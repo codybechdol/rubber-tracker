@@ -218,6 +218,7 @@ class SheetNavigator {
       if (activeView.id === 'safety-compliance-view') return this.renderSafetyCompliance();
       if (activeView.id === 'expiring-certs-view') return this.renderExpiringCerts();
       if (activeView.id === 'training-view') return this.renderTraining();
+      if (activeView.id === 'previous-employees-view' && window.previousEmployeesEngine) return window.previousEmployeesEngine.renderWorkspace();
       if (activeView.id === 'history-view' && window.historyNavigator) return window.historyNavigator.renderCurrentHistory();
       if (activeView.id === 'trip-planner-view' && window.tripPlanner) return window.tripPlanner.renderPlanner();
       if (activeView.id === 'tasks-view' && window.taskManager) return window.taskManager.renderTasks();
@@ -1218,7 +1219,7 @@ class SheetNavigator {
             
             const isEmployeeCol = (c === 0 || colLower === 'employee');
             if (isEmployeeCol && displayVal && !displayVal.includes('STAGE') && !displayVal.includes('Class ') && !displayVal.includes('Previous Employee')) {
-              customContent = `<span style="font-weight: 700; color: #60a5fa; cursor: pointer; text-decoration: underline dotted;" title="Click to view full profile, assignments & certs for ${this.escapeHtml(displayVal)}" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeHtml(displayVal)}');}">👤 ${this.escapeHtml(displayVal)}</span>`;
+              customContent = `<span style="font-weight: 700; color: #60a5fa; cursor: pointer; text-decoration: underline dotted;" title="Click to view full profile, assignments & certs for ${this.escapeHtml(displayVal)}" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(displayVal)}');}">👤 ${this.escapeHtml(displayVal)}</span>`;
               isCellEditable = false;
             } else {
               customContent = this.escapeHtml(displayVal);
@@ -1365,6 +1366,17 @@ class SheetNavigator {
           }
           return false;
         });
+      });
+    }
+
+    // Filter out previous/inactive employees from active Employees sheet (managed exclusively in Previous Employees workspace)
+    if (this.currentSheetKey === 'employees') {
+      rows = rows.filter(r => {
+        const loc = String(r['Location'] || '').toLowerCase().trim();
+        const stat = String(r['Status'] || '').toLowerCase().trim();
+        const isPrev = loc === 'previous employee' || loc.includes('previous') ||
+                       stat === 'previous employee' || stat.includes('inactive') || stat.includes('terminated');
+        return !isPrev;
       });
     }
 
@@ -2342,7 +2354,7 @@ class SheetNavigator {
           } else if (hLower.includes('foreman') || hLower.includes('lead')) {
             const foremanStr = String(val).trim();
             if (foremanStr) {
-              customCellHtml = `<span style="font-weight: 600; color: #93c5fd; cursor: pointer; text-decoration: underline dotted;" title="Click to view profile for ${this.escapeHtml(foremanStr)}" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeHtml(foremanStr)}');}">👤 ${this.escapeHtml(val)}</span>`;
+              customCellHtml = `<span style="font-weight: 600; color: #93c5fd; cursor: pointer; text-decoration: underline dotted;" title="Click to view profile for ${this.escapeHtml(foremanStr)}" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(foremanStr)}');}">👤 ${this.escapeHtml(val)}</span>`;
             }
           }
         }
@@ -2385,7 +2397,7 @@ class SheetNavigator {
           } else if (hLower.includes('employee') || hLower === 'name') {
             const empNameStr = String(val).trim();
             if (empNameStr) {
-              customCellHtml = `<span style="font-weight: 600; color: #60a5fa; cursor: pointer; text-decoration: underline dotted;" title="Click to view full profile, assignments & certs for ${this.escapeHtml(empNameStr)}" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeHtml(empNameStr)}');}">👤 ${this.escapeHtml(val)}</span>`;
+              customCellHtml = `<span style="font-weight: 600; color: #60a5fa; cursor: pointer; text-decoration: underline dotted;" title="Click to view full profile, assignments & certs for ${this.escapeHtml(empNameStr)}" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(empNameStr)}');}">👤 ${this.escapeHtml(val)}</span>`;
             } else {
               customCellHtml = `<span style="color: var(--text-muted);">—</span>`;
             }
@@ -2397,9 +2409,9 @@ class SheetNavigator {
             const expDate = String(row['Expiration Date'] || row['Expiration'] || '').trim();
 
             if (vStr.includes('Sent') || vStr.includes('Notified')) {
-              customCellHtml = `<button class="btn btn-secondary" style="font-size: 11px; padding: 2px 8px; background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4); cursor: pointer; border-radius: 4px;" title="Notification logged (${this.escapeHtml(vStr)}). Click to resend SMS." onclick="if(window.smsDialogEngine){window.smsDialogEngine.openCertSms('${this.escapeHtml(rowEmp)}', '${this.escapeHtml(certType)}', '${this.escapeHtml(expDate)}', ${sheetRowIdx}, ${colIdx + 1});}">📱 ${this.escapeHtml(val)}</button>`;
+              customCellHtml = `<button class="btn btn-secondary" style="font-size: 11px; padding: 2px 8px; background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4); cursor: pointer; border-radius: 4px;" title="Notification logged (${this.escapeHtml(vStr)}). Click to resend SMS." onclick="if(window.smsDialogEngine){window.smsDialogEngine.openCertSms('${this.escapeJs(rowEmp)}', '${this.escapeJs(certType)}', '${this.escapeJs(expDate)}', ${sheetRowIdx}, ${colIdx + 1});}">📱 ${this.escapeHtml(val)}</button>`;
             } else {
-              customCellHtml = `<button class="btn btn-primary" style="font-size: 11px; padding: 2px 8px; background-color: #f59e0b; border: 1px solid #d97706; color: #fff; font-weight: 700; cursor: pointer; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.2);" title="Send SMS reminder to ${this.escapeHtml(rowEmp)}" onclick="if(window.smsDialogEngine){window.smsDialogEngine.openCertSms('${this.escapeHtml(rowEmp)}', '${this.escapeHtml(certType)}', '${this.escapeHtml(expDate)}', ${sheetRowIdx}, ${colIdx + 1});}">💬 Send SMS</button>`;
+              customCellHtml = `<button class="btn btn-primary" style="font-size: 11px; padding: 2px 8px; background-color: #f59e0b; border: 1px solid #d97706; color: #fff; font-weight: 700; cursor: pointer; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.2);" title="Send SMS reminder to ${this.escapeHtml(rowEmp)}" onclick="if(window.smsDialogEngine){window.smsDialogEngine.openCertSms('${this.escapeJs(rowEmp)}', '${this.escapeJs(certType)}', '${this.escapeJs(expDate)}', ${sheetRowIdx}, ${colIdx + 1});}">💬 Send SMS</button>`;
             }
           }
         }
@@ -2421,7 +2433,7 @@ class SheetNavigator {
           } else if (hLower.includes('lead') || hLower.includes('foreman')) {
             const leadName = String(val).trim();
             if (leadName) {
-              customCellHtml = `<span style="font-weight: 600; color: #60a5fa; cursor: pointer; text-decoration: underline dotted;" title="Click to view profile & certs for ${this.escapeHtml(leadName)}" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeHtml(leadName)}');}">👤 ${this.escapeHtml(val)}</span>`;
+              customCellHtml = `<span style="font-weight: 600; color: #60a5fa; cursor: pointer; text-decoration: underline dotted;" title="Click to view profile & certs for ${this.escapeHtml(leadName)}" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(leadName)}');}">👤 ${this.escapeHtml(val)}</span>`;
             }
           } else if (hLower.includes('month')) {
             customCellHtml = `<span style="font-weight: 700; color: #a78bfa;">📅 ${this.escapeHtml(val)}</span>`;
@@ -2450,7 +2462,7 @@ class SheetNavigator {
         if (isEquipmentSheet && isPrimaryItemCol && val) {
           const itemKey = String(val).trim();
           const histKey = this.currentSheetKey.endsWith('_history') ? this.currentSheetKey : (this.currentSheetKey + '_history');
-          customCellHtml = `<span style="font-weight: 700; color: #60a5fa; cursor: pointer; text-decoration: underline dotted; display: inline-block; padding: 2px 4px; border-radius: 4px;" title="Click to inspect lifecycle dossier for #${this.escapeHtml(itemKey)}" onclick="if(window.itemStatsEngine){window.itemStatsEngine.openDossierModal('${this.escapeHtml(itemKey)}', '${this.escapeHtml(histKey)}');}">${this.escapeHtml(val)}</span>`;
+          customCellHtml = `<span style="font-weight: 700; color: #60a5fa; cursor: pointer; text-decoration: underline dotted; display: inline-block; padding: 2px 4px; border-radius: 4px;" title="Click to inspect lifecycle dossier for #${this.escapeHtml(itemKey)}" onclick="if(window.itemStatsEngine){window.itemStatsEngine.openDossierModal('${this.escapeJs(itemKey)}', '${this.escapeJs(histKey)}');}">${this.escapeHtml(val)}</span>`;
         } else if (isEquipmentSheet && hLower === 'esl id' && val) {
           // ESL ID is an electronic tracking tag barcode (not linked to item lifecycle)
           customCellHtml = `<span style="font-family: monospace; font-size: 11px; color: #94a3b8; font-weight: 500;">${this.escapeHtml(val)}</span>`;
@@ -2461,7 +2473,7 @@ class SheetNavigator {
           const nonEmpHolders = ['on shelf', 'in testing', 'packed for testing', 'packed for delivery', 'failed rubber', 'failed', 'lost', 'destroyed', 'new', 'unassigned', 'n/a', '—', '-'];
           const holderLower = String(val).toLowerCase().trim();
           if (!nonEmpHolders.includes(holderLower)) {
-            customCellHtml = `<span style="color: #60a5fa; cursor: pointer; text-decoration: underline dotted; font-weight: 600;" title="Click to view assignments & certs for ${this.escapeHtml(val)}" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeHtml(val)}');}">👤 ${this.escapeHtml(val)}</span>`;
+            customCellHtml = `<span style="color: #60a5fa; cursor: pointer; text-decoration: underline dotted; font-weight: 600;" title="Click to view assignments & certs for ${this.escapeHtml(val)}" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(val)}');}">👤 ${this.escapeHtml(val)}</span>`;
           }
         }
 
@@ -2471,7 +2483,7 @@ class SheetNavigator {
           if (isEmployeeNameCol) {
             const empNameStr = String(val).trim();
             if (empNameStr) {
-              customCellHtml = `<span style="font-weight: 700; color: #60a5fa; cursor: pointer; text-decoration: underline dotted; display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px; border-radius: 4px;" title="Click to view full profile, equipment assignments & certs for ${this.escapeHtml(empNameStr)}" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeHtml(empNameStr)}');}">👤 ${this.escapeHtml(val)}</span>`;
+              customCellHtml = `<span style="font-weight: 700; color: #60a5fa; cursor: pointer; text-decoration: underline dotted; display: inline-flex; align-items: center; gap: 4px; padding: 2px 4px; border-radius: 4px;" title="Click to view full profile, equipment assignments & certs for ${this.escapeHtml(empNameStr)}" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(empNameStr)}');}">👤 ${this.escapeHtml(val)}</span>`;
             }
           } else if (hLower === 'job number' || hLower === 'job #') {
             customCellHtml = `<span style="font-family: monospace; font-weight: bold; color: #60a5fa;">${this.escapeHtml(val)}</span>`;
@@ -3375,7 +3387,17 @@ class SheetNavigator {
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;');
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
+  escapeJs(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+      .replace(/\\/g, '\\\\')
+      .replace(/'/g, "\\'")
+      .replace(/"/g, '&quot;')
+      .replace(/[\n\r]/g, ' ');
   }
 }
 

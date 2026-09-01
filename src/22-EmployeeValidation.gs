@@ -1970,10 +1970,21 @@ function syncCrews(silent) {
 
       // Update foreman if different
       if (existing.foreman !== crew.foreman && crew.foreman) {
-        jobData[dataIdx][colIndices.foreman] = crew.foreman;
+        var oldForeman = existing.foreman;
+        var newForeman = crew.foreman;
+        jobData[dataIdx][colIndices.foreman] = newForeman;
         foremanUpdates++;
         jobDataModified = true;
-        Logger.log('syncCrews: Updated foreman for ' + crewNum + ': ' + existing.foreman + ' → ' + crew.foreman);
+        Logger.log('syncCrews: Updated foreman for ' + crewNum + ': ' + oldForeman + ' → ' + newForeman);
+
+        // Automatically reassign crew equipment (Blankets, MACKs, HV Testers, Phasing Sets, AED, Grounds, Hot Sticks)
+        if (oldForeman && typeof reassignCrewEquipment === 'function') {
+          try {
+            reassignCrewEquipment(ss, oldForeman, newForeman, crewNum, timestamp);
+          } catch (reassignErr) {
+            Logger.log('syncCrews: Error reassigning crew equipment: ' + reassignErr);
+          }
+        }
       }
 
       // Set default schedule if not set (empty or undefined)
@@ -2270,6 +2281,203 @@ function menuAutoConfigureSecondaryJobs() {
  */
 function menuSyncCrews() {
   syncCrews(false);
+}
+
+/**
+ * Menu action to manually transfer crew equipment from an outgoing foreman to an incoming foreman.
+ */
+function menuTransferCrewEquipment() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ui = SpreadsheetApp.getUi();
+
+  var resp1 = ui.prompt(
+    '🔄 Transfer Crew Equipment (Outgoing Foreman)',
+    'Enter the outgoing / departed Foreman\'s name (e.g. Keenan O\'Keefe):',
+    ui.ButtonSet.OK_CANCEL
+  );
+  if (resp1.getSelectedButton() !== ui.Button.OK) return;
+  var oldForeman = resp1.getResponseText().trim();
+  if (!oldForeman) {
+    ui.alert('⚠️ Outgoing Foreman name cannot be empty.');
+    return;
+  }
+
+  var resp2 = ui.prompt(
+    '🔄 Transfer Crew Equipment (Incoming Foreman)',
+    'Enter the new incoming Foreman\'s name (e.g. Kameron Powell):',
+    ui.ButtonSet.OK_CANCEL
+  );
+  if (resp2.getSelectedButton() !== ui.Button.OK) return;
+  var newForeman = resp2.getResponseText().trim();
+  if (!newForeman) {
+    ui.alert('⚠️ Incoming Foreman name cannot be empty.');
+    return;
+  }
+
+  var resp3 = ui.prompt(
+    '🔄 Job / Crew Number (Optional)',
+    'Enter the Job Number (optional, e.g. 110-26):',
+    ui.ButtonSet.OK_CANCEL
+  );
+  var jobNum = (resp3.getSelectedButton() === ui.Button.OK) ? resp3.getResponseText().trim() : '';
+
+  var count = reassignCrewEquipment(ss, oldForeman, newForeman, jobNum, new Date());
+  ui.alert(
+    '✅ Crew Equipment Transferred',
+    'Transferred ' + count + ' crew equipment items (Blankets, MACKs, HV Testers, Phasing Sets, AED, Grounds, Hot Sticks) from ' + oldForeman + ' to ' + newForeman + '.\n\nNote: Personal PPE (Gloves & Sleeves) remains assigned to ' + oldForeman + ' for physical reclaim.',
+    ui.ButtonSet.OK
+  );
+}
+
+/**
+ * Automatically transfers crew equipment (Blankets, MACKs, HV Testers, Phasing Sets, AED, Grounds, Hot Sticks)
+ * from an outgoing / departed Foreman to the new incoming Foreman of that crew/job.
+ * 
+ * Note: Personal PPE (Gloves & Sleeves) is intentionally EXCLUDED - it remains assigned to the departing
+ * employee and is routed to the "Previous Employee" section on Glove/Sleeve Swap reports for reclaim.
+ * 
+ * Vacation Exclusion: Does NOT transfer if the outgoing foreman is merely on temporary vacation.
+ * 
+ * @param {Spreadsheet} ss - The active spreadsheet
+ * @param {string} oldForeman - The previous foreman's name
+ * @param {string} newForeman - The new foreman's name
+ * @param {string} crewNum - The crew/job number (e.g. "110-26")
+ * @param {Date|string} transitionDate - The date of the foreman change
+ * @returns {number} The count of items transferred
+ */
+function reassignCrewEquipment(ss, oldForeman, newForeman, crewNum, transitionDate) {
+  if (!oldForeman || !newForeman || String(oldForeman).toLowerCase().trim() === String(newForeman).toLowerCase().trim()) {
+    return 0;
+  }
+
+  var oldNameLower = String(oldForeman).toLowerCase().trim();
+  var newNameStr = String(newForeman).trim();
+  var tz = ss.getSpreadsheetTimeZone ? ss.getSpreadsheetTimeZone() : Session.getScriptTimeZone();
+  var dateObj = (transitionDate instanceof Date) ? transitionDate : (transitionDate ? new Date(transitionDate) : new Date());
+
+  // Check if old foreman is merely on temporary vacation (or status location)
+  var employeesSheet = ss.getSheetByName(SHEET_EMPLOYEES);
+  if (employeesSheet && employeesSheet.getLastRow() > 1) {
+    var empData = employeesSheet.getDataRange().getValues();
+    var empHeaders = empData[0];
+    var nameIdx = (typeof getEmployeeNameColumnIndex === 'function') ? getEmployeeNameColumnIndex(empHeaders) : 0;
+    var locIdx = -1;
+    for (var h = 0; h < empHeaders.length; h++) {
+      if (String(empHeaders[h]).toLowerCase().trim() === 'location') locIdx = h;
+    }
+    if (nameIdx !== -1 && locIdx !== -1) {
+      for (var e = 1; e < empData.length; e++) {
+        var eName = String(empData[e][nameIdx] || '').toLowerCase().trim();
+        if (eName === oldNameLower) {
+          var eLoc = String(empData[e][locIdx] || '').trim();
+          // If the employee is still active and their location indicates temporary vacation, do not transfer
+          if (typeof isStatusLocation === 'function' && isStatusLocation(eLoc) && eLoc.toLowerCase().indexOf('vacation') !== -1) {
+            Logger.log('reassignCrewEquipment: Skipping transfer for ' + oldForeman + ' (temporary status: ' + eLoc + ')');
+            return 0;
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  // Get new foreman's physical location
+  var newForemanLocation = 'Helena';
+  if (employeesSheet && employeesSheet.getLastRow() > 1) {
+    var empData = employeesSheet.getDataRange().getValues();
+    var empHeaders = empData[0];
+    var nameIdx = (typeof getEmployeeNameColumnIndex === 'function') ? getEmployeeNameColumnIndex(empHeaders) : 0;
+    var locIdx = -1;
+    for (var h = 0; h < empHeaders.length; h++) {
+      if (String(empHeaders[h]).toLowerCase().trim() === 'location') locIdx = h;
+    }
+    if (nameIdx !== -1 && locIdx !== -1) {
+      for (var e = 1; e < empData.length; e++) {
+        var eName = String(empData[e][nameIdx] || '').toLowerCase().trim();
+        if (eName === newNameStr.toLowerCase()) {
+          var rawLoc = String(empData[e][locIdx] || '').trim();
+          newForemanLocation = (typeof getPhysicalLocation === 'function') ? (getPhysicalLocation(rawLoc) || 'Helena') : rawLoc;
+          break;
+        }
+      }
+    }
+  }
+
+  // Crew equipment sheet definitions (Gloves & Sleeves explicitly excluded)
+  var crewSheets = [
+    { name: SHEET_BLANKETS, hist: SHEET_BLANKETS_HISTORY, cols: COLS.BLANKETS, label: 'Blanket' },
+    { name: SHEET_MACKS, hist: SHEET_MACKS_HISTORY, cols: COLS.MACKS, label: 'MACK' },
+    { name: SHEET_HV_TESTERS, hist: SHEET_HV_TESTERS_HISTORY, cols: COLS.HV_TESTERS, label: 'HV Tester' },
+    { name: SHEET_PHASING_SETS, hist: SHEET_PHASING_SETS_HISTORY, cols: COLS.PHASING_SETS, label: 'Phasing Set' },
+    { name: SHEET_AED, hist: SHEET_AED_HISTORY, cols: COLS.AED, label: 'AED' },
+    { name: SHEET_GROUNDS, hist: SHEET_GROUNDS_HISTORY, cols: COLS.GROUNDS, label: 'Ground' },
+    { name: SHEET_HOT_STICKS, hist: SHEET_HOT_STICKS_HISTORY, cols: COLS.HOT_STICKS, label: 'Hot Stick' }
+  ];
+
+  var totalTransferred = 0;
+
+  for (var s = 0; s < crewSheets.length; s++) {
+    var def = crewSheets[s];
+    var sheet = ss.getSheetByName(def.name);
+    if (!sheet || sheet.getLastRow() < 2) continue;
+
+    var data = sheet.getDataRange().getValues();
+    var assignedToCol = def.cols.ASSIGNED_TO;
+    var dateAssignedCol = def.cols.DATE_ASSIGNED;
+    var locationCol = def.cols.LOCATION;
+    var itemNumCol = def.cols.ITEM_NUM || def.cols.SERIAL_NUM || 1;
+
+    var itemsTransferredForSheet = [];
+
+    for (var r = 1; r < data.length; r++) {
+      var row = data[r];
+      var currentHolder = String(row[assignedToCol - 1] || '').trim();
+      if (currentHolder.toLowerCase() === oldNameLower) {
+        var itemNum = String(row[itemNumCol - 1] || '').trim();
+
+        // Update Assigned To, Date Assigned, and Location
+        sheet.getRange(r + 1, assignedToCol).setValue(newNameStr);
+        sheet.getRange(r + 1, dateAssignedCol).setValue(dateObj);
+        if (locationCol) {
+          sheet.getRange(r + 1, locationCol).setValue(newForemanLocation);
+        }
+
+        itemsTransferredForSheet.push({
+          itemNum: itemNum,
+          row: row
+        });
+        totalTransferred++;
+      }
+    }
+
+    // Log to History sheet
+    if (itemsTransferredForSheet.length > 0) {
+      var histSheet = ss.getSheetByName(def.hist);
+      if (histSheet) {
+        for (var i = 0; i < itemsTransferredForSheet.length; i++) {
+          var tItem = itemsTransferredForSheet[i];
+          try {
+            var histRow = [
+              dateObj,
+              tItem.itemNum,
+              newForemanLocation,
+              newNameStr,
+              'Transferred from previous foreman ' + oldForeman + ' to ' + newNameStr + (crewNum ? ' (Job ' + crewNum + ')' : '')
+            ];
+            histSheet.appendRow(histRow);
+          } catch (histErr) {
+            Logger.log('Error appending history for ' + def.name + ': ' + histErr);
+          }
+        }
+      }
+      Logger.log('reassignCrewEquipment: Transferred ' + itemsTransferredForSheet.length + ' ' + def.name + ' from ' + oldForeman + ' to ' + newNameStr);
+    }
+  }
+
+  if (typeof logEvent === 'function') {
+    logEvent('Transferred ' + totalTransferred + ' crew equipment items from ' + oldForeman + ' to ' + newNameStr + (crewNum ? ' on Job ' + crewNum : ''), 'INFO');
+  }
+  return totalTransferred;
 }
 
 /**

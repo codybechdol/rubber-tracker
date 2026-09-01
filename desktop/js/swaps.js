@@ -277,16 +277,35 @@ class SwapGenerationEngine {
     }
 
     // Build employee maps (Skip pending new hires)
-    // 0. Build list of previous employees from employee table and employee history
+    // 0. Build list of previous employees from employee table, employee history, and previous employees tables
     const previousEmployeeNames = new Set();
+    const isValName = (n) => {
+      if (!n || typeof n !== 'string') return false;
+      const s = n.trim();
+      if (s.length < 2 || s.length > 60) return false;
+      if (/^\d{1,4}[.\/-]\d{1,2}[.\/-]\d{1,4}$/.test(s) || /^\d{1,2}-[A-Za-z]{3,9}-\d{2,4}$/.test(s)) return false;
+      return (s.match(/[a-zA-Z]/g) || []).length >= 2;
+    };
+
     const employeeHistoryTable = this.db.getTable('employee_history') || this.db.getTable('Employee History');
     if (employeeHistoryTable && employeeHistoryTable.rows) {
       employeeHistoryTable.rows.forEach(hr => {
-        const hName = String(hr['Employee Name'] || hr['Name'] || Object.values(hr)[1] || '').trim().toLowerCase();
-        const hEvent = String(hr['Event Type'] || hr['Event'] || Object.values(hr)[2] || '').trim().toLowerCase();
-        const hLoc = String(hr['Location'] || Object.values(hr)[3] || '').trim().toLowerCase();
-        if (hEvent === 'terminated' || hLoc === 'previous employee' || hEvent.includes('inactive')) {
-          if (hName) previousEmployeeNames.add(hName);
+        let hName = String(hr['Employee Name'] || hr['Name'] || hr['Worker'] || hr['Employee'] || '').trim();
+        if (!hName || !isValName(hName)) return;
+        const hEvent = String(hr['Event Type'] || hr['Event'] || hr['Action'] || '').trim().toLowerCase();
+        const hLoc = String(hr['Location'] || '').trim().toLowerCase();
+        if (hEvent === 'terminated' || hLoc === 'previous employee' || hEvent.includes('inactive') || hEvent.includes('quit') || hEvent.includes('departure')) {
+          previousEmployeeNames.add(hName.toLowerCase());
+        }
+      });
+    }
+
+    const prevSheetTable = this.db.getTable('previous_employees') || this.db.getTable('previous_employee') || this.db.getTable('Previous Employees');
+    if (prevSheetTable && prevSheetTable.rows) {
+      prevSheetTable.rows.forEach(pr => {
+        let pName = String(pr['Employee Name'] || pr['Name'] || pr['Worker'] || pr['Employee'] || '').trim();
+        if (pName && isValName(pName)) {
+          previousEmployeeNames.add(pName.toLowerCase());
         }
       });
     }
@@ -1396,7 +1415,7 @@ class SwapGenerationEngine {
       (gridRow && gridRow[0]) || ''
     ).trim();
 
-    if (!pickNum || pickNum === '—') return;
+    const isReclaimOnly = !pickNum || pickNum === '—' || pickNum === '-';
 
     const invMap = {
       'glove_swaps': 'gloves',
@@ -1412,6 +1431,60 @@ class SwapGenerationEngine {
     const invKey = invMap[swapSheetKey];
     const invTable = this.db.getTable(invKey);
     if (!invTable || !invTable.rows) return;
+
+    if (isReclaimOnly) {
+      // Previous Employee / Reclaim-only row (no pick replacement item)
+      const oldItemNum = String(
+        (row && (row['Current Glove #'] || row['Current Sleeve #'] || row['Current Blanket #'] || row['Current MACK #'] || row['Current HV Tester #'] || row['Current Phasing Set #'] || row['Current AED #'] || row['Current Item #'] || row['Serial #'])) ||
+        (gridRow && gridRow[1]) || ''
+      ).trim();
+
+      const oldRow = oldItemNum && oldItemNum !== '—' ? invTable.rows.find(it => {
+        const itNum = String(it['Item #'] || it['Glove'] || it['Sleeve'] || it['Blanket'] || it['MACK'] || it['Serial #'] || it['ESL ID'] || Object.values(it)[0] || '').trim();
+        return itNum === oldItemNum;
+      }) : null;
+
+      if (!oldRow) return;
+      const todayFormatted = this.formatDate(new Date());
+
+      if (isChecked) {
+        if (row) {
+          row['Picked'] = true;
+          row['Status'] = 'Ready For Delivery 🚚';
+        }
+        if (gridRow) {
+          gridRow[7] = 'Ready For Delivery 🚚';
+          gridRow[8] = 'TRUE';
+        }
+        oldRow['Location'] = "Cody's Truck";
+        oldRow['Status'] = 'Ready For Test';
+        oldRow['Assigned To'] = 'Packed For Testing';
+        oldRow['Date Assigned'] = todayFormatted;
+        oldRow['Picked For'] = `${empName} reclaim`;
+        this.syncRowToRawGrid(invTable, oldRow);
+        const invSheetName = (invTable && invTable.name) ? invTable.name : (this.db.getSheetNameForTableKey(invKey) || invKey);
+        await this.db.recordItemHistoryEvent(invSheetName, oldRow, `Packed For Testing (Reclaim from ${empName})`);
+        await this.queueRowMutations(invKey, oldRow);
+      } else {
+        if (row) {
+          row['Picked'] = false;
+          row['Status'] = 'Return to Shelf';
+        }
+        if (gridRow) {
+          gridRow[7] = 'Return to Shelf';
+          gridRow[8] = 'FALSE';
+        }
+        oldRow['Location'] = 'Previous Employee';
+        oldRow['Status'] = 'Assigned';
+        oldRow['Assigned To'] = empName;
+        oldRow['Picked For'] = '';
+        this.syncRowToRawGrid(invTable, oldRow);
+        await this.queueRowMutations(invKey, oldRow);
+      }
+
+      if (window.sheetNavigator) window.sheetNavigator.renderActiveView();
+      return;
+    }
 
     const invRow = invTable.rows.find(it => {
       const itNum = String(it['Item #'] || it['Glove'] || it['Sleeve'] || it['Blanket'] || it['MACK'] || it['Serial #'] || it['ESL ID'] || Object.values(it)[0] || '').trim();
@@ -1571,7 +1644,63 @@ class SwapGenerationEngine {
       (gridRow && gridRow[0]) || ''
     ).trim();
 
-    if (!pickNum || pickNum === '—') return;
+    const invMap = {
+      'glove_swaps': 'gloves',
+      'sleeve_swaps': 'sleeves',
+      'blanket_swaps': 'blankets',
+      'mack_swaps': 'macks',
+      'hv_tester_swaps': 'hv_testers',
+      'phasing_set_swaps': 'phasing_sets',
+      'aed_swaps': 'aed',
+      'ground_swaps': 'grounds',
+      'hot_stick_swaps': 'hot_sticks'
+    };
+    const invKey = invMap[swapSheetKey];
+    const invTable = this.db.getTable(invKey);
+    if (!invTable || !invTable.rows) return;
+
+    const isReclaimOnly = !pickNum || pickNum === '—' || pickNum === '-';
+
+    const oldRow = oldItemNum && oldItemNum !== '—' ? invTable.rows.find(it => {
+      const itNum = String(it['Item #'] || it['Glove'] || it['Sleeve'] || it['Blanket'] || it['MACK'] || it['Serial #'] || it['ESL ID'] || Object.values(it)[0] || '').trim();
+      return itNum === oldItemNum;
+    }) : null;
+
+    if (isReclaimOnly) {
+      if (!oldRow) return;
+      if (dateVal) {
+        const dateFormatted = this.formatDate(dateVal);
+        if (row) {
+          row['Date Changed'] = dateFormatted;
+          row['Status'] = 'Delivered ✅';
+        }
+        if (gridRow) {
+          gridRow[7] = 'Delivered ✅';
+          gridRow[9] = dateFormatted;
+        }
+        oldRow['Location'] = "Cody's Truck";
+        oldRow['Status'] = 'Ready For Test';
+        oldRow['Assigned To'] = 'Packed For Testing';
+        oldRow['Date Assigned'] = dateFormatted;
+        oldRow['Change Out Date'] = 'N/A';
+        oldRow['Picked For'] = '';
+        this.syncRowToRawGrid(invTable, oldRow);
+        const invSheetName = (invTable && invTable.name) ? invTable.name : (this.db.getSheetNameForTableKey(invKey) || invKey);
+        await this.db.recordItemHistoryEvent(invSheetName, oldRow, `Reclaimed from ${empName} (Packed For Testing)`);
+        await this.queueRowMutations(invKey, oldRow);
+      } else {
+        if (row) {
+          row['Date Changed'] = '';
+          row['Status'] = 'Ready For Delivery 🚚';
+        }
+        if (gridRow) {
+          gridRow[7] = 'Ready For Delivery 🚚';
+          gridRow[9] = '';
+        }
+      }
+      if (window.sheetNavigator) window.sheetNavigator.renderActiveView();
+      return;
+    }
 
     const invMap = {
       'glove_swaps': 'gloves',

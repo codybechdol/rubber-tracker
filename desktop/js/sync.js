@@ -144,51 +144,122 @@ class SyncEngine {
     }
   }
 
+  getEquipmentIcon(sheetName, tableKey) {
+    const s = String(sheetName || tableKey || '').toLowerCase();
+    if (s.includes('glove')) return '🧤';
+    if (s.includes('sleeve')) return '🦾';
+    if (s.includes('blanket')) return '🔲';
+    if (s.includes('mack')) return '🧱';
+    if (s.includes('hv_tester') || s.includes('hv tester')) return '⚡';
+    if (s.includes('phasing')) return '⚡';
+    if (s.includes('ground')) return '⚡';
+    if (s.includes('hot_stick') || s.includes('hot stick')) return '🔴';
+    if (s.includes('aed')) return '🏥';
+    if (s.includes('employee')) return '👤';
+    if (s.includes('job_tracking') || s.includes('job tracking')) return '📋';
+    if (s.includes('cert') || s.includes('cpr')) return '📜';
+    if (s.includes('training')) return '🎓';
+    if (s.includes('safety')) return '🛡️';
+    if (s.includes('vendor') || s.includes('purchase') || s.includes('po')) return '📦';
+    return '✏️';
+  }
+
   formatMutation(mut) {
     if (!mut) return { title: 'Unknown Change', desc: '', icon: '✏️', sheet: 'System', time: '' };
     const timeStr = mut.timestamp ? new Date(mut.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '';
     const sheet = mut.sheetName || 'Sheet';
+    const tableKey = mut.tableKey || (this.db && typeof this.db.getTableKeyForSheet === 'function' ? this.db.getTableKeyForSheet(sheet) : sheet.toLowerCase().replace(/\s+/g, '_'));
+    const eqIcon = this.getEquipmentIcon(sheet, tableKey);
+
+    const isEquipmentSheet = [
+      'gloves', 'sleeves', 'blankets', 'macks', 'hv_testers', 'phasing_sets', 'aed', 'grounds', 'hot_sticks',
+      'glove_swaps', 'sleeve_swaps', 'blanket_swaps', 'mack_swaps', 'hv_tester_swaps', 'phasing_set_swaps', 'aed_swaps', 'ground_swaps', 'hot_stick_swaps',
+      'gloves_history', 'sleeves_history', 'blankets_history', 'macks_history', 'hv_testers_history', 'phasing_sets_history', 'aed_history', 'grounds_history', 'hot_sticks_history'
+    ].some(k => tableKey.includes(k) || sheet.toLowerCase().replace(/\s+/g, '_').includes(k));
+
+    const isEmployeeSheet = tableKey === 'employees' || tableKey === 'previous_employees' || tableKey === 'employee_history';
+    const isCertsSheet = tableKey === 'expiring_certs' || tableKey === 'certs';
+    const isJobTrackingSheet = tableKey === 'job_tracking';
 
     // Resolve context from local db row or mutation payload
     let employeeName = mut.employeeName || mut.empName || '';
-    let itemNumber = mut.itemNumber || mut.itemNum || mut.serialNum || mut.itemIdentifier || '';
+    let itemNumber = mut.itemNumber || mut.itemNum || mut.serialNum || mut.itemIdentifier || mut.serial || '';
     let certName = mut.certName || mut.certType || mut.itemType || '';
     let fieldHeader = mut.header || mut.colName || (mut.col ? `Column ${mut.col}` : 'Field');
     let rowData = mut.rowData || {};
 
-    const tableKey = mut.tableKey || (this.db && typeof this.db.getTableKeyForSheet === 'function' ? this.db.getTableKeyForSheet(sheet) : sheet.toLowerCase().replace(/\s+/g, '_'));
     const table = this.db && typeof this.db.getTable === 'function' ? this.db.getTable(tableKey) : null;
+    let targetRow = null;
 
-    if (table && table.rows && mut.row && table.rows[mut.row - 2]) {
-      const rowObj = table.rows[mut.row - 2];
-      if (!employeeName) employeeName = rowObj['Employee Name'] || rowObj['Name'] || rowObj['Assigned To'] || rowObj['Worker'] || '';
-      if (!itemNumber) itemNumber = rowObj['Item #'] || rowObj['Serial #'] || rowObj['Glove'] || rowObj['Sleeve'] || rowObj['Blanket'] || rowObj['MACK'] || '';
-      if (!certName) certName = rowObj['Item Type'] || rowObj['Cert Type'] || rowObj['Type'] || '';
+    if (table && table.rows && mut.row) {
+      targetRow = table.rows.find(r => r._rowIdx === mut.row) || table.rows[mut.row - 2] || table.rows[mut.row - 1];
+    }
+
+    const isHvtOrPs = tableKey.includes('hv') || tableKey.includes('phasing') || sheet.toLowerCase().includes('hv') || sheet.toLowerCase().includes('phasing');
+
+    if (targetRow) {
+      if (isHvtOrPs && (targetRow['Model'] || targetRow['Serial #'] || targetRow['HVT #'] || targetRow['PS #'])) {
+        itemNumber = targetRow['Model'] || targetRow['Serial #'] || targetRow['HVT #'] || targetRow['PS #'];
+      } else if (!itemNumber || /^\d{1,3}$/.test(String(itemNumber).trim()) && (targetRow['Model'] || targetRow['Serial #'])) {
+        itemNumber = targetRow['Model'] || targetRow['Serial #'] || targetRow['Item #'] || targetRow['Item'] ||
+                     targetRow['Glove'] || targetRow['Sleeve'] || targetRow['Blanket'] || targetRow['MACK'] ||
+                     targetRow['ESL ID'] || (table.headers && targetRow[table.headers[0]]) || (table.headers && targetRow[table.headers[1]]) || itemNumber;
+      }
+      if (!employeeName) {
+        employeeName = targetRow['Assigned To'] || targetRow['Employee Name'] || targetRow['Name'] || targetRow['Worker'] || targetRow['Holder'] || '';
+      }
+      if (!certName) {
+        certName = targetRow['Item Type'] || targetRow['Cert Type'] || targetRow['Type'] || '';
+      }
       if ((!mut.header || mut.header.startsWith('Column ')) && table.headers && mut.col && table.headers[mut.col - 1]) {
         fieldHeader = table.headers[mut.col - 1];
       }
     } else if (rowData && Object.keys(rowData).length > 0) {
-      if (!employeeName) employeeName = rowData['Employee Name'] || rowData['Name'] || rowData['Assigned To'] || '';
-      if (!itemNumber) itemNumber = rowData['Item #'] || rowData['Serial #'] || '';
+      if (isHvtOrPs && (rowData['Model'] || rowData['Serial #'] || rowData['HVT #'] || rowData['PS #'])) {
+        itemNumber = rowData['Model'] || rowData['Serial #'] || rowData['HVT #'] || rowData['PS #'];
+      } else if (!itemNumber || /^\d{1,3}$/.test(String(itemNumber).trim()) && (rowData['Model'] || rowData['Serial #'])) {
+        itemNumber = rowData['Model'] || rowData['Serial #'] || rowData['Item #'] || rowData['Item'] || rowData['Glove'] || rowData['Sleeve'] || rowData['Blanket'] || rowData['MACK'] || itemNumber;
+      }
+      if (!employeeName) employeeName = rowData['Assigned To'] || rowData['Employee Name'] || rowData['Name'] || rowData['Worker'] || '';
       if (!certName) certName = rowData['Item Type'] || rowData['Cert Type'] || '';
     }
 
+    // Clean item number formatting
+    if (itemNumber) {
+      itemNumber = String(itemNumber).replace(/^#+/, '').trim();
+    }
+
+    const row = mut.row || '?';
+    const oldVal = mut.oldValue !== undefined && mut.oldValue !== null && String(mut.oldValue).trim() !== '' ? `"${mut.oldValue}"` : '(Empty)';
+    const newVal = mut.value !== undefined && mut.value !== null && String(mut.value).trim() !== '' ? `"${mut.value}"` : '(Empty)';
+
     if (mut.action === 'UPDATE_CELL') {
-      const row = mut.row;
-      const oldVal = mut.oldValue !== undefined && mut.oldValue !== null && String(mut.oldValue).trim() !== '' ? `"${mut.oldValue}"` : '(Empty)';
-      const newVal = mut.value !== undefined && mut.value !== null && String(mut.value).trim() !== '' ? `"${mut.value}"` : '(Empty)';
-      
       let title = '';
       let desc = '';
 
-      if (employeeName && certName) {
-        title = `👤 ${employeeName} — 📜 ${certName}`;
+      if (isEquipmentSheet) {
+        const itemLabel = itemNumber ? `Item #${itemNumber}` : `Row ${row}`;
+        const empSuffix = employeeName && employeeName !== itemNumber ? ` (${employeeName})` : '';
+        title = `${eqIcon} ${itemLabel}${empSuffix} • ${fieldHeader}`;
+        desc = `<span style="color: #60a5fa; font-weight: 700;">${itemLabel}</span> <span style="color: var(--text-muted); font-size: 11px;">(Row ${row}):</span> ${oldVal} → <strong style="color: #60a5fa;">${newVal}</strong>`;
+      } else if (isCertsSheet) {
+        const empLabel = employeeName ? `👤 ${employeeName}` : `Row ${row}`;
+        const certLabel = certName ? ` — 📜 ${certName}` : '';
+        title = `${empLabel}${certLabel} • ${fieldHeader}`;
         desc = `<span style="color: var(--text-muted); font-size: 11px;">${fieldHeader} (Row ${row}):</span> ${oldVal} → <strong style="color: #60a5fa;">${newVal}</strong>`;
-      } else if (employeeName) {
-        title = `👤 ${employeeName} • ${fieldHeader}`;
+      } else if (isEmployeeSheet) {
+        const empLabel = employeeName ? `👤 ${employeeName}` : `Employee Row ${row}`;
+        title = `${empLabel} • ${fieldHeader}`;
+        desc = `<span style="color: var(--text-muted); font-size: 11px;">Row ${row}:</span> ${oldVal} → <strong style="color: #60a5fa;">${newVal}</strong>`;
+      } else if (isJobTrackingSheet) {
+        const jobLabel = mut.jobNumber || (targetRow ? (targetRow['Job Number'] || targetRow['Job #']) : `Row ${row}`);
+        title = `📋 Job #${jobLabel} • ${fieldHeader}`;
         desc = `<span style="color: var(--text-muted); font-size: 11px;">Row ${row}:</span> ${oldVal} → <strong style="color: #60a5fa;">${newVal}</strong>`;
       } else if (itemNumber) {
-        title = `🧤 Item #${itemNumber}${employeeName ? ` (${employeeName})` : ''} • ${fieldHeader}`;
+        title = `${eqIcon} Item #${itemNumber}${employeeName ? ` (${employeeName})` : ''} • ${fieldHeader}`;
+        desc = `<span style="color: #60a5fa; font-weight: 700;">Item #${itemNumber}</span> <span style="color: var(--text-muted); font-size: 11px;">(Row ${row}):</span> ${oldVal} → <strong style="color: #60a5fa;">${newVal}</strong>`;
+      } else if (employeeName) {
+        title = `👤 ${employeeName} • ${fieldHeader}`;
         desc = `<span style="color: var(--text-muted); font-size: 11px;">Row ${row}:</span> ${oldVal} → <strong style="color: #60a5fa;">${newVal}</strong>`;
       } else {
         title = `Row ${row} • ${fieldHeader}`;
@@ -196,10 +267,47 @@ class SyncEngine {
       }
 
       return {
-        icon: '✏️',
+        icon: eqIcon,
         sheet: sheet,
         title: title,
         desc: desc,
+        time: timeStr
+      };
+    }
+
+    if (mut.action === 'UPDATE_ROW') {
+      let title = '';
+      let desc = '';
+
+      if (isEquipmentSheet) {
+        const itemLabel = itemNumber ? `Item #${itemNumber}` : `Row ${row}`;
+        const empSuffix = employeeName && employeeName !== itemNumber ? ` (${employeeName})` : '';
+        title = `${eqIcon} ${itemLabel}${empSuffix} • Updated`;
+        desc = `<span style="color: #60a5fa; font-weight: 700;">${itemLabel}</span> <span style="color: var(--text-muted); font-size: 11px;">(Row ${row}):</span> Record data updated`;
+      } else if (isEmployeeSheet) {
+        title = `👤 Employee: ${employeeName || `Row ${row}`} • Updated`;
+        desc = `<span style="color: var(--text-muted); font-size: 11px;">Row ${row}:</span> Employee record updated`;
+      } else {
+        title = `📝 Updated Row ${row} on ${sheet}`;
+        desc = Object.entries(rowData || {}).slice(0, 3).map(([k, v]) => `${k}: <strong>${v}</strong>`).join(' • ') || 'Row updated';
+      }
+
+      return {
+        icon: eqIcon,
+        sheet: sheet,
+        title: title,
+        desc: desc,
+        time: timeStr
+      };
+    }
+
+    if (mut.action === 'DELETE_ROW') {
+      const itemLabel = itemNumber ? `Item #${itemNumber}` : `Row ${row}`;
+      return {
+        icon: '🗑️',
+        sheet: sheet,
+        title: isEquipmentSheet ? `🗑️ Deleted ${itemLabel}` : `🗑️ Deleted Row ${row} from ${sheet}`,
+        desc: `Removed row from ${sheet}`,
         time: timeStr
       };
     }
@@ -309,8 +417,33 @@ class SyncEngine {
       };
     }
 
+    if (mut.action === 'REPLACE_SWAP_TABLE' || mut.action === 'REPLACE_TABLE_DATA' || mut.action === 'SYNC_FULL_TABLE') {
+      const gridRows = mut.rawGrid ? (mut.rawGrid.length - 1) : ((mut.rows && mut.rows.length) || 0);
+      const isSwapSheet = sheet.toLowerCase().includes('swap');
+      
+      let title = '';
+      let desc = '';
+      if (isSwapSheet) {
+        title = `${eqIcon} ${sheet} • Generated Swap Schedule`;
+        desc = gridRows > 0 
+          ? `Generated <strong style="color: #60a5fa;">${gridRows} active equipment swap${gridRows === 1 ? '' : 's'}</strong> for change-out cycle`
+          : `No swaps currently due for this equipment cycle (0 records)`;
+      } else {
+        title = `🔄 ${sheet} • Full Table Sync`;
+        desc = `Synchronized <strong style="color: #60a5fa;">${gridRows} records</strong> with Google Sheets`;
+      }
+
+      return {
+        icon: isSwapSheet ? '🔄' : '📊',
+        sheet: sheet,
+        title: title,
+        desc: desc,
+        time: timeStr
+      };
+    }
+
     return {
-      icon: '🔄',
+      icon: eqIcon,
       sheet: mut.sheetName || 'System',
       title: mut.action || 'Change',
       desc: JSON.stringify(mut).substring(0, 80),
@@ -518,8 +651,9 @@ class SyncEngine {
       }
     }, 200);
 
-    // 1. Pre-Flight Conflict Scan (only for small outboxes <= 15 items to prevent large payload timeouts)
-    if (options.force !== true && options.detectConflicts !== false && currentOutbox.length > 0 && currentOutbox.length <= 15) {
+    // 1. Pre-Flight Conflict Scan (only for small cell-level outboxes <= 15 items to prevent large payload timeouts)
+    const hasFullTableReplacements = currentOutbox.some(m => m.action === 'REPLACE_SWAP_TABLE' || m.action === 'REPLACE_TABLE_DATA' || m.action === 'SYNC_FULL_TABLE' || (m.rawGrid && m.rawGrid.length > 5));
+    if (options.force !== true && options.detectConflicts !== false && !hasFullTableReplacements && currentOutbox.length > 0 && currentOutbox.length <= 15) {
       currentBatchText = `Checking for conflicts (${currentOutbox.length} change${currentOutbox.length === 1 ? '' : 's'})...`;
       const subTitleEl = document.getElementById('sync-modal-subtitle');
       if (subTitleEl) subTitleEl.textContent = `${currentBatchText} (${this.formatDuration(Date.now() - pushStartTime)})`;
@@ -558,8 +692,10 @@ class SyncEngine {
 
       while (i < totalCount) {
         batchNum++;
-        // 10 changes per request for fast streaming on flattened formula-free sheets
-        const chunkSize = 10;
+        // Push full-table swaps 1 at a time to prevent payload limits; standard cell edits 10 per batch
+        const currentMut = currentOutbox[i];
+        const isLargePayload = currentMut && (currentMut.action === 'REPLACE_SWAP_TABLE' || currentMut.action === 'REPLACE_TABLE_DATA' || currentMut.action === 'SYNC_FULL_TABLE' || (currentMut.rawGrid && currentMut.rawGrid.length > 5));
+        const chunkSize = isLargePayload ? 1 : 10;
         const chunk = currentOutbox.slice(i, i + chunkSize);
         const isLastChunk = (i + chunk.length >= totalCount);
 
@@ -752,20 +888,34 @@ class SyncEngine {
       // Look up local db row to get rich contextual info (Employee name, cert type, item number)
       const tableKey = this.db && typeof this.db.getTableKeyForSheet === 'function' ? this.db.getTableKeyForSheet(sheetName) : sheetName.toLowerCase().replace(/\s+/g, '_');
       const table = this.db && typeof this.db.getTable === 'function' ? this.db.getTable(tableKey) : null;
-      let rowObj = (table && table.rows && conf.row && table.rows[conf.row - 2]) ? table.rows[conf.row - 2] : {};
+      let rowObj = (table && table.rows && conf.row) ? (table.rows.find(r => r._rowIdx === conf.row) || table.rows[conf.row - 2] || table.rows[conf.row - 1] || {}) : {};
+
+      const isEquipmentSheet = [
+        'gloves', 'sleeves', 'blankets', 'macks', 'hv_testers', 'phasing_sets', 'aed', 'grounds', 'hot_sticks',
+        'glove_swaps', 'sleeve_swaps', 'blanket_swaps', 'mack_swaps', 'hv_tester_swaps', 'phasing_set_swaps', 'aed_swaps', 'ground_swaps', 'hot_stick_swaps',
+        'gloves_history', 'sleeves_history', 'blankets_history', 'macks_history', 'hv_testers_history', 'phasing_sets_history', 'aed_history', 'grounds_history', 'hot_sticks_history'
+      ].some(k => tableKey.includes(k) || sheetName.toLowerCase().replace(/\s+/g, '_').includes(k));
+
+      const eqIcon = this.getEquipmentIcon(sheetName, tableKey);
 
       let employeeName = conf.employeeName || rowObj['Employee Name'] || rowObj['Name'] || rowObj['Assigned To'] || rowObj['Worker'] || '';
       let certName = conf.certName || conf.itemType || rowObj['Item Type'] || rowObj['Cert Type'] || rowObj['Type'] || '';
-      let itemNumber = conf.itemNumber || conf.itemIdentifier || rowObj['Item #'] || rowObj['Serial #'] || rowObj['Glove'] || rowObj['Sleeve'] || '';
+      let itemNumber = conf.itemNumber || conf.itemIdentifier || rowObj['Item #'] || rowObj['Serial #'] || rowObj['Glove'] || rowObj['Sleeve'] || rowObj['Blanket'] || rowObj['MACK'] || rowObj['ESL ID'] || (table && table.headers && rowObj[table.headers[0]]) || '';
       let fieldName = conf.header || conf.field || (table && table.headers && conf.col ? table.headers[conf.col - 1] : '') || `Column ${conf.col}`;
 
+      if (itemNumber) itemNumber = String(itemNumber).replace(/^#+/, '').trim();
+
       let itemTitle = '';
-      if (employeeName && certName) {
+      if (isEquipmentSheet) {
+        const itemLabel = itemNumber ? `Item #${itemNumber}` : `Row ${conf.row}`;
+        const empSuffix = employeeName && employeeName !== itemNumber ? ` (${employeeName})` : '';
+        itemTitle = `${eqIcon} ${itemLabel}${empSuffix}`;
+      } else if (employeeName && certName) {
         itemTitle = `👤 ${employeeName} — 📜 ${certName}`;
       } else if (employeeName) {
         itemTitle = `👤 ${employeeName}`;
       } else if (itemNumber) {
-        itemTitle = `🧤 Item #${itemNumber}${employeeName ? ` (${employeeName})` : ''}`;
+        itemTitle = `${eqIcon} Item #${itemNumber}${employeeName ? ` (${employeeName})` : ''}`;
       } else {
         itemTitle = conf.itemIdentifier ? `Item ${conf.itemIdentifier}` : `Row ${conf.row}`;
       }

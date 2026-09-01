@@ -1509,7 +1509,12 @@ class InventoryManager {
           const isHistRetired = !isHistLineman && (histAssignedLower.includes('retir') || histAssignedLower.includes('destroy') || histLocLower.includes('destroyed'));
           const isHistReturned = !isHistLineman && (isHistTesting || isHistShelf || isHistLost || isHistFailed || isHistRetired);
 
-          const isCurActiveEmployee = curAssignedTo && !['on shelf', 'in testing', 'packed for testing', 'packed for delivery', 'ready for delivery', 'ready for test', 'lost', 'failed rubber', 'destroyed', 'unassigned', 'n/a', '—', '-'].includes(curAssignedLower);
+          // Check if history employee is a known previous/inactive employee
+          const isHistPreviousEmp = isHistLineman && (
+            histLocLower === 'previous employee' ||
+            histLocLower.includes('previous') ||
+            (window.previousEmployeeManager && window.previousEmployeeManager.isPreviousEmployee && window.previousEmployeeManager.isPreviousEmployee(latestHist.assignedTo))
+          );
 
           // Needs reconciliation if:
           // A. History shows an active Lineman assignment that differs from active sheet (e.g. active sheet was left On Shelf)
@@ -1522,7 +1527,7 @@ class InventoryManager {
           let newLocation = curLocation;
           let newDateAssigned = curDateAssigned;
 
-          if (isHistLineman) {
+          if (isHistLineman && !isHistPreviousEmp) {
             if (curAssignedLower !== histAssignedLower || curStatus.toLowerCase() !== 'assigned') {
               needsFix = true;
             }
@@ -1530,11 +1535,13 @@ class InventoryManager {
             needsFix = true;
           } else if (latestHist.dateObj && curDateObj && latestHist.dateObj.getTime() > curDateObj.getTime()) {
             if (curAssignedLower !== histAssignedLower || curStatus.toLowerCase() !== histAssignedLower) {
-              needsFix = true;
+              if (!isHistPreviousEmp || isCurActiveEmployee) {
+                needsFix = true;
+              }
             }
-          } else if (latestHist.assignedTo && curAssignedLower !== histAssignedLower) {
+          } else if (latestHist.assignedTo && curAssignedLower !== histAssignedLower && !isHistPreviousEmp && isCurActiveEmployee) {
             needsFix = true;
-          } else if (latestHist.dateObj && !curDateObj) {
+          } else if (latestHist.dateObj && !curDateObj && !isHistPreviousEmp) {
             needsFix = true;
           }
 
@@ -1791,7 +1798,308 @@ class InventoryManager {
       }
     }
   }
+
+  /**
+   * Opens the interactive modal to manually transfer crew equipment from one foreman to another.
+   */
+  openTransferEquipmentModal(preselectedForeman = '') {
+    let modal = document.getElementById('transfer-equipment-modal');
+    if (modal) modal.remove();
+
+    modal = document.createElement('div');
+    modal.id = 'transfer-equipment-modal';
+    modal.className = 'modal-overlay active';
+    modal.style.zIndex = '1100';
+    modal.style.display = 'flex';
+    modal.innerHTML = `
+      <div class="modal-box" style="max-width: 650px; width: 92%; max-height: 90vh; display: flex; flex-direction: column;">
+        <div class="modal-header" style="background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); color: white;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 18px;">🔄</span>
+            <span style="font-weight: 700; font-size: 15px;">Transfer Crew Equipment (Foreman Change)</span>
+          </div>
+          <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 12px; background: rgba(0,0,0,0.2); border: none; color: white; cursor: pointer;" onclick="document.getElementById('transfer-equipment-modal').remove()">✕</button>
+        </div>
+        <div class="modal-body" style="max-height: 70vh; overflow-y: auto; padding: 20px;">
+          <div style="background: rgba(59, 130, 246, 0.1); border-left: 4px solid #3b82f6; border-radius: 4px; padding: 10px 14px; margin-bottom: 16px; font-size: 12px; color: #cbd5e1; line-height: 1.5;">
+            <strong style="color: #93c5fd;">💡 Crew Rig Equipment vs Personal PPE:</strong><br>
+            • <strong>Crew Rig Tools</strong> (Blankets, MACKs, HV Testers, Phasing Sets, AED, Grounds, Hot Sticks) transfer to the new Foreman.<br>
+            • <strong>Personal PPE</strong> (Gloves & Sleeves) remains with the outgoing employee and will appear under <em>Previous Employee</em> on swap reports for physical reclaim.
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px;">
+            <div>
+              <label style="font-size: 12px; font-weight: 700; color: #94a3b8; display: block; margin-bottom: 6px;">
+                Outgoing / Departed Foreman:
+              </label>
+              <select id="transfer-old-foreman" class="form-control" style="width: 100%; padding: 8px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary);" onchange="window.inventoryManager.updateTransferPreview()">
+              </select>
+            </div>
+            <div>
+              <label style="font-size: 12px; font-weight: 700; color: #94a3b8; display: block; margin-bottom: 6px;">
+                New Incoming Foreman:
+              </label>
+              <select id="transfer-new-foreman" class="form-control" style="width: 100%; padding: 8px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary);">
+              </select>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 16px;">
+            <div>
+              <label style="font-size: 12px; font-weight: 700; color: #94a3b8; display: block; margin-bottom: 6px;">
+                Job / Crew # (Optional):
+              </label>
+              <select id="transfer-job-num" class="form-control" style="width: 100%; padding: 8px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary);">
+              </select>
+            </div>
+            <div>
+              <label style="font-size: 12px; font-weight: 700; color: #94a3b8; display: block; margin-bottom: 6px;">
+                Effective Transition Date:
+              </label>
+              <input type="date" id="transfer-date" class="form-control" style="width: 100%; padding: 8px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary);">
+            </div>
+          </div>
+
+          <!-- Live Equipment Preview Box -->
+          <div id="transfer-equipment-preview" style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 14px;">
+            <!-- Populated dynamically -->
+          </div>
+        </div>
+        <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center; background: var(--bg-secondary); border-top: 1px solid var(--border-color); padding: 12px 20px;">
+          <button class="btn btn-secondary" onclick="document.getElementById('transfer-equipment-modal').remove()">Cancel</button>
+          <button class="btn btn-primary" id="btn-execute-equipment-transfer" style="background: #0284c7; border-color: #0284c7; font-weight: 700; display: inline-flex; align-items: center; gap: 6px;" onclick="window.inventoryManager.executeTransferEquipment()">
+            <span>⚡</span> Transfer Equipment Now
+          </button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+
+    // Populate dropdowns
+    const empTable = this.db.getTable('employees');
+    const empRows = empTable ? (empTable.rows || []) : [];
+    const jtTable = this.db.getTable('job_tracking');
+    const jtRows = jtTable ? (jtTable.rows || []) : [];
+
+    // Collect all employee names
+    const allNamesSet = new Set();
+    empRows.forEach(e => {
+      const n = String(e['Employee Name'] || e['Name'] || Object.values(e)[0] || '').trim();
+      if (n) allNamesSet.add(n);
+    });
+
+    const histTable = this.db.getTable('employee_history');
+    if (histTable && histTable.rows) {
+      histTable.rows.forEach(h => {
+        const n = String(h['Employee Name'] || h['Name'] || Object.values(h)[1] || '').trim();
+        if (n) allNamesSet.add(n);
+      });
+    }
+
+    const allNames = Array.from(allNamesSet).sort();
+    const activeNames = empRows.map(e => String(e['Employee Name'] || e['Name'] || Object.values(e)[0] || '').trim()).filter(Boolean).sort();
+
+    const oldSelect = document.getElementById('transfer-old-foreman');
+    const newSelect = document.getElementById('transfer-new-foreman');
+    const jobSelect = document.getElementById('transfer-job-num');
+    const dateInput = document.getElementById('transfer-date');
+
+    if (oldSelect) {
+      oldSelect.innerHTML = `<option value="">-- Select Outgoing Foreman --</option>` +
+        allNames.map(n => `<option value="${n}" ${n.toLowerCase() === preselectedForeman.toLowerCase() ? 'selected' : ''}>${n}</option>`).join('');
+    }
+
+    if (newSelect) {
+      newSelect.innerHTML = `<option value="">-- Select Incoming Foreman --</option>` +
+        activeNames.map(n => `<option value="${n}">${n}</option>`).join('');
+    }
+
+    if (jobSelect) {
+      jobSelect.innerHTML = `<option value="">(Optional - None)</option>` +
+        jtRows.map(j => {
+          const jn = String(j['Job Number'] || j['Job #'] || Object.values(j)[0] || '').trim();
+          const jLoc = String(j['Location'] || '').trim();
+          return jn ? `<option value="${jn}">${jn} - ${jLoc}</option>` : '';
+        }).filter(Boolean).join('');
+    }
+
+    if (dateInput) {
+      dateInput.value = new Date().toISOString().split('T')[0];
+    }
+
+    this.updateTransferPreview();
+  }
+
+  updateTransferPreview() {
+    const oldForemanSelect = document.getElementById('transfer-old-foreman');
+    const previewContainer = document.getElementById('transfer-equipment-preview');
+    if (!previewContainer) return;
+
+    const oldForeman = oldForemanSelect ? oldForemanSelect.value.trim() : '';
+    if (!oldForeman) {
+      previewContainer.innerHTML = `
+        <div style="text-align: center; color: var(--text-muted); font-size: 12px; padding: 10px;">
+          Select an outgoing foreman above to preview their assigned equipment.
+        </div>
+      `;
+      return;
+    }
+
+    const oldLower = oldForeman.toLowerCase();
+    const crewDefs = [
+      { key: 'blankets', label: 'Blankets', icon: '🟨' },
+      { key: 'macks', label: 'MACKs', icon: '⚡' },
+      { key: 'hv_testers', label: 'HV Testers', icon: '🔬' },
+      { key: 'phasing_sets', label: 'Phasing Sets', icon: '⚡' },
+      { key: 'aed', label: 'AED Units', icon: '🏥' },
+      { key: 'grounds', label: 'Grounds', icon: '⚡' },
+      { key: 'hot_sticks', label: 'Hot Sticks', icon: '🔴' }
+    ];
+
+    const ppeDefs = [
+      { key: 'gloves', label: 'Gloves', icon: '🧤' },
+      { key: 'sleeves', label: 'Sleeves', icon: '🧥' }
+    ];
+
+    let crewCount = 0;
+    const crewSummary = [];
+
+    crewDefs.forEach(def => {
+      const table = this.db.getTable(def.key);
+      const rows = table ? (table.rows || []) : [];
+      const matching = rows.filter(r => String(r['Assigned To'] || r['Assigned'] || '').toLowerCase().trim() === oldLower);
+      if (matching.length > 0) {
+        const itemsList = matching.map(m => {
+          const keys = ['Item #', 'Item#', 'Blanket', 'MACK', 'Glove', 'Sleeve', 'Serial #', 'HVT #', 'Phasing Set #', 'AED #', 'ESL ID'];
+          for (const k of keys) {
+            if (m[k] !== undefined && m[k] !== null && String(m[k]).trim() !== '') return String(m[k]).trim();
+          }
+          if (table && table.headers && m[table.headers[0]]) return String(m[table.headers[0]]).trim();
+          return '';
+        }).filter(Boolean).slice(0, 8).join(', ');
+        crewSummary.push(`
+          <div style="display: flex; justify-content: space-between; align-items: center; padding: 5px 0; border-bottom: 1px dashed rgba(255,255,255,0.08); font-size: 12px;">
+            <div>
+              <span>${def.icon}</span> <strong>${def.label}:</strong> <span style="color: #93c5fd; font-weight: 700;">${matching.length} item(s)</span>
+              <div style="font-size: 11px; color: var(--text-muted); font-family: monospace;">(${itemsList}${matching.length > 8 ? '...' : ''})</div>
+            </div>
+            <span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px;">WILL TRANSFER</span>
+          </div>
+        `);
+      }
+    });
+
+    let ppeCount = 0;
+    const ppeSummary = [];
+    ppeDefs.forEach(def => {
+      const table = this.db.getTable(def.key);
+      const rows = table ? (table.rows || []) : [];
+      const matching = rows.filter(r => String(r['Assigned To'] || r['Assigned'] || '').toLowerCase().trim() === oldLower);
+      if (matching.length > 0) {
+        ppeCount += matching.length;
+        ppeSummary.push(`
+          <div style="display: flex; justify-content: space-between; align-items: center; padding: 5px 0; border-bottom: 1px dashed rgba(255,255,255,0.08); font-size: 12px;">
+            <div>
+              <span>${def.icon}</span> <strong>${def.label}:</strong> <span style="color: #cbd5e1;">${matching.length} item(s)</span>
+            </div>
+            <span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px;">REMAINS FOR RECLAIM</span>
+          </div>
+        `);
+      }
+    });
+
+    previewContainer.innerHTML = `
+      <div style="font-size: 12px; font-weight: 700; color: var(--text-primary); margin-bottom: 8px;">
+        📦 Equipment Currently Assigned to <u>${oldForeman}</u>:
+      </div>
+      ${crewSummary.length > 0 ? crewSummary.join('') : '<div style="color: var(--text-muted); font-size: 12px; padding: 4px 0;">No crew equipment items currently found assigned to this person.</div>'}
+      ${ppeSummary.length > 0 ? `
+        <div style="margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--border-color);">
+          <div style="font-size: 11px; font-weight: 700; color: #f59e0b; margin-bottom: 4px;">Personal PPE (Not Transferred):</div>
+          ${ppeSummary.join('')}
+        </div>
+      ` : ''}
+    `;
+  }
+
+  async executeTransferEquipment() {
+    const oldSelect = document.getElementById('transfer-old-foreman');
+    const newSelect = document.getElementById('transfer-new-foreman');
+    const jobSelect = document.getElementById('transfer-job-num');
+    const dateInput = document.getElementById('transfer-date');
+
+    const oldForeman = oldSelect ? oldSelect.value.trim() : '';
+    const newForeman = newSelect ? newSelect.value.trim() : '';
+    const jobNum = jobSelect ? jobSelect.value.trim() : '';
+    const dateStr = dateInput ? dateInput.value : new Date().toISOString().split('T')[0];
+
+    if (!oldForeman) {
+      alert('Please select the outgoing / departed Foreman.');
+      return;
+    }
+    if (!newForeman) {
+      alert('Please select the new incoming Foreman.');
+      return;
+    }
+    if (oldForeman.toLowerCase() === newForeman.toLowerCase()) {
+      alert('Outgoing and Incoming Foreman cannot be the same person.');
+      return;
+    }
+
+    const btn = document.getElementById('btn-execute-equipment-transfer');
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = '<span>⏳</span> Transferring...';
+    }
+
+    try {
+      let count = 0;
+      if (window.crewImportEngine && typeof window.crewImportEngine.reassignCrewEquipment === 'function') {
+        count = await window.crewImportEngine.reassignCrewEquipment(oldForeman, newForeman, jobNum, dateStr);
+      }
+
+      // Save database snapshot
+      if (this.db && typeof this.db.setSnapshot === 'function') {
+        await this.db.setSnapshot(this.db.snapshot);
+      }
+
+      document.getElementById('transfer-equipment-modal')?.remove();
+
+      alert(`✅ Successfully transferred ${count} crew equipment item(s) from ${oldForeman} to ${newForeman}!\n\nAll changes and history milestones are saved locally and queued for Google Sheets push.`);
+
+      if (window.sheetNavigator) {
+        window.sheetNavigator.renderCurrentSheet();
+      }
+    } catch (err) {
+      alert(`❌ Error transferring equipment: ${err.message}`);
+      console.error(err);
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = '<span>⚡</span> Transfer Equipment Now';
+      }
+    }
+  }
+
+  escapeHtml(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#039;');
+  }
+
+  escapeJs(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+      .replace(/\\/g, '\\\\')
+      .replace(/'/g, "\\'")
+      .replace(/"/g, '&quot;')
+      .replace(/[\n\r]/g, ' ');
+  }
 }
 
 window.inventoryManager = new InventoryManager(window.localDB);
+
 

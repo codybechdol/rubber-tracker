@@ -76,7 +76,7 @@ class LookupApp {
           <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 14px; margin-bottom: 8px; cursor: pointer; transition: all 0.15s ease;"
                onmouseover="this.style.borderColor='var(--accent)';" 
                onmouseout="this.style.borderColor='var(--border-color)';"
-               onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeHtml(empName)}');}">
+               onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(empName)}');}">
             <div style="display: flex; align-items: center; justify-content: space-between;">
               <div style="font-weight: 700; font-size: 15px; color: #60a5fa;">👤 ${this.escapeHtml(empName)}</div>
               <span class="badge" style="background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4); font-size: 11px; padding: 2px 8px; border-radius: 4px;">
@@ -102,7 +102,7 @@ class LookupApp {
           <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 14px; margin-bottom: 8px; cursor: pointer; transition: all 0.15s ease;"
                onmouseover="this.style.borderColor='var(--success)';" 
                onmouseout="this.style.borderColor='var(--border-color)';"
-               onclick="if(window.itemStatsEngine){window.itemStatsEngine.openDossierModal('${this.escapeHtml(item.itemNum)}', '${this.escapeHtml(histKey)}');}">
+               onclick="if(window.itemStatsEngine){window.itemStatsEngine.openDossierModal('${this.escapeJs(item.itemNum)}', '${this.escapeJs(histKey)}');}">
             <div style="display: flex; align-items: center; justify-content: space-between;">
               <div style="font-weight: 700; font-size: 15px; color: #34d399;">📦 ${this.escapeHtml(item.type)} — #${this.escapeHtml(item.itemNum)}</div>
               <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #6ee7b7; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 11px; padding: 2px 8px; border-radius: 4px;">
@@ -140,6 +140,15 @@ class LookupApp {
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#039;');
+  }
+
+  escapeJs(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+      .replace(/\\/g, '\\\\')
+      .replace(/'/g, "\\'")
+      .replace(/"/g, '&quot;')
+      .replace(/[\n\r]/g, ' ');
   }
 }
 

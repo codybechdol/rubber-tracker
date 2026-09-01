@@ -30,11 +30,23 @@ class EmployeeProfileEngine {
    */
   normalizeName(name) {
     if (!name) return '';
-    return String(name).toLowerCase().replace(/[^a-z0-9]/g, ' ').replace(/\s+/g, ' ').trim();
+    return String(name).toLowerCase()
+      .replace(/\(.*?\)/g, '')
+      .replace(/[^a-z0-9]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  normalizeNameCompact(name) {
+    if (!name) return '';
+    return String(name).toLowerCase()
+      .replace(/\(.*?\)/g, '')
+      .replace(/[^a-z0-9]/g, '')
+      .trim();
   }
 
   /**
-   * Matches employee name across different formats (e.g. "Darrell Swann" vs "Swann, Darrell" vs "Darrell Swann (Bozeman)")
+   * Matches employee name across different formats (e.g. "Darrell Swann" vs "Swann, Darrell" vs "Keenan O'Keefe" vs "O'Keefe, Keenan")
    */
   isNameMatch(nameA, nameB) {
     if (!nameA || !nameB) return false;
@@ -44,23 +56,49 @@ class EmployeeProfileEngine {
 
     if (normA === normB) return true;
 
-    // Remove parenthesized status/city if present
-    const cleanA = this.normalizeName(String(nameA).replace(/\(.*?\)/g, ''));
-    const cleanB = this.normalizeName(String(nameB).replace(/\(.*?\)/g, ''));
-    if (cleanA === cleanB) return true;
+    // Compact comparison (strips whitespace and punctuation, e.g. "keenanokeefe" === "keenanokeefe")
+    const compA = this.normalizeNameCompact(nameA);
+    const compB = this.normalizeNameCompact(nameB);
+    if (compA && compB && compA === compB) return true;
 
-    // Check reversed "Last First" vs "First Last"
-    const partsA = cleanA.split(' ').filter(Boolean);
-    const partsB = cleanB.split(' ').filter(Boolean);
+    const wordsA = normA.split(' ').filter(w => w.length > 0);
+    const wordsB = normB.split(' ').filter(w => w.length > 0);
 
-    if (partsA.length >= 2 && partsB.length >= 2) {
-      if (partsA[0] === partsB[partsB.length - 1] && partsA[partsA.length - 1] === partsB[0]) return true;
-      if (partsA.join(' ') === partsB.reverse().join(' ')) return true;
+    const cleanWordsA = wordsA.filter(w => !['jr', 'sr', 'ii', 'iii', 'iv'].includes(w));
+    const cleanWordsB = wordsB.filter(w => !['jr', 'sr', 'ii', 'iii', 'iv'].includes(w));
+
+    if (cleanWordsA.length > 0 && cleanWordsB.length > 0) {
+      const setA = new Set(cleanWordsA);
+      const setB = new Set(cleanWordsB);
+      if (cleanWordsA.every(w => setB.has(w)) && cleanWordsB.every(w => setA.has(w))) {
+        return true;
+      }
+
+      const [shorter, longer] = cleanWordsA.length <= cleanWordsB.length ? [cleanWordsA, cleanWordsB] : [cleanWordsB, cleanWordsA];
+      const longerSet = new Set(longer);
+      const majorWords = shorter.filter(w => w.length > 1);
+      if (majorWords.length >= 2 && majorWords.every(w => longerSet.has(w))) {
+        return true;
+      }
     }
 
-    // Check containment if length is sufficient
-    if (cleanA.length > 5 && cleanB.length > 5) {
-      if (cleanA.includes(cleanB) || cleanB.includes(cleanA)) return true;
+    if (cleanWordsA.length >= 2 && cleanWordsB.length >= 2) {
+      const firstLastA = cleanWordsA[0] + cleanWordsA.slice(1).join('');
+      const lastFirstA = cleanWordsA.slice(1).join('') + cleanWordsA[0];
+      const lastFirstFullA = cleanWordsA[cleanWordsA.length - 1] + cleanWordsA.slice(0, -1).join('');
+      const firstLastFullA = cleanWordsA.slice(0, -1).join('') + cleanWordsA[cleanWordsA.length - 1];
+
+      const firstLastB = cleanWordsB[0] + cleanWordsB.slice(1).join('');
+      const lastFirstB = cleanWordsB.slice(1).join('') + cleanWordsB[0];
+      const lastFirstFullB = cleanWordsB[cleanWordsB.length - 1] + cleanWordsB.slice(0, -1).join('');
+      const firstLastFullB = cleanWordsB.slice(0, -1).join('') + cleanWordsB[cleanWordsB.length - 1];
+
+      const variantsA = [compA, firstLastA, lastFirstA, lastFirstFullA, firstLastFullA];
+      const variantsB = [compB, firstLastB, lastFirstB, lastFirstFullB, firstLastFullB];
+
+      for (const vA of variantsA) {
+        if (variantsB.includes(vA)) return true;
+      }
     }
 
     return false;
@@ -485,26 +523,45 @@ class EmployeeProfileEngine {
     const rawEmpName = String(employeeName || '').trim();
     if (!rawEmpName) return null;
 
-    // 1. Locate Employee Record in Employees table
+    // 1. Locate Employee Record in Employees table, Previous Employees table, or Employee History table
     const empTable = snap.tables['employees'];
     let empRow = null;
     if (empTable && empTable.rows) {
       empRow = empTable.rows.find(r => {
-        const rName = r['Name'] || r['Employee Name'] || r['Employee'] || '';
+        const rName = r['Name'] || r['Employee Name'] || r['Employee'] || r['Worker'] || '';
         return this.isNameMatch(rName, rawEmpName);
       });
     }
 
-    const displayName = empRow ? (empRow['Name'] || empRow['Employee Name'] || rawEmpName) : rawEmpName;
-    const location = empRow ? (empRow['Location'] || 'Unknown') : 'Unknown';
-    const jobNumber = empRow ? (empRow['Job Number'] || empRow['Job #'] || 'N/A') : 'N/A';
-    const secondaryJob = empRow ? (empRow['Secondary Job Number'] || '') : '';
-    const role = empRow ? (empRow['Job Classification'] || empRow['Classification'] || 'Lineman') : 'Lineman';
-    const phone = empRow ? (empRow['Phone Number'] || empRow['Phone'] || 'N/A') : 'N/A';
-    const email = empRow ? (empRow['Email Address'] || empRow['Email'] || '') : '';
-    const mpEmail = empRow ? (empRow['MP Email'] || '') : '';
-    const notifEmail = empRow ? (empRow['Notification Emails'] || '') : '';
-    const hireDate = empRow ? (empRow['Hire Date'] || empRow['Hire'] || '') : '';
+    const prevTable = snap.tables['previous_employees'] || snap.tables['previous_employee'] || snap.tables['past_employees'];
+    let prevRow = null;
+    if (!empRow && prevTable && prevTable.rows) {
+      prevRow = prevTable.rows.find(r => {
+        const rName = r['Name'] || r['Employee Name'] || r['Employee'] || r['Worker'] || Object.values(r)[0] || '';
+        return this.isNameMatch(rName, rawEmpName);
+      });
+    }
+
+    const histTable = snap.tables['employee_history'];
+    let histRow = null;
+    if (!empRow && !prevRow && histTable && histTable.rows) {
+      histRow = histTable.rows.slice().reverse().find(r => {
+        const rName = r['Employee Name'] || r['Name'] || r['Employee'] || r['Worker'] || Object.values(r)[1] || '';
+        return this.isNameMatch(rName, rawEmpName);
+      });
+    }
+
+    const primaryRow = empRow || prevRow || histRow;
+    const displayName = primaryRow ? (primaryRow['Name'] || primaryRow['Employee Name'] || primaryRow['Worker'] || rawEmpName) : rawEmpName;
+    const location = primaryRow ? (primaryRow['Location'] || (prevRow ? 'Previous Employee' : (histRow ? 'Previous Employee' : 'Unknown'))) : 'Unknown';
+    const jobNumber = primaryRow ? (primaryRow['Job Number'] || primaryRow['Job #'] || 'N/A') : 'N/A';
+    const secondaryJob = primaryRow ? (primaryRow['Secondary Job Number'] || '') : '';
+    const role = primaryRow ? (primaryRow['Job Classification'] || primaryRow['Classification'] || primaryRow['Role'] || (prevRow ? 'Previous Employee' : (histRow ? 'Previous Employee' : 'Lineman'))) : 'Previous Employee';
+    const phone = primaryRow ? (primaryRow['Phone Number'] || primaryRow['Phone'] || 'N/A') : 'N/A';
+    const email = primaryRow ? (primaryRow['Email Address'] || primaryRow['Email'] || '') : '';
+    const mpEmail = primaryRow ? (primaryRow['MP Email'] || '') : '';
+    const notifEmail = primaryRow ? (primaryRow['Notification Emails'] || '') : '';
+    const hireDate = primaryRow ? (primaryRow['Hire Date'] || primaryRow['Hire'] || '') : '';
 
     // 2. Scan ALL equipment sheets for items currently assigned to this employee
     const equipmentSheets = [
@@ -526,7 +583,7 @@ class EmployeeProfileEngine {
       if (t && t.rows) {
         t.rows.forEach(item => {
           const assignedTo = String(item['Assigned To'] || item['Assigned'] || item['Holder'] || '').trim();
-          if (this.isNameMatch(assignedTo, displayName)) {
+          if (this.isNameMatch(assignedTo, displayName) || this.isNameMatch(assignedTo, rawEmpName)) {
             const itemNum = this.getItemNum(item, t.headers);
             const eslId = String(item['ESL ID'] || '').trim();
             const size = String(item['Size'] || '').trim();
@@ -588,12 +645,14 @@ class EmployeeProfileEngine {
     });
 
     // 3. Scan Expiring Certs table for this employee
-    const certsTable = snap.tables['expiring_certs'];
+    const certsTable = snap.tables['expiring_certs'] || snap.tables['certs'] || snap.tables['certifications'];
     const certifications = [];
+    const matchedCerts = new Set();
+
     if (certsTable && certsTable.rows) {
       certsTable.rows.forEach(c => {
-        const cEmp = String(c['Employee'] || c['Name'] || c['Employee Name'] || '').trim();
-        if (this.isNameMatch(cEmp, displayName)) {
+        const cEmp = String(c['Employee Name'] || c['Employee'] || c['Name'] || c['Worker'] || Object.values(c)[0] || '').trim();
+        if (this.isNameMatch(cEmp, displayName) || this.isNameMatch(cEmp, rawEmpName)) {
           const certType = this.getCertType(c, certsTable.headers);
           const expDate = String(c['Expiration Date'] || c['Expiration'] || c['Change Out Date'] || 'N/A').trim();
           const testDate = String(c['Date Acquired'] || c['Acquired Date'] || c['Test Date'] || c['Issue Date'] || c['Issued Date'] || c['Date'] || 'N/A').trim();
@@ -628,6 +687,8 @@ class EmployeeProfileEngine {
           const smsStatus = String(c['SMS'] || c['SMS Sent'] || c['SMS Status'] || '').trim();
           const notes = String(c['Notes'] || '').trim();
 
+          matchedCerts.add(this.normalizeName(certType));
+
           certifications.push({
             rowIdx: c._rowIdx || null,
             rawRow: c,
@@ -643,6 +704,43 @@ class EmployeeProfileEngine {
       });
     }
 
+    // Ensure all 16 standard company certifications are included in the qualification matrix
+    const standardCertTypes = [
+      'First Aid / CPR',
+      'Pole Top Rescue',
+      'Bucket Truck Rescue',
+      'Crane - Mobile',
+      'Rigging / Signal Person',
+      'CDL - Medical',
+      'OSHA 10/30',
+      'Diggers Hotline',
+      'Forklift / Telehandler',
+      'Defensive Driving',
+      'Substation Safety',
+      'Enclosed Space',
+      'MSHA',
+      'BNSF Safety',
+      'Crane Operator Eval',
+      'Helicopter Safety'
+    ];
+
+    standardCertTypes.forEach(stdType => {
+      const normStd = this.normalizeName(stdType);
+      if (!matchedCerts.has(normStd) && !certifications.some(c => this.normalizeName(c.certType) === normStd)) {
+        certifications.push({
+          rowIdx: null,
+          rawRow: null,
+          certType: stdType,
+          expDate: 'No Date Set',
+          testDate: 'N/A',
+          daysLeft: null,
+          status: 'No Date Set',
+          smsStatus: '',
+          notes: ''
+        });
+      }
+    });
+
     // 4. Scan Training Tracking for this employee / crew
     const trainingTable = snap.tables['training_tracking'];
     const trainingList = [];
@@ -652,8 +750,8 @@ class EmployeeProfileEngine {
         const crew = String(tr['Crew'] || tr['Job #'] || tr['Job Number'] || '').trim();
         const attendees = String(tr['Attendees'] || tr['Crew Members'] || '').trim();
 
-        const isLeadMatch = this.isNameMatch(lead, displayName);
-        const isAttendeeMatch = attendees && this.isNameMatch(attendees, displayName);
+        const isLeadMatch = this.isNameMatch(lead, displayName) || this.isNameMatch(lead, rawEmpName);
+        const isAttendeeMatch = attendees && (this.isNameMatch(attendees, displayName) || this.isNameMatch(attendees, rawEmpName));
         const isCrewMatch = jobNumber && jobNumber !== 'N/A' && crew === jobNumber;
 
         if (isLeadMatch || isAttendeeMatch || isCrewMatch) {
@@ -676,12 +774,12 @@ class EmployeeProfileEngine {
     // A. Lifecycle events from Employee History
     if (historyTable && historyTable.rows) {
       historyTable.rows.forEach(h => {
-        const hName = String(h['Employee Name'] || h['Name'] || h['Employee'] || '').trim();
-        if (this.isNameMatch(hName, displayName)) {
+        const hName = String(h['Employee Name'] || h['Name'] || h['Employee'] || h['Worker'] || Object.values(h)[1] || '').trim();
+        if (this.isNameMatch(hName, displayName) || this.isNameMatch(hName, rawEmpName)) {
           const rawEvent = String(h['Event'] || h['Event Type'] || h['Action'] || '').trim();
-          const rawDetails = String(h['Details'] || h['Notes'] || h['Description'] || '').trim();
+          const rawDetails = String(h['Details'] || h['Notes'] || h['Description'] || h['Last Day Reason'] || '').trim();
           const rawLoc = String(h['Location'] || '').trim();
-          const rawJob = String(h['Job Number'] || '').trim();
+          const rawJob = String(h['Job Number'] || h['Job #'] || '').trim();
           const dateStr = String(h['Date'] || h['Date Changed'] || 'N/A').trim();
 
           const eventLower = rawEvent.toLowerCase();
@@ -689,7 +787,7 @@ class EmployeeProfileEngine {
 
           const isHire = eventLower.includes('new hire') || (eventLower.includes('hire') && !eventLower.includes('rehire'));
           const isRehire = eventLower.includes('rehire');
-          const isTerm = eventLower.includes('term') || eventLower.includes('quit') || eventLower.includes('departure') || eventLower.includes('layoff');
+          const isTerm = eventLower.includes('term') || eventLower.includes('quit') || eventLower.includes('departure') || eventLower.includes('layoff') || eventLower.includes('archive') || eventLower.includes('previous');
           const isRole = eventLower.includes('role') || eventLower.includes('promotion') || eventLower.includes('class');
           const isLocEvent = eventLower.includes('location') || eventLower.includes('rezone') || eventLower.includes('transfer');
           const detailsHasLoc = detailsLower.includes('location') || detailsLower.includes('rezone') || detailsLower.includes('moved to') || detailsLower.includes('transfer') || detailsLower.includes('changed from');
@@ -760,6 +858,59 @@ class EmployeeProfileEngine {
               location: rawLoc,
               job: rawJob
             });
+          } else {
+            employeeHistory.push({
+              type: 'general',
+              date: dateStr,
+              event: rawEvent ? (rawEvent.startsWith('📋') ? rawEvent : `📋 ${rawEvent}`) : '📋 Career Milestone',
+              details: rawDetails || (rawLoc ? `Recorded for ${rawLoc}` : 'Career event logged'),
+              location: rawLoc,
+              job: rawJob
+            });
+          }
+        }
+      });
+    }
+
+    // A2. Lifecycle events from Previous Employees table
+    const prevSheetTable = snap.tables['previous_employees'] || snap.tables['previous_employee'] || snap.tables['past_employees'];
+    if (prevSheetTable && prevSheetTable.rows) {
+      prevSheetTable.rows.forEach(p => {
+        const pName = String(p['Employee Name'] || p['Name'] || p['Employee'] || p['Worker'] || Object.values(p)[0] || '').trim();
+        if (this.isNameMatch(pName, displayName) || this.isNameMatch(pName, rawEmpName)) {
+          const lastDay = String(p['Last Day'] || p['Term Date'] || p['Date'] || '').trim();
+          const reason = String(p['Last Day Reason'] || p['Reason'] || p['Notes'] || 'Departed').trim();
+          const loc = String(p['Location'] || '').trim();
+          const job = String(p['Job Number'] || p['Job #'] || '').trim();
+          const roleVal = String(p['Job Classification'] || p['Classification'] || p['Role'] || '').trim();
+          const hireVal = String(p['Hire Date'] || p['Hire'] || '').trim();
+
+          if (lastDay && lastDay !== 'N/A') {
+            const hasTerm = employeeHistory.some(e => e.type === 'term');
+            if (!hasTerm) {
+              employeeHistory.push({
+                type: 'term',
+                date: lastDay,
+                event: '🚪 Departure / Termination',
+                details: reason || 'Previous Employee',
+                location: loc || location,
+                job: job || jobNumber
+              });
+            }
+          }
+
+          if (hireVal && hireVal !== 'N/A') {
+            const hasHire = employeeHistory.some(e => e.type === 'hire');
+            if (!hasHire) {
+              employeeHistory.push({
+                type: 'hire',
+                date: hireVal,
+                event: '🎉 New Hire / Start Date',
+                details: `Hired as ${roleVal || 'Lineworker'}${loc ? ` at ${loc}` : ''}${job ? ` (Job ${job})` : ''}`,
+                location: loc || location,
+                job: job || jobNumber
+              });
+            }
           }
         }
       });
@@ -780,19 +931,18 @@ class EmployeeProfileEngine {
       }
     }
 
-    // B. Cert Updates from Certifications List
+    // B. Cert Updates from Certifications List (for certs that have a recorded date)
     if (certifications && certifications.length > 0) {
       certifications.forEach(c => {
         const certName = c.certType || 'Certification';
-        const dateUpdated = (c.testDate && c.testDate !== 'N/A') ? c.testDate : ((c.expDate && c.expDate !== 'N/A') ? c.expDate : null);
+        const dateUpdated = (c.testDate && c.testDate !== 'N/A') ? c.testDate : ((c.expDate && c.expDate !== 'N/A' && c.expDate !== 'No Date Set') ? c.expDate : null);
         if (dateUpdated) {
-          // Avoid duplicate if already logged from employee_history on same date
           const isDup = employeeHistory.some(e => e.type === 'cert' && e.date === dateUpdated && e.details.toLowerCase().includes(certName.toLowerCase()));
           if (!isDup) {
             let certDetail = `Valid · ${certName}`;
-            if (c.testDate && c.testDate !== 'N/A' && c.expDate && c.expDate !== 'N/A') {
+            if (c.testDate && c.testDate !== 'N/A' && c.expDate && c.expDate !== 'N/A' && c.expDate !== 'No Date Set') {
               certDetail = `Updated / Acquired: ${c.testDate} · Expires: ${c.expDate}`;
-            } else if (c.expDate && c.expDate !== 'N/A') {
+            } else if (c.expDate && c.expDate !== 'N/A' && c.expDate !== 'No Date Set') {
               certDetail = `Expires: ${c.expDate}`;
             } else if (c.testDate && c.testDate !== 'N/A') {
               certDetail = `Date Acquired: ${c.testDate}`;
@@ -801,7 +951,7 @@ class EmployeeProfileEngine {
             employeeHistory.push({
               type: 'cert',
               date: dateUpdated,
-              event: `📜 Cert Updated: ${certName}`,
+              event: `📜 Cert Recorded: ${certName}`,
               details: certDetail,
               location: location,
               job: jobNumber
@@ -809,6 +959,32 @@ class EmployeeProfileEngine {
           }
         }
       });
+    }
+
+    // C. Baseline Career Milestone Fallback for Former Employees if no history rows were logged
+    if (employeeHistory.length === 0 && primaryRow) {
+      if (prevRow || location === 'Previous Employee' || (primaryRow && String(primaryRow['Status'] || '').toLowerCase().includes('prev'))) {
+        const lastReason = prevRow ? (prevRow['Last Day Reason'] || prevRow['Reason'] || prevRow['Notes'] || 'Separated') : 'Previous Employee Archive';
+        const lastDate = prevRow ? (prevRow['Last Day'] || prevRow['Date'] || '') : '';
+        employeeHistory.push({
+          type: 'term',
+          date: lastDate || 'Archive Record',
+          event: '🚪 Departure / Archive Record',
+          details: `Status: Previous Employee · ${lastReason}`,
+          location: location || 'Helena',
+          job: jobNumber || 'N/A'
+        });
+      }
+      if (hireDate) {
+        employeeHistory.push({
+          type: 'hire',
+          date: hireDate,
+          event: '🎉 Employment Record',
+          details: `Role: ${role || 'Lineman'} · Location: ${location || 'Helena'}`,
+          location: location || 'Helena',
+          job: jobNumber || 'N/A'
+        });
+      }
     }
 
     // Sort Milestones chronologically (most recent first)
@@ -944,6 +1120,14 @@ class EmployeeProfileEngine {
             </div>
           </div>
 
+          ${totalEquipment > 0 ? `
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <button class="btn btn-secondary" style="font-size: 11.5px; padding: 6px 12px; border-color: #0284c7; color: #38bdf8; display: inline-flex; align-items: center; gap: 5px;" onclick="if(window.inventoryManager){window.inventoryManager.openTransferEquipmentModal('${this.escapeHtml(data.displayName)}');}">
+                <span>⚡</span> Transfer Equipment
+              </button>
+            </div>
+          ` : ''}
+
         </div>
 
         <!-- 4-Card Quick KPI Grid -->
@@ -959,10 +1143,10 @@ class EmployeeProfileEngine {
 
           <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 14px;">
             <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-weight: 700; margin-bottom: 2px;">Certifications Status</div>
-            <div style="font-size: 17px; font-weight: 800; color: ${expCerts > 0 ? '#ef4444' : (warnCerts > 0 ? '#f59e0b' : '#10b981')};">
-              ${expCerts > 0 ? `🔴 ${expCerts} Expired` : (warnCerts > 0 ? `🟡 ${warnCerts} Expiring` : `🟢 ${okCerts} Valid`)}
+            <div style="font-size: 17px; font-weight: 800; color: ${expCerts > 0 ? '#ef4444' : (warnCerts > 0 ? '#f59e0b' : (okCerts > 0 ? '#10b981' : '#94a3b8'))};">
+              ${expCerts > 0 ? `🔴 ${expCerts} Expired` : (warnCerts > 0 ? `🟡 ${warnCerts} Expiring` : (okCerts > 0 ? `🟢 ${okCerts} Valid` : `⚪ ${totalCerts} Tracked`))}
             </div>
-            <div style="font-size: 11px; color: var(--text-secondary); margin-top: 2px;">${totalCerts} Total Certs Tracked</div>
+            <div style="font-size: 11px; color: var(--text-secondary); margin-top: 2px;">${okCerts > 0 ? `${totalCerts} Total Certs Tracked` : 'Company Qualification Matrix'}</div>
           </div>
 
           <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 14px;">
@@ -2038,6 +2222,39 @@ class EmployeeProfileEngine {
           if (colNotes !== -1) certsTable.rawGrid[rowIdx - 1][colNotes - 1] = newNotes;
           if (colSms !== -1) certsTable.rawGrid[rowIdx - 1][colSms - 1] = '';
         }
+      } else {
+        const acqValueToSave = formattedAcq !== 'N/A' ? formattedAcq : '';
+        const expValueToSave = formattedExp !== 'N/A' ? formattedExp : (isNonExp ? 'N/A' : '');
+
+        const newCertRow = {
+          'Employee Name': employeeName,
+          'Name': employeeName,
+          'Item Type': certType,
+          'Cert Type': certType,
+          'Date Acquired': acqValueToSave,
+          'Expiration Date': expValueToSave,
+          'Days Until Expiration': daysLeft !== null ? String(daysLeft) : (isNonExp ? 'N/A' : ''),
+          'Status': status,
+          'SMS': '',
+          'Notes': newNotes
+        };
+        if (!certsTable.rows) certsTable.rows = [];
+        certsTable.rows.push(newCertRow);
+        certsTable.rowCount = certsTable.rows.length;
+        newCertRow._rowIdx = certsTable.rowCount + 1;
+
+        if (certsTable.rawGrid) {
+          const rowArr = headers.map(h => newCertRow[h] !== undefined ? newCertRow[h] : '');
+          certsTable.rawGrid.push(rowArr);
+          certsTable.maxRows = certsTable.rawGrid.length;
+        }
+
+        await this.db.addMutation({
+          action: 'ADD_ROW',
+          sheetName: 'Expiring Certs',
+          tableKey: 'expiring_certs',
+          rowData: newCertRow
+        });
       }
     }
 

@@ -582,7 +582,12 @@ class LocalDatabase {
     }
 
     const todayStr = new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
-    const itemNum = String(itemRow['Item #'] || itemRow['Glove'] || itemRow['Sleeve'] || itemRow['Blanket'] || itemRow['MACK'] || itemRow['Serial #'] || Object.values(itemRow)[0] || '').trim();
+    let itemNum = '';
+    if (sNameLower.includes('hv') || sNameLower.includes('tester') || sNameLower.includes('phasing')) {
+      itemNum = String(itemRow['Model'] || itemRow['HVT #'] || itemRow['PS #'] || itemRow['Serial #'] || itemRow['Item #'] || Object.values(itemRow)[0] || '').trim();
+    } else {
+      itemNum = String(itemRow['Item #'] || itemRow['Glove'] || itemRow['Sleeve'] || itemRow['Blanket'] || itemRow['MACK'] || itemRow['Serial #'] || Object.values(itemRow)[0] || '').trim();
+    }
     if (!itemNum) return;
 
     const assignedTo = String(itemRow['Assigned To'] || itemRow['Status'] || 'On Shelf').trim();
@@ -594,7 +599,7 @@ class LocalDatabase {
       const isNum = /^\d+$/.test(itemNum);
       const parsedNum = isNum ? parseInt(itemNum, 10) : null;
       const latest = histTable.rows.find(r => {
-        const rNum = String(r['Item #'] || r['Serial #'] || Object.values(r)[1] || Object.values(r)[0] || '').trim();
+        const rNum = String(r['Item #'] || r['Model'] || r['Serial #'] || Object.values(r)[1] || Object.values(r)[0] || '').trim();
         if (rNum.toLowerCase() === itemNum.toLowerCase()) return true;
         if (isNum && /^\d+$/.test(rNum) && parseInt(rNum, 10) === parsedNum) return true;
         return false;
@@ -615,13 +620,13 @@ class LocalDatabase {
       'Assigned To': assignedTo,
       'Notes': notes
     };
+    if (itemRow['Model']) histRow['Model'] = itemRow['Model'];
+    if (itemRow['KV']) histRow['KV'] = itemRow['KV'];
+    if (itemRow['Serial #'] && !histRow['Serial #']) histRow['Serial #'] = itemRow['Serial #'];
     if (itemRow['Size']) histRow['Size'] = itemRow['Size'];
     if (itemRow['Class']) histRow['Class'] = itemRow['Class'];
     if (itemRow['Type']) histRow['Type'] = itemRow['Type'];
-    if (itemRow['KV']) histRow['KV'] = itemRow['KV'];
-    if (itemRow['Model']) histRow['Model'] = itemRow['Model'];
     if (itemRow['Length']) histRow['Length'] = itemRow['Length'];
-    if (itemRow['Serial #'] && !histRow['Serial #']) histRow['Serial #'] = itemRow['Serial #'];
 
     if (!histTable.rows) histTable.rows = [];
     histTable.rows.unshift({ ...histRow });
@@ -638,6 +643,8 @@ class LocalDatabase {
       action: 'ADD_ROW',
       sheetName: histSheetName,
       tableKey: histTableKey,
+      itemNumber: itemNum,
+      itemIdentifier: itemNum,
       rowData: histRow
     });
   }
@@ -848,7 +855,7 @@ class LocalDatabase {
       return null;
     }
 
-    // Coalesce / update existing pending cell edit in outbox if present
+      // Coalesce / update existing pending cell edit in outbox if present
     if (mutation.action === 'UPDATE_CELL') {
       const existingIdx = this.outbox.findIndex(m => 
         m.action === 'UPDATE_CELL' &&
@@ -859,6 +866,31 @@ class LocalDatabase {
       if (existingIdx !== -1) {
         this.outbox[existingIdx].value = mutation.value;
         this.outbox[existingIdx].timestamp = new Date().toISOString();
+        await this.applyLocalMutation(mutation);
+        if (window.desktopAPI) {
+          await window.desktopAPI.saveLocalOutbox(this.outbox);
+          await window.desktopAPI.saveLocalSnapshot(this.snapshot);
+        } else {
+          localStorage.setItem('sa_outbox', JSON.stringify(this.outbox));
+          localStorage.setItem('sa_snapshot', JSON.stringify(this.snapshot));
+        }
+        this.notify();
+        return this.outbox[existingIdx];
+      }
+    }
+
+    // Coalesce full-table replacements for the same sheet/tableKey
+    if (mutation.action === 'REPLACE_SWAP_TABLE' || mutation.action === 'REPLACE_TABLE_DATA' || mutation.action === 'SYNC_FULL_TABLE') {
+      const existingIdx = this.outbox.findIndex(m => 
+        (m.action === 'REPLACE_SWAP_TABLE' || m.action === 'REPLACE_TABLE_DATA' || m.action === 'SYNC_FULL_TABLE') &&
+        (m.sheetName === mutation.sheetName || (m.tableKey && mutation.tableKey && m.tableKey === mutation.tableKey))
+      );
+      if (existingIdx !== -1) {
+        this.outbox[existingIdx] = {
+          ...this.outbox[existingIdx],
+          ...mutation,
+          timestamp: new Date().toISOString()
+        };
         await this.applyLocalMutation(mutation);
         if (window.desktopAPI) {
           await window.desktopAPI.saveLocalOutbox(this.outbox);

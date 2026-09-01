@@ -1977,6 +1977,7 @@ class CrewImportEngine {
           });
         } else {
           // Update existing job
+          const oldForeman = String(jobRow['Foreman'] || '').trim();
           jobRow['Location'] = physicalLoc;
           jobRow['Foreman'] = foremanName;
           jobRow['Crew Size'] = crewSize;
@@ -2031,6 +2032,18 @@ class CrewImportEngine {
               'Last Updated': todayFormatted
             }
           });
+
+          // Automatically transfer crew equipment (Blankets, MACKs, HV Testers, Phasing Sets, AED, Grounds, Hot Sticks)
+          if (oldForeman && foremanName && oldForeman.toLowerCase() !== foremanName.toLowerCase()) {
+            try {
+              const transferCount = await this.reassignCrewEquipment(oldForeman, foremanName, crew.jobNumber, this.rosterDate || todayFormatted);
+              if (transferCount > 0) {
+                appliedCount += transferCount;
+              }
+            } catch (transErr) {
+              console.warn(`Could not auto-transfer crew equipment from ${oldForeman} to ${foremanName}:`, transErr);
+            }
+          }
         }
       }
     }
@@ -2077,6 +2090,135 @@ class CrewImportEngine {
       totalChanges: this.computedDeltas.totalChanges,
       message: `Successfully applied ${appliedCount} updates across Employees, Job Tracking, and Employee History!`
     };
+  }
+
+  /**
+   * Automatically transfers crew equipment (Blankets, MACKs, HV Testers, Phasing Sets, AED, Grounds, Hot Sticks)
+   * from an outgoing / departed Foreman to the incoming Foreman of that crew/job.
+   * 
+   * Note: Personal PPE (Gloves & Sleeves) is intentionally EXCLUDED - it remains assigned to the departing
+   * employee and is routed to the "Previous Employee" section on Glove/Sleeve Swap reports for physical reclaim.
+   * 
+   * Vacation Exclusion: Does NOT transfer if the outgoing foreman is merely on temporary vacation.
+   */
+  async reassignCrewEquipment(oldForeman, newForeman, jobNumber, dateStr) {
+    if (!oldForeman || !newForeman || oldForeman.toLowerCase().trim() === newForeman.toLowerCase().trim()) return 0;
+
+    const oldLower = oldForeman.toLowerCase().trim();
+    const empTable = this.db.getTable('employees');
+    const empRows = empTable ? (empTable.rows || []) : [];
+
+    // Check if old foreman is merely on temporary vacation
+    const oldEmp = empRows.find(e => String(e['Employee Name'] || e['Name'] || Object.values(e)[0] || '').toLowerCase().trim() === oldLower);
+    if (oldEmp) {
+      const loc = String(oldEmp['Location'] || '').toLowerCase();
+      if (loc.includes('vacation')) {
+        console.log(`[Equipment Transfer] Skipping transfer for ${oldForeman} (temporary vacation: ${oldEmp['Location']})`);
+        return 0;
+      }
+    }
+
+    // Get new foreman's physical location
+    let newLoc = 'Helena';
+    const newEmp = empRows.find(e => String(e['Employee Name'] || e['Name'] || Object.values(e)[0] || '').toLowerCase().trim() === newForeman.toLowerCase().trim());
+    if (newEmp) {
+      newLoc = String(newEmp['Location'] || 'Helena').replace(/\s*\(.*?\)\s*/g, '').trim() || 'Helena';
+    }
+
+    // Crew equipment table definitions (Gloves & Sleeves explicitly excluded)
+    const crewTableKeys = [
+      { key: 'blankets', histKey: 'blankets_history', label: 'Blanket' },
+      { key: 'macks', histKey: 'macks_history', label: 'MACK' },
+      { key: 'hv_testers', histKey: 'hv_testers_history', label: 'HV Tester' },
+      { key: 'phasing_sets', histKey: 'phasing_sets_history', label: 'Phasing Set' },
+      { key: 'aed', histKey: 'aed_history', label: 'AED' },
+      { key: 'grounds', histKey: 'grounds_history', label: 'Ground' },
+      { key: 'hot_sticks', histKey: 'hot_sticks_history', label: 'Hot Stick' }
+    ];
+
+    let count = 0;
+    const dateFormatted = this.formatDateForSheet(dateStr) || new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+
+    for (const itemDef of crewTableKeys) {
+      const table = this.db.getTable(itemDef.key);
+      if (!table || !table.rows) continue;
+
+      const histTable = this.db.getTable(itemDef.histKey);
+
+      for (let rIdx = 0; rIdx < table.rows.length; rIdx++) {
+        const row = table.rows[rIdx];
+        const assigned = String(row['Assigned To'] || row['Assigned'] || '').toLowerCase().trim();
+        if (assigned === oldLower) {
+          let itemIdentifier = '';
+          const candidateKeys = ['Item #', 'Item#', 'Blanket', 'MACK', 'Glove', 'Sleeve', 'Serial #', 'HVT #', 'Phasing Set #', 'AED #', 'ESL ID'];
+          if (table.headers && table.headers.length > 0) {
+            candidateKeys.push(table.headers[0]);
+          }
+          for (const k of candidateKeys) {
+            if (row[k] !== undefined && row[k] !== null && String(row[k]).trim() !== '') {
+              itemIdentifier = String(row[k]).trim();
+              break;
+            }
+          }
+          if (!itemIdentifier) {
+            for (const k of Object.keys(row)) {
+              if (k.startsWith('_')) continue;
+              const val = String(row[k] || '').trim();
+              if (val) { itemIdentifier = val; break; }
+            }
+          }
+
+          const targetRow = typeof row._rowIdx === 'number' ? row._rowIdx : (rIdx + 2);
+
+          row['Assigned To'] = newForeman;
+          row['Date Assigned'] = dateFormatted;
+          if (row['Location'] !== undefined) row['Location'] = newLoc;
+
+          this.syncRowToRawGrid(table, row);
+          count++;
+
+          // Add UPDATE_ROW mutation with both itemIdentifier and row index
+          await this.db.addMutation({
+            action: 'UPDATE_ROW',
+            sheetName: table.name,
+            tableKey: itemDef.key,
+            row: targetRow,
+            itemIdentifier: itemIdentifier,
+            updatedFields: {
+              'Assigned To': newForeman,
+              'Date Assigned': dateFormatted,
+              'Location': newLoc
+            }
+          });
+
+          // Add milestone to history table
+          if (histTable && histTable.rows) {
+            const histRow = {
+              'Date Assigned': dateFormatted,
+              'Item #': itemIdentifier,
+              'Location': newLoc,
+              'Assigned To': newForeman,
+              'Notes': `Transferred from previous foreman ${oldForeman} to ${newForeman} (${jobNumber ? `Job ${jobNumber}` : 'Crew change'})`
+            };
+            histTable.rows.unshift(histRow);
+            histTable.rowCount = histTable.rows.length;
+            this.syncRowToRawGrid(histTable, histRow, true);
+
+            await this.db.addMutation({
+              action: 'ADD_ROW',
+              sheetName: histTable.name,
+              tableKey: itemDef.histKey,
+              rowData: histRow
+            });
+          }
+        }
+      }
+    }
+
+    if (count > 0) {
+      console.log(`[Equipment Transfer] Automatically transferred ${count} crew equipment items from ${oldForeman} to ${newForeman} (Job ${jobNumber})`);
+    }
+    return count;
   }
 
   syncRowToRawGrid(table, rowObj, isNew = false) {

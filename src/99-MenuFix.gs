@@ -28,6 +28,7 @@ function _buildGloveManagerMenu() {
         .addItem('👥 Import Crew Makeup', 'showCrewImportDialog')
         .addItem('👷 Assign Crew Leads', 'showAssignCrewLeadsDialog')
         .addItem('🔄 Sync Crews', 'menuSyncCrews')
+        .addItem('⚡ Transfer Crew Equipment (Foreman Change)', 'menuTransferCrewEquipment')
         .addItem('📂 View Job Tracking', 'openJobTrackingSheet'))
 
       // === STEP 2: GENERATE ALL REPORTS ===

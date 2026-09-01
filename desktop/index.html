@@ -98,6 +98,9 @@
         <div class="nav-item" data-view="training-view">
           <span class="nav-item-icon">🎓</span> Training
         </div>
+        <div class="nav-item" data-view="previous-employees-view">
+          <span class="nav-item-icon">👥</span> Previous Employees
+        </div>
         <div class="nav-item" data-view="history-view">
           <span class="nav-item-icon">📜</span> History Records
         </div>
@@ -160,6 +163,9 @@
             </button>
             <button class="btn" id="btn-new-item" style="background: #2563eb; color: white; padding: 6px 14px; font-size: 12px;" onclick="window.inventoryManager.showNewItemModal(window.sheetNavigator.currentSheetKey)">
               ➕ New Item
+            </button>
+            <button class="btn btn-secondary" id="btn-transfer-equipment-top" style="padding: 6px 12px; font-size: 12px; display: inline-flex; align-items: center; gap: 5px; border-color: #0284c7; color: #38bdf8;" onclick="window.inventoryManager.openTransferEquipmentModal()" title="Transfer truck & crew equipment (Blankets, MACKs, HV Testers, Phasing Sets, AED, Grounds, Hot Sticks) from outgoing to incoming Foreman">
+              <span>⚡</span> Transfer Equipment
             </button>
             <button class="btn btn-secondary" id="btn-push-clean-sheet" style="display: none; padding: 6px 12px; font-size: 12px;" onclick="window.syncEngine.pushFullCleanTable(window.sheetNavigator.currentSheetKey)" title="Push this full clean table directly to Google Sheets">
               📤 Sync Sheet to Google
@@ -558,6 +564,29 @@
 
         <div style="flex: 1; padding: 16px 20px; overflow-y: auto;" id="aging-table-container">
           <!-- Injected dynamically by aging.js -->
+        </div>
+      </section>
+
+      <!-- View: Previous Employees & Rehire Workspace -->
+      <section id="previous-employees-view" class="view-container">
+        <div class="sheet-toolbar">
+          <div class="sheet-info">
+            <h2 style="font-size: 16px; display: flex; align-items: center; gap: 8px;">
+              <span>👥</span> Previous Employees & History
+            </h2>
+            <span class="sheet-count-badge" id="previous-employees-count-badge">0 former staff</span>
+          </div>
+          <div class="sheet-actions" style="display: flex; gap: 8px;">
+            <button class="btn btn-secondary" style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); color: #fca5a5; padding: 6px 12px; font-size: 12px; font-weight: 600; display: inline-flex; align-items: center; gap: 6px;" onclick="window.previousEmployeesEngine.purgePreviousEmployeesFromActiveSheet()" title="Clean up departed staff from active Employees table and keep them archived here">
+              <span>🧹</span> Clean Up Active Roster
+            </button>
+            <button class="btn btn-primary" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); border: none; padding: 6px 14px; font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; gap: 6px;" onclick="window.previousEmployeesEngine.openRehireModal()">
+              <span>⚡</span> Rehire Employee
+            </button>
+          </div>
+        </div>
+        <div style="flex: 1; padding: 16px 20px; overflow-y: auto;" id="previous-employees-table-container">
+          <!-- Injected dynamically by previous-employees.js -->
         </div>
       </section>
 
@@ -1245,28 +1274,29 @@
   <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
 
   <!-- Scripts -->
-  <script src="js/db.js?v=20260901_10"></script>
-  <script src="js/sync.js?v=20260901_10"></script>
-  <script src="js/gps.js?v=20260901_10"></script>
-  <script src="js/scanner.js?v=20260901_10"></script>
-  <script src="js/inventory.js?v=20260901_10"></script>
-  <script src="js/swaps.js?v=20260901_10"></script>
-  <script src="js/crew-import.js?v=20260901_10"></script>
-  <script src="js/item-stats.js?v=20260901_10"></script>
-  <script src="js/sms-dialog.js?v=20260901_10"></script>
-  <script src="js/employee-profile.js?v=20260901_10"></script>
-  <script src="js/safety-emails.js?v=20260901_10"></script>
-  <script src="js/certs-config.js?v=20260901_10"></script>
-  <script src="js/cpr-roster.js?v=20260901_10"></script>
-  <script src="js/certs-import.js?v=20260901_10"></script>
-  <script src="js/time-breakdown.js?v=20260901_10"></script>
-  <script src="js/sheets.js?v=20260901_10"></script>
-  <script src="js/history.js?v=20260901_10"></script>
-  <script src="js/tasks.js?v=20260901_10"></script>
-  <script src="js/trip-planner.js?v=20260901_10"></script>
-  <script src="js/lookup.js?v=20260901_10"></script>
-  <script src="js/procurement.js?v=20260901_10"></script>
-  <script src="js/aging.js?v=20260901_10"></script>
+  <script src="js/db.js?v=20260901_22"></script>
+  <script src="js/sync.js?v=20260901_22"></script>
+  <script src="js/gps.js?v=20260901_22"></script>
+  <script src="js/scanner.js?v=20260901_22"></script>
+  <script src="js/inventory.js?v=20260901_22"></script>
+  <script src="js/swaps.js?v=20260901_22"></script>
+  <script src="js/crew-import.js?v=20260901_22"></script>
+  <script src="js/item-stats.js?v=20260901_22"></script>
+  <script src="js/sms-dialog.js?v=20260901_22"></script>
+  <script src="js/employee-profile.js?v=20260901_22"></script>
+  <script src="js/safety-emails.js?v=20260901_22"></script>
+  <script src="js/certs-config.js?v=20260901_22"></script>
+  <script src="js/cpr-roster.js?v=20260901_22"></script>
+  <script src="js/certs-import.js?v=20260901_22"></script>
+  <script src="js/time-breakdown.js?v=20260901_22"></script>
+  <script src="js/sheets.js?v=20260901_22"></script>
+  <script src="js/history.js?v=20260901_22"></script>
+  <script src="js/previous-employees.js?v=20260901_22"></script>
+  <script src="js/tasks.js?v=20260901_22"></script>
+  <script src="js/trip-planner.js?v=20260901_22"></script>
+  <script src="js/lookup.js?v=20260901_22"></script>
+  <script src="js/procurement.js?v=20260901_22"></script>
+  <script src="js/aging.js?v=20260901_22"></script>
 
   <script>
     // Navigation routing for desktop & mobile
@@ -1294,6 +1324,7 @@
       if (viewId === 'safety-compliance-view') window.sheetNavigator.renderSafetyCompliance();
       if (viewId === 'expiring-certs-view') window.sheetNavigator.renderExpiringCerts();
       if (viewId === 'training-view') window.sheetNavigator.renderTraining();
+      if (viewId === 'previous-employees-view' && window.previousEmployeesEngine) window.previousEmployeesEngine.renderWorkspace();
       if (viewId === 'history-view') window.historyNavigator.renderCurrentHistory();
       if (viewId === 'lookup-view') window.lookupApp.init();
       if (viewId === 'procurement-view') window.procurementEngine.loadData();

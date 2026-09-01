@@ -82,6 +82,7 @@ function exportFullDatabaseSnapshot() {
     { key: 'grounds_history', name: typeof SHEET_GROUNDS_HISTORY !== 'undefined' ? SHEET_GROUNDS_HISTORY : 'Grounds History' },
     { key: 'hot_sticks_history', name: typeof SHEET_HOT_STICKS_HISTORY !== 'undefined' ? SHEET_HOT_STICKS_HISTORY : 'Hot Sticks History' },
     { key: 'employee_history', name: typeof SHEET_EMPLOYEE_HISTORY !== 'undefined' ? SHEET_EMPLOYEE_HISTORY : 'Employee History' },
+    { key: 'previous_employees', name: 'Previous Employees' },
     { key: 'safety_equipment_needs', name: 'Safety Equipment Needs' },
     { key: 'jha_log', name: 'JHA Log' },
     { key: 'weekly_safety_log', name: 'Weekly Safety Log' },
@@ -97,6 +98,12 @@ function exportFullDatabaseSnapshot() {
   for (var i = 0; i < sheetConfigs.length; i++) {
     var cfg = sheetConfigs[i];
     var sheet = ss.getSheetByName(cfg.name);
+    if (!sheet && cfg.key === 'previous_employees') {
+      sheet = ss.getSheetByName('Previous Employee') || ss.getSheetByName('Previous Employees') || ss.getSheetByName('Past Employees');
+    }
+    if (!sheet && cfg.key === 'employee_history') {
+      sheet = ss.getSheetByName('Employee History') || ss.getSheetByName('Employees History');
+    }
     if (!sheet || sheet.getLastRow() < 1) {
       tables[cfg.key] = { name: cfg.name, headers: [], rows: [], rawGrid: [], rowCount: 0, maxRows: 0, maxCols: 0 };
       continue;
@@ -439,13 +446,32 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
         for (var r = 1; r < d.length; r++) {
           var itm = String(d[r][0] || '').trim().toLowerCase();
           var esl = (d[r].length > 1) ? String(d[r][1] || '').trim().toLowerCase() : '';
-          if (itm) invItemIndexCache[sName][itm] = r + 1;
-          if (esl) invItemIndexCache[sName][esl] = r + 1;
+          var ser = (d[r].length > 3) ? String(d[r][3] || '').trim().toLowerCase() : '';
+          if (itm) {
+            invItemIndexCache[sName][itm] = r + 1;
+            var itmClean = itm.replace(/^[#bBsS\-_]+/, '').trim();
+            if (itmClean && !invItemIndexCache[sName][itmClean]) invItemIndexCache[sName][itmClean] = r + 1;
+          }
+          if (esl) {
+            invItemIndexCache[sName][esl] = r + 1;
+          }
+          if (ser) {
+            invItemIndexCache[sName][ser] = r + 1;
+            var serClean = ser.replace(/^[#\-_]+/, '').trim();
+            if (serClean && !invItemIndexCache[sName][serClean]) invItemIndexCache[sName][serClean] = r + 1;
+          }
         }
       }
     }
     var cleanKey = String(itemNum).trim().toLowerCase();
-    return invItemIndexCache[sName] ? (invItemIndexCache[sName][cleanKey] || -1) : -1;
+    var directMatch = invItemIndexCache[sName] ? invItemIndexCache[sName][cleanKey] : undefined;
+    if (directMatch !== undefined) return directMatch;
+
+    var strippedKey = cleanKey.replace(/^[#bBsS\-_]+/, '').trim();
+    if (strippedKey && invItemIndexCache[sName] && invItemIndexCache[sName][strippedKey] !== undefined) {
+      return invItemIndexCache[sName][strippedKey];
+    }
+    return -1;
   }
 
   // 1. Conflict Detection Pre-Pass
@@ -1200,9 +1226,18 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
               
               var targetRowIdx = -1;
               if (idStr) {
+                var fastIdx = getInvItemRowIndexFast(sheet, sheetName, idStr);
+                if (fastIdx > 1 && fastIdx <= data.length) {
+                  targetRowIdx = fastIdx;
+                }
+              }
+
+              if (targetRowIdx === -1 && idStr) {
+                var cleanId = idStr.replace(/^[#bBsS\-_]+/, '').trim();
                 for (var r = 1; r < data.length; r++) {
                   var c0 = String(data[r][0] || '').trim().toLowerCase();
-                  if (c0 === idStr) {
+                  var c0Clean = c0.replace(/^[#bBsS\-_]+/, '').trim();
+                  if (c0 === idStr || (cleanId && c0Clean === cleanId)) {
                     targetRowIdx = r + 1; // 1-based sheet row
                     break;
                   }
@@ -1210,11 +1245,20 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
                   if (!isEmpSheet) {
                     var c1 = String(data[r][1] || '').trim().toLowerCase();
                     var c3 = (data[r].length > 3) ? String(data[r][3] || '').trim().toLowerCase() : '';
-                    if (c1 === idStr || c3 === idStr) {
+                    var c3Clean = c3.replace(/^[#\-_]+/, '').trim();
+                    if (c1 === idStr || c3 === idStr || (cleanId && c3Clean === cleanId)) {
                       targetRowIdx = r + 1;
                       break;
                     }
                   }
+                }
+              }
+
+              // Fallback to mut.row if provided
+              if (targetRowIdx === -1 && mut.row && !isNaN(parseInt(mut.row, 10))) {
+                var rNum = parseInt(mut.row, 10);
+                if (rNum >= 2 && rNum <= data.length) {
+                  targetRowIdx = rNum;
                 }
               }
 

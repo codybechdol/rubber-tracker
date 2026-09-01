@@ -330,6 +330,14 @@ class CprRosterEngine {
       .trim();
   }
 
+  normalizeNameCompact(name) {
+    if (!name) return '';
+    return String(name).toLowerCase()
+      .replace(/\(.*?\)/g, '')
+      .replace(/[^a-z0-9]/g, '')
+      .trim();
+  }
+
   isNameMatch(nameA, nameB) {
     if (!nameA || !nameB) return false;
     const normA = this.normalizeName(nameA);
@@ -337,16 +345,48 @@ class CprRosterEngine {
     if (!normA || !normB) return false;
     if (normA === normB) return true;
 
-    const partsA = normA.split(' ').filter(Boolean);
-    const partsB = normB.split(' ').filter(Boolean);
+    const compA = this.normalizeNameCompact(nameA);
+    const compB = this.normalizeNameCompact(nameB);
+    if (compA && compB && compA === compB) return true;
 
-    if (partsA.length >= 2 && partsB.length >= 2) {
-      if (partsA[0] === partsB[partsB.length - 1] && partsA[partsA.length - 1] === partsB[0]) return true;
-      if (partsA.join(' ') === partsB.reverse().join(' ')) return true;
+    const wordsA = normA.split(' ').filter(w => w.length > 0);
+    const wordsB = normB.split(' ').filter(w => w.length > 0);
+
+    const cleanWordsA = wordsA.filter(w => !['jr', 'sr', 'ii', 'iii', 'iv'].includes(w));
+    const cleanWordsB = wordsB.filter(w => !['jr', 'sr', 'ii', 'iii', 'iv'].includes(w));
+
+    if (cleanWordsA.length > 0 && cleanWordsB.length > 0) {
+      const setA = new Set(cleanWordsA);
+      const setB = new Set(cleanWordsB);
+      if (cleanWordsA.every(w => setB.has(w)) && cleanWordsB.every(w => setA.has(w))) {
+        return true;
+      }
+
+      const [shorter, longer] = cleanWordsA.length <= cleanWordsB.length ? [cleanWordsA, cleanWordsB] : [cleanWordsB, cleanWordsA];
+      const longerSet = new Set(longer);
+      const majorWords = shorter.filter(w => w.length > 1);
+      if (majorWords.length >= 2 && majorWords.every(w => longerSet.has(w))) {
+        return true;
+      }
     }
 
-    if (normA.length > 5 && normB.length > 5) {
-      if (normA.includes(normB) || normB.includes(normA)) return true;
+    if (cleanWordsA.length >= 2 && cleanWordsB.length >= 2) {
+      const firstLastA = cleanWordsA[0] + cleanWordsA.slice(1).join('');
+      const lastFirstA = cleanWordsA.slice(1).join('') + cleanWordsA[0];
+      const lastFirstFullA = cleanWordsA[cleanWordsA.length - 1] + cleanWordsA.slice(0, -1).join('');
+      const firstLastFullA = cleanWordsA.slice(0, -1).join('') + cleanWordsA[cleanWordsA.length - 1];
+
+      const firstLastB = cleanWordsB[0] + cleanWordsB.slice(1).join('');
+      const lastFirstB = cleanWordsB.slice(1).join('') + cleanWordsB[0];
+      const lastFirstFullB = cleanWordsB[cleanWordsB.length - 1] + cleanWordsB.slice(0, -1).join('');
+      const firstLastFullB = cleanWordsB.slice(0, -1).join('') + cleanWordsB[cleanWordsB.length - 1];
+
+      const variantsA = [compA, firstLastA, lastFirstA, lastFirstFullA, firstLastFullA];
+      const variantsB = [compB, firstLastB, lastFirstB, lastFirstFullB, firstLastFullB];
+
+      for (const vA of variantsA) {
+        if (variantsB.includes(vA)) return true;
+      }
     }
 
     return false;
