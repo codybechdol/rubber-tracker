@@ -1702,21 +1702,6 @@ class SwapGenerationEngine {
       return;
     }
 
-    const invMap = {
-      'glove_swaps': 'gloves',
-      'sleeve_swaps': 'sleeves',
-      'blanket_swaps': 'blankets',
-      'mack_swaps': 'macks',
-      'hv_tester_swaps': 'hv_testers',
-      'phasing_set_swaps': 'phasing_sets',
-      'aed_swaps': 'aed',
-      'ground_swaps': 'grounds',
-      'hot_stick_swaps': 'hot_sticks'
-    };
-    const invKey = invMap[swapSheetKey];
-    const invTable = this.db.getTable(invKey);
-    if (!invTable || !invTable.rows) return;
-
     const empTable = this.db.getTable('employees');
     let empLoc = 'Helena';
     if (empTable && empTable.rows) {
@@ -1728,11 +1713,6 @@ class SwapGenerationEngine {
       const itNum = String(it['Item #'] || it['Glove'] || it['Sleeve'] || it['Blanket'] || it['MACK'] || it['Serial #'] || it['ESL ID'] || Object.values(it)[0] || '').trim();
       return itNum === pickNum;
     });
-
-    const oldRow = oldItemNum && oldItemNum !== '—' ? invTable.rows.find(it => {
-      const itNum = String(it['Item #'] || it['Glove'] || it['Sleeve'] || it['Blanket'] || it['MACK'] || it['Serial #'] || it['ESL ID'] || Object.values(it)[0] || '').trim();
-      return itNum === oldItemNum;
-    }) : null;
 
     const histKey = `${invKey}_history`;
 
