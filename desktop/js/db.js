@@ -823,6 +823,12 @@ class LocalDatabase {
       hot_stick_swaps: 'Hot Stick Swaps'
     };
     const name = sheetNameMap[tableKey] || tableKey;
+    const prevTable = this.snapshot.tables[tableKey];
+    let isUnchanged = false;
+    if (prevTable && prevTable.rawGrid && Array.isArray(prevTable.rawGrid) && prevTable.rawGrid.length === rawGrid.length) {
+      // Check if grid content matches
+      isUnchanged = JSON.stringify(prevTable.rawGrid) === JSON.stringify(rawGrid);
+    }
 
     this.snapshot.tables[tableKey] = {
       name: name,
@@ -835,13 +841,15 @@ class LocalDatabase {
       _normalized: true
     };
 
-    // Queue REPLACE_SWAP_TABLE mutation
-    await this.addMutation({
-      action: 'REPLACE_SWAP_TABLE',
-      sheetName: name,
-      tableKey: tableKey,
-      rawGrid: rawGrid
-    });
+    // Only queue REPLACE_SWAP_TABLE mutation if table content actually changed
+    if (!isUnchanged) {
+      await this.addMutation({
+        action: 'REPLACE_SWAP_TABLE',
+        sheetName: name,
+        tableKey: tableKey,
+        rawGrid: rawGrid
+      });
+    }
 
     this.notify();
     return this.snapshot.tables[tableKey];
