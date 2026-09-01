@@ -264,8 +264,9 @@ function generateAndStoreSyncSnapshot(existingSnapshot) {
 }
 
 /**
- * Fast snapshot retrieval from pre-generated Google Drive JSON snapshot file,
+ * Fast snapshot retrieval from pre-generated Google Drive JSON snapshot file in Glove Manager Backups folder,
  * avoiding expensive 42-sheet scans during web/mobile download calls.
+ * Automatically searches the Google Drive backup folder for the newest .JSON / .txt snapshot.
  *
  * @return {string} JSON string of snapshot
  */
@@ -279,21 +280,31 @@ function getFastSnapshotFromDriveOrExport() {
       } catch (fErr) { file = null; }
     }
 
-    // Auto-discover existing snapshot file in the backup folder if property wasn't set
+    // Auto-discover the newest snapshot file in the backup folder if property wasn't set or file was moved/trashed
     if (!file || file.isTrashed()) {
       try {
         var folder = getOrCreateBackupFolder();
-        var files = folder.getFilesByName(SYNC_SNAPSHOT_FILENAME);
-        if (files.hasNext()) {
-          file = files.next();
-        } else {
-          var txtFiles = folder.getFilesByName('snapshot.txt');
-          if (txtFiles.hasNext()) {
-            file = txtFiles.next();
+        var files = folder.getFiles();
+        var newestFile = null;
+        var newestTime = 0;
+
+        while (files.hasNext()) {
+          var f = files.next();
+          if (f.isTrashed()) continue;
+          var fName = f.getName().toLowerCase();
+          if (fName.endsWith('.json') || fName.endsWith('.txt') || fName.indexOf('snapshot') !== -1) {
+            var updated = f.getLastUpdated().getTime();
+            if (updated > newestTime) {
+              newestTime = updated;
+              newestFile = f;
+            }
           }
         }
-        if (file && !file.isTrashed()) {
+
+        if (newestFile) {
+          file = newestFile;
           PropertiesService.getScriptProperties().setProperty('SYNC_SNAPSHOT_FILE_ID', file.getId());
+          Logger.log('getFastSnapshotFromDriveOrExport: Discovered newest snapshot file in Drive: ' + file.getName() + ' (Updated: ' + new Date(newestTime).toISOString() + ')');
         }
       } catch (findErr) {
         Logger.log('getFastSnapshotFromDriveOrExport: Folder search error: ' + findErr);
@@ -302,8 +313,8 @@ function getFastSnapshotFromDriveOrExport() {
 
     if (file && !file.isTrashed()) {
       var content = file.getBlob().getDataAsString();
-      if (content && content.length > 50) {
-        Logger.log('getFastSnapshotFromDriveOrExport: Served from Drive cache (' + (content.length / 1024).toFixed(1) + ' KB)');
+      if (content && content.length > 50 && (content.indexOf('{') === 0 || content.indexOf('[') === 0)) {
+        Logger.log('getFastSnapshotFromDriveOrExport: Served from Drive cache ' + file.getName() + ' (' + (content.length / 1024).toFixed(1) + ' KB)');
         return content;
       }
     }
@@ -1821,7 +1832,16 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
       Logger.log('applyBatchSyncMutations auto saveHistoryFast error: ' + histErr);
     }
 
-    // 2. Refresh backup (only if explicitly requested to prevent HTTP timeout on Google Apps Script)
+    // 2. Automatically generate and update the .JSON snapshot file in the Glove Manager Backups folder on Google Drive
+    try {
+      if (typeof generateAndStoreSyncSnapshot === 'function') {
+        generateAndStoreSyncSnapshot();
+      }
+    } catch (bkErr) {
+      Logger.log('applyBatchSyncMutations auto generateAndStoreSyncSnapshot error: ' + bkErr);
+    }
+
+    // 3. Refresh backup (only if explicitly requested to prevent HTTP timeout on Google Apps Script)
     if (options && options.forceBackup === true) {
       try {
         if (typeof createBackupSnapshotFast === 'function') {

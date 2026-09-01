@@ -33153,8 +33153,10 @@ function doGet(e) {
       return ContentService.createTextOutput(JSON.stringify(flatRes))
         .setMimeType(ContentService.MimeType.JSON);
     } else if (action === 'getSnapshot' || !action) {
-      var snapshot = exportFullDatabaseSnapshot();
-      return ContentService.createTextOutput(JSON.stringify(snapshot))
+      var snapshotJson = (typeof getFastSnapshotFromDriveOrExport === 'function')
+        ? getFastSnapshotFromDriveOrExport()
+        : JSON.stringify(exportFullDatabaseSnapshot());
+      return ContentService.createTextOutput(snapshotJson)
         .setMimeType(ContentService.MimeType.JSON);
     }
 
@@ -33228,8 +33230,10 @@ function doPost(e) {
     }
 
     if (action === 'getSnapshot') {
-      var snapshot = exportFullDatabaseSnapshot();
-      return ContentService.createTextOutput(JSON.stringify(snapshot))
+      var snapshotJson = (typeof getFastSnapshotFromDriveOrExport === 'function')
+        ? getFastSnapshotFromDriveOrExport()
+        : JSON.stringify(exportFullDatabaseSnapshot());
+      return ContentService.createTextOutput(snapshotJson)
         .setMimeType(ContentService.MimeType.JSON);
     }
 
