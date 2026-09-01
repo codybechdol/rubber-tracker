@@ -1943,6 +1943,9 @@ function executeSyncApiProcessSafetyEmails(options) {
     if (typeof exportFullDatabaseSnapshot === 'function') {
       try {
         freshSnapshot = exportFullDatabaseSnapshot();
+        if (freshSnapshot && typeof generateAndStoreSyncSnapshot === 'function') {
+          generateAndStoreSyncSnapshot(freshSnapshot);
+        }
       } catch (eSnap) {
         Logger.log('executeSyncApiProcessSafetyEmails snapshot error: ' + eSnap);
       }
@@ -2014,6 +2017,9 @@ function executeSyncApiProcessSafetyEmails(options) {
   if (typeof exportFullDatabaseSnapshot === 'function') {
     try {
       freshSnapshot = exportFullDatabaseSnapshot();
+      if (freshSnapshot && typeof generateAndStoreSyncSnapshot === 'function') {
+        generateAndStoreSyncSnapshot(freshSnapshot);
+      }
     } catch (eSnap) {
       Logger.log('executeSyncApiProcessSafetyEmails snapshot error: ' + eSnap);
     }

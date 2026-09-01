@@ -971,10 +971,11 @@ class SyncEngine {
   /**
    * Downloads the latest database snapshot from Google Sheets and updates local database
    */
-  async downloadLatestSnapshot(force = false) {
+  async downloadLatestSnapshot(force = false, silent = false) {
     if (this.isSyncing) return;
 
     if (!this.syncUrl) {
+      if (silent) return;
       this.openSyncModal('Connect to Google Sheets', '⚙️');
       const body = document.getElementById('sync-modal-body');
       if (body) {
@@ -996,30 +997,38 @@ class SyncEngine {
     }
 
     const outbox = this.db.getOutbox() || [];
-    if (outbox.length > 0 && !force) {
-      const proceed = confirm(
-        `⚠️ Warning: You have ${outbox.length} pending offline change(s) that haven't been pushed to Google Sheets yet.\n\n` +
-        `Downloading the latest snapshot will replace your local database with the current Google Sheets version.\n\n` +
-        `• Click "OK" to download snapshot (overwriting local data).\n` +
-        `• Click "Cancel" to go back and click "Push Changes to Sheets" first.`
-      );
-      if (!proceed) return { success: false, cancelled: true };
+    if (outbox.length > 0) {
+      if (silent) return; // Never overwrite pending edits during silent background check
+      if (!force) {
+        const proceed = confirm(
+          `⚠️ Warning: You have ${outbox.length} pending offline change(s) that haven't been pushed to Google Sheets yet.\n\n` +
+          `Downloading the latest snapshot will replace your local database with the current Google Sheets version.\n\n` +
+          `• Click "OK" to download snapshot (overwriting local data).\n` +
+          `• Click "Cancel" to go back and click "Push Changes to Sheets" first.`
+        );
+        if (!proceed) return { success: false, cancelled: true };
+      }
     }
 
     this.isSyncing = true;
     const downloadStartTime = Date.now();
     const baseDownloadMsg = 'Connecting to Google Sheets and downloading fresh database snapshot...';
-    this.openSyncModal('Downloading Latest Snapshot', '⬇️');
-    this.renderModalChanges([], `${baseDownloadMsg} (${this.formatDuration(0)})`, 'syncing', false);
+    if (!silent) {
+      this.openSyncModal('Downloading Latest Snapshot', '⬇️');
+      this.renderModalChanges([], `${baseDownloadMsg} (${this.formatDuration(0)})`, 'syncing', false);
+    }
     this.updateStatusUI('syncing', 'Downloading snapshot...');
 
-    const downloadTimerInterval = setInterval(() => {
-      const elapsedMs = Date.now() - downloadStartTime;
-      const subTitleEl = document.getElementById('sync-modal-subtitle');
-      if (subTitleEl) {
-        subTitleEl.textContent = `${baseDownloadMsg} (${this.formatDuration(elapsedMs)})`;
-      }
-    }, 200);
+    let downloadTimerInterval = null;
+    if (!silent) {
+      downloadTimerInterval = setInterval(() => {
+        const elapsedMs = Date.now() - downloadStartTime;
+        const subTitleEl = document.getElementById('sync-modal-subtitle');
+        if (subTitleEl) {
+          subTitleEl.textContent = `${baseDownloadMsg} (${this.formatDuration(elapsedMs)})`;
+        }
+      }, 200);
+    }
 
     try {
       let activeUrl = this.syncUrl || DEFAULT_SYNC_URL;
@@ -1036,7 +1045,7 @@ class SyncEngine {
         }
       }
 
-      clearInterval(downloadTimerInterval);
+      if (downloadTimerInterval) clearInterval(downloadTimerInterval);
       const totalElapsedMs = Date.now() - downloadStartTime;
       const durationFormatted = this.formatDuration(totalElapsedMs);
 
@@ -1046,31 +1055,35 @@ class SyncEngine {
         if (window.historyNavigator) window.historyNavigator.renderCurrentHistory();
         if (window.tripPlanner) window.tripPlanner.renderPlanner();
         if (window.taskManager) window.taskManager.renderTasks();
+        if (window.safetyComplianceEngine) window.safetyComplianceEngine.renderOverview();
 
         this.updateStatusUI('synced', `Synced in ${durationFormatted}`);
-        this.renderModalChanges([], `✅ Latest database snapshot successfully downloaded and loaded in ${durationFormatted}!`, 'success', false);
-
-        setTimeout(() => {
-          this.closeSyncModal();
-        }, 2000);
+        if (!silent) {
+          this.renderModalChanges([], `✅ Latest database snapshot successfully downloaded and loaded in ${durationFormatted}!`, 'success', false);
+          setTimeout(() => {
+            this.closeSyncModal();
+          }, 2000);
+        }
 
         this.isSyncing = false;
         return { success: true, snapshot: freshSnapshot };
       } else if (freshSnapshot && freshSnapshot.error) {
         throw new Error(freshSnapshot.error);
       } else {
-        throw new Error('Web App returned non-JSON response. Please verify in Google Sheets: Extensions > Apps Script > Deploy > Manage deployments, and ensure "Who has access" is set to "Anyone".');
+        throw new Error('Web App returned non-JSON response.');
       }
     } catch (err) {
-      clearInterval(downloadTimerInterval);
+      if (downloadTimerInterval) clearInterval(downloadTimerInterval);
       const totalElapsedMs = Date.now() - downloadStartTime;
       const durationFormatted = this.formatDuration(totalElapsedMs);
       console.error('Download snapshot failed:', err);
-      const isAuthError = err.message && (err.message.includes('HTML') || err.message.includes('Anyone') || err.message.includes('deployments'));
-      const statusLabel = isAuthError ? 'Auth Error (Check Web App Access)' : 'Offline / Connection error';
-      this.updateStatusUI('offline', statusLabel);
-      this.openSyncModal('Download Error', '⚠️');
-      this.renderModalChanges([], `❌ Download failed (${durationFormatted}): ${err.message}`, 'error', true);
+      if (!silent) {
+        const isAuthError = err.message && (err.message.includes('HTML') || err.message.includes('Anyone') || err.message.includes('deployments'));
+        const statusLabel = isAuthError ? 'Auth Error (Check Web App Access)' : 'Offline / Connection error';
+        this.updateStatusUI('offline', statusLabel);
+        this.openSyncModal('Download Error', '⚠️');
+        this.renderModalChanges([], `❌ Download failed (${durationFormatted}): ${err.message}`, 'error', true);
+      }
       this.isSyncing = false;
       return { success: false, error: err.message };
     }
