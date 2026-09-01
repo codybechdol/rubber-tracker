@@ -96,9 +96,9 @@ class SwapGenerationEngine {
     ];
 
     table.rows.forEach(row => {
-      const empName = String(row['Employee'] || row['Crew Lead / Employee'] || Object.values(row)[0] || '').trim();
-      const currentItemNum = String(row['Current Glove #'] || row['Current Sleeve #'] || row['Current Blanket #'] || row['Current MACK #'] || row['Current Item #'] || Object.values(row)[1] || '').trim();
-      const pickListNum = String(row['Pick List Item #'] || row['Pick List Glove #'] || row['Pick List Sleeve #'] || row['Pick List Blanket #'] || row['Pick List MACK #'] || row['Pick List'] || Object.values(row)[6] || '').trim();
+      const empName = String(row['Employee'] || row['Crew Lead / Employee'] || Object.entries(row).find(([k]) => k !== '_rowIdx')?.[1] || '').trim();
+      const currentItemNum = String(row['Current Glove #'] || row['Current Sleeve #'] || row['Current Blanket #'] || row['Current MACK #'] || row['Current HV Tester #'] || row['Current Phasing Set #'] || row['Current AED #'] || row['Current Item #'] || row['Serial #'] || '').trim();
+      const pickListNum = String(row['Pick List Item #'] || row['Pick List Glove #'] || row['Pick List Sleeve #'] || row['Pick List Blanket #'] || row['Pick List MACK #'] || row['Pick List HV Tester #'] || row['Pick List Phasing Set #'] || row['Pick List AED #'] || row['Pick List Serial #'] || row['Pick List'] || '').trim();
       const status = String(row['Status'] || '').trim();
       const daysLeft = String(row['Days Left'] || '').trim().toUpperCase();
 
@@ -893,7 +893,7 @@ class SwapGenerationEngine {
     const shelfBlankets = [];
 
     invTable.rows.forEach(r => {
-      const itemNum = String(r['Item #'] || r['Blanket'] || Object.values(r)[0] || '').trim();
+      const itemNum = String(r['Item #'] || r['Blanket'] || r['Blanket #'] || Object.entries(r).find(([k]) => k !== '_rowIdx')?.[1] || '').trim();
       const status = String(r['Status'] || '').trim().toLowerCase();
       const chgOut = this.parseDate(r['Change Out Date']);
       const assignedTo = String(r['Assigned To'] || '').trim();
@@ -919,6 +919,7 @@ class SwapGenerationEngine {
     });
 
     rawGrid.push(['Blanket Swaps', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '']);
+    rawGrid.push(headers);
 
     blanketsNeedingSwap.forEach(b => {
       // Find matching shelf blanket
@@ -965,7 +966,7 @@ class SwapGenerationEngine {
     const shelfMacks = [];
 
     invTable.rows.forEach(r => {
-      const itemNum = String(r['Item #'] || r['ESL ID'] || Object.values(r)[0] || '').trim();
+      const itemNum = String(r['Item #'] || r['ESL ID'] || r['MACK'] || r['MACK #'] || Object.entries(r).find(([k]) => k !== '_rowIdx')?.[1] || '').trim();
       const status = String(r['Status'] || '').trim().toLowerCase();
       const chgOut = this.parseDate(r['Change Out Date']);
       const assignedTo = String(r['Assigned To'] || '').trim();
@@ -992,6 +993,7 @@ class SwapGenerationEngine {
     });
 
     rawGrid.push(['MACK Swaps', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '']);
+    rawGrid.push(headers);
 
     macksNeedingSwap.forEach(m => {
       const match = shelfMacks.find(sm => String(sm['KV']) === String(m.kv) && String(sm['Size']) === String(m.size));
@@ -1032,7 +1034,7 @@ class SwapGenerationEngine {
     const shelfItems = [];
 
     invTable.rows.forEach(r => {
-      const itemNum = String(r['Item #'] || Object.values(r)[0] || '').trim();
+      const itemNum = String(r['HVT #'] || r['Phasing Set #'] || r['Item #'] || r['Item'] || r['Serial #'] || Object.entries(r).find(([k]) => k !== '_rowIdx')?.[1] || '').trim();
       const status = String(r['Status'] || '').trim().toLowerCase();
       const chgOut = this.parseDate(r['Change Out Date'] || r['Calibration Date']);
       const assignedTo = String(r['Assigned To'] || '').trim();
@@ -1058,10 +1060,11 @@ class SwapGenerationEngine {
     });
 
     rawGrid.push([`${equipmentLabel} Swaps`, '', '', '', '', '', '', '', '', '', '', '']);
+    rawGrid.push(headers);
 
     needingSwap.forEach(it => {
       const match = shelfItems.find(si => String(si['Model']) === String(it.model));
-      const pickNum = match ? String(match['Item #'] || Object.values(match)[0] || '').trim() : '—';
+      const pickNum = match ? String(match['HVT #'] || match['Phasing Set #'] || match['Item #'] || match['Item'] || match['Serial #'] || Object.entries(match).find(([k]) => k !== '_rowIdx')?.[1] || '').trim() : '—';
       const pickStatus = match ? 'In Stock ✅' : 'Need to Purchase ❌';
       if (match) pickedCount++;
 
@@ -1098,7 +1101,7 @@ class SwapGenerationEngine {
     const shelfItems = [];
 
     invTable.rows.forEach(r => {
-      const itemNum = String(r['Item #'] || Object.values(r)[0] || '').trim();
+      const itemNum = String(r['AED #'] || r['AED'] || r['Item #'] || r['Item'] || Object.entries(r).find(([k]) => k !== '_rowIdx')?.[1] || '').trim();
       const status = String(r['Status'] || '').trim().toLowerCase();
       const padExp = this.parseDate(r['Pad Expiration'] || r['Change Out Date']);
       const assignedTo = String(r['Assigned To'] || '').trim();
@@ -1121,10 +1124,11 @@ class SwapGenerationEngine {
     });
 
     rawGrid.push(['AED Swaps', '', '', '', '', '', '', '', '']);
+    rawGrid.push(headers);
 
     needingSwap.forEach(it => {
       const match = shelfItems.find(si => String(si['Model']) === String(it.model));
-      const pickNum = match ? String(match['Item #'] || Object.values(match)[0] || '').trim() : '—';
+      const pickNum = match ? String(match['AED #'] || match['AED'] || match['Item #'] || match['Item'] || Object.entries(match).find(([k]) => k !== '_rowIdx')?.[1] || '').trim() : '—';
       const pickStatus = match ? 'In Stock ✅' : 'Need to Purchase ❌';
       if (match) pickedCount++;
 
@@ -1161,7 +1165,7 @@ class SwapGenerationEngine {
     const shelfItems = [];
 
     invTable.rows.forEach(r => {
-      const itemNum = String(r['Serial #'] || Object.values(r)[0] || '').trim();
+      const itemNum = String(r['Serial #'] || r['Ground #'] || r['Item #'] || Object.entries(r).find(([k]) => k !== '_rowIdx')?.[1] || '').trim();
       const status = String(r['Status'] || '').trim().toLowerCase();
       const chgOut = this.parseDate(r['Change Out Date']);
       const assignedTo = String(r['Assigned To'] || '').trim();
@@ -1188,10 +1192,11 @@ class SwapGenerationEngine {
     });
 
     rawGrid.push(['Ground Swaps', '', '', '', '', '', '', '', '', '', '', '', '']);
+    rawGrid.push(headers);
 
     needingSwap.forEach(it => {
       const match = shelfItems.find(si => String(si['Type']) === String(it.type) && String(si['Size']) === String(it.size));
-      const pickNum = match ? String(match['Serial #'] || Object.values(match)[0] || '').trim() : '—';
+      const pickNum = match ? String(match['Serial #'] || match['Ground #'] || match['Item #'] || Object.entries(match).find(([k]) => k !== '_rowIdx')?.[1] || '').trim() : '—';
       const pickStatus = match ? 'In Stock ✅' : 'Need to Purchase ❌';
       if (match) pickedCount++;
 
@@ -1228,7 +1233,7 @@ class SwapGenerationEngine {
     const shelfItems = [];
 
     invTable.rows.forEach(r => {
-      const itemNum = String(r['Item #'] || Object.values(r)[0] || '').trim();
+      const itemNum = String(r['Item #'] || r['Hot Stick #'] || r['Item'] || Object.entries(r).find(([k]) => k !== '_rowIdx')?.[1] || '').trim();
       const status = String(r['Status'] || '').trim().toLowerCase();
       const chgOut = this.parseDate(r['Change Out Date']);
       const assignedTo = String(r['Assigned To'] || '').trim();
@@ -1253,10 +1258,11 @@ class SwapGenerationEngine {
     });
 
     rawGrid.push(['Hot Stick Swaps', '', '', '', '', '', '', '', '', '', '']);
+    rawGrid.push(headers);
 
     needingSwap.forEach(it => {
       const match = shelfItems.find(si => String(si['Type']) === String(it.type) && String(si['Length']) === String(it.length));
-      const pickNum = match ? String(match['Item #'] || Object.values(match)[0] || '').trim() : '—';
+      const pickNum = match ? String(match['Item #'] || match['Hot Stick #'] || match['Item'] || Object.entries(match).find(([k]) => k !== '_rowIdx')?.[1] || '').trim() : '—';
       const pickStatus = match ? 'In Stock ✅' : 'Need to Purchase ❌';
       if (match) pickedCount++;
 
@@ -1551,12 +1557,12 @@ class SwapGenerationEngine {
     if (!row && !gridRow) return;
 
     const pickNum = String(
-      (row && (row['Pick List Item #'] || row['Pick List Glove #'] || row['Pick List Sleeve #'] || row['Pick List Blanket #'] || row['Pick List MACK #'] || row['Pick List'])) ||
+      (row && (row['Pick List Item #'] || row['Pick List Glove #'] || row['Pick List Sleeve #'] || row['Pick List Blanket #'] || row['Pick List MACK #'] || row['Pick List HV Tester #'] || row['Pick List Phasing Set #'] || row['Pick List AED #'] || row['Pick List Serial #'] || row['Pick List'])) ||
       (gridRow && gridRow[6]) || ''
     ).trim();
 
     const oldItemNum = String(
-      (row && (row['Current Glove #'] || row['Current Sleeve #'] || row['Current Blanket #'] || row['Current MACK #'] || row['Current Item #'])) ||
+      (row && (row['Current Glove #'] || row['Current Sleeve #'] || row['Current Blanket #'] || row['Current MACK #'] || row['Current HV Tester #'] || row['Current Phasing Set #'] || row['Current AED #'] || row['Current Item #'] || row['Serial #'])) ||
       (gridRow && gridRow[1]) || ''
     ).trim();
 

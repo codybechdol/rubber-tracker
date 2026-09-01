@@ -943,10 +943,13 @@ class SheetNavigator {
 
     for (let r = 0; r < Math.min(grid.length, 10); r++) {
       const row = grid[r];
-      if (row && (row[0] === 'Employee' || (row[1] && String(row[1]).includes('Current')) || (row[3] && String(row[3]).includes('Current')))) {
+      const r0 = String(row?.[0] || '').trim();
+      const r1 = String(row?.[1] || '').trim();
+      const r3 = String(row?.[3] || '').trim();
+      if (row && (r0 === 'Employee' || r0.includes('Employee') || r1.includes('Current') || r1.includes('Serial') || r3.includes('Current') || r3.includes('Serial') || r3.includes('Date') || r3.includes('KV'))) {
         const detected = [];
         const detectedLabels = [];
-        for (let c = 0; c < 12; c++) {
+        for (let c = 0; c < 15; c++) {
           const val = String(row[c] || '').trim();
           if (val || c === 0) {
             detected.push(c);
@@ -957,7 +960,7 @@ class SheetNavigator {
             }
           }
         }
-        if (detected.length >= 6) {
+        if (detected.length >= 5) {
           visibleColIndices = detected;
           colLabels = detectedLabels;
           break;
