@@ -2431,7 +2431,18 @@ class SheetNavigator {
 
         // Equipment Sheet Formatting (Clickable Glove / Sleeve / Item # for Lifecycle Dossier)
         const isEquipmentSheet = ['gloves', 'sleeves', 'blankets', 'macks', 'hv_testers', 'phasing_sets', 'aed', 'grounds', 'hot_sticks'].includes(this.currentSheetKey);
-        const isPrimaryItemCol = isEquipmentSheet && (colIdx === 0 || ['glove', 'gloves', 'glove #', 'glove#', 'sleeve', 'sleeves', 'sleeve #', 'sleeve#', 'blanket', 'blankets', 'blanket #', 'blanket#', 'mack', 'macks', 'mack #', 'item #', 'item#', 'item', 'items', 'item number', 'item num', 'serial #', 'serial#', 'serial'].includes(hLower));
+        
+        let isPrimaryItemCol = false;
+        if (isEquipmentSheet) {
+          if (this.currentSheetKey === 'grounds') {
+            // For Grounds, Serial # is the primary item key in column 0
+            isPrimaryItemCol = (colIdx === 0 || ['serial #', 'serial#', 'serial', 'ground #', 'ground', 'item #', 'item'].includes(hLower));
+          } else {
+            // For HV Testers, Phasing Sets, AED, Gloves, Sleeves, Blankets, MACKs, Hot Sticks:
+            // ONLY Column 0 / Item # / HVT # is the primary key. Secondary "Serial #" or "ESL ID" columns are NOT item keys.
+            isPrimaryItemCol = (colIdx === 0 || ['glove', 'gloves', 'glove #', 'glove#', 'sleeve', 'sleeves', 'sleeve #', 'sleeve#', 'blanket', 'blankets', 'blanket #', 'blanket#', 'mack', 'macks', 'mack #', 'mack#', 'hvt', 'hvt #', 'hvt#', 'phasing set', 'phasing set #', 'aed', 'aed #', 'item #', 'item#', 'item', 'items', 'item number', 'item num'].includes(hLower));
+          }
+        }
 
         if (isEquipmentSheet && isPrimaryItemCol && val) {
           const itemKey = String(val).trim();
@@ -2440,6 +2451,9 @@ class SheetNavigator {
         } else if (isEquipmentSheet && hLower === 'esl id' && val) {
           // ESL ID is an electronic tracking tag barcode (not linked to item lifecycle)
           customCellHtml = `<span style="font-family: monospace; font-size: 11px; color: #94a3b8; font-weight: 500;">${this.escapeHtml(val)}</span>`;
+        } else if (isEquipmentSheet && (hLower === 'serial #' || hLower === 'serial#' || hLower === 'serial') && val) {
+          // Secondary Serial # (plain text / monospace)
+          customCellHtml = `<span style="font-family: monospace; font-size: 11.5px; color: #cbd5e1; font-weight: 500;">${this.escapeHtml(val)}</span>`;
         } else if (isEquipmentSheet && (hLower === 'assigned to' || hLower === 'assigned' || hLower === 'holder') && val) {
           const nonEmpHolders = ['on shelf', 'in testing', 'packed for testing', 'packed for delivery', 'failed rubber', 'failed', 'lost', 'destroyed', 'new', 'unassigned', 'n/a', '—', '-'];
           const holderLower = String(val).toLowerCase().trim();
@@ -2465,7 +2479,7 @@ class SheetNavigator {
 
         const isSmsCol = hLower.includes('sms');
         const isEditable = !isPrimaryItemCol && !isEmployeeNameCol && !isSmsCol && !hLower.includes('change out') && !hLower.startsWith('skip ');
-        const itemIdentifier = String(row['Serial #'] || row['Item #'] || row['Glove'] || row['Sleeve'] || row['Blanket'] || row['MACK'] || row['Name'] || row['Employee Name'] || row['Job Number'] || Object.values(row)[0] || '').trim();
+        const itemIdentifier = String(row['Item #'] || row['HVT #'] || row['Phasing Set #'] || row['AED #'] || row['Glove'] || row['Sleeve'] || row['Blanket'] || row['MACK'] || row['Serial #'] || row['Name'] || row['Employee Name'] || row['Job Number'] || Object.values(row)[0] || '').trim();
 
         html += `<td class="${isEditable ? 'editable' : ''}" 
                      contenteditable="${isEditable}" 

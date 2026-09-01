@@ -153,10 +153,14 @@ class HistoryNavigator {
     this.renderCurrentHistory();
   }
 
-  // Find primary grouping column for this sheet (Item # / Serial # / Employee Name)
+  // Find primary grouping column for this sheet (Item # / HVT # / Serial # / Employee Name)
   getGroupCol(headers) {
     if (!headers || headers.length === 0) return null;
-    const candidates = ['item #', 'serial #', 'item', 'employee name', 'employee', 'name'];
+    if (this.currentSheetKey === 'grounds_history') {
+      const gFound = headers.find(h => String(h || '').toLowerCase().trim().includes('serial'));
+      if (gFound) return gFound;
+    }
+    const candidates = ['item #', 'item#', 'hvt #', 'hvt#', 'hvt', 'phasing set #', 'aed #', 'glove #', 'sleeve #', 'blanket #', 'mack #', 'item', 'employee name', 'employee', 'name', 'serial #'];
     for (const cand of candidates) {
       const found = headers.find(h => {
         const hLower = String(h || '').toLowerCase().trim();
