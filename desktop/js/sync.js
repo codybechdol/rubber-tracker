@@ -2,14 +2,14 @@
  * sync.js - Google Sheets Synchronization Client with Live Offline Changes Modal
  */
 
-const DEFAULT_SYNC_URL = 'https://script.google.com/macros/s/AKfycbwiNHntFllJB-7fWT4HMF4-ruFxdX6hjSXkYQbtcEYcQQKn0fXW_4BK5qjfjTfSGbiI/exec';
+const DEFAULT_SYNC_URL = 'https://script.google.com/macros/s/AKfycbzkXtU3SM5OaY3_INM7WNIlpoOHaFAiHTxkVQ-aBycP8OPtagn-t4qI4EGvvGB0Si56/exec';
 
 class SyncEngine {
   constructor(db) {
     this.db = db;
     let savedUrl = localStorage.getItem('sa_sync_url');
     // If savedUrl is missing, empty, or points to any old non-working deployment URL, auto-migrate to DEFAULT_SYNC_URL!
-    if (!savedUrl || savedUrl.includes('AKfycby_F6C') || savedUrl.includes('AKfycbxs') || savedUrl.includes('AKfycbxx') || savedUrl.includes('AKfycbycoq') || !savedUrl.includes('AKfycbwiNHntFllJB')) {
+    if (!savedUrl || !savedUrl.includes('AKfycbzkXtU3SM5OaY3')) {
       savedUrl = DEFAULT_SYNC_URL;
       localStorage.setItem('sa_sync_url', DEFAULT_SYNC_URL);
     }
