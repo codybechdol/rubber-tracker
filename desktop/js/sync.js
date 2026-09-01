@@ -207,8 +207,15 @@ class SyncEngine {
     if (mut.action === 'ADD_ROW') {
       let title = 'Add New Record';
       let desc = '';
+      const isHistorySheet = sheet.toLowerCase().includes('history') || sheet.toLowerCase().includes('_history');
 
-      if (employeeName && certName) {
+      if (isHistorySheet && itemNumber) {
+        title = `📜 History Milestone: #${itemNumber}`;
+        const holder = rowData['Assigned To'] || rowData['Holder'] || rowData['Status'] || '';
+        const loc = rowData['Location'] || '';
+        const dateVal = rowData['Date Assigned'] || rowData['Date'] || rowData['Test Date'] || '';
+        desc = `${holder ? `Assigned: <strong>${holder}</strong>` : ''}${loc ? ` • Loc: ${loc}` : ''}${dateVal ? ` • Date: ${dateVal}` : ''}`;
+      } else if (employeeName && certName) {
         const expDate = rowData['Expiration Date'] || rowData['Date Acquired'] || mut.value || '';
         title = `✨ New Cert: 👤 ${employeeName} — 📜 ${certName}`;
         desc = `Date: <strong style="color: #34d399;">${expDate || 'N/A'}</strong> • Loc: ${rowData['Location'] || 'Helena'}`;
@@ -224,7 +231,7 @@ class SyncEngine {
       }
 
       return {
-        icon: '➕',
+        icon: isHistorySheet ? '📜' : '➕',
         sheet: sheet,
         title: title,
         desc: desc,
