@@ -1088,11 +1088,21 @@ class SyncEngine {
 
       if (freshSnapshot && freshSnapshot.tables) {
         await this.db.setSnapshot(freshSnapshot);
-        if (window.sheetNavigator) window.sheetNavigator.renderActiveView();
-        if (window.historyNavigator) window.historyNavigator.renderCurrentHistory();
-        if (window.tripPlanner) window.tripPlanner.renderPlanner();
-        if (window.taskManager) window.taskManager.renderTasks();
-        if (window.safetyComplianceEngine) window.safetyComplianceEngine.renderOverview();
+        if (window.sheetNavigator && typeof window.sheetNavigator.renderActiveView === 'function') {
+          window.sheetNavigator.renderActiveView();
+        }
+        if (window.historyNavigator && typeof window.historyNavigator.renderCurrentHistory === 'function') {
+          window.historyNavigator.renderCurrentHistory();
+        }
+        if (window.tripPlanner && typeof window.tripPlanner.renderPlanner === 'function') {
+          window.tripPlanner.renderPlanner();
+        }
+        if (window.taskManager && typeof window.taskManager.renderTasks === 'function') {
+          window.taskManager.renderTasks();
+        }
+        if (window.safetyComplianceEngine && typeof window.safetyComplianceEngine.renderSafetyLogs === 'function') {
+          window.safetyComplianceEngine.renderSafetyLogs();
+        }
 
         this.updateStatusUI('synced', `Synced in ${durationFormatted}`);
         if (!silent) {
