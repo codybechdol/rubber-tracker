@@ -56,10 +56,17 @@ class TripPlannerApp {
   }
 
   init() {
+    try {
+      const savedWeeks = parseInt(localStorage.getItem('sa_trip_planner_weeks'), 10);
+      if (savedWeeks && [1, 2, 4, 6, 8, 12].includes(savedWeeks)) {
+        this.weeksToShow = savedWeeks;
+      }
+    } catch (_) {}
+
     this.loadSavedTrips();
     this.setupSearchListeners();
     this.populateWeekDropdown();
-    this.setWeeksToShow(8);
+    this.setWeeksToShow(this.weeksToShow || 8);
   }
 
   setupSearchListeners() {
@@ -459,7 +466,7 @@ class TripPlannerApp {
     try {
       localStorage.setItem('sa_trip_planner_weeks', this.weeksToShow);
     } catch (e) {}
-    [1, 2, 4, 6, 8].forEach(w => {
+    [1, 2, 4, 6, 8, 12].forEach(w => {
       const btn = document.getElementById(`btn-span-${w}w`);
       if (btn) {
         if (w === this.weeksToShow) btn.classList.add('active');
@@ -875,7 +882,7 @@ class TripPlannerApp {
     board.innerHTML = '';
 
     // Synchronize UI active button with current weeksToShow
-    [1, 2, 4, 6, 8].forEach(w => {
+    [1, 2, 4, 6, 8, 12].forEach(w => {
       const btn = document.getElementById(`btn-span-${w}w`);
       if (btn) {
         if (w === this.weeksToShow) btn.classList.add('active');
@@ -897,9 +904,10 @@ class TripPlannerApp {
 
     // Render multi-week sections based on weeksToShow
     for (let w = 0; w < this.weeksToShow; w++) {
-      const weekMonday = new Date(baseMonday);
-      weekMonday.setDate(baseMonday.getDate() + (w * 7));
-      const weekDays = this.getDaysForWeek(weekMonday, workSchedule);
+      try {
+        const weekMonday = new Date(baseMonday);
+        weekMonday.setDate(baseMonday.getDate() + (w * 7));
+        const weekDays = this.getDaysForWeek(weekMonday, workSchedule);
 
       const firstDay = weekDays[0];
       const lastDay = weekDays[weekDays.length - 1];
@@ -1156,7 +1164,10 @@ class TripPlannerApp {
         grid.appendChild(col);
       });
 
-      board.appendChild(section);
+        board.appendChild(section);
+      } catch (weekErr) {
+        console.error(`Error rendering week ${w + 1}:`, weekErr);
+      }
     }
 
     this.renderAvailableLocations();
@@ -1620,6 +1631,16 @@ class TripPlannerApp {
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#039;');
+  }
+
+  escapeJs(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+      .replace(/\\/g, '\\\\')
+      .replace(/'/g, "\\'")
+      .replace(/"/g, '\\"')
+      .replace(/\n/g, '\\n')
+      .replace(/\r/g, '\\r');
   }
 }
 
