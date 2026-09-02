@@ -1213,17 +1213,25 @@ class LocalDatabase {
       // 2. Direct rawGrid and row update for Inventory or Data Sheets (Gloves, Sleeves, Blankets, MACKs, Grounds, etc.)
       if (table && table.rows && table.headers) {
         let row = null;
-        if (mut.itemIdentifier) {
+        if (mut.itemIdentifier && String(mut.itemIdentifier).trim() !== '') {
           const idClean = String(mut.itemIdentifier).trim().toLowerCase();
+          // Priority 1: Exact match on primary item identifier keys
           row = table.rows.find(r => {
-            for (const k in r) {
-              const kl = k.toLowerCase();
-              if (kl.includes('item') || kl.includes('serial') || kl.includes('glove') || kl.includes('sleeve') || kl.includes('blanket') || kl.includes('mack') || kl.includes('employee') || kl.includes('name') || kl.includes('job') || kl === 'id') {
-                if (String(r[k] || '').trim().toLowerCase() === idClean) return true;
-              }
-            }
-            return false;
+            const pk = String(r['Glove'] || r['Sleeve'] || r['Blanket'] || r['MACK'] || r['HVT #'] || r['Phasing Set #'] || r['AED #'] || r['Serial #'] || r['Item #'] || r['Item'] || r['Employee Name'] || r['Name'] || r['Job Number'] || Object.values(r)[0] || '').trim().toLowerCase();
+            return pk === idClean;
           });
+          // Priority 2: Secondary item/serial fields
+          if (!row) {
+            row = table.rows.find(r => {
+              for (const k in r) {
+                const kl = k.toLowerCase();
+                if (kl.includes('item') || kl.includes('serial') || kl.includes('glove') || kl.includes('sleeve') || kl.includes('blanket') || kl.includes('mack') || kl.includes('employee') || kl.includes('name')) {
+                  if (String(r[k] || '').trim().toLowerCase() === idClean) return true;
+                }
+              }
+              return false;
+            });
+          }
         }
         if (!row && mut.row) {
           row = table.rows.find(r => r._rowIdx === mut.row);

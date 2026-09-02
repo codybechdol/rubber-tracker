@@ -2643,9 +2643,10 @@ class SheetNavigator {
 
       // Quick calendar picker on double-click for date cells
       td.addEventListener('dblclick', (e) => {
-        const header = (e.currentTarget.dataset.header || '').toLowerCase();
+        const header = (td.dataset.header || '').toLowerCase();
         if (header.includes('date') || header.includes('expiration') || header.includes('calibration')) {
-          const currentText = e.currentTarget.textContent.trim();
+          const targetCell = td;
+          const currentText = targetCell.textContent.trim();
           let isoVal = '';
           if (/^\d{4}-\d{2}-\d{2}$/.test(currentText)) isoVal = currentText;
           else if (currentText.includes('/')) {
@@ -2669,8 +2670,9 @@ class SheetNavigator {
             if (picker.value) {
               const p = picker.value.split('-');
               const mdY = `${p[1]}/${p[2]}/${p[0]}`;
-              e.currentTarget.textContent = mdY;
-              e.currentTarget.blur();
+              targetCell.textContent = mdY;
+              targetCell.focus();
+              targetCell.blur();
             }
             picker.remove();
           });
@@ -2944,6 +2946,59 @@ class SheetNavigator {
             }
           }
         }
+
+        // 1. Update in-memory row and grid
+        if (tableRow) {
+          tableRow[header] = newVal;
+        }
+        if (tableData && tableData.rawGrid && actualRowIdx && tableData.rawGrid[actualRowIdx - 1]) {
+          const cIdx = (typeof col === 'number' && col >= 1) ? (col - 1) : (tableData.headers || []).indexOf(header);
+          if (cIdx !== -1) tableData.rawGrid[actualRowIdx - 1][cIdx] = newVal;
+        }
+
+        // 2. If Date Assigned, Test Date, or Calibration Date was changed on an inventory sheet, recalculate Change Out Date!
+        if (isInventorySheet && tableRow && tableData) {
+          const isDateAssigned = hLower.includes('date assigned');
+          const isTestDate = hLower.includes('test date') || hLower.includes('calibration');
+
+          if (isDateAssigned || isTestDate) {
+            const dateAssignedColName = (tableData.headers || []).find(h => /date\s*assigned/i.test(h));
+            const testDateColName = (tableData.headers || []).find(h => /test\s*date|calibration/i.test(h));
+            const locationColName = (tableData.headers || []).find(h => /^location$/i.test(h));
+            const assignedColName = (tableData.headers || []).find(h => /assigned\s*to|^assigned$|^holder$/i.test(h));
+            const chgOutColName = (tableData.headers || []).find(h => /change\s*out/i.test(h));
+
+            const curDateAssigned = dateAssignedColName ? (tableRow[dateAssignedColName] || '') : '';
+            const curTestDate = testDateColName ? (tableRow[testDateColName] || '') : '';
+            const curLoc = locationColName ? (tableRow[locationColName] || '') : '';
+            const curAssignedTo = assignedColName ? (tableRow[assignedColName] || '') : '';
+
+            let calculatedChgOut = '';
+            if (window.inventoryManager && typeof window.inventoryManager.calculateChangeOutDate === 'function') {
+              calculatedChgOut = window.inventoryManager.calculateChangeOutDate(
+                curDateAssigned || curTestDate,
+                curLoc,
+                curAssignedTo,
+                this.currentSheetKey,
+                {
+                  testDate: curTestDate,
+                  calibrationDate: curTestDate
+                }
+              );
+            }
+
+            if (calculatedChgOut && chgOutColName && calculatedChgOut !== 'N/A') {
+              tableRow[chgOutColName] = calculatedChgOut;
+              const chgIdx = (tableData.headers || []).indexOf(chgOutColName);
+              if (chgIdx !== -1 && tableData.rawGrid && tableData.rawGrid[actualRowIdx - 1]) {
+                tableData.rawGrid[actualRowIdx - 1][chgIdx] = calculatedChgOut;
+              }
+              await queueCell(chgOutColName, calculatedChgOut);
+            }
+          }
+        }
+
+        syncTableRowToGrid();
 
         await this.db.addMutation({
           action: 'UPDATE_CELL',
