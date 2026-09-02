@@ -592,12 +592,23 @@
         <div class="search-box">
           <input type="text" id="testSearchInput" class="search-input" placeholder="🔍 Search employee, crew, clinic..." oninput="filterTestsTable()">
         </div>
-        <select id="testStatusFilter" class="form-control" style="width: 130px;" onchange="filterTestsTable()">
+        <select id="testStatusFilter" class="form-control" style="width: 120px;" onchange="filterTestsTable()">
           <option value="ALL">All Statuses</option>
           <option value="Pending">⏳ Pending</option>
           <option value="Scheduled">📅 Scheduled</option>
           <option value="Completed">✅ Completed</option>
           <option value="Excused">🚫 Excused</option>
+        </select>
+        <select id="testTypeFilter" class="form-control" style="width: 125px;" onchange="filterTestsTable()">
+          <option value="ALL">All Types</option>
+          <option value="Drug Only">💊 Drug Only</option>
+          <option value="Drug & Alcohol">🍷💊 Drug & Alcohol</option>
+        </select>
+        <select id="testClassFilter" class="form-control" style="width: 120px;" onchange="filterTestsTable()">
+          <option value="ALL">All Agencies</option>
+          <option value="FMCSA">FMCSA</option>
+          <option value="PHMSA">PHMSA</option>
+          <option value="Non-DOT">Non-DOT</option>
         </select>
       </div>
     </div>
@@ -607,12 +618,13 @@
         <thead>
           <tr>
             <th style="width: 100px;">Status</th>
-            <th style="width: 180px;">Employee</th>
-            <th style="width: 110px;">Type</th>
-            <th style="min-width: 280px;">Clinic / Provider & Requirements</th>
+            <th style="width: 170px;">Employee</th>
+            <th style="width: 150px;">Test Option & Agency</th>
+            <th style="width: 100px;">Collection</th>
+            <th style="min-width: 270px;">Clinic / Provider & Requirements</th>
             <th style="min-width: 220px;">Appointment / Meeting Details</th>
-            <th style="min-width: 140px;">Notes / Results</th>
-            <th style="width: 110px; text-align: right;">Actions</th>
+            <th style="min-width: 130px;">Notes / Results</th>
+            <th style="width: 100px; text-align: right;">Actions</th>
           </tr>
         </thead>
         <tbody id="testsTbody">
@@ -676,11 +688,29 @@
         <button class="modal-close" onclick="closeModal('bulkPasteModal')">&times;</button>
       </div>
       <div class="modal-body">
+        <div class="form-row" style="margin-bottom: 12px; gap: 12px;">
+          <div class="form-col form-group" style="margin-bottom: 0;">
+            <label style="font-weight: 600; font-size: 11.5px;">Default Test Type:</label>
+            <select id="bulkDefaultTestType" class="form-control">
+              <option value="Drug Only" selected>💊 Drug Only</option>
+              <option value="Drug & Alcohol">🍷💊 Drug & Alcohol</option>
+            </select>
+          </div>
+          <div class="form-col form-group" style="margin-bottom: 0;">
+            <label style="font-weight: 600; font-size: 11.5px;">Default Classification:</label>
+            <select id="bulkDefaultClassification" class="form-control">
+              <option value="FMCSA" selected>FMCSA</option>
+              <option value="PHMSA">PHMSA</option>
+              <option value="Non-DOT">Non-DOT</option>
+            </select>
+          </div>
+        </div>
+
         <div class="form-group">
           <label>Paste employee names (one per line, or copied from a spreadsheet/email):</label>
-          <textarea id="bulkPasteText" class="form-control" style="height: 180px; font-family: monospace; font-size: 12px;" placeholder="John Smith&#10;Jane Doe&#10;Darrell Swann..."></textarea>
+          <textarea id="bulkPasteText" class="form-control" style="height: 170px; font-family: monospace; font-size: 12px;" placeholder="John Smith&#10;Jane Doe&#10;Darrell Swann..."></textarea>
           <div style="font-size: 11px; color: var(--gray-700); margin-top: 4px;">
-            The system will automatically match each name against your active <strong>Employees</strong> sheet to retrieve their Job Number, City/Location, and Phone number.
+            The system matches each name against your active <strong>Employees</strong> sheet for Job#, Location, and Phone. Auto-detects lines containing "Alcohol", "PHMSA", or "Non-DOT".
           </div>
         </div>
       </div>
@@ -959,6 +989,19 @@
             </div>
           </td>
           <td>
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+              <select class="form-control form-control-sm" style="font-weight: 600; font-size: 11px; padding: 2px 4px;" onchange="updateTestField(${test.rowId}, 'testType', this.value)">
+                <option value="Drug Only" ${test.testType === 'Drug Only' ? 'selected' : ''}>💊 Drug Only</option>
+                <option value="Drug & Alcohol" ${test.testType === 'Drug & Alcohol' ? 'selected' : ''}>🍷💊 Drug & Alcohol</option>
+              </select>
+              <select class="form-control form-control-sm" style="font-weight: 700; font-size: 11px; padding: 2px 4px; ${getClassBadgeStyle(test.classification)}" onchange="updateTestField(${test.rowId}, 'classification', this.value)">
+                <option value="FMCSA" ${test.classification === 'FMCSA' ? 'selected' : ''}>FMCSA</option>
+                <option value="PHMSA" ${test.classification === 'PHMSA' ? 'selected' : ''}>PHMSA</option>
+                <option value="Non-DOT" ${test.classification === 'Non-DOT' ? 'selected' : ''}>Non-DOT</option>
+              </select>
+            </div>
+          </td>
+          <td>
             <select class="form-control form-control-sm" onchange="toggleCollectionType(${test.rowId}, this.value)">
               <option value="Clinic Visit" ${!isMobile ? 'selected' : ''}>🏥 Clinic</option>
               <option value="Mobile Collector" ${isMobile ? 'selected' : ''}>🚚 Mobile</option>
@@ -1052,6 +1095,12 @@
       if (clinic.hours) details.push(`🕒 ${escapeHtml(clinic.hours)}`);
       if (clinic.notes) details.push(`⚠️ ${escapeHtml(clinic.notes)}`);
       return details.join(' &bull; ');
+    }
+
+    function getClassBadgeStyle(cls) {
+      if (cls === 'PHMSA') return 'color: #7c3aed; background: #ede9fe; border-color: #c4b5fd;';
+      if (cls === 'Non-DOT') return 'color: #0f766e; background: #ccfbf1; border-color: #5eead4;';
+      return 'color: #1d4ed8; background: #dbeafe; border-color: #93c5fd;'; // FMCSA default
     }
 
     // Toggle Collection Type between Clinic and Mobile Collector
@@ -1193,6 +1242,8 @@
         location: emp ? emp.location : '',
         jobNumber: emp ? emp.jobNumber : '',
         phone: emp ? emp.phone : '',
+        testType: 'Drug Only',
+        classification: 'FMCSA',
         collectionType: 'Clinic Visit',
         status: 'Pending'
       };
@@ -1225,11 +1276,23 @@
         return;
       }
 
+      const defaultTestType = document.getElementById('bulkDefaultTestType')?.value || 'Drug Only';
+      const defaultClassification = document.getElementById('bulkDefaultClassification')?.value || 'FMCSA';
+
       const lines = rawText.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
       const newRecords = [];
       const currentTests = appData.tests || [];
 
       lines.forEach(line => {
+        const lineLower = line.toLowerCase();
+        let testType = defaultTestType;
+        if (lineLower.includes('alcohol')) testType = 'Drug & Alcohol';
+
+        let classification = defaultClassification;
+        if (lineLower.includes('phmsa') || lineLower.includes('phsma')) classification = 'PHMSA';
+        else if (lineLower.includes('non-dot') || lineLower.includes('nondot')) classification = 'Non-DOT';
+        else if (lineLower.includes('fmcsa')) classification = 'FMCSA';
+
         // Strip common prefixes or tabs if copied from Excel/table
         const cleanName = line.split('\t')[0].trim().replace(/^[\d\.\-\*•]+\s*/, '');
         if (!cleanName) return;
@@ -1248,6 +1311,8 @@
           location: matchedEmp ? matchedEmp.location : '',
           jobNumber: matchedEmp ? matchedEmp.jobNumber : '',
           phone: matchedEmp ? matchedEmp.phone : '',
+          testType: testType,
+          classification: classification,
           collectionType: 'Clinic Visit',
           status: 'Pending'
         });
@@ -1277,6 +1342,8 @@
     function filterTestsTable() {
       const query = document.getElementById('testSearchInput').value.toLowerCase();
       const statusFilter = document.getElementById('testStatusFilter').value;
+      const typeFilter = document.getElementById('testTypeFilter')?.value || 'ALL';
+      const classFilter = document.getElementById('testClassFilter')?.value || 'ALL';
       const rows = document.querySelectorAll('#testsTbody tr');
 
       rows.forEach(row => {
@@ -1285,11 +1352,23 @@
         
         let matchesStatus = true;
         if (statusFilter !== 'ALL') {
-          const statusSelect = row.querySelector('select');
+          const statusSelect = row.cells[0]?.querySelector('select');
           matchesStatus = statusSelect && statusSelect.value === statusFilter;
         }
 
-        row.style.display = (matchesQuery && matchesStatus) ? '' : 'none';
+        let matchesType = true;
+        if (typeFilter !== 'ALL') {
+          const typeSelect = row.cells[2]?.querySelectorAll('select')[0];
+          matchesType = typeSelect && typeSelect.value === typeFilter;
+        }
+
+        let matchesClass = true;
+        if (classFilter !== 'ALL') {
+          const classSelect = row.cells[2]?.querySelectorAll('select')[1];
+          matchesClass = classSelect && classSelect.value === classFilter;
+        }
+
+        row.style.display = (matchesQuery && matchesStatus && matchesType && matchesClass) ? '' : 'none';
       });
     }
 

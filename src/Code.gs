@@ -33879,6 +33879,8 @@ function setupDrugTestingSheets() {
     'Location',
     'Job Number',
     'Phone',
+    'Test Type',
+    'Classification',
     'Collection Type',
     'Clinic / Provider Name',
     'Clinic City/State',
@@ -33908,18 +33910,41 @@ function setupDrugTestingSheets() {
     testsSheet.setColumnWidth(3, 120); // Location
     testsSheet.setColumnWidth(4, 110); // Job Number
     testsSheet.setColumnWidth(5, 120); // Phone
-    testsSheet.setColumnWidth(6, 130); // Collection Type
-    testsSheet.setColumnWidth(7, 240); // Clinic Name
-    testsSheet.setColumnWidth(8, 140); // Clinic City/State
-    testsSheet.setColumnWidth(9, 140); // Appt Required
-    testsSheet.setColumnWidth(10, 110);// Scheduled Date
-    testsSheet.setColumnWidth(11, 110);// Scheduled Time
-    testsSheet.setColumnWidth(12, 250);// Meeting Address
-    testsSheet.setColumnWidth(13, 110);// Status
-    testsSheet.setColumnWidth(14, 110);// Date Completed
-    testsSheet.setColumnWidth(15, 200);// Paperwork
-    testsSheet.setColumnWidth(16, 220);// Notes
-    testsSheet.setColumnWidth(17, 120);// Date Added
+    testsSheet.setColumnWidth(6, 120); // Test Type
+    testsSheet.setColumnWidth(7, 120); // Classification
+    testsSheet.setColumnWidth(8, 130); // Collection Type
+    testsSheet.setColumnWidth(9, 240); // Clinic Name
+    testsSheet.setColumnWidth(10, 140); // Clinic City/State
+    testsSheet.setColumnWidth(11, 140); // Appt Required
+    testsSheet.setColumnWidth(12, 110);// Scheduled Date
+    testsSheet.setColumnWidth(13, 110);// Scheduled Time
+    testsSheet.setColumnWidth(14, 250);// Meeting Address
+    testsSheet.setColumnWidth(15, 110);// Status
+    testsSheet.setColumnWidth(16, 110);// Date Completed
+    testsSheet.setColumnWidth(17, 200);// Paperwork
+    testsSheet.setColumnWidth(18, 220);// Notes
+    testsSheet.setColumnWidth(19, 120);// Date Added
+  } else {
+    // Migration check: If col 6 is 'Collection Type', insert 'Test Type' and 'Classification'
+    var col6Header = String(testsSheet.getRange(1, 6).getValue() || '').trim().toLowerCase();
+    if (col6Header === 'collection type') {
+      testsSheet.insertColumns(6, 2);
+      testsSheet.getRange(1, 6, 1, 2).setValues([['Test Type', 'Classification']])
+        .setFontWeight('bold')
+        .setBackground('#1565c0')
+        .setFontColor('#ffffff')
+        .setHorizontalAlignment('center');
+      testsSheet.setColumnWidth(6, 120);
+      testsSheet.setColumnWidth(7, 120);
+      var totalRows = testsSheet.getLastRow();
+      if (totalRows > 1) {
+        var defaultVals = [];
+        for (var dr = 2; dr <= totalRows; dr++) {
+          defaultVals.push(['Drug Only', 'FMCSA']);
+        }
+        testsSheet.getRange(2, 6, defaultVals.length, 2).setValues(defaultVals);
+      }
+    }
   }
 
   return { success: true, message: 'DOT Drug Testing sheets initialized successfully.' };
@@ -34029,7 +34054,10 @@ function getDrugTestingDialogData(targetQuarter) {
   var lastTestRow = testsSheet.getLastRow();
 
   if (lastTestRow > 1) {
-    var testVals = testsSheet.getRange(2, 1, lastTestRow - 1, 17).getValues();
+    var maxCols = Math.max(testsSheet.getLastColumn(), 19);
+    var testVals = testsSheet.getRange(2, 1, lastTestRow - 1, maxCols).getValues();
+    var isNewLayout = maxCols >= 19 && String(testsSheet.getRange(1, 6).getValue() || '').trim().toLowerCase() !== 'collection type';
+
     for (var j = 0; j < testVals.length; j++) {
       var tRow = testVals[j];
       var q = String(tRow[0] || '').trim();
@@ -34040,25 +34068,70 @@ function getDrugTestingDialogData(targetQuarter) {
       var empName = String(tRow[1] || '').trim();
       if (!empName) continue;
 
+      var testType = 'Drug Only';
+      var classification = 'FMCSA';
+      var collectionType = 'Clinic Visit';
+      var clinicName = '';
+      var clinicCity = '';
+      var apptRequired = '';
+      var rawSchedDate = '';
+      var schedTime = '';
+      var meetingAddr = '';
+      var status = 'Pending';
+      var rawCompDate = '';
+      var paperworkNotes = '';
+      var notes = '';
+      var rawDateAdded = '';
+
+      if (isNewLayout) {
+        testType = String(tRow[5] || 'Drug Only').trim();
+        classification = String(tRow[6] || 'FMCSA').trim();
+        collectionType = String(tRow[7] || 'Clinic Visit').trim();
+        clinicName = String(tRow[8] || '').trim();
+        clinicCity = String(tRow[9] || '').trim();
+        apptRequired = String(tRow[10] || '').trim();
+        rawSchedDate = tRow[11];
+        schedTime = String(tRow[12] || '').trim();
+        meetingAddr = String(tRow[13] || '').trim();
+        status = String(tRow[14] || 'Pending').trim();
+        rawCompDate = tRow[15];
+        paperworkNotes = String(tRow[16] || '').trim();
+        notes = String(tRow[17] || '').trim();
+        rawDateAdded = tRow[18];
+      } else {
+        collectionType = String(tRow[5] || 'Clinic Visit').trim();
+        clinicName = String(tRow[6] || '').trim();
+        clinicCity = String(tRow[7] || '').trim();
+        apptRequired = String(tRow[8] || '').trim();
+        rawSchedDate = tRow[9];
+        schedTime = String(tRow[10] || '').trim();
+        meetingAddr = String(tRow[11] || '').trim();
+        status = String(tRow[12] || 'Pending').trim();
+        rawCompDate = tRow[13];
+        paperworkNotes = String(tRow[14] || '').trim();
+        notes = String(tRow[15] || '').trim();
+        rawDateAdded = tRow[16];
+      }
+
       var schedDateStr = '';
-      if (tRow[9] instanceof Date) {
-        schedDateStr = Utilities.formatDate(tRow[9], Session.getScriptTimeZone() || 'America/Denver', 'yyyy-MM-dd');
-      } else if (tRow[9]) {
-        schedDateStr = String(tRow[9]).trim();
+      if (rawSchedDate instanceof Date) {
+        schedDateStr = Utilities.formatDate(rawSchedDate, Session.getScriptTimeZone() || 'America/Denver', 'yyyy-MM-dd');
+      } else if (rawSchedDate) {
+        schedDateStr = String(rawSchedDate).trim();
       }
 
       var compDateStr = '';
-      if (tRow[13] instanceof Date) {
-        compDateStr = Utilities.formatDate(tRow[13], Session.getScriptTimeZone() || 'America/Denver', 'yyyy-MM-dd');
-      } else if (tRow[13]) {
-        compDateStr = String(tRow[13]).trim();
+      if (rawCompDate instanceof Date) {
+        compDateStr = Utilities.formatDate(rawCompDate, Session.getScriptTimeZone() || 'America/Denver', 'yyyy-MM-dd');
+      } else if (rawCompDate) {
+        compDateStr = String(rawCompDate).trim();
       }
 
       var dateAddedStr = '';
-      if (tRow[16] instanceof Date) {
-        dateAddedStr = Utilities.formatDate(tRow[16], Session.getScriptTimeZone() || 'America/Denver', 'yyyy-MM-dd');
-      } else if (tRow[16]) {
-        dateAddedStr = String(tRow[16]).trim();
+      if (rawDateAdded instanceof Date) {
+        dateAddedStr = Utilities.formatDate(rawDateAdded, Session.getScriptTimeZone() || 'America/Denver', 'yyyy-MM-dd');
+      } else if (rawDateAdded) {
+        dateAddedStr = String(rawDateAdded).trim();
       }
 
       allTests.push({
@@ -34068,17 +34141,19 @@ function getDrugTestingDialogData(targetQuarter) {
         location: String(tRow[2] || '').trim(),
         jobNumber: String(tRow[3] || '').trim(),
         phone: String(tRow[4] || '').trim(),
-        collectionType: String(tRow[5] || 'Clinic Visit').trim(),
-        clinicName: String(tRow[6] || '').trim(),
-        clinicCity: String(tRow[7] || '').trim(),
-        apptRequired: String(tRow[8] || '').trim(),
+        testType: testType,
+        classification: classification,
+        collectionType: collectionType,
+        clinicName: clinicName,
+        clinicCity: clinicCity,
+        apptRequired: apptRequired,
         scheduledDate: schedDateStr,
-        scheduledTime: String(tRow[10] || '').trim(),
-        meetingAddress: String(tRow[11] || '').trim(),
-        status: String(tRow[12] || 'Pending').trim(),
+        scheduledTime: schedTime,
+        meetingAddress: meetingAddr,
+        status: status,
         dateCompleted: compDateStr,
-        paperworkNotes: String(tRow[14] || '').trim(),
-        notes: String(tRow[15] || '').trim(),
+        paperworkNotes: paperworkNotes,
+        notes: notes,
         dateAdded: dateAddedStr
       });
     }
@@ -34187,6 +34262,8 @@ function saveDrugTestRecord(record) {
     record.location || '',
     record.jobNumber || '',
     record.phone || '',
+    record.testType || 'Drug Only',
+    record.classification || 'FMCSA',
     record.collectionType || 'Clinic Visit',
     record.clinicName || '',
     record.clinicCity || '',

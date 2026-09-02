@@ -9,6 +9,8 @@ class DrugTestingEngine {
     this.db = db;
     this.currentQuarter = this.getDefaultQuarter();
     this.statusFilter = 'all';
+    this.typeFilter = 'all'; // 'all', 'Drug Only', 'Drug & Alcohol'
+    this.classFilter = 'all'; // 'all', 'FMCSA', 'PHMSA', 'Non-DOT'
     this.searchTerm = '';
     this.activeTab = 'pool'; // 'pool' or 'clinics'
     this.clinicFilter = 'all'; // 'all', 'mobile', 'walkin', 'appt'
@@ -64,7 +66,7 @@ class DrugTestingEngine {
   getTestsTable() {
     let t = this.db.getTable('dot_drug_tests');
     if (!t || !t.rows) {
-      t = { name: 'DOT Drug Tests', headers: ['Quarter', 'Employee Name', 'Location', 'Job Number', 'Phone Number', 'Collection Type', 'Clinic Name', 'Clinic City / State', 'Appt Required', 'Scheduled Date', 'Scheduled Time', 'Meeting / Collection Address', 'Status', 'Date Completed', 'Paperwork / Kit Notes', 'Notes', 'Date Added'], rows: [], rawGrid: [] };
+      t = { name: 'DOT Drug Tests', headers: ['Quarter', 'Employee Name', 'Location', 'Job Number', 'Phone Number', 'Test Type', 'Classification', 'Collection Type', 'Clinic Name', 'Clinic City / State', 'Appt Required', 'Scheduled Date', 'Scheduled Time', 'Meeting / Collection Address', 'Status', 'Date Completed', 'Paperwork / Kit Notes', 'Notes', 'Date Added'], rows: [], rawGrid: [] };
     }
     return t;
   }
@@ -243,8 +245,21 @@ class DrugTestingEngine {
               <button class="btn btn-secondary ${this.statusFilter === 'pending' ? 'active' : ''}" style="padding: 2px 8px; font-size: 11px; color: #facc15;" onclick="window.drugTestingEngine.setStatusFilter('pending')">⏳ Pending</button>
               <button class="btn btn-secondary ${this.statusFilter === 'scheduled' ? 'active' : ''}" style="padding: 2px 8px; font-size: 11px; color: #60a5fa;" onclick="window.drugTestingEngine.setStatusFilter('scheduled')">📅 Scheduled</button>
               <button class="btn btn-secondary ${this.statusFilter === 'completed' ? 'active' : ''}" style="padding: 2px 8px; font-size: 11px; color: #4ade80;" onclick="window.drugTestingEngine.setStatusFilter('completed')">✅ Completed</button>
+
+              <select style="padding: 3px 8px; font-size: 11px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; color: #fff;" onchange="window.drugTestingEngine.setTypeFilter(this.value)">
+                <option value="all" ${this.typeFilter === 'all' ? 'selected' : ''}>All Types</option>
+                <option value="Drug Only" ${this.typeFilter === 'Drug Only' ? 'selected' : ''}>💊 Drug Only</option>
+                <option value="Drug & Alcohol" ${this.typeFilter === 'Drug & Alcohol' ? 'selected' : ''}>🍷💊 Drug & Alcohol</option>
+              </select>
+
+              <select style="padding: 3px 8px; font-size: 11px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; color: #fff;" onchange="window.drugTestingEngine.setClassFilter(this.value)">
+                <option value="all" ${this.classFilter === 'all' ? 'selected' : ''}>All Agencies</option>
+                <option value="FMCSA" ${this.classFilter === 'FMCSA' ? 'selected' : ''}>FMCSA</option>
+                <option value="PHMSA" ${this.classFilter === 'PHMSA' ? 'selected' : ''}>PHMSA</option>
+                <option value="Non-DOT" ${this.classFilter === 'Non-DOT' ? 'selected' : ''}>Non-DOT</option>
+              </select>
               
-              <input type="text" id="dt-search-input" value="${this.searchTerm}" placeholder="🔍 Search employee, clinic, city..." style="padding: 4px 10px; font-size: 11.5px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; width: 220px;" oninput="window.drugTestingEngine.setSearchTerm(this.value)">
+              <input type="text" id="dt-search-input" value="${this.searchTerm}" placeholder="🔍 Search employee, clinic, city..." style="padding: 4px 10px; font-size: 11.5px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; width: 190px;" oninput="window.drugTestingEngine.setSearchTerm(this.value)">
             </div>
 
             <div style="display: flex; align-items: center; gap: 8px;">
@@ -291,10 +306,16 @@ class DrugTestingEngine {
   renderPoolTable(tests, clinics, siteSuggestions) {
     // Apply filters
     let filtered = tests.filter(r => {
-      const status = String(r['Status'] || r[12] || 'Pending').toLowerCase();
+      const hasNewCols = r['Test Type'] !== undefined || (Array.isArray(r) && r.length >= 19);
+      const status = String(r['Status'] || (hasNewCols ? r[14] : r[12]) || 'Pending').toLowerCase();
       if (this.statusFilter === 'pending' && status !== 'pending' && status !== 'unassigned') return false;
       if (this.statusFilter === 'scheduled' && status !== 'scheduled') return false;
       if (this.statusFilter === 'completed' && status !== 'completed') return false;
+
+      const testType = String(r['Test Type'] || (hasNewCols ? r[5] : 'Drug Only') || 'Drug Only');
+      const classification = String(r['Classification'] || (hasNewCols ? r[6] : 'FMCSA') || 'FMCSA');
+      if (this.typeFilter !== 'all' && testType !== this.typeFilter) return false;
+      if (this.classFilter !== 'all' && classification !== this.classFilter) return false;
 
       if (this.searchTerm) {
         const q = this.searchTerm.toLowerCase();
@@ -310,7 +331,7 @@ class DrugTestingEngine {
           <div style="font-size: 40px; margin-bottom: 12px;">🧪</div>
           <h3 style="margin: 0 0 6px 0; font-size: 16px; color: #f8fafc;">No Drug Test Records for ${this.currentQuarter}</h3>
           <p style="font-size: 12px; color: var(--text-muted); max-width: 450px; margin: 0 auto 16px auto;">
-            No employees have been added to the testing pool for this quarter yet. Add employees individually using the dropdown above or paste a full roster list.
+            No employees match the active filters for this quarter yet. Add employees individually using the dropdown above or paste a full roster list.
           </p>
           <button class="btn btn-primary" onclick="window.drugTestingEngine.openBulkPasteModal()">📋 Paste Quarterly Roster</button>
         </div>
@@ -322,31 +343,35 @@ class DrugTestingEngine {
         <table style="width: 100%; border-collapse: collapse; font-size: 12px; color: #f8fafc; text-align: left;">
           <thead>
             <tr style="background: #0f172a; border-bottom: 1px solid var(--border-color); color: var(--text-muted); font-size: 11px; text-transform: uppercase;">
-              <th style="padding: 10px 14px; width: 120px;">Status</th>
-              <th style="padding: 10px 14px; min-width: 160px;">Employee</th>
-              <th style="padding: 10px 14px; min-width: 110px;">Type</th>
-              <th style="padding: 10px 14px; min-width: 260px;">Clinic / Collector</th>
-              <th style="padding: 10px 14px; min-width: 240px;">Meeting Address / Location</th>
-              <th style="padding: 10px 14px; width: 150px;">Date / Time</th>
-              <th style="padding: 10px 14px; text-align: right; width: 100px;">Actions</th>
+              <th style="padding: 10px 14px; width: 115px;">Status</th>
+              <th style="padding: 10px 14px; min-width: 150px;">Employee</th>
+              <th style="padding: 10px 14px; min-width: 140px;">Test Option & Agency</th>
+              <th style="padding: 10px 14px; min-width: 90px;">Type</th>
+              <th style="padding: 10px 14px; min-width: 250px;">Clinic / Collector</th>
+              <th style="padding: 10px 14px; min-width: 230px;">Meeting Address / Location</th>
+              <th style="padding: 10px 14px; width: 140px;">Date / Time</th>
+              <th style="padding: 10px 14px; text-align: right; width: 90px;">Actions</th>
             </tr>
           </thead>
           <tbody>
             ${filtered.map((r, idx) => {
+              const hasNewCols = r['Test Type'] !== undefined || (Array.isArray(r) && r.length >= 19);
               const empName = String(r['Employee Name'] || r[1] || 'Unknown');
               const loc = String(r['Location'] || r[2] || '—');
               const jobNum = String(r['Job Number'] || r[3] || '—');
               const phone = String(r['Phone Number'] || r[4] || '');
-              const type = String(r['Collection Type'] || r[5] || 'Clinic Visit');
+              const testType = String(r['Test Type'] || (hasNewCols ? r[5] : 'Drug Only') || 'Drug Only');
+              const classification = String(r['Classification'] || (hasNewCols ? r[6] : 'FMCSA') || 'FMCSA');
+              const type = String(r['Collection Type'] || (hasNewCols ? r[7] : r[5]) || 'Clinic Visit');
               const isMobile = type.toLowerCase().includes('mobile');
-              const clinicName = String(r['Clinic Name'] || r[6] || '');
-              const apptReq = String(r['Appt Required'] || r[8] || 'No');
-              const schedDate = String(r['Scheduled Date'] || r[9] || '');
-              const schedTime = String(r['Scheduled Time'] || r[10] || '');
-              const meetingAddr = String(r['Meeting / Collection Address'] || r[11] || '');
-              const status = String(r['Status'] || r[12] || 'Pending');
-              const dateCompleted = String(r['Date Completed'] || r[13] || '');
-              const paperwork = String(r['Paperwork / Kit Notes'] || r[14] || '');
+              const clinicName = String(r['Clinic Name'] || (hasNewCols ? r[8] : r[6]) || '');
+              const apptReq = String(r['Appt Required'] || (hasNewCols ? r[10] : r[8]) || 'No');
+              const schedDate = String(r['Scheduled Date'] || (hasNewCols ? r[11] : r[9]) || '');
+              const schedTime = String(r['Scheduled Time'] || (hasNewCols ? r[12] : r[10]) || '');
+              const meetingAddr = String(r['Meeting / Collection Address'] || (hasNewCols ? r[13] : r[11]) || '');
+              const status = String(r['Status'] || (hasNewCols ? r[14] : r[12]) || 'Pending');
+              const dateCompleted = String(r['Date Completed'] || (hasNewCols ? r[15] : r[13]) || '');
+              const paperwork = String(r['Paperwork / Kit Notes'] || (hasNewCols ? r[16] : r[14]) || '');
 
               // Matching clinic info
               const matchedClinic = clinics.find(c => c.name.toLowerCase() === clinicName.toLowerCase());
@@ -373,6 +398,19 @@ class DrugTestingEngine {
                       📍 ${loc} &bull; Job: <span style="font-family: monospace; color: #93c5fd;">${jobNum}</span>
                     </div>
                     ${phone ? `<div style="font-size: 10.5px; color: #a5b4fc; margin-top: 2px;">📞 ${phone}</div>` : ''}
+                  </td>
+
+                  <!-- Test Option & Agency -->
+                  <td style="padding: 10px 14px; vertical-align: top;">
+                    <select style="width: 100%; box-sizing: border-box; padding: 3px 6px; font-size: 11px; font-weight: 600; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; color: #fff; margin-bottom: 4px;" onchange="window.drugTestingEngine.updateTestType('${empName}', this.value)">
+                      <option value="Drug Only" ${testType === 'Drug Only' ? 'selected' : ''}>💊 Drug Only</option>
+                      <option value="Drug & Alcohol" ${testType === 'Drug & Alcohol' ? 'selected' : ''}>🍷💊 Drug & Alcohol</option>
+                    </select>
+                    <select style="width: 100%; box-sizing: border-box; padding: 3px 6px; font-size: 11px; font-weight: 700; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; ${this.getClassBadgeStyle(classification)}" onchange="window.drugTestingEngine.updateClassification('${empName}', this.value)">
+                      <option value="FMCSA" ${classification === 'FMCSA' ? 'selected' : ''}>FMCSA</option>
+                      <option value="PHMSA" ${classification === 'PHMSA' ? 'selected' : ''}>PHMSA</option>
+                      <option value="Non-DOT" ${classification === 'Non-DOT' ? 'selected' : ''}>Non-DOT</option>
+                    </select>
                   </td>
 
                   <!-- Collection Type Toggle -->
@@ -503,6 +541,42 @@ class DrugTestingEngine {
     `;
   }
 
+  setTypeFilter(val) {
+    this.typeFilter = val;
+    this.render();
+  }
+
+  setClassFilter(val) {
+    this.classFilter = val;
+    this.render();
+  }
+
+  getClassBadgeStyle(cls) {
+    if (cls === 'PHMSA') return 'color: #c084fc; border-color: rgba(192, 132, 252, 0.5);';
+    if (cls === 'Non-DOT') return 'color: #2dd4bf; border-color: rgba(45, 212, 191, 0.5);';
+    return 'color: #60a5fa; border-color: rgba(96, 165, 250, 0.5);'; // FMCSA default
+  }
+
+  async updateTestType(empName, newType) {
+    const row = this.findTestRow(empName);
+    if (row) {
+      row['Test Type'] = newType;
+      if (row[5] !== undefined) row[5] = newType;
+      await this.saveTable(this.getTestsTable());
+      this.render();
+    }
+  }
+
+  async updateClassification(empName, newClass) {
+    const row = this.findTestRow(empName);
+    if (row) {
+      row['Classification'] = newClass;
+      if (row[6] !== undefined) row[6] = newClass;
+      await this.saveTable(this.getTestsTable());
+      this.render();
+    }
+  }
+
   // --- Mutation & Update Helpers ---
 
   async saveTable(table) {
@@ -529,10 +603,12 @@ class DrugTestingEngine {
     if (row) {
       row['Status'] = newStatus;
       if (row[12] !== undefined) row[12] = newStatus;
-      if (newStatus.toLowerCase() === 'completed' && !row['Date Completed'] && !row[13]) {
+      if (row[14] !== undefined) row[14] = newStatus;
+      if (newStatus.toLowerCase() === 'completed' && !row['Date Completed'] && !row[13] && !row[15]) {
         const today = new Date().toLocaleDateString();
         row['Date Completed'] = today;
         if (row[13] !== undefined) row[13] = today;
+        if (row[15] !== undefined) row[15] = today;
       }
       await this.saveTable(this.getTestsTable());
       this.render();
@@ -544,6 +620,7 @@ class DrugTestingEngine {
     if (row) {
       row['Collection Type'] = newType;
       if (row[5] !== undefined) row[5] = newType;
+      if (row[7] !== undefined) row[7] = newType;
       await this.saveTable(this.getTestsTable());
       this.render();
     }
@@ -654,6 +731,8 @@ class DrugTestingEngine {
       'Location': loc,
       'Job Number': job,
       'Phone Number': phone,
+      'Test Type': 'Drug Only',
+      'Classification': 'FMCSA',
       'Collection Type': 'Clinic Visit',
       'Clinic Name': '',
       'Clinic City / State': '',
@@ -693,8 +772,27 @@ class DrugTestingEngine {
             <button style="background: transparent; border: none; font-size: 18px; color: var(--text-muted); cursor: pointer;" onclick="document.getElementById('dt-modal-container').innerHTML=''">✕</button>
           </div>
           <p style="font-size: 11.5px; color: var(--text-muted); margin: 0 0 12px 0;">
-            Paste employee names from your notification email (one per line). Names will be automatically matched to active employees to pull their location, job number, and phone.
+            Paste employee names from your notification email (one per line). Names will be automatically matched to active employees. Auto-detects lines containing "Alcohol", "PHMSA", or "Non-DOT".
           </p>
+
+          <div style="display: flex; gap: 12px; margin-bottom: 12px;">
+            <div style="flex: 1;">
+              <label style="display: block; font-size: 11px; font-weight: 600; color: var(--text-muted); margin-bottom: 4px;">Default Test Type:</label>
+              <select id="dt-bulk-test-type" style="width: 100%; box-sizing: border-box; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; color: #fff; padding: 6px 8px; font-size: 11.5px;">
+                <option value="Drug Only" selected>💊 Drug Only</option>
+                <option value="Drug & Alcohol">🍷💊 Drug & Alcohol</option>
+              </select>
+            </div>
+            <div style="flex: 1;">
+              <label style="display: block; font-size: 11px; font-weight: 600; color: var(--text-muted); margin-bottom: 4px;">Default Classification:</label>
+              <select id="dt-bulk-classification" style="width: 100%; box-sizing: border-box; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; color: #fff; padding: 6px 8px; font-size: 11.5px;">
+                <option value="FMCSA" selected>FMCSA</option>
+                <option value="PHMSA">PHMSA</option>
+                <option value="Non-DOT">Non-DOT</option>
+              </select>
+            </div>
+          </div>
+
           <textarea id="dt-bulk-textarea" rows="10" placeholder="John Doe&#10;Jane Smith&#10;Robert Johnson" style="width: 100%; box-sizing: border-box; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; padding: 10px; font-family: monospace; font-size: 12px;"></textarea>
           <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;">
             <button class="btn btn-secondary" onclick="document.getElementById('dt-modal-container').innerHTML=''">Cancel</button>
@@ -707,6 +805,9 @@ class DrugTestingEngine {
 
   async processBulkRoster() {
     const text = document.getElementById('dt-bulk-textarea')?.value || '';
+    const defaultTestType = document.getElementById('dt-bulk-test-type')?.value || 'Drug Only';
+    const defaultClassification = document.getElementById('dt-bulk-classification')?.value || 'FMCSA';
+
     const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 0);
     if (lines.length === 0) return;
 
@@ -715,8 +816,17 @@ class DrugTestingEngine {
     let addedCount = 0;
 
     lines.forEach(line => {
+      const lineLower = line.toLowerCase();
+      let testType = defaultTestType;
+      if (lineLower.includes('alcohol')) testType = 'Drug & Alcohol';
+
+      let classification = defaultClassification;
+      if (lineLower.includes('phmsa') || lineLower.includes('phsma')) classification = 'PHMSA';
+      else if (lineLower.includes('non-dot') || lineLower.includes('nondot')) classification = 'Non-DOT';
+      else if (lineLower.includes('fmcsa')) classification = 'FMCSA';
+
       // Clean up punctuation or leading numbers
-      const cleanName = line.replace(/^\d+[\.\-\)]\s*/, '').trim();
+      const cleanName = line.split('\t')[0].replace(/^\d+[\.\-\)]\s*/, '').trim();
       if (!cleanName) return;
 
       // Find match
@@ -740,6 +850,8 @@ class DrugTestingEngine {
           'Location': loc,
           'Job Number': job,
           'Phone Number': phone,
+          'Test Type': testType,
+          'Classification': classification,
           'Collection Type': 'Clinic Visit',
           'Clinic Name': '',
           'Clinic City / State': '',

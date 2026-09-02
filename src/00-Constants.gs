@@ -359,18 +359,20 @@ var COLS = {
     LOCATION: 3,          // C - Physical Location / City
     JOB_NUMBER: 4,        // D - Job Number / Crew
     PHONE: 5,             // E - Phone Number
-    COLLECTION_TYPE: 6,   // F - Clinic Visit / Mobile Collector
-    CLINIC_NAME: 7,       // G - Selected Clinic / Provider Name
-    CLINIC_CITY: 8,       // H - Clinic City/State
-    APPT_REQUIRED: 9,     // I - Yes / No / Suggested
-    SCHEDULED_DATE: 10,   // J - Scheduled Date
-    SCHEDULED_TIME: 11,   // K - Scheduled Time
-    MEETING_ADDRESS: 12,  // L - Meeting / Collection Address (for Mobile Collector)
-    STATUS: 13,           // M - Pending, Scheduled, Completed, Excused
-    DATE_COMPLETED: 14,   // N - Date Completed
-    PAPERWORK_NOTES: 15,  // O - Paperwork / Kit requirements
-    NOTES: 16,            // P - Additional Notes / Confirmation # / Lab Results
-    DATE_ADDED: 17        // Q - Timestamp Created
+    TEST_TYPE: 6,         // F - Test Type (Drug Only / Drug & Alcohol)
+    CLASSIFICATION: 7,    // G - Agency Classification (PHMSA / FMCSA / Non-DOT)
+    COLLECTION_TYPE: 8,   // H - Clinic Visit / Mobile Collector
+    CLINIC_NAME: 9,       // I - Selected Clinic / Provider Name
+    CLINIC_CITY: 10,      // J - Clinic City/State
+    APPT_REQUIRED: 11,    // K - Yes / No / Suggested
+    SCHEDULED_DATE: 12,   // L - Scheduled Date
+    SCHEDULED_TIME: 13,   // M - Scheduled Time
+    MEETING_ADDRESS: 14,  // N - Meeting / Collection Address (for Mobile Collector)
+    STATUS: 15,           // O - Pending, Scheduled, Completed, Excused
+    DATE_COMPLETED: 16,   // P - Date Completed
+    PAPERWORK_NOTES: 17,  // Q - Paperwork / Kit requirements
+    NOTES: 18,            // R - Additional Notes / Confirmation # / Lab Results
+    DATE_ADDED: 19        // S - Timestamp Created
   },
 
   // Drug Test Clinics Sheet
