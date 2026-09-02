@@ -60,20 +60,44 @@ class DrugTestingEngine {
     this.ensureOutboxSynced();
   }
 
-  ensureOutboxSynced() {
+  async ensureOutboxSynced() {
     const t = this.getTestsTable();
     if (t && t.rows && t.rows.length > 0 && this.db && typeof this.db.addMutation === 'function') {
       const outbox = (typeof this.db.getOutbox === 'function' ? this.db.getOutbox() : this.db.outbox) || [];
       const hasDrugTestMutation = outbox.some(m => m.tableKey === 'dot_drug_tests' || m.sheetName === 'DOT Drug Tests');
       if (!hasDrugTestMutation) {
-        this.db.addMutation({
+        await this.db.addMutation({
           action: 'REPLACE_TABLE_DATA',
           sheetName: 'DOT Drug Tests',
           tableKey: 'dot_drug_tests',
           headers: t.headers || ['Quarter', 'Employee Name', 'Location', 'Job Number', 'Phone Number', 'Test Type', 'Classification', 'Collection Type', 'Clinic Name', 'Clinic City / State', 'Appt Required', 'Scheduled Date', 'Scheduled Time', 'Meeting / Collection Address', 'Status', 'Date Completed', 'Paperwork / Kit Notes', 'Notes', 'Date Added'],
           rows: t.rows || []
         });
+        if (window.syncEngine && typeof window.syncEngine.renderOutboxBadge === 'function') {
+          window.syncEngine.renderOutboxBadge();
+        }
       }
+    }
+  }
+
+  async forcePushTests() {
+    const t = this.getTestsTable();
+    if (!t || !t.rows || t.rows.length === 0) {
+      alert('No drug test records to push.');
+      return;
+    }
+    if (this.db && typeof this.db.addMutation === 'function') {
+      await this.db.addMutation({
+        action: 'REPLACE_TABLE_DATA',
+        sheetName: 'DOT Drug Tests',
+        tableKey: 'dot_drug_tests',
+        headers: t.headers || ['Quarter', 'Employee Name', 'Location', 'Job Number', 'Phone Number', 'Test Type', 'Classification', 'Collection Type', 'Clinic Name', 'Clinic City / State', 'Appt Required', 'Scheduled Date', 'Scheduled Time', 'Meeting / Collection Address', 'Status', 'Date Completed', 'Paperwork / Kit Notes', 'Notes', 'Date Added'],
+        rows: t.rows || []
+      });
+    }
+    if (window.syncEngine) {
+      window.syncEngine.renderOutboxBadge();
+      await window.syncEngine.pushChangesToGoogleSheets();
     }
   }
 
@@ -307,6 +331,10 @@ class DrugTestingEngine {
 
             <button class="btn btn-primary" style="font-size: 11.5px; font-weight: 700; background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%); display: inline-flex; align-items: center; gap: 6px; border: none;" onclick="window.drugTestingEngine.openBulkPasteModal()">
               <span>📋</span> Bulk Paste Roster
+            </button>
+
+            <button class="btn btn-primary" style="font-size: 11.5px; font-weight: 700; background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); display: inline-flex; align-items: center; gap: 6px; border: none;" onclick="window.drugTestingEngine.forcePushTests()" title="Push Drug Tests directly to Google Sheets">
+              <span>⬆️</span> Push Tests to Sheets
             </button>
           </div>
         </div>
