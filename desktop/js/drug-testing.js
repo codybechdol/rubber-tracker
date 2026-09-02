@@ -880,6 +880,9 @@ class DrugTestingEngine {
       }
       await this.saveTable(this.getTestsTable());
       this.render();
+      if (window.tripPlanner && typeof window.tripPlanner.renderPlanner === 'function') {
+        window.tripPlanner.renderPlanner();
+      }
     }
   }
 
@@ -889,6 +892,9 @@ class DrugTestingEngine {
       row['Scheduled Time'] = timeVal;
       if (row[10] !== undefined) row[10] = timeVal;
       await this.saveTable(this.getTestsTable());
+      if (window.tripPlanner && typeof window.tripPlanner.renderPlanner === 'function') {
+        window.tripPlanner.renderPlanner();
+      }
     }
   }
 
@@ -930,9 +936,12 @@ class DrugTestingEngine {
       await this.saveTable(this.getTestsTable());
       this.render();
 
-      // Trigger re-render of TaskManager and EmployeeProfile if active
+      // Trigger re-render of TaskManager, TripPlanner, and EmployeeProfile if active
       if (window.taskManager && typeof window.taskManager.renderTasks === 'function') {
         window.taskManager.renderTasks();
+      }
+      if (window.tripPlanner && typeof window.tripPlanner.renderPlanner === 'function') {
+        window.tripPlanner.renderPlanner();
       }
       if (window.employeeProfileEngine && typeof window.employeeProfileEngine.renderModalContent === 'function') {
         const modal = document.getElementById('employee-profile-modal');
@@ -954,6 +963,9 @@ class DrugTestingEngine {
     t.rowCount = t.rows.length;
     await this.saveTable(t);
     this.render();
+    if (window.tripPlanner && typeof window.tripPlanner.renderPlanner === 'function') {
+      window.tripPlanner.renderPlanner();
+    }
   }
 
   async addSelectedEmployee() {

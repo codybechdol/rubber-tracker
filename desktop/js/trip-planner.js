@@ -210,6 +210,155 @@ class TripPlannerApp {
     this.db.savePlannedTrips(this.plannedTrips);
   }
 
+  /**
+   * Normalizes various date string formats (YYYY-MM-DD, MM/DD/YYYY, ISO) to standard YYYY-MM-DD.
+   */
+  normalizeDateKey(dateStr) {
+    if (!dateStr) return '';
+    const s = String(dateStr).trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    if (s.includes('/')) {
+      const parts = s.split('/');
+      if (parts.length === 3) {
+        const mm = parts[0].padStart(2, '0');
+        const dd = parts[1].padStart(2, '0');
+        let yyyy = parts[2].trim();
+        if (yyyy.length === 2) yyyy = '20' + yyyy;
+        if (yyyy.length === 4) return `${yyyy}-${mm}-${dd}`;
+      }
+    }
+    if (s.includes('T')) {
+      const d = s.split('T')[0];
+      if (/^\d{4}-\d{2}-\d{2}$/.test(d)) return d;
+    }
+    const parsed = new Date(s);
+    if (!isNaN(parsed.getTime())) {
+      const yyyy = parsed.getFullYear();
+      const mm = String(parsed.getMonth() + 1).padStart(2, '0');
+      const dd = String(parsed.getDate()).padStart(2, '0');
+      return `${yyyy}-${mm}-${dd}`;
+    }
+    return '';
+  }
+
+  /**
+   * Formats a time string (e.g. 09:30 or 14:00) into friendly 12-hour AM/PM format.
+   */
+  formatTimeDisplay(timeStr) {
+    if (!timeStr) return '';
+    const s = String(timeStr).trim();
+    if (s.includes('AM') || s.includes('PM') || s.includes('am') || s.includes('pm')) return s;
+    if (s.includes(':')) {
+      const parts = s.split(':');
+      let hh = parseInt(parts[0], 10);
+      const mm = parts[1].padStart(2, '0');
+      if (isNaN(hh)) return s;
+      const ampm = hh >= 12 ? 'PM' : 'AM';
+      hh = hh % 12;
+      if (hh === 0) hh = 12;
+      return `${hh}:${mm} ${ampm}`;
+    }
+    return s;
+  }
+
+  /**
+   * Retrieves all DOT Drug Tests assigned to a specific dateKey (YYYY-MM-DD).
+   */
+  getDrugTestsForDate(dateKey) {
+    if (!this.db) this.db = window.localDB || window.safetyDB;
+    if (!this.db) return [];
+
+    const table = this.db.getTable('dot_drug_tests');
+    if (!table || !table.rows) return [];
+
+    const matched = [];
+    table.rows.forEach(r => {
+      const empName = String(r['Employee Name'] || r['Name'] || r[1] || '').trim();
+      if (!empName || empName.toLowerCase() === 'employee name') return;
+
+      const schedDate = String(r['Scheduled Date'] || r[11] || r[9] || '').trim();
+      if (!schedDate || schedDate === 'N/A') return;
+
+      const normDate = this.normalizeDateKey(schedDate);
+      if (normDate !== dateKey) return;
+
+      const status = String(r['Status'] || r[14] || 'Pending').trim();
+      if (status.toLowerCase() === 'excused') return;
+
+      const schedTime = String(r['Scheduled Time'] || r[12] || r[10] || '').trim();
+      const testType = String(r['Test Type'] || r[5] || 'Drug Only').trim();
+      const classification = String(r['Classification'] || r[6] || 'FMCSA').trim();
+      const collectionType = String(r['Collection Type'] || r[7] || 'Clinic Visit').trim();
+      const isMobile = collectionType.toLowerCase().includes('mobile');
+      const clinicName = String(r['Clinic Name'] || r[8] || '').trim();
+      const clinicCity = String(r['Clinic City / State'] || r[9] || '').trim();
+      const meetingAddr = String(r['Meeting / Collection Address'] || r[13] || '').trim();
+      const phone = String(r['Phone Number'] || r[4] || '').trim();
+      const job = String(r['Job Number'] || r[3] || '').trim();
+      const location = String(r['Location'] || r[2] || '').trim();
+
+      matched.push({
+        employee: empName,
+        date: schedDate,
+        dateKey: normDate,
+        time: schedTime,
+        status: status,
+        testType: testType,
+        classification: classification,
+        collectionType: collectionType,
+        isMobile: isMobile,
+        clinicName: clinicName,
+        clinicCity: clinicCity,
+        meetingAddr: meetingAddr,
+        phone: phone,
+        job: job,
+        location: location
+      });
+    });
+
+    // Sort chronologically by time, then name
+    matched.sort((a, b) => {
+      if (a.time && b.time) return a.time.localeCompare(b.time);
+      if (a.time) return -1;
+      if (b.time) return 1;
+      return a.employee.localeCompare(b.employee);
+    });
+
+    return matched;
+  }
+
+  /**
+   * One-click action to mark a drug test appointment done directly from Trip Planner.
+   */
+  async markDrugTestDone(empName, dateKey) {
+    if (!confirm(`Mark DOT Drug Test completed for ${empName}?`)) return;
+
+    if (window.drugTestingEngine && typeof window.drugTestingEngine.markComplete === 'function') {
+      await window.drugTestingEngine.markComplete(empName, dateKey);
+    } else {
+      const table = this.db ? this.db.getTable('dot_drug_tests') : null;
+      if (table && table.rows) {
+        const row = table.rows.find(r => {
+          const n = String(r['Employee Name'] || r['Name'] || r[1] || '').trim().toLowerCase();
+          return n === empName.toLowerCase().trim();
+        });
+        if (row) {
+          row['Status'] = 'Completed';
+          row['Date Completed'] = dateKey;
+          if (this.db && typeof this.db.addMutation === 'function') {
+            await this.db.addMutation({
+              action: 'UPDATE_ROW',
+              sheetName: 'DOT Drug Tests',
+              tableKey: 'dot_drug_tests',
+              row: row
+            });
+          }
+        }
+      }
+    }
+    this.renderPlanner();
+  }
+
   openHolidaysModal() {
     const modal = document.getElementById('holidays-modal');
     if (!modal) return;
@@ -755,8 +904,8 @@ class TripPlannerApp {
       const firstDay = weekDays[0];
       const lastDay = weekDays[weekDays.length - 1];
       const weekDateKey = firstDay.dateKey;
-
       const tripsInWeek = weekDays.reduce((sum, d) => sum + this.getTripsForDate(d.dateKey).length, 0);
+      const drugTestsInWeek = weekDays.reduce((sum, d) => sum + this.getDrugTestsForDate(d.dateKey).length, 0);
 
       const section = document.createElement('div');
       section.className = 'trip-planner-week-section';
@@ -779,9 +928,11 @@ class TripPlannerApp {
             `}
           </div>
 
-          <div style="display: flex; align-items: center; gap: 10px;">
-            <span style="font-size: 11.5px; color: ${tripsInWeek > 0 ? '#4ade80' : 'var(--text-muted)'}; font-weight: 600;">
-              ${tripsInWeek > 0 ? `🚗 ${tripsInWeek} City Visit${tripsInWeek > 1 ? 's' : ''} Scheduled` : '⚪ No trips scheduled'}
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 11.5px; color: ${(tripsInWeek > 0 || drugTestsInWeek > 0) ? '#4ade80' : 'var(--text-muted)'}; font-weight: 600; display: flex; align-items: center; gap: 6px;">
+              ${tripsInWeek > 0 ? `<span>🚗 ${tripsInWeek} City Visit${tripsInWeek > 1 ? 's' : ''}</span>` : ''}
+              ${drugTestsInWeek > 0 ? `<span class="badge" style="background: rgba(168, 85, 247, 0.2); color: #d8b4fe; border: 1px solid rgba(168, 85, 247, 0.4); font-size: 10px; font-weight: 700; padding: 1px 6px;">🧪 ${drugTestsInWeek} Drug Test${drugTestsInWeek > 1 ? 's' : ''}</span>` : ''}
+              ${tripsInWeek === 0 && drugTestsInWeek === 0 ? '⚪ No trips or tests scheduled' : ''}
             </span>
             ${tripsInWeek > 0 ? `
               <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 10.5px; color: #f87171;" onclick="window.tripPlanner.clearWeekTrips('${weekDateKey}')" title="Clear scheduled trips for this week">
@@ -800,14 +951,82 @@ class TripPlannerApp {
       weekDays.forEach(day => {
         const dateKey = day.dateKey;
         const trips = this.getTripsForDate(dateKey);
+        const drugTests = this.getDrugTestsForDate(dateKey);
         const isHoliday = this.isDayHoliday(dateKey);
 
         const col = document.createElement('div');
         col.className = 'day-column';
 
-        let cardsHtml = '';
+        // 1. Render Drug Test appointments if scheduled on this date
+        let drugTestsHtml = '';
+        if (drugTests.length > 0) {
+          drugTestsHtml = `
+            <div class="drug-tests-day-section" style="margin-bottom: 8px; display: flex; flex-direction: column; gap: 6px;">
+              <div style="font-size: 10.5px; font-weight: 800; color: #c084fc; display: flex; align-items: center; justify-content: space-between; padding: 3px 6px; background: rgba(168, 85, 247, 0.12); border-radius: 4px; border-left: 3px solid #a855f7;">
+                <span style="display: flex; align-items: center; gap: 4px;">🧪 DOT Drug Tests (${drugTests.length})</span>
+                <button class="btn btn-secondary" style="padding: 1px 6px; font-size: 9.5px; color: #c084fc; border-color: rgba(168, 85, 247, 0.35); background: rgba(168, 85, 247, 0.08); cursor: pointer;" onclick="window.sheetNavigator.switchWorkspace('drug_testing')" title="Open DOT Drug Testing Workspace">Manage ↗</button>
+              </div>
+              ${drugTests.map(dt => `
+                <div class="drug-test-appointment-card" style="background: var(--bg-primary); border: 1px solid rgba(168, 85, 247, 0.35); border-left: 4px solid #a855f7; border-radius: 6px; padding: 8px 10px; box-shadow: 0 2px 6px rgba(0,0,0,0.25);">
+                  <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px;">
+                    <div style="font-weight: 700; font-size: 12.5px; color: #f8fafc; cursor: pointer;" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(dt.employee)}', 'drug_tests');}" title="Click to view employee profile">
+                      👤 <span style="color: #60a5fa; text-decoration: underline dotted;">${this.escapeHtml(dt.employee)}</span>
+                    </div>
+                    <span class="badge" style="font-size: 9.5px; padding: 1px 5px; font-weight: 700; ${dt.time ? 'background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4);' : 'background: rgba(148, 163, 184, 0.15); color: #94a3b8;'}">
+                      ⏰ ${dt.time ? this.formatTimeDisplay(dt.time) : 'Time TBD'}
+                    </span>
+                  </div>
+
+                  <div style="font-size: 10px; color: #cbd5e1; margin-bottom: 4px; display: flex; align-items: center; gap: 4px; flex-wrap: wrap;">
+                    <span class="badge" style="background: rgba(168, 85, 247, 0.15); color: #d8b4fe; font-size: 9.5px; padding: 1px 4px;">
+                      ${this.escapeHtml(dt.testType)} (${this.escapeHtml(dt.classification)})
+                    </span>
+                    <span class="badge" style="background: ${dt.isMobile ? 'rgba(245, 158, 11, 0.15)' : 'rgba(59, 130, 246, 0.15)'}; color: ${dt.isMobile ? '#fcd34d' : '#93c5fd'}; font-size: 9.5px; padding: 1px 4px;">
+                      ${dt.isMobile ? '🚐 Mobile' : '🏥 Clinic'}
+                    </span>
+                    <span class="badge" style="background: ${dt.status === 'Completed' ? 'rgba(16, 185, 129, 0.2)' : (dt.status === 'Scheduled' ? 'rgba(59, 130, 246, 0.2)' : 'rgba(234, 179, 8, 0.2)')}; color: ${dt.status === 'Completed' ? '#34d399' : (dt.status === 'Scheduled' ? '#93c5fd' : '#facc15')}; font-size: 9.5px; padding: 1px 4px;">
+                      ${dt.status === 'Completed' ? '✅ Done' : (dt.status === 'Scheduled' ? '📅 Sched' : '⏳ Pending')}
+                    </span>
+                  </div>
+
+                  ${dt.meetingAddr ? `
+                    <div style="font-size: 10.5px; color: #94a3b8; margin-top: 3px; line-height: 1.3;">
+                      📍 <strong style="color: #cbd5e1;">Meet:</strong> ${this.escapeHtml(dt.meetingAddr)}
+                    </div>
+                  ` : (dt.clinicName ? `
+                    <div style="font-size: 10.5px; color: #94a3b8; margin-top: 3px; line-height: 1.3;">
+                      🏥 <strong style="color: #cbd5e1;">Clinic:</strong> ${this.escapeHtml(dt.clinicName)}${dt.clinicCity ? ' (' + this.escapeHtml(dt.clinicCity) + ')' : ''}
+                    </div>
+                  ` : '')}
+
+                  ${dt.phone ? `
+                    <div style="font-size: 10px; color: #64748b; margin-top: 2px;">
+                      📞 ${this.escapeHtml(dt.phone)} ${dt.job ? `· Job ${this.escapeHtml(dt.job)}` : ''}
+                    </div>
+                  ` : ''}
+
+                  <div style="display: flex; justify-content: flex-end; gap: 4px; margin-top: 5px; padding-top: 4px; border-top: 1px solid rgba(255,255,255,0.06);">
+                    ${dt.status !== 'Completed' ? `
+                      <button class="btn btn-primary" style="padding: 2px 7px; font-size: 10px; background: #10b981; border: none; font-weight: 700; cursor: pointer;" onclick="window.tripPlanner.markDrugTestDone('${this.escapeJs(dt.employee)}', '${dateKey}')" title="Mark test completed today">
+                        ✅ Done
+                      </button>
+                    ` : `
+                      <span style="font-size: 10px; color: #34d399; font-weight: 700; display: flex; align-items: center; gap: 2px;">✓ Completed</span>
+                    `}
+                    <button class="btn btn-secondary" style="padding: 2px 6px; font-size: 10px; color: #c084fc; border-color: rgba(168, 85, 247, 0.3); cursor: pointer;" onclick="window.sheetNavigator.switchWorkspace('drug_testing')" title="View in DOT Drug Testing">
+                      🔍 Details
+                    </button>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+          `;
+        }
+
+        // 2. Render City Visit Cards
+        let tripsHtml = '';
         if (trips.length > 0) {
-          cardsHtml = trips.map(trip => {
+          tripsHtml = trips.map(trip => {
             const locInfo = locMap[trip.location] || null;
             const drive = this.getDriveTime(trip.location);
 
@@ -879,24 +1098,31 @@ class TripPlannerApp {
           }).join('');
 
           if (!isHoliday) {
-            cardsHtml += `
+            tripsHtml += `
               <div style="color: var(--text-muted); font-size: 11px; text-align: center; border: 1px dashed rgba(255,255,255,0.1); border-radius: 6px; padding: 8px; margin-top: 4px; opacity: 0.85;">
                 + Drop another city here
               </div>
             `;
           }
         } else {
-          cardsHtml = `
-            <div style="color: var(--text-muted); font-size: 11.5px; text-align: center; margin-top: 30px; border: 1px dashed var(--border-color); border-radius: 6px; padding: 14px;">
-              ${isHoliday ? '🏖️ Holiday Day' : 'Drag city here'}
+          tripsHtml = `
+            <div style="color: var(--text-muted); font-size: 11px; text-align: center; margin-top: ${drugTests.length > 0 ? '4px' : '30px'}; border: 1px dashed var(--border-color); border-radius: 6px; padding: ${drugTests.length > 0 ? '8px' : '14px'};">
+              ${isHoliday ? '🏖️ Holiday Day' : '+ Drop city here'}
             </div>
           `;
         }
 
+        const cardsHtml = drugTestsHtml + tripsHtml;
+
         col.innerHTML = `
-          <div class="day-header" style="background: ${isHoliday ? 'linear-gradient(90deg, #854d0e 0%, #1e293b 100%)' : '#1e293b'};">
+          <div class="day-header" style="background: ${isHoliday ? 'linear-gradient(90deg, #854d0e 0%, #1e293b 100%)' : (drugTests.length > 0 ? 'linear-gradient(90deg, rgba(88, 28, 135, 0.4) 0%, #1e293b 100%)' : '#1e293b')};">
             <div>
               <span style="font-weight: 800; color: #f8fafc;">${day.dayName}, ${day.formattedDate}</span>
+              ${drugTests.length > 0 ? `
+                <span class="badge" style="background: rgba(168, 85, 247, 0.25); color: #d8b4fe; border: 1px solid rgba(168, 85, 247, 0.4); font-size: 9px; padding: 1px 4px; border-radius: 3px; margin-left: 4px;" title="${drugTests.length} DOT Drug Test Appt(s) Scheduled">
+                  🧪 ${drugTests.length}
+                </span>
+              ` : ''}
             </div>
             <div>
               <span class="badge" style="background: ${isHoliday ? '#ca8a04' : (day.isWorkDay ? '#0284c7' : '#475569')}; color: #fff; font-size: 9.5px; padding: 2px 5px; border-radius: 4px;">
