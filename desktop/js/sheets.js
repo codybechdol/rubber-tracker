@@ -523,6 +523,66 @@ class SheetNavigator {
   }
 
   /**
+   * Deletes a specific certification record row from Expiring Certs and syncs change.
+   */
+  async deleteCertRow(sheetRowIdx) {
+    const tableData = this.db.getTable('expiring_certs');
+    if (!tableData || !tableData.rows) return;
+
+    let targetIdx = -1;
+    if (tableData.rows.some(r => r._rowIdx !== undefined)) {
+      targetIdx = tableData.rows.findIndex(r => r._rowIdx === sheetRowIdx);
+    }
+    if (targetIdx === -1 && sheetRowIdx >= 2) {
+      targetIdx = sheetRowIdx - 2;
+    }
+
+    const targetRow = tableData.rows[targetIdx];
+    if (!targetRow) {
+      alert('Could not locate the selected record to delete.');
+      return;
+    }
+
+    const empName = targetRow['Employee Name'] || targetRow['Name'] || 'this employee';
+    const certType = targetRow['Item Type'] || targetRow['Cert Type'] || 'this certification';
+
+    if (!confirm(`Are you sure you want to delete the "${certType}" certification record for ${empName}?`)) {
+      return;
+    }
+
+    tableData.rows.splice(targetIdx, 1);
+    tableData.rows.forEach((r, idx) => {
+      r._rowIdx = idx + 2;
+    });
+
+    if (tableData.headers) {
+      tableData.rawGrid = [tableData.headers];
+      tableData.rows.forEach(r => {
+        tableData.rawGrid.push(tableData.headers.map(h => r[h] !== undefined ? r[h] : ''));
+      });
+      tableData.maxRows = tableData.rawGrid.length;
+    }
+    tableData.rowCount = tableData.rows.length;
+
+    if (this.db && typeof this.db.addMutation === 'function') {
+      await this.db.addMutation({
+        action: 'REPLACE_TABLE_DATA',
+        sheetName: 'Expiring Certs',
+        tableKey: 'expiring_certs',
+        headers: tableData.headers,
+        rows: tableData.rows,
+        rawGrid: tableData.rawGrid
+      });
+    }
+
+    if (typeof this.db.setSnapshot === 'function' && this.db.snapshot) {
+      await this.db.setSnapshot(this.db.snapshot);
+    }
+
+    this.renderExpiringCerts();
+  }
+
+  /**
    * Initializes all 16 company certification records for all active employees if missing in expiring_certs.
    */
   async ensureAllEmployeeCertsExist(silent = false) {
@@ -2108,6 +2168,9 @@ class SheetNavigator {
         ${this.escapeHtml(h)}<span style="color: var(--accent); font-weight: bold;">${sortIndicator}</span>
       </th>`;
     });
+    if (this.currentSheetKey === 'expiring_certs') {
+      html += `<th style="width: 48px; text-align: center;">Action</th>`;
+    }
     html += `</tr></thead><tbody>`;
 
     const isJobTracking = this.currentSheetKey === 'job_tracking';
@@ -2506,6 +2569,11 @@ class SheetNavigator {
                      data-item="${this.escapeHtml(itemIdentifier)}"
                      data-sheet="${this.escapeHtml(tableData.name)}">${customCellHtml !== null ? customCellHtml : this.escapeHtml(val)}</td>`;
       });
+      if (this.currentSheetKey === 'expiring_certs') {
+        html += `<td style="text-align: center; width: 48px;">
+          <button class="btn btn-secondary" style="padding: 2px 7px; font-size: 11px; color: #f87171; border-color: rgba(239, 68, 68, 0.35); background: rgba(239, 68, 68, 0.08); cursor: pointer;" onclick="window.sheetNavigator.deleteCertRow(${sheetRowIdx})" title="Delete this certification record">🗑️</button>
+        </td>`;
+      }
       html += `</tr>`;
     });
 

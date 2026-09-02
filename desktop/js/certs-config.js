@@ -10,6 +10,7 @@ class CertsConfigEngine {
   constructor(db) {
     this.db = db;
     this.storageKey = 'EXPIRING_CERTS_CONFIG';
+    this.deletedStorageKey = 'EXPIRING_CERTS_DELETED_KEYS';
 
     // Standard available job classifications for role selection
     this.jobRoleGroups = [
@@ -77,20 +78,26 @@ class CertsConfigEngine {
    */
   loadConfig() {
     try {
+      const deletedRaw = localStorage.getItem(this.deletedStorageKey);
+      const deletedKeys = new Set(deletedRaw ? JSON.parse(deletedRaw).map(k => String(k).toLowerCase().trim()) : []);
+
       const raw = localStorage.getItem(this.storageKey);
       if (raw) {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          // Merge with defaults to guarantee all standard certs exist
-          const merged = [...parsed];
-          const existingKeys = new Set(merged.map(c => String(c.key || c.name || '').toLowerCase().trim()));
+          // Filter out any deleted keys from parsed
+          const filtered = parsed.filter(c => !deletedKeys.has(String(c.key || c.name || '').toLowerCase().trim()));
+          const existingKeys = new Set(filtered.map(c => String(c.key || c.name || '').toLowerCase().trim()));
           this.defaultCerts.forEach(dc => {
-            if (!existingKeys.has(dc.key.toLowerCase())) {
-              merged.push(dc);
+            const dcKey = dc.key.toLowerCase().trim();
+            if (!existingKeys.has(dcKey) && !deletedKeys.has(dcKey)) {
+              filtered.push(dc);
             }
           });
-          return merged;
+          return filtered;
         }
+      } else {
+        return this.defaultCerts.filter(dc => !deletedKeys.has(dc.key.toLowerCase().trim()));
       }
     } catch (e) {
       console.warn('Could not parse saved certs config:', e);
@@ -194,6 +201,9 @@ class CertsConfigEngine {
             </div>
           </div>
           <div style="display: flex; gap: 8px;">
+            <button class="btn btn-secondary" onclick="window.certsConfigEngine.resetDefaultCerts()" style="font-size: 12px; font-weight: 600; color: #94a3b8; display: flex; align-items: center; gap: 6px; padding: 6px 12px;" title="Restore company default certification list">
+              <span>🔄</span> Reset Defaults
+            </button>
             <button class="btn btn-primary" onclick="window.certsConfigEngine.openAddCertModal()" style="font-size: 12px; font-weight: 700; background: #2563eb; display: flex; align-items: center; gap: 6px; padding: 6px 14px;">
               <span>➕</span> Add New Cert
             </button>
@@ -226,7 +236,7 @@ class CertsConfigEngine {
               </div>
             </div>
 
-            <div style="display: flex; align-items: center; gap: 12px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
               <!-- Expiration Term Select -->
               <div style="display: flex; align-items: center; gap: 6px;">
                 <label style="font-size: 11px; color: var(--text-muted); font-weight: 600;">Validity:</label>
@@ -249,9 +259,15 @@ class CertsConfigEngine {
                 </select>
               </div>
 
-              ${isCustom ? `
-                <button class="btn btn-secondary" style="color: #f87171; padding: 4px 8px; font-size: 11px;" onclick="window.certsConfigEngine.deleteCustomCert(${idx})" title="Delete Custom Certification">🗑️</button>
-              ` : ''}
+              <!-- Edit / Rename Button -->
+              <button class="btn btn-secondary" style="color: #60a5fa; border-color: rgba(96, 165, 250, 0.4); padding: 4px 10px; font-size: 11.5px; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;" onclick="window.certsConfigEngine.openEditCertModal(${idx})" title="Edit Name, Label, Validity & Roles">
+                <span>✏️</span> Edit
+              </button>
+
+              <!-- Delete Button -->
+              <button class="btn btn-secondary" style="color: #f87171; border-color: rgba(248, 113, 113, 0.4); padding: 4px 10px; font-size: 11.5px; font-weight: 600; display: inline-flex; align-items: center; gap: 4px;" onclick="window.certsConfigEngine.deleteCert(${idx})" title="Delete Certification and all its records">
+                <span>🗑️</span> Delete
+              </button>
             </div>
           </div>
 
@@ -430,17 +446,278 @@ class CertsConfigEngine {
   }
 
   /**
-   * Deletes a custom certification.
+   * Opens the "Edit / Rename Certification" modal.
    */
-  deleteCustomCert(idx) {
+  openEditCertModal(idx) {
     const cert = this.certs[idx];
-    if (!cert || !cert.custom) return;
+    if (!cert) return;
 
-    if (confirm(`Are you sure you want to delete the custom certification "${cert.label || cert.name}"?`)) {
-      this.certs.splice(idx, 1);
-      this.saveConfig();
-      this.renderConfigModal();
+    const modal = document.getElementById('edit-cert-modal');
+    if (!modal) return;
+
+    document.getElementById('edit-cert-index').value = idx;
+    document.getElementById('edit-cert-name').value = cert.key || cert.name || '';
+    document.getElementById('edit-cert-label').value = cert.label || cert.name || '';
+    document.getElementById('edit-cert-term').value = String(cert.termMonths !== undefined ? cert.termMonths : 12);
+    document.getElementById('edit-cert-scope').value = cert.requirementScope || 'all';
+
+    this.onEditScopeChange(cert.requirementScope || 'all', cert.requiredJobClasses || []);
+
+    modal.style.display = 'flex';
+  }
+
+  /**
+   * Closes the "Edit / Rename Certification" modal.
+   */
+  closeEditCertModal() {
+    const modal = document.getElementById('edit-cert-modal');
+    if (modal) modal.style.display = 'none';
+  }
+
+  /**
+   * Handles scope dropdown change in Edit Modal.
+   */
+  onEditScopeChange(scope, currentRoles) {
+    const container = document.getElementById('edit-cert-roles-container');
+    const grid = document.getElementById('edit-cert-roles-grid');
+    if (!container || !grid) return;
+
+    if (scope !== 'job_class') {
+      container.style.display = 'none';
+      return;
     }
+
+    container.style.display = 'block';
+
+    const idx = parseInt(document.getElementById('edit-cert-index').value, 10);
+    const cert = this.certs[idx];
+    const roles = currentRoles || (cert && cert.requiredJobClasses) || ['F', 'GF', 'SUP', 'JRY'];
+    const roleSet = new Set(roles.map(r => String(r).toUpperCase().trim()));
+
+    grid.innerHTML = this.jobRoleGroups.map(group => {
+      const checks = group.roles.map(r => {
+        const isChecked = roleSet.has(r.id.toUpperCase());
+        return `
+          <label style="display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-secondary); cursor: pointer;">
+            <input type="checkbox" class="edit-cert-role-chk" value="${r.id}" ${isChecked ? 'checked' : ''} style="accent-color: #3b82f6;" />
+            <span>${r.label}</span>
+          </label>
+        `;
+      }).join('');
+
+      return `
+        <div style="display: flex; flex-direction: column; gap: 4px;">
+          <div style="font-size: 10px; font-weight: 700; color: #cbd5e1; text-transform: uppercase; letter-spacing: 0.5px; border-bottom: 1px solid rgba(255,255,255,0.06); padding-bottom: 2px;">
+            ${group.groupName}
+          </div>
+          ${checks}
+        </div>
+      `;
+    }).join('');
+  }
+
+  /**
+   * Saves updates to an existing certification, automatically updating all matching table rows if renamed.
+   */
+  async saveEditCert() {
+    const idx = parseInt(document.getElementById('edit-cert-index').value, 10);
+    const cert = this.certs[idx];
+    if (!cert) return;
+
+    const newName = (document.getElementById('edit-cert-name').value || '').trim();
+    const newLabel = (document.getElementById('edit-cert-label').value || newName).trim();
+    const termMonths = parseInt(document.getElementById('edit-cert-term').value, 10) || 0;
+    const scope = document.getElementById('edit-cert-scope').value || 'all';
+
+    if (!newName) {
+      alert('Certification Name cannot be empty.');
+      return;
+    }
+
+    const oldKey = cert.key || cert.name;
+    const oldKeyLower = String(oldKey).toLowerCase().trim();
+    const newKeyLower = newName.toLowerCase().trim();
+
+    // Check duplicates if name changed
+    if (oldKeyLower !== newKeyLower) {
+      const duplicate = this.certs.some((c, i) => i !== idx && (c.key || c.name).toLowerCase().trim() === newKeyLower);
+      if (duplicate) {
+        alert(`A certification named "${newName}" already exists!`);
+        return;
+      }
+    }
+
+    // Collect selected roles
+    let selectedRoles = [];
+    if (scope === 'job_class') {
+      document.querySelectorAll('.edit-cert-role-chk:checked').forEach(chk => {
+        selectedRoles.push(chk.value);
+      });
+      if (selectedRoles.length === 0) {
+        selectedRoles = ['F', 'GF', 'SUP', 'JRY'];
+      }
+    }
+
+    // Update definition
+    cert.key = newName;
+    cert.name = newName;
+    cert.label = newLabel;
+    cert.termMonths = termMonths;
+    cert.isIssuedDate = (termMonths === 0);
+    cert.requirementScope = scope;
+    cert.requiredJobClasses = selectedRoles;
+
+    this.saveConfig();
+
+    // If renamed, update all matching rows in expiring_certs table
+    let updatedRowsCount = 0;
+    if (oldKeyLower !== newKeyLower) {
+      const certTable = this.db.getTable('expiring_certs');
+      if (certTable && certTable.rows) {
+        certTable.rows.forEach(r => {
+          const itemType = String(r['Item Type'] || r['Cert Type'] || r['Type'] || '').toLowerCase().trim();
+          if (itemType === oldKeyLower) {
+            r['Item Type'] = newName;
+            updatedRowsCount++;
+          }
+        });
+
+        if (updatedRowsCount > 0) {
+          if (certTable.headers) {
+            certTable.rawGrid = [certTable.headers];
+            certTable.rows.forEach(r => {
+              certTable.rawGrid.push(certTable.headers.map(h => r[h] !== undefined ? r[h] : ''));
+            });
+            certTable.maxRows = certTable.rawGrid.length;
+          }
+          certTable.rowCount = certTable.rows.length;
+
+          if (this.db && typeof this.db.addMutation === 'function') {
+            await this.db.addMutation({
+              action: 'REPLACE_TABLE_DATA',
+              sheetName: 'Expiring Certs',
+              tableKey: 'expiring_certs',
+              headers: certTable.headers,
+              rows: certTable.rows,
+              rawGrid: certTable.rawGrid
+            });
+          }
+
+          if (typeof this.db.setSnapshot === 'function' && this.db.snapshot) {
+            await this.db.setSnapshot(this.db.snapshot);
+          }
+        }
+      }
+    }
+
+    this.closeEditCertModal();
+    this.renderConfigModal();
+
+    if (window.sheetNavigator && (window.sheetNavigator.currentSheetKey === 'expiring_certs' || document.getElementById('expiring-certs-view')?.classList.contains('active'))) {
+      window.sheetNavigator.renderExpiringCerts();
+    }
+
+    const msg = oldKeyLower !== newKeyLower
+      ? `✅ Renamed "${oldKey}" to "${newName}" and updated ${updatedRowsCount} records in Expiring Certs!`
+      : `✅ Updated settings for "${newName}"!`;
+    alert(msg);
+  }
+
+  /**
+   * Deletes any certification (default or custom), blacklists it from re-adding,
+   * and optionally purges all associated rows from the Expiring Certs table.
+   */
+  async deleteCert(idx) {
+    const cert = this.certs[idx];
+    if (!cert) return;
+
+    const certName = cert.label || cert.name || cert.key;
+    const certKeyLower = String(cert.key || cert.name).toLowerCase().trim();
+
+    if (!confirm(`Are you sure you want to delete the certification "${certName}"?\n\n⚠️ This will permanently remove it from the requirements list and delete all "${cert.name}" rows from the Expiring Certs table.`)) {
+      return;
+    }
+
+    // 1. Add to deleted blacklist so loadConfig never auto-restores it
+    try {
+      const deletedRaw = localStorage.getItem(this.deletedStorageKey);
+      const deletedKeys = deletedRaw ? JSON.parse(deletedRaw) : [];
+      if (!deletedKeys.includes(certKeyLower)) {
+        deletedKeys.push(certKeyLower);
+        localStorage.setItem(this.deletedStorageKey, JSON.stringify(deletedKeys));
+      }
+    } catch (e) {
+      console.warn('Error saving deleted cert keys:', e);
+    }
+
+    // 2. Remove from active certs array
+    this.certs.splice(idx, 1);
+    this.saveConfig();
+
+    // 3. Remove all matching rows from expiring_certs table
+    let removedCount = 0;
+    const certTable = this.db.getTable('expiring_certs');
+    if (certTable && certTable.rows) {
+      const initialCount = certTable.rows.length;
+      certTable.rows = certTable.rows.filter(r => {
+        const itemType = String(r['Item Type'] || r['Cert Type'] || r['Type'] || '').toLowerCase().trim();
+        return itemType !== certKeyLower;
+      });
+      removedCount = initialCount - certTable.rows.length;
+
+      if (removedCount > 0) {
+        if (certTable.headers) {
+          certTable.rawGrid = [certTable.headers];
+          certTable.rows.forEach(r => {
+            certTable.rawGrid.push(certTable.headers.map(h => r[h] !== undefined ? r[h] : ''));
+          });
+          certTable.maxRows = certTable.rawGrid.length;
+        }
+        certTable.rowCount = certTable.rows.length;
+
+        // Queue full table sync mutation
+        if (this.db && typeof this.db.addMutation === 'function') {
+          await this.db.addMutation({
+            action: 'REPLACE_TABLE_DATA',
+            sheetName: 'Expiring Certs',
+            tableKey: 'expiring_certs',
+            headers: certTable.headers,
+            rows: certTable.rows,
+            rawGrid: certTable.rawGrid
+          });
+        }
+
+        if (typeof this.db.setSnapshot === 'function' && this.db.snapshot) {
+          await this.db.setSnapshot(this.db.snapshot);
+        }
+      }
+    }
+
+    this.renderConfigModal();
+
+    if (window.sheetNavigator && (window.sheetNavigator.currentSheetKey === 'expiring_certs' || document.getElementById('expiring-certs-view')?.classList.contains('active'))) {
+      window.sheetNavigator.renderExpiringCerts();
+    }
+
+    alert(`✅ Deleted "${certName}"!\n\nRemoved from requirements and purged ${removedCount} matching records from Expiring Certs.`);
+  }
+
+  deleteCustomCert(idx) {
+    return this.deleteCert(idx);
+  }
+
+  /**
+   * Resets configuration back to company defaults, clearing any deletions.
+   */
+  resetDefaultCerts() {
+    if (!confirm('Are you sure you want to reset certifications to the company defaults?\n\nThis will restore any deleted standard certifications.')) {
+      return;
+    }
+    localStorage.removeItem(this.deletedStorageKey);
+    this.certs = JSON.parse(JSON.stringify(this.defaultCerts));
+    this.saveConfig();
+    this.renderConfigModal();
+    alert('✅ Reset to company default certification requirements.');
   }
 
   /**
