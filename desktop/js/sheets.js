@@ -583,6 +583,53 @@ class SheetNavigator {
   }
 
   /**
+   * Returns a Set of lowercase normalized names of all departed / previous employees.
+   */
+  getPreviousEmployeeNamesSet() {
+    const prevEmpNames = new Set();
+    const empTable = this.db ? this.db.getTable('employees') : null;
+    if (empTable && empTable.rows) {
+      empTable.rows.forEach(e => {
+        const eName = String(e['Employee Name'] || e['Name'] || Object.values(e)[0] || '').toLowerCase().trim();
+        const eLoc = String(e['Location'] || '').toLowerCase().trim();
+        const eStat = String(e['Status'] || '').toLowerCase().trim();
+        const eJob = String(e['Job Number'] || e['Job #'] || '').toLowerCase().trim();
+        if (eLoc === 'previous employee' || eLoc.includes('previous') ||
+            eStat === 'previous employee' || eStat.includes('inactive') || eStat.includes('terminated') ||
+            eJob.includes('previous') || eJob.startsWith('002-') || eName.includes('former')) {
+          if (eName) prevEmpNames.add(eName);
+        }
+      });
+    }
+    const prevTable = this.db ? this.db.getTable('previous_employees') : null;
+    if (prevTable && prevTable.rows) {
+      prevTable.rows.forEach(p => {
+        const pName = String(p['Employee Name'] || p['Name'] || Object.values(p)[0] || '').toLowerCase().trim();
+        if (pName) prevEmpNames.add(pName);
+      });
+    }
+    return prevEmpNames;
+  }
+
+  /**
+   * Returns true if a table row represents a previous or departed employee.
+   */
+  isRowPreviousEmployee(r, prevEmpNames) {
+    if (!r) return false;
+    const eName = String(r['Employee Name'] || r['Name'] || Object.values(r)[0] || '').toLowerCase().trim();
+    if (prevEmpNames && prevEmpNames.has(eName)) return true;
+    const loc = String(r['Location'] || '').toLowerCase().trim();
+    const stat = String(r['Status'] || '').toLowerCase().trim();
+    const job = String(r['Job Number'] || r['Job #'] || '').toLowerCase().trim();
+    if (loc === 'previous employee' || loc.includes('previous') ||
+        stat === 'previous employee' || stat.includes('inactive') || stat.includes('terminated') ||
+        job.includes('previous') || job.startsWith('002-') || eName.includes('former')) {
+      return true;
+    }
+    return false;
+  }
+
+  /**
    * Initializes all 16 company certification records for all active employees if missing in expiring_certs.
    */
   async ensureAllEmployeeCertsExist(silent = false) {
@@ -1442,6 +1489,12 @@ class SheetNavigator {
       });
     }
 
+    // Filter out previous/inactive employees from active Expiring Certs page (archived on profile in Previous Employees workspace)
+    if (this.currentSheetKey === 'expiring_certs') {
+      const prevEmpNames = this.getPreviousEmployeeNamesSet();
+      rows = rows.filter(r => !this.isRowPreviousEmployee(r, prevEmpNames));
+    }
+
     // Multi-criteria filtering for inventory sheets
     const isInventorySheet = ['gloves', 'sleeves', 'blankets', 'macks', 'hv_testers', 'phasing_sets', 'aed', 'grounds', 'hot_sticks'].includes(this.currentSheetKey);
 
@@ -1971,7 +2024,8 @@ class SheetNavigator {
         </div>
       `;
     } else if (this.currentSheetKey === 'expiring_certs') {
-      const allRows = tableData.rows || [];
+      const prevEmpNames = this.getPreviousEmployeeNamesSet();
+      const allRows = (tableData.rows || []).filter(r => !this.isRowPreviousEmployee(r, prevEmpNames));
       const totalAll = allRows.length;
       const okAll = allRows.filter(r => (String(r['Status'] || '').toUpperCase() === 'OK')).length;
       const upAll = allRows.filter(r => (String(r['Status'] || '').toUpperCase() === 'UPCOMING')).length;
@@ -1993,7 +2047,7 @@ class SheetNavigator {
         const typ = String(r['Item Type'] || r['Cert Type'] || r['Type'] || '').trim();
         if (typ) typeSet.add(typ);
         const loc = String(r['Location'] || '').trim();
-        if (loc && loc !== 'N/A' && loc !== '—') locSet.add(loc);
+        if (loc && loc !== 'N/A' && loc !== '—' && loc.toLowerCase() !== 'previous employee') locSet.add(loc);
       });
 
       const uniqueEmps = Array.from(empSet).sort((a, b) => a.localeCompare(b));

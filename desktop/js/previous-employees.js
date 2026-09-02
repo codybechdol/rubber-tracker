@@ -433,6 +433,28 @@ class PreviousEmployeesEngine {
     scanPPE(glovesTable, 'unreturnedGloves');
     scanPPE(sleevesTable, 'unreturnedSleeves');
 
+    // 5. Scan Expiring Certs table for former employees' archived qualifications
+    const certsTable = snap.tables['expiring_certs'];
+    if (certsTable && certsTable.rows) {
+      certsTable.rows.forEach(c => {
+        const cEmp = String(c['Employee Name'] || c['Employee'] || c['Name'] || Object.values(c)[0] || '').trim();
+        if (!cEmp) return;
+        for (const [norm, prevEmp] of prevMap.entries()) {
+          if (this.isNameMatch(cEmp, prevEmp.name)) {
+            if (!prevEmp.certRecords) prevEmp.certRecords = [];
+            prevEmp.certRecords.push({
+              itemType: String(c['Item Type'] || c['Cert Type'] || c['Type'] || '').trim(),
+              dateAcquired: String(c['Date Acquired'] || c['Test Date'] || 'N/A').trim(),
+              expirationDate: String(c['Expiration Date'] || c['Expiration'] || 'N/A').trim(),
+              daysUntil: String(c['Days Until Expiration'] || c['Days Left'] || 'N/A').trim(),
+              status: String(c['Status'] || 'OK').trim()
+            });
+            break;
+          }
+        }
+      });
+    }
+
     // Convert map to array and exclude currently active staff
     const results = Array.from(prevMap.values()).filter(p => !p.isActive && this.isValidEmployeeName(p.name));
 
@@ -663,9 +685,14 @@ class PreviousEmployeesEngine {
             </td>
             <td style="padding: 10px 14px; text-align: right; white-space: nowrap;">
               <div style="display: inline-flex; align-items: center; gap: 6px;">
-                <button class="btn btn-secondary" style="padding: 4px 8px; font-size: 11.5px; border-color: #3b82f6; color: #60a5fa;" title="View dossier & certs" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(emp.name)}');}">
+                <button class="btn btn-secondary" style="padding: 4px 8px; font-size: 11.5px; border-color: #3b82f6; color: #60a5fa;" title="View dossier & profile" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(emp.name)}');}">
                   👤 Profile
                 </button>
+                ${(emp.certRecords && emp.certRecords.length > 0) ? `
+                  <button class="btn btn-secondary" style="padding: 4px 8px; font-size: 11.5px; border-color: rgba(234, 179, 8, 0.4); color: #facc15; font-weight: 600;" title="View ${emp.certRecords.length} archived certifications on file" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(emp.name)}', 'certs');}">
+                    📜 ${emp.certRecords.length} Certs
+                  </button>
+                ` : ''}
                 <button class="btn btn-primary" style="padding: 4px 10px; font-size: 11.5px; background: #059669; border-color: #059669; font-weight: 700; display: inline-flex; align-items: center; gap: 4px;" title="Rehire to active roster" onclick="window.previousEmployeesEngine.openRehireModal('${this.escapeJs(emp.name)}')">
                   <span>⚡</span> Rehire
                 </button>

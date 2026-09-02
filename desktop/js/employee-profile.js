@@ -494,7 +494,7 @@ class EmployeeProfileEngine {
   /**
    * Opens the Employee Profile & Certifications Modal
    */
-  openProfileModal(employeeName) {
+  openProfileModal(employeeName, initialTab = 'equipment') {
     const modal = document.getElementById('employee-profile-modal');
     const body = document.getElementById('employee-profile-modal-body');
     const titleEl = document.getElementById('employee-profile-modal-title');
@@ -506,7 +506,7 @@ class EmployeeProfileEngine {
     const profileData = this.compileProfileData(snap, employeeName);
     if (!profileData) return;
 
-    this.currentActiveTab = 'equipment';
+    this.currentActiveTab = initialTab || 'equipment';
     this.currentEquipmentFilter = 'all';
     this.currentEmployeeData = profileData;
 
