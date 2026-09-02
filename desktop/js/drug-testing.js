@@ -105,15 +105,29 @@ class DrugTestingEngine {
   getActiveEmployees() {
     const t = this.db.getTable('employees');
     const emps = [];
+    const seen = new Set();
+    const ignoreNames = ['active', 'employee name', 'name', 'lost', 'destroyed', 'in testing', 'system placeholder'];
+
     if (t && t.rows) {
       t.rows.forEach(r => {
-        const name = String(r['Employee Name'] || r['Name'] || r[0] || '').trim();
-        const loc = String(r['Location'] || r[1] || '').trim();
-        const job = String(r['Job Number'] || r[2] || '').trim();
-        const phone = String(r['Phone Number'] || r['Phone'] || r[3] || '').trim();
-        if (name && name.toLowerCase() !== 'employee name' && name.toLowerCase() !== 'active') {
-          emps.push({ name, location: loc, jobNumber: job, phone });
-        }
+        const isArr = Array.isArray(r);
+        const name = String(r['Employee Name'] || r['Name'] || (isArr ? r[0] : Object.values(r)[0]) || '').trim();
+        const nameLower = name.toLowerCase();
+        if (!name || ignoreNames.includes(nameLower) || seen.has(nameLower)) return;
+
+        // In Employees sheet: Col A = Name (0), Col B = Glove Class (1), Col C = Location (2), Col D = Job Number (3), Col E = Phone (4)
+        const loc = String(r['Location'] || r['City'] || (isArr ? r[2] : Object.values(r)[2]) || '').trim();
+        const locLower = loc.toLowerCase();
+        if (locLower === 'previous employee' || locLower.includes('previous')) return;
+
+        const status = String(r['Status'] || '').trim().toLowerCase();
+        if (status.includes('previous') || status.includes('inactive') || status.includes('terminated')) return;
+
+        const job = String(r['Job Number'] || r['Job #'] || (isArr ? r[3] : Object.values(r)[3]) || '').trim();
+        const phone = String(r['Phone Number'] || r['Phone'] || (isArr ? r[4] : Object.values(r)[4]) || '').trim();
+
+        seen.add(nameLower);
+        emps.push({ name, location: loc, jobNumber: job, phone });
       });
     }
     emps.sort((a, b) => a.name.localeCompare(b.name));
@@ -193,7 +207,7 @@ class DrugTestingEngine {
               <select id="dt-quarter-select" style="padding: 3px 8px; font-size: 12px; font-weight: 700; background: transparent; border: none; color: #fff; outline: none; cursor: pointer;">
                 ${quarters.map(q => `<option value="${q}" ${q === this.currentQuarter ? 'selected' : ''} style="background: #1e293b;">${q}</option>`).join('')}
               </select>
-              <button class="btn btn-secondary" style="padding: 2px 6px; font-size: 10.5px; margin-left: 4px;" onclick="window.drugTestingEngine.promptNewQuarter()" title="Start a new quarterly testing pool">+ New</button>
+              <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 10.5px; margin-left: 4px;" onclick="window.drugTestingEngine.promptNewQuarter()" title="Start a new quarterly testing pool (e.g. Q4 2026)">+ New Quarter</button>
             </div>
 
             <div style="display: flex; background: var(--bg-primary); border-radius: 6px; padding: 2px; border: 1px solid var(--border-color);">
@@ -201,7 +215,11 @@ class DrugTestingEngine {
               <button class="btn btn-secondary ${this.activeTab === 'clinics' ? 'active' : ''}" style="font-size: 11.5px; padding: 5px 12px; border: none; font-weight: 700;" onclick="window.drugTestingEngine.switchTab('clinics')">🏥 Clinics Directory (${clinics.length})</button>
             </div>
 
-            <button class="btn btn-primary" style="font-size: 11.5px; font-weight: 700; background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%); display: inline-flex; align-items: center; gap: 6px;" onclick="window.drugTestingEngine.openBulkPasteModal()">
+            <button class="btn btn-primary" style="font-size: 11.5px; font-weight: 700; background: linear-gradient(135deg, #10b981 0%, #059669 100%); display: inline-flex; align-items: center; gap: 6px; border: none;" onclick="window.drugTestingEngine.openAddEmployeeModal()" title="Add a single employee to this quarter">
+              <span>➕</span> Add Employee
+            </button>
+
+            <button class="btn btn-primary" style="font-size: 11.5px; font-weight: 700; background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%); display: inline-flex; align-items: center; gap: 6px; border: none;" onclick="window.drugTestingEngine.openBulkPasteModal()">
               <span>📋</span> Bulk Paste Roster
             </button>
           </div>
@@ -711,7 +729,10 @@ class DrugTestingEngine {
 
   async addSelectedEmployee() {
     const select = document.getElementById('dt-add-emp-select');
-    if (!select || !select.value) return;
+    if (!select || !select.value) {
+      this.openAddEmployeeModal();
+      return;
+    }
     const opt = select.options[select.selectedIndex];
     const name = opt.value;
     const loc = opt.dataset.loc || '';
@@ -754,11 +775,274 @@ class DrugTestingEngine {
   }
 
   promptNewQuarter() {
-    const nextQ = prompt('Enter Quarter Name (e.g. Q4 2026, Q1 2027):', this.currentQuarter);
-    if (nextQ && nextQ.trim()) {
-      this.currentQuarter = nextQ.trim();
-      this.render();
+    const modal = document.getElementById('dt-modal-container');
+    if (!modal) return;
+    modal.innerHTML = `
+      <div style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 9999;">
+        <div style="background: #1e293b; border: 1px solid var(--border-color); border-radius: 8px; width: 420px; max-width: 90%; padding: 22px; box-shadow: 0 10px 25px rgba(0,0,0,0.5);">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+            <h3 style="margin: 0; font-size: 15px; color: #f8fafc;">➕ Start New Testing Quarter</h3>
+            <button style="background: transparent; border: none; font-size: 18px; color: var(--text-muted); cursor: pointer;" onclick="document.getElementById('dt-modal-container').innerHTML=''">✕</button>
+          </div>
+          <p style="font-size: 11.5px; color: var(--text-muted); margin: 0 0 12px 0;">
+            Enter the quarter identifier for the new testing pool (e.g. Q4 2026, Q1 2027):
+          </p>
+          <input type="text" id="dt-new-quarter-name" placeholder="e.g. Q4 2026" value="${this.currentQuarter}" style="width: 100%; box-sizing: border-box; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; padding: 8px 10px; font-size: 13px; font-weight: 700; margin-bottom: 16px;">
+          <div style="display: flex; justify-content: flex-end; gap: 8px;">
+            <button class="btn btn-secondary" onclick="document.getElementById('dt-modal-container').innerHTML=''">Cancel</button>
+            <button class="btn btn-primary" style="background: #3b82f6; border: none; font-weight: 700;" onclick="window.drugTestingEngine.submitNewQuarter()">Create Quarter</button>
+          </div>
+        </div>
+      </div>
+    `;
+    setTimeout(() => {
+      const inp = document.getElementById('dt-new-quarter-name');
+      if (inp) {
+        inp.focus();
+        inp.select();
+      }
+    }, 50);
+  }
+
+  submitNewQuarter() {
+    const val = document.getElementById('dt-new-quarter-name')?.value.trim();
+    if (!val) {
+      alert('Please enter a quarter name.');
+      return;
     }
+    this.currentQuarter = val;
+    document.getElementById('dt-modal-container').innerHTML = '';
+    this.render();
+  }
+
+  openAddEmployeeModal() {
+    const modal = document.getElementById('dt-modal-container');
+    if (!modal) return;
+
+    const employees = this.getActiveEmployees();
+    const clinics = this.getClinicsList();
+
+    modal.innerHTML = `
+      <div style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 9999;">
+        <div style="background: #1e293b; border: 1px solid var(--border-color); border-radius: 8px; width: 560px; max-width: 95%; padding: 22px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); max-height: 90vh; overflow-y: auto;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+            <h3 style="margin: 0; font-size: 16px; color: #f8fafc; display: flex; align-items: center; gap: 8px;">
+              <span>➕</span> Add Employee to ${this.currentQuarter} Testing Pool
+            </h3>
+            <button style="background: transparent; border: none; font-size: 18px; color: var(--text-muted); cursor: pointer;" onclick="document.getElementById('dt-modal-container').innerHTML=''">✕</button>
+          </div>
+
+          <!-- Employee Name -->
+          <div style="margin-bottom: 12px;">
+            <label style="display: block; font-size: 11.5px; font-weight: 600; color: var(--text-muted); margin-bottom: 4px;">Employee Name <span style="color: #f87171;">*</span></label>
+            <select id="dt-modal-emp-select" style="width: 100%; box-sizing: border-box; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; padding: 7px 10px; font-size: 12px; margin-bottom: 6px;" onchange="window.drugTestingEngine.onModalEmployeeSelect(this.value)">
+              <option value="">-- Choose from Active Roster (${employees.length} employees) --</option>
+              ${employees.map(e => `<option value="${e.name}">${e.name} (${e.location || 'Unknown'} - Job: ${e.jobNumber || 'N/A'})</option>`).join('')}
+              <option value="__CUSTOM__">✏️ Other / Type Custom Name...</option>
+            </select>
+            <input type="text" id="dt-modal-emp-custom" placeholder="Type employee name..." style="display: none; width: 100%; box-sizing: border-box; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; padding: 7px 10px; font-size: 12px;">
+          </div>
+
+          <!-- Location, Job Number, Phone -->
+          <div style="display: flex; gap: 10px; margin-bottom: 12px;">
+            <div style="flex: 1;">
+              <label style="display: block; font-size: 11px; font-weight: 600; color: var(--text-muted); margin-bottom: 4px;">Location / City</label>
+              <input type="text" id="dt-modal-emp-loc" placeholder="e.g. Helena" style="width: 100%; box-sizing: border-box; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 5px; color: #fff; padding: 5px 8px; font-size: 11.5px;">
+            </div>
+            <div style="flex: 1;">
+              <label style="display: block; font-size: 11px; font-weight: 600; color: var(--text-muted); margin-bottom: 4px;">Job Number</label>
+              <input type="text" id="dt-modal-emp-job" placeholder="e.g. 066-26.02" style="width: 100%; box-sizing: border-box; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 5px; color: #fff; padding: 5px 8px; font-size: 11.5px;">
+            </div>
+            <div style="flex: 1;">
+              <label style="display: block; font-size: 11px; font-weight: 600; color: var(--text-muted); margin-bottom: 4px;">Phone Number</label>
+              <input type="text" id="dt-modal-emp-phone" placeholder="e.g. 406-555-1234" style="width: 100%; box-sizing: border-box; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 5px; color: #fff; padding: 5px 8px; font-size: 11.5px;">
+            </div>
+          </div>
+
+          <!-- Test Option & Classification -->
+          <div style="display: flex; gap: 12px; margin-bottom: 12px;">
+            <div style="flex: 1;">
+              <label style="display: block; font-size: 11px; font-weight: 600; color: var(--text-muted); margin-bottom: 4px;">Test Option</label>
+              <select id="dt-modal-test-type" style="width: 100%; box-sizing: border-box; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 5px; color: #fff; padding: 6px 8px; font-size: 11.5px; font-weight: 600;">
+                <option value="Drug Only" selected>💊 Drug Only</option>
+                <option value="Drug & Alcohol">🍷💊 Drug & Alcohol</option>
+              </select>
+            </div>
+            <div style="flex: 1;">
+              <label style="display: block; font-size: 11px; font-weight: 600; color: var(--text-muted); margin-bottom: 4px;">Agency Classification</label>
+              <select id="dt-modal-classification" style="width: 100%; box-sizing: border-box; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 5px; color: #fff; padding: 6px 8px; font-size: 11.5px; font-weight: 700; color: #60a5fa;">
+                <option value="FMCSA" selected>FMCSA</option>
+                <option value="PHMSA">PHMSA</option>
+                <option value="Non-DOT">Non-DOT</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Collection Type -->
+          <div style="margin-bottom: 12px;">
+            <label style="display: block; font-size: 11px; font-weight: 600; color: var(--text-muted); margin-bottom: 4px;">Collection Method</label>
+            <select id="dt-modal-collection-type" style="width: 100%; box-sizing: border-box; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 5px; color: #fff; padding: 6px 8px; font-size: 11.5px;" onchange="window.drugTestingEngine.onModalCollectionTypeChange(this.value)">
+              <option value="Clinic Visit" selected>🏥 Clinic Visit (Donor goes to facility)</option>
+              <option value="Mobile Collector">🚚 Mobile Collector (Collector meets crew on-site)</option>
+            </select>
+          </div>
+
+          <!-- Clinic / Collector Selection -->
+          <div style="margin-bottom: 12px;">
+            <label style="display: block; font-size: 11px; font-weight: 600; color: var(--text-muted); margin-bottom: 4px;">Clinic or Mobile Provider</label>
+            <select id="dt-modal-clinic" style="width: 100%; box-sizing: border-box; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 5px; color: #fff; padding: 6px 8px; font-size: 11.5px;" onchange="window.drugTestingEngine.onModalClinicChange(this.value)">
+              <option value="">-- Select Clinic or Collector (Optional) --</option>
+              ${clinics.map(c => `<option value="${c.name}">${c.isMobile ? '🚚 [Mobile] ' : '🏥 '}${c.name} (${c.city}, ${c.state})</option>`).join('')}
+            </select>
+          </div>
+
+          <!-- Meeting Address for Mobile Collector -->
+          <div id="dt-modal-meeting-container" style="display: none; margin-bottom: 12px; background: rgba(168, 85, 247, 0.1); border: 1px solid rgba(168, 85, 247, 0.3); border-radius: 6px; padding: 10px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+              <label style="font-size: 11px; font-weight: 700; color: #c084fc;">📍 Crew Meeting / Job Site Address:</label>
+              <button type="button" class="btn btn-secondary" style="padding: 2px 6px; font-size: 10px; color: #c084fc;" onclick="window.drugTestingEngine.suggestModalMeetingAddress()">Auto-Suggest</button>
+            </div>
+            <input type="text" id="dt-modal-meeting-address" placeholder="e.g. 554 Water St, Darby, MT, 59829 or Substation Yard" style="width: 100%; box-sizing: border-box; background: var(--bg-primary); border: 1px solid rgba(168, 85, 247, 0.4); border-radius: 4px; color: #fff; padding: 6px 8px; font-size: 11.5px;">
+          </div>
+
+          <!-- Schedule Date & Time -->
+          <div style="display: flex; gap: 10px; margin-bottom: 16px;">
+            <div style="flex: 1;">
+              <label style="display: block; font-size: 11px; font-weight: 600; color: var(--text-muted); margin-bottom: 4px;">Target / Scheduled Date</label>
+              <input type="date" id="dt-modal-sched-date" style="width: 100%; box-sizing: border-box; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; color: #fff; padding: 5px 8px; font-size: 11.5px;">
+            </div>
+            <div style="flex: 1;">
+              <label style="display: block; font-size: 11px; font-weight: 600; color: var(--text-muted); margin-bottom: 4px;">Scheduled Time</label>
+              <input type="text" id="dt-modal-sched-time" placeholder="e.g. 9:00 AM" style="width: 100%; box-sizing: border-box; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; color: #fff; padding: 5px 8px; font-size: 11.5px;">
+            </div>
+          </div>
+
+          <div style="display: flex; justify-content: flex-end; gap: 8px; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 14px;">
+            <button class="btn btn-secondary" onclick="document.getElementById('dt-modal-container').innerHTML=''">Cancel</button>
+            <button class="btn btn-primary" style="background: #10b981; border: none; font-weight: 700;" onclick="window.drugTestingEngine.submitAddEmployeeModal()">➕ Add to ${this.currentQuarter}</button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  onModalEmployeeSelect(empName) {
+    const customInput = document.getElementById('dt-modal-emp-custom');
+    const locInput = document.getElementById('dt-modal-emp-loc');
+    const jobInput = document.getElementById('dt-modal-emp-job');
+    const phoneInput = document.getElementById('dt-modal-emp-phone');
+
+    if (empName === '__CUSTOM__') {
+      if (customInput) {
+        customInput.style.display = 'block';
+        customInput.focus();
+      }
+      return;
+    }
+
+    if (customInput) customInput.style.display = 'none';
+
+    const emp = this.getActiveEmployees().find(e => e.name === empName);
+    if (emp) {
+      if (locInput) locInput.value = emp.location || '';
+      if (jobInput) jobInput.value = emp.jobNumber || '';
+      if (phoneInput) phoneInput.value = emp.phone || '';
+    }
+  }
+
+  onModalCollectionTypeChange(type) {
+    const meetingCont = document.getElementById('dt-modal-meeting-container');
+    if (meetingCont) {
+      meetingCont.style.display = type === 'Mobile Collector' ? 'block' : 'none';
+      if (type === 'Mobile Collector') {
+        this.suggestModalMeetingAddress();
+      }
+    }
+  }
+
+  onModalClinicChange(clinicName) {
+    const clinic = this.getClinicsList().find(c => c.name === clinicName);
+    if (clinic && clinic.isMobile) {
+      const typeSelect = document.getElementById('dt-modal-collection-type');
+      if (typeSelect) {
+        typeSelect.value = 'Mobile Collector';
+        this.onModalCollectionTypeChange('Mobile Collector');
+      }
+    }
+  }
+
+  suggestModalMeetingAddress() {
+    const job = document.getElementById('dt-modal-emp-job')?.value || '';
+    const loc = document.getElementById('dt-modal-emp-loc')?.value || '';
+    const addrInput = document.getElementById('dt-modal-meeting-address');
+    if (!addrInput) return;
+
+    const siteSuggestions = this.getJobSiteSuggestions();
+    if (siteSuggestions[job]) {
+      addrInput.value = siteSuggestions[job];
+    } else if (loc) {
+      addrInput.value = `${loc} Job Site / Yard`;
+    }
+  }
+
+  async submitAddEmployeeModal() {
+    const select = document.getElementById('dt-modal-emp-select');
+    let empName = select?.value || '';
+    if (empName === '__CUSTOM__') {
+      empName = document.getElementById('dt-modal-emp-custom')?.value.trim() || '';
+    }
+    if (!empName) {
+      alert('Please select or enter an employee name.');
+      return;
+    }
+
+    const existing = this.findTestRow(empName);
+    if (existing) {
+      alert(`${empName} is already in the testing pool for ${this.currentQuarter}.`);
+      return;
+    }
+
+    const loc = document.getElementById('dt-modal-emp-loc')?.value.trim() || '';
+    const job = document.getElementById('dt-modal-emp-job')?.value.trim() || '';
+    const phone = document.getElementById('dt-modal-emp-phone')?.value.trim() || '';
+    const testType = document.getElementById('dt-modal-test-type')?.value || 'Drug Only';
+    const classification = document.getElementById('dt-modal-classification')?.value || 'FMCSA';
+    const collectionType = document.getElementById('dt-modal-collection-type')?.value || 'Clinic Visit';
+    const clinicName = document.getElementById('dt-modal-clinic')?.value || '';
+    const meetingAddr = document.getElementById('dt-modal-meeting-address')?.value.trim() || '';
+    const schedDate = document.getElementById('dt-modal-sched-date')?.value || '';
+    const schedTime = document.getElementById('dt-modal-sched-time')?.value.trim() || '';
+
+    const clinic = this.getClinicsList().find(c => c.name === clinicName);
+
+    const t = this.getTestsTable();
+    const newRow = {
+      'Quarter': this.currentQuarter,
+      'Employee Name': empName,
+      'Location': loc,
+      'Job Number': job,
+      'Phone Number': phone,
+      'Test Type': testType,
+      'Classification': classification,
+      'Collection Type': collectionType,
+      'Clinic Name': clinicName,
+      'Clinic City / State': clinic ? `${clinic.city}, ${clinic.state}` : '',
+      'Appt Required': clinic ? clinic.apptReq : 'No',
+      'Scheduled Date': schedDate,
+      'Scheduled Time': schedTime,
+      'Meeting / Collection Address': meetingAddr,
+      'Status': schedDate ? 'Scheduled' : 'Pending',
+      'Date Completed': '',
+      'Paperwork / Kit Notes': clinic ? clinic.paperwork : '',
+      'Notes': '',
+      'Date Added': new Date().toLocaleDateString()
+    };
+
+    t.rows.push(newRow);
+    t.rowCount = t.rows.length;
+    await this.saveTable(t);
+    document.getElementById('dt-modal-container').innerHTML = '';
+    this.render();
   }
 
   openBulkPasteModal() {
