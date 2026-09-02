@@ -699,6 +699,13 @@ class SyncEngine {
         const chunk = currentOutbox.slice(i, i + chunkSize);
         const isLastChunk = (i + chunk.length >= totalCount);
 
+        // Sanitize: never allow a header-only rawGrid to wipe out valid row objects
+        chunk.forEach(m => {
+          if (m.rawGrid && Array.isArray(m.rawGrid) && m.rawGrid.length <= 1) {
+            delete m.rawGrid;
+          }
+        });
+
         currentBatchText = `Pushing batch ${batchNum} (${Math.min(i + chunk.length, totalCount)}/${totalCount} changes)...`;
         const subTitleEl = document.getElementById('sync-modal-subtitle');
         if (subTitleEl) {

@@ -102,7 +102,7 @@ class DrugTestingEngine {
     return {
       headers,
       rows: cleanRows,
-      rawGrid
+      rawGrid: rawGrid.length > 1 ? rawGrid : undefined
     };
   }
 
