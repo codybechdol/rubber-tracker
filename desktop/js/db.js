@@ -411,7 +411,11 @@ class LocalDatabase {
       'weekly safety log': 'weekly_safety_log',
       'weekly_safety_log': 'weekly_safety_log',
       'monthly checklist log': 'monthly_checklist_log',
-      'monthly_checklist_log': 'monthly_checklist_log'
+      'monthly_checklist_log': 'monthly_checklist_log',
+      'dot drug tests': 'dot_drug_tests',
+      'dot_drug_tests': 'dot_drug_tests',
+      'drug test clinics': 'drug_test_clinics',
+      'drug_test_clinics': 'drug_test_clinics'
     };
     if (map[clean]) return map[clean];
 
@@ -472,7 +476,11 @@ class LocalDatabase {
       'locations': 'Locations',
       'drive_time_routes': 'Drive Time Routes',
       'vendors': 'Vendors',
-      'purchase_orders': 'Purchase Orders'
+      'purchase_orders': 'Purchase Orders',
+      'dot_drug_tests': 'DOT Drug Tests',
+      'dot drug tests': 'DOT Drug Tests',
+      'drug_test_clinics': 'Drug Test Clinics',
+      'drug test clinics': 'Drug Test Clinics'
     };
     if (map[clean]) return map[clean];
     if (this.snapshot && this.snapshot.tables && this.snapshot.tables[clean]) {

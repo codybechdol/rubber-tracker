@@ -57,6 +57,24 @@ class DrugTestingEngine {
 
   init() {
     this.bindEvents();
+    this.ensureOutboxSynced();
+  }
+
+  ensureOutboxSynced() {
+    const t = this.getTestsTable();
+    if (t && t.rows && t.rows.length > 0 && this.db && typeof this.db.addMutation === 'function') {
+      const outbox = (typeof this.db.getOutbox === 'function' ? this.db.getOutbox() : this.db.outbox) || [];
+      const hasDrugTestMutation = outbox.some(m => m.tableKey === 'dot_drug_tests' || m.sheetName === 'DOT Drug Tests');
+      if (!hasDrugTestMutation) {
+        this.db.addMutation({
+          action: 'REPLACE_TABLE_DATA',
+          sheetName: 'DOT Drug Tests',
+          tableKey: 'dot_drug_tests',
+          headers: t.headers || ['Quarter', 'Employee Name', 'Location', 'Job Number', 'Phone Number', 'Test Type', 'Classification', 'Collection Type', 'Clinic Name', 'Clinic City / State', 'Appt Required', 'Scheduled Date', 'Scheduled Time', 'Meeting / Collection Address', 'Status', 'Date Completed', 'Paperwork / Kit Notes', 'Notes', 'Date Added'],
+          rows: t.rows || []
+        });
+      }
+    }
   }
 
   bindEvents() {
@@ -602,6 +620,17 @@ class DrugTestingEngine {
     if (!this.db.snapshot.tables) this.db.snapshot.tables = {};
     this.db.snapshot.tables.dot_drug_tests = table;
     await this.db.setSnapshot(this.db.snapshot);
+
+    if (this.db && typeof this.db.addMutation === 'function') {
+      await this.db.addMutation({
+        action: 'REPLACE_TABLE_DATA',
+        sheetName: 'DOT Drug Tests',
+        tableKey: 'dot_drug_tests',
+        headers: table.headers || ['Quarter', 'Employee Name', 'Location', 'Job Number', 'Phone Number', 'Test Type', 'Classification', 'Collection Type', 'Clinic Name', 'Clinic City / State', 'Appt Required', 'Scheduled Date', 'Scheduled Time', 'Meeting / Collection Address', 'Status', 'Date Completed', 'Paperwork / Kit Notes', 'Notes', 'Date Added'],
+        rows: table.rows || []
+      });
+    }
+
     if (window.syncEngine && typeof window.syncEngine.renderOutboxBadge === 'function') {
       window.syncEngine.renderOutboxBadge();
     }
@@ -1258,6 +1287,20 @@ class DrugTestingEngine {
     if (!this.db.snapshot.tables) this.db.snapshot.tables = {};
     this.db.snapshot.tables.drug_test_clinics = t;
     await this.db.setSnapshot(this.db.snapshot);
+
+    if (this.db && typeof this.db.addMutation === 'function') {
+      await this.db.addMutation({
+        action: 'REPLACE_TABLE_DATA',
+        sheetName: 'Drug Test Clinics',
+        tableKey: 'drug_test_clinics',
+        headers: t.headers || ['Firm / Clinic Name', 'Is Mobile', 'Street Address', 'City', 'State', 'Zip', 'Phone Number', 'Hours', 'Appt Required', 'Paperwork Required', 'Notes / Lab Instructions', 'Active'],
+        rows: t.rows || []
+      });
+    }
+
+    if (window.syncEngine && typeof window.syncEngine.renderOutboxBadge === 'function') {
+      window.syncEngine.renderOutboxBadge();
+    }
 
     document.getElementById('dt-modal-container').innerHTML = '';
     this.render();
