@@ -279,6 +279,154 @@ function generateAndStoreSyncSnapshot(existingSnapshot) {
 }
 
 /**
+ * Fast sub-second patch of the pre-cached Google Drive snapshot file for modified sheets only.
+ * Avoids expensive 45-sheet rescanning during batch mutation pushes.
+ *
+ * @param {Object} sheetsModified - Map of sheet names that were modified during the push
+ * @return {boolean} True if patched successfully
+ */
+function patchSyncSnapshotInDrive(sheetsModified) {
+  try {
+    if (!sheetsModified || Object.keys(sheetsModified).length === 0) return false;
+    var fileId = PropertiesService.getScriptProperties().getProperty('SYNC_SNAPSHOT_FILE_ID');
+    if (!fileId) return false;
+    var file = null;
+    try {
+      file = DriveApp.getFileById(fileId);
+      if (file && file.isTrashed()) file = null;
+    } catch (fErr) { file = null; }
+    if (!file) return false;
+
+    var content = file.getBlob().getDataAsString();
+    if (!content || content.length < 50) return false;
+    var snap = JSON.parse(content);
+    if (!snap || !snap.tables) return false;
+
+    var ss = typeof getActiveSpreadsheetSafe === 'function' ? getActiveSpreadsheetSafe() : SpreadsheetApp.getActiveSpreadsheet();
+    if (!ss) return false;
+
+    var sheetToTableKey = {
+      'employees': 'employees',
+      'job tracking': 'job_tracking',
+      'gloves': 'gloves',
+      'sleeves': 'sleeves',
+      'blankets': 'blankets',
+      'macks': 'macks',
+      'hv testers': 'hv_testers',
+      'phasing sets': 'phasing_sets',
+      'aed': 'aed',
+      'grounds': 'grounds',
+      'hot sticks': 'hot_sticks',
+      'task metadata': 'task_metadata',
+      'glove swaps': 'glove_swaps',
+      'sleeve swaps': 'sleeve_swaps',
+      'blanket swaps': 'blanket_swaps',
+      'mack swaps': 'mack_swaps',
+      'hv tester swaps': 'hv_tester_swaps',
+      'phasing set swaps': 'phasing_set_swaps',
+      'aed swaps': 'aed_swaps',
+      'ground swaps': 'ground_swaps',
+      'hot stick swaps': 'hot_stick_swaps',
+      'safety compliance': 'safety_compliance',
+      'expiring certs': 'expiring_certs',
+      'training tracking': 'training_tracking',
+      'gloves history': 'gloves_history',
+      'sleeves history': 'sleeves_history',
+      'blankets history': 'blankets_history',
+      'macks history': 'macks_history',
+      'hv testers history': 'hv_testers_history',
+      'phasing sets history': 'phasing_sets_history',
+      'aed history': 'aed_history',
+      'grounds history': 'grounds_history',
+      'hot sticks history': 'hot_sticks_history',
+      'employee history': 'employee_history',
+      'previous employees': 'previous_employees',
+      'safety equipment needs': 'safety_equipment_needs',
+      'jha log': 'jha_log',
+      'weekly safety log': 'weekly_safety_log',
+      'monthly checklist log': 'monthly_checklist_log',
+      'locations': 'locations',
+      'drive time routes': 'drive_time_routes',
+      'vendors': 'vendors',
+      'purchase orders': 'purchase_orders',
+      'dot drug tests': 'dot_drug_tests',
+      'drug test clinics': 'drug_test_clinics'
+    };
+
+    function fastDateStr(d) {
+      if (!(d instanceof Date) || isNaN(d.getTime())) return '';
+      var m = d.getMonth() + 1;
+      var day = d.getDate();
+      var yr = d.getFullYear();
+      return (m < 10 ? '0' + m : m) + '/' + (day < 10 ? '0' + day : day) + '/' + yr;
+    }
+
+    var patchedAny = false;
+    var modifiedNames = Object.keys(sheetsModified);
+
+    for (var i = 0; i < modifiedNames.length; i++) {
+      var sheetName = modifiedNames[i];
+      var cleanLower = sheetName.toLowerCase().trim().replace(/_/g, ' ');
+      var tableKey = sheetToTableKey[cleanLower];
+      if (!tableKey) continue;
+
+      var sheet = ss.getSheetByName(sheetName);
+      if (!sheet && typeof getSheetCaseInsensitive === 'function') {
+        sheet = getSheetCaseInsensitive(sheetName);
+      }
+      if (!sheet || sheet.getLastRow() < 1) {
+        snap.tables[tableKey] = { name: sheetName, headers: [], rows: [], rawGrid: [], rowCount: 0, maxRows: 0, maxCols: 0 };
+        patchedAny = true;
+        continue;
+      }
+
+      var lastRow = sheet.getLastRow();
+      var lastCol = sheet.getLastColumn();
+      var data = sheet.getRange(1, 1, lastRow, lastCol).getValues();
+      var headerRowIdx = 0;
+      var headers = data[headerRowIdx].map(function(h) { return String(h || '').trim(); });
+      var rows = [];
+
+      for (var r = headerRowIdx + 1; r < data.length; r++) {
+        var rowObj = { _rowIdx: r + 1 };
+        var hasData = false;
+        for (var c = 0; c < headers.length; c++) {
+          var val = data[r][c];
+          if (val instanceof Date) {
+            val = fastDateStr(val);
+          }
+          if (val !== '' && val !== null && val !== undefined) hasData = true;
+          rowObj[headers[c]] = val;
+        }
+        if (hasData) rows.push(rowObj);
+      }
+
+      snap.tables[tableKey] = {
+        name: sheetName,
+        headers: headers,
+        rows: rows,
+        rawGrid: data,
+        rowCount: rows.length,
+        maxRows: sheet.getMaxRows(),
+        maxCols: sheet.getMaxColumns()
+      };
+      patchedAny = true;
+      Logger.log('patchSyncSnapshotInDrive: Patched ' + sheetName + ' (' + rows.length + ' rows) in Drive snapshot cache');
+    }
+
+    if (patchedAny) {
+      snap.timestamp = new Date().toISOString();
+      file.setContent(JSON.stringify(snap));
+      PropertiesService.getScriptProperties().setProperty('SYNC_SNAPSHOT_UPDATED', String(new Date().getTime()));
+    }
+    return true;
+  } catch (patchErr) {
+    Logger.log('patchSyncSnapshotInDrive error: ' + patchErr);
+    return false;
+  }
+}
+
+/**
  * Fast snapshot retrieval from pre-generated Google Drive JSON snapshot file in Glove Manager Backups folder,
  * avoiding expensive 42-sheet scans during web/mobile download calls.
  * Automatically searches the Google Drive backup folder for the newest .JSON / .txt snapshot.
@@ -1887,13 +2035,13 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
       Logger.log('applyBatchSyncMutations auto saveHistoryFast error: ' + histErr);
     }
 
-    // 2. Automatically generate and update the .JSON snapshot file in the Glove Manager Backups folder on Google Drive
+    // 2. Fast sub-second patch of the .JSON snapshot in Google Drive for modified sheets only
     try {
-      if (typeof generateAndStoreSyncSnapshot === 'function') {
-        generateAndStoreSyncSnapshot();
+      if (typeof patchSyncSnapshotInDrive === 'function') {
+        patchSyncSnapshotInDrive(sheetsModified);
       }
     } catch (bkErr) {
-      Logger.log('applyBatchSyncMutations auto generateAndStoreSyncSnapshot error: ' + bkErr);
+      Logger.log('applyBatchSyncMutations auto patchSyncSnapshotInDrive error: ' + bkErr);
     }
 
     // 3. Refresh backup (only if explicitly requested to prevent HTTP timeout on Google Apps Script)
