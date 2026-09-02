@@ -1,0 +1,1447 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Random DOT Drug Testing</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Google+Sans:wght@400;500;600;700&family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --primary: #1a73e8;
+      --primary-dark: #1557b0;
+      --primary-light: #e8f0fe;
+      --success: #1e8e3e;
+      --success-light: #e6f4ea;
+      --warning: #f9ab00;
+      --warning-light: #fef7e0;
+      --danger: #d93025;
+      --danger-light: #fce8e6;
+      --purple: #9334e6;
+      --purple-light: #f3e8fd;
+      --gray-50: #f8f9fa;
+      --gray-100: #f1f3f4;
+      --gray-200: #e8eaed;
+      --gray-300: #dadce0;
+      --gray-500: #9aa0a6;
+      --gray-700: #5f6368;
+      --gray-900: #202124;
+      --shadow-sm: 0 1px 2px 0 rgba(60,64,67,0.3), 0 1px 3px 1px rgba(60,64,67,0.15);
+      --shadow-md: 0 2px 6px 2px rgba(60,64,67,0.15);
+      --radius-sm: 6px;
+      --radius-md: 8px;
+      --radius-lg: 12px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Google Sans', 'Roboto', Arial, sans-serif;
+      background: var(--gray-50);
+      color: var(--gray-900);
+      font-size: 13px;
+      line-height: 1.4;
+      padding: 16px;
+      overflow-x: hidden;
+    }
+
+    /* Header & Metrics */
+    .header-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 14px;
+      background: white;
+      padding: 14px 18px;
+      border-radius: var(--radius-md);
+      box-shadow: var(--shadow-sm);
+      border-left: 5px solid var(--primary);
+    }
+    .header-title h1 {
+      font-size: 19px;
+      font-weight: 700;
+      color: var(--gray-900);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .header-title .subtitle {
+      color: var(--gray-700);
+      font-size: 12px;
+      margin-top: 2px;
+    }
+    .header-controls {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    .quarter-select-wrapper {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--gray-100);
+      padding: 4px 8px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--gray-300);
+    }
+    .quarter-select-wrapper label {
+      font-size: 11px;
+      font-weight: 600;
+      text-transform: uppercase;
+      color: var(--gray-700);
+    }
+    .quarter-select {
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--primary-dark);
+      background: transparent;
+      border: none;
+      outline: none;
+      cursor: pointer;
+    }
+
+    /* KPI Summary Cards */
+    .kpi-container {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    .kpi-card {
+      background: white;
+      padding: 10px 14px;
+      border-radius: var(--radius-md);
+      box-shadow: var(--shadow-sm);
+      display: flex;
+      flex-direction: column;
+      border-top: 3px solid transparent;
+    }
+    .kpi-card.total { border-top-color: var(--primary); }
+    .kpi-card.pending { border-top-color: var(--warning); }
+    .kpi-card.scheduled { border-top-color: var(--primary-dark); }
+    .kpi-card.mobile { border-top-color: var(--purple); }
+    .kpi-card.completed { border-top-color: var(--success); }
+    .kpi-label { font-size: 11px; color: var(--gray-700); font-weight: 500; }
+    .kpi-value { font-size: 20px; font-weight: 700; color: var(--gray-900); margin-top: 2px; }
+
+    /* Tabs Navigation */
+    .nav-tabs {
+      display: flex;
+      gap: 6px;
+      border-bottom: 2px solid var(--gray-200);
+      margin-bottom: 14px;
+    }
+    .tab-btn {
+      padding: 9px 18px;
+      font-family: inherit;
+      font-size: 13px;
+      font-weight: 600;
+      border: none;
+      background: transparent;
+      color: var(--gray-700);
+      cursor: pointer;
+      border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      position: relative;
+    }
+    .tab-btn:hover {
+      background: var(--gray-100);
+      color: var(--gray-900);
+    }
+    .tab-btn.active {
+      color: var(--primary);
+      background: white;
+      border-bottom: 3px solid var(--primary);
+      margin-bottom: -2px;
+    }
+
+    /* Content Area */
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    /* Action bar */
+    .action-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: white;
+      padding: 10px 14px;
+      border-radius: var(--radius-md);
+      box-shadow: var(--shadow-sm);
+      margin-bottom: 12px;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+    .action-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    /* Buttons */
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 13px;
+      font-family: inherit;
+      font-size: 12px;
+      font-weight: 600;
+      border-radius: var(--radius-sm);
+      border: 1px solid transparent;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      white-space: nowrap;
+    }
+    .btn-primary { background: var(--primary); color: white; }
+    .btn-primary:hover { background: var(--primary-dark); }
+    .btn-success { background: var(--success); color: white; }
+    .btn-success:hover { background: #167931; }
+    .btn-outline {
+      background: white;
+      border-color: var(--gray-300);
+      color: var(--gray-700);
+    }
+    .btn-outline:hover {
+      background: var(--gray-100);
+      color: var(--gray-900);
+    }
+    .btn-sm {
+      padding: 4px 9px;
+      font-size: 11px;
+    }
+    .btn-danger-outline {
+      background: white;
+      border-color: #fad2cf;
+      color: var(--danger);
+    }
+    .btn-danger-outline:hover {
+      background: var(--danger-light);
+    }
+
+    /* Inputs */
+    .search-box {
+      position: relative;
+      min-width: 220px;
+    }
+    .search-input, .form-control {
+      width: 100%;
+      padding: 6px 10px;
+      font-family: inherit;
+      font-size: 12px;
+      border: 1px solid var(--gray-300);
+      border-radius: var(--radius-sm);
+      background: white;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .search-input:focus, .form-control:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 2px var(--primary-light);
+    }
+
+    /* Table Container */
+    .table-container {
+      background: white;
+      border-radius: var(--radius-md);
+      box-shadow: var(--shadow-sm);
+      overflow-x: auto;
+      border: 1px solid var(--gray-200);
+      max-height: calc(100vh - 280px);
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+    }
+    thead th {
+      background: #f1f3f4;
+      color: var(--gray-900);
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.3px;
+      padding: 9px 10px;
+      position: sticky;
+      top: 0;
+      z-index: 10;
+      border-bottom: 2px solid var(--gray-300);
+    }
+    tbody tr {
+      border-bottom: 1px solid var(--gray-200);
+      transition: background-color 0.1s;
+    }
+    tbody tr:hover { background-color: #fcfdfe; }
+    tbody td {
+      padding: 8px 10px;
+      vertical-align: middle;
+      font-size: 12px;
+    }
+
+    /* Badges */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 7px;
+      border-radius: 12px;
+      font-size: 11px;
+      font-weight: 600;
+      line-height: 1;
+      white-space: nowrap;
+    }
+    .badge-pending { background: var(--warning-light); color: #8a5700; border: 1px solid #fce38a; }
+    .badge-scheduled { background: var(--primary-light); color: var(--primary-dark); border: 1px solid #c2e7ff; }
+    .badge-completed { background: var(--success-light); color: var(--success); border: 1px solid #c4eed0; }
+    .badge-excused { background: var(--gray-100); color: var(--gray-700); border: 1px solid var(--gray-300); }
+    
+    .badge-appt-yes { background: #fce8e6; color: #c5221f; border: 1px solid #fad2cf; }
+    .badge-appt-no { background: #e6f4ea; color: #137333; border: 1px solid #ceead6; }
+    .badge-appt-suggested { background: #fef7e0; color: #b06000; border: 1px solid #feefc3; }
+
+    .badge-mobile { background: var(--purple-light); color: var(--purple); border: 1px solid #e9d5ff; }
+    .badge-clinic { background: #e0f2fe; color: #0284c7; border: 1px solid #bae6fd; }
+
+    .badge-paperwork {
+      background: #fff8e1;
+      color: #795548;
+      border: 1px solid #ffe082;
+      font-size: 10.5px;
+      font-weight: 500;
+      max-width: 180px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* Employee info cell */
+    .emp-info { display: flex; flex-direction: column; }
+    .emp-name { font-weight: 600; color: var(--gray-900); }
+    .emp-meta { font-size: 11px; color: var(--gray-700); margin-top: 1px; }
+
+    /* Provider selection cell */
+    .provider-cell { min-width: 260px; }
+    .provider-select {
+      width: 100%;
+      padding: 5px 8px;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--gray-300);
+      font-family: inherit;
+      font-size: 12px;
+      background: white;
+    }
+    .provider-badges {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+      margin-top: 4px;
+    }
+    .provider-details {
+      font-size: 10.5px;
+      color: var(--gray-700);
+      margin-top: 2px;
+      line-height: 1.2;
+    }
+
+    /* Meeting address input for mobile */
+    .meeting-address-box {
+      margin-top: 4px;
+      padding: 4px 6px;
+      background: #fdf4ff;
+      border: 1px dashed #d946ef;
+      border-radius: var(--radius-sm);
+    }
+    .meeting-address-box label {
+      font-size: 10px;
+      font-weight: 700;
+      color: #9333ea;
+      display: flex;
+      justify-content: space-between;
+    }
+    .meeting-address-box input {
+      width: 100%;
+      padding: 3px 6px;
+      font-size: 11px;
+      border: 1px solid #e9d5ff;
+      border-radius: 4px;
+      margin-top: 2px;
+    }
+    .suggest-link {
+      color: var(--primary);
+      cursor: pointer;
+      text-decoration: underline;
+      font-weight: normal;
+    }
+
+    /* Schedule time cell */
+    .schedule-cell { min-width: 140px; }
+    .schedule-cell input[type="date"] {
+      width: 100%;
+      padding: 4px 6px;
+      font-size: 11px;
+      border: 1px solid var(--gray-300);
+      border-radius: 4px;
+      margin-bottom: 3px;
+    }
+    .schedule-cell input[type="time"], .schedule-cell input[type="text"] {
+      width: 100%;
+      padding: 4px 6px;
+      font-size: 11px;
+      border: 1px solid var(--gray-300);
+      border-radius: 4px;
+    }
+
+    /* Actions cell */
+    .actions-cell {
+      white-space: nowrap;
+      text-align: right;
+    }
+
+    /* Modals */
+    .modal-overlay {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0,0,0,0.5);
+      z-index: 100;
+      align-items: center;
+      justify-content: center;
+    }
+    .modal-overlay.active { display: flex; }
+    .modal-card {
+      background: white;
+      border-radius: var(--radius-md);
+      box-shadow: var(--shadow-md);
+      width: 90%;
+      max-width: 600px;
+      max-height: 85vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      animation: modalIn 0.15s ease-out;
+    }
+    @keyframes modalIn {
+      from { transform: scale(0.95); opacity: 0; }
+      to { transform: scale(1); opacity: 1; }
+    }
+    .modal-header {
+      padding: 12px 18px;
+      background: var(--gray-100);
+      border-bottom: 1px solid var(--gray-300);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .modal-header h3 { font-size: 15px; font-weight: 700; color: var(--gray-900); }
+    .modal-close {
+      background: none; border: none; font-size: 18px; cursor: pointer; color: var(--gray-700);
+    }
+    .modal-body {
+      padding: 16px 18px;
+      overflow-y: auto;
+    }
+    .modal-footer {
+      padding: 10px 18px;
+      background: var(--gray-100);
+      border-top: 1px solid var(--gray-300);
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+    }
+
+    /* Form Layout in Modal */
+    .form-group { margin-bottom: 12px; }
+    .form-group label {
+      display: block;
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--gray-700);
+      margin-bottom: 4px;
+    }
+    .form-row {
+      display: flex;
+      gap: 10px;
+    }
+    .form-col { flex: 1; }
+
+    /* Toast Notification */
+    .toast {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      padding: 10px 18px;
+      border-radius: var(--radius-sm);
+      font-size: 12px;
+      font-weight: 600;
+      color: white;
+      background: #323232;
+      box-shadow: var(--shadow-md);
+      display: none;
+      z-index: 200;
+      animation: fadeIn 0.2s;
+    }
+    @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+    .loading-overlay {
+      display: none;
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(255,255,255,0.75);
+      z-index: 150;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .loading-overlay.active { display: flex; }
+    .spinner {
+      border: 3px solid #f3f3f3;
+      border-top: 3px solid var(--primary);
+      border-radius: 50%;
+      width: 32px;
+      height: 32px;
+      animation: spin 0.8s linear infinite;
+    }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+    /* Empty state */
+    .empty-placeholder {
+      text-align: center;
+      padding: 40px 20px;
+      color: var(--gray-700);
+    }
+    .empty-placeholder h4 {
+      font-size: 15px;
+      font-weight: 600;
+      color: var(--gray-900);
+      margin-bottom: 6px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Header Bar -->
+  <div class="header-bar">
+    <div class="header-title">
+      <h1>🧪 Random DOT Drug Testing</h1>
+      <div class="subtitle">Quarterly DOT testing pool, clinic scheduling & mobile collector dispatch</div>
+    </div>
+    <div class="header-controls">
+      <div class="quarter-select-wrapper">
+        <label>Quarter:</label>
+        <select id="quarterSelect" class="quarter-select" onchange="switchQuarter()">
+          <option value="">Loading...</option>
+        </select>
+      </div>
+      <button class="btn btn-outline btn-sm" onclick="promptNewQuarter()" title="Add / Start New Quarter">➕ New Quarter</button>
+      <button class="btn btn-outline btn-sm" onclick="loadData()" title="Refresh">🔄 Refresh</button>
+      <button class="btn btn-outline btn-sm" onclick="openSheet('tests')" title="Open DOT Drug Tests Sheet">📂 Sheet</button>
+    </div>
+  </div>
+
+  <!-- KPI Metrics Bar -->
+  <div class="kpi-container">
+    <div class="kpi-card total">
+      <div class="kpi-label">Selected In Quarter</div>
+      <div class="kpi-value" id="kpiTotal">0</div>
+    </div>
+    <div class="kpi-card pending">
+      <div class="kpi-label">⏳ Pending Scheduling</div>
+      <div class="kpi-value" id="kpiPending">0</div>
+    </div>
+    <div class="kpi-card scheduled">
+      <div class="kpi-label">📅 Scheduled</div>
+      <div class="kpi-value" id="kpiScheduled">0</div>
+    </div>
+    <div class="kpi-card mobile">
+      <div class="kpi-label">🚚 Mobile Collections</div>
+      <div class="kpi-value" id="kpiMobile">0</div>
+    </div>
+    <div class="kpi-card completed">
+      <div class="kpi-label">✅ Completed</div>
+      <div class="kpi-value" id="kpiCompleted">0</div>
+    </div>
+  </div>
+
+  <!-- Nav Tabs -->
+  <div class="nav-tabs">
+    <button class="tab-btn active" id="tabBtnTests" onclick="switchTab('tests')">
+      📋 Quarterly Test Pool (<span id="tabCountTests">0</span>)
+    </button>
+    <button class="tab-btn" id="tabBtnClinics" onclick="switchTab('clinics')">
+      🏥 Clinics & Mobile Collectors (<span id="tabCountClinics">0</span>)
+    </button>
+  </div>
+
+  <!-- ==================== TAB 1: TESTS ==================== -->
+  <div id="tabTests" class="tab-content active">
+    <div class="action-bar">
+      <div class="action-group">
+        <!-- Add single employee -->
+        <select id="empSelect" class="form-control" style="width: 240px;">
+          <option value="">-- Add Employee to Quarter --</option>
+        </select>
+        <button class="btn btn-primary" onclick="addSelectedEmployee()">➕ Add to Quarter</button>
+        <button class="btn btn-outline" onclick="openBulkPasteModal()">📋 Bulk Paste Roster</button>
+      </div>
+      <div class="action-group">
+        <div class="search-box">
+          <input type="text" id="testSearchInput" class="search-input" placeholder="🔍 Search employee, crew, clinic..." oninput="filterTestsTable()">
+        </div>
+        <select id="testStatusFilter" class="form-control" style="width: 130px;" onchange="filterTestsTable()">
+          <option value="ALL">All Statuses</option>
+          <option value="Pending">⏳ Pending</option>
+          <option value="Scheduled">📅 Scheduled</option>
+          <option value="Completed">✅ Completed</option>
+          <option value="Excused">🚫 Excused</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="table-container">
+      <table id="testsTable">
+        <thead>
+          <tr>
+            <th style="width: 100px;">Status</th>
+            <th style="width: 180px;">Employee</th>
+            <th style="width: 110px;">Type</th>
+            <th style="min-width: 280px;">Clinic / Provider & Requirements</th>
+            <th style="min-width: 220px;">Appointment / Meeting Details</th>
+            <th style="min-width: 140px;">Notes / Results</th>
+            <th style="width: 110px; text-align: right;">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="testsTbody">
+          <!-- Rows injected via JS -->
+        </tbody>
+      </table>
+      <div id="emptyTestsMsg" class="empty-placeholder" style="display: none;">
+        <h4>No employees in this quarter yet</h4>
+        <p>Use the dropdown above to add employees, or click <strong>Bulk Paste Roster</strong> to paste a list from your email.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== TAB 2: CLINICS DIRECTORY ==================== -->
+  <div id="tabClinics" class="tab-content">
+    <div class="action-bar">
+      <div class="action-group">
+        <button class="btn btn-primary" onclick="openAddClinicModal()">➕ Add New Clinic / Collector</button>
+        <button class="btn btn-outline" onclick="openSheet('clinics')">📂 Open Clinics Sheet</button>
+      </div>
+      <div class="action-group">
+        <div class="search-box">
+          <input type="text" id="clinicSearchInput" class="search-input" placeholder="🔍 Search by name, city, state..." oninput="filterClinicsTable()">
+        </div>
+        <select id="clinicTypeFilter" class="form-control" style="width: 150px;" onchange="filterClinicsTable()">
+          <option value="ALL">All Providers</option>
+          <option value="MOBILE">🚚 Mobile Collectors</option>
+          <option value="FACILITY">🏥 Fixed Clinics</option>
+          <option value="APPT_REQ">🔴 Appt Required</option>
+          <option value="WALK_IN">🟢 Walk-In</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="table-container">
+      <table id="clinicsTable">
+        <thead>
+          <tr>
+            <th style="min-width: 240px;">Firm / Clinic Name</th>
+            <th style="width: 120px;">Type</th>
+            <th style="min-width: 160px;">Location</th>
+            <th style="width: 130px;">Phone</th>
+            <th style="min-width: 150px;">Hours</th>
+            <th style="min-width: 150px;">Appointment?</th>
+            <th style="min-width: 180px;">Paperwork / Notes</th>
+            <th style="width: 80px; text-align: right;">Actions</th>
+          </tr>
+        </thead>
+        <tbody id="clinicsTbody">
+          <!-- Rows injected via JS -->
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ==================== MODAL: BULK PASTE ROSTER ==================== -->
+  <div id="bulkPasteModal" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>📋 Bulk Paste Employee Roster</h3>
+        <button class="modal-close" onclick="closeModal('bulkPasteModal')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>Paste employee names (one per line, or copied from a spreadsheet/email):</label>
+          <textarea id="bulkPasteText" class="form-control" style="height: 180px; font-family: monospace; font-size: 12px;" placeholder="John Smith&#10;Jane Doe&#10;Darrell Swann..."></textarea>
+          <div style="font-size: 11px; color: var(--gray-700); margin-top: 4px;">
+            The system will automatically match each name against your active <strong>Employees</strong> sheet to retrieve their Job Number, City/Location, and Phone number.
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="closeModal('bulkPasteModal')">Cancel</button>
+        <button class="btn btn-primary" onclick="processBulkPaste()">Process & Add</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== MODAL: ADD / EDIT CLINIC ==================== -->
+  <div id="clinicModal" class="modal-overlay">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3 id="clinicModalTitle">➕ Add New Clinic / Collector</h3>
+        <button class="modal-close" onclick="closeModal('clinicModal')">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="form-group">
+          <label>Firm / Clinic Name <span style="color:red;">*</span></label>
+          <input type="text" id="modalClinicFirm" class="form-control" placeholder="e.g. Montana Occupational Health" required>
+        </div>
+
+        <div class="form-group">
+          <label style="display: flex; align-items: center; gap: 6px; cursor: pointer;">
+            <input type="checkbox" id="modalClinicIsMobile">
+            <span>🚚 <strong>Is Mobile Collector?</strong> (Collector meets crew at job site/yard)</span>
+          </label>
+        </div>
+
+        <div class="form-group">
+          <label>Street Address</label>
+          <input type="text" id="modalClinicStreet" class="form-control" placeholder="e.g. 2075 Charlotte #3 (or 'Mobile Collections')">
+        </div>
+
+        <div class="form-row">
+          <div class="form-col form-group">
+            <label>City</label>
+            <input type="text" id="modalClinicCity" class="form-control" placeholder="e.g. Bozeman">
+          </div>
+          <div class="form-col form-group" style="flex: 0 0 70px;">
+            <label>State</label>
+            <input type="text" id="modalClinicState" class="form-control" placeholder="MT" maxlength="2">
+          </div>
+          <div class="form-col form-group" style="flex: 0 0 90px;">
+            <label>Zip</label>
+            <input type="text" id="modalClinicZip" class="form-control" placeholder="59718">
+          </div>
+        </div>
+
+        <div class="form-row">
+          <div class="form-col form-group">
+            <label>Phone Number</label>
+            <input type="text" id="modalClinicPhone" class="form-control" placeholder="e.g. 406-556-1060">
+          </div>
+          <div class="form-col form-group">
+            <label>Operating Hours</label>
+            <input type="text" id="modalClinicHours" class="form-control" placeholder="e.g. M-F 8 am to 5 pm">
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Appointment Required?</label>
+          <input type="text" id="modalClinicAppt" class="form-control" placeholder="Yes, No, Suggested, or specific booking notes">
+        </div>
+
+        <div class="form-group">
+          <label>Paperwork Required with Donor</label>
+          <input type="text" id="modalClinicPaperwork" class="form-control" placeholder="e.g. eCCF only, Split Kit & shipping label, Form Fox, No">
+        </div>
+
+        <div class="form-group">
+          <label>Special Notes / Instructions</label>
+          <textarea id="modalClinicNotes" class="form-control" style="height: 60px;" placeholder="e.g. NO BATS, send authorization to email..."></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn btn-outline" onclick="closeModal('clinicModal')">Cancel</button>
+        <button class="btn btn-primary" onclick="submitSaveClinic()">Save Clinic</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Loading Spinner Overlay -->
+  <div id="loadingOverlay" class="loading-overlay">
+    <div class="spinner"></div>
+    <div id="loadingMsg" style="font-weight: 600; color: var(--gray-700);">Loading data...</div>
+  </div>
+
+  <!-- Toast -->
+  <div id="toast" class="toast"></div>
+
+  <script>
+    // Global State
+    let appData = {
+      quarters: [],
+      currentQuarter: '',
+      selectedQuarter: '',
+      tests: [],
+      clinics: [],
+      employees: [],
+      jobLocations: {}
+    };
+
+    // Initialize on Load
+    window.addEventListener('DOMContentLoaded', () => {
+      loadData();
+    });
+
+    function showLoading(msg) {
+      document.getElementById('loadingMsg').textContent = msg || 'Loading data...';
+      document.getElementById('loadingOverlay').classList.add('active');
+    }
+
+    function hideLoading() {
+      document.getElementById('loadingOverlay').classList.remove('active');
+    }
+
+    function showToast(msg, isSuccess = true) {
+      const toast = document.getElementById('toast');
+      toast.textContent = msg;
+      toast.style.background = isSuccess ? '#1e8e3e' : '#d93025';
+      toast.style.display = 'block';
+      setTimeout(() => { toast.style.display = 'none'; }, 3200);
+    }
+
+    function loadData(targetQuarter = null) {
+      showLoading('Loading drug testing data...');
+      google.script.run
+        .withSuccessHandler(data => {
+          appData = data;
+          renderAll();
+          hideLoading();
+        })
+        .withFailureHandler(err => {
+          hideLoading();
+          showToast('Error loading data: ' + err.message, false);
+        })
+        .getDrugTestingDialogData(targetQuarter);
+    }
+
+    function renderAll() {
+      renderQuarterSelect();
+      renderKPIs();
+      renderEmployeePicker();
+      renderTestsTable();
+      renderClinicsTable();
+    }
+
+    // Quarter dropdown
+    function renderQuarterSelect() {
+      const select = document.getElementById('quarterSelect');
+      select.innerHTML = '';
+      appData.quarters.forEach(q => {
+        const opt = document.createElement('option');
+        opt.value = q;
+        opt.textContent = q + (q === appData.currentQuarter ? ' (Current)' : '');
+        if (q === appData.selectedQuarter) opt.selected = true;
+        select.appendChild(opt);
+      });
+    }
+
+    function switchQuarter() {
+      const q = document.getElementById('quarterSelect').value;
+      loadData(q);
+    }
+
+    function promptNewQuarter() {
+      const now = new Date();
+      const nextQNum = (Math.floor(now.getMonth() / 3) + 1) % 4 + 1;
+      const nextYear = nextQNum === 1 ? now.getFullYear() + 1 : now.getFullYear();
+      const defaultVal = `Q${nextQNum} ${nextYear}`;
+      const userQ = prompt('Enter new quarter name (e.g. Q4 2026):', defaultVal);
+      if (userQ && userQ.trim()) {
+        const qClean = userQ.trim().toUpperCase();
+        if (!appData.quarters.includes(qClean)) {
+          appData.quarters.unshift(qClean);
+        }
+        loadData(qClean);
+      }
+    }
+
+    // KPIs
+    function renderKPIs() {
+      const tests = appData.tests || [];
+      const total = tests.length;
+      const pending = tests.filter(t => t.status === 'Pending').length;
+      const scheduled = tests.filter(t => t.status === 'Scheduled').length;
+      const mobile = tests.filter(t => t.collectionType === 'Mobile Collector').length;
+      const completed = tests.filter(t => t.status === 'Completed').length;
+
+      document.getElementById('kpiTotal').textContent = total;
+      document.getElementById('kpiPending').textContent = pending;
+      document.getElementById('kpiScheduled').textContent = scheduled;
+      document.getElementById('kpiMobile').textContent = mobile;
+      document.getElementById('kpiCompleted').textContent = total > 0 ? `${completed} (${Math.round((completed/total)*100)}%)` : '0';
+
+      document.getElementById('tabCountTests').textContent = total;
+      document.getElementById('tabCountClinics').textContent = (appData.clinics || []).length;
+    }
+
+    // Employee Picker dropdown
+    function renderEmployeePicker() {
+      const select = document.getElementById('empSelect');
+      select.innerHTML = '<option value="">-- Add Employee to Quarter --</option>';
+      (appData.employees || []).forEach(emp => {
+        const opt = document.createElement('option');
+        opt.value = emp.name;
+        opt.textContent = `${emp.name} — ${emp.location || 'No City'} (${emp.jobNumber || 'No Job#'})`;
+        select.appendChild(opt);
+      });
+    }
+
+    // Tabs switching
+    function switchTab(tab) {
+      document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+      document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+
+      if (tab === 'tests') {
+        document.getElementById('tabBtnTests').classList.add('active');
+        document.getElementById('tabTests').classList.add('active');
+      } else {
+        document.getElementById('tabBtnClinics').classList.add('active');
+        document.getElementById('tabClinics').classList.add('active');
+      }
+    }
+
+    // Helper: Find Clinic Object
+    function getClinicByName(firmName) {
+      if (!firmName) return null;
+      return (appData.clinics || []).find(c => c.firm.toLowerCase() === firmName.toLowerCase());
+    }
+
+    // Render Tests Table
+    function renderTestsTable() {
+      const tbody = document.getElementById('testsTbody');
+      const emptyMsg = document.getElementById('emptyTestsMsg');
+      tbody.innerHTML = '';
+
+      const tests = appData.tests || [];
+      if (tests.length === 0) {
+        emptyMsg.style.display = 'block';
+        return;
+      }
+      emptyMsg.style.display = 'none';
+
+      tests.forEach((test, idx) => {
+        const tr = document.createElement('tr');
+        tr.id = `test-row-${test.rowId}`;
+
+        // Status badge
+        let statusBadgeClass = 'badge-pending';
+        let statusIcon = '⏳';
+        if (test.status === 'Scheduled') { statusBadgeClass = 'badge-scheduled'; statusIcon = '📅'; }
+        else if (test.status === 'Completed') { statusBadgeClass = 'badge-completed'; statusIcon = '✅'; }
+        else if (test.status === 'Excused') { statusBadgeClass = 'badge-excused'; statusIcon = '🚫'; }
+
+        // Selected Clinic lookup
+        const clinic = getClinicByName(test.clinicName);
+        const isMobile = test.collectionType === 'Mobile Collector';
+
+        tr.innerHTML = `
+          <td>
+            <select class="form-control form-control-sm" style="font-weight: 600;" onchange="updateTestField(${test.rowId}, 'status', this.value)">
+              <option value="Pending" ${test.status === 'Pending' ? 'selected' : ''}>⏳ Pending</option>
+              <option value="Scheduled" ${test.status === 'Scheduled' ? 'selected' : ''}>📅 Scheduled</option>
+              <option value="Completed" ${test.status === 'Completed' ? 'selected' : ''}>✅ Completed</option>
+              <option value="Excused" ${test.status === 'Excused' ? 'selected' : ''}>🚫 Excused</option>
+            </select>
+          </td>
+          <td>
+            <div class="emp-info">
+              <span class="emp-name">${escapeHtml(test.employeeName)}</span>
+              <span class="emp-meta">📍 ${escapeHtml(test.location || 'Unknown')} &bull; Job ${escapeHtml(test.jobNumber || 'N/A')}</span>
+              ${test.phone ? `<span class="emp-meta">📞 ${escapeHtml(test.phone)}</span>` : ''}
+            </div>
+          </td>
+          <td>
+            <select class="form-control form-control-sm" onchange="toggleCollectionType(${test.rowId}, this.value)">
+              <option value="Clinic Visit" ${!isMobile ? 'selected' : ''}>🏥 Clinic</option>
+              <option value="Mobile Collector" ${isMobile ? 'selected' : ''}>🚚 Mobile</option>
+            </select>
+          </td>
+          <td class="provider-cell">
+            <select class="provider-select" onchange="onClinicChange(${test.rowId}, this.value)">
+              <option value="">-- Select Provider / Clinic --</option>
+              ${buildClinicOptions(test.clinicName)}
+            </select>
+            <div class="provider-badges" id="provider-badges-${test.rowId}">
+              ${renderProviderBadges(clinic)}
+            </div>
+            <div class="provider-details" id="provider-details-${test.rowId}">
+              ${renderProviderDetails(clinic)}
+            </div>
+          </td>
+          <td class="schedule-cell">
+            ${isMobile ? `
+              <div class="meeting-address-box" id="meeting-box-${test.rowId}">
+                <label>
+                  <span>📍 Crew Meeting Address:</span>
+                  <span class="suggest-link" onclick="suggestMeetingAddress(${test.rowId}, '${escapeHtml(test.jobNumber)}', '${escapeHtml(test.location)}')">Suggest</span>
+                </label>
+                <input type="text" placeholder="Enter meeting address / job site" value="${escapeHtml(test.meetingAddress || '')}" onchange="updateTestField(${test.rowId}, 'meetingAddress', this.value)">
+              </div>
+            ` : ''}
+            <div style="display: flex; gap: 4px; margin-top: 4px;">
+              <input type="date" title="Scheduled Test Date" value="${test.scheduledDate || ''}" onchange="updateTestField(${test.rowId}, 'scheduledDate', this.value)">
+              <input type="text" placeholder="Time (e.g. 9:30 AM)" style="width: 100px;" value="${escapeHtml(test.scheduledTime || '')}" onchange="updateTestField(${test.rowId}, 'scheduledTime', this.value)">
+            </div>
+          </td>
+          <td>
+            <input type="text" class="form-control" style="font-size: 11px;" placeholder="Notes, result, confirmation..." value="${escapeHtml(test.notes || '')}" onchange="updateTestField(${test.rowId}, 'notes', this.value)">
+            ${test.dateCompleted ? `<div style="font-size: 10px; color: var(--success); margin-top: 2px;">Done: ${test.dateCompleted}</div>` : ''}
+          </td>
+          <td class="actions-cell">
+            ${test.status !== 'Completed' ? `
+              <button class="btn btn-success btn-sm" onclick="quickMarkComplete(${test.rowId})" title="Mark Completed Now">✅ Done</button>
+            ` : `
+              <button class="btn btn-outline btn-sm" onclick="quickMarkComplete(${test.rowId})" title="Edit Completion Date">✏️ Done</button>
+            `}
+            <button class="btn btn-danger-outline btn-sm" onclick="deleteTest(${test.rowId}, '${escapeHtml(test.employeeName)}')" title="Remove from quarter">🗑️</button>
+          </td>
+        `;
+
+        tbody.appendChild(tr);
+      });
+    }
+
+    function buildClinicOptions(selectedFirm) {
+      const clinics = appData.clinics || [];
+      return clinics.map(c => {
+        const isSel = c.firm.toLowerCase() === String(selectedFirm || '').toLowerCase();
+        const prefix = c.isMobile ? '🚚 [Mobile] ' : '🏥 ';
+        return `<option value="${escapeHtml(c.firm)}" ${isSel ? 'selected' : ''}>${prefix}${escapeHtml(c.firm)} (${escapeHtml(c.city)}, ${escapeHtml(c.state)})</option>`;
+      }).join('');
+    }
+
+    function renderProviderBadges(clinic) {
+      if (!clinic) return '';
+      let html = '';
+      
+      // Appointment requirement badge
+      const apptLower = (clinic.apptRequired || '').toLowerCase();
+      if (apptLower.startsWith('yes') || apptLower.includes('required') || apptLower.includes('schedule') || apptLower.includes('locked')) {
+        html += `<span class="badge badge-appt-yes">🔴 Appt Required</span>`;
+      } else if (apptLower.startsWith('suggested') || apptLower.includes('prefer')) {
+        html += `<span class="badge badge-appt-suggested">🟡 Appt Suggested</span>`;
+      } else if (apptLower.startsWith('no')) {
+        html += `<span class="badge badge-appt-no">🟢 Walk-In (No Appt)</span>`;
+      }
+
+      // Paperwork badge
+      if (clinic.paperworkRequired && clinic.paperworkRequired.toLowerCase() !== 'no') {
+        html += `<span class="badge badge-paperwork" title="${escapeHtml(clinic.paperworkRequired)}">📋 ${escapeHtml(clinic.paperworkRequired)}</span>`;
+      }
+
+      // Mobile badge
+      if (clinic.isMobile) {
+        html += `<span class="badge badge-mobile">🚚 Mobile Collector</span>`;
+      }
+
+      return html;
+    }
+
+    function renderProviderDetails(clinic) {
+      if (!clinic) return '<span style="color: var(--gray-500); font-style: italic;">No clinic selected</span>';
+      let details = [];
+      if (clinic.phone) details.push(`📞 ${escapeHtml(clinic.phone)}`);
+      if (clinic.hours) details.push(`🕒 ${escapeHtml(clinic.hours)}`);
+      if (clinic.notes) details.push(`⚠️ ${escapeHtml(clinic.notes)}`);
+      return details.join(' &bull; ');
+    }
+
+    // Toggle Collection Type between Clinic and Mobile Collector
+    function toggleCollectionType(rowId, newType) {
+      const test = (appData.tests || []).find(t => t.rowId === rowId);
+      if (!test) return;
+
+      test.collectionType = newType;
+      // If switched to mobile and meeting address is blank, try suggesting
+      if (newType === 'Mobile Collector' && !test.meetingAddress) {
+        test.meetingAddress = getSuggestedAddress(test.jobNumber, test.location);
+      }
+      saveTestRecord(test);
+    }
+
+    function onClinicChange(rowId, firmName) {
+      const test = (appData.tests || []).find(t => t.rowId === rowId);
+      if (!test) return;
+
+      const clinic = getClinicByName(firmName);
+      test.clinicName = firmName;
+      if (clinic) {
+        test.clinicCity = `${clinic.city}, ${clinic.state}`;
+        test.apptRequired = clinic.apptRequired;
+        test.paperworkNotes = clinic.paperworkRequired;
+        if (clinic.isMobile) {
+          test.collectionType = 'Mobile Collector';
+          if (!test.meetingAddress) {
+            test.meetingAddress = getSuggestedAddress(test.jobNumber, test.location);
+          }
+        }
+      } else {
+        test.clinicCity = '';
+        test.apptRequired = '';
+        test.paperworkNotes = '';
+      }
+
+      saveTestRecord(test);
+    }
+
+    function updateTestField(rowId, field, value) {
+      const test = (appData.tests || []).find(t => t.rowId === rowId);
+      if (!test) return;
+      test[field] = value;
+      saveTestRecord(test);
+    }
+
+    function suggestMeetingAddress(rowId, jobNumber, location) {
+      const suggested = getSuggestedAddress(jobNumber, location);
+      const test = (appData.tests || []).find(t => t.rowId === rowId);
+      if (test) {
+        test.meetingAddress = suggested;
+        saveTestRecord(test);
+      }
+    }
+
+    function getSuggestedAddress(jobNumber, location) {
+      const jobInfo = appData.jobLocations && appData.jobLocations[jobNumber];
+      if (jobInfo && jobInfo.jobName) {
+        return `${jobInfo.jobName}, ${jobInfo.location || location || ''}`.trim();
+      }
+      return `${location || 'Main Job Yard / Site'}`.trim();
+    }
+
+    function saveTestRecord(test) {
+      google.script.run
+        .withSuccessHandler(res => {
+          showToast('Updated test schedule.');
+          renderKPIs();
+          renderTestsTable();
+        })
+        .withFailureHandler(err => {
+          showToast('Failed to update: ' + err.message, false);
+        })
+        .saveDrugTestRecord(test);
+    }
+
+    // Quick Mark Complete
+    function quickMarkComplete(rowId) {
+      const test = (appData.tests || []).find(t => t.rowId === rowId);
+      if (!test) return;
+
+      const today = new Date().toISOString().split('T')[0];
+      const userDate = prompt(`Enter completion date for ${test.employeeName}:`, test.dateCompleted || today);
+      if (userDate !== null) {
+        showLoading('Marking test complete...');
+        google.script.run
+          .withSuccessHandler(res => {
+            hideLoading();
+            showToast(`Marked ${test.employeeName} completed!`);
+            loadData(appData.selectedQuarter);
+          })
+          .withFailureHandler(err => {
+            hideLoading();
+            showToast('Error: ' + err.message, false);
+          })
+          .markDrugTestComplete(rowId, userDate.trim(), '');
+      }
+    }
+
+    // Delete test from quarter
+    function deleteTest(rowId, empName) {
+      if (confirm(`Remove ${empName} from the ${appData.selectedQuarter} testing pool?`)) {
+        showLoading('Removing employee...');
+        google.script.run
+          .withSuccessHandler(() => {
+            hideLoading();
+            showToast(`Removed ${empName}.`);
+            loadData(appData.selectedQuarter);
+          })
+          .withFailureHandler(err => {
+            hideLoading();
+            showToast('Error: ' + err.message, false);
+          })
+          .deleteDrugTestRecord(rowId);
+      }
+    }
+
+    // Add selected single employee
+    function addSelectedEmployee() {
+      const select = document.getElementById('empSelect');
+      const empName = select.value;
+      if (!empName) {
+        alert('Please select an employee to add.');
+        return;
+      }
+
+      // Check if already in this quarter
+      const existing = (appData.tests || []).find(t => t.employeeName.toLowerCase() === empName.toLowerCase());
+      if (existing) {
+        alert(`${empName} is already in the ${appData.selectedQuarter} testing pool.`);
+        return;
+      }
+
+      const emp = (appData.employees || []).find(e => e.name === empName);
+      const newRecord = {
+        quarter: appData.selectedQuarter,
+        employeeName: empName,
+        location: emp ? emp.location : '',
+        jobNumber: emp ? emp.jobNumber : '',
+        phone: emp ? emp.phone : '',
+        collectionType: 'Clinic Visit',
+        status: 'Pending'
+      };
+
+      showLoading('Adding employee...');
+      google.script.run
+        .withSuccessHandler(() => {
+          hideLoading();
+          showToast(`Added ${empName} to ${appData.selectedQuarter}!`);
+          select.value = '';
+          loadData(appData.selectedQuarter);
+        })
+        .withFailureHandler(err => {
+          hideLoading();
+          showToast('Error: ' + err.message, false);
+        })
+        .saveDrugTestRecord(newRecord);
+    }
+
+    // Bulk Paste Modal & Processing
+    function openBulkPasteModal() {
+      document.getElementById('bulkPasteText').value = '';
+      document.getElementById('bulkPasteModal').classList.add('active');
+    }
+
+    function processBulkPaste() {
+      const rawText = document.getElementById('bulkPasteText').value;
+      if (!rawText.trim()) {
+        alert('Please paste at least one employee name.');
+        return;
+      }
+
+      const lines = rawText.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+      const newRecords = [];
+      const currentTests = appData.tests || [];
+
+      lines.forEach(line => {
+        // Strip common prefixes or tabs if copied from Excel/table
+        const cleanName = line.split('\t')[0].trim().replace(/^[\d\.\-\*•]+\s*/, '');
+        if (!cleanName) return;
+
+        // Prevent adding duplicate in this batch or quarter
+        const alreadyInQuarter = currentTests.some(t => t.employeeName.toLowerCase() === cleanName.toLowerCase());
+        const alreadyInBatch = newRecords.some(r => r.employeeName.toLowerCase() === cleanName.toLowerCase());
+        if (alreadyInQuarter || alreadyInBatch) return;
+
+        // Match against active employees
+        const matchedEmp = (appData.employees || []).find(e => e.name.toLowerCase() === cleanName.toLowerCase());
+
+        newRecords.push({
+          quarter: appData.selectedQuarter,
+          employeeName: matchedEmp ? matchedEmp.name : cleanName,
+          location: matchedEmp ? matchedEmp.location : '',
+          jobNumber: matchedEmp ? matchedEmp.jobNumber : '',
+          phone: matchedEmp ? matchedEmp.phone : '',
+          collectionType: 'Clinic Visit',
+          status: 'Pending'
+        });
+      });
+
+      if (newRecords.length === 0) {
+        alert('No new employees found to add (they may already be in this quarter).');
+        return;
+      }
+
+      closeModal('bulkPasteModal');
+      showLoading(`Adding ${newRecords.length} employees...`);
+      google.script.run
+        .withSuccessHandler(res => {
+          hideLoading();
+          showToast(`Successfully added ${newRecords.length} employees!`);
+          loadData(appData.selectedQuarter);
+        })
+        .withFailureHandler(err => {
+          hideLoading();
+          showToast('Error saving bulk roster: ' + err.message, false);
+        })
+        .saveDrugTestBatch(newRecords);
+    }
+
+    // Filter Tests Table
+    function filterTestsTable() {
+      const query = document.getElementById('testSearchInput').value.toLowerCase();
+      const statusFilter = document.getElementById('testStatusFilter').value;
+      const rows = document.querySelectorAll('#testsTbody tr');
+
+      rows.forEach(row => {
+        const text = row.innerText.toLowerCase();
+        const matchesQuery = !query || text.includes(query);
+        
+        let matchesStatus = true;
+        if (statusFilter !== 'ALL') {
+          const statusSelect = row.querySelector('select');
+          matchesStatus = statusSelect && statusSelect.value === statusFilter;
+        }
+
+        row.style.display = (matchesQuery && matchesStatus) ? '' : 'none';
+      });
+    }
+
+    // ==================== CLINICS DIRECTORY ====================
+    function renderClinicsTable() {
+      const tbody = document.getElementById('clinicsTbody');
+      tbody.innerHTML = '';
+
+      const clinics = appData.clinics || [];
+      clinics.forEach(c => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `
+          <td>
+            <strong>${escapeHtml(c.firm)}</strong>
+            <div style="font-size: 11px; color: var(--gray-700);">${escapeHtml(c.street || '')}</div>
+          </td>
+          <td>
+            ${c.isMobile ? '<span class="badge badge-mobile">🚚 Mobile Collector</span>' : '<span class="badge badge-clinic">🏥 Clinic Facility</span>'}
+          </td>
+          <td>${escapeHtml(c.city || '')}, ${escapeHtml(c.state || '')} ${escapeHtml(c.zip || '')}</td>
+          <td>${escapeHtml(c.phone || '')}</td>
+          <td>${escapeHtml(c.hours || 'N/A')}</td>
+          <td>
+            <div style="font-size: 11.5px;">${renderProviderBadges(c)}</div>
+            <div style="font-size: 10.5px; color: var(--gray-700); margin-top: 2px;">${escapeHtml(c.apptRequired || '')}</div>
+          </td>
+          <td>
+            <div style="font-size: 11px; font-weight: 500;">${escapeHtml(c.paperworkRequired || 'None')}</div>
+            ${c.notes ? `<div style="font-size: 10.5px; color: #b06000; margin-top: 2px;">⚠️ ${escapeHtml(c.notes)}</div>` : ''}
+          </td>
+          <td style="text-align: right;">
+            <button class="btn btn-outline btn-sm" onclick="editClinic('${escapeHtml(c.firm)}')">✏️ Edit</button>
+          </td>
+        `;
+        tbody.appendChild(tr);
+      });
+    }
+
+    function filterClinicsTable() {
+      const query = document.getElementById('clinicSearchInput').value.toLowerCase();
+      const typeFilter = document.getElementById('clinicTypeFilter').value;
+      const rows = document.querySelectorAll('#clinicsTbody tr');
+
+      rows.forEach(row => {
+        const text = row.innerText.toLowerCase();
+        const matchesQuery = !query || text.includes(query);
+
+        let matchesType = true;
+        if (typeFilter === 'MOBILE') matchesType = text.includes('mobile collector');
+        else if (typeFilter === 'FACILITY') matchesType = text.includes('clinic facility');
+        else if (typeFilter === 'APPT_REQ') matchesType = text.includes('appt required');
+        else if (typeFilter === 'WALK_IN') matchesType = text.includes('walk-in');
+
+        row.style.display = (matchesQuery && matchesType) ? '' : 'none';
+      });
+    }
+
+    function openAddClinicModal() {
+      document.getElementById('clinicModalTitle').textContent = '➕ Add New Clinic / Collector';
+      document.getElementById('modalClinicFirm').value = '';
+      document.getElementById('modalClinicFirm').disabled = false;
+      document.getElementById('modalClinicIsMobile').checked = false;
+      document.getElementById('modalClinicStreet').value = '';
+      document.getElementById('modalClinicCity').value = '';
+      document.getElementById('modalClinicState').value = 'MT';
+      document.getElementById('modalClinicZip').value = '';
+      document.getElementById('modalClinicPhone').value = '';
+      document.getElementById('modalClinicHours').value = '';
+      document.getElementById('modalClinicAppt').value = '';
+      document.getElementById('modalClinicPaperwork').value = '';
+      document.getElementById('modalClinicNotes').value = '';
+      document.getElementById('clinicModal').classList.add('active');
+    }
+
+    function editClinic(firmName) {
+      const clinic = getClinicByName(firmName);
+      if (!clinic) return;
+
+      document.getElementById('clinicModalTitle').textContent = '✏️ Edit Clinic / Collector';
+      document.getElementById('modalClinicFirm').value = clinic.firm;
+      document.getElementById('modalClinicFirm').disabled = true; // Firm name acts as key
+      document.getElementById('modalClinicIsMobile').checked = clinic.isMobile;
+      document.getElementById('modalClinicStreet').value = clinic.street || '';
+      document.getElementById('modalClinicCity').value = clinic.city || '';
+      document.getElementById('modalClinicState').value = clinic.state || '';
+      document.getElementById('modalClinicZip').value = clinic.zip || '';
+      document.getElementById('modalClinicPhone').value = clinic.phone || '';
+      document.getElementById('modalClinicHours').value = clinic.hours || '';
+      document.getElementById('modalClinicAppt').value = clinic.apptRequired || '';
+      document.getElementById('modalClinicPaperwork').value = clinic.paperworkRequired || '';
+      document.getElementById('modalClinicNotes').value = clinic.notes || '';
+      document.getElementById('clinicModal').classList.add('active');
+    }
+
+    function submitSaveClinic() {
+      const firm = document.getElementById('modalClinicFirm').value.trim();
+      if (!firm) {
+        alert('Firm / Clinic name is required.');
+        return;
+      }
+
+      const clinicObj = {
+        firm: firm,
+        isMobile: document.getElementById('modalClinicIsMobile').checked,
+        street: document.getElementById('modalClinicStreet').value.trim(),
+        city: document.getElementById('modalClinicCity').value.trim(),
+        state: document.getElementById('modalClinicState').value.trim(),
+        zip: document.getElementById('modalClinicZip').value.trim(),
+        phone: document.getElementById('modalClinicPhone').value.trim(),
+        hours: document.getElementById('modalClinicHours').value.trim(),
+        apptRequired: document.getElementById('modalClinicAppt').value.trim(),
+        paperworkRequired: document.getElementById('modalClinicPaperwork').value.trim(),
+        notes: document.getElementById('modalClinicNotes').value.trim(),
+        active: true
+      };
+
+      closeModal('clinicModal');
+      showLoading('Saving clinic...');
+      google.script.run
+        .withSuccessHandler(() => {
+          hideLoading();
+          showToast('Clinic saved successfully!');
+          loadData(appData.selectedQuarter);
+        })
+        .withFailureHandler(err => {
+          hideLoading();
+          showToast('Error saving clinic: ' + err.message, false);
+        })
+        .saveDrugClinic(clinicObj);
+    }
+
+    function closeModal(id) {
+      document.getElementById(id).classList.remove('active');
+    }
+
+    function openSheet(type) {
+      if (type === 'tests') {
+        google.script.run.openDrugTestsSheet();
+      } else {
+        google.script.run.openDrugClinicsSheet();
+      }
+    }
+
+    function escapeHtml(text) {
+      if (!text) return '';
+      return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+  </script>
+</body>
+</html>

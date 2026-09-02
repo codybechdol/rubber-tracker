@@ -63,6 +63,8 @@ function _buildGloveManagerMenu() {
         .addItem('⚙️ Schedule Config', 'showToDoConfig')
         .addItem('📝 Daily Accomplishments', 'showTimeBreakdownDialog')
         .addSeparator()
+        .addItem('🧪 DOT Drug Testing', 'showDrugTestingDialog')
+        .addSeparator()
         .addSubMenu(ui.createMenu('📧 Weekly Email Reports')
           .addItem('⏰ Schedule Weekly Auto-Send...', 'showScheduleWeeklyEmailDialog')
           .addItem('⚙️ Configure Recipients & Sections', 'setupEmailReportConfig')
@@ -122,6 +124,12 @@ function _buildGloveManagerMenu() {
           .addItem('📝 Create Purchase Order', 'showPurchaseOrderDialog')
           .addItem('📋 Order History', 'openPurchaseOrdersSheet')
           .addItem('⚙️ Manage Vendors', 'showVendorConfigDialog'))
+
+        .addSubMenu(ui.createMenu('🧪 DOT Drug Testing')
+          .addItem('📋 Manage DOT Drug Tests', 'showDrugTestingDialog')
+          .addItem('📂 View Drug Tests Sheet', 'openDrugTestsSheet')
+          .addItem('🏥 View Clinics Sheet', 'openDrugClinicsSheet')
+          .addItem('⚙️ Setup / Seed Drug Testing Sheets', 'setupDrugTestingSheets'))
 
         .addSubMenu(ui.createMenu('👥 Employees')
           .addItem('📋 Organize & Format Employees Sheet', 'organizeAndFormatEmployeesSheet')

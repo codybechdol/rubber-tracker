@@ -73,7 +73,7 @@ var itemNum = row[COLS.INVENTORY.ITEM_NUM - 1];  // -1 for array index
 var status = row[COLS.INVENTORY.STATUS - 1];
 ```
 
-Available `COLS` namespaces: `INVENTORY` (Gloves/Sleeves — 12-column layout with ESL_ID), `BLANKETS`, `MACKS`, `HV_TESTERS`, `PHASING_SETS`, `AED`, `GROUNDS`, `HOT_STICKS`, `SWAPS`, `BLANKET_SWAPS`, `MACK_SWAPS`, `SWAPS_HIDDEN`, `EMPLOYEES`, `EMPLOYEE_HISTORY`.
+Available `COLS` namespaces: `INVENTORY` (Gloves/Sleeves — 12-column layout with ESL_ID), `BLANKETS`, `MACKS`, `HV_TESTERS`, `PHASING_SETS`, `AED`, `GROUNDS`, `HOT_STICKS`, `SWAPS`, `BLANKET_SWAPS`, `MACK_SWAPS`, `SWAPS_HIDDEN`, `EMPLOYEES`, `EMPLOYEE_HISTORY`, `DRUG_TESTS`, `DRUG_CLINICS`.
 
 **Note:** `HV_TESTERS` and `PHASING_SETS` share the same 12-column layout (A-L): Item#, Model, KV, Serial#, Calibration Date, Date Assigned, Location, Status, Assigned To, Change Out Date, Picked For, Notes.
 
@@ -185,6 +185,7 @@ Keys are stored as `TASKS_DATA_chunks` (count) + `TASKS_DATA_chunk_0`, `TASKS_DA
 | `ExpiringCertsChoice.html` | Cert management choice dialog (Import / Refresh / Scan) (~95 lines) |
 | `TimeBreakdown.html` | Daily Accomplishments / time tracking dialog (~519 lines) |
 | `FiscalYearConfig.html` | Fiscal year configuration dialog (~342 lines) |
+| `DrugTestingDialog.html` | Quarterly Random DOT Drug Testing & Clinic Scheduling dialog — clinic directory (36 regional clinics), mobile collector meeting address, bulk paste roster, appointment badges, one-click completion (~850 lines) |
 | `TabNavigator.html` | Spreadsheet tab navigator sidebar — favorites, grouped sheets, live filter, click-to-switch. Backend functions (`showTabNavigatorSidebar`, `getTabNavigatorData`, `goToSheet`, `addFavoriteSheet`, `removeFavoriteSheet`, `tabNavigatorPing`) not yet implemented in .gs files; menu item in 99-MenuFix.gs only (~249 lines) |
 
 ## Trip Planner Work Schedule
@@ -412,6 +413,21 @@ Key backend functions:
 - `getEquipmentHistoryForEmployee(ss, sheetName, name)` - Scans History sheets for past assignments
 - `getAllEmployeeAssignments()` - Builds all-employee equipment map with swap detection, stores in ScriptProperties. Falls back to `directData` in response if ScriptProperties storage fails.
 - `getStoredAllAssignments()` - Retrieves stored data for client
+
+## Random DOT Drug Testing System (September 2026)
+Tracks quarterly random DOT drug testing rosters, clinic appointments, mobile collector dispatches, and test completions:
+- **Sheet Constants:** `SHEET_DRUG_TESTS` ('DOT Drug Tests'), `SHEET_DRUG_CLINICS` ('Drug Test Clinics')
+- **Column Constants:** `COLS.DRUG_TESTS` (17 columns: Quarter, Employee, Location, Job Number, Phone, Collection Type, Clinic Name, Clinic City/State, Appt Required, Scheduled Date, Scheduled Time, Meeting / Collection Address, Status, Date Completed, Paperwork / Kit Notes, Notes, Date Added), `COLS.DRUG_CLINICS` (12 columns: Firm, Is Mobile, Street, City, State, Zip, Phone, Hours, Appt Required, Paperwork Required, Notes, Active)
+- **Pre-Populated Regional Clinics:** 36 regional clinics across MT, SD, TX, CA, NV seeded automatically by `setupDrugTestingSheets()`
+- **Mobile Collector Support:** When a mobile collector is selected (or Collection Type = "Mobile Collector"), prompts for the Crew Meeting Address (where collector meets crew at job site/yard); includes "Suggest" helper using job site names from Job Tracking
+- **Interactive Dialog:** `DrugTestingDialog.html` (1200x820)
+  - Quarter selector & KPI counters (Total, Pending, Scheduled, Mobile, Completed %)
+  - Add employee via active employee dropdown or **Bulk Paste Roster**
+  - Real-time badges for 🔴 Appointment Required vs 🟢 Walk-In, 📋 Paperwork requirements, and 🚚 Mobile Collector
+  - One-click "✅ Done" completion marking
+  - Complete Clinics Directory tab with "+ Add New Clinic / Collector" and edit capability
+- **Backend Functions in `Code.gs`:** `setupDrugTestingSheets()`, `showDrugTestingDialog()`, `openDrugTestsSheet()`, `openDrugClinicsSheet()`, `getDrugTestingDialogData()`, `saveDrugTestRecord()`, `saveDrugTestBatch()`, `deleteDrugTestRecord()`, `markDrugTestComplete()`, `saveDrugClinic()`, `deleteDrugClinic()`
+- **Menu Items:** `Review & Schedule → 🧪 DOT Drug Testing` and `Maintenance → 🧪 DOT Drug Testing → Manage / View / Setup`
 
 ## Menu System
 Menu defined in `99-MenuFix.gs` `_buildGloveManagerMenu()`. As of June 1, 2026, **`onOpen()` in Code.gs delegates to `_buildGloveManagerMenu()`** — `99-MenuFix.gs` is the single source of truth for all menu strings. Organized as a 6-step Monday workflow under **Glove Manager**.

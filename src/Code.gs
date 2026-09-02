@@ -33278,3 +33278,1102 @@ function menuConfigureSMSWebApp() {
     }
   }
 }
+
+// =============================================================================
+// DOT DRUG TESTING & CLINIC MANAGEMENT
+// =============================================================================
+
+var DEFAULT_DRUG_CLINICS = [
+  {
+    firm: 'Valley Workforce Compliance & Training / Dominic Valdez - Mobile Collector',
+    isMobile: 'Yes',
+    street: '744 P Street Ste. 315',
+    city: 'Fresno',
+    state: 'CA',
+    zip: '93721',
+    phone: '559-358-2515',
+    hours: 'M-F 8:00 am to 4:00 pm',
+    apptRequired: 'Yes',
+    paperworkRequired: 'No',
+    notes: 'Mobile Collector',
+    active: true
+  },
+  {
+    firm: 'Pioneer Medical Center',
+    isMobile: 'No',
+    street: '301 W 7th',
+    city: 'Big Timber',
+    state: 'MT',
+    zip: '59011',
+    phone: '406-932-4199',
+    hours: 'T/Th 9:30 am to 2 pm',
+    apptRequired: 'Yes',
+    paperworkRequired: 'Needs split kit & shipping label/piping',
+    notes: '',
+    active: true
+  },
+  {
+    firm: 'St. Vincent Hospital Occupational Health',
+    isMobile: 'No',
+    street: '2919 Broadwater',
+    city: 'Billings',
+    state: 'MT',
+    zip: '59102',
+    phone: '406-237-8855',
+    hours: 'M-F 7:30 am to 4:30 pm',
+    apptRequired: 'Suggested but not required',
+    paperworkRequired: 'No-Form Fox',
+    notes: '',
+    active: true
+  },
+  {
+    firm: 'TRI MED Services',
+    isMobile: 'No',
+    street: '2040 N 22nd Ave #2',
+    city: 'Bozeman',
+    state: 'MT',
+    zip: '59718',
+    phone: '406-585-5301',
+    hours: 'M-F 8 am to 4 pm',
+    apptRequired: 'No-need to send electronic chain, call Kristie at office',
+    paperworkRequired: 'eCCFs ONLY',
+    notes: '',
+    active: true
+  },
+  {
+    firm: 'Montana Occupational Health',
+    isMobile: 'No',
+    street: '2075 Charlotte #3',
+    city: 'Bozeman',
+    state: 'MT',
+    zip: '59718',
+    phone: '406-556-1060',
+    hours: 'M-F 8 am to 12 pm & 1 pm to 5 pm',
+    apptRequired: 'No',
+    paperworkRequired: 'No',
+    notes: '',
+    active: true
+  },
+  {
+    firm: 'Checman',
+    isMobile: 'No',
+    street: '800 E Front',
+    city: 'Butte',
+    state: 'MT',
+    zip: '59701',
+    phone: '406-256-3157 Option #3',
+    hours: 'M-Th 8 am to 2 pm/Fri 6 am to 12 pm',
+    apptRequired: 'No',
+    paperworkRequired: 'No',
+    notes: '',
+    active: true
+  },
+  {
+    firm: 'Drug Information Systems Mobile Collections',
+    isMobile: 'Yes',
+    street: 'Mobile Collections',
+    city: 'Butte',
+    state: 'MT',
+    zip: '59701',
+    phone: '406-444-5001',
+    hours: 'call Abby to schedule a mobile collection',
+    apptRequired: 'Yes-need to send electronic chain, call Kristie at office',
+    paperworkRequired: 'eCCFs ONLY',
+    notes: 'Mobile Collections',
+    active: true
+  },
+  {
+    firm: 'Bitterroot Valley Mobile Drug & Alcohol Testing/Torri Chaffin',
+    isMobile: 'Yes',
+    street: '533 Old Corvallis Road',
+    city: 'Corvallis/Hamilton/Stevensville/Darby',
+    state: 'MT',
+    zip: '59828',
+    phone: '406-531-0579',
+    hours: 'call Kristie to schedule a mobile collection',
+    apptRequired: 'Yes',
+    paperworkRequired: 'Needs split kit & shipping label/piping',
+    notes: 'Mobile Collections',
+    active: true
+  },
+  {
+    firm: 'Barrett Memorial Hospital',
+    isMobile: 'No',
+    street: '600 Highway 91 South',
+    city: 'Dillon',
+    state: 'MT',
+    zip: '59725',
+    phone: '406-683-3000 (ask for lab)',
+    hours: 'M-F 7:30 am to 4 pm',
+    apptRequired: 'No',
+    paperworkRequired: 'Needs split kit & shipping label/piping',
+    notes: 'Ask for lab',
+    active: true
+  },
+  {
+    firm: 'Madison Valley Medical Center Laboratory',
+    isMobile: 'No',
+    street: '305 North Main Street',
+    city: 'Ennis',
+    state: 'MT',
+    zip: '59729',
+    phone: '406-682-6645',
+    hours: '',
+    apptRequired: 'Required if more than one donor-fax Authorization to 406-682-5628 or email to mdeltenre@mvmedicalcenter.org',
+    paperworkRequired: 'No',
+    notes: 'Fax auth to 406-682-5628 or email mdeltenre@mvmedicalcenter.org',
+    active: true
+  },
+  {
+    firm: 'Great Falls Medical Services',
+    isMobile: 'No',
+    street: '11 11 Central Ave',
+    city: 'Great Falls',
+    state: 'MT',
+    zip: '59401',
+    phone: '406-454-3247',
+    hours: 'M-F 8 am to 5 pm',
+    apptRequired: 'No-send authorization',
+    paperworkRequired: 'No',
+    notes: 'Send authorization',
+    active: true
+  },
+  {
+    firm: 'Drug Information Systems',
+    isMobile: 'No',
+    street: '2625 E Broadway St',
+    city: 'Helena',
+    state: 'MT',
+    zip: '59601',
+    phone: '406-444-5001',
+    hours: 'M-F 10:30 am to 12 pm/1 pm to 3 pm',
+    apptRequired: 'No',
+    paperworkRequired: 'No',
+    notes: '',
+    active: true
+  },
+  {
+    firm: 'Montana Drug Testing fka VMS Drug Testing (Valley Medical)',
+    isMobile: 'No',
+    street: '2425 US Hwy 2 East',
+    city: 'Kalispell',
+    state: 'MT',
+    zip: '59901',
+    phone: '406-257-1680',
+    hours: 'M-F 8 am to 4:00 pm',
+    apptRequired: 'No',
+    paperworkRequired: 'No',
+    notes: 'Email authorization to info@MTDrugTesting.com',
+    active: true
+  },
+  {
+    firm: 'Dot Health Services-Kalispell',
+    isMobile: 'No',
+    street: '75 Clammore St. #F',
+    city: 'Kalispell',
+    state: 'MT',
+    zip: '59901',
+    phone: '406-751-4149',
+    hours: '',
+    apptRequired: 'Yes',
+    paperworkRequired: 'Yes',
+    notes: '',
+    active: true
+  },
+  {
+    firm: 'MedNorth',
+    isMobile: 'No',
+    street: '2316 US Hwy 93 North',
+    city: 'Kalispell',
+    state: 'MT',
+    zip: '59901',
+    phone: '406-755-5661',
+    hours: 'M-F 9 am to 5 pm',
+    apptRequired: 'No',
+    paperworkRequired: 'No',
+    notes: '',
+    active: true
+  },
+  {
+    firm: 'A Place for Recovery, Inc.',
+    isMobile: 'No',
+    street: '205 West Main St Ste A',
+    city: 'Laurel',
+    state: 'MT',
+    zip: '59044',
+    phone: '406-238-2284',
+    hours: 'M-F 9 am to 5 pm',
+    apptRequired: 'Yes',
+    paperworkRequired: 'eCCF',
+    notes: '',
+    active: true
+  },
+  {
+    firm: 'Central Montana Medical Center',
+    isMobile: 'No',
+    street: '408 Wendell Ave.',
+    city: 'Lewistown',
+    state: 'MT',
+    zip: '59457',
+    phone: '406-535-7711',
+    hours: 'M-Th 8 am to 5 pm; F 8 am to 12 pm',
+    apptRequired: 'Yes',
+    paperworkRequired: 'Yes',
+    notes: '',
+    active: true
+  },
+  {
+    firm: 'Livingston Healthcare a/k/a Park Clinic',
+    isMobile: 'No',
+    street: '320 Alpenglow Lane',
+    city: 'Livingston',
+    state: 'MT',
+    zip: '59047',
+    phone: '406-222-3541',
+    hours: '',
+    apptRequired: 'Yes',
+    paperworkRequired: 'Yes',
+    notes: '',
+    active: true
+  },
+  {
+    firm: 'Phillips County Hospital',
+    isMobile: 'No',
+    street: '311 S 8th Ave. E',
+    city: 'Malta',
+    state: 'MT',
+    zip: '59538',
+    phone: '406-654-1100',
+    hours: 'M-F 9 am to 3 pm',
+    apptRequired: 'No',
+    paperworkRequired: 'Yes',
+    notes: '',
+    active: true
+  },
+  {
+    firm: 'Arc Mobile Drug Testing',
+    isMobile: 'No',
+    street: '2473 W. Broadway',
+    city: 'Missoula',
+    state: 'MT',
+    zip: '59808',
+    phone: '406-543-8111',
+    hours: 'M-F 8 am to 3 pm',
+    apptRequired: 'No',
+    paperworkRequired: 'eCCF',
+    notes: '',
+    active: true
+  },
+  {
+    firm: "St. Luke's - NO BATS",
+    isMobile: 'No',
+    street: '126 6th Ave SW',
+    city: 'Ronan',
+    state: 'MT',
+    zip: '59864',
+    phone: '406-528-5355 or 406-676-4441',
+    hours: 'M-F 9 am-3 pm',
+    apptRequired: 'Yes',
+    paperworkRequired: 'Yes',
+    notes: 'NO BATS (Breath Alcohol Tests)',
+    active: true
+  },
+  {
+    firm: 'Mineral Community Hospital',
+    isMobile: 'No',
+    street: '1208 6th Ave E',
+    city: 'Superior',
+    state: 'MT',
+    zip: '59872',
+    phone: '406-822-4841',
+    hours: 'M-F 8 am to 4 pm',
+    apptRequired: 'No',
+    paperworkRequired: 'No',
+    notes: '',
+    active: true
+  },
+  {
+    firm: 'Northern Montana Family Medical Center - NO BATS',
+    isMobile: 'No',
+    street: '1410 1st Ave.',
+    city: 'Havre',
+    state: 'MT',
+    zip: '59501',
+    phone: '406-265-5408',
+    hours: '',
+    apptRequired: 'Yes',
+    paperworkRequired: 'Yes',
+    notes: 'NO BATS',
+    active: true
+  },
+  {
+    firm: 'Concentra Henderson',
+    isMobile: 'No',
+    street: '149 N Gibson Ste H',
+    city: 'Henderson',
+    state: 'NV',
+    zip: '89014',
+    phone: '702-558-6275',
+    hours: 'M-F 8 am to 5 pm',
+    apptRequired: 'No',
+    paperworkRequired: 'No',
+    notes: '',
+    active: true
+  },
+  {
+    firm: 'Faulkton Area Medical Center - NO BATS',
+    isMobile: 'No',
+    street: '1300 Oak Street',
+    city: 'Faulkton',
+    state: 'SD',
+    zip: '57438',
+    phone: '605-598-6262',
+    hours: 'M-F 8 am to 12 pm and 1 pm to 5 pm',
+    apptRequired: 'Preferred and made between 8 am - 9 am',
+    paperworkRequired: 'Yes',
+    notes: 'NO BATS',
+    active: true
+  },
+  {
+    firm: 'Freeman Rural Medical Clinic - NO BATS',
+    isMobile: 'No',
+    street: '804 S. Walnut Street',
+    city: 'Freeman',
+    state: 'SD',
+    zip: '57029',
+    phone: '605-925-4219',
+    hours: 'M-F 8am to 11am and 1pm to 2 pm',
+    apptRequired: 'Yes-call upon arrival-doors are locked',
+    paperworkRequired: 'Yes',
+    notes: 'NO BATS, call upon arrival - doors are locked',
+    active: true
+  },
+  {
+    firm: 'Huron Clinic',
+    isMobile: 'No',
+    street: '111 4th St SE',
+    city: 'Huron',
+    state: 'SD',
+    zip: '57350',
+    phone: '605-352-8691',
+    hours: 'M-F 9 am to 3 pm',
+    apptRequired: 'Yes',
+    paperworkRequired: 'Yes',
+    notes: '',
+    active: true
+  },
+  {
+    firm: 'Rural Health Clinic',
+    isMobile: 'No',
+    street: '209 Commercial Ave. SE',
+    city: 'Highmore',
+    state: 'SD',
+    zip: '57345',
+    phone: '605-852-2238',
+    hours: 'Mon, Wed, Fri 9-5 Tues & Thur 8-5',
+    apptRequired: 'Yes',
+    paperworkRequired: 'Needs split kit & shipping label/ piping & authorization',
+    notes: '',
+    active: true
+  },
+  {
+    firm: 'Yankton Medical Clinic',
+    isMobile: 'No',
+    street: '1104 W 8th Street',
+    city: 'Yankton',
+    state: 'SD',
+    zip: '57078',
+    phone: '605-665-7841',
+    hours: 'Mon - Fri 8 am -5:30 pm',
+    apptRequired: 'Yes',
+    paperworkRequired: 'Needs split kit & shipping label/ piping & authorization',
+    notes: '',
+    active: true
+  },
+  {
+    firm: "Avera St. Luke's",
+    isMobile: 'No',
+    street: '305 S. State Street',
+    city: 'Aberdeen',
+    state: 'SD',
+    zip: '57401',
+    phone: '605-622-5838',
+    hours: 'M-F 8 am to 5 pm',
+    apptRequired: 'Yes',
+    paperworkRequired: 'Yes & authorization',
+    notes: '',
+    active: true
+  },
+  {
+    firm: 'Dakota Family Medical Center',
+    isMobile: 'No',
+    street: '101 South Front St. Ste 1',
+    city: 'Chamberlain',
+    state: 'SD',
+    zip: '57325',
+    phone: '605-234-6584',
+    hours: 'M-F 8 am to 5 pm',
+    apptRequired: 'Yes',
+    paperworkRequired: 'Yes',
+    notes: '',
+    active: true
+  },
+  {
+    firm: 'Wagner Community Clinic - NO BATS',
+    isMobile: 'No',
+    street: '700 W. SD Hwy 46',
+    city: 'Wagner',
+    state: 'SD',
+    zip: '57380',
+    phone: '605-384-3481',
+    hours: 'M-F 8 am to 2 pm',
+    apptRequired: 'Yes',
+    paperworkRequired: 'Yes, and paperwork arrives',
+    notes: 'NO BATS',
+    active: true
+  },
+  {
+    firm: 'Sanford Health Connect-Watertown',
+    isMobile: 'No',
+    street: '901 4th St NW',
+    city: 'Watertown',
+    state: 'SD',
+    zip: '57201',
+    phone: '605-886-1580',
+    hours: 'M-F 8 am to 5 pm',
+    apptRequired: 'Yes-need to send electronic chain, call Kristie at office',
+    paperworkRequired: 'eCCFs ONLY',
+    notes: '',
+    active: true
+  },
+  {
+    firm: 'Fisher County Hospital',
+    isMobile: 'No',
+    street: '774 State Hwy 70 N',
+    city: 'Rotan',
+    state: 'TX',
+    zip: '79546',
+    phone: '325-735-2256',
+    hours: '',
+    apptRequired: 'Yes',
+    paperworkRequired: 'Needs split kit & shipping label/piping & authorization',
+    notes: '',
+    active: true
+  },
+  {
+    firm: 'Hendrick Health FX',
+    isMobile: 'No',
+    street: '4902 Buffalo Gap Rd, Ste A',
+    city: 'Abilene',
+    state: 'TX',
+    zip: '79605',
+    phone: '325-695-0090',
+    hours: 'Fridays 1-3 and Mondays 8-12 & 1-3',
+    apptRequired: 'Yes',
+    paperworkRequired: 'Yes',
+    notes: '',
+    active: true
+  },
+  {
+    firm: 'Driving Safety Services',
+    isMobile: 'No',
+    street: '110 Merchant St.',
+    city: 'El Campo',
+    state: 'TX',
+    zip: '77437',
+    phone: '979-543-7849',
+    hours: 'M-F 8 am to 12 pm and 1 pm to 5 pm',
+    apptRequired: 'Yes-need to send electronic chain, call Kristie at office',
+    paperworkRequired: 'No',
+    notes: '',
+    active: true
+  }
+];
+
+/**
+ * Ensures 'DOT Drug Tests' and 'Drug Test Clinics' sheets exist and are initialized.
+ * Populates all 36 default regional clinics if 'Drug Test Clinics' is newly created or empty.
+ *
+ * Menu: Safety Assistant → 🔧 Maintenance → 🧪 DOT Drug Testing → ⚙️ Setup / Seed Drug Testing Sheets
+ */
+function setupDrugTestingSheets() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  // 1. Setup 'Drug Test Clinics' sheet
+  var clinicsSheet = ss.getSheetByName(SHEET_DRUG_CLINICS);
+  if (!clinicsSheet) {
+    clinicsSheet = ss.insertSheet(SHEET_DRUG_CLINICS);
+  }
+
+  var clinicHeaders = [
+    'Firm / Clinic Name',
+    'Is Mobile Collector?',
+    'Street Address',
+    'City',
+    'State',
+    'Zip Code',
+    'Phone #',
+    'Hours',
+    'Appointment Required',
+    'Paperwork Required w/ Donor',
+    'Special Notes',
+    'Active'
+  ];
+
+  if (clinicsSheet.getLastRow() === 0) {
+    clinicsSheet.getRange(1, 1, 1, clinicHeaders.length).setValues([clinicHeaders])
+      .setFontWeight('bold')
+      .setBackground('#1565c0')
+      .setFontColor('#ffffff')
+      .setHorizontalAlignment('center');
+
+    clinicsSheet.setFrozenRows(1);
+    clinicsSheet.setRowHeight(1, 30);
+
+    // Seed default clinics
+    var seedRows = DEFAULT_DRUG_CLINICS.map(function(c) {
+      return [
+        c.firm,
+        c.isMobile,
+        c.street,
+        c.city,
+        c.state,
+        c.zip,
+        c.phone,
+        c.hours,
+        c.apptRequired,
+        c.paperworkRequired,
+        c.notes,
+        c.active !== false
+      ];
+    });
+
+    if (seedRows.length > 0) {
+      clinicsSheet.getRange(2, 1, seedRows.length, clinicHeaders.length).setValues(seedRows);
+    }
+
+    // Set column widths
+    clinicsSheet.setColumnWidth(1, 260); // Firm
+    clinicsSheet.setColumnWidth(2, 140); // Is Mobile
+    clinicsSheet.setColumnWidth(3, 220); // Street
+    clinicsSheet.setColumnWidth(4, 150); // City
+    clinicsSheet.setColumnWidth(5, 60);  // State
+    clinicsSheet.setColumnWidth(6, 80);  // Zip
+    clinicsSheet.setColumnWidth(7, 160); // Phone
+    clinicsSheet.setColumnWidth(8, 200); // Hours
+    clinicsSheet.setColumnWidth(9, 200); // Appt Required
+    clinicsSheet.setColumnWidth(10, 240);// Paperwork
+    clinicsSheet.setColumnWidth(11, 220);// Special Notes
+    clinicsSheet.setColumnWidth(12, 70); // Active
+  }
+
+  // 2. Setup 'DOT Drug Tests' sheet
+  var testsSheet = ss.getSheetByName(SHEET_DRUG_TESTS);
+  if (!testsSheet) {
+    testsSheet = ss.insertSheet(SHEET_DRUG_TESTS);
+  }
+
+  var testHeaders = [
+    'Quarter',
+    'Employee Name',
+    'Location',
+    'Job Number',
+    'Phone',
+    'Collection Type',
+    'Clinic / Provider Name',
+    'Clinic City/State',
+    'Appointment Required',
+    'Scheduled Date',
+    'Scheduled Time',
+    'Meeting / Collection Address',
+    'Status',
+    'Date Completed',
+    'Paperwork / Kit Notes',
+    'Notes / Lab Result',
+    'Date Added'
+  ];
+
+  if (testsSheet.getLastRow() === 0) {
+    testsSheet.getRange(1, 1, 1, testHeaders.length).setValues([testHeaders])
+      .setFontWeight('bold')
+      .setBackground('#1565c0')
+      .setFontColor('#ffffff')
+      .setHorizontalAlignment('center');
+
+    testsSheet.setFrozenRows(1);
+    testsSheet.setRowHeight(1, 30);
+
+    testsSheet.setColumnWidth(1, 100); // Quarter
+    testsSheet.setColumnWidth(2, 160); // Employee Name
+    testsSheet.setColumnWidth(3, 120); // Location
+    testsSheet.setColumnWidth(4, 110); // Job Number
+    testsSheet.setColumnWidth(5, 120); // Phone
+    testsSheet.setColumnWidth(6, 130); // Collection Type
+    testsSheet.setColumnWidth(7, 240); // Clinic Name
+    testsSheet.setColumnWidth(8, 140); // Clinic City/State
+    testsSheet.setColumnWidth(9, 140); // Appt Required
+    testsSheet.setColumnWidth(10, 110);// Scheduled Date
+    testsSheet.setColumnWidth(11, 110);// Scheduled Time
+    testsSheet.setColumnWidth(12, 250);// Meeting Address
+    testsSheet.setColumnWidth(13, 110);// Status
+    testsSheet.setColumnWidth(14, 110);// Date Completed
+    testsSheet.setColumnWidth(15, 200);// Paperwork
+    testsSheet.setColumnWidth(16, 220);// Notes
+    testsSheet.setColumnWidth(17, 120);// Date Added
+  }
+
+  return { success: true, message: 'DOT Drug Testing sheets initialized successfully.' };
+}
+
+/**
+ * Opens the Manage DOT Drug Tests modal dialog.
+ */
+function showDrugTestingDialog() {
+  setupDrugTestingSheets();
+
+  var html = HtmlService.createHtmlOutputFromFile('DrugTestingDialog')
+    .setWidth(1200)
+    .setHeight(820);
+
+  SpreadsheetApp.getUi().showModalDialog(html, '🧪 DOT Drug Testing & Clinic Scheduling');
+}
+
+/**
+ * Opens the DOT Drug Tests sheet in the spreadsheet.
+ */
+function openDrugTestsSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEET_DRUG_TESTS);
+  if (!sheet) {
+    setupDrugTestingSheets();
+    sheet = ss.getSheetByName(SHEET_DRUG_TESTS);
+  }
+  ss.setActiveSheet(sheet);
+}
+
+/**
+ * Opens the Drug Test Clinics sheet in the spreadsheet.
+ */
+function openDrugClinicsSheet() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEET_DRUG_CLINICS);
+  if (!sheet) {
+    setupDrugTestingSheets();
+    sheet = ss.getSheetByName(SHEET_DRUG_CLINICS);
+  }
+  ss.setActiveSheet(sheet);
+}
+
+/**
+ * Retrieves all data required for the DrugTestingDialog:
+ * - List of available quarters
+ * - Current quarter string (e.g. "Q3 2026")
+ * - Tests for the requested/selected quarter
+ * - Master clinic directory
+ * - Active employee roster
+ * - Job tracking site/dock metadata for address suggestions
+ *
+ * @param {string} [targetQuarter] - Target quarter string, e.g. "Q3 2026"
+ * @returns {Object}
+ */
+function getDrugTestingDialogData(targetQuarter) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  // Determine current quarter based on today's date
+  var now = new Date();
+  var currentQNum = Math.floor(now.getMonth() / 3) + 1;
+  var currentQuarter = 'Q' + currentQNum + ' ' + now.getFullYear();
+
+  // 1. Read Clinics
+  var clinicsSheet = ss.getSheetByName(SHEET_DRUG_CLINICS);
+  if (!clinicsSheet) {
+    setupDrugTestingSheets();
+    clinicsSheet = ss.getSheetByName(SHEET_DRUG_CLINICS);
+  }
+
+  var clinics = [];
+  var lastClinicRow = clinicsSheet.getLastRow();
+  if (lastClinicRow > 1) {
+    var clinicVals = clinicsSheet.getRange(2, 1, lastClinicRow - 1, 12).getValues();
+    for (var i = 0; i < clinicVals.length; i++) {
+      var row = clinicVals[i];
+      var firmName = String(row[0] || '').trim();
+      if (!firmName) continue;
+      clinics.push({
+        firm: firmName,
+        isMobile: String(row[1] || '').trim().toLowerCase() === 'yes',
+        street: String(row[2] || '').trim(),
+        city: String(row[3] || '').trim(),
+        state: String(row[4] || '').trim(),
+        zip: String(row[5] || '').trim(),
+        phone: String(row[6] || '').trim(),
+        hours: String(row[7] || '').trim(),
+        apptRequired: String(row[8] || '').trim(),
+        paperworkRequired: String(row[9] || '').trim(),
+        notes: String(row[10] || '').trim(),
+        active: row[11] !== false && String(row[11]).toLowerCase() !== 'false'
+      });
+    }
+  }
+
+  // 2. Read Tests and Quarters
+  var testsSheet = ss.getSheetByName(SHEET_DRUG_TESTS);
+  if (!testsSheet) {
+    setupDrugTestingSheets();
+    testsSheet = ss.getSheetByName(SHEET_DRUG_TESTS);
+  }
+
+  var quarterSet = {};
+  quarterSet[currentQuarter] = true;
+  var allTests = [];
+  var lastTestRow = testsSheet.getLastRow();
+
+  if (lastTestRow > 1) {
+    var testVals = testsSheet.getRange(2, 1, lastTestRow - 1, 17).getValues();
+    for (var j = 0; j < testVals.length; j++) {
+      var tRow = testVals[j];
+      var q = String(tRow[0] || '').trim();
+      if (q) {
+        quarterSet[q] = true;
+      }
+
+      var empName = String(tRow[1] || '').trim();
+      if (!empName) continue;
+
+      var schedDateStr = '';
+      if (tRow[9] instanceof Date) {
+        schedDateStr = Utilities.formatDate(tRow[9], Session.getScriptTimeZone() || 'America/Denver', 'yyyy-MM-dd');
+      } else if (tRow[9]) {
+        schedDateStr = String(tRow[9]).trim();
+      }
+
+      var compDateStr = '';
+      if (tRow[13] instanceof Date) {
+        compDateStr = Utilities.formatDate(tRow[13], Session.getScriptTimeZone() || 'America/Denver', 'yyyy-MM-dd');
+      } else if (tRow[13]) {
+        compDateStr = String(tRow[13]).trim();
+      }
+
+      var dateAddedStr = '';
+      if (tRow[16] instanceof Date) {
+        dateAddedStr = Utilities.formatDate(tRow[16], Session.getScriptTimeZone() || 'America/Denver', 'yyyy-MM-dd');
+      } else if (tRow[16]) {
+        dateAddedStr = String(tRow[16]).trim();
+      }
+
+      allTests.push({
+        rowId: j + 2, // 1-indexed row number in spreadsheet
+        quarter: q,
+        employeeName: empName,
+        location: String(tRow[2] || '').trim(),
+        jobNumber: String(tRow[3] || '').trim(),
+        phone: String(tRow[4] || '').trim(),
+        collectionType: String(tRow[5] || 'Clinic Visit').trim(),
+        clinicName: String(tRow[6] || '').trim(),
+        clinicCity: String(tRow[7] || '').trim(),
+        apptRequired: String(tRow[8] || '').trim(),
+        scheduledDate: schedDateStr,
+        scheduledTime: String(tRow[10] || '').trim(),
+        meetingAddress: String(tRow[11] || '').trim(),
+        status: String(tRow[12] || 'Pending').trim(),
+        dateCompleted: compDateStr,
+        paperworkNotes: String(tRow[14] || '').trim(),
+        notes: String(tRow[15] || '').trim(),
+        dateAdded: dateAddedStr
+      });
+    }
+  }
+
+  // Quarters list sorted descending
+  var quartersList = Object.keys(quarterSet).sort(function(a, b) {
+    return b.localeCompare(a);
+  });
+
+  var selectedQuarter = targetQuarter && quarterSet[targetQuarter] ? targetQuarter : currentQuarter;
+
+  // Filter tests for selected quarter
+  var selectedQuarterTests = allTests.filter(function(t) {
+    return t.quarter === selectedQuarter;
+  });
+
+  // 3. Read Active Employees
+  var empSheet = ss.getSheetByName(SHEET_EMPLOYEES);
+  var employees = [];
+  if (empSheet && empSheet.getLastRow() > 1) {
+    var empData = empSheet.getDataRange().getValues();
+    for (var e = 1; e < empData.length; e++) {
+      var eRow = empData[e];
+      var name = String(eRow[COLS.EMPLOYEES.NAME - 1] || '').trim();
+      var loc = String(eRow[COLS.EMPLOYEES.LOCATION - 1] || '').trim();
+      var job = String(eRow[COLS.EMPLOYEES.JOB_NUMBER - 1] || '').trim();
+      var ph = String(eRow[COLS.EMPLOYEES.PHONE - 1] || '').trim();
+
+      if (!name) continue;
+      if (loc.toLowerCase() === 'previous employee' || loc.toLowerCase() === 'destroyed') continue;
+
+      employees.push({
+        name: name,
+        location: loc,
+        jobNumber: job,
+        phone: ph
+      });
+    }
+
+    employees.sort(function(a, b) {
+      return a.name.localeCompare(b.name);
+    });
+  }
+
+  // 4. Read Job Tracking metadata for meeting address suggestions
+  var jobLocations = {};
+  var jtSheet = ss.getSheetByName('Job Tracking');
+  if (jtSheet && jtSheet.getLastRow() > 1) {
+    var jtData = jtSheet.getDataRange().getValues();
+    for (var k = 1; k < jtData.length; k++) {
+      var jRow = jtData[k];
+      var jNum = String(jRow[0] || '').trim();
+      var jLoc = String(jRow[1] || '').trim();
+      var jName = jRow.length >= 26 ? String(jRow[25] || '').trim() : '';
+      if (jNum) {
+        jobLocations[jNum] = {
+          location: jLoc,
+          jobName: jName
+        };
+      }
+    }
+  }
+
+  return {
+    quarters: quartersList,
+    currentQuarter: currentQuarter,
+    selectedQuarter: selectedQuarter,
+    tests: selectedQuarterTests,
+    clinics: clinics,
+    employees: employees,
+    jobLocations: jobLocations
+  };
+}
+
+/**
+ * Saves or updates a single test record in 'DOT Drug Tests'.
+ *
+ * @param {Object} record - The test record object
+ * @returns {Object}
+ */
+function saveDrugTestRecord(record) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEET_DRUG_TESTS);
+  if (!sheet) {
+    setupDrugTestingSheets();
+    sheet = ss.getSheetByName(SHEET_DRUG_TESTS);
+  }
+
+  var rowId = record.rowId ? parseInt(record.rowId, 10) : 0;
+  var schedDateVal = '';
+  if (record.scheduledDate) {
+    schedDateVal = typeof parseDateNoon === 'function' ? parseDateNoon(record.scheduledDate) : record.scheduledDate;
+  }
+
+  var compDateVal = '';
+  if (record.dateCompleted) {
+    compDateVal = typeof parseDateNoon === 'function' ? parseDateNoon(record.dateCompleted) : record.dateCompleted;
+  }
+
+  var dateAddedVal = record.dateAdded ? record.dateAdded : Utilities.formatDate(new Date(), Session.getScriptTimeZone() || 'America/Denver', 'yyyy-MM-dd');
+
+  var rowData = [
+    record.quarter || '',
+    record.employeeName || '',
+    record.location || '',
+    record.jobNumber || '',
+    record.phone || '',
+    record.collectionType || 'Clinic Visit',
+    record.clinicName || '',
+    record.clinicCity || '',
+    record.apptRequired || '',
+    schedDateVal,
+    record.scheduledTime || '',
+    record.meetingAddress || '',
+    record.status || 'Pending',
+    compDateVal,
+    record.paperworkNotes || '',
+    record.notes || '',
+    dateAddedVal
+  ];
+
+  if (rowId >= 2 && rowId <= sheet.getLastRow()) {
+    sheet.getRange(rowId, 1, 1, rowData.length).setValues([rowData]);
+  } else {
+    // Check if duplicate Quarter + Employee already exists
+    var lastRow = sheet.getLastRow();
+    var existingRow = 0;
+    if (lastRow > 1) {
+      var allRows = sheet.getRange(2, 1, lastRow - 1, 2).getValues();
+      for (var r = 0; r < allRows.length; r++) {
+        if (String(allRows[r][0]).trim() === String(record.quarter).trim() &&
+            String(allRows[r][1]).trim().toLowerCase() === String(record.employeeName).trim().toLowerCase()) {
+          existingRow = r + 2;
+          break;
+        }
+      }
+    }
+
+    if (existingRow > 0) {
+      sheet.getRange(existingRow, 1, 1, rowData.length).setValues([rowData]);
+      rowId = existingRow;
+    } else {
+      sheet.appendRow(rowData);
+      rowId = sheet.getLastRow();
+    }
+  }
+
+  return { success: true, rowId: rowId };
+}
+
+/**
+ * Saves multiple test records in batch (e.g., when adding a roster for a quarter).
+ *
+ * @param {Array<Object>} records - Array of test record objects
+ * @returns {Object}
+ */
+function saveDrugTestBatch(records) {
+  if (!records || !records.length) return { success: true, count: 0 };
+  var savedCount = 0;
+  for (var i = 0; i < records.length; i++) {
+    saveDrugTestRecord(records[i]);
+    savedCount++;
+  }
+  return { success: true, count: savedCount };
+}
+
+/**
+ * Deletes a test record from 'DOT Drug Tests' by rowId.
+ *
+ * @param {number} rowId - Row index to delete (2-indexed)
+ * @returns {Object}
+ */
+function deleteDrugTestRecord(rowId) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEET_DRUG_TESTS);
+  if (!sheet) return { success: false, error: 'Sheet not found' };
+
+  var row = parseInt(rowId, 10);
+  if (row >= 2 && row <= sheet.getLastRow()) {
+    sheet.deleteRow(row);
+    return { success: true };
+  }
+  return { success: false, error: 'Invalid row index' };
+}
+
+/**
+ * Quickly marks a test record as Completed with completion date and optional notes.
+ *
+ * @param {number} rowId - Row index (2-indexed)
+ * @param {string} [completedDate] - YYYY-MM-DD or empty for today
+ * @param {string} [notes] - Optional completion/lab notes
+ * @returns {Object}
+ */
+function markDrugTestComplete(rowId, completedDate, notes) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEET_DRUG_TESTS);
+  if (!sheet) return { success: false, error: 'Sheet not found' };
+
+  var row = parseInt(rowId, 10);
+  if (row < 2 || row > sheet.getLastRow()) {
+    return { success: false, error: 'Invalid row index' };
+  }
+
+  var cDateVal = completedDate ?
+    (typeof parseDateNoon === 'function' ? parseDateNoon(completedDate) : completedDate) :
+    new Date();
+
+  sheet.getRange(row, COLS.DRUG_TESTS.STATUS).setValue('Completed');
+  sheet.getRange(row, COLS.DRUG_TESTS.DATE_COMPLETED).setValue(cDateVal);
+
+  if (notes) {
+    var existingNotes = sheet.getRange(row, COLS.DRUG_TESTS.NOTES).getValue();
+    var newNotes = existingNotes ? existingNotes + ' | ' + notes : notes;
+    sheet.getRange(row, COLS.DRUG_TESTS.NOTES).setValue(newNotes);
+  }
+
+  return { success: true };
+}
+
+/**
+ * Adds or updates a clinic in 'Drug Test Clinics'.
+ *
+ * @param {Object} clinicObj - Clinic object
+ * @returns {Object}
+ */
+function saveDrugClinic(clinicObj) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEET_DRUG_CLINICS);
+  if (!sheet) {
+    setupDrugTestingSheets();
+    sheet = ss.getSheetByName(SHEET_DRUG_CLINICS);
+  }
+
+  var firmName = String(clinicObj.firm || '').trim();
+  if (!firmName) return { success: false, error: 'Firm name is required' };
+
+  var rowData = [
+    firmName,
+    clinicObj.isMobile ? 'Yes' : 'No',
+    clinicObj.street || '',
+    clinicObj.city || '',
+    clinicObj.state || '',
+    clinicObj.zip || '',
+    clinicObj.phone || '',
+    clinicObj.hours || '',
+    clinicObj.apptRequired || '',
+    clinicObj.paperworkRequired || '',
+    clinicObj.notes || '',
+    clinicObj.active !== false
+  ];
+
+  var lastRow = sheet.getLastRow();
+  var matchedRow = 0;
+  if (lastRow > 1) {
+    var firms = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+    for (var i = 0; i < firms.length; i++) {
+      if (String(firms[i][0]).trim().toLowerCase() === firmName.toLowerCase()) {
+        matchedRow = i + 2;
+        break;
+      }
+    }
+  }
+
+  if (matchedRow > 0) {
+    sheet.getRange(matchedRow, 1, 1, rowData.length).setValues([rowData]);
+  } else {
+    sheet.appendRow(rowData);
+  }
+
+  return { success: true };
+}
+
+/**
+ * Deactivates or removes a clinic from 'Drug Test Clinics'.
+ *
+ * @param {string} firmName - Firm name to archive/deactivate
+ * @returns {Object}
+ */
+function deleteDrugClinic(firmName) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SHEET_DRUG_CLINICS);
+  if (!sheet) return { success: false, error: 'Sheet not found' };
+
+  var targetName = String(firmName || '').trim().toLowerCase();
+  var lastRow = sheet.getLastRow();
+  if (lastRow > 1) {
+    var firms = sheet.getRange(2, 1, lastRow - 1, 1).getValues();
+    for (var i = 0; i < firms.length; i++) {
+      if (String(firms[i][0]).trim().toLowerCase() === targetName) {
+        sheet.getRange(i + 2, COLS.DRUG_CLINICS.ACTIVE).setValue(false);
+        return { success: true };
+      }
+    }
+  }
+
+  return { success: false, error: 'Clinic not found' };
+}

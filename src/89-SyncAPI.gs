@@ -90,7 +90,9 @@ function exportFullDatabaseSnapshot() {
     { key: 'locations', name: 'Locations' },
     { key: 'drive_time_routes', name: 'Drive Time Routes' },
     { key: 'vendors', name: 'Vendors' },
-    { key: 'purchase_orders', name: 'Purchase Orders' }
+    { key: 'purchase_orders', name: 'Purchase Orders' },
+    { key: 'dot_drug_tests', name: typeof SHEET_DRUG_TESTS !== 'undefined' ? SHEET_DRUG_TESTS : 'DOT Drug Tests' },
+    { key: 'drug_test_clinics', name: typeof SHEET_DRUG_CLINICS !== 'undefined' ? SHEET_DRUG_CLINICS : 'Drug Test Clinics' }
   ];
 
   var tables = {};

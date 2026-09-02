@@ -98,6 +98,9 @@
         <div class="nav-item" data-view="training-view">
           <span class="nav-item-icon">🎓</span> Training
         </div>
+        <div class="nav-item" data-view="drug-testing-view">
+          <span class="nav-item-icon">🧪</span> DOT Drug Testing
+        </div>
         <div class="nav-item" data-view="previous-employees-view">
           <span class="nav-item-icon">👥</span> Previous Employees
         </div>
@@ -267,6 +270,11 @@
           </div>
         </div>
         <div class="grid-wrapper" id="training-grid-container"></div>
+      </section>
+
+      <!-- View: DOT Drug Testing Workspace -->
+      <section id="drug-testing-view" class="view-container">
+        <!-- Injected dynamically by drug-testing.js -->
       </section>
 
       <!-- View 1B: History Records Grid -->
@@ -1297,6 +1305,7 @@
   <script src="js/lookup.js?v=20260901_25"></script>
   <script src="js/procurement.js?v=20260901_25"></script>
   <script src="js/aging.js?v=20260901_25"></script>
+  <script src="js/drug-testing.js?v=20260902_1"></script>
 
   <script>
     // Navigation routing for desktop & mobile
@@ -1324,6 +1333,7 @@
       if (viewId === 'safety-compliance-view') window.sheetNavigator.renderSafetyCompliance();
       if (viewId === 'expiring-certs-view') window.sheetNavigator.renderExpiringCerts();
       if (viewId === 'training-view') window.sheetNavigator.renderTraining();
+      if (viewId === 'drug-testing-view' && window.drugTestingEngine) window.drugTestingEngine.render();
       if (viewId === 'previous-employees-view' && window.previousEmployeesEngine) window.previousEmployeesEngine.renderWorkspace();
       if (viewId === 'history-view') window.historyNavigator.renderCurrentHistory();
       if (viewId === 'lookup-view') window.lookupApp.init();
@@ -1448,6 +1458,8 @@
       window.cprRosterEngine = new CprRosterEngine(window.localDB);
       window.certsImportEngine = new CertsImportEngine(window.localDB);
       window.timeBreakdownEngine = new TimeBreakdownEngine(window.localDB);
+      window.drugTestingEngine = new DrugTestingEngine(window.localDB);
+      window.drugTestingEngine.init();
 
       if (window.inventoryManager) window.inventoryManager.init();
       if (window.crewImportEngine) window.crewImportEngine.init();

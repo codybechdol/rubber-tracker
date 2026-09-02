@@ -37,7 +37,9 @@ class SheetNavigator {
       { key: 'grounds', label: '⚡ Grounds', icon: '⚡', isSwap: false },
       { key: 'ground_swaps', label: '🔄 Ground Swaps', icon: '🔄', isSwap: true },
       { key: 'hot_sticks', label: '🔴 Hot Sticks', icon: '🔴', isSwap: false },
-      { key: 'hot_stick_swaps', label: '🔄 Hot Stick Swaps', icon: '🔄', isSwap: true }
+      { key: 'hot_stick_swaps', label: '🔄 Hot Stick Swaps', icon: '🔄', isSwap: true },
+      { key: 'dot_drug_tests', label: '🧪 DOT Drug Tests', icon: '🧪', isSwap: false },
+      { key: 'drug_test_clinics', label: '🏥 Drug Test Clinics', icon: '🏥', isSwap: false }
     ];
   }
 

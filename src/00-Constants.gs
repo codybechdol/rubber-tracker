@@ -53,6 +53,10 @@ var SHEET_HOT_STICKS = 'Hot Sticks';
 var SHEET_HOT_STICK_SWAPS = 'Hot Stick Swaps';
 var SHEET_HOT_STICKS_HISTORY = 'Hot Sticks History';
 
+// DOT Drug Testing
+var SHEET_DRUG_TESTS = 'DOT Drug Tests';
+var SHEET_DRUG_CLINICS = 'Drug Test Clinics';
+
 // =============================================================================
 // VISUAL CONSTANTS
 // =============================================================================
@@ -346,6 +350,43 @@ var COLS = {
     LAST_DAY_REASON: 8,   // H
     REHIRE_DATE: 9,       // I
     NOTES: 10             // J
+  },
+
+  // DOT Drug Tests Sheet
+  DRUG_TESTS: {
+    QUARTER: 1,           // A - Quarter (e.g. Q3 2026)
+    EMPLOYEE_NAME: 2,     // B - Employee Name
+    LOCATION: 3,          // C - Physical Location / City
+    JOB_NUMBER: 4,        // D - Job Number / Crew
+    PHONE: 5,             // E - Phone Number
+    COLLECTION_TYPE: 6,   // F - Clinic Visit / Mobile Collector
+    CLINIC_NAME: 7,       // G - Selected Clinic / Provider Name
+    CLINIC_CITY: 8,       // H - Clinic City/State
+    APPT_REQUIRED: 9,     // I - Yes / No / Suggested
+    SCHEDULED_DATE: 10,   // J - Scheduled Date
+    SCHEDULED_TIME: 11,   // K - Scheduled Time
+    MEETING_ADDRESS: 12,  // L - Meeting / Collection Address (for Mobile Collector)
+    STATUS: 13,           // M - Pending, Scheduled, Completed, Excused
+    DATE_COMPLETED: 14,   // N - Date Completed
+    PAPERWORK_NOTES: 15,  // O - Paperwork / Kit requirements
+    NOTES: 16,            // P - Additional Notes / Confirmation # / Lab Results
+    DATE_ADDED: 17        // Q - Timestamp Created
+  },
+
+  // Drug Test Clinics Sheet
+  DRUG_CLINICS: {
+    FIRM: 1,              // A - Firm / Provider Name
+    IS_MOBILE: 2,         // B - Is Mobile Collector? (Yes/No)
+    STREET: 3,            // C - Street Address
+    CITY: 4,              // D - City
+    STATE: 5,             // E - State
+    ZIP: 6,               // F - Zip Code
+    PHONE: 7,             // G - Phone Number
+    HOURS: 8,             // H - Operating Hours
+    APPT_REQUIRED: 9,     // I - Appointment Required (Yes/No/Details)
+    PAPERWORK_REQUIRED: 10,// J - Paperwork Required w/ Donor
+    NOTES: 11,            // K - Special Instructions / Notes
+    ACTIVE: 12            // L - Active (TRUE/FALSE)
   }
 };
 
