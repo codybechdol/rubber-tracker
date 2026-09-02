@@ -95,6 +95,9 @@ class DrugTestingEngine {
     if (t && t.rows && t.rows.length > 0) {
       t.rows.forEach(r => {
         const name = String(r['Firm / Clinic Name'] || r['Firm'] || r[0] || '').trim();
+        const activeStr = String(r['Active'] || r[11] || 'TRUE').trim().toLowerCase();
+        if (activeStr === 'false') return;
+
         if (name && name.toLowerCase() !== 'firm / clinic name') {
           list.push({
             name: name,
@@ -107,17 +110,82 @@ class DrugTestingEngine {
             hours: String(r['Hours'] || r[7] || ''),
             apptReq: String(r['Appt Required'] || r[8] || 'No'),
             paperwork: String(r['Paperwork Required'] || r[9] || ''),
-            notes: String(r['Notes / Lab Instructions'] || r[10] || '')
+            notes: String(r['Notes / Lab Instructions'] || r[10] || ''),
+            active: true
           });
         }
       });
+      return list;
     }
 
-    // If local table is empty, merge default clinics
-    if (list.length === 0) {
+    // Only if table has never been saved into db snapshot, fallback to defaultClinics
+    if (!this.db.snapshot?.tables?.drug_test_clinics) {
       return this.defaultClinics;
     }
     return list;
+  }
+
+  getClinicsTable() {
+    let t = this.db.getTable('drug_test_clinics');
+    if (!t || !t.rows || (!this.db.snapshot?.tables?.drug_test_clinics && t.rows.length === 0)) {
+      t = {
+        name: 'Drug Test Clinics',
+        headers: ['Firm / Clinic Name', 'Is Mobile', 'Street Address', 'City', 'State', 'Zip', 'Phone Number', 'Hours', 'Appt Required', 'Paperwork Required', 'Notes / Lab Instructions', 'Active'],
+        rows: this.defaultClinics.map(c => ({
+          'Firm / Clinic Name': c.name,
+          'Is Mobile': c.isMobile ? 'TRUE' : 'FALSE',
+          'Street Address': c.address || '',
+          'City': c.city || '',
+          'State': c.state || '',
+          'Zip': c.zip || '',
+          'Phone Number': c.phone || '',
+          'Hours': c.hours || '',
+          'Appt Required': c.apptReq || 'No',
+          'Paperwork Required': c.paperwork || '',
+          'Notes / Lab Instructions': c.notes || '',
+          'Active': 'TRUE'
+        }))
+      };
+      t.rowCount = t.rows.length;
+    }
+    return t;
+  }
+
+  async saveClinicsTable(t) {
+    t.rowCount = (t.rows || []).length;
+    if (!this.db.snapshot) this.db.snapshot = { tables: {}, configs: {} };
+    if (!this.db.snapshot.tables) this.db.snapshot.tables = {};
+    this.db.snapshot.tables.drug_test_clinics = t;
+    await this.db.setSnapshot(this.db.snapshot);
+
+    if (this.db && typeof this.db.addMutation === 'function') {
+      await this.db.addMutation({
+        action: 'REPLACE_TABLE_DATA',
+        sheetName: 'Drug Test Clinics',
+        tableKey: 'drug_test_clinics',
+        headers: t.headers || ['Firm / Clinic Name', 'Is Mobile', 'Street Address', 'City', 'State', 'Zip', 'Phone Number', 'Hours', 'Appt Required', 'Paperwork Required', 'Notes / Lab Instructions', 'Active'],
+        rows: t.rows || []
+      });
+    }
+
+    if (window.syncEngine && typeof window.syncEngine.renderOutboxBadge === 'function') {
+      window.syncEngine.renderOutboxBadge();
+    }
+  }
+
+  escapeHtml(str) {
+    if (!str && str !== 0) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  escapeJs(str) {
+    if (!str && str !== 0) return '';
+    return String(str).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '&quot;');
   }
 
   getActiveEmployees() {
@@ -538,25 +606,26 @@ class DrugTestingEngine {
               <th style="padding: 10px 14px; min-width: 200px;">Location</th>
               <th style="padding: 10px 14px; min-width: 120px;">Phone & Hours</th>
               <th style="padding: 10px 14px; width: 130px;">Appointment</th>
-              <th style="padding: 10px 14px; min-width: 220px;">Paperwork & Notes</th>
+              <th style="padding: 10px 14px; min-width: 200px;">Paperwork & Notes</th>
+              <th style="padding: 10px 14px; width: 110px; text-align: center;">Actions</th>
             </tr>
           </thead>
           <tbody>
             ${filtered.map((c, idx) => `
               <tr style="border-bottom: 1px solid rgba(255,255,255,0.05); background: ${idx % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.015)'};">
-                <td style="padding: 10px 14px; font-weight: 700; color: #f8fafc;">${c.name}</td>
+                <td style="padding: 10px 14px; font-weight: 700; color: #f8fafc;">${this.escapeHtml(c.name)}</td>
                 <td style="padding: 10px 14px;">
                   <span style="font-size: 10.5px; font-weight: 700; padding: 2px 6px; border-radius: 4px; ${c.isMobile ? 'background: rgba(168, 85, 247, 0.2); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.4);' : 'background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4);'}">
                     ${c.isMobile ? '🚚 Mobile' : '🏥 Clinic'}
                   </span>
                 </td>
                 <td style="padding: 10px 14px; font-size: 11.5px; color: var(--text-muted);">
-                  ${c.address ? `${c.address}<br>` : ''}
-                  <span style="color: #cbd5e1;">${c.city}, ${c.state} ${c.zip}</span>
+                  ${c.address ? `${this.escapeHtml(c.address)}<br>` : ''}
+                  <span style="color: #cbd5e1;">${this.escapeHtml(c.city)}${c.city && c.state ? ', ' : ''}${this.escapeHtml(c.state)} ${this.escapeHtml(c.zip)}</span>
                 </td>
                 <td style="padding: 10px 14px; font-size: 11px;">
-                  ${c.phone ? `<div style="color: #93c5fd; font-weight: 600;">📞 ${c.phone}</div>` : ''}
-                  ${c.hours ? `<div style="color: var(--text-muted); margin-top: 2px;">🕒 ${c.hours}</div>` : ''}
+                  ${c.phone ? `<div style="color: #93c5fd; font-weight: 600;">📞 ${this.escapeHtml(c.phone)}</div>` : ''}
+                  ${c.hours ? `<div style="color: var(--text-muted); margin-top: 2px;">🕒 ${this.escapeHtml(c.hours)}</div>` : ''}
                 </td>
                 <td style="padding: 10px 14px;">
                   ${c.apptReq.toLowerCase() === 'yes' ? `
@@ -566,8 +635,24 @@ class DrugTestingEngine {
                   `}
                 </td>
                 <td style="padding: 10px 14px; font-size: 11px;">
-                  ${c.paperwork ? `<div style="color: #fde047; margin-bottom: 2px;">📋 ${c.paperwork}</div>` : ''}
-                  ${c.notes ? `<div style="color: var(--text-muted); font-style: italic;">${c.notes}</div>` : ''}
+                  ${c.paperwork ? `<div style="color: #fde047; margin-bottom: 2px;">📋 ${this.escapeHtml(c.paperwork)}</div>` : ''}
+                  ${c.notes ? `<div style="color: var(--text-muted); font-style: italic;">${this.escapeHtml(c.notes)}</div>` : ''}
+                </td>
+                <td style="padding: 10px 14px; text-align: center;">
+                  <div style="display: inline-flex; align-items: center; justify-content: center; gap: 6px;">
+                    <button class="btn btn-secondary" 
+                            style="padding: 4px 8px; font-size: 11px; border: 1px solid rgba(255,255,255,0.15); color: #93c5fd;" 
+                            onclick="window.drugTestingEngine.openEditClinicModal('${this.escapeJs(c.name)}')" 
+                            title="Edit clinic details">
+                      ✏️ Edit
+                    </button>
+                    <button class="btn btn-secondary" 
+                            style="padding: 4px 8px; font-size: 11px; border: 1px solid rgba(239, 68, 68, 0.35); color: #f87171;" 
+                            onclick="window.drugTestingEngine.deleteClinic('${this.escapeJs(c.name)}')" 
+                            title="Delete clinic from directory">
+                      🗑️
+                    </button>
+                  </div>
                 </td>
               </tr>
             `).join('')}
@@ -1232,7 +1317,7 @@ class DrugTestingEngine {
     if (!modal) return;
     modal.innerHTML = `
       <div style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 9999;">
-        <div style="background: #1e293b; border: 1px solid var(--border-color); border-radius: 8px; width: 550px; max-width: 90%; padding: 24px; box-shadow: 0 10px 25px rgba(0,0,0,0.5);">
+        <div style="background: #1e293b; border: 1px solid var(--border-color); border-radius: 8px; width: 560px; max-width: 92%; padding: 24px; box-shadow: 0 10px 25px rgba(0,0,0,0.5);">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
             <h3 style="margin: 0; font-size: 16px; color: #f8fafc;">➕ Add New Clinic / Collector</h3>
             <button style="background: transparent; border: none; font-size: 18px; color: var(--text-muted); cursor: pointer;" onclick="document.getElementById('dt-modal-container').innerHTML=''">✕</button>
@@ -1259,6 +1344,10 @@ class DrugTestingEngine {
                 </select>
               </div>
             </div>
+            <div>
+              <label style="font-size: 11px; color: var(--text-muted); font-weight: 700;">Street Address</label>
+              <input type="text" id="new-c-address" placeholder="e.g. 1930 N Sanders St" style="width: 100%; box-sizing: border-box; padding: 6px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 5px; color: #fff;">
+            </div>
             <div style="display: flex; gap: 10px;">
               <div style="flex: 2;">
                 <label style="font-size: 11px; color: var(--text-muted); font-weight: 700;">City</label>
@@ -1266,19 +1355,33 @@ class DrugTestingEngine {
               </div>
               <div style="flex: 1;">
                 <label style="font-size: 11px; color: var(--text-muted); font-weight: 700;">State</label>
-                <input type="text" id="new-c-state" placeholder="State (MT)" style="width: 100%; box-sizing: border-box; padding: 6px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 5px; color: #fff;">
+                <input type="text" id="new-c-state" value="MT" placeholder="State (MT)" style="width: 100%; box-sizing: border-box; padding: 6px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 5px; color: #fff;">
               </div>
               <div style="flex: 1;">
-                <label style="font-size: 11px; color: var(--text-muted); font-weight: 700;">Phone</label>
+                <label style="font-size: 11px; color: var(--text-muted); font-weight: 700;">Zip</label>
+                <input type="text" id="new-c-zip" placeholder="Zip" style="width: 100%; box-sizing: border-box; padding: 6px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 5px; color: #fff;">
+              </div>
+            </div>
+            <div style="display: flex; gap: 10px;">
+              <div style="flex: 1;">
+                <label style="font-size: 11px; color: var(--text-muted); font-weight: 700;">Phone Number</label>
                 <input type="text" id="new-c-phone" placeholder="Phone #" style="width: 100%; box-sizing: border-box; padding: 6px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 5px; color: #fff;">
+              </div>
+              <div style="flex: 1;">
+                <label style="font-size: 11px; color: var(--text-muted); font-weight: 700;">Hours</label>
+                <input type="text" id="new-c-hours" placeholder="e.g. M-F 8am-5pm" style="width: 100%; box-sizing: border-box; padding: 6px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 5px; color: #fff;">
               </div>
             </div>
             <div>
               <label style="font-size: 11px; color: var(--text-muted); font-weight: 700;">Paperwork / Kit Notes</label>
               <input type="text" id="new-c-paperwork" placeholder="e.g. eCCF only, bring split kit" style="width: 100%; box-sizing: border-box; padding: 6px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 5px; color: #fff;">
             </div>
+            <div>
+              <label style="font-size: 11px; color: var(--text-muted); font-weight: 700;">Notes / Lab Instructions</label>
+              <input type="text" id="new-c-notes" placeholder="e.g. Call ahead, meets crew on site" style="width: 100%; box-sizing: border-box; padding: 6px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 5px; color: #fff;">
+            </div>
           </div>
-          <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px;">
+          <div style="display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px;">
             <button class="btn btn-secondary" onclick="document.getElementById('dt-modal-container').innerHTML=''">Cancel</button>
             <button class="btn btn-primary" onclick="window.drugTestingEngine.saveNewClinic()">Save Clinic</button>
           </div>
@@ -1295,54 +1398,238 @@ class DrugTestingEngine {
     }
     const isMobile = document.getElementById('new-c-mobile')?.value === 'true';
     const appt = document.getElementById('new-c-appt')?.value || 'No';
+    const address = document.getElementById('new-c-address')?.value?.trim() || '';
     const city = document.getElementById('new-c-city')?.value?.trim() || '';
     const state = document.getElementById('new-c-state')?.value?.trim() || 'MT';
+    const zip = document.getElementById('new-c-zip')?.value?.trim() || '';
     const phone = document.getElementById('new-c-phone')?.value?.trim() || '';
+    const hours = document.getElementById('new-c-hours')?.value?.trim() || '';
     const paperwork = document.getElementById('new-c-paperwork')?.value?.trim() || '';
+    const notes = document.getElementById('new-c-notes')?.value?.trim() || '';
 
-    let t = this.db.getTable('drug_test_clinics');
-    if (!t || !t.rows) {
-      t = { name: 'Drug Test Clinics', headers: ['Firm / Clinic Name', 'Is Mobile', 'Street Address', 'City', 'State', 'Zip', 'Phone Number', 'Hours', 'Appt Required', 'Paperwork Required', 'Notes / Lab Instructions', 'Active'], rows: [] };
-    }
-
+    const t = this.getClinicsTable();
     t.rows.push({
       'Firm / Clinic Name': name,
       'Is Mobile': isMobile ? 'TRUE' : 'FALSE',
-      'Street Address': '',
+      'Street Address': address,
       'City': city,
       'State': state,
-      'Zip': '',
+      'Zip': zip,
       'Phone Number': phone,
-      'Hours': '',
+      'Hours': hours,
       'Appt Required': appt,
       'Paperwork Required': paperwork,
-      'Notes / Lab Instructions': '',
+      'Notes / Lab Instructions': notes,
       'Active': 'TRUE'
     });
 
-    t.rowCount = t.rows.length;
-    if (!this.db.snapshot) this.db.snapshot = { tables: {}, configs: {} };
-    if (!this.db.snapshot.tables) this.db.snapshot.tables = {};
-    this.db.snapshot.tables.drug_test_clinics = t;
-    await this.db.setSnapshot(this.db.snapshot);
+    await this.saveClinicsTable(t);
+    document.getElementById('dt-modal-container').innerHTML = '';
+    this.render();
+    alert(`✅ Added "${name}" to clinics directory!`);
+  }
 
-    if (this.db && typeof this.db.addMutation === 'function') {
-      await this.db.addMutation({
-        action: 'REPLACE_TABLE_DATA',
-        sheetName: 'Drug Test Clinics',
-        tableKey: 'drug_test_clinics',
-        headers: t.headers || ['Firm / Clinic Name', 'Is Mobile', 'Street Address', 'City', 'State', 'Zip', 'Phone Number', 'Hours', 'Appt Required', 'Paperwork Required', 'Notes / Lab Instructions', 'Active'],
-        rows: t.rows || []
+  openEditClinicModal(clinicName) {
+    const clinics = this.getClinicsList();
+    const c = clinics.find(item => item.name.toLowerCase() === String(clinicName).trim().toLowerCase());
+    if (!c) {
+      alert('Clinic not found: ' + clinicName);
+      return;
+    }
+
+    const modal = document.getElementById('dt-modal-container');
+    if (!modal) return;
+
+    modal.innerHTML = `
+      <div style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 9999;">
+        <div style="background: #1e293b; border: 1px solid var(--border-color); border-radius: 8px; width: 560px; max-width: 92%; padding: 24px; box-shadow: 0 10px 25px rgba(0,0,0,0.5);">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
+            <h3 style="margin: 0; font-size: 16px; color: #f8fafc;">✏️ Edit Clinic / Collector</h3>
+            <button style="background: transparent; border: none; font-size: 18px; color: var(--text-muted); cursor: pointer;" onclick="document.getElementById('dt-modal-container').innerHTML=''">✕</button>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 10px;">
+            <div>
+              <label style="font-size: 11px; color: var(--text-muted); font-weight: 700;">Provider / Clinic Name *</label>
+              <input type="text" id="edit-c-name" value="${this.escapeHtml(c.name)}" style="width: 100%; box-sizing: border-box; padding: 6px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 5px; color: #fff;">
+            </div>
+            <div style="display: flex; gap: 10px;">
+              <div style="flex: 1;">
+                <label style="font-size: 11px; color: var(--text-muted); font-weight: 700;">Provider Type</label>
+                <select id="edit-c-mobile" style="width: 100%; box-sizing: border-box; padding: 6px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 5px; color: #fff;">
+                  <option value="false" ${!c.isMobile ? 'selected' : ''}>🏥 Standard Clinic</option>
+                  <option value="true" ${c.isMobile ? 'selected' : ''}>🚚 Mobile Collector</option>
+                </select>
+              </div>
+              <div style="flex: 1;">
+                <label style="font-size: 11px; color: var(--text-muted); font-weight: 700;">Appointment Required</label>
+                <select id="edit-c-appt" style="width: 100%; box-sizing: border-box; padding: 6px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 5px; color: #fff;">
+                  <option value="No" ${String(c.apptReq).toLowerCase() === 'no' ? 'selected' : ''}>No (Walk-In Welcome)</option>
+                  <option value="Yes" ${String(c.apptReq).toLowerCase() === 'yes' ? 'selected' : ''}>Yes (Appointment Required)</option>
+                  <option value="Suggested" ${String(c.apptReq).toLowerCase() === 'suggested' ? 'selected' : ''}>Suggested</option>
+                </select>
+              </div>
+            </div>
+            <div>
+              <label style="font-size: 11px; color: var(--text-muted); font-weight: 700;">Street Address</label>
+              <input type="text" id="edit-c-address" value="${this.escapeHtml(c.address || '')}" placeholder="Street Address" style="width: 100%; box-sizing: border-box; padding: 6px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 5px; color: #fff;">
+            </div>
+            <div style="display: flex; gap: 10px;">
+              <div style="flex: 2;">
+                <label style="font-size: 11px; color: var(--text-muted); font-weight: 700;">City</label>
+                <input type="text" id="edit-c-city" value="${this.escapeHtml(c.city || '')}" placeholder="City" style="width: 100%; box-sizing: border-box; padding: 6px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 5px; color: #fff;">
+              </div>
+              <div style="flex: 1;">
+                <label style="font-size: 11px; color: var(--text-muted); font-weight: 700;">State</label>
+                <input type="text" id="edit-c-state" value="${this.escapeHtml(c.state || 'MT')}" placeholder="State" style="width: 100%; box-sizing: border-box; padding: 6px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 5px; color: #fff;">
+              </div>
+              <div style="flex: 1;">
+                <label style="font-size: 11px; color: var(--text-muted); font-weight: 700;">Zip</label>
+                <input type="text" id="edit-c-zip" value="${this.escapeHtml(c.zip || '')}" placeholder="Zip" style="width: 100%; box-sizing: border-box; padding: 6px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 5px; color: #fff;">
+              </div>
+            </div>
+            <div style="display: flex; gap: 10px;">
+              <div style="flex: 1;">
+                <label style="font-size: 11px; color: var(--text-muted); font-weight: 700;">Phone Number</label>
+                <input type="text" id="edit-c-phone" value="${this.escapeHtml(c.phone || '')}" placeholder="Phone #" style="width: 100%; box-sizing: border-box; padding: 6px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 5px; color: #fff;">
+              </div>
+              <div style="flex: 1;">
+                <label style="font-size: 11px; color: var(--text-muted); font-weight: 700;">Hours</label>
+                <input type="text" id="edit-c-hours" value="${this.escapeHtml(c.hours || '')}" placeholder="e.g. M-F 8am-5pm" style="width: 100%; box-sizing: border-box; padding: 6px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 5px; color: #fff;">
+              </div>
+            </div>
+            <div>
+              <label style="font-size: 11px; color: var(--text-muted); font-weight: 700;">Paperwork / Kit Requirements</label>
+              <input type="text" id="edit-c-paperwork" value="${this.escapeHtml(c.paperwork || '')}" placeholder="e.g. eCCF available, split kit required" style="width: 100%; box-sizing: border-box; padding: 6px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 5px; color: #fff;">
+            </div>
+            <div>
+              <label style="font-size: 11px; color: var(--text-muted); font-weight: 700;">Notes / Lab Instructions</label>
+              <input type="text" id="edit-c-notes" value="${this.escapeHtml(c.notes || '')}" placeholder="e.g. Call ahead, meets crew on site" style="width: 100%; box-sizing: border-box; padding: 6px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 5px; color: #fff;">
+            </div>
+          </div>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 20px;">
+            <button class="btn btn-secondary" style="color: #f87171; border-color: rgba(239, 68, 68, 0.4);" onclick="window.drugTestingEngine.deleteClinic('${this.escapeJs(c.name)}')">
+              🗑️ Delete Clinic
+            </button>
+            <div style="display: flex; gap: 8px;">
+              <button class="btn btn-secondary" onclick="document.getElementById('dt-modal-container').innerHTML=''">Cancel</button>
+              <button class="btn btn-primary" onclick="window.drugTestingEngine.saveEditedClinic('${this.escapeJs(c.name)}')">Save Changes</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  async saveEditedClinic(originalName) {
+    const newName = document.getElementById('edit-c-name')?.value?.trim();
+    if (!newName) {
+      alert('Please enter a clinic name.');
+      return;
+    }
+    const isMobile = document.getElementById('edit-c-mobile')?.value === 'true';
+    const appt = document.getElementById('edit-c-appt')?.value || 'No';
+    const address = document.getElementById('edit-c-address')?.value?.trim() || '';
+    const city = document.getElementById('edit-c-city')?.value?.trim() || '';
+    const state = document.getElementById('edit-c-state')?.value?.trim() || 'MT';
+    const zip = document.getElementById('edit-c-zip')?.value?.trim() || '';
+    const phone = document.getElementById('edit-c-phone')?.value?.trim() || '';
+    const hours = document.getElementById('edit-c-hours')?.value?.trim() || '';
+    const paperwork = document.getElementById('edit-c-paperwork')?.value?.trim() || '';
+    const notes = document.getElementById('edit-c-notes')?.value?.trim() || '';
+
+    const t = this.getClinicsTable();
+    const origLower = String(originalName).trim().toLowerCase();
+    const row = (t.rows || []).find(r => {
+      const n = String(r['Firm / Clinic Name'] || r['Firm'] || r[0] || '').trim().toLowerCase();
+      return n === origLower;
+    });
+
+    if (row) {
+      row['Firm / Clinic Name'] = newName;
+      if (row[0] !== undefined) row[0] = newName;
+      row['Is Mobile'] = isMobile ? 'TRUE' : 'FALSE';
+      if (row[1] !== undefined) row[1] = isMobile ? 'TRUE' : 'FALSE';
+      row['Street Address'] = address;
+      if (row[2] !== undefined) row[2] = address;
+      row['City'] = city;
+      if (row[3] !== undefined) row[3] = city;
+      row['State'] = state;
+      if (row[4] !== undefined) row[4] = state;
+      row['Zip'] = zip;
+      if (row[5] !== undefined) row[5] = zip;
+      row['Phone Number'] = phone;
+      if (row[6] !== undefined) row[6] = phone;
+      row['Hours'] = hours;
+      if (row[7] !== undefined) row[7] = hours;
+      row['Appt Required'] = appt;
+      if (row[8] !== undefined) row[8] = appt;
+      row['Paperwork Required'] = paperwork;
+      if (row[9] !== undefined) row[9] = paperwork;
+      row['Notes / Lab Instructions'] = notes;
+      if (row[10] !== undefined) row[10] = notes;
+      row['Active'] = 'TRUE';
+      if (row[11] !== undefined) row[11] = 'TRUE';
+    } else {
+      t.rows.push({
+        'Firm / Clinic Name': newName,
+        'Is Mobile': isMobile ? 'TRUE' : 'FALSE',
+        'Street Address': address,
+        'City': city,
+        'State': state,
+        'Zip': zip,
+        'Phone Number': phone,
+        'Hours': hours,
+        'Appt Required': appt,
+        'Paperwork Required': paperwork,
+        'Notes / Lab Instructions': notes,
+        'Active': 'TRUE'
       });
     }
 
-    if (window.syncEngine && typeof window.syncEngine.renderOutboxBadge === 'function') {
-      window.syncEngine.renderOutboxBadge();
+    // Cascade clinic name update to dot_drug_tests if renamed
+    if (newName !== originalName) {
+      const testsTable = this.getTestsTable();
+      let testUpdated = false;
+      (testsTable.rows || []).forEach(tr => {
+        const cName = String(tr['Clinic Name'] || tr[8] || '').trim();
+        if (cName.toLowerCase() === origLower) {
+          tr['Clinic Name'] = newName;
+          if (tr[8] !== undefined) tr[8] = newName;
+          if (city) {
+            tr['Clinic City / State'] = `${city}, ${state}`;
+            if (tr[9] !== undefined) tr[9] = `${city}, ${state}`;
+          }
+          testUpdated = true;
+        }
+      });
+      if (testUpdated) {
+        await this.saveTable(testsTable);
+      }
     }
 
+    await this.saveClinicsTable(t);
     document.getElementById('dt-modal-container').innerHTML = '';
     this.render();
-    alert(`✅ Added ${name} to clinics directory!`);
+    alert(`✅ Successfully updated "${newName}"!`);
+  }
+
+  async deleteClinic(clinicName) {
+    if (!confirm(`Are you sure you want to delete "${clinicName}" from the clinics directory?\n\nThis will permanently remove it from the directory and clinic selection lists.`)) {
+      return;
+    }
+
+    const t = this.getClinicsTable();
+    const origLower = String(clinicName).trim().toLowerCase();
+    t.rows = (t.rows || []).filter(r => {
+      const name = String(r['Firm / Clinic Name'] || r['Firm'] || r[0] || '').trim().toLowerCase();
+      return name !== origLower;
+    });
+
+    await this.saveClinicsTable(t);
+    const modal = document.getElementById('dt-modal-container');
+    if (modal) modal.innerHTML = '';
+    this.render();
+    alert(`🗑️ Successfully deleted "${clinicName}" from the clinics directory.`);
   }
 
   // --- UI Helpers ---
