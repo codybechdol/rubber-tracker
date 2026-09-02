@@ -1873,21 +1873,50 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
             var gridToWrite = [];
             var sheetHeaders = [];
 
-            if (mut.rawGrid && Array.isArray(mut.rawGrid) && mut.rawGrid.length > 0) {
-              gridToWrite = mut.rawGrid;
-              sheetHeaders = mut.rawGrid[0];
-            } else if (mut.headers && mut.rows && Array.isArray(mut.rows)) {
-              sheetHeaders = mut.headers;
+            var rawGridHasData = mut.rawGrid && Array.isArray(mut.rawGrid) && mut.rawGrid.length > 1;
+            var rowsHaveData = mut.rows && Array.isArray(mut.rows) && mut.rows.length > 0;
+
+            if (rowsHaveData && (!rawGridHasData || mut.rows.length >= mut.rawGrid.length)) {
+              sheetHeaders = mut.headers || (mut.rawGrid && mut.rawGrid[0]) || [];
+              if (sheetHeaders.length === 0 && sheet.getLastRow() >= 1) {
+                sheetHeaders = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+              }
               gridToWrite = [sheetHeaders];
               for (var rIdx = 0; rIdx < mut.rows.length; rIdx++) {
                 var rowObj = mut.rows[rIdx];
-                var rowArr = sheetHeaders.map(function(h) {
-                  var v = rowObj[h];
+                var rowArr = sheetHeaders.map(function(h, colIdx) {
+                  var v = undefined;
+                  if (Array.isArray(rowObj)) {
+                    v = rowObj[colIdx];
+                  } else if (typeof rowObj === 'object' && rowObj !== null) {
+                    if (rowObj[h] !== undefined && rowObj[h] !== null) {
+                      v = rowObj[h];
+                    } else if (rowObj[colIdx] !== undefined && rowObj[colIdx] !== null) {
+                      v = rowObj[colIdx];
+                    } else {
+                      var hLower = String(h || '').trim().toLowerCase();
+                      for (var k in rowObj) {
+                        if (String(k || '').trim().toLowerCase() === hLower) {
+                          v = rowObj[k];
+                          break;
+                        }
+                      }
+                    }
+                  }
                   if (v === undefined || v === null) v = '';
                   return v;
                 });
                 gridToWrite.push(rowArr);
               }
+            } else if (rawGridHasData) {
+              gridToWrite = mut.rawGrid;
+              sheetHeaders = mut.rawGrid[0];
+            } else if (mut.rawGrid && Array.isArray(mut.rawGrid) && mut.rawGrid.length > 0) {
+              gridToWrite = mut.rawGrid;
+              sheetHeaders = mut.rawGrid[0];
+            } else if (mut.headers && Array.isArray(mut.headers)) {
+              sheetHeaders = mut.headers;
+              gridToWrite = [sheetHeaders];
             }
 
             if (gridToWrite.length > 0) {

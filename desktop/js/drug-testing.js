@@ -60,22 +60,66 @@ class DrugTestingEngine {
     this.ensureOutboxSynced();
   }
 
+  buildTableMutationPayload(t) {
+    const headers = t.headers || [
+      'Quarter', 'Employee Name', 'Location', 'Job Number', 'Phone Number',
+      'Test Type', 'Classification', 'Collection Type', 'Clinic Name', 'Clinic City / State',
+      'Appt Required', 'Scheduled Date', 'Scheduled Time', 'Meeting / Collection Address',
+      'Status', 'Date Completed', 'Paperwork / Kit Notes', 'Notes', 'Date Added'
+    ];
+
+    const cleanRows = (t.rows || []).map((r, rIdx) => {
+      const obj = { _rowIdx: rIdx + 2 };
+      headers.forEach((h, cIdx) => {
+        let val = '';
+        if (Array.isArray(r)) {
+          val = r[cIdx];
+        } else if (typeof r === 'object' && r !== null) {
+          if (r[h] !== undefined && r[h] !== null) {
+            val = r[h];
+          } else if (r[cIdx] !== undefined && r[cIdx] !== null) {
+            val = r[cIdx];
+          } else {
+            const hLower = h.toLowerCase().trim();
+            for (const k in r) {
+              if (String(k).toLowerCase().trim() === hLower) {
+                val = r[k];
+                break;
+              }
+            }
+          }
+        }
+        obj[h] = val !== undefined && val !== null ? val : '';
+      });
+      return obj;
+    });
+
+    const rawGrid = [headers];
+    cleanRows.forEach(rowObj => {
+      rawGrid.push(headers.map(h => rowObj[h] !== undefined && rowObj[h] !== null ? rowObj[h] : ''));
+    });
+
+    return {
+      headers,
+      rows: cleanRows,
+      rawGrid
+    };
+  }
+
   async ensureOutboxSynced() {
     const t = this.getTestsTable();
     if (t && t.rows && t.rows.length > 0 && this.db && typeof this.db.addMutation === 'function') {
-      const outbox = (typeof this.db.getOutbox === 'function' ? this.db.getOutbox() : this.db.outbox) || [];
-      const hasDrugTestMutation = outbox.some(m => m.tableKey === 'dot_drug_tests' || m.sheetName === 'DOT Drug Tests');
-      if (!hasDrugTestMutation) {
-        await this.db.addMutation({
-          action: 'REPLACE_TABLE_DATA',
-          sheetName: 'DOT Drug Tests',
-          tableKey: 'dot_drug_tests',
-          headers: t.headers || ['Quarter', 'Employee Name', 'Location', 'Job Number', 'Phone Number', 'Test Type', 'Classification', 'Collection Type', 'Clinic Name', 'Clinic City / State', 'Appt Required', 'Scheduled Date', 'Scheduled Time', 'Meeting / Collection Address', 'Status', 'Date Completed', 'Paperwork / Kit Notes', 'Notes', 'Date Added'],
-          rows: t.rows || []
-        });
-        if (window.syncEngine && typeof window.syncEngine.renderOutboxBadge === 'function') {
-          window.syncEngine.renderOutboxBadge();
-        }
+      const payload = this.buildTableMutationPayload(t);
+      await this.db.addMutation({
+        action: 'REPLACE_TABLE_DATA',
+        sheetName: 'DOT Drug Tests',
+        tableKey: 'dot_drug_tests',
+        headers: payload.headers,
+        rows: payload.rows,
+        rawGrid: payload.rawGrid
+      });
+      if (window.syncEngine && typeof window.syncEngine.renderOutboxBadge === 'function') {
+        window.syncEngine.renderOutboxBadge();
       }
     }
   }
@@ -86,13 +130,15 @@ class DrugTestingEngine {
       alert('No drug test records to push.');
       return;
     }
+    const payload = this.buildTableMutationPayload(t);
     if (this.db && typeof this.db.addMutation === 'function') {
       await this.db.addMutation({
         action: 'REPLACE_TABLE_DATA',
         sheetName: 'DOT Drug Tests',
         tableKey: 'dot_drug_tests',
-        headers: t.headers || ['Quarter', 'Employee Name', 'Location', 'Job Number', 'Phone Number', 'Test Type', 'Classification', 'Collection Type', 'Clinic Name', 'Clinic City / State', 'Appt Required', 'Scheduled Date', 'Scheduled Time', 'Meeting / Collection Address', 'Status', 'Date Completed', 'Paperwork / Kit Notes', 'Notes', 'Date Added'],
-        rows: t.rows || []
+        headers: payload.headers,
+        rows: payload.rows,
+        rawGrid: payload.rawGrid
       });
     }
     if (window.syncEngine) {
@@ -734,13 +780,16 @@ class DrugTestingEngine {
     this.db.snapshot.tables.dot_drug_tests = table;
     await this.db.setSnapshot(this.db.snapshot);
 
+    const payload = this.buildTableMutationPayload(table);
+
     if (this.db && typeof this.db.addMutation === 'function') {
       await this.db.addMutation({
         action: 'REPLACE_TABLE_DATA',
         sheetName: 'DOT Drug Tests',
         tableKey: 'dot_drug_tests',
-        headers: table.headers || ['Quarter', 'Employee Name', 'Location', 'Job Number', 'Phone Number', 'Test Type', 'Classification', 'Collection Type', 'Clinic Name', 'Clinic City / State', 'Appt Required', 'Scheduled Date', 'Scheduled Time', 'Meeting / Collection Address', 'Status', 'Date Completed', 'Paperwork / Kit Notes', 'Notes', 'Date Added'],
-        rows: table.rows || []
+        headers: payload.headers,
+        rows: payload.rows,
+        rawGrid: payload.rawGrid
       });
     }
 
