@@ -1223,13 +1223,22 @@ class SyncEngine {
       let freshSnapshot = null;
       try {
         freshSnapshot = await this.executeNetworkRequest(`${activeUrl}?action=getSnapshot`, 'GET', null, 120000);
-      } catch (reqErr) {
-        if (activeUrl !== DEFAULT_SYNC_URL) {
-          console.warn('Custom syncUrl failed, falling back to default working URL:', reqErr);
-          this.setSyncUrl(DEFAULT_SYNC_URL);
-          freshSnapshot = await this.executeNetworkRequest(`${DEFAULT_SYNC_URL}?action=getSnapshot`, 'GET', null, 120000);
-        } else {
-          throw reqErr;
+      } catch (getErr) {
+        console.warn('GET getSnapshot failed, attempting POST fallback:', getErr);
+        try {
+          freshSnapshot = await this.executeNetworkRequest(activeUrl, 'POST', { action: 'getSnapshot' }, 120000);
+        } catch (postErr) {
+          if (activeUrl !== DEFAULT_SYNC_URL) {
+            console.warn('Custom syncUrl failed, falling back to default working URL:', postErr);
+            this.setSyncUrl(DEFAULT_SYNC_URL);
+            try {
+              freshSnapshot = await this.executeNetworkRequest(`${DEFAULT_SYNC_URL}?action=getSnapshot`, 'GET', null, 120000);
+            } catch (defGetErr) {
+              freshSnapshot = await this.executeNetworkRequest(DEFAULT_SYNC_URL, 'POST', { action: 'getSnapshot' }, 120000);
+            }
+          } else {
+            throw postErr;
+          }
         }
       }
 

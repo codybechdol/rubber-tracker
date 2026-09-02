@@ -262,6 +262,12 @@ function generateAndStoreSyncSnapshot(existingSnapshot) {
       Logger.log('generateAndStoreSyncSnapshot: Created new ' + SYNC_SNAPSHOT_FILENAME);
     }
 
+    if (file) {
+      try {
+        PropertiesService.getScriptProperties().setProperty('SYNC_SNAPSHOT_FILE_ID', file.getId());
+      } catch (pErr) {}
+    }
+
     var elapsed = new Date().getTime() - startTime;
     Logger.log('generateAndStoreSyncSnapshot: Completed in ' + elapsed + 'ms (' + (jsonStr.length / 1024).toFixed(1) + ' KB)');
     return file;
@@ -281,42 +287,43 @@ function generateAndStoreSyncSnapshot(existingSnapshot) {
  */
 function getFastSnapshotFromDriveOrExport() {
   try {
-    var fileId = PropertiesService.getScriptProperties().getProperty('SYNC_SNAPSHOT_FILE_ID');
+    var props = PropertiesService.getScriptProperties();
+    var fileId = props.getProperty('SYNC_SNAPSHOT_FILE_ID');
     var file = null;
     if (fileId) {
       try {
         file = DriveApp.getFileById(fileId);
+        if (file && file.isTrashed()) file = null;
       } catch (fErr) { file = null; }
     }
 
-    // Auto-discover the newest snapshot file in the backup folder if property wasn't set or file was moved/trashed
-    if (!file || file.isTrashed()) {
+    // 1. Fast direct indexed lookup by exact filename across Drive (no slow folder scans)
+    if (!file) {
       try {
-        var folder = getOrCreateBackupFolder();
-        var files = folder.getFiles();
-        var newestFile = null;
-        var newestTime = 0;
-
-        while (files.hasNext()) {
-          var f = files.next();
-          if (f.isTrashed()) continue;
-          var fName = f.getName().toLowerCase();
-          if (fName.endsWith('.json') || fName.endsWith('.txt') || fName.indexOf('snapshot') !== -1) {
-            var updated = f.getLastUpdated().getTime();
-            if (updated > newestTime) {
-              newestTime = updated;
-              newestFile = f;
-            }
-          }
-        }
-
-        if (newestFile) {
-          file = newestFile;
-          PropertiesService.getScriptProperties().setProperty('SYNC_SNAPSHOT_FILE_ID', file.getId());
-          Logger.log('getFastSnapshotFromDriveOrExport: Discovered newest snapshot file in Drive: ' + file.getName() + ' (Updated: ' + new Date(newestTime).toISOString() + ')');
+        var files = DriveApp.getFilesByName(SYNC_SNAPSHOT_FILENAME);
+        if (files.hasNext()) {
+          file = files.next();
+          props.setProperty('SYNC_SNAPSHOT_FILE_ID', file.getId());
+          Logger.log('getFastSnapshotFromDriveOrExport: Found snapshot by filename in Drive: ' + file.getId());
         }
       } catch (findErr) {
-        Logger.log('getFastSnapshotFromDriveOrExport: Folder search error: ' + findErr);
+        Logger.log('getFastSnapshotFromDriveOrExport: Drive search error: ' + findErr);
+      }
+    }
+
+    // 2. Fast direct lookup in backup folder
+    if (!file) {
+      try {
+        var folder = getOrCreateBackupFolder();
+        if (folder) {
+          var folderFiles = folder.getFilesByName(SYNC_SNAPSHOT_FILENAME);
+          if (folderFiles.hasNext()) {
+            file = folderFiles.next();
+            props.setProperty('SYNC_SNAPSHOT_FILE_ID', file.getId());
+          }
+        }
+      } catch (foldErr) {
+        Logger.log('getFastSnapshotFromDriveOrExport: Backup folder error: ' + foldErr);
       }
     }
 
@@ -333,14 +340,16 @@ function getFastSnapshotFromDriveOrExport() {
 
   // Fallback to live export and auto-save to Drive cache
   var snapshot = exportFullDatabaseSnapshot();
+  var jsonStr = JSON.stringify(snapshot);
   try {
-    if (typeof generateAndStoreSyncSnapshot === 'function') {
-      generateAndStoreSyncSnapshot(snapshot);
+    var savedFile = generateAndStoreSyncSnapshot(snapshot);
+    if (savedFile) {
+      PropertiesService.getScriptProperties().setProperty('SYNC_SNAPSHOT_FILE_ID', savedFile.getId());
     }
   } catch (saveErr) {
     Logger.log('getFastSnapshotFromDriveOrExport: Auto-store snapshot error: ' + saveErr);
   }
-  return JSON.stringify(snapshot);
+  return jsonStr;
 }
 
 /**
