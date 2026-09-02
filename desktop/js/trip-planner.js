@@ -505,6 +505,7 @@ class TripPlannerApp {
     let training = 0;
     let certs = 0;
     let reports = 0;
+    let drugTests = 0;
     let overdue = 0;
 
     activeTasks.forEach(t => {
@@ -513,7 +514,9 @@ class TripPlannerApp {
       const item = String(t.itemType || '').toLowerCase();
       const cat = String(t.category || '').toLowerCase();
 
-      if (type.includes('glove') || item.includes('glove')) {
+      if (cat === 'drug testing' || type.includes('drug') || item.includes('drug')) {
+        drugTests++;
+      } else if (type.includes('glove') || item.includes('glove')) {
         gloves++;
       } else if (type.includes('sleeve') || item.includes('sleeve')) {
         sleeves++;
@@ -544,7 +547,8 @@ class TripPlannerApp {
       equipment,
       training,
       certs,
-      reports
+      reports,
+      drugTests
     };
   }
 
@@ -855,6 +859,7 @@ class TripPlannerApp {
                               ${summary.training > 0 ? `<span class="badge" style="background: rgba(34, 197, 94, 0.15); color: #86efac; font-size: 9.5px; padding: 1px 5px; border: 1px solid rgba(34, 197, 94, 0.3);">🎓 ${summary.training} Training</span>` : ''}
                               ${summary.certs > 0 ? `<span class="badge" style="background: rgba(239, 68, 68, 0.15); color: #fca5a5; font-size: 9.5px; padding: 1px 5px; border: 1px solid rgba(239, 68, 68, 0.3);">📜 ${summary.certs} Cert${summary.certs > 1 ? 's' : ''}</span>` : ''}
                               ${summary.reports > 0 ? `<span class="badge" style="background: rgba(249, 115, 22, 0.15); color: #fdba74; font-size: 9.5px; padding: 1px 5px; border: 1px solid rgba(249, 115, 22, 0.3);">📋 ${summary.reports} Report${summary.reports > 1 ? 's' : ''}</span>` : ''}
+                              ${summary.drugTests > 0 ? `<span class="badge" style="background: rgba(139, 92, 246, 0.15); color: #c084fc; font-size: 9.5px; padding: 1px 5px; border: 1px solid rgba(139, 92, 246, 0.3);">🧪 ${summary.drugTests} Drug Test${summary.drugTests > 1 ? 's' : ''}</span>` : ''}
                               ${summary.total === 0 ? `<span style="font-size: 9.5px; color: #94a3b8; font-style: italic;">✓ No pending tasks</span>` : ''}
                             </div>
                           </div>
@@ -1019,6 +1024,7 @@ class TripPlannerApp {
                         ${summary.certs > 0 ? `<span style="font-size: 9px; color: #fca5a5;">📜${summary.certs}</span>` : ''}
                         ${summary.equipment > 0 || summary.macks > 0 ? `<span style="font-size: 9px; color: #5eead4;">⚡${summary.equipment + summary.macks}</span>` : ''}
                         ${summary.reports > 0 ? `<span style="font-size: 9px; color: #fdba74;">📋${summary.reports}</span>` : ''}
+                        ${summary.drugTests > 0 ? `<span style="font-size: 9px; color: #c084fc;">🧪${summary.drugTests}</span>` : ''}
                       </div>
                     </div>
                   `;
@@ -1099,6 +1105,8 @@ class TripPlannerApp {
       filtered = filtered.filter(t => t.category === 'Certs' || (t.type || '').toLowerCase().includes('cert') || (t.type || '').toLowerCase().includes('cpr') || (t.type || '').toLowerCase().includes('crane') || (t.type || '').toLowerCase().includes('rescue'));
     } else if (filterCat === 'Reports') {
       filtered = filtered.filter(t => t.category === 'Safety Reports' || (t.type || '').toLowerCase().includes('safety report') || (t.type || '').toLowerCase().includes('meeting') || (t.type || '').toLowerCase().includes('compliance') || (t.type || '').toLowerCase().includes('jha') || (t.type || '').toLowerCase().includes('checklist'));
+    } else if (filterCat === 'DrugTests') {
+      filtered = filtered.filter(t => t.category === 'Drug Testing' || (t.type || '').toLowerCase().includes('drug'));
     }
 
     const safeDateKey = this.escapeHtml(targetDateKey || '');
@@ -1152,6 +1160,11 @@ class TripPlannerApp {
             📋 Safety Reports (${summary.reports})
           </button>
         ` : ''}
+        ${summary.drugTests > 0 ? `
+          <button class="btn btn-secondary ${filterCat === 'DrugTests' ? 'active' : ''}" style="padding: 3px 10px; font-size: 11.5px;" onclick="window.tripPlanner.openCrewTasksModal('${this.escapeHtml(crewId)}', '${this.escapeHtml(loc)}', 'DrugTests', '${safeDateKey}')">
+            🧪 Drug Tests (${summary.drugTests})
+          </button>
+        ` : ''}
       </div>
 
       <!-- Task Checklist Items -->
@@ -1179,6 +1192,16 @@ class TripPlannerApp {
                       🚛 ${this.escapeHtml(t.truckNumber)}
                     </span>
                   ` : ''}
+                  ${t.testType ? `
+                    <span class="badge" style="background: rgba(139, 92, 246, 0.15); color: #c084fc; border: 1px solid rgba(139, 92, 246, 0.35); font-weight: 700; font-size: 11px; padding: 2px 7px;">
+                      🧪 ${this.escapeHtml(t.testType)}
+                    </span>
+                  ` : ''}
+                  ${t.classification ? `
+                    <span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.35); font-weight: 700; font-size: 11px; padding: 2px 7px;">
+                      🏛️ ${this.escapeHtml(t.classification)}
+                    </span>
+                  ` : ''}
                   ${t.currentItem ? `
                     <span class="badge" style="background: rgba(255,255,255,0.06); color: #93c5fd; font-family: monospace; font-size: 11px; padding: 1px 6px;">
                       ${this.escapeHtml(t.currentItem)}
@@ -1199,7 +1222,14 @@ class TripPlannerApp {
                     📅 Due: <strong>${this.escapeHtml(t.dueDate)}</strong>
                   </span>
                   ${t.scheduledDate ? `<span>🗓️ Scheduled: <strong>${this.escapeHtml(t.scheduledDate)}</strong></span>` : ''}
+                  ${t.scheduledTime ? `<span>⏰ Time: <strong>${this.escapeHtml(t.scheduledTime)}</strong></span>` : ''}
                 </div>
+
+                ${t.meetingAddress ? `
+                  <div style="font-size: 11.5px; color: #93c5fd; margin-top: 3px;">
+                    📍 <strong>Meeting / Collection Address:</strong> ${this.escapeHtml(t.meetingAddress)}
+                  </div>
+                ` : ''}
 
                 ${t.notes ? `
                   <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">

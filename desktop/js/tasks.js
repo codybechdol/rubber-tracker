@@ -41,12 +41,13 @@ class TaskManagerApp {
 
   setCategory(cat) {
     this.filterCategory = cat;
-    const btns = ['task-cat-all', 'task-cat-ppe', 'task-cat-equipment', 'task-cat-training', 'task-cat-certs'];
+    const btns = ['task-cat-all', 'task-cat-ppe', 'task-cat-equipment', 'task-cat-training', 'task-cat-certs', 'task-cat-drug-testing'];
     btns.forEach(bId => {
       const el = document.getElementById(bId);
       if (el) el.classList.remove('active');
     });
-    const activeBtn = document.getElementById(`task-cat-${cat.toLowerCase()}`);
+    const targetId = cat === 'Drug Testing' ? 'task-cat-drug-testing' : `task-cat-${cat.toLowerCase()}`;
+    const activeBtn = document.getElementById(targetId);
     if (activeBtn) activeBtn.classList.add('active');
     this.renderTasks();
   }
@@ -458,6 +459,77 @@ class TaskManagerApp {
       });
     }
 
+    // 6. Harvest Scheduled DOT Drug Tests from dot_drug_tests
+    const drugTestTable = this.db.getTable('dot_drug_tests');
+    if (drugTestTable && drugTestTable.rows) {
+      drugTestTable.rows.forEach((r, idx) => {
+        const emp = String(r['Employee Name'] || r['Name'] || r[1] || '').trim();
+        if (!emp || emp.toLowerCase() === 'employee name') return;
+
+        const status = String(r['Status'] || r[14] || '').trim();
+        const schedDate = String(r['Scheduled Date'] || r[11] || '').trim();
+        const schedTime = String(r['Scheduled Time'] || r[12] || '').trim();
+        const quarter = String(r['Quarter'] || r[0] || '').trim();
+
+        // Include if Status is 'Scheduled' OR has a scheduled date, and is not completed or excused
+        const sLower = status.toLowerCase();
+        if (sLower === 'completed' || sLower === 'excused') return;
+
+        const isScheduled = sLower === 'scheduled' || (schedDate && schedDate !== 'N/A' && schedDate !== '');
+        if (!isScheduled) return;
+
+        const testType = String(r['Test Type'] || r[5] || 'Drug Only').trim();
+        const classification = String(r['Classification'] || r[6] || 'FMCSA').trim();
+        const collectionType = String(r['Collection Type'] || r[7] || 'Clinic Visit').trim();
+        const clinicName = String(r['Clinic Name'] || r[8] || '').trim();
+        const clinicCity = String(r['Clinic City / State'] || r[9] || '').trim();
+        const meetingAddr = String(r['Meeting / Collection Address'] || r[13] || '').trim();
+        const notes = String(r['Notes'] || r[17] || '').trim();
+
+        const empInfo = empLookup[emp.toLowerCase()] || {};
+        const crewId = empInfo.crewId || String(r['Job Number'] || r[3] || 'Unassigned Crew').trim();
+        const loc = empInfo.location || String(r['Location'] || r[2] || (clinicCity ? clinicCity.split(',')[0].trim() : 'Helena')).trim();
+        const foreman = empInfo.foreman || (jobLookup[crewId]?.foreman) || 'Lead';
+
+        const rowKey = `dot_drug_tests_${quarter}_${emp}_${idx + 1}`;
+        const taskKey = `drug_test_${quarter}_${emp}_${schedDate}`.toLowerCase();
+
+        if (this.db.isTaskDismissed(rowKey) || this.db.isTaskDismissed(taskKey)) return;
+
+        if (!seenTaskKeys.has(taskKey) && !seenTaskKeys.has(rowKey.toLowerCase())) {
+          seenTaskKeys.add(taskKey);
+          seenTaskKeys.add(rowKey.toLowerCase());
+          const isOverdue = schedDate ? this.checkIfOverdue(schedDate) : false;
+
+          allTasks.push({
+            id: `dt_${idx + 1}`,
+            sourceSheet: 'DOT Drug Tests',
+            category: 'Drug Testing',
+            type: '🧪 DOT Drug Test',
+            itemType: `${testType} (${classification})`,
+            currentItem: clinicName || (collectionType === 'Mobile Collector' ? 'Mobile Collector' : 'Clinic Visit'),
+            employee: emp,
+            crewId: crewId,
+            foreman: foreman,
+            location: this.cleanLocation(loc),
+            dueDate: schedDate || quarter,
+            scheduledDate: schedDate,
+            scheduledTime: schedTime,
+            status: isOverdue ? 'Overdue' : 'Scheduled',
+            isOverdue: isOverdue,
+            notes: `[${collectionType}] ${clinicName ? clinicName + (clinicCity ? ' (' + clinicCity + ')' : '') : ''}${meetingAddr ? ' 📍 Meet: ' + meetingAddr : ''}${notes ? ' · ' + notes : ''}`.trim(),
+            _rawRow: r,
+            quarter: quarter,
+            testType: testType,
+            classification: classification,
+            collectionType: collectionType,
+            clinicName: clinicName,
+            meetingAddress: meetingAddr
+          });
+        }
+      });
+    }
+
     return allTasks;
   }
 
@@ -816,6 +888,15 @@ class TaskManagerApp {
 
   completeTask(taskId) {
     const todayStr = new Date().toISOString().split('T')[0];
+
+    // If it's a drug test task, mark it complete in DrugTestingEngine as well
+    if (taskId.startsWith('dt_') || taskId.startsWith('dot_drug_tests_')) {
+      const allTasks = this.collectAllTasks();
+      const t = allTasks.find(x => x.id === taskId);
+      if (t && window.drugTestingEngine && typeof window.drugTestingEngine.markComplete === 'function') {
+        window.drugTestingEngine.markComplete(t.employee, todayStr);
+      }
+    }
 
     // Optimistically update local database
     this.db.addMutation({

@@ -34373,6 +34373,39 @@ function markDrugTestComplete(rowId, completedDate, notes) {
     sheet.getRange(row, COLS.DRUG_TESTS.NOTES).setValue(newNotes);
   }
 
+  // Append Career Milestone to Employee History sheet
+  try {
+    var empName = String(sheet.getRange(row, COLS.DRUG_TESTS.EMPLOYEE_NAME).getValue() || '').trim();
+    var quarter = String(sheet.getRange(row, COLS.DRUG_TESTS.QUARTER).getValue() || '').trim();
+    var testType = String(sheet.getRange(row, COLS.DRUG_TESTS.TEST_TYPE).getValue() || 'Drug Only').trim();
+    var classification = String(sheet.getRange(row, COLS.DRUG_TESTS.CLASSIFICATION).getValue() || 'FMCSA').trim();
+    var clinicName = String(sheet.getRange(row, COLS.DRUG_TESTS.CLINIC_NAME).getValue() || '').trim();
+    var empLoc = String(sheet.getRange(row, COLS.DRUG_TESTS.LOCATION).getValue() || '').trim();
+
+    var histSheet = ss.getSheetByName(typeof SHEET_EMPLOYEE_HISTORY !== 'undefined' ? SHEET_EMPLOYEE_HISTORY : 'Employee History');
+    if (histSheet && empName) {
+      var histHeaders = histSheet.getDataRange().getValues()[0];
+      var histRowData = [];
+      for (var hi = 0; hi < histHeaders.length; hi++) {
+        var hName = String(histHeaders[hi]).toLowerCase().trim();
+        if (hName === 'timestamp') histRowData.push(new Date());
+        else if (hName === 'date') histRowData.push(cDateVal);
+        else if (hName === 'employee name' || hName === 'name') histRowData.push(empName);
+        else if (hName === 'event type' || hName === 'event') histRowData.push('DOT Drug Test Completed');
+        else if (hName === 'notes' || hName === 'details') histRowData.push(quarter + ' · ' + testType + ' (' + classification + ')' + (clinicName ? ' · ' + clinicName : ''));
+        else if (hName === 'location') histRowData.push(empLoc);
+        else histRowData.push('');
+      }
+      if (typeof safeWriteRowToTable === 'function') {
+        safeWriteRowToTable(histSheet, histSheet.getLastRow() + 1, histRowData, histHeaders);
+      } else {
+        histSheet.appendRow(histRowData);
+      }
+    }
+  } catch (histErr) {
+    Logger.log('markDrugTestComplete: Error appending to Employee History: ' + histErr);
+  }
+
   return { success: true };
 }
 

@@ -987,6 +987,71 @@ class EmployeeProfileEngine {
       }
     }
 
+    // 5b. Scan DOT Drug Tests for Completed and Scheduled tests
+    const drugTestsTable = snap.tables['dot_drug_tests'];
+    const completedDrugTests = [];
+    const scheduledDrugTests = [];
+    const allDrugTests = [];
+
+    if (drugTestsTable && drugTestsTable.rows) {
+      drugTestsTable.rows.forEach((r, idx) => {
+        const empName = String(r['Employee Name'] || r['Name'] || r[1] || '').trim();
+        if (!empName) return;
+        if (this.isNameMatch(empName, displayName) || this.isNameMatch(empName, rawEmpName)) {
+          const quarter = String(r['Quarter'] || r[0] || '').trim();
+          const testType = String(r['Test Type'] || r[5] || 'Drug Only').trim();
+          const classification = String(r['Classification'] || r[6] || 'FMCSA').trim();
+          const collectionType = String(r['Collection Type'] || r[7] || 'Clinic Visit').trim();
+          const clinicName = String(r['Clinic Name'] || r[8] || '').trim();
+          const clinicCity = String(r['Clinic City / State'] || r[9] || '').trim();
+          const schedDate = String(r['Scheduled Date'] || r[11] || '').trim();
+          const schedTime = String(r['Scheduled Time'] || r[12] || '').trim();
+          const meetingAddr = String(r['Meeting / Collection Address'] || r[13] || '').trim();
+          const status = String(r['Status'] || r[14] || '').trim();
+          const dateCompleted = String(r['Date Completed'] || r[15] || '').trim();
+          const paperworkNotes = String(r['Paperwork / Kit Notes'] || r[16] || '').trim();
+          const notes = String(r['Notes'] || r[17] || '').trim();
+
+          const testObj = {
+            id: `dt_${idx + 1}`,
+            quarter,
+            empName,
+            testType,
+            classification,
+            collectionType,
+            clinicName,
+            clinicCity,
+            schedDate,
+            schedTime,
+            meetingAddr,
+            status,
+            dateCompleted,
+            paperworkNotes,
+            notes,
+            isCompleted: status.toLowerCase() === 'completed' || (dateCompleted && dateCompleted !== 'N/A' && dateCompleted !== '')
+          };
+
+          allDrugTests.push(testObj);
+
+          if (testObj.isCompleted) {
+            completedDrugTests.push(testObj);
+
+            // Add Milestone to Career History
+            employeeHistory.push({
+              type: 'drug_test',
+              date: dateCompleted || schedDate,
+              event: '🧪 DOT Drug Test Completed',
+              details: `${quarter} · ${testType} (${classification}) · ${collectionType === 'Mobile Collector' ? 'Mobile Collector' : (clinicName || 'Clinic')}${meetingAddr ? ' @ ' + meetingAddr : ''}${notes ? ' · ' + notes : ''}`,
+              location: clinicCity || location || 'Helena',
+              job: jobNumber || 'N/A'
+            });
+          } else if (status.toLowerCase() === 'scheduled' || schedDate) {
+            scheduledDrugTests.push(testObj);
+          }
+        }
+      });
+    }
+
     // Sort Milestones chronologically (most recent first)
     employeeHistory.sort((a, b) => {
       const dA = this.parseDate(a.date);
@@ -1018,7 +1083,10 @@ class EmployeeProfileEngine {
       equipmentHistory,
       certifications,
       trainingList,
-      employeeHistory
+      employeeHistory,
+      completedDrugTests,
+      scheduledDrugTests,
+      allDrugTests
     };
   }
 
@@ -1184,6 +1252,11 @@ class EmployeeProfileEngine {
                 style="padding: 7px 14px; font-size: 12px; font-weight: 700;" 
                 onclick="window.employeeProfileEngine.setTab('history')">
           🎓 Training & Lifecycle (${data.trainingList.length + data.employeeHistory.length})
+        </button>
+        <button class="btn ${this.currentActiveTab === 'drug_tests' ? 'btn-primary' : 'btn-secondary'}" 
+                style="padding: 7px 14px; font-size: 12px; font-weight: 700;" 
+                onclick="window.employeeProfileEngine.setTab('drug_tests')">
+          🧪 DOT Drug Tests (${data.completedDrugTests.length})
         </button>
       </div>
 
@@ -1663,7 +1736,8 @@ class EmployeeProfileEngine {
                     location: { titleColor: '#60a5fa', borderColor: 'rgba(59, 130, 246, 0.35)', bg: 'var(--bg-primary)' },
                     role: { titleColor: '#a855f7', borderColor: 'rgba(168, 85, 247, 0.35)', bg: 'rgba(168, 85, 247, 0.05)' },
                     term: { titleColor: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.35)', bg: 'rgba(239, 68, 68, 0.05)' },
-                    cert: { titleColor: '#f59e0b', borderColor: 'rgba(245, 158, 11, 0.35)', bg: 'var(--bg-primary)' }
+                    cert: { titleColor: '#f59e0b', borderColor: 'rgba(245, 158, 11, 0.35)', bg: 'var(--bg-primary)' },
+                    drug_test: { titleColor: '#c084fc', borderColor: 'rgba(192, 132, 252, 0.35)', bg: 'rgba(192, 132, 252, 0.08)' }
                   };
                   const s = styleMap[h.type] || styleMap.location;
 
@@ -1689,7 +1763,162 @@ class EmployeeProfileEngine {
       `;
     }
 
+    if (this.currentActiveTab === 'drug_tests') {
+      return this.renderDrugTestsTab(data);
+    }
+
     return '';
+  }
+
+  /**
+   * Renders the complete DOT Drug & Alcohol Testing tab
+   */
+  renderDrugTestsTab(data) {
+    const completed = data.completedDrugTests || [];
+    const scheduled = data.scheduledDrugTests || [];
+    const latestTest = completed.length > 0 ? completed[0] : null;
+
+    let html = `
+      <!-- Drug Test Summary KPI Cards -->
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin-bottom: 20px;">
+        <div style="background-color: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 14px;">
+          <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-weight: 700; margin-bottom: 3px;">Completed Tests</div>
+          <div style="font-size: 20px; font-weight: 800; color: #4ade80;">${completed.length}</div>
+          <div style="font-size: 11px; color: var(--text-secondary); margin-top: 2px;">Official Random / DOT</div>
+        </div>
+
+        <div style="background-color: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 14px;">
+          <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-weight: 700; margin-bottom: 3px;">Latest Test Date</div>
+          <div style="font-size: 16px; font-weight: 800; color: #93c5fd;">
+            ${latestTest ? this.escapeHtml(latestTest.dateCompleted || latestTest.schedDate || 'Recorded') : 'None on file'}
+          </div>
+          <div style="font-size: 11px; color: var(--text-secondary); margin-top: 2px;">${latestTest ? this.escapeHtml(latestTest.quarter) : 'No tests recorded'}</div>
+        </div>
+
+        <div style="background-color: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 14px;">
+          <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-weight: 700; margin-bottom: 3px;">Agency Classification</div>
+          <div style="font-size: 16px; font-weight: 800; color: #c084fc;">
+            ${latestTest ? this.escapeHtml(latestTest.classification) : 'FMCSA / DOT'}
+          </div>
+          <div style="font-size: 11px; color: var(--text-secondary); margin-top: 2px;">${latestTest ? this.escapeHtml(latestTest.testType) : 'Testing Pool'}</div>
+        </div>
+
+        <div style="background-color: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 14px;">
+          <div style="font-size: 11px; color: var(--text-muted); text-transform: uppercase; font-weight: 700; margin-bottom: 3px;">Active Scheduled</div>
+          <div style="font-size: 20px; font-weight: 800; color: ${scheduled.length > 0 ? '#facc15' : '#94a3b8'};">${scheduled.length}</div>
+          <div style="font-size: 11px; color: var(--text-secondary); margin-top: 2px;">Upcoming appointments</div>
+        </div>
+      </div>
+    `;
+
+    // Show Scheduled Test Banner if pending
+    if (scheduled.length > 0) {
+      html += `
+        <div style="background: rgba(234, 179, 8, 0.1); border: 1px solid rgba(234, 179, 8, 0.35); border-left: 4px solid #facc15; border-radius: 8px; padding: 12px 16px; margin-bottom: 20px;">
+          <div style="font-size: 13px; font-weight: 800; color: #facc15; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
+            <span>🗓️</span> Active Scheduled DOT Drug Test (${scheduled.length})
+          </div>
+          ${scheduled.map(st => `
+            <div style="font-size: 12px; color: #f8fafc; margin-top: 4px;">
+              <strong>${this.escapeHtml(st.quarter)}</strong>: ${this.escapeHtml(st.testType)} (${this.escapeHtml(st.classification)}) &nbsp;•&nbsp; 
+              Scheduled: <strong>${this.escapeHtml(st.schedDate || 'Pending Date')}${st.schedTime ? ' @ ' + this.escapeHtml(st.schedTime) : ''}</strong> &nbsp;•&nbsp; 
+              Method: <strong>${this.escapeHtml(st.collectionType)}</strong> &nbsp;•&nbsp; 
+              ${st.clinicName ? `Clinic: <strong>${this.escapeHtml(st.clinicName)}</strong>` : ''}
+              ${st.meetingAddr ? ` &nbsp;•&nbsp; 📍 Meeting at: <strong style="color: #93c5fd;">${this.escapeHtml(st.meetingAddr)}</strong>` : ''}
+            </div>
+          `).join('')}
+        </div>
+      `;
+    }
+
+    // Historical Completed Tests Table
+    html += `
+      <div style="margin-bottom: 16px;">
+        <div style="font-size: 13px; font-weight: 800; color: #f8fafc; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between;">
+          <span style="display: flex; align-items: center; gap: 6px;">
+            <span>📋</span> Completed Drug & Alcohol Testing Records (${completed.length})
+          </span>
+          <button class="btn btn-secondary" style="font-size: 11px; padding: 3px 9px;" onclick="if(window.drugTestingEngine){window.showView('drug-testing-view');window.employeeProfileEngine.closeProfileModal();}">
+            🧪 Open DOT Drug Testing Console →
+          </button>
+        </div>
+    `;
+
+    if (completed.length === 0) {
+      html += `
+        <div style="padding: 36px 20px; text-align: center; color: var(--text-muted); background: var(--bg-primary); border-radius: 8px; border: 1px dashed var(--border-color);">
+          <div style="font-size: 28px; margin-bottom: 6px;">🧪</div>
+          <h4 style="font-size: 14px; font-weight: 700; color: #f8fafc; margin-bottom: 4px;">No Completed Drug Tests On File</h4>
+          <p style="font-size: 12px; color: var(--text-secondary); max-width: 460px; margin: 0 auto;">
+            When this employee completes an official random or pre-employment DOT drug/alcohol test, complete test records, paperwork notes, and clinic details will appear here automatically.
+          </p>
+        </div>
+      </div>
+      `;
+    } else {
+      html += `
+        <div style="overflow-x: auto; background: var(--bg-primary); border-radius: 8px; border: 1px solid var(--border-color);">
+          <table class="data-table" style="width: 100%; font-size: 12px;">
+            <thead>
+              <tr>
+                <th style="text-align: center;">Quarter</th>
+                <th style="text-align: center;">Date Completed</th>
+                <th style="text-align: center;">Test Option</th>
+                <th style="text-align: center;">Agency</th>
+                <th style="text-align: center;">Collection Method</th>
+                <th style="text-align: left;">Clinic / Provider</th>
+                <th style="text-align: left;">Meeting / Location Address</th>
+                <th style="text-align: left;">Paperwork / Kit Notes</th>
+                <th style="text-align: center;">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${completed.map(ct => `
+                <tr>
+                  <td style="text-align: center; font-weight: 700; color: #93c5fd;">
+                    ${this.escapeHtml(ct.quarter)}
+                  </td>
+                  <td style="text-align: center; font-weight: 700; color: #4ade80;">
+                    ${this.escapeHtml(ct.dateCompleted || ct.schedDate || 'Completed')}
+                  </td>
+                  <td style="text-align: center;">
+                    <span class="badge" style="background: rgba(139, 92, 246, 0.15); color: #c084fc; border: 1px solid rgba(139, 92, 246, 0.3); font-size: 10.5px; padding: 2px 7px;">
+                      🧪 ${this.escapeHtml(ct.testType)}
+                    </span>
+                  </td>
+                  <td style="text-align: center;">
+                    <span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.3); font-size: 10.5px; padding: 2px 7px;">
+                      🏛️ ${this.escapeHtml(ct.classification)}
+                    </span>
+                  </td>
+                  <td style="text-align: center; color: var(--text-secondary);">
+                    ${ct.collectionType === 'Mobile Collector' ? '🚐 Mobile Collector' : '🏥 Clinic Visit'}
+                  </td>
+                  <td style="text-align: left; font-weight: 600; color: #f8fafc;">
+                    ${this.escapeHtml(ct.clinicName || (ct.collectionType === 'Mobile Collector' ? 'Mobile Collector' : '—'))}
+                    ${ct.clinicCity ? `<div style="font-size: 10.5px; color: #94a3b8; font-weight: normal;">${this.escapeHtml(ct.clinicCity)}</div>` : ''}
+                  </td>
+                  <td style="text-align: left; color: var(--text-secondary); font-size: 11.5px;">
+                    ${this.escapeHtml(ct.meetingAddr || '—')}
+                  </td>
+                  <td style="text-align: left; color: var(--text-muted); font-size: 11px;">
+                    ${this.escapeHtml(ct.paperworkNotes || ct.notes || '—')}
+                  </td>
+                  <td style="text-align: center;">
+                    <span class="badge" style="background: rgba(34, 197, 94, 0.2); color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.4); font-size: 11px; padding: 2px 8px; font-weight: 700;">
+                      ✅ Completed
+                    </span>
+                  </td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      `;
+    }
+
+    return html;
   }
 
   /**

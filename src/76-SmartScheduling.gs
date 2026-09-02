@@ -496,6 +496,12 @@ function collectAndGroupTasks(ss) {
   var afterMissingSafety = countTasks(tasksByLocation);
   Logger.log('collectAndGroupTasks: Missing Safety Reports added ' + (afterMissingSafety - beforeMissingSafety) + ' tasks');
 
+  // Collect from DOT Drug Tests (Scheduled tests)
+  var beforeDrugTests = countTasks(tasksByLocation);
+  collectScheduledDrugTestTasks(ss, tasksByLocation, employeeLocations, employeeForemen, employeePhones, today);
+  var afterDrugTests = countTasks(tasksByLocation);
+  Logger.log('collectAndGroupTasks: DOT Drug Tests added ' + (afterDrugTests - beforeDrugTests) + ' tasks');
+
   Logger.log('collectAndGroupTasks: TOTAL tasks = ' + countTasks(tasksByLocation));
 
   // Sort tasks within each location by foreman, then by due date
@@ -2057,6 +2063,153 @@ function collectTrainingTasks(ss, tasksByLocation, employeePhones, today) {
 
   Logger.log('collectTrainingTasks: Added ' + taskCount + ' training tasks');
   Logger.log('collectTrainingTasks: Skipped: ' + skippedComplete + ' complete/N/A, ' + skippedCrews + ' not in selected crews, ' + skippedNoAssignee + ' no assignee, ' + skippedFutureMonth + ' future month');
+}
+
+/**
+ * Collects scheduled DOT Drug Tests from 'DOT Drug Tests' sheet
+ *
+ * @param {Spreadsheet} ss - Active spreadsheet
+ * @param {Object} tasksByLocation - Map of location -> task array
+ * @param {Object} employeeLocations - Map of employee name -> physical location
+ * @param {Object} employeeForemen - Map of employee name -> foreman
+ * @param {Object} employeePhones - Map of employee name -> phone number
+ * @param {Date} today - Today's date
+ */
+function collectScheduledDrugTestTasks(ss, tasksByLocation, employeeLocations, employeeForemen, employeePhones, today) {
+  var drugSheet = ss.getSheetByName(typeof SHEET_DRUG_TESTS !== 'undefined' ? SHEET_DRUG_TESTS : 'DOT Drug Tests');
+  if (!drugSheet || drugSheet.getLastRow() < 2) {
+    return;
+  }
+
+  var data = drugSheet.getDataRange().getValues();
+  if (data.length < 2) return;
+
+  var headers = data[0];
+  var qCol = -1, nameCol = -1, locCol = -1, jobCol = -1, phoneCol = -1;
+  var typeCol = -1, classCol = -1, collCol = -1, clinicCol = -1, cityCol = -1;
+  var schedDateCol = -1, schedTimeCol = -1, addrCol = -1, statusCol = -1, compDateCol = -1, notesCol = -1;
+
+  for (var h = 0; h < headers.length; h++) {
+    var hdr = String(headers[h]).toLowerCase().trim();
+    if (hdr === 'quarter') qCol = h;
+    else if (hdr === 'employee name' || hdr === 'name') nameCol = h;
+    else if (hdr === 'location') locCol = h;
+    else if (hdr === 'job number' || hdr === 'job #') jobCol = h;
+    else if (hdr === 'phone number' || hdr === 'phone') phoneCol = h;
+    else if (hdr === 'test type' || hdr === 'test option') typeCol = h;
+    else if (hdr === 'classification' || hdr === 'agency') classCol = h;
+    else if (hdr === 'collection type' || hdr === 'method') collCol = h;
+    else if (hdr === 'clinic name' || hdr === 'clinic') clinicCol = h;
+    else if (hdr.indexOf('city') !== -1) cityCol = h;
+    else if (hdr === 'scheduled date') schedDateCol = h;
+    else if (hdr === 'scheduled time') schedTimeCol = h;
+    else if (hdr.indexOf('meeting') !== -1 || hdr.indexOf('address') !== -1) addrCol = h;
+    else if (hdr === 'status') statusCol = h;
+    else if (hdr === 'date completed') compDateCol = h;
+    else if (hdr === 'notes') notesCol = h;
+  }
+
+  // Fallbacks if headers shifted (19-col standard: A-S)
+  if (qCol === -1) qCol = 0;
+  if (nameCol === -1) nameCol = 1;
+  if (locCol === -1) locCol = 2;
+  if (jobCol === -1) jobCol = 3;
+  if (phoneCol === -1) phoneCol = 4;
+  if (typeCol === -1) typeCol = 5;
+  if (classCol === -1) classCol = 6;
+  if (collCol === -1) collCol = 7;
+  if (clinicCol === -1) clinicCol = 8;
+  if (cityCol === -1) cityCol = 9;
+  if (schedDateCol === -1) schedDateCol = 11;
+  if (schedTimeCol === -1) schedTimeCol = 12;
+  if (addrCol === -1) addrCol = 13;
+  if (statusCol === -1) statusCol = 14;
+  if (compDateCol === -1) compDateCol = 15;
+  if (notesCol === -1) notesCol = 17;
+
+  var todayStart = new Date(today);
+  todayStart.setHours(0, 0, 0, 0);
+
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i];
+    var emp = String(row[nameCol] || '').trim();
+    if (!emp || emp.toLowerCase() === 'employee name') continue;
+
+    var status = String(row[statusCol] || '').trim();
+    var sLower = status.toLowerCase();
+    if (sLower === 'completed' || sLower === 'excused') continue;
+
+    var rawSchedDate = row[schedDateCol];
+    var schedDateStr = '';
+    var schedDateObj = null;
+
+    if (rawSchedDate instanceof Date && !isNaN(rawSchedDate.getTime())) {
+      schedDateObj = rawSchedDate;
+      schedDateStr = Utilities.formatDate(rawSchedDate, Session.getScriptTimeZone(), 'MM/dd/yyyy');
+    } else if (typeof rawSchedDate === 'string' && rawSchedDate.trim() !== '') {
+      schedDateStr = rawSchedDate.trim();
+      schedDateObj = typeof parseDateNoon === 'function' ? parseDateNoon(schedDateStr) : new Date(schedDateStr);
+    }
+
+    var isScheduled = sLower === 'scheduled' || (schedDateStr && schedDateStr !== 'N/A');
+    if (!isScheduled) continue;
+
+    var empLower = emp.toLowerCase();
+    var empLocation = employeeLocations[empLower] || String(row[locCol] || '').trim();
+    if (!empLocation || (typeof isStatusLocation === 'function' && isStatusLocation(empLocation))) {
+      empLocation = 'Helena';
+    } else if (typeof getPhysicalLocation === 'function') {
+      empLocation = getPhysicalLocation(empLocation);
+    }
+
+    var testType = String(row[typeCol] || 'Drug Only').trim();
+    var classification = String(row[classCol] || 'FMCSA').trim();
+    var collectionType = String(row[collCol] || 'Clinic Visit').trim();
+    var clinicName = String(row[clinicCol] || '').trim();
+    var clinicCity = String(row[cityCol] || '').trim();
+    var schedTime = String(row[schedTimeCol] || '').trim();
+    var meetingAddr = String(row[addrCol] || '').trim();
+    var quarter = String(row[qCol] || '').trim();
+    var phone = String(row[phoneCol] || '').trim();
+
+    var isOverdue = false;
+    var daysTillDue = null;
+    if (schedDateObj && !isNaN(schedDateObj.getTime())) {
+      var sStart = new Date(schedDateObj);
+      sStart.setHours(0, 0, 0, 0);
+      daysTillDue = Math.ceil((sStart - todayStart) / (1000 * 60 * 60 * 24));
+      isOverdue = daysTillDue < 0;
+    }
+
+    var noteParts = ['[' + collectionType + ']'];
+    if (clinicName) noteParts.push(clinicName + (clinicCity ? ' (' + clinicCity + ')' : ''));
+    if (meetingAddr) noteParts.push('📍 Meet: ' + meetingAddr);
+
+    var task = {
+      type: 'DOT Drug Test',
+      itemType: testType + ' (' + classification + ')',
+      employee: emp,
+      location: empLocation,
+      foreman: employeeForemen[empLower] || 'Lead',
+      phoneNumber: employeePhones[empLower] || phone || '',
+      dueDate: schedDateStr || quarter,
+      scheduledDate: schedDateStr,
+      scheduledTime: schedTime,
+      isOverdue: isOverdue,
+      daysTillDue: daysTillDue,
+      status: isOverdue ? 'Overdue' : 'Scheduled',
+      estimatedTime: 30,
+      priority: 'High',
+      sheetName: 'DOT Drug Tests',
+      rowIndex: i + 1,
+      notes: noteParts.join(' ')
+    };
+
+    if (!tasksByLocation[empLocation]) {
+      tasksByLocation[empLocation] = [];
+    }
+    tasksByLocation[empLocation].push(task);
+  }
 }
 
 /**

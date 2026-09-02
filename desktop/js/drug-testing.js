@@ -730,16 +730,54 @@ class DrugTestingEngine {
     }
   }
 
-  async markDone(empName) {
-    const today = new Date().toLocaleDateString();
+  async markDone(empName, dateVal = null) {
+    return this.markComplete(empName, dateVal);
+  }
+
+  async markComplete(empName, dateVal = null) {
+    const today = dateVal || new Date().toISOString().split('T')[0];
     const row = this.findTestRow(empName);
     if (row) {
       row['Status'] = 'Completed';
       if (row[12] !== undefined) row[12] = 'Completed';
+      if (row[14] !== undefined) row[14] = 'Completed';
       row['Date Completed'] = today;
       if (row[13] !== undefined) row[13] = today;
+      if (row[15] !== undefined) row[15] = today;
+
+      // Log Career Milestone to employee_history table in local DB if available
+      if (this.db && this.db.snapshot && this.db.snapshot.tables && this.db.snapshot.tables.employee_history) {
+        const histTable = this.db.snapshot.tables.employee_history;
+        if (histTable.rows) {
+          const q = String(row['Quarter'] || row[0] || this.currentQuarter).trim();
+          const tType = String(row['Test Type'] || row[5] || 'Drug Only').trim();
+          const cls = String(row['Classification'] || row[6] || 'FMCSA').trim();
+          const prov = String(row['Clinic Name'] || row[8] || row['Collection Type'] || 'Clinic').trim();
+          histTable.rows.push({
+            'Timestamp': new Date().toISOString(),
+            'Date': today,
+            'Employee Name': empName,
+            'Event Type': 'DOT Drug Test Completed',
+            'Notes': `${q} · ${tType} (${cls}) · Provider: ${prov}`,
+            'Location': String(row['Location'] || row[2] || 'Helena').trim()
+          });
+          histTable.rowCount = histTable.rows.length;
+        }
+      }
+
       await this.saveTable(this.getTestsTable());
       this.render();
+
+      // Trigger re-render of TaskManager and EmployeeProfile if active
+      if (window.taskManager && typeof window.taskManager.renderTasks === 'function') {
+        window.taskManager.renderTasks();
+      }
+      if (window.employeeProfileEngine && typeof window.employeeProfileEngine.renderModalContent === 'function') {
+        const modal = document.getElementById('employee-profile-modal');
+        if (modal && modal.classList.contains('active') && window.employeeProfileEngine.currentEmployeeData) {
+          window.employeeProfileEngine.openProfileModal(empName);
+        }
+      }
     }
   }
 
