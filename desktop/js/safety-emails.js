@@ -631,7 +631,7 @@ class SafetyEmailsEngine {
         const payload = {
           action: 'processSafetyEmails',
           daysBack: daysBack,
-          batchSize: 50,
+          batchSize: 10,
           reportTypeFilter: reportTypeFilter,
           newOnlyMode: newOnlyMode,
           skipPdfExtraction: skipPdfExtraction,
@@ -640,7 +640,7 @@ class SafetyEmailsEngine {
           prevResult: lastResult
         };
 
-        const response = await window.syncEngine.executeNetworkRequest(syncUrl, 'POST', payload);
+        const response = await window.syncEngine.executeNetworkRequest(syncUrl, 'POST', payload, 180000);
         console.log(`Safety email batch #${batchIndex} response:`, response);
 
         if (!response || !response.success) {

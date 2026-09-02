@@ -2140,7 +2140,7 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
 function executeSyncApiProcessSafetyEmails(options) {
   options = options || {};
   var daysBack = options.daysBack || 7;
-  var batchSize = options.batchSize || 50;
+  var batchSize = options.batchSize || 10;
   var newOnlyMode = options.newOnlyMode !== false;
   var skipPdfExtraction = options.skipPdfExtraction === true;
   var endDate = options.endDate || null;
