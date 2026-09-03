@@ -57,7 +57,6 @@ class DrugTestingEngine {
 
   init() {
     this.bindEvents();
-    this.ensureOutboxSynced();
   }
 
   buildTableMutationPayload(t) {
