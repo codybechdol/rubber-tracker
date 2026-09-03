@@ -893,8 +893,11 @@ class ItemStatsEngine {
                 ${isPurchaseOrigin ? `<span class="brand-badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; font-size: 10px; font-weight: 700;">✨ Lifecycle Origin (Purchased New)</span>` : ''}
                 ${isOrigin && !stats.hasKnownPurchaseDate ? `<span class="brand-badge" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; font-size: 10px;">⏳ Tracking Baseline (Purchase Unknown)</span>` : ''}
               </div>
-              <div style="display: flex; align-items: center; gap: 8px;">
-                <span style="font-size: 11px; font-weight: 600; color: #60a5fa;">${m.durationFormatted}</span>
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <span style="font-size: 11px; font-weight: 600; color: #60a5fa; margin-right: 2px;">${m.durationFormatted}</span>
+                <button class="btn btn-sm" title="Edit date or details for this history record" style="padding: 2px 8px; font-size: 11px; background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.35); border-radius: 4px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;" onclick="window.itemStatsEngine.openEditMilestoneModal('${this.escapeHtml(sheetKey)}', '${this.escapeHtml(cleanItemKey)}', ${reversedMilestones.length - 1 - mIdx})">
+                  ✏️ Edit
+                </button>
                 <button class="btn btn-sm" title="Delete this history record" style="padding: 2px 6px; font-size: 11px; background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 4px; cursor: pointer;" onclick="window.itemStatsEngine.deleteMilestoneRecord('${this.escapeHtml(sheetKey)}', '${this.escapeHtml(cleanItemKey)}', ${reversedMilestones.length - 1 - mIdx})">
                   🗑️ Delete
                 </button>
@@ -1340,6 +1343,270 @@ class ItemStatsEngine {
     this.openDossierModal(itemKey, histKey);
     if (window.historyNavigator) {
       window.historyNavigator.renderCurrentHistory();
+    }
+  }
+
+  openEditMilestoneModal(sheetKey, itemKey, milestoneIdx) {
+    const histKey = sheetKey.endsWith('_history') ? sheetKey : `${sheetKey}_history`;
+    const histTable = this.db.getTable(histKey);
+    if (!histTable || !histTable.rows) return;
+
+    const activeKey = histKey.replace('_history', '');
+    const activeTable = this.db.getTable(activeKey);
+    const cleanItemKey = String(itemKey || '').trim();
+
+    const numKey = parseInt(cleanItemKey, 10);
+    const isPureNumKey = !isNaN(numKey) && String(numKey) === cleanItemKey;
+
+    const groupRows = histTable.rows.filter(r => {
+      for (const k of Object.keys(r)) {
+        const kl = k.toLowerCase();
+        if (kl.includes('item') || kl.includes('serial') || kl.includes('glove') || kl.includes('sleeve') || kl.includes('blanket') || kl.includes('mack')) {
+          const val = String(r[k] || '').trim();
+          if (val === cleanItemKey) return true;
+          if (isPureNumKey && parseInt(val, 10) === numKey) return true;
+        }
+      }
+      return false;
+    });
+
+    const foundActive = activeTable && activeTable.rows ? activeTable.rows.find(r => {
+      for (const k of Object.keys(r)) {
+        const kl = k.toLowerCase();
+        if (kl.includes('item') || kl.includes('serial') || kl.includes('glove') || kl.includes('sleeve') || kl.includes('blanket') || kl.includes('mack')) {
+          const val = String(r[k] || '').trim();
+          if (val === cleanItemKey) return true;
+          if (isPureNumKey && parseInt(val, 10) === numKey) return true;
+        }
+      }
+      return false;
+    }) : null;
+
+    const stats = this.analyzeLifecycle(cleanItemKey, groupRows, foundActive);
+    if (!stats || !stats.milestones || !stats.milestones[milestoneIdx]) return;
+
+    const m = stats.milestones[milestoneIdx];
+    this.currentEditingMilestone = {
+      sheetKey: histKey,
+      activeSheetKey: activeKey,
+      itemKey: cleanItemKey,
+      milestoneIdx: milestoneIdx,
+      milestone: m,
+      rawRow: m.rawRow
+    };
+
+    const modal = document.getElementById('edit-milestone-modal');
+    if (!modal) return;
+
+    const titleEl = document.getElementById('edit-milestone-title');
+    if (titleEl) {
+      titleEl.innerHTML = `<span>✏️</span> Edit History Record — #${cleanItemKey}`;
+    }
+
+    const badgeEl = document.getElementById('edit-milestone-stage-badge');
+    if (badgeEl) {
+      badgeEl.innerHTML = `<span style="display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 6px; background-color: ${m.state.color}22; color: ${m.state.color}; border: 1px solid ${m.state.color}55; font-size: 11.5px; font-weight: 700;">${m.state.icon} ${m.state.label} ${m.isCurrent ? '• Current State' : ''}</span>`;
+    }
+
+    const toIso = (d) => {
+      if (!d) return '';
+      if (typeof d === 'string') {
+        if (/^\d{4}-\d{2}-\d{2}$/.test(d)) return d;
+        if (d.includes('/')) {
+          const p = d.split('/');
+          if (p.length === 3) {
+            const mm = String(parseInt(p[0], 10)).padStart(2, '0');
+            const dd = String(parseInt(p[1], 10)).padStart(2, '0');
+            let y = parseInt(p[2], 10);
+            if (y < 100) y = 2000 + y;
+            return `${y}-${mm}-${dd}`;
+          }
+        }
+        const dt = new Date(d);
+        if (!isNaN(dt.getTime())) return dt.toISOString().split('T')[0];
+      } else if (d instanceof Date && !isNaN(d.getTime())) {
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        return `${d.getFullYear()}-${mm}-${dd}`;
+      }
+      return '';
+    };
+
+    const dateInput = document.getElementById('edit-milestone-date');
+    const assignedInput = document.getElementById('edit-milestone-assigned');
+    const locationInput = document.getElementById('edit-milestone-location');
+    const notesInput = document.getElementById('edit-milestone-notes');
+    const syncActiveContainer = document.getElementById('edit-milestone-sync-active-container');
+    const syncActiveCheck = document.getElementById('edit-milestone-sync-active-check');
+
+    if (dateInput) dateInput.value = toIso(m.startDate);
+    if (assignedInput) assignedInput.value = m.assignedTo || '';
+    if (locationInput) locationInput.value = m.location || 'Helena';
+    if (notesInput) notesInput.value = m.notes || '';
+
+    if (syncActiveContainer) {
+      syncActiveContainer.style.display = m.isCurrent ? 'block' : 'none';
+      if (syncActiveCheck) syncActiveCheck.checked = true;
+    }
+
+    modal.onclick = (e) => {
+      if (e.target === modal) this.closeEditMilestoneModal();
+    };
+
+    modal.classList.add('active');
+    modal.style.display = 'flex';
+  }
+
+  closeEditMilestoneModal() {
+    const modal = document.getElementById('edit-milestone-modal');
+    if (modal) {
+      modal.classList.remove('active');
+      modal.style.display = 'none';
+      modal.onclick = null;
+    }
+    this.currentEditingMilestone = null;
+  }
+
+  async saveMilestoneEdit() {
+    if (!this.currentEditingMilestone) return;
+    const { sheetKey, activeSheetKey, itemKey, milestone, rawRow } = this.currentEditingMilestone;
+
+    const dateInput = document.getElementById('edit-milestone-date');
+    const assignedInput = document.getElementById('edit-milestone-assigned');
+    const locationInput = document.getElementById('edit-milestone-location');
+    const notesInput = document.getElementById('edit-milestone-notes');
+    const syncActiveCheck = document.getElementById('edit-milestone-sync-active-check');
+
+    const isoDate = dateInput ? dateInput.value.trim() : '';
+    if (!isoDate) {
+      alert('Please enter a valid Date.');
+      return;
+    }
+
+    let dateFormatted = isoDate;
+    if (isoDate.includes('-')) {
+      const p = isoDate.split('-');
+      if (p.length === 3) dateFormatted = `${p[1]}/${p[2]}/${p[0]}`;
+    }
+
+    const assignedTo = assignedInput ? assignedInput.value.trim() : (milestone.assignedTo || '');
+    const location = locationInput ? locationInput.value.trim() : (milestone.location || 'Helena');
+    const notes = notesInput ? notesInput.value.trim() : (milestone.notes || '');
+    const shouldSyncActive = syncActiveCheck ? syncActiveCheck.checked : false;
+
+    // Update history table row using db.updateHistoryRow
+    const updatedFields = {
+      'Date Assigned': dateFormatted,
+      'Assigned To': assignedTo,
+      'Location': location,
+      'Notes': notes
+    };
+
+    let updatedHistory = false;
+    if (rawRow) {
+      updatedHistory = await this.db.updateHistoryRow(sheetKey, rawRow, updatedFields);
+    } else {
+      updatedHistory = await this.db.updateHistoryRow(sheetKey, r => {
+        const d = String(r['Date Assigned'] || r['Date'] || Object.values(r)[0] || '').trim();
+        const a = String(r['Assigned To'] || r['Employee Name'] || '').trim();
+        return d === milestone.startDateFormatted && a === milestone.assignedTo;
+      }, updatedFields);
+    }
+
+    // If this is the current state and should sync with active sheet
+    if (milestone.isCurrent && shouldSyncActive) {
+      const activeTable = this.db.getTable(activeSheetKey);
+      if (activeTable && activeTable.rows) {
+        const numKey = parseInt(itemKey, 10);
+        const isPureNumKey = !isNaN(numKey) && String(numKey) === itemKey;
+
+        const activeRow = activeTable.rows.find(r => {
+          for (const k of Object.keys(r)) {
+            const kl = k.toLowerCase();
+            if (kl.includes('item') || kl.includes('serial') || kl.includes('glove') || kl.includes('sleeve') || kl.includes('blanket') || kl.includes('mack')) {
+              const val = String(r[k] || '').trim();
+              if (val.toLowerCase() === itemKey.toLowerCase()) return true;
+              if (isPureNumKey && parseInt(val, 10) === numKey) return true;
+            }
+          }
+          return false;
+        });
+
+        if (activeRow) {
+          const dateAssignedCol = (activeTable.headers || []).find(h => /date\s*assigned/i.test(h));
+          const assignedToCol = (activeTable.headers || []).find(h => /assigned\s*to|^assigned$|^holder$/i.test(h));
+          const locationCol = (activeTable.headers || []).find(h => /^location$/i.test(h));
+          const chgOutCol = (activeTable.headers || []).find(h => /change\s*out/i.test(h));
+
+          if (dateAssignedCol) activeRow[dateAssignedCol] = dateFormatted;
+          if (assignedToCol) activeRow[assignedToCol] = assignedTo;
+          if (locationCol) activeRow[locationCol] = location;
+
+          // Recalculate Change Out Date
+          let calculatedChgOut = '';
+          if (window.inventoryManager && typeof window.inventoryManager.calculateChangeOutDate === 'function') {
+            const testD = activeRow['Test Date'] || activeRow['Calibration Date'] || '';
+            calculatedChgOut = window.inventoryManager.calculateChangeOutDate(
+              dateFormatted || testD,
+              location,
+              assignedTo,
+              activeSheetKey,
+              { testDate: testD, calibrationDate: testD }
+            );
+          }
+          if (calculatedChgOut && chgOutCol) {
+            activeRow[chgOutCol] = calculatedChgOut;
+          }
+
+          // Update activeTable rawGrid & queue mutations
+          const rIdx = activeRow._rowIdx || (activeTable.rows.indexOf(activeRow) !== -1 ? activeTable.rows.indexOf(activeRow) + 2 : null);
+          if (rIdx && activeTable.rawGrid && activeTable.rawGrid[rIdx - 1]) {
+            const gRow = activeTable.rawGrid[rIdx - 1];
+            (activeTable.headers || []).forEach((h, cIdx) => {
+              if (activeRow[h] !== undefined) gRow[cIdx] = activeRow[h];
+            });
+          }
+
+          const queueCell = async (hName, val) => {
+            if (!hName || val === undefined) return;
+            const cIdx = (activeTable.headers || []).indexOf(hName);
+            if (cIdx !== -1 && rIdx) {
+              await this.db.addMutation({
+                action: 'UPDATE_CELL',
+                sheetName: activeTable.name || activeSheetKey,
+                row: rIdx,
+                col: cIdx + 1,
+                header: hName,
+                itemIdentifier: itemKey,
+                value: val
+              });
+            }
+          };
+
+          if (dateAssignedCol) await queueCell(dateAssignedCol, dateFormatted);
+          if (assignedToCol) await queueCell(assignedToCol, assignedTo);
+          if (locationCol) await queueCell(locationCol, location);
+          if (calculatedChgOut && chgOutCol) await queueCell(chgOutCol, calculatedChgOut);
+        }
+      }
+    }
+
+    this.closeEditMilestoneModal();
+
+    // Re-open dossier to recalculate all stats & display updated timeline
+    this.openDossierModal(itemKey, sheetKey);
+
+    if (window.sheetNavigator) {
+      window.sheetNavigator.renderActiveView();
+    }
+    if (window.historyNavigator) {
+      window.historyNavigator.renderCurrentHistory();
+    }
+
+    if (window.inventoryManager && typeof window.inventoryManager.showToast === 'function') {
+      window.inventoryManager.showToast(`✅ Successfully updated history record for #${itemKey}!`);
+    } else {
+      alert(`✅ Successfully updated history record for #${itemKey}!`);
     }
   }
 

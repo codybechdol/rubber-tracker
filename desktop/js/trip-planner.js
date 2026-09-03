@@ -226,7 +226,32 @@ class TripPlannerApp {
   }
 
   loadManualTasks() {
-    return this.db.getManualTasks();
+    const tasks = this.db.getManualTasks() || [];
+    let modified = false;
+    tasks.forEach(t => {
+      if (t.certType) {
+        const norm = this.normalizeCertClassName(t.certType);
+        if (norm !== t.certType) {
+          t.certType = norm;
+          if (t.title && (t.title.includes('(3-Yr)') || t.title.includes('(2-Yr)') || t.title.includes('(Annual)'))) {
+            t.title = norm;
+          }
+          modified = true;
+        }
+      }
+      if (!t.date && t.dateKey) {
+        t.date = t.dateKey;
+        modified = true;
+      }
+      if (!t.dateKey && t.date) {
+        t.dateKey = t.date;
+        modified = true;
+      }
+    });
+    if (modified) {
+      this.db.saveManualTasks(tasks);
+    }
+    return tasks;
   }
 
   saveManualTasks(tasks) {
@@ -234,37 +259,83 @@ class TripPlannerApp {
     this.db.saveManualTasks(this.manualTasks);
   }
 
-  getAvailableCertTypes() {
-    const certs = [
-      'CPR / AED (2-Yr)',
-      '1st Aid / First Aid (2-Yr)',
-      'CPR & 1st Aid Combo (2-Yr)',
-      'Pole Top Rescue (Annual)',
-      'Bucket Truck Rescue (Annual)',
-      'Forklift Operator Safety Training (3-Yr)',
-      'Dig Safe / 811 Excavation (2-Yr)',
-      'OSHA 10 Construction',
-      'OSHA 30 Construction',
-      'OSHA 1910 T&D Refresher',
-      'OSHA Trench Competent Person (3-Yr)',
-      'Rigging & Signaling / Signalperson (3-Yr)',
-      'Crane Safety & Practical Evaluation',
-      'Confined Space Entry & Rescue',
-      'Flagger & Traffic Control Certification',
-      'Defensive Driving / Smith System',
-      'Harassment & Workplace Safety (Annual)'
-    ];
+  normalizeCertClassName(name) {
+    if (!name) return '';
+    const s = String(name).trim();
+    const map = {
+      'OSHA Trench Competent Person (3-Yr)': 'OSHA Trench Competent Person',
+      'OSHA Trench Comp Person': 'OSHA Trench Competent Person',
+      'Rigging & Signaling / Signalperson (3-Yr)': 'Rigging & Signaling / Signalperson',
+      'Rigging & Signaling/Signalperson & Spotter Cert': 'Rigging & Signaling / Signalperson',
+      'CPR / AED (2-Yr)': 'CPR / AED',
+      '1st Aid / First Aid (2-Yr)': '1st Aid / First Aid',
+      'CPR & 1st Aid Combo (2-Yr)': 'CPR / AED & 1st Aid Combo',
+      'Pole Top Rescue (Annual)': 'Pole Top Rescue',
+      'Bucket Truck Rescue (Annual)': 'Bucket Truck Rescue',
+      'Forklift Operator Safety Training (3-Yr)': 'Forklift Operator Safety Training',
+      'Forklift (3-Yr)': 'Forklift Certification',
+      'Dig Safe / 811 Excavation (2-Yr)': 'Dig Safe (811)',
+      'Harassment & Workplace Safety (Annual)': 'Harassment Training'
+    };
+    return map[s] || s;
+  }
 
-    if (window.certsConfigEngine && window.certsConfigEngine.certs) {
+  getAvailableCertTypes() {
+    const certsList = [];
+
+    const addCert = (lbl) => {
+      const clean = String(lbl || '').trim();
+      if (!clean) return;
+      if (!certsList.includes(clean)) {
+        certsList.push(clean);
+      }
+    };
+
+    // 1. Primary Source: Exact certifications configured in Certification Requirements & Job Role Matrix
+    if (window.certsConfigEngine && Array.isArray(window.certsConfigEngine.certs) && window.certsConfigEngine.certs.length > 0) {
       window.certsConfigEngine.certs.forEach(c => {
-        const name = c.name || c.label || c.key;
-        if (name && !certs.some(dc => dc.toLowerCase().includes(name.toLowerCase()))) {
-          certs.push(name);
-        }
+        // Exclude driver-specific credentials from training class list as they are individual driver credentials
+        if (c.key === 'DL' || c.key === 'MEC Expiration') return;
+        const label = c.label || c.name || c.key;
+        addCert(label);
       });
+    } else {
+      try {
+        const raw = localStorage.getItem('sa_certs_config');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            parsed.forEach(c => {
+              if (c.key === 'DL' || c.key === 'MEC Expiration') return;
+              addCert(c.label || c.name || c.key);
+            });
+          }
+        }
+      } catch (e) {}
     }
 
-    return certs;
+    // 2. Fallback canonical list strictly matching Certification Requirements & Job Role Matrix
+    if (certsList.length === 0) {
+      [
+        'CPR / AED',
+        '1st Aid / First Aid',
+        'Pole Top Rescue',
+        'OSHA 1910',
+        'OSHA Trench Competent Person',
+        'Forklift Certification',
+        'Forklift Operator Safety Training',
+        'Rigging & Signaling / Signalperson',
+        'Crane Certification',
+        'Crane Evaluation',
+        'Dig Safe (811)',
+        'Harassment Training',
+        'BNSF Rail Safety',
+        'MSHA Mine Safety',
+        'NECA Helicopter Safety'
+      ].forEach(addCert);
+    }
+
+    return certsList;
   }
 
   getEmployeeOptions() {
@@ -582,7 +653,9 @@ class TripPlannerApp {
       allAttendees: [],
       totalCount: 0,
       crewId: '',
-      foreman: ''
+      foreman: '',
+      foremanEmails: [],
+      allEmails: []
     };
 
     const empTable = this.db.getTable('employees');
@@ -596,6 +669,11 @@ class TripPlannerApp {
         const n = String(r['Name'] || r['Employee Name'] || r['Employee'] || '').trim().toLowerCase();
         return n === clean;
       });
+    };
+
+    const getEmpEmail = (empRow) => {
+      if (!empRow) return '';
+      return String(empRow['Email Address'] || empRow['Email'] || empRow['MP Email'] || empRow['Notification Emails'] || '').trim();
     };
 
     // Extract all crew IDs (supports crewIds array or legacy comma-separated crewId)
@@ -622,18 +700,31 @@ class TripPlannerApp {
       const members = this.getCrewMembers(crewId);
       members.forEach(m => {
         if (m.isForeman && !foreman) foreman = m.name;
+        const empR = findEmp(m.name);
+        const email = getEmpEmail(empR);
+        m.email = email;
         if (!allAttendeesMap.has(m.name.toLowerCase())) {
-          allAttendeesMap.set(m.name.toLowerCase(), { name: m.name, role: m.role, isForeman: m.isForeman, crewId: crewId });
+          allAttendeesMap.set(m.name.toLowerCase(), { name: m.name, role: m.role, isForeman: m.isForeman, crewId: crewId, email: email });
         }
       });
 
+      let fEmail = '';
+      if (foreman) {
+        const fRow = findEmp(foreman);
+        fEmail = getEmpEmail(fRow);
+        if (fEmail && !result.foremanEmails.includes(fEmail)) {
+          result.foremanEmails.push(fEmail);
+        }
+      }
+
       if (foreman && !allAttendeesMap.has(foreman.toLowerCase())) {
-        allAttendeesMap.set(foreman.toLowerCase(), { name: foreman, role: 'Foreman', isForeman: true, crewId: crewId });
+        allAttendeesMap.set(foreman.toLowerCase(), { name: foreman, role: 'Foreman', isForeman: true, crewId: crewId, email: fEmail });
       }
 
       result.crews.push({
         crewId,
         foreman,
+        foremanEmail: fEmail,
         members
       });
     });
@@ -642,6 +733,12 @@ class TripPlannerApp {
     allAttendeesMap.forEach(item => {
       result.crewMembers.push(item);
       result.allAttendees.push(item.name);
+      if (item.email && !result.allEmails.includes(item.email)) {
+        result.allEmails.push(item.email);
+      }
+      if (item.isForeman && item.email && !result.foremanEmails.includes(item.email)) {
+        result.foremanEmails.push(item.email);
+      }
     });
 
     // Individual attendees
@@ -654,8 +751,12 @@ class TripPlannerApp {
       if (cleanName && !allAttendeesMap.has(cleanName.toLowerCase())) {
         const r = findEmp(cleanName);
         const role = r ? String(r['Job Classification'] || r['Role'] || r['Title'] || '').trim() : '';
-        result.individualMembers.push({ name: cleanName, role });
+        const email = getEmpEmail(r);
+        result.individualMembers.push({ name: cleanName, role, email });
         result.allAttendees.push(cleanName);
+        if (email && !result.allEmails.includes(email)) {
+          result.allEmails.push(email);
+        }
       }
     });
 
@@ -961,10 +1062,29 @@ class TripPlannerApp {
     }
   }
 
-  showCertDropdown() {
+  showCertDropdown(forceAll = false) {
     this.setupManualTaskAutocomplete();
     const input = document.getElementById('manual-task-cert-type-input');
-    this.filterCertDropdown(input ? input.value : '');
+    const val = input ? input.value.trim() : '';
+    const certs = this.getAvailableCertTypes();
+    const isExactMatch = certs.some(c => c.toLowerCase() === val.toLowerCase());
+
+    // If forceAll is true, OR if current value matches an existing cert (e.g. when editing!),
+    // show ALL available certs so the user can easily change to a different class!
+    if (forceAll || isExactMatch || !val) {
+      this.filterCertDropdown('');
+    } else {
+      this.filterCertDropdown(val);
+    }
+  }
+
+  toggleCertDropdown() {
+    const dropdown = document.getElementById('manual-task-cert-dropdown');
+    if (dropdown && dropdown.style.display !== 'none') {
+      this.hideCertDropdown();
+    } else {
+      this.showCertDropdown(true);
+    }
   }
 
   filterCertDropdown(query = '') {
@@ -973,6 +1093,9 @@ class TripPlannerApp {
 
     const certs = this.getAvailableCertTypes();
     const q = String(query || '').trim().toLowerCase();
+
+    const input = document.getElementById('manual-task-cert-type-input');
+    const currentVal = input ? input.value.trim().toLowerCase() : '';
 
     const filtered = q
       ? certs.filter(c => c.toLowerCase().includes(q))
@@ -984,20 +1107,29 @@ class TripPlannerApp {
       dropdown.innerHTML = `
         <div style="padding: 10px 14px; font-size: 12px; color: var(--text-muted); text-align: center;">
           Custom class: "<strong>${this.escapeHtml(query)}</strong>"
+          <div style="margin-top: 6px;">
+            <button type="button" class="btn btn-secondary" style="padding: 2px 8px; font-size: 11px; color: #10b981;" onmousedown="window.tripPlanner.selectCertType('${this.escapeJs(query)}');">
+              Use Custom "${this.escapeHtml(query)}"
+            </button>
+          </div>
         </div>
       `;
       dropdown.style.display = 'block';
       return;
     }
 
-    dropdown.innerHTML = filtered.map((c, idx) => `
-      <div class="cert-dropdown-item" data-idx="${idx}" data-cert="${this.escapeHtml(c)}" style="padding: 8px 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.05); transition: background 0.15s ease;" onmouseenter="window.tripPlanner.setHighlightedCert(${idx});" onmousedown="window.tripPlanner.selectCertType(this.getAttribute('data-cert'));">
-        <div style="font-size: 12.5px; font-weight: 700; color: #f8fafc; display: flex; align-items: center; gap: 6px;">
-          <span>🎓</span>
-          <span>${this.escapeHtml(c)}</span>
+    dropdown.innerHTML = filtered.map((c, idx) => {
+      const isSelected = (c.toLowerCase() === currentVal);
+      return `
+        <div class="cert-dropdown-item" data-idx="${idx}" data-cert="${this.escapeHtml(c)}" style="padding: 8px 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.05); background: ${isSelected ? 'rgba(16, 185, 129, 0.18)' : 'transparent'}; transition: background 0.15s ease;" onmouseenter="window.tripPlanner.setHighlightedCert(${idx});" onmousedown="window.tripPlanner.selectCertType(this.getAttribute('data-cert'));">
+          <div style="font-size: 12.5px; font-weight: 700; color: ${isSelected ? '#34d399' : '#f8fafc'}; display: flex; align-items: center; gap: 6px;">
+            <span>🎓</span>
+            <span>${this.escapeHtml(c)}</span>
+          </div>
+          ${isSelected ? `<span style="font-size: 10.5px; font-weight: 700; color: #34d399;">✓ Current</span>` : ''}
         </div>
-      </div>
-    `).join('');
+      `;
+    }).join('');
 
     dropdown.style.display = 'block';
   }
@@ -1012,7 +1144,8 @@ class TripPlannerApp {
         item.style.backgroundColor = 'rgba(16, 185, 129, 0.25)';
         item.scrollIntoView({ block: 'nearest' });
       } else {
-        item.style.backgroundColor = '';
+        const isSel = item.textContent.includes('✓ Current');
+        item.style.backgroundColor = isSel ? 'rgba(16, 185, 129, 0.18)' : '';
       }
     });
   }
@@ -1021,7 +1154,7 @@ class TripPlannerApp {
     const dropdown = document.getElementById('manual-task-cert-dropdown');
     if (!dropdown || dropdown.style.display === 'none') {
       if (e.key === 'ArrowDown') {
-        this.showCertDropdown();
+        this.showCertDropdown(true);
         e.preventDefault();
       } else if (e.key === 'Enter') {
         this.saveManualTaskFromModal();
@@ -1062,7 +1195,6 @@ class TripPlannerApp {
     const input = document.getElementById('manual-task-cert-type-input');
     if (input) {
       input.value = cert;
-      input.focus();
     }
     this.hideCertDropdown();
   }
@@ -1080,7 +1212,7 @@ class TripPlannerApp {
     this.hideCertDropdown();
   }
 
-  switchManualTaskTab(category) {
+  switchManualTaskTab(category, autoFocus = true) {
     const activeCategoryInput = document.getElementById('manual-task-active-category');
     if (activeCategoryInput) activeCategoryInput.value = category;
 
@@ -1091,6 +1223,9 @@ class TripPlannerApp {
     const modalIcon = document.getElementById('manual-task-modal-icon');
     const saveBtn = document.getElementById('btn-save-manual-task');
     const saveBtnText = document.getElementById('btn-save-manual-task-text');
+
+    const editIdInput = document.getElementById('manual-task-edit-id');
+    const isEditing = !!(editIdInput && editIdInput.value.trim());
 
     if (category === 'cert_class') {
       if (certFields) certFields.style.display = 'flex';
@@ -1111,12 +1246,14 @@ class TripPlannerApp {
         saveBtn.style.background = '#10b981';
         saveBtn.style.boxShadow = '0 2px 8px rgba(16, 185, 129, 0.4)';
       }
-      if (saveBtnText) saveBtnText.textContent = 'Schedule Class';
+      if (saveBtnText) saveBtnText.textContent = isEditing ? 'Update Class' : 'Schedule Class';
 
-      setTimeout(() => {
-        const certInput = document.getElementById('manual-task-cert-type-input');
-        if (certInput) certInput.focus();
-      }, 50);
+      if (autoFocus) {
+        setTimeout(() => {
+          const certInput = document.getElementById('manual-task-cert-type-input');
+          if (certInput) certInput.focus();
+        }, 50);
+      }
     } else {
       if (certFields) certFields.style.display = 'none';
       if (personalFields) personalFields.style.display = 'flex';
@@ -1136,35 +1273,40 @@ class TripPlannerApp {
         saveBtn.style.background = '#3b82f6';
         saveBtn.style.boxShadow = '0 2px 8px rgba(59, 130, 246, 0.4)';
       }
-      if (saveBtnText) saveBtnText.textContent = 'Save Task';
+      if (saveBtnText) saveBtnText.textContent = isEditing ? 'Update Task' : 'Save Task';
 
-      setTimeout(() => {
-        const titleInput = document.getElementById('manual-task-personal-title-input');
-        if (titleInput) titleInput.focus();
-      }, 50);
+      if (autoFocus) {
+        setTimeout(() => {
+          const titleInput = document.getElementById('manual-task-personal-title-input');
+          if (titleInput) titleInput.focus();
+        }, 50);
+      }
     }
   }
 
   getManualTasksForDate(dateKey) {
     if (!this.manualTasks) this.manualTasks = this.loadManualTasks();
-    return this.manualTasks.filter(t => t.dateKey === dateKey);
+    return this.manualTasks.filter(t => (t.dateKey === dateKey || t.date === dateKey));
   }
 
   addManualTask(dateKey, taskData) {
     if (!this.manualTasks) this.manualTasks = this.loadManualTasks();
     const isCert = (taskData.taskCategory === 'cert_class' || !!taskData.certType);
+    const certTypeVal = (taskData.certType || '').trim();
 
     const newTask = {
       id: 'mt_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
       taskCategory: isCert ? 'cert_class' : 'personal_task',
-      title: (taskData.title || (isCert ? taskData.certType : '')).trim(),
-      certType: (taskData.certType || '').trim(),
+      title: (taskData.title || (isCert ? certTypeVal : '')).trim(),
+      certType: certTypeVal,
+      crewIds: Array.isArray(taskData.crewIds) ? [...taskData.crewIds] : [],
       crewId: (taskData.crewId || '').trim(),
       assignedEmployees: Array.isArray(taskData.assignedEmployees) ? [...taskData.assignedEmployees] : [],
       employee: (taskData.employee || '').trim(),
       instructor: (taskData.instructor || 'Cody Bechdol (Self)').trim(),
       assignedTo: (taskData.assignedTo || 'Myself').trim(),
       dateKey: dateKey,
+      date: dateKey,
       location: (taskData.location || '').trim(),
       time: (taskData.time || '').trim(),
       priority: (taskData.priority || 'Normal').trim(),
@@ -1187,18 +1329,22 @@ class TripPlannerApp {
 
     const existing = this.manualTasks[idx];
     const isCert = (taskData.taskCategory === 'cert_class' || !!taskData.certType);
+    const dateVal = taskData.dateKey || taskData.date || existing.dateKey || existing.date;
+    const certTypeVal = (taskData.certType !== undefined ? taskData.certType : existing.certType || '').trim();
 
     this.manualTasks[idx] = {
       ...existing,
       taskCategory: isCert ? 'cert_class' : 'personal_task',
-      title: (taskData.title || (isCert ? taskData.certType : existing.title)).trim(),
-      certType: (taskData.certType !== undefined ? taskData.certType : existing.certType || '').trim(),
+      title: (taskData.title || (isCert ? certTypeVal : existing.title)).trim(),
+      certType: certTypeVal,
+      crewIds: (taskData.crewIds !== undefined ? [...taskData.crewIds] : (existing.crewIds ? [...existing.crewIds] : [])),
       crewId: (taskData.crewId !== undefined ? taskData.crewId : existing.crewId || '').trim(),
-      assignedEmployees: (taskData.assignedEmployees !== undefined ? taskData.assignedEmployees : existing.assignedEmployees || []),
+      assignedEmployees: (taskData.assignedEmployees !== undefined ? [...taskData.assignedEmployees] : (existing.assignedEmployees ? [...existing.assignedEmployees] : [])),
       employee: (taskData.employee !== undefined ? taskData.employee : existing.employee || '').trim(),
       instructor: (taskData.instructor !== undefined ? taskData.instructor : existing.instructor || 'Cody Bechdol (Self)').trim(),
       assignedTo: (taskData.assignedTo !== undefined ? taskData.assignedTo : existing.assignedTo || 'Myself').trim(),
-      dateKey: taskData.dateKey || existing.dateKey,
+      dateKey: dateVal,
+      date: dateVal,
       location: (taskData.location !== undefined ? taskData.location : existing.location || '').trim(),
       time: (taskData.time !== undefined ? taskData.time : existing.time || '').trim(),
       priority: (taskData.priority !== undefined ? taskData.priority : existing.priority || 'Normal').trim(),
@@ -1326,9 +1472,10 @@ class TripPlannerApp {
       const certTrainerInput = document.getElementById('manual-task-cert-trainer-input');
       const certNotesInput = document.getElementById('manual-task-cert-notes-input');
 
-      if (certTypeInput) certTypeInput.value = task.certType || task.title || '';
+      const normCert = this.normalizeCertClassName(task.certType || task.title || '');
+      if (certTypeInput) certTypeInput.value = normCert;
       if (certEmpInput) certEmpInput.value = '';
-      if (certDateInput) certDateInput.value = task.dateKey || '';
+      if (certDateInput) certDateInput.value = task.dateKey || task.date || '';
       if (certLocInput) certLocInput.value = task.location || '';
       if (certTimeInput) certTimeInput.value = task.time || '';
       if (certTrainerInput) certTrainerInput.value = task.instructor || 'Cody Bechdol (Self)';
@@ -1348,7 +1495,7 @@ class TripPlannerApp {
       this.renderClassAttendeeChips();
       this.updateClassAttendeesSummary();
 
-      this.switchManualTaskTab('cert_class');
+      this.switchManualTaskTab('cert_class', false);
     } else {
       const pTitleInput = document.getElementById('manual-task-personal-title-input');
       const pAssignedInput = document.getElementById('manual-task-assigned-to-input');
@@ -1360,13 +1507,13 @@ class TripPlannerApp {
 
       if (pTitleInput) pTitleInput.value = task.title || '';
       if (pAssignedInput) pAssignedInput.value = task.assignedTo || 'Myself';
-      if (pDateInput) pDateInput.value = task.dateKey || '';
+      if (pDateInput) pDateInput.value = task.dateKey || task.date || '';
       if (pLocInput) pLocInput.value = task.location || '';
       if (pPrioInput) pPrioInput.value = task.priority || 'Normal';
       if (pTimeInput) pTimeInput.value = task.time || '';
       if (pNotesInput) pNotesInput.value = task.notes || '';
 
-      this.switchManualTaskTab('personal_task');
+      this.switchManualTaskTab('personal_task', false);
     }
 
     if (titleEl) {
@@ -1814,6 +1961,1109 @@ class TripPlannerApp {
       this.renderHolidaysModalContent();
       this.renderPlanner();
     }
+  }
+
+  // =========================================================================
+  // TRAINING SCHEDULE EMAIL COMPOSER
+  // =========================================================================
+
+  openComposeTrainingEmailModal(classId = null) {
+    const allManual = this.manualTasks || [];
+    const allClasses = allManual
+      .filter(m => m.taskCategory === 'cert_class' || !!m.certType)
+      .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+
+    if (allClasses.length === 0) {
+      alert('⚠️ No scheduled training classes found on the Trip Planner.\n\nPlease schedule a class first using "+ Class" or "Manual Task".');
+      return;
+    }
+
+    this._trainingEmailSelectedClassIds = new Set();
+
+    if (classId && allClasses.some(c => c.id === classId)) {
+      const cls = allClasses.find(c => c.id === classId);
+      this._trainingEmailStartDate = cls.date || '';
+      this._trainingEmailEndDate = cls.date || '';
+      this._trainingEmailActivePreset = 'custom';
+      this._trainingEmailSelectedClassIds.add(classId);
+    } else {
+      // Default date range: check if any classes exist this week, else next 2 weeks, else upcoming
+      const now = new Date();
+      const dayOfWeek = now.getDay();
+      const distToMon = (dayOfWeek === 0 ? -6 : 1) - dayOfWeek;
+      const mon = new Date(now.getFullYear(), now.getMonth(), now.getDate() + distToMon, 12, 0, 0);
+      const sun = new Date(mon.getFullYear(), mon.getMonth(), mon.getDate() + 6, 12, 0, 0);
+      const sMon = this.formatIsoDate(mon);
+      const sSun = this.formatIsoDate(sun);
+
+      const thisWeekClasses = allClasses.filter(c => c.date && c.date >= sMon && c.date <= sSun);
+      if (thisWeekClasses.length > 0) {
+        this._trainingEmailStartDate = sMon;
+        this._trainingEmailEndDate = sSun;
+        this._trainingEmailActivePreset = 'this_week';
+        thisWeekClasses.forEach(c => this._trainingEmailSelectedClassIds.add(c.id));
+      } else {
+        const in14 = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 14, 12, 0, 0);
+        const s14 = this.formatIsoDate(in14);
+        const next2WksClasses = allClasses.filter(c => c.date && c.date >= sMon && c.date <= s14);
+        if (next2WksClasses.length > 0) {
+          this._trainingEmailStartDate = sMon;
+          this._trainingEmailEndDate = s14;
+          this._trainingEmailActivePreset = 'next_2_weeks';
+          next2WksClasses.forEach(c => this._trainingEmailSelectedClassIds.add(c.id));
+        } else {
+          // If no upcoming classes within 2 weeks, show all dates
+          this._trainingEmailStartDate = '';
+          this._trainingEmailEndDate = '';
+          this._trainingEmailActivePreset = 'all';
+          allClasses.slice(0, 10).forEach(c => this._trainingEmailSelectedClassIds.add(c.id));
+        }
+      }
+    }
+
+    this._trainingEmailActiveTab = 'html';
+    const modal = document.getElementById('training-email-modal');
+    if (modal) modal.classList.add('active');
+
+    this.renderTrainingEmailModalContent();
+  }
+
+  openComposeTrainingEmailModalForDate(dateKey) {
+    const allManual = this.manualTasks || [];
+    const dateClasses = allManual.filter(m => (m.taskCategory === 'cert_class' || !!m.certType) && m.date === dateKey);
+    if (dateClasses.length === 0) {
+      alert(`⚠️ No training classes scheduled for ${dateKey}.`);
+      return;
+    }
+    this._trainingEmailStartDate = dateKey;
+    this._trainingEmailEndDate = dateKey;
+    this._trainingEmailActivePreset = 'custom';
+    this._trainingEmailSelectedClassIds = new Set(dateClasses.map(c => c.id));
+    this._trainingEmailActiveTab = 'html';
+    const modal = document.getElementById('training-email-modal');
+    if (modal) modal.classList.add('active');
+
+    this.renderTrainingEmailModalContent();
+  }
+
+  openComposeTrainingEmailModalWithRange(startDate, endDate) {
+    this._trainingEmailStartDate = startDate || '';
+    this._trainingEmailEndDate = endDate || '';
+    this._trainingEmailActivePreset = 'custom';
+    this._trainingEmailSelectedClassIds = new Set();
+
+    const allManual = this.manualTasks || [];
+    const matchingClasses = allManual.filter(c => {
+      if (c.taskCategory !== 'cert_class' && !c.certType) return false;
+      if (!c.date) return !startDate && !endDate;
+      if (startDate && c.date < startDate) return false;
+      if (endDate && c.date > endDate) return false;
+      return true;
+    });
+    matchingClasses.forEach(c => this._trainingEmailSelectedClassIds.add(c.id));
+
+    this._trainingEmailActiveTab = 'html';
+    const modal = document.getElementById('training-email-modal');
+    if (modal) modal.classList.add('active');
+
+    this.renderTrainingEmailModalContent();
+  }
+
+  closeComposeTrainingEmailModal() {
+    const modal = document.getElementById('training-email-modal');
+    if (modal) modal.classList.remove('active');
+  }
+
+  formatIsoDate(d) {
+    if (!d || isNaN(d.getTime())) return '';
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  }
+
+  formatEmailDate(dateStr, format = 'short') {
+    if (!dateStr) return 'Date TBD';
+    const parts = String(dateStr).split('-');
+    if (parts.length === 3) {
+      const d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10), 12, 0, 0);
+      const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+      if (format === 'long') {
+        const months = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+        return `${days[d.getDay()]}, ${months[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
+      } else if (format === 'month_day') {
+        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        return `${months[d.getMonth()]} ${d.getDate()}`;
+      } else if (format === 'concise') {
+        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        return `${months[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()}`;
+      } else {
+        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        return `${days[d.getDay()]}, ${months[d.getMonth()]} ${d.getDate()}`;
+      }
+    }
+    return dateStr;
+  }
+
+  getTrainingEmailRangeSummaryText() {
+    const s = this._trainingEmailStartDate;
+    const e = this._trainingEmailEndDate;
+    if (s && e) {
+      if (s === e) return this.formatEmailDate(s, 'long');
+      const sParts = s.split('-');
+      const eParts = e.split('-');
+      if (sParts[0] === eParts[0]) {
+        return `${this.formatEmailDate(s, 'month_day')} – ${this.formatEmailDate(e, 'concise')}`;
+      }
+      return `${this.formatEmailDate(s, 'concise')} – ${this.formatEmailDate(e, 'concise')}`;
+    } else if (s) {
+      return `From ${this.formatEmailDate(s, 'concise')} onwards`;
+    } else if (e) {
+      return `Through ${this.formatEmailDate(e, 'concise')}`;
+    }
+    return 'All Scheduled Dates';
+  }
+
+  setTrainingEmailDatePreset(preset) {
+    const now = new Date();
+    let s = '';
+    let e = '';
+
+    if (preset === 'this_week') {
+      const dayOfWeek = now.getDay();
+      const distToMon = (dayOfWeek === 0 ? -6 : 1) - dayOfWeek;
+      const mon = new Date(now.getFullYear(), now.getMonth(), now.getDate() + distToMon, 12, 0, 0);
+      const sun = new Date(mon.getFullYear(), mon.getMonth(), mon.getDate() + 6, 12, 0, 0);
+      s = this.formatIsoDate(mon);
+      e = this.formatIsoDate(sun);
+    } else if (preset === 'next_week') {
+      const dayOfWeek = now.getDay();
+      const distToMon = (dayOfWeek === 0 ? -6 : 1) - dayOfWeek;
+      const nextMon = new Date(now.getFullYear(), now.getMonth(), now.getDate() + distToMon + 7, 12, 0, 0);
+      const nextSun = new Date(nextMon.getFullYear(), nextMon.getMonth(), nextMon.getDate() + 6, 12, 0, 0);
+      s = this.formatIsoDate(nextMon);
+      e = this.formatIsoDate(nextSun);
+    } else if (preset === 'next_2_weeks') {
+      s = this.formatIsoDate(now);
+      const in14 = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 14, 12, 0, 0);
+      e = this.formatIsoDate(in14);
+    } else if (preset === 'this_month') {
+      const mStart = new Date(now.getFullYear(), now.getMonth(), 1, 12, 0, 0);
+      const mEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 12, 0, 0);
+      s = this.formatIsoDate(mStart);
+      e = this.formatIsoDate(mEnd);
+    } else if (preset === 'next_month') {
+      const nmStart = new Date(now.getFullYear(), now.getMonth() + 1, 1, 12, 0, 0);
+      const nmEnd = new Date(now.getFullYear(), now.getMonth() + 2, 0, 12, 0, 0);
+      s = this.formatIsoDate(nmStart);
+      e = this.formatIsoDate(nmEnd);
+    } else if (preset === 'all') {
+      s = '';
+      e = '';
+    }
+
+    this._trainingEmailActivePreset = preset;
+    this._trainingEmailStartDate = s;
+    this._trainingEmailEndDate = e;
+
+    const sEl = document.getElementById('training-email-start-date');
+    if (sEl) sEl.value = s;
+    const eEl = document.getElementById('training-email-end-date');
+    if (eEl) eEl.value = e;
+
+    this.updateTrainingEmailPresetButtonsUi();
+    this.applyTrainingEmailDateRangeFilter();
+  }
+
+  updateTrainingEmailPresetButtonsUi() {
+    const presets = ['this_week', 'next_week', 'next_2_weeks', 'this_month', 'next_month', 'all'];
+    presets.forEach(p => {
+      const btn = document.getElementById(`training-preset-${p}`);
+      if (btn) {
+        if (this._trainingEmailActivePreset === p) {
+          btn.style.borderColor = '#10b981';
+          btn.style.background = 'rgba(16, 185, 129, 0.25)';
+          btn.style.color = '#34d399';
+          btn.style.fontWeight = '700';
+        } else {
+          btn.style.borderColor = p === 'all' ? 'rgba(59, 130, 246, 0.35)' : 'rgba(16, 185, 129, 0.35)';
+          btn.style.background = p === 'all' ? 'rgba(59, 130, 246, 0.08)' : 'rgba(16, 185, 129, 0.08)';
+          btn.style.color = p === 'all' ? '#93c5fd' : '#6ee7b7';
+          btn.style.fontWeight = 'normal';
+        }
+      }
+    });
+  }
+
+  onTrainingEmailDateRangeChange() {
+    this._trainingEmailActivePreset = 'custom';
+    const sEl = document.getElementById('training-email-start-date');
+    const eEl = document.getElementById('training-email-end-date');
+    this._trainingEmailStartDate = sEl ? sEl.value : '';
+    this._trainingEmailEndDate = eEl ? eEl.value : '';
+    this.updateTrainingEmailPresetButtonsUi();
+    this.applyTrainingEmailDateRangeFilter();
+  }
+
+  applyTrainingEmailDateRangeFilter() {
+    const allManual = this.manualTasks || [];
+    const allClasses = allManual
+      .filter(m => m.taskCategory === 'cert_class' || !!m.certType)
+      .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+
+    const s = this._trainingEmailStartDate;
+    const e = this._trainingEmailEndDate;
+
+    const matchingClasses = allClasses.filter(c => {
+      if (!c.date) return !s && !e;
+      if (s && c.date < s) return false;
+      if (e && c.date > e) return false;
+      return true;
+    });
+
+    // Auto-select all matching classes in range
+    this._trainingEmailSelectedClassIds = new Set(matchingClasses.map(c => c.id));
+
+    // Update range summary text
+    const sumEl = document.getElementById('training-email-range-summary');
+    if (sumEl) sumEl.textContent = this.getTrainingEmailRangeSummaryText();
+
+    // Update class chips & heading
+    this.updateTrainingEmailClassChipsDom();
+
+    this.updateTrainingEmailClassesCountBadge();
+    this.updateTrainingEmailRecipientsAndSubject();
+    this.updateTrainingEmailLivePreview();
+  }
+
+  toggleTrainingEmailClass(classId) {
+    if (!this._trainingEmailSelectedClassIds) this._trainingEmailSelectedClassIds = new Set();
+    if (this._trainingEmailSelectedClassIds.has(classId)) {
+      this._trainingEmailSelectedClassIds.delete(classId);
+    } else {
+      this._trainingEmailSelectedClassIds.add(classId);
+    }
+    this.updateTrainingEmailClassChipsDom();
+    this.updateTrainingEmailClassesCountBadge();
+    this.updateTrainingEmailRecipientsAndSubject();
+    this.updateTrainingEmailLivePreview();
+  }
+
+  selectAllTrainingEmailClasses() {
+    const allManual = this.manualTasks || [];
+    const allClasses = allManual.filter(m => m.taskCategory === 'cert_class' || !!m.certType);
+    const s = this._trainingEmailStartDate;
+    const e = this._trainingEmailEndDate;
+    const matchingClasses = allClasses.filter(c => {
+      if (!c.date) return !s && !e;
+      if (s && c.date < s) return false;
+      if (e && c.date > e) return false;
+      return true;
+    });
+    this._trainingEmailSelectedClassIds = new Set(matchingClasses.map(c => c.id));
+    this.updateTrainingEmailClassChipsDom();
+    this.updateTrainingEmailClassesCountBadge();
+    this.updateTrainingEmailRecipientsAndSubject();
+    this.updateTrainingEmailLivePreview();
+  }
+
+  selectNoneTrainingEmailClasses() {
+    this._trainingEmailSelectedClassIds = new Set();
+    this.updateTrainingEmailClassChipsDom();
+    this.updateTrainingEmailClassesCountBadge();
+    this.updateTrainingEmailRecipientsAndSubject();
+    this.updateTrainingEmailLivePreview();
+  }
+
+  updateTrainingEmailClassChipsDom() {
+    const allManual = this.manualTasks || [];
+    const allClasses = allManual
+      .filter(m => m.taskCategory === 'cert_class' || !!m.certType)
+      .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+    const s = this._trainingEmailStartDate;
+    const e = this._trainingEmailEndDate;
+    const matchingClasses = allClasses.filter(c => {
+      if (!c.date) return !s && !e;
+      if (s && c.date < s) return false;
+      if (e && c.date > e) return false;
+      return true;
+    });
+
+    const chipsEl = document.getElementById('training-email-classes-chips-container');
+    if (chipsEl) {
+      chipsEl.innerHTML = this.renderTrainingEmailClassChipsHtml(allClasses, matchingClasses);
+    }
+    const headEl = document.getElementById('training-email-classes-heading');
+    if (headEl) {
+      const selCount = matchingClasses.filter(c => this._trainingEmailSelectedClassIds && this._trainingEmailSelectedClassIds.has(c.id)).length;
+      headEl.textContent = `CLASSES IN RANGE (${matchingClasses.length} found, ${selCount} selected):`;
+    }
+  }
+
+  renderTrainingEmailClassChipsHtml(allClasses, matchingClasses) {
+    if (!matchingClasses || matchingClasses.length === 0) {
+      return `
+        <div style="padding: 10px 14px; font-size: 11.5px; color: #94a3b8; font-style: italic; background: var(--bg-primary); border-radius: 6px; width: 100%;">
+          ⚠️ No training classes scheduled within this date range. Adjust start / end dates or click <strong style="color: #93c5fd; cursor: pointer; text-decoration: underline;" onclick="window.tripPlanner.setTrainingEmailDatePreset('all')">"All Dates"</strong>.
+        </div>
+      `;
+    }
+
+    return matchingClasses.map(c => {
+      const isSel = this._trainingEmailSelectedClassIds && this._trainingEmailSelectedClassIds.has(c.id);
+      const res = this.resolveClassAttendees(c);
+      const crewLabel = res.crews.length > 0 ? (res.crews.length === 1 ? `Crew ${res.crews[0].crewId}` : `${res.crews.length} Crews`) : `${res.totalCount} Attendee${res.totalCount === 1 ? '' : 's'}`;
+      return `
+        <div style="cursor: pointer; display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: 6px; font-size: 11px; font-weight: 600; border: 1px solid ${isSel ? '#10b981' : 'rgba(255,255,255,0.1)'}; background: ${isSel ? 'rgba(16, 185, 129, 0.18)' : 'var(--bg-primary)'}; color: ${isSel ? '#34d399' : '#94a3b8'}; transition: all 0.15s ease;" onclick="window.tripPlanner.toggleTrainingEmailClass('${this.escapeHtml(c.id)}')">
+          <input type="checkbox" ${isSel ? 'checked' : ''} style="accent-color: #10b981; pointer-events: none; margin: 0; width: 13px; height: 13px;">
+          <span><strong>${c.date ? this.formatEmailDate(c.date) : 'Date TBD'}:</strong> ${this.escapeHtml(c.certType || c.title)}</span>
+          <span style="opacity: 0.75; font-size: 10px;">(${this.escapeHtml(crewLabel)})</span>
+          ${c.location ? `<span style="font-size: 9.5px; opacity: 0.6;">· 📍 ${this.escapeHtml(c.location)}</span>` : ''}
+          ${c.time ? `<span style="font-size: 9.5px; opacity: 0.85; color: #6ee7b7;">· ⏰ ${this.escapeHtml(c.time)}</span>` : ''}
+        </div>
+      `;
+    }).join('');
+  }
+
+  updateTrainingEmailClassesCountBadge() {
+    const badge = document.getElementById('training-email-classes-count');
+    if (badge) {
+      const count = this._trainingEmailSelectedClassIds ? this._trainingEmailSelectedClassIds.size : 0;
+      badge.textContent = `${count} Class${count === 1 ? '' : 'es'} Selected`;
+    }
+  }
+
+  renderTrainingEmailModalContent() {
+    const container = document.getElementById('training-email-modal-body');
+    if (!container) return;
+
+    const allManual = this.manualTasks || [];
+    const allClasses = allManual
+      .filter(m => m.taskCategory === 'cert_class' || !!m.certType)
+      .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+
+    const s = this._trainingEmailStartDate;
+    const e = this._trainingEmailEndDate;
+
+    const matchingClasses = allClasses.filter(c => {
+      if (!c.date) return !s && !e;
+      if (s && c.date < s) return false;
+      if (e && c.date > e) return false;
+      return true;
+    });
+
+    if (!this._trainingEmailSelectedClassIds) this._trainingEmailSelectedClassIds = new Set();
+    const selectedClasses = allClasses.filter(c => this._trainingEmailSelectedClassIds.has(c.id));
+
+    this.updateTrainingEmailClassesCountBadge();
+
+    // Gather recipients
+    const foremanEmails = [];
+    const allEmails = [];
+    selectedClasses.forEach(task => {
+      const res = this.resolveClassAttendees(task);
+      (res.foremanEmails || []).forEach(em => { if (em && !foremanEmails.includes(em)) foremanEmails.push(em); });
+      (res.allEmails || []).forEach(em => { if (em && !allEmails.includes(em)) allEmails.push(em); });
+    });
+
+    let defaultSubject = '';
+    if (selectedClasses.length === 1) {
+      const t = selectedClasses[0];
+      defaultSubject = `Upcoming Training: ${t.certType || t.title} - ${this.formatEmailDate(t.date)}${t.location ? ` (${t.location})` : ''}`;
+    } else if (selectedClasses.length > 1) {
+      defaultSubject = `Scheduled Safety Training Classes: ${this.getTrainingEmailRangeSummaryText()} (${selectedClasses.length} Sessions)`;
+    } else {
+      defaultSubject = s || e ? `Scheduled Safety Training Classes: ${this.getTrainingEmailRangeSummaryText()}` : 'Upcoming Scheduled Safety Training Classes';
+    }
+
+    const defaultNote = 'Team, please review the upcoming scheduled safety training session details, locations, and attendee rosters below. Please ensure all assigned crew members arrive on time and prepared with required PPE.';
+
+    container.innerHTML = `
+      <!-- Date Range Filter & Quick Presets Strip -->
+      <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+          <div style="font-size: 11px; font-weight: 800; color: #34d399; letter-spacing: 0.5px; display: flex; align-items: center; gap: 6px;">
+            <span>📅</span> FILTER BY DATE RANGE
+          </div>
+          <!-- Quick Presets -->
+          <div style="display: flex; gap: 4px; flex-wrap: wrap;">
+            <button type="button" id="training-preset-this_week" class="btn btn-secondary" style="padding: 2px 7px; font-size: 10px; color: #6ee7b7; border-color: rgba(16, 185, 129, 0.35); background: rgba(16, 185, 129, 0.08);" onclick="window.tripPlanner.setTrainingEmailDatePreset('this_week')">This Week</button>
+            <button type="button" id="training-preset-next_week" class="btn btn-secondary" style="padding: 2px 7px; font-size: 10px; color: #6ee7b7; border-color: rgba(16, 185, 129, 0.35); background: rgba(16, 185, 129, 0.08);" onclick="window.tripPlanner.setTrainingEmailDatePreset('next_week')">Next Week</button>
+            <button type="button" id="training-preset-next_2_weeks" class="btn btn-secondary" style="padding: 2px 7px; font-size: 10px; color: #6ee7b7; border-color: rgba(16, 185, 129, 0.35); background: rgba(16, 185, 129, 0.08);" onclick="window.tripPlanner.setTrainingEmailDatePreset('next_2_weeks')">Next 2 Wks</button>
+            <button type="button" id="training-preset-this_month" class="btn btn-secondary" style="padding: 2px 7px; font-size: 10px; color: #6ee7b7; border-color: rgba(16, 185, 129, 0.35); background: rgba(16, 185, 129, 0.08);" onclick="window.tripPlanner.setTrainingEmailDatePreset('this_month')">This Month</button>
+            <button type="button" id="training-preset-next_month" class="btn btn-secondary" style="padding: 2px 7px; font-size: 10px; color: #6ee7b7; border-color: rgba(16, 185, 129, 0.35); background: rgba(16, 185, 129, 0.08);" onclick="window.tripPlanner.setTrainingEmailDatePreset('next_month')">Next Month</button>
+            <button type="button" id="training-preset-all" class="btn btn-secondary" style="padding: 2px 7px; font-size: 10px; color: #93c5fd; border-color: rgba(59, 130, 246, 0.35); background: rgba(59, 130, 246, 0.08);" onclick="window.tripPlanner.setTrainingEmailDatePreset('all')">All Dates</button>
+          </div>
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <label style="font-size: 11px; font-weight: 700; color: #cbd5e1;">FROM:</label>
+            <input type="date" id="training-email-start-date" value="${this._trainingEmailStartDate || ''}" style="padding: 5px 8px; font-size: 12px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 5px; color: #fff;" onchange="window.tripPlanner.onTrainingEmailDateRangeChange()">
+          </div>
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <label style="font-size: 11px; font-weight: 700; color: #cbd5e1;">TO:</label>
+            <input type="date" id="training-email-end-date" value="${this._trainingEmailEndDate || ''}" style="padding: 5px 8px; font-size: 12px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 5px; color: #fff;" onchange="window.tripPlanner.onTrainingEmailDateRangeChange()">
+          </div>
+          <div style="margin-left: auto; font-size: 11px; color: #94a3b8; font-weight: 600;" id="training-email-range-summary">
+            ${this.getTrainingEmailRangeSummaryText()}
+          </div>
+        </div>
+
+        <!-- Class Selector Header & Chips -->
+        <div style="border-top: 1px solid rgba(255,255,255,0.08); padding-top: 8px; margin-top: 2px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; flex-wrap: wrap; gap: 6px;">
+            <div id="training-email-classes-heading" style="font-size: 10.5px; font-weight: 700; color: var(--text-muted); letter-spacing: 0.5px;">
+              CLASSES IN RANGE (${matchingClasses.length} found, ${selectedClasses.length} selected):
+            </div>
+            <div style="display: flex; gap: 4px;">
+              <button type="button" class="btn btn-secondary" style="padding: 1px 6px; font-size: 9.5px; color: #93c5fd;" onclick="window.tripPlanner.selectAllTrainingEmailClasses()">Select All in Range</button>
+              <button type="button" class="btn btn-secondary" style="padding: 1px 6px; font-size: 9.5px; color: #94a3b8;" onclick="window.tripPlanner.selectNoneTrainingEmailClasses()">Clear</button>
+            </div>
+          </div>
+
+          <div id="training-email-classes-chips-container" style="display: flex; flex-wrap: wrap; gap: 6px; max-height: 120px; overflow-y: auto; padding: 2px 0;">
+            ${this.renderTrainingEmailClassChipsHtml(allClasses, matchingClasses)}
+          </div>
+        </div>
+      </div>
+
+      <!-- Email Fields -->
+      <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 14px; display: flex; flex-direction: column; gap: 10px;">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+          <div>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+              <label style="font-size: 10.5px; font-weight: 700; color: var(--text-muted); letter-spacing: 0.5px;">TO (RECIPIENTS):</label>
+              <div style="display: flex; gap: 4px;">
+                <button type="button" class="btn btn-secondary" style="padding: 1px 6px; font-size: 9.5px; color: #60a5fa;" onclick="window.tripPlanner.addForemenEmailsToRecipientInput()" title="Add emails of foremen for selected classes">
+                  + Foremen (${foremanEmails.length})
+                </button>
+                <button type="button" class="btn btn-secondary" style="padding: 1px 6px; font-size: 9.5px; color: #34d399;" onclick="window.tripPlanner.addAllAttendeeEmailsToRecipientInput()" title="Add all attendee emails">
+                  + All (${allEmails.length})
+                </button>
+              </div>
+            </div>
+            <input type="text" id="training-email-to-input" class="form-control" value="${this.escapeHtml(foremanEmails.join(', '))}" placeholder="Enter emails separated by comma..." style="width: 100%; box-sizing: border-box; font-size: 12px; padding: 6px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
+          </div>
+          <div>
+            <label style="display: block; font-size: 10.5px; font-weight: 700; color: var(--text-muted); margin-bottom: 4px; letter-spacing: 0.5px;">CC (OPTIONAL):</label>
+            <input type="text" id="training-email-cc-input" class="form-control" placeholder="e.g. superintendent@example.com, management@example.com" style="width: 100%; box-sizing: border-box; font-size: 12px; padding: 6px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
+          </div>
+        </div>
+
+        <div>
+          <label style="display: block; font-size: 10.5px; font-weight: 700; color: var(--text-muted); margin-bottom: 4px; letter-spacing: 0.5px;">SUBJECT LINE:</label>
+          <input type="text" id="training-email-subject-input" class="form-control" value="${this.escapeHtml(defaultSubject)}" style="width: 100%; box-sizing: border-box; font-size: 12.5px; font-weight: 600; padding: 7px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;" oninput="window.tripPlanner.updateTrainingEmailLivePreview()">
+        </div>
+
+        <div>
+          <label style="display: block; font-size: 10.5px; font-weight: 700; color: var(--text-muted); margin-bottom: 4px; letter-spacing: 0.5px;">MESSAGE / INSTRUCTIONS (PREPENDED TO ROSTER):</label>
+          <textarea id="training-email-note-input" class="form-control" rows="2" style="width: 100%; box-sizing: border-box; font-size: 12px; padding: 6px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; resize: vertical;" oninput="window.tripPlanner.updateTrainingEmailLivePreview()">${defaultNote}</textarea>
+        </div>
+      </div>
+
+      <!-- Preview Tabs & Container -->
+      <div style="display: flex; flex-direction: column; gap: 8px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 6px;">
+          <div style="display: flex; gap: 6px;">
+            <button type="button" id="tab-btn-email-html" class="btn" style="padding: 4px 10px; font-size: 11px; font-weight: 700; border-radius: 5px; cursor: pointer; border: 1px solid #10b981; background: rgba(16, 185, 129, 0.2); color: #34d399;" onclick="window.tripPlanner.switchTrainingEmailPreviewTab('html')">
+              📄 Formatted HTML (Outlook / Gmail)
+            </button>
+            <button type="button" id="tab-btn-email-text" class="btn" style="padding: 4px 10px; font-size: 11px; font-weight: 700; border-radius: 5px; cursor: pointer; border: 1px solid rgba(255,255,255,0.1); background: var(--bg-primary); color: #94a3b8;" onclick="window.tripPlanner.switchTrainingEmailPreviewTab('text')">
+              📝 Plain Text (SMS / Slack)
+            </button>
+          </div>
+          <span style="font-size: 11px; color: var(--text-muted);">
+            👁️ Live Email Output Preview
+          </span>
+        </div>
+
+        <div id="training-email-preview-container" style="border: 1px solid var(--border-color); border-radius: 6px; overflow: hidden; background: #ffffff;">
+          <!-- Injected dynamically -->
+        </div>
+      </div>
+    `;
+
+    this.updateTrainingEmailPresetButtonsUi();
+    this.updateTrainingEmailLivePreview();
+  }
+
+  updateTrainingEmailRecipientsAndSubject() {
+    const allManual = this.manualTasks || [];
+    const selectedClasses = allManual.filter(c => (c.taskCategory === 'cert_class' || !!c.certType) && this._trainingEmailSelectedClassIds && this._trainingEmailSelectedClassIds.has(c.id));
+
+    const foremanEmails = [];
+    selectedClasses.forEach(task => {
+      const res = this.resolveClassAttendees(task);
+      (res.foremanEmails || []).forEach(em => { if (em && !foremanEmails.includes(em)) foremanEmails.push(em); });
+    });
+
+    const toInput = document.getElementById('training-email-to-input');
+    if (toInput && !toInput.dataset.userEdited) {
+      toInput.value = foremanEmails.join(', ');
+    }
+
+    const subjInput = document.getElementById('training-email-subject-input');
+    if (subjInput && !subjInput.dataset.userEdited) {
+      const s = this._trainingEmailStartDate;
+      const e = this._trainingEmailEndDate;
+      if (selectedClasses.length === 1) {
+        const t = selectedClasses[0];
+        subjInput.value = `Upcoming Training: ${t.certType || t.title} - ${this.formatEmailDate(t.date)}${t.location ? ` (${t.location})` : ''}`;
+      } else if (selectedClasses.length > 1) {
+        subjInput.value = `Scheduled Safety Training Classes: ${this.getTrainingEmailRangeSummaryText()} (${selectedClasses.length} Sessions)`;
+      } else {
+        subjInput.value = s || e ? `Scheduled Safety Training Classes: ${this.getTrainingEmailRangeSummaryText()}` : 'Upcoming Scheduled Safety Training Classes';
+      }
+    }
+  }
+
+  addForemenEmailsToRecipientInput() {
+    const allManual = this.manualTasks || [];
+    const selectedClasses = allManual.filter(c => (c.taskCategory === 'cert_class' || !!c.certType) && this._trainingEmailSelectedClassIds.has(c.id));
+    const foremanEmails = [];
+    selectedClasses.forEach(task => {
+      const res = this.resolveClassAttendees(task);
+      (res.foremanEmails || []).forEach(em => { if (em && !foremanEmails.includes(em)) foremanEmails.push(em); });
+    });
+    const toInput = document.getElementById('training-email-to-input');
+    if (toInput) {
+      const existing = toInput.value.split(',').map(s => s.trim()).filter(Boolean);
+      foremanEmails.forEach(e => { if (!existing.includes(e)) existing.push(e); });
+      toInput.value = existing.join(', ');
+      toInput.dataset.userEdited = 'true';
+      this.showEmailToast(`Added ${foremanEmails.length} foremen emails.`);
+    }
+  }
+
+  addAllAttendeeEmailsToRecipientInput() {
+    const allManual = this.manualTasks || [];
+    const selectedClasses = allManual.filter(c => (c.taskCategory === 'cert_class' || !!c.certType) && this._trainingEmailSelectedClassIds.has(c.id));
+    const allEmails = [];
+    selectedClasses.forEach(task => {
+      const res = this.resolveClassAttendees(task);
+      (res.allEmails || []).forEach(em => { if (em && !allEmails.includes(em)) allEmails.push(em); });
+    });
+    const toInput = document.getElementById('training-email-to-input');
+    if (toInput) {
+      const existing = toInput.value.split(',').map(s => s.trim()).filter(Boolean);
+      allEmails.forEach(e => { if (!existing.includes(e)) existing.push(e); });
+      toInput.value = existing.join(', ');
+      toInput.dataset.userEdited = 'true';
+      this.showEmailToast(`Added ${allEmails.length} attendee emails.`);
+    }
+  }
+
+  switchTrainingEmailPreviewTab(tab) {
+    this._trainingEmailActiveTab = tab;
+    const btnHtml = document.getElementById('tab-btn-email-html');
+    const btnText = document.getElementById('tab-btn-email-text');
+    if (btnHtml && btnText) {
+      if (tab === 'html') {
+        btnHtml.style.border = '1px solid #10b981';
+        btnHtml.style.background = 'rgba(16, 185, 129, 0.2)';
+        btnHtml.style.color = '#34d399';
+        btnText.style.border = '1px solid rgba(255,255,255,0.1)';
+        btnText.style.background = 'var(--bg-primary)';
+        btnText.style.color = '#94a3b8';
+      } else {
+        btnText.style.border = '1px solid #10b981';
+        btnText.style.background = 'rgba(16, 185, 129, 0.2)';
+        btnText.style.color = '#34d399';
+        btnHtml.style.border = '1px solid rgba(255,255,255,0.1)';
+        btnHtml.style.background = 'var(--bg-primary)';
+        btnHtml.style.color = '#94a3b8';
+      }
+    }
+    this.updateTrainingEmailLivePreview();
+  }
+
+  getSelectedTrainingTasks() {
+    const allManual = this.manualTasks || [];
+    return allManual
+      .filter(m => (m.taskCategory === 'cert_class' || !!m.certType) && this._trainingEmailSelectedClassIds && this._trainingEmailSelectedClassIds.has(m.id))
+      .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+  }
+
+  generateTrainingEmailHtml() {
+    const selected = this.getSelectedTrainingTasks();
+    const noteEl = document.getElementById('training-email-note-input');
+    const noteText = noteEl ? noteEl.value.trim() : '';
+
+    if (selected.length === 0) {
+      return `
+        <div style="padding: 30px; text-align: center; color: #64748b; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;">
+          <div style="font-size: 24px; margin-bottom: 6px;">⚠️</div>
+          <div style="font-weight: 700; color: #0f172a;">No Classes Selected</div>
+          <div style="font-size: 13px;">Please select at least one training class from the list above.</div>
+        </div>
+      `;
+    }
+
+    let html = `
+      <div style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1e293b; background: #ffffff; padding: 20px; line-height: 1.5; font-size: 13px;">
+        ${noteText ? `
+          <div style="background: #f8fafc; border-left: 4px solid #10b981; border-radius: 4px; padding: 12px 14px; margin-bottom: 20px; color: #334155; font-size: 13.5px; line-height: 1.5;">
+            ${this.escapeHtml(noteText).replace(/\n/g, '<br>')}
+          </div>
+        ` : ''}
+
+        <div style="margin-bottom: 16px; border-bottom: 2px solid #059669; padding-bottom: 6px;">
+          <h2 style="margin: 0 0 4px 0; color: #064e3b; font-size: 17px; font-weight: 800; display: flex; align-items: center; gap: 6px;">
+            <span>🎓</span> Scheduled Safety Training Schedule
+          </h2>
+          <div style="font-size: 12px; color: #64748b;">
+            Mountain Power · Safety & Compliance Department · <strong>${this.escapeHtml(this.getTrainingEmailRangeSummaryText())}</strong> · ${selected.length} Scheduled Session${selected.length === 1 ? '' : 's'}
+          </div>
+        </div>
+
+        <div style="display: flex; flex-direction: column; gap: 20px;">
+    `;
+
+    selected.forEach((task, idx) => {
+      const resolved = this.resolveClassAttendees(task);
+      const isDone = task.status === 'Complete';
+      const formattedDate = this.formatEmailDate(task.date, 'long');
+      const timeStr = task.time || 'Time TBD';
+      const locStr = task.location || 'Location TBD';
+      const instructorStr = task.instructor || 'Cody Bechdol';
+
+      html += `
+        <div style="border: 1px solid #e2e8f0; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(0,0,0,0.05); margin-bottom: 16px;">
+          <!-- Card Header -->
+          <div style="background: ${isDone ? '#f1f5f9' : '#f0fdf4'}; border-bottom: 1px solid #e2e8f0; padding: 10px 14px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+            <div>
+              <span style="font-size: 11px; font-weight: 800; color: #059669; text-transform: uppercase; letter-spacing: 0.5px;">CLASS #${idx + 1}</span>
+              <h3 style="margin: 2px 0 0 0; font-size: 15px; font-weight: 800; color: #0f172a;">
+                🎓 ${this.escapeHtml(task.certType || task.title)}
+              </h3>
+            </div>
+            <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap;">
+              <span style="background: #ffffff; color: #0f172a; border: 1px solid #cbd5e1; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 12px;">
+                📍 ${this.escapeHtml(locStr)}
+              </span>
+              <span style="background: #dbeafe; color: #1e40af; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 12px;">
+                👥 ${resolved.totalCount} Attendee${resolved.totalCount === 1 ? '' : 's'}
+              </span>
+              ${isDone ? `
+                <span style="background: #e2e8f0; color: #475569; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 12px;">✅ Completed</span>
+              ` : ''}
+            </div>
+          </div>
+
+          <!-- Concise Logistics Table (Date, Time, Assigned) -->
+          <table style="width: 100%; border-collapse: collapse; font-size: 12px; background: #ffffff;">
+            <tbody>
+              <tr style="border-bottom: 1px solid #f1f5f9;">
+                <td style="padding: 7px 14px; color: #475569; width: 50%;">
+                  📅 <strong>Date:</strong> <span style="color: #0f172a; font-weight: 700;">${this.escapeHtml(formattedDate)}</span>
+                </td>
+                <td style="padding: 7px 14px; color: #475569; width: 50%;">
+                  ⏰ <strong>Time:</strong> <span style="color: #059669; font-weight: 700;">${this.escapeHtml(timeStr)}</span>
+                </td>
+              </tr>
+              <tr style="border-bottom: 1px solid #f1f5f9;">
+                <td colspan="2" style="padding: 7px 14px; color: #334155;">
+                  🚚 <strong>Assigned:</strong> ${resolved.crews.length > 0 ? resolved.crews.map(c => `<strong>Crew ${this.escapeHtml(c.crewId)}</strong>${c.foreman ? ` (Foreman: <strong>${this.escapeHtml(c.foreman)}</strong>)` : ''}`).join('; ') : '<em>Individual Attendees Only</em>'}
+                </td>
+              </tr>
+              ${task.notes ? `
+                <tr style="border-bottom: 1px solid #f1f5f9;">
+                  <td colspan="2" style="padding: 7px 14px; color: #b45309; font-size: 11.5px;">
+                    📝 <strong>Notes:</strong> ${this.escapeHtml(task.notes)}
+                  </td>
+                </tr>
+              ` : ''}
+            </tbody>
+          </table>
+
+          <!-- Attendee Roster Section -->
+          <div style="padding: 10px 14px 4px 14px; background: #f8fafc; border-top: 1px solid #e2e8f0;">
+            ${resolved.crews.length > 0 ? resolved.crews.map(c => `
+              <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px 12px; margin-bottom: 8px;">
+                <div style="font-size: 12px; font-weight: 800; color: #1e40af; border-bottom: 1px solid #f1f5f9; padding-bottom: 4px; margin-bottom: 6px;">
+                  <span>🚚 Crew ${this.escapeHtml(c.crewId)} ${c.foreman ? `· Foreman: ${this.escapeHtml(c.foreman)}` : ''}</span>
+                </div>
+                <ul style="margin: 0; padding-left: 18px; font-size: 12px; color: #334155;">
+                  ${c.members.map(m => `
+                    <li style="margin-bottom: 3px;">
+                      <strong>${this.escapeHtml(m.name)}</strong>
+                      <span style="color: #64748b;"> — ${this.escapeHtml(m.role || (m.isForeman ? 'Foreman' : 'Lineman'))}</span>
+                      ${m.isForeman ? `<span style="background: #fef08a; color: #854d0e; font-size: 10px; font-weight: 700; padding: 0 4px; border-radius: 3px; margin-left: 4px;">Foreman</span>` : ''}
+                    </li>
+                  `).join('')}
+                </ul>
+              </div>
+            `).join('') : ''}
+
+            ${resolved.individualMembers.length > 0 ? `
+              <div style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px 12px; margin-bottom: 8px;">
+                <div style="font-size: 12px; font-weight: 800; color: #7c3aed; border-bottom: 1px solid #f1f5f9; padding-bottom: 4px; margin-bottom: 6px;">
+                  👤 Individual Attendees (${resolved.individualMembers.length})
+                </div>
+                <ul style="margin: 0; padding-left: 18px; font-size: 12px; color: #334155;">
+                  ${resolved.individualMembers.map(m => `
+                    <li style="margin-bottom: 3px;">
+                      <strong>${this.escapeHtml(m.name)}</strong>
+                      ${m.role ? `<span style="color: #64748b;"> — ${this.escapeHtml(m.role)}</span>` : ''}
+                    </li>
+                  `).join('')}
+                </ul>
+              </div>
+            ` : ''}
+          </div>
+        </div>
+      `;
+    });
+
+    html += `
+        </div>
+
+        <div style="margin-top: 20px; border-top: 1px solid #e2e8f0; padding-top: 14px; font-size: 12px; color: #64748b; line-height: 1.4;">
+          <strong>Mountain Power Safety & Operations</strong><br>
+          Cody Bechdol · Safety Director<br>
+          Generated via Safety Assistant Trip Planner
+        </div>
+      </div>
+    `;
+
+    return html;
+  }
+
+  generateTrainingEmailPlainText() {
+    const selected = this.getSelectedTrainingTasks();
+    const noteEl = document.getElementById('training-email-note-input');
+    const noteText = noteEl ? noteEl.value.trim() : '';
+
+    if (selected.length === 0) {
+      return 'No training classes selected.';
+    }
+
+    let text = `UPCOMING SAFETY TRAINING SCHEDULE\n============================================================\n`;
+    text += `DATE RANGE: ${this.getTrainingEmailRangeSummaryText()}\n`;
+    text += `SESSIONS:   ${selected.length} Scheduled\n`;
+    text += `============================================================\n\n`;
+
+    if (noteText) {
+      text += `${noteText}\n\n`;
+      text += `============================================================\n\n`;
+    }
+
+    selected.forEach((task, idx) => {
+      const resolved = this.resolveClassAttendees(task);
+      const formattedDate = this.formatEmailDate(task.date, 'long');
+      const timeStr = task.time || 'Time TBD';
+      const locStr = task.location || 'Location TBD';
+
+      text += `SESSION #${idx + 1}: ${task.certType || task.title}\n`;
+      text += `LOCATION:   ${locStr} | ATTENDEES: ${resolved.totalCount}\n`;
+      text += `------------------------------------------------------------\n`;
+      text += `  • DATE:     ${formattedDate}\n`;
+      text += `  • TIME:     ${timeStr}\n`;
+      if (resolved.crews.length > 0) {
+        text += `  • ASSIGNED: ${resolved.crews.map(c => `Crew ${c.crewId}${c.foreman ? ` (Foreman: ${c.foreman})` : ''}`).join(', ')}\n`;
+      }
+      if (task.notes) {
+        text += `  • NOTES:    ${task.notes}\n`;
+      }
+      text += `\n`;
+      if (resolved.crews.length > 0) {
+        resolved.crews.forEach(c => {
+          text += `  [Crew ${c.crewId}]${c.foreman ? ` (Foreman: ${c.foreman})` : ''}:\n`;
+          c.members.forEach(m => {
+            text += `    - ${m.name} (${m.role || (m.isForeman ? 'Foreman' : 'Lineman')})\n`;
+          });
+        });
+      }
+
+      if (resolved.individualMembers.length > 0) {
+        text += `  [Individual Attendees] - ${resolved.individualMembers.length} Workers:\n`;
+        resolved.individualMembers.forEach(m => {
+          text += `    - ${m.name}${m.role ? ` (${m.role})` : ''}\n`;
+        });
+      }
+
+      text += `\n`;
+    });
+
+    text += `============================================================\n`;
+    text += `Mountain Power Safety & Operations\n`;
+    text += `Cody Bechdol · Safety Director\n`;
+    text += `Generated via Safety Assistant Trip Planner\n`;
+
+    return text;
+  }
+
+  updateTrainingEmailLivePreview() {
+    const container = document.getElementById('training-email-preview-container');
+    if (!container) return;
+
+    if (this._trainingEmailActiveTab === 'text') {
+      const text = this.generateTrainingEmailPlainText();
+      container.innerHTML = `
+        <pre style="margin: 0; padding: 16px; font-family: Consolas, Monaco, 'Courier New', monospace; font-size: 11.5px; line-height: 1.4; color: #1e293b; background: #f8fafc; white-space: pre-wrap; word-break: break-word; max-height: 400px; overflow-y: auto;">${this.escapeHtml(text)}</pre>
+      `;
+    } else {
+      const html = this.generateTrainingEmailHtml();
+      container.innerHTML = `
+        <div style="max-height: 420px; overflow-y: auto; background: #ffffff;">
+          ${html}
+        </div>
+      `;
+    }
+  }
+
+  async copyTrainingEmailHtml() {
+    const html = this.generateTrainingEmailHtml();
+    const text = this.generateTrainingEmailPlainText();
+
+    try {
+      if (navigator.clipboard && window.ClipboardItem) {
+        const blobHtml = new Blob([html], { type: 'text/html' });
+        const blobText = new Blob([text], { type: 'text/plain' });
+        await navigator.clipboard.write([
+          new ClipboardItem({
+            'text/html': blobHtml,
+            'text/plain': blobText
+          })
+        ]);
+      } else {
+        const el = document.createElement('div');
+        el.innerHTML = html;
+        el.style.position = 'fixed';
+        el.style.opacity = '0';
+        document.body.appendChild(el);
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(range);
+        document.execCommand('copy');
+        sel.removeAllRanges();
+        document.body.removeChild(el);
+      }
+      this.showEmailToast('✅ Formatted email copied! Ready to paste into Outlook or Gmail.');
+    } catch (err) {
+      console.warn('Rich copy fallback to text:', err);
+      this.copyTrainingEmailText();
+    }
+  }
+
+  async copyTrainingEmailText() {
+    const text = this.generateTrainingEmailPlainText();
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.position = 'fixed';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand('copy');
+        document.body.removeChild(ta);
+      }
+      this.showEmailToast('✅ Plain text copied to clipboard!');
+    } catch (err) {
+      alert('Error copying text: ' + err);
+    }
+  }
+
+  openTrainingEmailClient() {
+    const toInput = document.getElementById('training-email-to-input');
+    const ccInput = document.getElementById('training-email-cc-input');
+    const subjInput = document.getElementById('training-email-subject-input');
+
+    const to = toInput ? toInput.value.trim() : '';
+    const cc = ccInput ? ccInput.value.trim() : '';
+    const subject = subjInput ? subjInput.value.trim() : 'Scheduled Safety Training';
+    const body = this.generateTrainingEmailPlainText();
+
+    let mailtoUrl = `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subject)}`;
+    if (cc) mailtoUrl += `&cc=${encodeURIComponent(cc)}`;
+    mailtoUrl += `&body=${encodeURIComponent(body)}`;
+
+    window.location.href = mailtoUrl;
+  }
+
+  openTrainingEmailGmail() {
+    const toInput = document.getElementById('training-email-to-input');
+    const ccInput = document.getElementById('training-email-cc-input');
+    const subjInput = document.getElementById('training-email-subject-input');
+
+    const to = toInput ? toInput.value.trim() : '';
+    const cc = ccInput ? ccInput.value.trim() : '';
+    const subject = subjInput ? subjInput.value.trim() : 'Scheduled Safety Training';
+    const body = this.generateTrainingEmailPlainText();
+
+    let gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(to)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+    if (cc) gmailUrl += `&cc=${encodeURIComponent(cc)}`;
+
+    window.open(gmailUrl, '_blank');
+  }
+
+  printTrainingAttendanceRoster() {
+    const selected = this.getSelectedTrainingTasks();
+    if (selected.length === 0) {
+      alert('⚠️ Please select at least one training class to print roster.');
+      return;
+    }
+
+    const printWin = window.open('', '_blank', 'width=900,height=700');
+    if (!printWin) {
+      alert('⚠️ Popup blocked. Please allow popups to print roster.');
+      return;
+    }
+
+    let printHtml = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Training Attendance & Sign-In Sheet</title>
+        <style>
+          @page { size: portrait; margin: 0.5in; }
+          body { font-family: Arial, sans-serif; font-size: 12px; color: #000; margin: 0; padding: 15px; }
+          .sheet-header { border-bottom: 2px solid #000; padding-bottom: 8px; margin-bottom: 12px; }
+          .sheet-title { font-size: 16px; font-weight: bold; text-transform: uppercase; margin: 0 0 4px 0; }
+          .sheet-sub { font-size: 11px; color: #444; }
+          .meta-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px; font-size: 12px; }
+          .meta-item { border: 1px solid #ccc; padding: 6px 10px; }
+          table { width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 11.5px; }
+          th, td { border: 1px solid #000; padding: 6px 8px; }
+          th { background: #eee; font-weight: bold; text-align: left; }
+          .sig-line { height: 28px; width: 220px; }
+          .footer-sigs { display: flex; justify-content: space-between; margin-top: 30px; font-size: 12px; }
+          .footer-sig-box { width: 45%; border-top: 1px solid #000; padding-top: 4px; }
+          .page-break { page-break-after: always; }
+        </style>
+      </head>
+      <body>
+    `;
+
+    selected.forEach((task, idx) => {
+      const resolved = this.resolveClassAttendees(task);
+      const formattedDate = this.formatEmailDate(task.date, 'long');
+      const timeStr = task.time || 'Time TBD';
+      const locStr = task.location || 'Location TBD';
+      const instructorStr = task.instructor || 'Cody Bechdol';
+
+      printHtml += `
+        <div class="sheet-header">
+          <div class="sheet-title">Mountain Power — Training Attendance & Sign-In Roster</div>
+          <div class="sheet-sub">Official Safety Training Compliance Record</div>
+        </div>
+
+        <div class="meta-grid">
+          <div class="meta-item"><strong>Course / Topic:</strong> ${this.escapeHtml(task.certType || task.title)}</div>
+          <div class="meta-item"><strong>Date:</strong> ${this.escapeHtml(formattedDate)}</div>
+          <div class="meta-item"><strong>Location / Facility:</strong> ${this.escapeHtml(locStr)}</div>
+          <div class="meta-item"><strong>Time / Window:</strong> ${this.escapeHtml(timeStr)}</div>
+          <div class="meta-item"><strong>Instructor:</strong> ${this.escapeHtml(instructorStr)}</div>
+          <div class="meta-item"><strong>Assigned Crews:</strong> ${resolved.crews.map(c => `Crew ${c.crewId}`).join(', ') || 'Individual'}</div>
+        </div>
+
+        <table>
+          <thead>
+            <tr>
+              <th style="width: 30px; text-align: center;">#</th>
+              <th>Trainee Name</th>
+              <th style="width: 150px;">Classification / Role</th>
+              <th style="width: 100px;">Crew (Job #)</th>
+              <th style="width: 220px;">Trainee Signature</th>
+            </tr>
+          </thead>
+          <tbody>
+      `;
+
+      let attendeeIndex = 1;
+      if (resolved.crews.length > 0) {
+        resolved.crews.forEach(c => {
+          c.members.forEach(m => {
+            printHtml += `
+              <tr>
+                <td style="text-align: center;">${attendeeIndex++}</td>
+                <td><strong>${this.escapeHtml(m.name)}</strong></td>
+                <td>${this.escapeHtml(m.role || (m.isForeman ? 'Foreman' : 'Lineman'))}</td>
+                <td>Crew ${this.escapeHtml(c.crewId)}</td>
+                <td class="sig-line"></td>
+              </tr>
+            `;
+          });
+        });
+      }
+
+      if (resolved.individualMembers.length > 0) {
+        resolved.individualMembers.forEach(m => {
+          printHtml += `
+            <tr>
+              <td style="text-align: center;">${attendeeIndex++}</td>
+              <td><strong>${this.escapeHtml(m.name)}</strong></td>
+              <td>${this.escapeHtml(m.role || 'Attendee')}</td>
+              <td>Individual</td>
+              <td class="sig-line"></td>
+            </tr>
+          `;
+        });
+      }
+
+      // Add 4 blank lines for walk-ins / visitors
+      for (let i = 0; i < 4; i++) {
+        printHtml += `
+          <tr>
+            <td style="text-align: center; color: #999;">${attendeeIndex++}</td>
+            <td style="color: #999;">(Walk-in / Attendee)</td>
+            <td></td>
+            <td></td>
+            <td class="sig-line"></td>
+          </tr>
+        `;
+      }
+
+      printHtml += `
+          </tbody>
+        </table>
+
+        <div class="footer-sigs">
+          <div class="footer-sig-box">
+            Instructor Signature: ___________________________<br>
+            Name: ${this.escapeHtml(instructorStr)}
+          </div>
+          <div class="footer-sig-box">
+            Date Completed: ___________________________<br>
+            Practical Evaluation Passed: [  ] Yes  [  ] No
+          </div>
+        </div>
+      `;
+
+      if (idx < selected.length - 1) {
+        printHtml += `<div class="page-break"></div>`;
+      }
+    });
+
+    printHtml += `
+      </body>
+      </html>
+    `;
+
+    printWin.document.write(printHtml);
+    printWin.document.close();
+    printWin.focus();
+    setTimeout(() => {
+      printWin.print();
+    }, 250);
+  }
+
+  showEmailToast(message, isError = false) {
+    const toast = document.getElementById('training-email-toast');
+    if (!toast) return;
+    toast.textContent = message;
+    toast.style.color = isError ? '#f87171' : '#34d399';
+    toast.style.display = 'block';
+    if (this._emailToastTimer) clearTimeout(this._emailToastTimer);
+    this._emailToastTimer = setTimeout(() => {
+      toast.style.display = 'none';
+    }, 4000);
   }
 
   setWeeksToShow(weeks) {
@@ -2405,7 +3655,10 @@ class TripPlannerApp {
                   <span id="section-chevron-${dateKey}-training" style="font-size: 8px; width: 10px; display: inline-block;">${isCollapsed ? '▶' : '▼'}</span>
                   <span>🎓 Training (${pendingCount}/${trainingClasses.length})</span>
                 </span>
-                <button class="btn btn-secondary" style="padding: 1px 6px; font-size: 9.5px; color: #34d399; border-color: rgba(16, 185, 129, 0.35); background: rgba(16, 185, 129, 0.08); cursor: pointer;" onclick="event.stopPropagation(); window.tripPlanner.openAddManualTaskModal('${dateKey}', '${this.escapeJs(day.dayName)}, ${this.escapeJs(day.formattedDate)}', 'cert_class')" title="Schedule Training Class on ${day.dayName}">+ Class</button>
+                <div style="display: flex; gap: 4px; align-items: center;">
+                  <button class="btn btn-secondary" style="padding: 1px 6px; font-size: 9.5px; color: #34d399; border-color: rgba(16, 185, 129, 0.35); background: rgba(16, 185, 129, 0.08); cursor: pointer;" onclick="event.stopPropagation(); window.tripPlanner.openComposeTrainingEmailModalForDate('${dateKey}')" title="Compose email for scheduled training classes on ${day.dayName}">📧 Email</button>
+                  <button class="btn btn-secondary" style="padding: 1px 6px; font-size: 9.5px; color: #34d399; border-color: rgba(16, 185, 129, 0.35); background: rgba(16, 185, 129, 0.08); cursor: pointer;" onclick="event.stopPropagation(); window.tripPlanner.openAddManualTaskModal('${dateKey}', '${this.escapeJs(day.dayName)}, ${this.escapeJs(day.formattedDate)}', 'cert_class')" title="Schedule Training Class on ${day.dayName}">+ Class</button>
+                </div>
               </div>
               <div id="section-body-${dateKey}-training" style="display: ${isCollapsed ? 'none' : 'flex'}; flex-direction: column; gap: 5px; margin-top: 5px;">
                 ${trainingClasses.map(mt => {
@@ -2515,6 +3768,9 @@ class TripPlannerApp {
                           </div>
                         </div>
                         <div style="display: flex; align-items: center; gap: 3px;">
+                          <button style="background: none; border: none; color: #34d399; cursor: pointer; padding: 1px 3px; font-size: 11.5px; line-height: 1; border-radius: 3px;" onmouseover="this.style.color='#10b981'" onmouseout="this.style.color='#34d399'" onclick="window.tripPlanner.openComposeTrainingEmailModal('${this.escapeHtml(mt.id)}')" title="Compose Email for this Class">
+                            ✉️
+                          </button>
                           <button style="background: none; border: none; color: #64748b; cursor: pointer; padding: 1px 3px; font-size: 11px; line-height: 1; border-radius: 3px;" onmouseover="this.style.color='#60a5fa'" onmouseout="this.style.color='#64748b'" onclick="window.tripPlanner.openEditManualTaskModal('${this.escapeHtml(mt.id)}')" title="Edit Class">
                             ✏️
                           </button>

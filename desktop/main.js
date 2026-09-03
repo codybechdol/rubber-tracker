@@ -90,7 +90,7 @@ ipcMain.handle('get-local-snapshot', async () => {
 
 ipcMain.handle('save-local-snapshot', async (event, snapshot) => {
   try {
-    fs.writeFileSync(LOCAL_SNAPSHOT_PATH, JSON.stringify(snapshot, null, 2), 'utf8');
+    await fs.promises.writeFile(LOCAL_SNAPSHOT_PATH, JSON.stringify(snapshot, null, 2), 'utf8');
     return { success: true };
   } catch (err) {
     console.error('Error saving local snapshot:', err);
@@ -113,7 +113,7 @@ ipcMain.handle('get-local-outbox', async () => {
 
 ipcMain.handle('save-local-outbox', async (event, outbox) => {
   try {
-    fs.writeFileSync(LOCAL_OUTBOX_PATH, JSON.stringify(outbox, null, 2), 'utf8');
+    await fs.promises.writeFile(LOCAL_OUTBOX_PATH, JSON.stringify(outbox, null, 2), 'utf8');
     return { success: true };
   } catch (err) {
     console.error('Error saving local outbox:', err);

@@ -2334,79 +2334,7 @@ class SheetNavigator {
         `;
       }
 
-      // Auto-reconcile legacy assigned items with stale Picked For
       const isEquipmentSheet = ['gloves', 'sleeves', 'blankets', 'macks', 'hv_testers', 'phasing_sets', 'aed', 'grounds', 'hot_sticks'].includes(this.currentSheetKey);
-      if (isEquipmentSheet) {
-        const rowAssigned = String(row['Assigned To'] || row['Assigned'] || row['Holder'] || '').trim();
-        const rowStatus = String(row['Status'] || row['Item Status'] || '').trim();
-        const rowDate = String(row['Date Assigned'] || row['Date'] || '').trim();
-        const rowPicked = String(row['Picked For'] || '').trim();
-        const nonEmpHolders = ['on shelf', 'in testing', 'packed for testing', 'packed for delivery', 'failed rubber', 'failed', 'lost', 'destroyed', 'new', 'unassigned', 'n/a', '—', '-'];
-        const isAssignedWorker = (rowStatus.toLowerCase() === 'assigned' || (rowAssigned && !nonEmpHolders.includes(rowAssigned.toLowerCase())));
-
-        if (isAssignedWorker && rowDate && rowPicked) {
-          row['Picked For'] = '';
-          const pickedHName = (headers || []).find(h => /^picked\s*for$/i.test(h));
-          if (pickedHName) {
-            const pColIdx = headers.indexOf(pickedHName);
-            if (tableData.rawGrid && tableData.rawGrid[sheetRowIdx - 1] && pColIdx !== -1) {
-              tableData.rawGrid[sheetRowIdx - 1][pColIdx] = '';
-            }
-            const itemIdentifier = String(row['Serial #'] || row['Item #'] || row['Glove'] || row['Sleeve'] || row['Blanket'] || row['MACK'] || Object.values(row)[0] || '').trim();
-            this.db.addMutation({
-              action: 'UPDATE_CELL',
-              sheetName: tableData.name || this.currentSheetKey,
-              row: sheetRowIdx,
-              col: pColIdx + 1,
-              header: pickedHName,
-              itemIdentifier: itemIdentifier,
-              value: ''
-            });
-          }
-        }
-
-        // Auto-reconcile On Shelf rows that still have previous status/location (e.g. In Testing / Arnett)
-        const rowLoc = String(row['Location'] || '').trim();
-        if (rowAssigned.toLowerCase() === 'on shelf' && (rowLoc !== 'Helena' || rowStatus !== 'On Shelf')) {
-          row['Location'] = 'Helena';
-          row['Status'] = 'On Shelf';
-          const locHName = (headers || []).find(h => /^location$/i.test(h));
-          const statHName = (headers || []).find(h => /^status$|^item\s*status$/i.test(h));
-          if (tableData.rawGrid && tableData.rawGrid[sheetRowIdx - 1]) {
-            if (locHName) {
-              const lIdx = headers.indexOf(locHName);
-              if (lIdx !== -1) tableData.rawGrid[sheetRowIdx - 1][lIdx] = 'Helena';
-            }
-            if (statHName) {
-              const sIdx = headers.indexOf(statHName);
-              if (sIdx !== -1) tableData.rawGrid[sheetRowIdx - 1][sIdx] = 'On Shelf';
-            }
-          }
-          const itemIdentifier = String(row['Serial #'] || row['Item #'] || row['Glove'] || row['Sleeve'] || row['Blanket'] || row['MACK'] || Object.values(row)[0] || '').trim();
-          if (locHName) {
-            this.db.addMutation({
-              action: 'UPDATE_CELL',
-              sheetName: tableData.name || this.currentSheetKey,
-              row: sheetRowIdx,
-              col: headers.indexOf(locHName) + 1,
-              header: locHName,
-              itemIdentifier: itemIdentifier,
-              value: 'Helena'
-            });
-          }
-          if (statHName) {
-            this.db.addMutation({
-              action: 'UPDATE_CELL',
-              sheetName: tableData.name || this.currentSheetKey,
-              row: sheetRowIdx,
-              col: headers.indexOf(statHName) + 1,
-              header: statHName,
-              itemIdentifier: itemIdentifier,
-              value: 'On Shelf'
-            });
-          }
-        }
-      }
 
       html += `<tr>`;
 
@@ -2584,15 +2512,15 @@ class SheetNavigator {
           customCellHtml = `<span style="font-weight: 700; color: #60a5fa; cursor: pointer; text-decoration: underline dotted; display: inline-block; padding: 2px 4px; border-radius: 4px;" title="Click to inspect lifecycle dossier for #${this.escapeHtml(itemKey)}" onclick="if(window.itemStatsEngine){window.itemStatsEngine.openDossierModal('${this.escapeJs(itemKey)}', '${this.escapeJs(histKey)}');}">${this.escapeHtml(val)}</span>`;
         } else if (isEquipmentSheet && hLower === 'esl id' && val) {
           // ESL ID is an electronic tracking tag barcode (not linked to item lifecycle)
-          customCellHtml = `<span style="font-family: monospace; font-size: 11px; color: #94a3b8; font-weight: 500;">${this.escapeHtml(val)}</span>`;
+          customCellHtml = `<span class="cell-text" style="font-family: monospace; font-size: 11px; color: #94a3b8; font-weight: 500;">${this.escapeHtml(val)}</span>`;
         } else if (isEquipmentSheet && (hLower === 'serial #' || hLower === 'serial#' || hLower === 'serial') && val) {
           // Secondary Serial # (plain text / monospace)
-          customCellHtml = `<span style="font-family: monospace; font-size: 11.5px; color: #cbd5e1; font-weight: 500;">${this.escapeHtml(val)}</span>`;
+          customCellHtml = `<span class="cell-text" style="font-family: monospace; font-size: 11.5px; color: #cbd5e1; font-weight: 500;">${this.escapeHtml(val)}</span>`;
         } else if (isEquipmentSheet && (hLower === 'assigned to' || hLower === 'assigned' || hLower === 'holder') && val) {
           const nonEmpHolders = ['on shelf', 'in testing', 'packed for testing', 'packed for delivery', 'failed rubber', 'failed', 'lost', 'destroyed', 'new', 'unassigned', 'n/a', '—', '-'];
           const holderLower = String(val).toLowerCase().trim();
           if (!nonEmpHolders.includes(holderLower)) {
-            customCellHtml = `<span style="color: #60a5fa; cursor: pointer; text-decoration: underline dotted; font-weight: 600;" title="Click to view assignments & certs for ${this.escapeHtml(val)}" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(val)}');}">👤 ${this.escapeHtml(val)}</span>`;
+            customCellHtml = `<span class="profile-link-badge" style="color: #60a5fa; cursor: pointer; margin-right: 4px; display: inline-block;" title="Click to view assignments & certs for ${this.escapeHtml(val)}" onclick="event.stopPropagation(); if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(val)}');}">👤</span><span class="cell-text" style="font-weight: 600; color: #93c5fd;">${this.escapeHtml(val)}</span>`;
           }
         }
 
@@ -2638,7 +2566,13 @@ class SheetNavigator {
     container.querySelectorAll('td.editable').forEach(td => {
       let initialVal = '';
       td.addEventListener('focus', (e) => {
-        initialVal = e.target.textContent.trim();
+        const targetCell = td;
+        const cellTextSpan = targetCell.querySelector('.cell-text');
+        if (cellTextSpan) {
+          initialVal = cellTextSpan.textContent.trim();
+        } else {
+          initialVal = targetCell.textContent.trim().replace(/^👤\s*/, '').trim();
+        }
       });
 
       // Quick calendar picker on double-click for date cells
@@ -2683,346 +2617,384 @@ class SheetNavigator {
       });
 
       td.addEventListener('blur', async (e) => {
-        let newVal = e.target.textContent.trim();
-        const header = e.target.dataset.header || '';
-        const hLower = header.toLowerCase();
-        const isDateCol = hLower.includes('date') || hLower.includes('expiration') || hLower.includes('calibration');
+        try {
+          const targetCell = td;
+          const cellTextSpan = targetCell.querySelector('.cell-text');
+          let newVal = (cellTextSpan ? cellTextSpan.textContent : targetCell.textContent).trim().replace(/^👤\s*/, '').trim();
+          const header = targetCell.dataset.header || '';
+          const hLower = header.toLowerCase();
+          const isDateCol = hLower.includes('date') || hLower.includes('expiration') || hLower.includes('calibration');
 
-        if (isDateCol && newVal) {
-          // Normalize date to MM/DD/YYYY format
-          if (newVal.includes('/')) {
-            const p = newVal.split('/');
-            if (p.length === 3) {
-              const m = String(parseInt(p[0], 10)).padStart(2, '0');
-              const d = String(parseInt(p[1], 10)).padStart(2, '0');
-              let y = parseInt(p[2], 10);
-              if (y < 100) y = 2000 + y;
-              newVal = `${m}/${d}/${y}`;
+          if (isDateCol && newVal) {
+            // Normalize date to MM/DD/YYYY format
+            if (newVal.includes('/')) {
+              const p = newVal.split('/');
+              if (p.length === 3) {
+                const m = String(parseInt(p[0], 10)).padStart(2, '0');
+                const d = String(parseInt(p[1], 10)).padStart(2, '0');
+                let y = parseInt(p[2], 10);
+                if (y < 100) y = 2000 + y;
+                newVal = `${m}/${d}/${y}`;
+              }
+            } else if (/^\d{4}-\d{2}-\d{2}$/.test(newVal)) {
+              const p = newVal.split('-');
+              newVal = `${p[1]}/${p[2]}/${p[0]}`;
             }
-          } else if (/^\d{4}-\d{2}-\d{2}$/.test(newVal)) {
-            const p = newVal.split('-');
-            newVal = `${p[1]}/${p[2]}/${p[0]}`;
+            targetCell.textContent = newVal;
           }
-          e.target.textContent = newVal;
-        }
 
-        const sheetName = e.target.dataset.sheet;
-        const row = parseInt(e.target.dataset.row, 10);
-        const col = parseInt(e.target.dataset.col, 10);
-        const itemIdentifier = e.target.dataset.item || '';
+          const sheetName = targetCell.dataset.sheet || (tableData ? tableData.name : this.currentSheetKey);
+          const row = parseInt(targetCell.dataset.row, 10);
+          const col = parseInt(targetCell.dataset.col, 10);
+          const itemIdentifier = targetCell.dataset.item || '';
 
-        const tableData = this.db.getTable(this.currentSheetKey);
-        let tableRow = null;
-        let actualRowIdx = row;
+          const tableData = this.db.getTable(this.currentSheetKey);
+          let tableRow = null;
+          let actualRowIdx = row;
 
-        if (tableData) {
-          if (itemIdentifier && tableData.rows) {
-            tableRow = tableData.rows.find(r => {
-              const id = String(r['Serial #'] || r['Item #'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['MACK'] || r['Name'] || r['Employee Name'] || r['Job Number'] || Object.values(r)[0] || '').trim();
-              return id.toLowerCase() === itemIdentifier.toLowerCase();
-            });
-          }
-          if (itemIdentifier && tableData.rawGrid) {
-            const gIdx = tableData.rawGrid.findIndex((gr, idx) => idx > 0 && String(gr[0] || '').trim().toLowerCase() === itemIdentifier.toLowerCase());
-            if (gIdx !== -1) {
-              actualRowIdx = gIdx + 1;
+          if (tableData) {
+            if (itemIdentifier && tableData.rows) {
+              tableRow = tableData.rows.find(r => {
+                const id = String(r['Serial #'] || r['Item #'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['MACK'] || r['Name'] || r['Employee Name'] || r['Job Number'] || Object.values(r)[0] || '').trim();
+                return id.toLowerCase() === itemIdentifier.toLowerCase();
+              });
             }
-          }
-          if (!tableRow && tableData.rows && tableData.rows[actualRowIdx - 2]) {
-            tableRow = tableData.rows[actualRowIdx - 2];
-          }
-        }
-
-        const isAssignedCol = (hLower.includes('assigned') || hLower === 'holder') && !hLower.includes('date');
-        const isStatusCol = hLower === 'status' || hLower === 'item status';
-        const valLower = newVal.toLowerCase();
-        const isInventorySheet = ['gloves', 'sleeves', 'blankets', 'macks', 'hv_testers', 'phasing_sets', 'aed', 'grounds', 'hot_sticks'].includes(this.currentSheetKey);
-        const isOnShelf = valLower === 'on shelf' || valLower === 'onshelf' || valLower === 'shelf';
-
-        const isUnreconciledShelf = (isAssignedCol || isStatusCol) && isOnShelf && isInventorySheet && tableRow && (tableRow['Status'] !== 'On Shelf' || tableRow['Location'] !== 'Helena');
-
-        if (newVal === initialVal && !isUnreconciledShelf) return; // No change made!
-
-        const queueCell = async (hName, val) => {
-          if (!hName || val === undefined || !tableData) return;
-          const cIdx = (tableData.headers || []).indexOf(hName);
-          if (cIdx !== -1) {
-            await this.db.addMutation({
-              action: 'UPDATE_CELL',
-              sheetName: sheetName,
-              row: actualRowIdx,
-              col: cIdx + 1,
-              header: hName,
-              itemIdentifier: itemIdentifier,
-              value: val
-            });
-          }
-        };
-
-        const syncTableRowToGrid = () => {
-          if (tableData && tableData.rawGrid && tableData.rawGrid[actualRowIdx - 1] && tableRow) {
-            const gRow = tableData.rawGrid[actualRowIdx - 1];
-            (tableData.headers || []).forEach((h, cIdx) => {
-              if (tableRow[h] !== undefined) gRow[cIdx] = tableRow[h];
-            });
-          }
-        };
-
-        const isFailedRubber = valLower === 'failed rubber' || valLower === 'failed' || valLower === 'not repairable';
-
-        if ((isAssignedCol || isStatusCol) && isFailedRubber) {
-          const curTestDate = String((tableRow && (tableRow['Test Date'] || tableRow['Calibration Date'])) || '').trim();
-          const failResult = await this.promptFailedRubberReason(itemIdentifier, curTestDate);
-          if (!failResult) {
-            e.target.textContent = initialVal;
-            return;
-          }
-
-          const reason = typeof failResult === 'object' ? failResult.reason : failResult;
-          const failTestDate = (typeof failResult === 'object' && failResult.testDate) ? failResult.testDate : '';
-
-          const today = new Date();
-          const todayFormatted = `${String(today.getMonth() + 1).padStart(2, '0')}/${String(today.getDate()).padStart(2, '0')}/${today.getFullYear()}`;
-
-          newVal = 'Failed Rubber';
-          e.target.textContent = newVal;
-
-          const assignedColName = (tableData.headers || []).find(h => /assigned\s*to|^assigned$|^holder$/i.test(h));
-          const statusColName = (tableData.headers || []).find(h => /^status$|^item\s*status$/i.test(h));
-          const locationColName = (tableData.headers || []).find(h => /^location$/i.test(h));
-          const dateAssignedColName = (tableData.headers || []).find(h => /date\s*assigned/i.test(h));
-          const testDateColName = (tableData.headers || []).find(h => /test\s*date|calibration/i.test(h));
-          const chgOutColName = (tableData.headers || []).find(h => /change\s*out/i.test(h));
-          const pickedColName = (tableData.headers || []).find(h => /picked\s*for/i.test(h));
-          const notesColName = (tableData.headers || []).find(h => /^notes$|^note$/i.test(h));
-
-          if (tableRow) {
-            if (assignedColName) tableRow[assignedColName] = 'Failed Rubber';
-            if (statusColName) tableRow[statusColName] = 'Failed Rubber';
-            if (locationColName) tableRow[locationColName] = 'Destroyed';
-            if (dateAssignedColName) tableRow[dateAssignedColName] = todayFormatted;
-            if (testDateColName && failTestDate) tableRow[testDateColName] = failTestDate;
-            if (chgOutColName) tableRow[chgOutColName] = 'N/A';
-            if (pickedColName) tableRow[pickedColName] = '';
-            if (notesColName) tableRow[notesColName] = reason;
-          }
-
-          syncTableRowToGrid();
-
-          if (assignedColName) await queueCell(assignedColName, 'Failed Rubber');
-          if (statusColName) await queueCell(statusColName, 'Failed Rubber');
-          if (locationColName) await queueCell(locationColName, 'Destroyed');
-          if (dateAssignedColName) await queueCell(dateAssignedColName, todayFormatted);
-          if (testDateColName && failTestDate) await queueCell(testDateColName, failTestDate);
-          if (chgOutColName) await queueCell(chgOutColName, 'N/A');
-          if (pickedColName) await queueCell(pickedColName, '');
-          if (notesColName) await queueCell(notesColName, reason);
-
-          await this.db.recordItemHistoryEvent(sheetName, tableRow, `Marked Failed Rubber: ${reason}`);
-
-          if (typeof this.db.setSnapshot === 'function' && this.db.snapshot) {
-            await this.db.setSnapshot(this.db.snapshot);
-          }
-
-          this.renderActiveView();
-          return;
-        }
-
-        if ((isAssignedCol || isStatusCol) && isOnShelf && isInventorySheet) {
-          const curTestDate = String((tableRow && (tableRow['Test Date'] || tableRow['Calibration Date'])) || '').trim();
-          const curEslId = String((tableRow && tableRow['ESL ID']) || '').trim();
-          const hasEsl = (tableData.headers || []).some(h => /^esl\s*id$/i.test(h));
-
-          const shelfDetails = await this.promptOnShelfDetails(itemIdentifier, curTestDate, curEslId, hasEsl);
-          if (!shelfDetails) {
-            e.target.textContent = initialVal;
-            return;
-          }
-
-          const today = new Date();
-          const todayFormatted = `${String(today.getMonth() + 1).padStart(2, '0')}/${String(today.getDate()).padStart(2, '0')}/${today.getFullYear()}`;
-
-          newVal = 'On Shelf';
-          e.target.textContent = newVal;
-
-          const assignedColName = (tableData.headers || []).find(h => /assigned\s*to|^assigned$|^holder$/i.test(h));
-          const statusColName = (tableData.headers || []).find(h => /^status$|^item\s*status$/i.test(h));
-          const locationColName = (tableData.headers || []).find(h => /^location$/i.test(h));
-          const dateAssignedColName = (tableData.headers || []).find(h => /date\s*assigned/i.test(h));
-          const testDateColName = (tableData.headers || []).find(h => /test\s*date|calibration/i.test(h));
-          const eslColName = (tableData.headers || []).find(h => /^esl\s*id$/i.test(h));
-          const chgOutColName = (tableData.headers || []).find(h => /change\s*out/i.test(h));
-          const pickedColName = (tableData.headers || []).find(h => /^picked\s*for$/i.test(h));
-
-          // Calculate Shelf Change Out Date (1 year from test date, 2 years for Hot Sticks)
-          let calculatedShelfDate = '';
-          const tDateToUse = shelfDetails.testDate || todayFormatted;
-          const parsedTest = this.parseDate(tDateToUse) || today;
-          if (parsedTest) {
-            const nextChg = new Date(parsedTest);
-            const intervalYears = this.currentSheetKey.includes('hot_stick') ? 2 : 1;
-            nextChg.setFullYear(nextChg.getFullYear() + intervalYears);
-            calculatedShelfDate = this.formatDate(nextChg);
-          }
-
-          if (tableRow) {
-            if (assignedColName) tableRow[assignedColName] = 'On Shelf';
-            if (statusColName) tableRow[statusColName] = 'On Shelf';
-            if (locationColName) tableRow[locationColName] = 'Helena';
-            if (dateAssignedColName) tableRow[dateAssignedColName] = todayFormatted;
-            if (testDateColName && shelfDetails.testDate) tableRow[testDateColName] = shelfDetails.testDate;
-            if (eslColName && shelfDetails.eslId) tableRow[eslColName] = shelfDetails.eslId;
-            if (pickedColName) tableRow[pickedColName] = '';
-            if (chgOutColName && calculatedShelfDate) tableRow[chgOutColName] = calculatedShelfDate;
-          }
-
-          syncTableRowToGrid();
-
-          if (assignedColName) await queueCell(assignedColName, 'On Shelf');
-          if (statusColName) await queueCell(statusColName, 'On Shelf');
-          if (locationColName) await queueCell(locationColName, 'Helena');
-          if (dateAssignedColName) await queueCell(dateAssignedColName, todayFormatted);
-          if (testDateColName && shelfDetails.testDate) await queueCell(testDateColName, shelfDetails.testDate);
-          if (eslColName && shelfDetails.eslId) await queueCell(eslColName, shelfDetails.eslId);
-          if (pickedColName) await queueCell(pickedColName, '');
-          if (chgOutColName && calculatedShelfDate) await queueCell(chgOutColName, calculatedShelfDate);
-
-          await this.db.recordItemHistoryEvent(sheetName, tableRow, `Returned to Shelf (Test Date: ${shelfDetails.testDate || todayFormatted})`);
-
-          if (typeof this.db.setSnapshot === 'function' && this.db.snapshot) {
-            await this.db.setSnapshot(this.db.snapshot);
-          }
-
-          this.renderActiveView();
-          return;
-        }
-
-        if (isInventorySheet && tableRow && tableData) {
-          const assignedColName = (tableData.headers || []).find(h => /assigned\s*to|^assigned$|^holder$/i.test(h));
-          const statusColName = (tableData.headers || []).find(h => /^status$|^item\s*status$/i.test(h));
-          const locationColName = (tableData.headers || []).find(h => /^location$/i.test(h));
-          const pickedColName = (tableData.headers || []).find(h => /^picked\s*for$/i.test(h));
-
-          const curAssigned = isAssignedCol ? newVal : String(tableRow[assignedColName] || '').trim();
-          const curAssignedLower = curAssigned.toLowerCase();
-          const nonEmpHolders = ['on shelf', 'in testing', 'packed for testing', 'packed for delivery', 'failed rubber', 'failed', 'lost', 'destroyed', 'new', 'unassigned', 'n/a', '—', '-'];
-          const isAssignedToEmp = curAssigned && !nonEmpHolders.includes(curAssignedLower);
-
-          // When Assigned To is set or Date Assigned is entered for an assigned item, remove Picked For
-          if (isAssignedToEmp) {
-            if (pickedColName && tableRow[pickedColName]) {
-              tableRow[pickedColName] = '';
-              const pIdx = (tableData.headers || []).indexOf(pickedColName);
-              if (pIdx !== -1) {
-                if (tableData.rawGrid && tableData.rawGrid[actualRowIdx - 1]) tableData.rawGrid[actualRowIdx - 1][pIdx] = '';
-                await queueCell(pickedColName, '');
+            if (itemIdentifier && tableData.rawGrid) {
+              const gIdx = tableData.rawGrid.findIndex((gr, idx) => idx > 0 && String(gr[0] || '').trim().toLowerCase() === itemIdentifier.toLowerCase());
+              if (gIdx !== -1) {
+                actualRowIdx = gIdx + 1;
               }
             }
-
-            // Auto-update Status to Assigned and Location to employee location if Assigned To changed
-            if (isAssignedCol) {
-              if (statusColName && tableRow[statusColName] !== 'Assigned') {
-                tableRow[statusColName] = 'Assigned';
-                const sIdx = (tableData.headers || []).indexOf(statusColName);
-                if (sIdx !== -1) {
-                  if (tableData.rawGrid && tableData.rawGrid[actualRowIdx - 1]) tableData.rawGrid[actualRowIdx - 1][sIdx] = 'Assigned';
-                  await queueCell(statusColName, 'Assigned');
-                }
-              }
-              const empTable = this.db.getTable('employees');
-              let empLoc = '';
-              if (empTable && empTable.rows) {
-                const empMatch = empTable.rows.find(e => String(e['Name'] || e['Employee Name'] || Object.values(e)[0] || '').trim().toLowerCase() === curAssignedLower);
-                if (empMatch) empLoc = String(empMatch['Location'] || '').trim();
-              }
-              if (empLoc && locationColName) {
-                tableRow[locationColName] = empLoc;
-                const lIdx = (tableData.headers || []).indexOf(locationColName);
-                if (lIdx !== -1) {
-                  if (tableData.rawGrid && tableData.rawGrid[actualRowIdx - 1]) tableData.rawGrid[actualRowIdx - 1][lIdx] = empLoc;
-                  await queueCell(locationColName, empLoc);
-                }
-              }
+            if (!tableRow && tableData.rows && tableData.rows[actualRowIdx - 2]) {
+              tableRow = tableData.rows[actualRowIdx - 2];
             }
           }
-        }
 
-        // 1. Update in-memory row and grid
-        if (tableRow) {
-          tableRow[header] = newVal;
-        }
-        if (tableData && tableData.rawGrid && actualRowIdx && tableData.rawGrid[actualRowIdx - 1]) {
-          const cIdx = (typeof col === 'number' && col >= 1) ? (col - 1) : (tableData.headers || []).indexOf(header);
-          if (cIdx !== -1) tableData.rawGrid[actualRowIdx - 1][cIdx] = newVal;
-        }
+          const isAssignedCol = (hLower.includes('assigned') || hLower === 'holder') && !hLower.includes('date');
+          const isStatusCol = hLower === 'status' || hLower === 'item status';
+          const valLower = newVal.toLowerCase();
+          const isInventorySheet = ['gloves', 'sleeves', 'blankets', 'macks', 'hv_testers', 'phasing_sets', 'aed', 'grounds', 'hot_sticks'].includes(this.currentSheetKey);
+          const isOnShelf = valLower === 'on shelf' || valLower === 'onshelf' || valLower === 'shelf';
 
-        // 2. If Date Assigned, Test Date, or Calibration Date was changed on an inventory sheet, recalculate Change Out Date!
-        if (isInventorySheet && tableRow && tableData) {
-          const isDateAssigned = hLower.includes('date assigned');
-          const isTestDate = hLower.includes('test date') || hLower.includes('calibration');
+          const isUnreconciledShelf = (isAssignedCol || isStatusCol) && isOnShelf && isInventorySheet && tableRow && (tableRow['Status'] !== 'On Shelf' || tableRow['Location'] !== 'Helena');
 
-          if (isDateAssigned || isTestDate) {
+          if (newVal === initialVal && !isUnreconciledShelf) return; // No change made!
+
+          const queueCell = async (hName, val) => {
+            if (!hName || val === undefined || !tableData) return;
+            const cIdx = (tableData.headers || []).indexOf(hName);
+            if (cIdx !== -1) {
+              await this.db.addMutation({
+                action: 'UPDATE_CELL',
+                sheetName: sheetName,
+                row: actualRowIdx,
+                col: cIdx + 1,
+                header: hName,
+                itemIdentifier: itemIdentifier,
+                value: val
+              });
+            }
+          };
+
+          const parentTr = targetCell.closest('tr');
+          const updateRowCell = (hName, v) => {
+            if (!parentTr || !hName) return;
+            const c = parentTr.querySelector(`td[data-header="${hName}"]`);
+            if (c) {
+              const hNameLower = hName.toLowerCase();
+              const isHoldCol = (hNameLower.includes('assigned') || hNameLower === 'holder') && !hNameLower.includes('date');
+              if (isHoldCol && v && !['on shelf', 'in testing', 'packed for testing', 'packed for delivery', 'failed rubber', 'failed', 'lost', 'destroyed', 'new', 'unassigned', 'n/a', '—', '-'].includes(v.toLowerCase())) {
+                c.innerHTML = `<span class="profile-link-badge" style="color: #60a5fa; cursor: pointer; margin-right: 4px; display: inline-block;" title="Click to view assignments & certs for ${this.escapeHtml(v)}" onclick="event.stopPropagation(); if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(v)}');}">👤</span><span class="cell-text" style="font-weight: 600; color: #93c5fd;">${this.escapeHtml(v)}</span>`;
+              } else {
+                c.textContent = v;
+              }
+            }
+          };
+
+          const flashSuccess = () => {
+            targetCell.style.transition = 'background-color 0.2s ease';
+            targetCell.style.backgroundColor = 'rgba(34, 197, 94, 0.25)';
+            setTimeout(() => {
+              targetCell.style.backgroundColor = '';
+            }, 450);
+          };
+
+          const syncTableRowToGrid = () => {
+            if (tableData && tableData.rawGrid && actualRowIdx && tableData.rawGrid[actualRowIdx - 1] && tableRow) {
+              const gRow = tableData.rawGrid[actualRowIdx - 1];
+              (tableData.headers || []).forEach((h, cIdx) => {
+                if (tableRow[h] !== undefined) gRow[cIdx] = tableRow[h];
+              });
+            }
+          };
+
+          const isFailedRubber = valLower === 'failed rubber' || valLower === 'failed' || valLower === 'not repairable';
+
+          if ((isAssignedCol || isStatusCol) && isFailedRubber) {
+            const curTestDate = String((tableRow && (tableRow['Test Date'] || tableRow['Calibration Date'])) || '').trim();
+            const failResult = await this.promptFailedRubberReason(itemIdentifier, curTestDate);
+            if (!failResult) {
+              targetCell.textContent = initialVal;
+              return;
+            }
+
+            const reason = typeof failResult === 'object' ? failResult.reason : failResult;
+            const failTestDate = (typeof failResult === 'object' && failResult.testDate) ? failResult.testDate : '';
+
+            const today = new Date();
+            const todayFormatted = `${String(today.getMonth() + 1).padStart(2, '0')}/${String(today.getDate()).padStart(2, '0')}/${today.getFullYear()}`;
+
+            newVal = 'Failed Rubber';
+            targetCell.textContent = newVal;
+
+            const assignedColName = (tableData.headers || []).find(h => /assigned\s*to|^assigned$|^holder$/i.test(h));
+            const statusColName = (tableData.headers || []).find(h => /^status$|^item\s*status$/i.test(h));
+            const locationColName = (tableData.headers || []).find(h => /^location$/i.test(h));
             const dateAssignedColName = (tableData.headers || []).find(h => /date\s*assigned/i.test(h));
             const testDateColName = (tableData.headers || []).find(h => /test\s*date|calibration/i.test(h));
-            const locationColName = (tableData.headers || []).find(h => /^location$/i.test(h));
-            const assignedColName = (tableData.headers || []).find(h => /assigned\s*to|^assigned$|^holder$/i.test(h));
             const chgOutColName = (tableData.headers || []).find(h => /change\s*out/i.test(h));
+            const pickedColName = (tableData.headers || []).find(h => /picked\s*for/i.test(h));
+            const notesColName = (tableData.headers || []).find(h => /^notes$|^note$/i.test(h));
 
-            const curDateAssigned = dateAssignedColName ? (tableRow[dateAssignedColName] || '') : '';
-            const curTestDate = testDateColName ? (tableRow[testDateColName] || '') : '';
-            const curLoc = locationColName ? (tableRow[locationColName] || '') : '';
-            const curAssignedTo = assignedColName ? (tableRow[assignedColName] || '') : '';
-
-            let calculatedChgOut = '';
-            if (window.inventoryManager && typeof window.inventoryManager.calculateChangeOutDate === 'function') {
-              calculatedChgOut = window.inventoryManager.calculateChangeOutDate(
-                curDateAssigned || curTestDate,
-                curLoc,
-                curAssignedTo,
-                this.currentSheetKey,
-                {
-                  testDate: curTestDate,
-                  calibrationDate: curTestDate
-                }
-              );
+            if (tableRow) {
+              if (assignedColName) tableRow[assignedColName] = 'Failed Rubber';
+              if (statusColName) tableRow[statusColName] = 'Failed Rubber';
+              if (locationColName) tableRow[locationColName] = 'Destroyed';
+              if (dateAssignedColName) tableRow[dateAssignedColName] = todayFormatted;
+              if (testDateColName && failTestDate) tableRow[testDateColName] = failTestDate;
+              if (chgOutColName) tableRow[chgOutColName] = 'N/A';
+              if (pickedColName) tableRow[pickedColName] = '';
+              if (notesColName) tableRow[notesColName] = reason;
             }
 
-            if (calculatedChgOut && chgOutColName && calculatedChgOut !== 'N/A') {
-              tableRow[chgOutColName] = calculatedChgOut;
-              const chgIdx = (tableData.headers || []).indexOf(chgOutColName);
-              if (chgIdx !== -1 && tableData.rawGrid && tableData.rawGrid[actualRowIdx - 1]) {
-                tableData.rawGrid[actualRowIdx - 1][chgIdx] = calculatedChgOut;
+            syncTableRowToGrid();
+
+            if (assignedColName) { await queueCell(assignedColName, 'Failed Rubber'); updateRowCell(assignedColName, 'Failed Rubber'); }
+            if (statusColName) { await queueCell(statusColName, 'Failed Rubber'); updateRowCell(statusColName, 'Failed Rubber'); }
+            if (locationColName) { await queueCell(locationColName, 'Destroyed'); updateRowCell(locationColName, 'Destroyed'); }
+            if (dateAssignedColName) { await queueCell(dateAssignedColName, todayFormatted); updateRowCell(dateAssignedColName, todayFormatted); }
+            if (testDateColName && failTestDate) { await queueCell(testDateColName, failTestDate); updateRowCell(testDateColName, failTestDate); }
+            if (chgOutColName) { await queueCell(chgOutColName, 'N/A'); updateRowCell(chgOutColName, 'N/A'); }
+            if (pickedColName) { await queueCell(pickedColName, ''); updateRowCell(pickedColName, ''); }
+            if (notesColName) { await queueCell(notesColName, reason); updateRowCell(notesColName, reason); }
+
+            await this.db.recordItemHistoryEvent(sheetName, tableRow, `Marked Failed Rubber: ${reason}`);
+            flashSuccess();
+            return;
+          }
+
+          if ((isAssignedCol || isStatusCol) && isOnShelf && isInventorySheet) {
+            const curTestDate = String((tableRow && (tableRow['Test Date'] || tableRow['Calibration Date'])) || '').trim();
+            const curEslId = String((tableRow && tableRow['ESL ID']) || '').trim();
+            const hasEsl = (tableData.headers || []).some(h => /^esl\s*id$/i.test(h));
+
+            const shelfDetails = await this.promptOnShelfDetails(itemIdentifier, curTestDate, curEslId, hasEsl);
+            if (!shelfDetails) {
+              targetCell.textContent = initialVal;
+              return;
+            }
+
+            const today = new Date();
+            const todayFormatted = `${String(today.getMonth() + 1).padStart(2, '0')}/${String(today.getDate()).padStart(2, '0')}/${today.getFullYear()}`;
+
+            newVal = 'On Shelf';
+            targetCell.textContent = newVal;
+
+            const assignedColName = (tableData.headers || []).find(h => /assigned\s*to|^assigned$|^holder$/i.test(h));
+            const statusColName = (tableData.headers || []).find(h => /^status$|^item\s*status$/i.test(h));
+            const locationColName = (tableData.headers || []).find(h => /^location$/i.test(h));
+            const dateAssignedColName = (tableData.headers || []).find(h => /date\s*assigned/i.test(h));
+            const testDateColName = (tableData.headers || []).find(h => /test\s*date|calibration/i.test(h));
+            const eslColName = (tableData.headers || []).find(h => /^esl\s*id$/i.test(h));
+            const chgOutColName = (tableData.headers || []).find(h => /change\s*out/i.test(h));
+            const pickedColName = (tableData.headers || []).find(h => /^picked\s*for$/i.test(h));
+
+            // Calculate Shelf Change Out Date (1 year from test date, 2 years for Hot Sticks)
+            let calculatedShelfDate = '';
+            const tDateToUse = shelfDetails.testDate || todayFormatted;
+            const parsedTest = this.parseDate(tDateToUse) || today;
+            if (parsedTest) {
+              const nextChg = new Date(parsedTest);
+              const intervalYears = this.currentSheetKey.includes('hot_stick') ? 2 : 1;
+              nextChg.setFullYear(nextChg.getFullYear() + intervalYears);
+              calculatedShelfDate = this.formatDate(nextChg);
+            }
+
+            if (tableRow) {
+              if (assignedColName) tableRow[assignedColName] = 'On Shelf';
+              if (statusColName) tableRow[statusColName] = 'On Shelf';
+              if (locationColName) tableRow[locationColName] = 'Helena';
+              if (dateAssignedColName) tableRow[dateAssignedColName] = todayFormatted;
+              if (testDateColName && shelfDetails.testDate) tableRow[testDateColName] = shelfDetails.testDate;
+              if (eslColName && shelfDetails.eslId) tableRow[eslColName] = shelfDetails.eslId;
+              if (pickedColName) tableRow[pickedColName] = '';
+              if (chgOutColName && calculatedShelfDate) tableRow[chgOutColName] = calculatedShelfDate;
+            }
+
+            syncTableRowToGrid();
+
+            if (assignedColName) { await queueCell(assignedColName, 'On Shelf'); updateRowCell(assignedColName, 'On Shelf'); }
+            if (statusColName) { await queueCell(statusColName, 'On Shelf'); updateRowCell(statusColName, 'On Shelf'); }
+            if (locationColName) { await queueCell(locationColName, 'Helena'); updateRowCell(locationColName, 'Helena'); }
+            if (dateAssignedColName) { await queueCell(dateAssignedColName, todayFormatted); updateRowCell(dateAssignedColName, todayFormatted); }
+            if (testDateColName && shelfDetails.testDate) { await queueCell(testDateColName, shelfDetails.testDate); updateRowCell(testDateColName, shelfDetails.testDate); }
+            if (eslColName && shelfDetails.eslId) { await queueCell(eslColName, shelfDetails.eslId); updateRowCell(eslColName, shelfDetails.eslId); }
+            if (pickedColName) { await queueCell(pickedColName, ''); updateRowCell(pickedColName, ''); }
+            if (chgOutColName && calculatedShelfDate) { await queueCell(chgOutColName, calculatedShelfDate); updateRowCell(chgOutColName, calculatedShelfDate); }
+
+            await this.db.recordItemHistoryEvent(sheetName, tableRow, `Returned to Shelf (Test Date: ${shelfDetails.testDate || todayFormatted})`);
+            flashSuccess();
+            return;
+          }
+
+          if (isInventorySheet && tableRow && tableData) {
+            const assignedColName = (tableData.headers || []).find(h => /assigned\s*to|^assigned$|^holder$/i.test(h));
+            const statusColName = (tableData.headers || []).find(h => /^status$|^item\s*status$/i.test(h));
+            const locationColName = (tableData.headers || []).find(h => /^location$/i.test(h));
+            const pickedColName = (tableData.headers || []).find(h => /^picked\s*for$/i.test(h));
+
+            const curAssigned = isAssignedCol ? newVal : String(tableRow[assignedColName] || '').trim();
+            const curAssignedLower = curAssigned.toLowerCase();
+            const nonEmpHolders = ['on shelf', 'in testing', 'packed for testing', 'packed for delivery', 'failed rubber', 'failed', 'lost', 'destroyed', 'new', 'unassigned', 'n/a', '—', '-'];
+            const isAssignedToEmp = curAssigned && !nonEmpHolders.includes(curAssignedLower);
+
+            // When Assigned To is set or Date Assigned is entered for an assigned item, remove Picked For
+            if (isAssignedToEmp) {
+              if (pickedColName && tableRow[pickedColName]) {
+                tableRow[pickedColName] = '';
+                const pIdx = (tableData.headers || []).indexOf(pickedColName);
+                if (pIdx !== -1) {
+                  if (tableData.rawGrid && tableData.rawGrid[actualRowIdx - 1]) tableData.rawGrid[actualRowIdx - 1][pIdx] = '';
+                  await queueCell(pickedColName, '');
+                  updateRowCell(pickedColName, '');
+                }
               }
-              await queueCell(chgOutColName, calculatedChgOut);
+
+              // Auto-update Status to Assigned and Location to employee location if Assigned To changed
+              if (isAssignedCol) {
+                if (statusColName && tableRow[statusColName] !== 'Assigned') {
+                  tableRow[statusColName] = 'Assigned';
+                  const sIdx = (tableData.headers || []).indexOf(statusColName);
+                  if (sIdx !== -1) {
+                    if (tableData.rawGrid && tableData.rawGrid[actualRowIdx - 1]) tableData.rawGrid[actualRowIdx - 1][sIdx] = 'Assigned';
+                    await queueCell(statusColName, 'Assigned');
+                    updateRowCell(statusColName, 'Assigned');
+                  }
+                }
+                const empTable = this.db.getTable('employees');
+                let empLoc = '';
+                if (empTable && empTable.rows) {
+                  const empMatch = empTable.rows.find(e => String(e['Name'] || e['Employee Name'] || Object.values(e)[0] || '').trim().toLowerCase() === curAssignedLower);
+                  if (empMatch) empLoc = String(empMatch['Location'] || '').trim();
+                }
+                if (empLoc && locationColName) {
+                  tableRow[locationColName] = empLoc;
+                  const lIdx = (tableData.headers || []).indexOf(locationColName);
+                  if (lIdx !== -1) {
+                    if (tableData.rawGrid && tableData.rawGrid[actualRowIdx - 1]) tableData.rawGrid[actualRowIdx - 1][lIdx] = empLoc;
+                    await queueCell(locationColName, empLoc);
+                    updateRowCell(locationColName, empLoc);
+                  }
+                }
+              }
             }
           }
+
+          // 1. Update in-memory row and grid
+          if (tableRow) {
+            tableRow[header] = newVal;
+          }
+          if (tableData && tableData.rawGrid && actualRowIdx && tableData.rawGrid[actualRowIdx - 1]) {
+            const cIdx = (typeof col === 'number' && col >= 1) ? (col - 1) : (tableData.headers || []).indexOf(header);
+            if (cIdx !== -1) tableData.rawGrid[actualRowIdx - 1][cIdx] = newVal;
+          }
+
+          // 2. If Date Assigned, Test Date, or Calibration Date was changed on an inventory sheet, recalculate Change Out Date!
+          if (isInventorySheet && tableRow && tableData) {
+            const isDateAssigned = hLower.includes('date assigned');
+            const isTestDate = hLower.includes('test date') || hLower.includes('calibration');
+
+            if (isDateAssigned || isTestDate) {
+              const dateAssignedColName = (tableData.headers || []).find(h => /date\s*assigned/i.test(h));
+              const testDateColName = (tableData.headers || []).find(h => /test\s*date|calibration/i.test(h));
+              const locationColName = (tableData.headers || []).find(h => /^location$/i.test(h));
+              const assignedColName = (tableData.headers || []).find(h => /assigned\s*to|^assigned$|^holder$/i.test(h));
+              const chgOutColName = (tableData.headers || []).find(h => /change\s*out/i.test(h));
+
+              const curDateAssigned = dateAssignedColName ? (tableRow[dateAssignedColName] || '') : '';
+              const curTestDate = testDateColName ? (tableRow[testDateColName] || '') : '';
+              const curLoc = locationColName ? (tableRow[locationColName] || '') : '';
+              const curAssignedTo = assignedColName ? (tableRow[assignedColName] || '') : '';
+
+              const dateAssignedVal = isDateAssigned ? newVal : curDateAssigned;
+              const testDateVal = isTestDate ? newVal : curTestDate;
+
+              let calculatedChgOut = '';
+              if (window.inventoryManager && typeof window.inventoryManager.calculateChangeOutDate === 'function') {
+                calculatedChgOut = window.inventoryManager.calculateChangeOutDate(
+                  curDateAssigned || curTestDate,
+                  curLoc,
+                  curAssignedTo,
+                  this.currentSheetKey,
+                  {
+                    testDate: curTestDate,
+                    calibrationDate: curTestDate
+                  }
+                );
+              }
+
+              if (calculatedChgOut && chgOutColName && calculatedChgOut !== 'N/A') {
+                tableRow[chgOutColName] = calculatedChgOut;
+                const chgIdx = (tableData.headers || []).indexOf(chgOutColName);
+                if (chgIdx !== -1 && tableData.rawGrid && tableData.rawGrid[actualRowIdx - 1]) {
+                  tableData.rawGrid[actualRowIdx - 1][chgIdx] = calculatedChgOut;
+                }
+                await queueCell(chgOutColName, calculatedChgOut);
+                updateRowCell(chgOutColName, calculatedChgOut);
+              }
+            }
+          }
+
+          // 3. If Date Assigned was edited on an inventory sheet, sync date to matching history entry
+          if (isInventorySheet && hLower.includes('date assigned') && tableRow) {
+            await this.db.recordItemHistoryEvent(sheetName, tableRow, tableRow['Notes'] || '');
+          }
+
+          syncTableRowToGrid();
+
+          await this.db.addMutation({
+            action: 'UPDATE_CELL',
+            sheetName: sheetName,
+            row: actualRowIdx,
+            col: col,
+            header: header,
+            itemIdentifier: itemIdentifier,
+            oldValue: initialVal,
+            value: newVal
+          });
+
+          // Update current cell presentation if it's Assigned To
+          if (isAssignedCol && newVal) {
+            const nonEmpHolders = ['on shelf', 'in testing', 'packed for testing', 'packed for delivery', 'failed rubber', 'failed', 'lost', 'destroyed', 'new', 'unassigned', 'n/a', '—', '-'];
+            if (!nonEmpHolders.includes(newVal.toLowerCase())) {
+              targetCell.innerHTML = `<span class="profile-link-badge" style="color: #60a5fa; cursor: pointer; margin-right: 4px; display: inline-block;" title="Click to view assignments & certs for ${this.escapeHtml(newVal)}" onclick="event.stopPropagation(); if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(newVal)}');}">👤</span><span class="cell-text" style="font-weight: 600; color: #93c5fd;">${this.escapeHtml(newVal)}</span>`;
+            } else {
+              targetCell.textContent = newVal;
+            }
+          } else if (!targetCell.querySelector('.cell-text')) {
+            targetCell.textContent = newVal;
+          }
+
+          flashSuccess();
+        } catch (err) {
+          console.error('Error committing inline edit:', err);
         }
-
-        syncTableRowToGrid();
-
-        await this.db.addMutation({
-          action: 'UPDATE_CELL',
-          sheetName: sheetName,
-          row: actualRowIdx,
-          col: col,
-          header: header,
-          itemIdentifier: itemIdentifier,
-          oldValue: initialVal,
-          value: newVal
-        });
-
-        if (typeof this.db.setSnapshot === 'function' && this.db.snapshot) {
-          await this.db.setSnapshot(this.db.snapshot);
-        }
-
-        // Re-render active view to immediately reflect updates
-        this.renderActiveView();
       });
 
       td.addEventListener('keydown', (e) => {
         if (e.key === 'Enter') {
           e.preventDefault();
-          e.target.blur();
+          td.blur();
         }
       });
     });
@@ -3121,6 +3093,7 @@ class SheetNavigator {
       const cleanup = () => {
         modal.classList.remove('active');
         modal.style.display = 'none';
+        modal.onclick = null;
         if (closeBtn) closeBtn.onclick = null;
         if (cancelBtn) cancelBtn.onclick = null;
         if (testPicker) testPicker.onchange = null;
@@ -3158,6 +3131,9 @@ class SheetNavigator {
         resolve(null);
       };
 
+      modal.onclick = (e) => {
+        if (e.target === modal) handleCancel();
+      };
       if (closeBtn) closeBtn.onclick = handleCancel;
       if (cancelBtn) cancelBtn.onclick = handleCancel;
       document.addEventListener('keydown', handleEsc);
@@ -3264,6 +3240,7 @@ class SheetNavigator {
       const cleanup = () => {
         modal.classList.remove('active');
         modal.style.display = 'none';
+        modal.onclick = null;
         if (closeBtn) closeBtn.onclick = null;
         if (cancelBtn) cancelBtn.onclick = null;
         if (confirmBtn) confirmBtn.onclick = null;
@@ -3301,6 +3278,9 @@ class SheetNavigator {
         });
       };
 
+      modal.onclick = (e) => {
+        if (e.target === modal) handleCancel();
+      };
       if (closeBtn) closeBtn.onclick = handleCancel;
       if (cancelBtn) cancelBtn.onclick = handleCancel;
       if (confirmBtn) confirmBtn.onclick = handleConfirm;

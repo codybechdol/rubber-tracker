@@ -174,6 +174,10 @@ class LocalDatabase {
 
   async persistSnapshot(snapshot = this.snapshot) {
     if (!snapshot) return;
+    if (this._persistTimer) {
+      clearTimeout(this._persistTimer);
+      this._persistTimer = null;
+    }
     if (window.desktopAPI) {
       await window.desktopAPI.saveLocalSnapshot(snapshot);
       return;
@@ -198,6 +202,27 @@ class LocalDatabase {
       } catch (lsErr) {
         console.warn('localStorage persist failed (quota exceeded):', lsErr);
       }
+    }
+  }
+
+  schedulePersistSnapshot(snapshot = this.snapshot, delayMs = 600) {
+    if (this._persistTimer) {
+      clearTimeout(this._persistTimer);
+    }
+    return new Promise((resolve) => {
+      this._persistTimer = setTimeout(async () => {
+        this._persistTimer = null;
+        await this.persistSnapshot(snapshot);
+        resolve();
+      }, delayMs);
+    });
+  }
+
+  async flushPersist() {
+    if (this._persistTimer) {
+      clearTimeout(this._persistTimer);
+      this._persistTimer = null;
+      await this.persistSnapshot(this.snapshot);
     }
   }
 
@@ -794,7 +819,32 @@ class LocalDatabase {
         const lAssigned = String(latest['Assigned To'] || latest['Status'] || '').trim().toLowerCase();
         const lLoc = String(latest['Location'] || '').trim().toLowerCase();
         if (lAssigned === assignedTo.toLowerCase() && lLoc === location.toLowerCase()) {
-          return; // Already recorded
+          const newDate = String(itemRow['Date Assigned'] || itemRow['Date'] || '').trim();
+          const curDate = String(latest['Date Assigned'] || latest['Date'] || '').trim();
+          if (newDate && newDate !== curDate) {
+            latest['Date Assigned'] = newDate;
+            if (itemRow['Notes'] !== undefined) latest['Notes'] = itemRow['Notes'];
+            if (histTable.rawGrid && histTable.headers) {
+              const dateColIdx = histTable.headers.findIndex(h => /date\s*assigned|^date$/i.test(h));
+              const rIdx = latest._rowIdx || (histTable.rows.indexOf(latest) !== -1 ? histTable.rows.indexOf(latest) + 2 : null);
+              if (rIdx && histTable.rawGrid[rIdx - 1] && dateColIdx !== -1) {
+                histTable.rawGrid[rIdx - 1][dateColIdx] = newDate;
+              }
+              if (rIdx && dateColIdx !== -1) {
+                await this.addMutation({
+                  action: 'UPDATE_CELL',
+                  sheetName: histTable.name,
+                  row: rIdx,
+                  col: dateColIdx + 1,
+                  header: histTable.headers[dateColIdx],
+                  itemIdentifier: itemNum,
+                  value: newDate
+                });
+              }
+            }
+            this.schedulePersistSnapshot(this.snapshot, 600);
+          }
+          return; // Already recorded & date synced
         }
       }
     }
@@ -993,6 +1043,98 @@ class LocalDatabase {
     return true;
   }
 
+  /**
+   * Updates fields of a single history record in a history table and queues UPDATE_CELL mutations
+   */
+  async updateHistoryRow(historyTableKey, matchFnOrRowObj, updatedFields = {}) {
+    const table = this.getTable(historyTableKey);
+    if (!table || !table.rows || !updatedFields || Object.keys(updatedFields).length === 0) return false;
+
+    let targetRow = null;
+    let rowIdx = -1;
+
+    if (typeof matchFnOrRowObj === 'function') {
+      rowIdx = table.rows.findIndex(matchFnOrRowObj);
+      if (rowIdx !== -1) targetRow = table.rows[rowIdx];
+    } else if (typeof matchFnOrRowObj === 'object') {
+      rowIdx = table.rows.indexOf(matchFnOrRowObj);
+      if (rowIdx !== -1) {
+        targetRow = table.rows[rowIdx];
+      } else {
+        const obj = matchFnOrRowObj;
+        const oDate = String(obj['Date Assigned'] || obj['Date'] || obj['Action Date'] || '').trim();
+        const oItem = String(obj['Item #'] || obj['Item'] || obj['Serial #'] || obj['Glove'] || obj['Sleeve'] || obj['Blanket'] || '').trim();
+        const oAssigned = String(obj['Assigned To'] || obj['Employee Name'] || obj['Employee'] || '').trim();
+        const oNotes = String(obj['Notes'] || obj['Note'] || '').trim();
+
+        rowIdx = table.rows.findIndex(r => {
+          const rDate = String(r['Date Assigned'] || r['Date'] || r['Action Date'] || '').trim();
+          const rItem = String(r['Item #'] || r['Item'] || r['Serial #'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || '').trim();
+          const rAssigned = String(r['Assigned To'] || r['Employee Name'] || r['Employee'] || '').trim();
+          const rNotes = String(r['Notes'] || r['Note'] || '').trim();
+          return rDate === oDate && rItem === oItem && rAssigned === oAssigned && (oNotes ? rNotes === oNotes : true);
+        });
+        if (rowIdx !== -1) targetRow = table.rows[rowIdx];
+      }
+    }
+
+    if (!targetRow || rowIdx === -1) return false;
+
+    const itemNum = String(targetRow['Item #'] || targetRow['Item'] || targetRow['Serial #'] || targetRow['Glove'] || targetRow['Sleeve'] || targetRow['Blanket'] || '').trim();
+
+    // Determine grid row index (1-indexed for sheet)
+    let gridIdx = -1;
+    if (table.rawGrid) {
+      if (targetRow._rowIdx && targetRow._rowIdx <= table.rawGrid.length) {
+        gridIdx = targetRow._rowIdx - 1;
+      } else {
+        const oDate = String(targetRow['Date Assigned'] || targetRow['Date'] || '').trim();
+        gridIdx = table.rawGrid.findIndex((gr, idx) => {
+          if (idx === 0) return false;
+          const grDate = String(gr[0] || '').trim();
+          const grItem = String(gr[1] || '').trim();
+          return (oDate ? grDate === oDate : true) && (itemNum ? grItem === itemNum : true);
+        });
+      }
+    }
+
+    const actualRowIdx = gridIdx !== -1 ? gridIdx + 1 : (targetRow._rowIdx || rowIdx + 2);
+
+    for (const [key, newVal] of Object.entries(updatedFields)) {
+      const oldVal = targetRow[key];
+      targetRow[key] = newVal;
+
+      let colIdx = -1;
+      if (table.headers) {
+        colIdx = table.headers.indexOf(key);
+        if (colIdx === -1) {
+          colIdx = table.headers.findIndex(h => h.toLowerCase() === key.toLowerCase());
+        }
+      }
+
+      if (gridIdx !== -1 && colIdx !== -1 && table.rawGrid && table.rawGrid[gridIdx]) {
+        table.rawGrid[gridIdx][colIdx] = newVal;
+      }
+
+      if (colIdx !== -1) {
+        await this.addMutation({
+          action: 'UPDATE_CELL',
+          sheetName: table.name,
+          row: actualRowIdx,
+          col: colIdx + 1,
+          header: table.headers[colIdx],
+          itemIdentifier: itemNum,
+          oldValue: oldVal,
+          value: newVal
+        });
+      }
+    }
+
+    this.schedulePersistSnapshot(this.snapshot, 600);
+    this.notify();
+    return true;
+  }
+
   async replaceSwapTable(tableKey, rawGrid, headers, rows) {
     if (!this.snapshot) this.snapshot = { tables: {}, configs: {} };
     if (!this.snapshot.tables) this.snapshot.tables = {};
@@ -1066,7 +1208,7 @@ class LocalDatabase {
         } else {
           try { localStorage.setItem('sa_outbox', JSON.stringify(this.outbox)); } catch (e) {}
         }
-        await this.persistSnapshot(this.snapshot);
+        this.schedulePersistSnapshot(this.snapshot, 600);
         this.notify();
         return this.outbox[existingIdx];
       }
@@ -1090,7 +1232,7 @@ class LocalDatabase {
         } else {
           try { localStorage.setItem('sa_outbox', JSON.stringify(this.outbox)); } catch (e) {}
         }
-        await this.persistSnapshot(this.snapshot);
+        this.schedulePersistSnapshot(this.snapshot, 600);
         this.notify();
         return this.outbox[existingIdx];
       }
@@ -1111,7 +1253,7 @@ class LocalDatabase {
         } else {
           try { localStorage.setItem('sa_outbox', JSON.stringify(this.outbox)); } catch (e) {}
         }
-        await this.persistSnapshot(this.snapshot);
+        this.schedulePersistSnapshot(this.snapshot, 600);
         this.notify();
         return this.outbox[existingIdx];
       }
@@ -1133,7 +1275,7 @@ class LocalDatabase {
     } else {
       try { localStorage.setItem('sa_outbox', JSON.stringify(this.outbox)); } catch (e) {}
     }
-    await this.persistSnapshot(this.snapshot);
+    this.schedulePersistSnapshot(this.snapshot, 600);
 
     this.notify();
     return mutRecord;
