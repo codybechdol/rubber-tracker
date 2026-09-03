@@ -336,6 +336,10 @@
                 🏖️ Holidays
               </button>
 
+              <button class="btn btn-secondary" onclick="window.tripPlanner.openAddManualTaskModal()" style="font-size: 11px; font-weight: 700; color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4); display: flex; align-items: center; gap: 4px;" title="Add custom manual task directly to Trip Planner">
+                <span>➕</span> Manual Task
+              </button>
+
               <button class="btn btn-primary" onclick="window.timeBreakdownEngine.openModal()" style="font-size: 11px; font-weight: 700; background: linear-gradient(135deg, #10b981 0%, #059669 100%); border: none; display: flex; align-items: center; gap: 4px; box-shadow: 0 2px 6px rgba(16, 185, 129, 0.3);" title="Generate daily accomplishments breakdown for timesheet">
                 <span>📝</span> Accomplishments
               </button>
@@ -843,6 +847,90 @@
       </div>
     </div>
   </div>
+
+  <!-- Add Manual Task Modal (Trip Planner) -->
+  <div id="manual-task-modal" class="modal-overlay">
+    <div class="modal-box" style="max-width: 540px; width: 92%;">
+      <div class="modal-header" style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); color: white;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 18px;">📋</span>
+          <span id="manual-task-modal-title" style="font-weight: 800; font-size: 15px;">Add Manual Task</span>
+        </div>
+        <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 12px; background: rgba(0,0,0,0.2); border: none; color: white; cursor: pointer;" onclick="window.tripPlanner.closeManualTaskModal()">✕</button>
+      </div>
+      <div class="modal-body" style="padding: 20px; display: flex; flex-direction: column; gap: 14px;">
+        <input type="hidden" id="manual-task-edit-id" value="">
+        <div>
+          <label style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; letter-spacing: 0.5px;">TASK TITLE / DESCRIPTION *</label>
+          <input type="text" id="manual-task-title-input" class="form-control" placeholder="e.g. Graybar supply pickup, shop organizing, truck 102 audit..." style="width: 100%; box-sizing: border-box; font-size: 13px; font-weight: 600; padding: 8px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;" onkeydown="if(event.key==='Enter'){window.tripPlanner.saveManualTaskFromModal();}">
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+          <div>
+            <label style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; letter-spacing: 0.5px;">SCHEDULED DATE *</label>
+            <input type="date" id="manual-task-date-input" class="form-control" style="width: 100%; box-sizing: border-box; font-size: 13px; padding: 7px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
+          </div>
+          <div>
+            <label style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; letter-spacing: 0.5px;">LOCATION / HUB</label>
+            <input type="text" id="manual-task-loc-input" list="trip-locations-datalist" class="form-control" placeholder="e.g. Helena HQ, Shop, Warehouse..." style="width: 100%; box-sizing: border-box; font-size: 13px; padding: 7px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
+          </div>
+        </div>
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+          <div>
+            <label style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; letter-spacing: 0.5px;">TIME / WINDOW (OPTIONAL)</label>
+            <input type="text" id="manual-task-time-input" class="form-control" placeholder="e.g. 09:00 AM, Morning, All Day" style="width: 100%; box-sizing: border-box; font-size: 13px; padding: 7px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
+          </div>
+          <div>
+            <label style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; letter-spacing: 0.5px;">PRIORITY</label>
+            <select id="manual-task-priority-input" class="form-control" style="width: 100%; box-sizing: border-box; font-size: 13px; padding: 7px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
+              <option value="Normal">Normal Priority</option>
+              <option value="High">🔴 High Priority</option>
+              <option value="Low">Low / Flexible</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <label style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; letter-spacing: 0.5px;">NOTES / INSTRUCTIONS (OPTIONAL)</label>
+          <textarea id="manual-task-notes-input" class="form-control" rows="2" placeholder="Add any details, contact info, part numbers, or checklist items..." style="width: 100%; box-sizing: border-box; font-size: 12px; resize: vertical; padding: 8px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center; padding: 14px 20px; background: var(--bg-secondary); border-top: 1px solid var(--border-color);">
+        <button class="btn btn-secondary" onclick="window.tripPlanner.closeManualTaskModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="window.tripPlanner.saveManualTaskFromModal()" style="font-weight: 700; display: flex; align-items: center; gap: 6px; background: #3b82f6; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; color: #fff;">
+          <span>💾</span> Save Task
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Datalist for Trip Planner Montana Locations & Hubs -->
+  <datalist id="trip-locations-datalist">
+    <option value="Helena HQ">
+    <option value="Helena Shop">
+    <option value="Helena Warehouse">
+    <option value="Bozeman">
+    <option value="Belgrade">
+    <option value="Belgrade Dock">
+    <option value="Butte">
+    <option value="Great Falls">
+    <option value="Missoula">
+    <option value="Billings">
+    <option value="Three Forks">
+    <option value="Deer Lodge">
+    <option value="Dillon">
+    <option value="Kalispell">
+    <option value="Stanford">
+    <option value="Raynesford Sub">
+    <option value="Anaconda">
+    <option value="Three Rivers Sub">
+    <option value="Manhattan">
+    <option value="Livingston">
+    <option value="Big Sky">
+    <option value="Hamilton">
+    <option value="Darby">
+    <option value="Miles City">
+    <option value="Glendive">
+    <option value="Sidney">
+  </datalist>
 
   <!-- Generated Purchase Order Modal -->
   <div id="procurement-po-modal" class="modal-overlay">

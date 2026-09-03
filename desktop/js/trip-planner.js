@@ -83,6 +83,7 @@ class TripPlannerApp {
   loadSavedTrips() {
     this.plannedTrips = this.db.getPlannedTrips() || {};
     this.holidaysMap = this.loadHolidays();
+    this.manualTasks = this.loadManualTasks();
     try {
       const savedSchedule = localStorage.getItem('sa_work_schedule');
       if (savedSchedule) {
@@ -150,6 +151,150 @@ class TripPlannerApp {
       localStorage.setItem('sa_work_schedule', this.activeSchedule);
     } catch (e) {}
     this.renderPlanner();
+  }
+
+  loadManualTasks() {
+    try {
+      const snap = this.db.getSnapshot();
+      if (snap && snap.configs && Array.isArray(snap.configs.manual_tasks)) {
+        return snap.configs.manual_tasks;
+      }
+      const raw = localStorage.getItem('sa_trip_manual_tasks');
+      if (raw) return JSON.parse(raw);
+    } catch (e) {}
+    return [];
+  }
+
+  saveManualTasks(tasks) {
+    this.manualTasks = tasks || this.manualTasks || [];
+    try {
+      localStorage.setItem('sa_trip_manual_tasks', JSON.stringify(this.manualTasks));
+      const snap = this.db.getSnapshot();
+      if (snap) {
+        if (!snap.configs) snap.configs = {};
+        snap.configs.manual_tasks = this.manualTasks;
+        this.db.setSnapshot(snap);
+      }
+    } catch (e) {}
+  }
+
+  getManualTasksForDate(dateKey) {
+    if (!this.manualTasks) this.manualTasks = this.loadManualTasks();
+    return this.manualTasks.filter(t => t.dateKey === dateKey);
+  }
+
+  addManualTask(dateKey, taskData) {
+    if (!this.manualTasks) this.manualTasks = this.loadManualTasks();
+    const title = (typeof taskData === 'string' ? taskData : taskData.title || '').trim();
+    if (!title) return null;
+
+    const newTask = {
+      id: 'mt_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+      dateKey: dateKey,
+      title: title,
+      location: (taskData.location || '').trim(),
+      time: (taskData.time || '').trim(),
+      priority: (taskData.priority || 'Normal').trim(),
+      notes: (taskData.notes || '').trim(),
+      status: 'Pending',
+      createdAt: new Date().toISOString()
+    };
+
+    this.manualTasks.push(newTask);
+    this.saveManualTasks(this.manualTasks);
+    this.renderPlanner();
+    return newTask;
+  }
+
+  toggleManualTask(taskId) {
+    if (!this.manualTasks) this.manualTasks = this.loadManualTasks();
+    const task = this.manualTasks.find(t => t.id === taskId);
+    if (task) {
+      task.status = task.status === 'Complete' ? 'Pending' : 'Complete';
+      task.completedAt = task.status === 'Complete' ? new Date().toISOString() : null;
+      this.saveManualTasks(this.manualTasks);
+      this.renderPlanner();
+    }
+  }
+
+  deleteManualTask(taskId) {
+    if (!this.manualTasks) this.manualTasks = this.loadManualTasks();
+    this.manualTasks = this.manualTasks.filter(t => t.id !== taskId);
+    this.saveManualTasks(this.manualTasks);
+    this.renderPlanner();
+  }
+
+  openAddManualTaskModal(dateKey = '', displayDate = '') {
+    const modal = document.getElementById('manual-task-modal');
+    if (!modal) return;
+
+    const titleEl = document.getElementById('manual-task-modal-title');
+    const dateInput = document.getElementById('manual-task-date-input');
+    const titleInput = document.getElementById('manual-task-title-input');
+    const locInput = document.getElementById('manual-task-loc-input');
+    const timeInput = document.getElementById('manual-task-time-input');
+    const prioInput = document.getElementById('manual-task-priority-input');
+    const notesInput = document.getElementById('manual-task-notes-input');
+    const editIdInput = document.getElementById('manual-task-edit-id');
+
+    if (editIdInput) editIdInput.value = '';
+    if (titleInput) titleInput.value = '';
+    if (timeInput) timeInput.value = '';
+    if (prioInput) prioInput.value = 'Normal';
+    if (notesInput) notesInput.value = '';
+
+    const targetDate = dateKey || new Date().toISOString().split('T')[0];
+    if (dateInput) dateInput.value = targetDate;
+
+    const trips = this.getTripsForDate(targetDate);
+    if (locInput) {
+      locInput.value = trips.length > 0 ? trips[0].location : 'Helena HQ';
+    }
+
+    if (titleEl) {
+      titleEl.textContent = displayDate ? `Add Manual Task • ${displayDate}` : `Add Manual Task (${targetDate})`;
+    }
+
+    modal.classList.add('active');
+    setTimeout(() => {
+      if (titleInput) titleInput.focus();
+    }, 100);
+  }
+
+  closeManualTaskModal() {
+    const modal = document.getElementById('manual-task-modal');
+    if (modal) modal.classList.remove('active');
+  }
+
+  saveManualTaskFromModal() {
+    const dateInput = document.getElementById('manual-task-date-input');
+    const titleInput = document.getElementById('manual-task-title-input');
+    const locInput = document.getElementById('manual-task-loc-input');
+    const timeInput = document.getElementById('manual-task-time-input');
+    const prioInput = document.getElementById('manual-task-priority-input');
+    const notesInput = document.getElementById('manual-task-notes-input');
+
+    const title = titleInput ? titleInput.value.trim() : '';
+    const dateKey = dateInput ? dateInput.value.trim() : '';
+
+    if (!title) {
+      if (titleInput) titleInput.focus();
+      return;
+    }
+    if (!dateKey) {
+      if (dateInput) dateInput.focus();
+      return;
+    }
+
+    this.addManualTask(dateKey, {
+      title: title,
+      location: locInput ? locInput.value : '',
+      time: timeInput ? timeInput.value : '',
+      priority: prioInput ? prioInput.value : 'Normal',
+      notes: notesInput ? notesInput.value : ''
+    });
+
+    this.closeManualTaskModal();
   }
 
   getTripsForDate(dateKey) {
@@ -1113,26 +1258,78 @@ class TripPlannerApp {
             `;
           }
         } else {
+          const hasOtherItems = (drugTests.length > 0) || (this.getManualTasksForDate(dateKey).length > 0);
           tripsHtml = `
-            <div style="color: var(--text-muted); font-size: 11px; text-align: center; margin-top: ${drugTests.length > 0 ? '4px' : '30px'}; border: 1px dashed var(--border-color); border-radius: 6px; padding: ${drugTests.length > 0 ? '8px' : '14px'};">
+            <div style="color: var(--text-muted); font-size: 11px; text-align: center; margin-top: ${hasOtherItems ? '4px' : '30px'}; border: 1px dashed var(--border-color); border-radius: 6px; padding: ${hasOtherItems ? '8px' : '14px'};">
               ${isHoliday ? '🏖️ Holiday Day' : '+ Drop city here'}
             </div>
           `;
         }
 
-        const cardsHtml = drugTestsHtml + tripsHtml;
+        // 3. Render Manual Tasks (Separate from PPE/Equipment tasks)
+        const manualTasks = this.getManualTasksForDate(dateKey);
+        let manualTasksHtml = '';
+        if (manualTasks.length > 0) {
+          const pendingCount = manualTasks.filter(m => m.status !== 'Complete').length;
+          manualTasksHtml = `
+            <div class="manual-tasks-day-section" style="margin-bottom: 8px; display: flex; flex-direction: column; gap: 5px;">
+              <div style="font-size: 10.5px; font-weight: 800; color: #93c5fd; display: flex; align-items: center; justify-content: space-between; padding: 3px 6px; background: rgba(59, 130, 246, 0.12); border-radius: 4px; border-left: 3px solid #3b82f6;">
+                <span style="display: flex; align-items: center; gap: 4px;">📋 Tasks (${pendingCount}/${manualTasks.length})</span>
+                <button class="btn btn-secondary" style="padding: 1px 6px; font-size: 9.5px; color: #93c5fd; border-color: rgba(59, 130, 246, 0.35); background: rgba(59, 130, 246, 0.08); cursor: pointer;" onclick="window.tripPlanner.openAddManualTaskModal('${dateKey}', '${this.escapeJs(day.dayName)}, ${this.escapeJs(day.formattedDate)}')" title="Add task to ${day.dayName}">+ Add</button>
+              </div>
+              ${manualTasks.map(mt => {
+                const isDone = mt.status === 'Complete';
+                return `
+                  <div class="manual-task-card" style="background: var(--bg-primary); border: 1px solid ${isDone ? 'rgba(16, 185, 129, 0.3)' : 'rgba(59, 130, 246, 0.3)'}; border-left: 4px solid ${isDone ? '#10b981' : (mt.priority === 'High' ? '#ef4444' : '#3b82f6')}; border-radius: 6px; padding: 6px 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.2); opacity: ${isDone ? '0.65' : '1'}; transition: opacity 0.2s;">
+                    <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 6px;">
+                      <div style="display: flex; align-items: flex-start; gap: 7px; flex: 1; min-width: 0;">
+                        <input type="checkbox" ${isDone ? 'checked' : ''} onchange="window.tripPlanner.toggleManualTask('${this.escapeHtml(mt.id)}')" style="cursor: pointer; margin-top: 2px; accent-color: #10b981; width: 14px; height: 14px;" title="${isDone ? 'Mark Pending' : 'Mark Complete'}">
+                        <div style="flex: 1; min-width: 0;">
+                          <div style="font-size: 11.5px; font-weight: 700; color: ${isDone ? '#94a3b8' : '#f8fafc'}; text-decoration: ${isDone ? 'line-through' : 'none'}; word-break: break-word; line-height: 1.3;">
+                            ${this.escapeHtml(mt.title)}
+                          </div>
+                          ${(mt.location || mt.time || mt.priority === 'High' || mt.notes) ? `
+                            <div style="font-size: 10px; color: #94a3b8; margin-top: 3px; display: flex; align-items: center; gap: 4px; flex-wrap: wrap;">
+                              ${mt.priority === 'High' ? `<span class="badge" style="background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.35); font-size: 9px; padding: 1px 4px;">🔴 High</span>` : ''}
+                              ${mt.location ? `<span class="badge" style="background: rgba(255,255,255,0.06); color: #cbd5e1; font-size: 9px; padding: 1px 4px;">📍 ${this.escapeHtml(mt.location)}</span>` : ''}
+                              ${mt.time ? `<span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; font-size: 9px; padding: 1px 4px;">⏰ ${this.escapeHtml(mt.time)}</span>` : ''}
+                              ${mt.notes ? `<div style="color: var(--text-muted); font-size: 9.5px; margin-top: 2px; width: 100%; word-break: break-word;">📝 ${this.escapeHtml(mt.notes)}</div>` : ''}
+                            </div>
+                          ` : ''}
+                        </div>
+                      </div>
+                      <button style="background: none; border: none; color: #64748b; cursor: pointer; padding: 1px 4px; font-size: 12px; line-height: 1; border-radius: 3px;" onmouseover="this.style.color='#f87171'" onmouseout="this.style.color='#64748b'" onclick="window.tripPlanner.deleteManualTask('${this.escapeHtml(mt.id)}')" title="Delete Task">
+                        ✕
+                      </button>
+                    </div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          `;
+        }
+
+        const cardsHtml = drugTestsHtml + manualTasksHtml + tripsHtml;
 
         col.innerHTML = `
           <div class="day-header" style="background: ${isHoliday ? 'linear-gradient(90deg, #854d0e 0%, #1e293b 100%)' : (drugTests.length > 0 ? 'linear-gradient(90deg, rgba(88, 28, 135, 0.4) 0%, #1e293b 100%)' : '#1e293b')};">
-            <div>
-              <span style="font-weight: 800; color: #f8fafc;">${day.dayName}, ${day.formattedDate}</span>
+            <div style="display: flex; align-items: center; gap: 4px; min-width: 0;">
+              <span style="font-weight: 800; color: #f8fafc; white-space: nowrap;">${day.dayName}, ${day.formattedDate}</span>
               ${drugTests.length > 0 ? `
-                <span class="badge" style="background: rgba(168, 85, 247, 0.25); color: #d8b4fe; border: 1px solid rgba(168, 85, 247, 0.4); font-size: 9px; padding: 1px 4px; border-radius: 3px; margin-left: 4px;" title="${drugTests.length} DOT Drug Test Appt(s) Scheduled">
+                <span class="badge" style="background: rgba(168, 85, 247, 0.25); color: #d8b4fe; border: 1px solid rgba(168, 85, 247, 0.4); font-size: 9px; padding: 1px 4px; border-radius: 3px;" title="${drugTests.length} DOT Drug Test Appt(s) Scheduled">
                   🧪 ${drugTests.length}
                 </span>
               ` : ''}
+              ${manualTasks.length > 0 ? `
+                <span class="badge" style="background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.35); font-size: 9px; padding: 1px 4px; border-radius: 3px;" title="${manualTasks.length} Manual Task(s)">
+                  📋 ${manualTasks.filter(m => m.status !== 'Complete').length}
+                </span>
+              ` : ''}
             </div>
-            <div>
+            <div style="display: flex; align-items: center; gap: 4px;">
+              <button class="btn btn-secondary" style="padding: 1px 5px; font-size: 9px; line-height: 1.2; background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 3px; cursor: pointer;" onclick="window.tripPlanner.openAddManualTaskModal('${dateKey}', '${this.escapeJs(day.dayName)}, ${this.escapeJs(day.formattedDate)}')" title="Add manual task to ${day.dayName}, ${day.formattedDate}">
+                ➕ Task
+              </button>
               <span class="badge" style="background: ${isHoliday ? '#ca8a04' : (day.isWorkDay ? '#0284c7' : '#475569')}; color: #fff; font-size: 9.5px; padding: 2px 5px; border-radius: 4px;">
                 ${isHoliday ? '🏖️ Holiday' : (day.isWorkDay ? 'Work' : 'Off')}
               </span>

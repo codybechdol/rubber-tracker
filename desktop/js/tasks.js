@@ -253,9 +253,18 @@ class TaskManagerApp {
         };
 
         const taskKey = taskId ? taskId.toLowerCase() : `${sourceSheet}_${sourceRow}_${taskObj.type}_${taskObj.employee}_${taskObj.itemType}_${truckNumber}_${taskObj.dueDate}`.toLowerCase();
-        if (this.db.isTaskDismissed(taskKey)) return;
+        if (this.db.isTaskDismissed(taskKey) || (taskId && this.db.isTaskDismissed(taskId))) return;
+
+        // Reconcile with live inventory & swap sheets: if the equipment swap has already occurred or item is in testing/swapped, skip it!
+        if (category === 'PPE' || category === 'Equipment' || rawType.toLowerCase().includes('swap') || sourceSheet.toLowerCase().includes('swap')) {
+          if (this.isEquipmentSwapCompleted(sourceSheet || rawType, currentItem, employee)) {
+            return; // Skip completed/reclaimed swap task!
+          }
+        }
+
         if (!seenTaskKeys.has(taskKey)) {
           seenTaskKeys.add(taskKey);
+          if (taskId) seenTaskKeys.add(taskId.toLowerCase());
           allTasks.push(taskObj);
         }
       });
@@ -279,11 +288,23 @@ class TaskManagerApp {
       if (swTable && swTable.rows) {
         swTable.rows.forEach((r, idx) => {
           const emp = String(r['Assigned To'] || r['Employee'] || r['Name'] || '').trim();
-          const itemNum = String(r['Item #'] || r['Item#'] || r['Serial #'] || r['Serial#'] || r['ESL ID'] || '').trim();
+          const itemNum = String(r['Item #'] || r['Item#'] || r['Serial #'] || r['Serial#'] || r['ESL ID'] || r['Current Glove #'] || r['Current Sleeve #'] || r['Current Item #'] || '').trim();
           const specs = String(r['Size'] || r['Model'] || r['KV'] || r['Type'] || r['Class'] || '').trim();
           const changeOut = String(r['Change Out Date'] || r['Due Date'] || r['Expiration'] || 'N/A').trim();
           const stage = String(r['Status'] || r['Stage'] || 'Unassigned').trim();
           const pickedFor = String(r['Picked For'] || '').trim();
+          const dateChanged = String(r['Date Changed'] || r['Delivered Date'] || r['Completed Date'] || '').trim();
+          const stageLower = stage.toLowerCase();
+
+          // Skip if already marked delivered or completed on the swap sheet
+          if (dateChanged || stageLower.includes('delivered') || stageLower === 'complete' || stageLower === 'resolved') {
+            return;
+          }
+
+          // Skip if inventory shows this item is already in testing, on shelf, or employee is current
+          if (this.isEquipmentSwapCompleted(sw.name, itemNum, emp)) {
+            return;
+          }
 
           const empInfo = empLookup[emp.toLowerCase()] || {};
           const crewId = empInfo.crewId || 'Unassigned Crew';
@@ -291,11 +312,15 @@ class TaskManagerApp {
           const foreman = empInfo.foreman || 'Lead';
 
           const taskKey = `${sw.name}_${emp}_${specs}_${changeOut}`.toLowerCase();
+          const swapId = `${sw.key}_${idx + 1}`;
+          if (this.db.isTaskDismissed(taskKey) || this.db.isTaskDismissed(swapId)) return;
+
           if (!seenTaskKeys.has(taskKey) && emp && emp !== 'N/A') {
             seenTaskKeys.add(taskKey);
+            seenTaskKeys.add(swapId.toLowerCase());
             const isOverdue = this.checkIfOverdue(changeOut);
             allTasks.push({
-              id: `${sw.key}_${idx + 1}`,
+              id: swapId,
               sourceSheet: sw.name,
               category: sw.cat,
               type: sw.name,
@@ -531,6 +556,99 @@ class TaskManagerApp {
     }
 
     return allTasks;
+  }
+
+  isEquipmentSwapCompleted(sourceSheet, itemNum, employeeName) {
+    if (!sourceSheet && !itemNum) return false;
+    const sLower = String(sourceSheet || '').toLowerCase();
+
+    let invKey = '';
+    let swKey = '';
+    if (sLower.includes('glove')) { invKey = 'gloves'; swKey = 'glove_swaps'; }
+    else if (sLower.includes('sleeve')) { invKey = 'sleeves'; swKey = 'sleeve_swaps'; }
+    else if (sLower.includes('blanket')) { invKey = 'blankets'; swKey = 'blanket_swaps'; }
+    else if (sLower.includes('mack')) { invKey = 'macks'; swKey = 'mack_swaps'; }
+    else if (sLower.includes('tester') || sLower.includes('hvt')) { invKey = 'hv_testers'; swKey = 'hv_tester_swaps'; }
+    else if (sLower.includes('phasing')) { invKey = 'phasing_sets'; swKey = 'phasing_set_swaps'; }
+    else if (sLower.includes('aed')) { invKey = 'aed'; swKey = 'aed_swaps'; }
+    else if (sLower.includes('ground')) { invKey = 'grounds'; swKey = 'ground_swaps'; }
+    else if (sLower.includes('hot_stick') || sLower.includes('hot stick')) { invKey = 'hot_sticks'; swKey = 'hot_stick_swaps'; }
+
+    if (!invKey) return false;
+
+    const empClean = String(employeeName || '').trim().toLowerCase();
+    const itmClean = String(itemNum || '').trim().toLowerCase();
+
+    // 1. Check corresponding Swap Sheet row
+    if (swKey) {
+      const swTable = this.db.getTable(swKey);
+      if (swTable && swTable.rows) {
+        const swRow = swTable.rows.find(r => {
+          const rEmp = String(r['Employee'] || r['Assigned To'] || r['Crew Lead / Employee'] || '').trim().toLowerCase();
+          const rOld = String(r['Current Glove #'] || r['Current Sleeve #'] || r['Current Blanket #'] || r['Current MACK #'] || r['Current HV Tester #'] || r['Current Phasing Set #'] || r['Current AED #'] || r['Current Item #'] || r['Item #'] || r['Serial #'] || '').trim().toLowerCase();
+          if (empClean && itmClean) return rEmp === empClean && rOld === itmClean;
+          if (itmClean) return rOld === itmClean;
+          if (empClean) return rEmp === empClean;
+          return false;
+        });
+        if (swRow) {
+          const stage = String(swRow['Status'] || swRow['Stage'] || '').trim().toLowerCase();
+          const dateChanged = String(swRow['Date Changed'] || swRow['Delivered Date'] || swRow['Completed Date'] || '').trim();
+          if (dateChanged || stage.includes('delivered') || stage.includes('complete') || stage.includes('resolved')) {
+            return true; // Marked Delivered on swap sheet!
+          }
+        }
+      }
+    }
+
+    // 2. Check live Inventory Table
+    const invTable = this.db.getTable(invKey);
+    if (invTable && invTable.rows) {
+      if (itmClean && itmClean !== 'n/a' && itmClean !== '—' && itmClean !== '-') {
+        const itemRow = invTable.rows.find(r => {
+          const pk = String(r['Glove'] || r['Sleeve'] || r['Blanket'] || r['MACK'] || r['HVT #'] || r['Phasing Set #'] || r['AED #'] || r['Serial #'] || r['Item #'] || r['Item'] || Object.values(r)[0] || '').trim().toLowerCase();
+          return pk === itmClean;
+        });
+
+        if (itemRow) {
+          const itemStatus = String(itemRow['Status'] || '').trim().toLowerCase();
+          const itemHolder = String(itemRow['Assigned To'] || '').trim().toLowerCase();
+          const nonEmpHolders = ['in testing', 'ready for test', 'packed for testing', 'on shelf', 'destroyed', 'lost', 'failed rubber', 'failed', 'not repairable', 'decommissioned'];
+
+          // Item is already in testing, on shelf, or packed for testing
+          if (nonEmpHolders.includes(itemStatus) || nonEmpHolders.includes(itemHolder)) {
+            return true;
+          }
+          // Item is assigned to someone else
+          if (itemHolder && empClean && itemHolder !== empClean) {
+            return true;
+          }
+        }
+      }
+
+      // Check if the employee has an active assigned item in this category that is not overdue
+      if (empClean && empClean !== 'unassigned') {
+        const workerActiveItem = invTable.rows.find(r => {
+          const h = String(r['Assigned To'] || '').trim().toLowerCase();
+          const st = String(r['Status'] || '').trim().toLowerCase();
+          return h === empClean && st === 'assigned';
+        });
+
+        if (workerActiveItem) {
+          const activeItemNum = String(workerActiveItem['Glove'] || workerActiveItem['Sleeve'] || workerActiveItem['Blanket'] || workerActiveItem['MACK'] || workerActiveItem['Serial #'] || workerActiveItem['Item #'] || '').trim().toLowerCase();
+          const curChgOut = String(workerActiveItem['Change Out Date'] || '').trim();
+
+          if (activeItemNum && activeItemNum !== itmClean && curChgOut && !this.checkIfOverdue(curChgOut)) {
+            return true;
+          }
+          if (activeItemNum === itmClean && curChgOut && !this.checkIfOverdue(curChgOut)) {
+            return true;
+          }
+        }
+      }
+    }
+
+    return false;
   }
 
   isFutureTrainingMonth(monthStr, targetDate = new Date()) {
@@ -889,12 +1007,58 @@ class TaskManagerApp {
   completeTask(taskId) {
     const todayStr = new Date().toISOString().split('T')[0];
 
+    // Dismiss task so it never re-appears in active views
+    if (this.db && typeof this.db.addDismissedTask === 'function') {
+      this.db.addDismissedTask(taskId);
+    }
+
+    const allTasks = this.collectAllTasks();
+    const task = allTasks.find(x => x.id === taskId);
+
     // If it's a drug test task, mark it complete in DrugTestingEngine as well
     if (taskId.startsWith('dt_') || taskId.startsWith('dot_drug_tests_')) {
-      const allTasks = this.collectAllTasks();
-      const t = allTasks.find(x => x.id === taskId);
-      if (t && window.drugTestingEngine && typeof window.drugTestingEngine.markComplete === 'function') {
-        window.drugTestingEngine.markComplete(t.employee, todayStr);
+      if (task && window.drugTestingEngine && typeof window.drugTestingEngine.markComplete === 'function') {
+        window.drugTestingEngine.markComplete(task.employee, todayStr);
+      }
+    }
+
+    // If it's an equipment swap, mark it delivered on the corresponding swap sheet
+    if (task && task.sourceSheet && task.sourceSheet.toLowerCase().includes('swap')) {
+      const invMap = {
+        'glove swap': 'glove_swaps',
+        'glove swaps': 'glove_swaps',
+        'sleeve swap': 'sleeve_swaps',
+        'sleeve swaps': 'sleeve_swaps',
+        'blanket swap': 'blanket_swaps',
+        'blanket swaps': 'blanket_swaps',
+        'mack swap': 'mack_swaps',
+        'mack swaps': 'mack_swaps',
+        'hv tester swap': 'hv_tester_swaps',
+        'hv tester swaps': 'hv_tester_swaps',
+        'phasing set swap': 'phasing_set_swaps',
+        'phasing set swaps': 'phasing_set_swaps',
+        'aed swap': 'aed_swaps',
+        'aed swaps': 'aed_swaps',
+        'ground swap': 'ground_swaps',
+        'ground swaps': 'ground_swaps',
+        'hot stick swap': 'hot_stick_swaps',
+        'hot stick swaps': 'hot_stick_swaps'
+      };
+      const swKey = invMap[task.sourceSheet.toLowerCase()] || task.sourceSheet;
+      const swTable = this.db.getTable(swKey);
+      if (swTable && swTable.rows) {
+        const swRow = swTable.rows.find(r => {
+          const emp = String(r['Employee'] || r['Assigned To'] || r['Crew Lead / Employee'] || '').trim().toLowerCase();
+          const itm = String(r['Item #'] || r['Current Glove #'] || r['Current Sleeve #'] || r['Current Item #'] || '').trim().toLowerCase();
+          return (emp && emp === String(task.employee || '').trim().toLowerCase()) || (itm && itm === String(task.currentItem || '').trim().toLowerCase());
+        });
+        if (swRow) {
+          swRow['Status'] = 'Delivered ✅';
+          swRow['Date Changed'] = todayStr;
+          if (window.swapsManager && typeof window.swapsManager.syncRowToRawGrid === 'function') {
+            window.swapsManager.syncRowToRawGrid(swTable, swRow);
+          }
+        }
       }
     }
 
@@ -913,6 +1077,11 @@ class TaskManagerApp {
   deleteTask(taskId, sourceSheet = '') {
     if (!window.confirm('Are you sure you want to delete this task? It will be removed from all task lists.')) {
       return;
+    }
+
+    // Dismiss task so it never re-appears in active views
+    if (this.db && typeof this.db.addDismissedTask === 'function') {
+      this.db.addDismissedTask(taskId);
     }
 
     // Optimistically update local database

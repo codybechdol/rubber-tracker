@@ -1503,6 +1503,9 @@ class LocalDatabase {
 
     // Task completion
     if (mut.action === 'SET_TASK_STATUS') {
+      if (mut.taskId && String(mut.status || '').toLowerCase() === 'complete') {
+        this.addDismissedTask(mut.taskId);
+      }
       const taskTable = this.snapshot.tables['task_metadata'];
       if (taskTable) {
         if (taskTable.rows) {
@@ -1572,14 +1575,11 @@ class LocalDatabase {
           }
         }
         if (table.rawGrid) {
-          for (let r = 1; r < table.rawGrid.length; r++) {
-            const match = table.rawGrid[r].some(val => String(val || '').trim().toLowerCase() === idLower);
-            if (match) {
-              table.rawGrid.splice(r, 1);
-              table.maxRows = table.rawGrid.length;
-              break;
-            }
-          }
+          table.rawGrid = table.rawGrid.filter((gr, idx) => {
+            if (idx === 0) return true;
+            return !gr.some(cell => String(cell || '').trim().toLowerCase() === idLower);
+          });
+          table.maxRows = table.rawGrid.length;
         }
       }
     }
@@ -1592,11 +1592,16 @@ class LocalDatabase {
       const saved = localStorage.getItem('sa_dismissed_tasks');
       if (saved) {
         try {
-          JSON.parse(saved).forEach(id => this.dismissedTaskIds.add(id));
+          JSON.parse(saved).forEach(id => {
+            const s = String(id).trim();
+            this.dismissedTaskIds.add(s);
+            this.dismissedTaskIds.add(s.toLowerCase());
+          });
         } catch (e) {}
       }
     }
-    return this.dismissedTaskIds.has(String(taskId).trim());
+    const cleanId = String(taskId).trim();
+    return this.dismissedTaskIds.has(cleanId) || this.dismissedTaskIds.has(cleanId.toLowerCase());
   }
 
   addDismissedTask(taskId) {
@@ -1606,11 +1611,17 @@ class LocalDatabase {
       const saved = localStorage.getItem('sa_dismissed_tasks');
       if (saved) {
         try {
-          JSON.parse(saved).forEach(id => this.dismissedTaskIds.add(id));
+          JSON.parse(saved).forEach(id => {
+            const s = String(id).trim();
+            this.dismissedTaskIds.add(s);
+            this.dismissedTaskIds.add(s.toLowerCase());
+          });
         } catch (e) {}
       }
     }
-    this.dismissedTaskIds.add(String(taskId).trim());
+    const cleanId = String(taskId).trim();
+    this.dismissedTaskIds.add(cleanId);
+    this.dismissedTaskIds.add(cleanId.toLowerCase());
     try {
       localStorage.setItem('sa_dismissed_tasks', JSON.stringify(Array.from(this.dismissedTaskIds)));
     } catch (e) {}
