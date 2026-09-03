@@ -2,14 +2,14 @@
  * sync.js - Google Sheets Synchronization Client with Live Offline Changes Modal
  */
 
-const DEFAULT_SYNC_URL = 'https://script.google.com/macros/s/AKfycbwkb2OPdrFd_t3kOThLOReg6WzWpyvUlSzWr1FVgc-o4ac53XWJb3FlbcAhYs3AjkX6/exec';
+const DEFAULT_SYNC_URL = 'https://script.google.com/macros/s/AKfycbzsCSiAhGr5aOMoEF6OlSInIgdnkvQbx_9zRcgdtA7usX7nZbPzlfZulyHDVTfStiuA/exec';
 
 class SyncEngine {
   constructor(db) {
     this.db = db;
     let savedUrl = localStorage.getItem('sa_sync_url');
     // If savedUrl is missing, empty, or points to any old non-working deployment URL, auto-migrate to DEFAULT_SYNC_URL!
-    if (!savedUrl || !savedUrl.includes('AKfycbwkb2OPdrFd')) {
+    if (!savedUrl || !savedUrl.includes('AKfycbzsCSiAhGr5a')) {
       savedUrl = DEFAULT_SYNC_URL;
       localStorage.setItem('sa_sync_url', DEFAULT_SYNC_URL);
     }
@@ -1340,7 +1340,17 @@ class SyncEngine {
         try {
           const text = await file.text();
           if (text.includes('quota') || text.includes('Quota') || text.startsWith('<!DOCTYPE') || text.startsWith('<html')) {
-            alert('⚠️ This file is not a valid snapshot file. It contains an error message or rate limit notice from Google Drive:\n\n"' + text.substring(0, 140).trim() + '..."\n\nPlease export a fresh snapshot directly from Google Sheets: Glove Manager > 💾 Save & Backup > 🔄 Export Offline Snapshot (Desktop App).');
+            const promptDirect = confirm(
+              '⚠️ Google Drive Download Quota Exceeded on this file!\n\n' +
+              'Google Drive limits how many times shared files can be downloaded from drive.google.com in a 24-hour window, so Drive returned an error page instead of the snapshot.\n\n' +
+              '💡 You don\'t need to download files from Google Drive! The app can download the complete database directly from Google Sheets.\n\n' +
+              'Would you like to download the latest snapshot directly from Google Sheets right now?'
+            );
+            if (promptDirect) {
+              setTimeout(() => {
+                this.downloadLatestSnapshot();
+              }, 100);
+            }
             resolve({ success: false, error: 'Quota exceeded in downloaded file' });
             return;
           }

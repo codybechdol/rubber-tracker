@@ -71,6 +71,8 @@ if %PUSH_RESULT% EQU 0 (
     echo ========================================
     echo SUCCESS! Files pushed to Apps Script.
     echo ========================================
+    echo Updating Web App deployment...
+    call "%APPDATA%\npm\clasp.cmd" deploy -i AKfycbzsCSiAhGr5aOMoEF6OlSInIgdnkvQbx_9zRcgdtA7usX7nZbPzlfZulyHDVTfStiuA -d "Auto deployed by push.bat"
 ) else (
     echo.
     echo ========================================
