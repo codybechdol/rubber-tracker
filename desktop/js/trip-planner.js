@@ -115,8 +115,9 @@ class TripPlannerApp {
     this.populateWeekDropdown();
     this.setWeeksToShow(this.weeksToShow || 8);
 
-    if (this.db && typeof this.db.on === 'function') {
-      this.db.on('change', () => {
+    if (this.db && typeof this.db.subscribe === 'function') {
+      this.db.subscribe(() => {
+        this.loadSavedTrips();
         this.renderPlanner();
       });
     }
@@ -2226,6 +2227,7 @@ class TripPlannerApp {
   }
 
   renderPlanner() {
+    this.loadSavedTrips();
     const board = document.getElementById('trip-planner-board');
     const scheduleBadge = document.getElementById('trip-planner-schedule-badge');
     if (!board) return;

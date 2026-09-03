@@ -130,22 +130,6 @@ class LocalDatabase {
       await this.persistSnapshot(this.snapshot);
     }
 
-    // Auto-queue unsynced plannedTrips and manual_tasks if present locally on this device
-    const currentTrips = this.getPlannedTrips();
-    const currentTasks = this.getManualTasks();
-    if (currentTrips && Object.keys(currentTrips).length > 0 && !this.outbox.some(m => m.action === 'SAVE_PLANNED_TRIPS')) {
-      await this.addMutation({
-        action: 'SAVE_PLANNED_TRIPS',
-        trips: currentTrips
-      });
-    }
-    if (currentTasks && currentTasks.length > 0 && !this.outbox.some(m => m.action === 'SAVE_MANUAL_TASKS')) {
-      await this.addMutation({
-        action: 'SAVE_MANUAL_TASKS',
-        manual_tasks: currentTasks
-      });
-    }
-
     this.notify();
     return this.snapshot;
   }
@@ -159,6 +143,31 @@ class LocalDatabase {
       this.normalizeSnapshot(snapshot);
     }
     this.snapshot = snapshot;
+
+    // Keep localStorage config caches in sync with fresh snapshot
+    if (snapshot && snapshot.configs) {
+      if (snapshot.configs.plannedTrips) {
+        try {
+          localStorage.setItem('sa_planned_trips', JSON.stringify(snapshot.configs.plannedTrips));
+        } catch (e) {}
+      }
+      if (Array.isArray(snapshot.configs.manual_tasks)) {
+        try {
+          localStorage.setItem('sa_trip_manual_tasks', JSON.stringify(snapshot.configs.manual_tasks));
+        } catch (e) {}
+      }
+      if (snapshot.configs.workSchedule) {
+        try {
+          localStorage.setItem('sa_work_schedule', snapshot.configs.workSchedule);
+        } catch (e) {}
+      }
+      if (snapshot.configs.holidays) {
+        try {
+          localStorage.setItem('sa_holidays', JSON.stringify(snapshot.configs.holidays));
+        } catch (e) {}
+      }
+    }
+
     await this.persistSnapshot(snapshot);
     this.notify();
   }
@@ -193,23 +202,19 @@ class LocalDatabase {
   }
 
   getPlannedTrips() {
-    let trips = {};
+    if (this.snapshot && this.snapshot.configs && this.snapshot.configs.plannedTrips && typeof this.snapshot.configs.plannedTrips === 'object') {
+      return this.snapshot.configs.plannedTrips;
+    }
     const stored = localStorage.getItem('sa_planned_trips');
     if (stored) {
       try {
         const parsed = JSON.parse(stored);
-        if (parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0) {
-          trips = { ...parsed };
+        if (parsed && typeof parsed === 'object') {
+          return parsed;
         }
       } catch (e) {}
     }
-    if (this.snapshot && this.snapshot.configs && this.snapshot.configs.plannedTrips) {
-      const snapTrips = this.snapshot.configs.plannedTrips;
-      if (snapTrips && typeof snapTrips === 'object' && Object.keys(snapTrips).length > 0) {
-        trips = { ...trips, ...snapTrips };
-      }
-    }
-    return trips;
+    return {};
   }
 
   async savePlannedTrips(trips) {

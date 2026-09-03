@@ -1240,6 +1240,8 @@ class SyncEngine {
         `• Click "Cancel" to go back and click "Push Changes to Sheets" first.`
       );
       if (!proceed) return { success: false, cancelled: true };
+      // User confirmed overwriting local changes with server snapshot
+      this.db.clearOutbox();
     }
 
     this.isSyncing = true;
@@ -1293,11 +1295,16 @@ class SyncEngine {
         if (window.historyNavigator && typeof window.historyNavigator.renderCurrentHistory === 'function') {
           window.historyNavigator.renderCurrentHistory();
         }
-        if (window.tripPlanner && typeof window.tripPlanner.renderPlanner === 'function') {
-          window.tripPlanner.renderPlanner();
-        }
         if (window.taskManager && typeof window.taskManager.renderTasks === 'function') {
           window.taskManager.renderTasks();
+        }
+        if (window.tripPlanner) {
+          if (typeof window.tripPlanner.loadSavedTrips === 'function') {
+            window.tripPlanner.loadSavedTrips();
+          }
+          if (typeof window.tripPlanner.renderPlanner === 'function') {
+            window.tripPlanner.renderPlanner();
+          }
         }
         if (window.safetyComplianceEngine && typeof window.safetyComplianceEngine.renderSafetyLogs === 'function') {
           window.safetyComplianceEngine.renderSafetyLogs();
