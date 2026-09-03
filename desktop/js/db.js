@@ -129,6 +129,23 @@ class LocalDatabase {
       this.normalizeSnapshot(this.snapshot);
       await this.persistSnapshot(this.snapshot);
     }
+
+    // Auto-queue unsynced plannedTrips and manual_tasks if present locally on this device
+    const currentTrips = this.getPlannedTrips();
+    const currentTasks = this.getManualTasks();
+    if (currentTrips && Object.keys(currentTrips).length > 0 && !this.outbox.some(m => m.action === 'SAVE_PLANNED_TRIPS')) {
+      await this.addMutation({
+        action: 'SAVE_PLANNED_TRIPS',
+        trips: currentTrips
+      });
+    }
+    if (currentTasks && currentTasks.length > 0 && !this.outbox.some(m => m.action === 'SAVE_MANUAL_TASKS')) {
+      await this.addMutation({
+        action: 'SAVE_MANUAL_TASKS',
+        manual_tasks: currentTasks
+      });
+    }
+
     this.notify();
     return this.snapshot;
   }
@@ -202,9 +219,39 @@ class LocalDatabase {
     try {
       localStorage.setItem('sa_planned_trips', JSON.stringify(trips));
     } catch (e) {}
-    if (window.desktopAPI) {
-      await window.desktopAPI.saveLocalSnapshot(this.snapshot);
+    await this.persistSnapshot(this.snapshot);
+    await this.addMutation({
+      action: 'SAVE_PLANNED_TRIPS',
+      trips: trips
+    });
+  }
+
+  getManualTasks() {
+    if (this.snapshot && this.snapshot.configs && Array.isArray(this.snapshot.configs.manual_tasks)) {
+      return this.snapshot.configs.manual_tasks;
     }
+    const stored = localStorage.getItem('sa_trip_manual_tasks');
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed)) return parsed;
+      } catch (e) {}
+    }
+    return [];
+  }
+
+  async saveManualTasks(tasks) {
+    if (!this.snapshot) this.snapshot = { configs: {}, tables: {} };
+    if (!this.snapshot.configs) this.snapshot.configs = {};
+    this.snapshot.configs.manual_tasks = tasks;
+    try {
+      localStorage.setItem('sa_trip_manual_tasks', JSON.stringify(tasks));
+    } catch (e) {}
+    await this.persistSnapshot(this.snapshot);
+    await this.addMutation({
+      action: 'SAVE_MANUAL_TASKS',
+      manual_tasks: tasks
+    });
   }
 
   getTable(tableKey) {
@@ -1044,6 +1091,27 @@ class LocalDatabase {
       }
     }
 
+    // Coalesce config mutations (SAVE_PLANNED_TRIPS, SAVE_MANUAL_TASKS, SET_HOLIDAYS, SET_TRIP_SCHEDULE)
+    if (mutation.action === 'SAVE_PLANNED_TRIPS' || mutation.action === 'SAVE_MANUAL_TASKS' || mutation.action === 'SET_HOLIDAYS' || mutation.action === 'SET_TRIP_SCHEDULE') {
+      const existingIdx = this.outbox.findIndex(m => m.action === mutation.action);
+      if (existingIdx !== -1) {
+        this.outbox[existingIdx] = {
+          ...this.outbox[existingIdx],
+          ...mutation,
+          timestamp: new Date().toISOString()
+        };
+        await this.applyLocalMutation(mutation);
+        if (window.desktopAPI) {
+          await window.desktopAPI.saveLocalOutbox(this.outbox);
+        } else {
+          try { localStorage.setItem('sa_outbox', JSON.stringify(this.outbox)); } catch (e) {}
+        }
+        await this.persistSnapshot(this.snapshot);
+        this.notify();
+        return this.outbox[existingIdx];
+      }
+    }
+
     const mutRecord = {
       id: 'mut_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6),
       timestamp: new Date().toISOString(),
@@ -1067,7 +1135,31 @@ class LocalDatabase {
   }
 
   async applyLocalMutation(mut) {
-    if (!this.snapshot || !this.snapshot.tables) return;
+    if (!this.snapshot) return;
+
+    // Config mutations
+    if (mut.action === 'SAVE_PLANNED_TRIPS') {
+      if (!this.snapshot.configs) this.snapshot.configs = {};
+      this.snapshot.configs.plannedTrips = mut.trips;
+      return;
+    }
+    if (mut.action === 'SAVE_MANUAL_TASKS') {
+      if (!this.snapshot.configs) this.snapshot.configs = {};
+      this.snapshot.configs.manual_tasks = mut.manual_tasks;
+      return;
+    }
+    if (mut.action === 'SET_HOLIDAYS') {
+      if (!this.snapshot.configs) this.snapshot.configs = {};
+      this.snapshot.configs.holidays = mut.holidays;
+      return;
+    }
+    if (mut.action === 'SET_TRIP_SCHEDULE') {
+      if (!this.snapshot.configs) this.snapshot.configs = {};
+      this.snapshot.configs.workSchedule = mut.schedule;
+      return;
+    }
+
+    if (!this.snapshot.tables) return;
 
     const addMonths = (dateStr, months) => {
       if (!dateStr) return '';

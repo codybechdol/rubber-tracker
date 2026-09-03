@@ -387,6 +387,38 @@ class SyncEngine {
       };
     }
 
+    if (mut.action === 'SAVE_PLANNED_TRIPS') {
+      const dayCount = mut.trips ? Object.keys(mut.trips).length : 0;
+      return {
+        icon: '🗺️',
+        sheet: 'Trip Planner',
+        title: 'Planned Trips Schedule',
+        desc: `Updated planned trips & crew assignments across <strong>${dayCount} day${dayCount === 1 ? '' : 's'}</strong>`,
+        time: timeStr
+      };
+    }
+
+    if (mut.action === 'SAVE_MANUAL_TASKS') {
+      const taskCount = Array.isArray(mut.manual_tasks) ? mut.manual_tasks.length : 0;
+      return {
+        icon: '🎓',
+        sheet: 'Trip Planner',
+        title: 'Training Classes & Tasks',
+        desc: `Updated <strong>${taskCount} scheduled class${taskCount === 1 ? '' : 'es'} / task${taskCount === 1 ? '' : 's'}</strong>`,
+        time: timeStr
+      };
+    }
+
+    if (mut.action === 'SET_TRIP_SCHEDULE') {
+      return {
+        icon: '🗓️',
+        sheet: 'Trip Planner',
+        title: 'Work Schedule Preference',
+        desc: `Set active work schedule to <strong>${mut.schedule || 'Mon-Thu'}</strong>`,
+        time: timeStr
+      };
+    }
+
     if (mut.action === 'SET_HOLIDAYS') {
       return {
         icon: '🏖️',

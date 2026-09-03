@@ -174,6 +174,15 @@ class TripPlannerApp {
     this.holidaysMap = holidays;
     try {
       localStorage.setItem('sa_holidays', JSON.stringify(holidays));
+      const snap = this.db.getSnapshot();
+      if (snap) {
+        if (!snap.configs) snap.configs = {};
+        snap.configs.holidays = holidays;
+      }
+      this.db.addMutation({
+        action: 'SET_HOLIDAYS',
+        holidays: holidays
+      });
     } catch (e) {}
   }
 
@@ -202,33 +211,26 @@ class TripPlannerApp {
     this.activeSchedule = this.activeSchedule === 'Mon-Thu' ? 'Tue-Fri' : 'Mon-Thu';
     try {
       localStorage.setItem('sa_work_schedule', this.activeSchedule);
+      const snap = this.db.getSnapshot();
+      if (snap) {
+        if (!snap.configs) snap.configs = {};
+        snap.configs.workSchedule = this.activeSchedule;
+      }
+      this.db.addMutation({
+        action: 'SET_TRIP_SCHEDULE',
+        schedule: this.activeSchedule
+      });
     } catch (e) {}
     this.renderPlanner();
   }
 
   loadManualTasks() {
-    try {
-      const snap = this.db.getSnapshot();
-      if (snap && snap.configs && Array.isArray(snap.configs.manual_tasks)) {
-        return snap.configs.manual_tasks;
-      }
-      const raw = localStorage.getItem('sa_trip_manual_tasks');
-      if (raw) return JSON.parse(raw);
-    } catch (e) {}
-    return [];
+    return this.db.getManualTasks();
   }
 
   saveManualTasks(tasks) {
     this.manualTasks = tasks || this.manualTasks || [];
-    try {
-      localStorage.setItem('sa_trip_manual_tasks', JSON.stringify(this.manualTasks));
-      const snap = this.db.getSnapshot();
-      if (snap) {
-        if (!snap.configs) snap.configs = {};
-        snap.configs.manual_tasks = this.manualTasks;
-        this.db.setSnapshot(snap);
-      }
-    } catch (e) {}
+    this.db.saveManualTasks(this.manualTasks);
   }
 
   getAvailableCertTypes() {
@@ -1993,10 +1995,6 @@ class TripPlannerApp {
       delete this.plannedTrips[`${yyyy}-${mm}-${dd}`];
     }
     this.saveTrips();
-    this.db.addMutation({
-      action: 'SAVE_PLANNED_TRIPS',
-      trips: this.plannedTrips
-    });
     this.renderPlanner();
   }
 

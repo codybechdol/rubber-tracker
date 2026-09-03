@@ -220,6 +220,16 @@ function exportFullDatabaseSnapshot() {
     Logger.log('exportFullDatabaseSnapshot: Error reading plannedTrips: ' + e);
   }
 
+  var manualTasks = [];
+  try {
+    var rawTasks = (typeof getChunkedScriptProperty === 'function') ? getChunkedScriptProperty('MANUAL_TASKS') : PropertiesService.getScriptProperties().getProperty('MANUAL_TASKS');
+    if (rawTasks) {
+      manualTasks = typeof rawTasks === 'string' ? JSON.parse(rawTasks) : rawTasks;
+    }
+  } catch (e) {
+    Logger.log('exportFullDatabaseSnapshot: Error reading manualTasks: ' + e);
+  }
+
   return {
     version: '2026.1.0',
     spreadsheetId: ss.getId(),
@@ -230,7 +240,8 @@ function exportFullDatabaseSnapshot() {
       holidays: holidays,
       workSchedule: workSchedule,
       driveTimeMap: driveTimeMap,
-      plannedTrips: plannedTrips
+      plannedTrips: plannedTrips,
+      manual_tasks: manualTasks
     },
     tables: tables
   };
@@ -283,11 +294,13 @@ function generateAndStoreSyncSnapshot(existingSnapshot) {
  * Avoids expensive 45-sheet rescanning during batch mutation pushes.
  *
  * @param {Object} sheetsModified - Map of sheet names that were modified during the push
+ * @param {boolean} [configsModified] - True if planned trips, manual tasks, or schedules changed
  * @return {boolean} True if patched successfully
  */
-function patchSyncSnapshotInDrive(sheetsModified) {
+function patchSyncSnapshotInDrive(sheetsModified, configsModified) {
   try {
-    if (!sheetsModified || Object.keys(sheetsModified).length === 0) return false;
+    var hasSheets = sheetsModified && Object.keys(sheetsModified).length > 0;
+    if (!hasSheets && !configsModified) return false;
     var fileId = PropertiesService.getScriptProperties().getProperty('SYNC_SNAPSHOT_FILE_ID');
     if (!fileId) return false;
     var file = null;
@@ -412,6 +425,27 @@ function patchSyncSnapshotInDrive(sheetsModified) {
       };
       patchedAny = true;
       Logger.log('patchSyncSnapshotInDrive: Patched ' + sheetName + ' (' + rows.length + ' rows) in Drive snapshot cache');
+    }
+
+    // If configs modified (planned trips, manual tasks, holidays, schedule), refresh configs in snapshot
+    if (configsModified) {
+      if (!snap.configs) snap.configs = {};
+      try {
+        var rawTrips = (typeof getChunkedScriptProperty === 'function') ? getChunkedScriptProperty('PLANNED_TRIPS') : PropertiesService.getScriptProperties().getProperty('PLANNED_TRIPS');
+        if (rawTrips) snap.configs.plannedTrips = typeof rawTrips === 'string' ? JSON.parse(rawTrips) : rawTrips;
+      } catch (eTr) {}
+      try {
+        var rawTasks = (typeof getChunkedScriptProperty === 'function') ? getChunkedScriptProperty('MANUAL_TASKS') : PropertiesService.getScriptProperties().getProperty('MANUAL_TASKS');
+        if (rawTasks) snap.configs.manual_tasks = typeof rawTasks === 'string' ? JSON.parse(rawTasks) : rawTasks;
+      } catch (eTk) {}
+      try {
+        if (typeof getHolidays === 'function') snap.configs.holidays = getHolidays();
+      } catch (eH) {}
+      try {
+        if (typeof getWorkSchedule === 'function') snap.configs.workSchedule = getWorkSchedule();
+      } catch (eW) {}
+      patchedAny = true;
+      Logger.log('patchSyncSnapshotInDrive: Patched plannedTrips & manual_tasks in Drive snapshot cache');
     }
 
     if (patchedAny) {
@@ -719,6 +753,7 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
   var appliedCount = 0;
   var errors = [];
   var sheetsModified = {};
+  var configsModified = false;
 
   for (var m = 0; m < mutations.length; m++) {
     var mut = mutations[m];
@@ -734,6 +769,7 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
         'SCHEDULE_CREW_VISIT',
         'UNSCHEDULE_CREW_VISIT',
         'SAVE_PLANNED_TRIPS',
+        'SAVE_MANUAL_TASKS',
         'SAVE_TASK',
         'ADD_LOCATION_OVERRIDE',
         'IMPORT_HISTORY_LOG',
@@ -1536,6 +1572,7 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
           if (mut.holidays && typeof saveHolidays === 'function') {
             saveHolidays(mut.holidays);
             appliedCount++;
+            configsModified = true;
           }
           break;
 
@@ -1546,6 +1583,7 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
           if (mut.schedule && typeof setWorkSchedule === 'function') {
             setWorkSchedule(mut.schedule);
             appliedCount++;
+            configsModified = true;
           }
           if (mut.trips) {
             var tripsStr = typeof mut.trips === 'string' ? mut.trips : JSON.stringify(mut.trips);
@@ -1555,6 +1593,7 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
               PropertiesService.getScriptProperties().setProperty('PLANNED_TRIPS', tripsStr);
             }
             appliedCount++;
+            configsModified = true;
           } else if (mut.date) {
             var rawTrips = (typeof getChunkedScriptProperty === 'function') ? getChunkedScriptProperty('PLANNED_TRIPS') : PropertiesService.getScriptProperties().getProperty('PLANNED_TRIPS');
             var tripsObj = {};
@@ -1576,6 +1615,20 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
               PropertiesService.getScriptProperties().setProperty('PLANNED_TRIPS', updatedStr);
             }
             appliedCount++;
+            configsModified = true;
+          }
+          break;
+
+        case 'SAVE_MANUAL_TASKS':
+          if (mut.manual_tasks) {
+            var tasksStr = typeof mut.manual_tasks === 'string' ? mut.manual_tasks : JSON.stringify(mut.manual_tasks);
+            if (typeof setChunkedScriptProperty === 'function') {
+              setChunkedScriptProperty('MANUAL_TASKS', tasksStr);
+            } else {
+              PropertiesService.getScriptProperties().setProperty('MANUAL_TASKS', tasksStr);
+            }
+            appliedCount++;
+            configsModified = true;
           }
           break;
 
@@ -2064,10 +2117,10 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
       Logger.log('applyBatchSyncMutations auto saveHistoryFast error: ' + histErr);
     }
 
-    // 2. Fast sub-second patch of the .JSON snapshot in Google Drive for modified sheets only
+    // 2. Fast sub-second patch of the .JSON snapshot in Google Drive for modified sheets or configs
     try {
       if (typeof patchSyncSnapshotInDrive === 'function') {
-        patchSyncSnapshotInDrive(sheetsModified);
+        patchSyncSnapshotInDrive(sheetsModified, configsModified);
       }
     } catch (bkErr) {
       Logger.log('applyBatchSyncMutations auto patchSyncSnapshotInDrive error: ' + bkErr);
