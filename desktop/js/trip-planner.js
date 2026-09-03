@@ -53,6 +53,49 @@ class TripPlannerApp {
       'California': { mins: 840, time: '14h 00m', desc: '14h 00m (900 mi)', dir: 'Far' },
       'California Sub': { mins: 840, time: '14h 00m', desc: '14h 00m (900 mi)', dir: 'Far' }
     };
+    this.collapsedSections = this.loadCollapsedSections();
+  }
+
+  loadCollapsedSections() {
+    try {
+      return JSON.parse(localStorage.getItem('TRIP_PLANNER_COLLAPSED_SECTIONS') || '{}');
+    } catch (e) {
+      return {};
+    }
+  }
+
+  saveCollapsedSections() {
+    try {
+      localStorage.setItem('TRIP_PLANNER_COLLAPSED_SECTIONS', JSON.stringify(this.collapsedSections || {}));
+    } catch (e) {}
+  }
+
+  isSectionCollapsed(dateKey, sectionKey) {
+    if (!this.collapsedSections) this.collapsedSections = this.loadCollapsedSections();
+    return !!this.collapsedSections[`${dateKey}_${sectionKey}`];
+  }
+
+  toggleSectionCollapse(dateKey, sectionKey) {
+    if (!this.collapsedSections) this.collapsedSections = this.loadCollapsedSections();
+    const key = `${dateKey}_${sectionKey}`;
+    const willBeCollapsed = !this.collapsedSections[key];
+    this.collapsedSections[key] = willBeCollapsed;
+    this.saveCollapsedSections();
+
+    // Fast DOM toggle for smooth response without full redraw
+    const bodyEl = document.getElementById(`section-body-${dateKey}-${sectionKey}`);
+    const chevronEl = document.getElementById(`section-chevron-${dateKey}-${sectionKey}`);
+    if (bodyEl && chevronEl) {
+      if (willBeCollapsed) {
+        bodyEl.style.display = 'none';
+        chevronEl.textContent = '▶';
+      } else {
+        bodyEl.style.display = 'flex';
+        chevronEl.textContent = '▼';
+      }
+    } else {
+      this.renderPlanner();
+    }
   }
 
   init() {
@@ -1693,175 +1736,96 @@ class TripPlannerApp {
         // 1. Render Drug Test appointments if scheduled on this date
         let drugTestsHtml = '';
         if (drugTests.length > 0) {
+          const isCollapsed = this.isSectionCollapsed(dateKey, 'drug_tests');
           drugTestsHtml = `
-            <div class="drug-tests-day-section" style="margin-bottom: 8px; display: flex; flex-direction: column; gap: 6px;">
-              <div style="font-size: 10.5px; font-weight: 800; color: #c084fc; display: flex; align-items: center; justify-content: space-between; padding: 3px 6px; background: rgba(168, 85, 247, 0.12); border-radius: 4px; border-left: 3px solid #a855f7;">
-                <span style="display: flex; align-items: center; gap: 4px;">🧪 DOT Drug Tests (${drugTests.length})</span>
-                <button class="btn btn-secondary" style="padding: 1px 6px; font-size: 9.5px; color: #c084fc; border-color: rgba(168, 85, 247, 0.35); background: rgba(168, 85, 247, 0.08); cursor: pointer;" onclick="window.sheetNavigator.switchWorkspace('drug_testing')" title="Open DOT Drug Testing Workspace">Manage ↗</button>
+            <div class="day-section-collapsible drug-tests-day-section" style="margin-bottom: 8px;">
+              <div style="font-size: 10.5px; font-weight: 800; color: #c084fc; display: flex; align-items: center; justify-content: space-between; padding: 4px 7px; background: rgba(168, 85, 247, 0.12); border-radius: 4px; border-left: 3px solid #a855f7; cursor: pointer; user-select: none;" onclick="window.tripPlanner.toggleSectionCollapse('${dateKey}', 'drug_tests')" title="Click to collapse / expand DOT Drug Tests">
+                <span style="display: flex; align-items: center; gap: 5px;">
+                  <span id="section-chevron-${dateKey}-drug_tests" style="font-size: 8px; width: 10px; display: inline-block;">${isCollapsed ? '▶' : '▼'}</span>
+                  <span>🧪 DOT Drug Tests (${drugTests.length})</span>
+                </span>
+                <button class="btn btn-secondary" style="padding: 1px 6px; font-size: 9.5px; color: #c084fc; border-color: rgba(168, 85, 247, 0.35); background: rgba(168, 85, 247, 0.08); cursor: pointer;" onclick="event.stopPropagation(); window.sheetNavigator.switchWorkspace('drug_testing')" title="Open DOT Drug Testing Workspace">Manage ↗</button>
               </div>
-              ${drugTests.map(dt => `
-                <div class="drug-test-appointment-card" style="background: var(--bg-primary); border: 1px solid rgba(168, 85, 247, 0.35); border-left: 4px solid #a855f7; border-radius: 6px; padding: 8px 10px; box-shadow: 0 2px 6px rgba(0,0,0,0.25);">
-                  <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px;">
-                    <div style="font-weight: 700; font-size: 12.5px; color: #f8fafc; cursor: pointer;" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(dt.employee)}', 'drug_tests');}" title="Click to view employee profile">
-                      👤 <span style="color: #60a5fa; text-decoration: underline dotted;">${this.escapeHtml(dt.employee)}</span>
-                    </div>
-                    <span class="badge" style="font-size: 9.5px; padding: 1px 5px; font-weight: 700; ${dt.time ? 'background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4);' : 'background: rgba(148, 163, 184, 0.15); color: #94a3b8;'}">
-                      ⏰ ${dt.time ? this.formatTimeDisplay(dt.time) : 'Time TBD'}
-                    </span>
-                  </div>
-
-                  <div style="font-size: 10px; color: #cbd5e1; margin-bottom: 4px; display: flex; align-items: center; gap: 4px; flex-wrap: wrap;">
-                    <span class="badge" style="background: rgba(168, 85, 247, 0.15); color: #d8b4fe; font-size: 9.5px; padding: 1px 4px;">
-                      ${this.escapeHtml(dt.testType)} (${this.escapeHtml(dt.classification)})
-                    </span>
-                    <span class="badge" style="background: ${dt.isMobile ? 'rgba(245, 158, 11, 0.15)' : 'rgba(59, 130, 246, 0.15)'}; color: ${dt.isMobile ? '#fcd34d' : '#93c5fd'}; font-size: 9.5px; padding: 1px 4px;">
-                      ${dt.isMobile ? '🚐 Mobile' : '🏥 Clinic'}
-                    </span>
-                    <span class="badge" style="background: ${dt.status === 'Completed' ? 'rgba(16, 185, 129, 0.2)' : (dt.status === 'Scheduled' ? 'rgba(59, 130, 246, 0.2)' : 'rgba(234, 179, 8, 0.2)')}; color: ${dt.status === 'Completed' ? '#34d399' : (dt.status === 'Scheduled' ? '#93c5fd' : '#facc15')}; font-size: 9.5px; padding: 1px 4px;">
-                      ${dt.status === 'Completed' ? '✅ Done' : (dt.status === 'Scheduled' ? '📅 Sched' : '⏳ Pending')}
-                    </span>
-                  </div>
-
-                  ${dt.meetingAddr ? `
-                    <div style="font-size: 10.5px; color: #94a3b8; margin-top: 3px; line-height: 1.3;">
-                      📍 <strong style="color: #cbd5e1;">Meet:</strong> ${this.escapeHtml(dt.meetingAddr)}
-                    </div>
-                  ` : (dt.clinicName ? `
-                    <div style="font-size: 10.5px; color: #94a3b8; margin-top: 3px; line-height: 1.3;">
-                      🏥 <strong style="color: #cbd5e1;">Clinic:</strong> ${this.escapeHtml(dt.clinicName)}${dt.clinicCity ? ' (' + this.escapeHtml(dt.clinicCity) + ')' : ''}
-                    </div>
-                  ` : '')}
-
-                  ${dt.phone ? `
-                    <div style="font-size: 10px; color: #64748b; margin-top: 2px;">
-                      📞 ${this.escapeHtml(dt.phone)} ${dt.job ? `· Job ${this.escapeHtml(dt.job)}` : ''}
-                    </div>
-                  ` : ''}
-
-                  <div style="display: flex; justify-content: flex-end; gap: 4px; margin-top: 5px; padding-top: 4px; border-top: 1px solid rgba(255,255,255,0.06);">
-                    ${dt.status !== 'Completed' ? `
-                      <button class="btn btn-primary" style="padding: 2px 7px; font-size: 10px; background: #10b981; border: none; font-weight: 700; cursor: pointer;" onclick="window.tripPlanner.markDrugTestDone('${this.escapeJs(dt.employee)}', '${dateKey}')" title="Mark test completed today">
-                        ✅ Done
-                      </button>
-                    ` : `
-                      <span style="font-size: 10px; color: #34d399; font-weight: 700; display: flex; align-items: center; gap: 2px;">✓ Completed</span>
-                    `}
-                    <button class="btn btn-secondary" style="padding: 2px 6px; font-size: 10px; color: #c084fc; border-color: rgba(168, 85, 247, 0.3); cursor: pointer;" onclick="window.sheetNavigator.switchWorkspace('drug_testing')" title="View in DOT Drug Testing">
-                      🔍 Details
-                    </button>
-                  </div>
-                </div>
-              `).join('')}
-            </div>
-          `;
-        }
-
-        // 2. Render City Visit Cards
-        let tripsHtml = '';
-        if (trips.length > 0) {
-          tripsHtml = trips.map(trip => {
-            const locInfo = locMap[trip.location] || null;
-            const drive = this.getDriveTime(trip.location);
-
-            return `
-              <div class="location-card" draggable="true" data-date="${dateKey}" data-location="${this.escapeHtml(trip.location)}" style="border-left: 4px solid #38bdf8; background: var(--bg-primary); margin-bottom: 8px;">
-                <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
-                  <div class="location-card-title" style="color: #60a5fa; font-size: 14px; font-weight: 800; display: flex; align-items: center; gap: 4px;">
-                    📍 ${this.escapeHtml(trip.location)}
-                  </div>
-                  <span class="badge" style="background: rgba(56, 189, 248, 0.2); color: #38bdf8; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px;">
-                    🚗 ${this.escapeHtml(drive.time)}
-                  </span>
-                </div>
-                
-                <div class="location-card-meta" style="line-height: 1.4; margin-bottom: 8px;">
-                  <div style="color: #94a3b8; font-size: 11px;">Distance: <strong>${this.escapeHtml(drive.desc)}</strong></div>
-                  ${locInfo && locInfo.activeCrews.length > 0 ? `
-                    <div style="margin-top: 6px; padding-top: 6px; border-top: 1px solid rgba(255,255,255,0.08);">
-                      <div style="font-size: 11px; font-weight: 700; color: #4ade80; margin-bottom: 6px;">
-                        🟢 Active Crews & Tasks (${locInfo.activeCrews.length}):
+              <div id="section-body-${dateKey}-drug_tests" style="display: ${isCollapsed ? 'none' : 'flex'}; flex-direction: column; gap: 6px; margin-top: 5px;">
+                ${drugTests.map(dt => `
+                  <div class="drug-test-appointment-card" style="background: var(--bg-primary); border: 1px solid rgba(168, 85, 247, 0.35); border-left: 4px solid #a855f7; border-radius: 6px; padding: 8px 10px; box-shadow: 0 2px 6px rgba(0,0,0,0.25);">
+                    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px;">
+                      <div style="font-weight: 700; font-size: 12.5px; color: #f8fafc; cursor: pointer;" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(dt.employee)}', 'drug_tests');}" title="Click to view employee profile">
+                        👤 <span style="color: #60a5fa; text-decoration: underline dotted;">${this.escapeHtml(dt.employee)}</span>
                       </div>
-                      ${locInfo.activeCrews.map(c => {
-                        const crewTasks = window.taskManager ? window.taskManager.getTasksByCrew(c.crewId, weekMonday) : [];
-                        const summary = this.getCrewTaskSummary(crewTasks);
-
-                        return `
-                          <div class="crew-task-box" onclick="window.tripPlanner.openCrewTasksModal('${this.escapeHtml(c.crewId)}', '${this.escapeHtml(trip.location)}', 'All', '${dateKey}')" title="Click to view all tasks for Crew ${this.escapeHtml(c.crewId)}">
-                            <div style="font-size: 11px; color: #cbd5e1; display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                              <span><strong style="color: #60a5fa;">Crew ${this.escapeHtml(c.crewId)}</strong> (${this.escapeHtml(c.foreman)})</span>
-                              <div style="display: flex; align-items: center; gap: 4px;">
-                                ${summary.overdue > 0 ? `
-                                  <span class="badge" style="background: #ef4444; color: #fff; font-size: 9px; font-weight: 700; padding: 1px 4px; border-radius: 3px;">
-                                    🔴 ${summary.overdue}
-                                  </span>
-                                ` : ''}
-                                <span class="badge" style="background: ${summary.total > 0 ? 'rgba(59, 130, 246, 0.25)' : 'rgba(16, 185, 129, 0.2)'}; color: ${summary.total > 0 ? '#93c5fd' : '#4ade80'}; font-size: 9px; font-weight: 700; padding: 1px 5px;">
-                                  ${summary.total > 0 ? `${summary.total} Tasks 🔍` : '✓ Current'}
-                                </span>
-                              </div>
-                            </div>
-
-                            <!-- Task Count Overview Pills -->
-                            <div style="display: flex; flex-wrap: wrap; gap: 3px; margin-top: 3px;">
-                              ${summary.gloves > 0 ? `<span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; font-size: 9.5px; padding: 1px 5px; border: 1px solid rgba(59, 130, 246, 0.3);">🧤 ${summary.gloves} Glove${summary.gloves > 1 ? 's' : ''}</span>` : ''}
-                              ${summary.sleeves > 0 ? `<span class="badge" style="background: rgba(168, 85, 247, 0.15); color: #d8b4fe; font-size: 9.5px; padding: 1px 5px; border: 1px solid rgba(168, 85, 247, 0.3);">🧤 ${summary.sleeves} Sleeve${summary.sleeves > 1 ? 's' : ''}</span>` : ''}
-                              ${summary.blankets > 0 ? `<span class="badge" style="background: rgba(236, 72, 153, 0.15); color: #f472b6; font-size: 9.5px; padding: 1px 5px; border: 1px solid rgba(236, 72, 153, 0.3);">🛏️ ${summary.blankets} Blanket${summary.blankets > 1 ? 's' : ''}</span>` : ''}
-                              ${summary.macks > 0 ? `<span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fcd34d; font-size: 9.5px; padding: 1px 5px; border: 1px solid rgba(245, 158, 11, 0.3);">⚡ ${summary.macks} MACK${summary.macks > 1 ? 's' : ''}</span>` : ''}
-                              ${summary.equipment > 0 ? `<span class="badge" style="background: rgba(20, 184, 166, 0.15); color: #5eead4; font-size: 9.5px; padding: 1px 5px; border: 1px solid rgba(20, 184, 166, 0.3);">🧰 ${summary.equipment} Equip</span>` : ''}
-                              ${summary.training > 0 ? `<span class="badge" style="background: rgba(34, 197, 94, 0.15); color: #86efac; font-size: 9.5px; padding: 1px 5px; border: 1px solid rgba(34, 197, 94, 0.3);">🎓 ${summary.training} Training</span>` : ''}
-                              ${summary.certs > 0 ? `<span class="badge" style="background: rgba(239, 68, 68, 0.15); color: #fca5a5; font-size: 9.5px; padding: 1px 5px; border: 1px solid rgba(239, 68, 68, 0.3);">📜 ${summary.certs} Cert${summary.certs > 1 ? 's' : ''}</span>` : ''}
-                              ${summary.reports > 0 ? `<span class="badge" style="background: rgba(249, 115, 22, 0.15); color: #fdba74; font-size: 9.5px; padding: 1px 5px; border: 1px solid rgba(249, 115, 22, 0.3);">📋 ${summary.reports} Report${summary.reports > 1 ? 's' : ''}</span>` : ''}
-                              ${summary.drugTests > 0 ? `<span class="badge" style="background: rgba(139, 92, 246, 0.15); color: #c084fc; font-size: 9.5px; padding: 1px 5px; border: 1px solid rgba(139, 92, 246, 0.3);">🧪 ${summary.drugTests} Drug Test${summary.drugTests > 1 ? 's' : ''}</span>` : ''}
-                              ${summary.total === 0 ? `<span style="font-size: 9.5px; color: #94a3b8; font-style: italic;">✓ No pending tasks</span>` : ''}
-                            </div>
-                          </div>
-                        `;
-                      }).join('')}
+                      <span class="badge" style="font-size: 9.5px; padding: 1px 5px; font-weight: 700; ${dt.time ? 'background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4);' : 'background: rgba(148, 163, 184, 0.15); color: #94a3b8;'}">
+                        ⏰ ${dt.time ? this.formatTimeDisplay(dt.time) : 'Time TBD'}
+                      </span>
                     </div>
-                  ` : `
-                    <div style="margin-top: 4px; font-size: 11px; color: #94a3b8;">Base / Non-crew visit</div>
-                  `}
-                </div>
 
-                <div style="display: flex; justify-content: flex-end; margin-top: 6px;">
-                  <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 10px; color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3);" onclick="window.tripPlanner.removeTrip('${dateKey}', '${this.escapeHtml(trip.location)}')">❌ Remove</button>
-                </div>
-              </div>
-            `;
-          }).join('');
+                    <div style="font-size: 10px; color: #cbd5e1; margin-bottom: 4px; display: flex; align-items: center; gap: 4px; flex-wrap: wrap;">
+                      <span class="badge" style="background: rgba(168, 85, 247, 0.15); color: #d8b4fe; font-size: 9.5px; padding: 1px 4px;">
+                        ${this.escapeHtml(dt.testType)} (${this.escapeHtml(dt.classification)})
+                      </span>
+                      <span class="badge" style="background: ${dt.isMobile ? 'rgba(245, 158, 11, 0.15)' : 'rgba(59, 130, 246, 0.15)'}; color: ${dt.isMobile ? '#fcd34d' : '#93c5fd'}; font-size: 9.5px; padding: 1px 4px;">
+                        ${dt.isMobile ? '🚐 Mobile' : '🏥 Clinic'}
+                      </span>
+                      <span class="badge" style="background: ${dt.status === 'Completed' ? 'rgba(16, 185, 129, 0.2)' : (dt.status === 'Scheduled' ? 'rgba(59, 130, 246, 0.2)' : 'rgba(234, 179, 8, 0.2)')}; color: ${dt.status === 'Completed' ? '#34d399' : (dt.status === 'Scheduled' ? '#93c5fd' : '#facc15')}; font-size: 9.5px; padding: 1px 4px;">
+                        ${dt.status === 'Completed' ? '✅ Done' : (dt.status === 'Scheduled' ? '📅 Sched' : '⏳ Pending')}
+                      </span>
+                    </div>
 
-          if (!isHoliday) {
-            tripsHtml += `
-              <div style="color: var(--text-muted); font-size: 11px; text-align: center; border: 1px dashed rgba(255,255,255,0.1); border-radius: 6px; padding: 8px; margin-top: 4px; opacity: 0.85;">
-                + Drop another city here
+                    ${dt.meetingAddr ? `
+                      <div style="font-size: 10.5px; color: #94a3b8; margin-top: 3px; line-height: 1.3;">
+                        📍 <strong style="color: #cbd5e1;">Meet:</strong> ${this.escapeHtml(dt.meetingAddr)}
+                      </div>
+                    ` : (dt.clinicName ? `
+                      <div style="font-size: 10.5px; color: #94a3b8; margin-top: 3px; line-height: 1.3;">
+                        🏥 <strong style="color: #cbd5e1;">Clinic:</strong> ${this.escapeHtml(dt.clinicName)}${dt.clinicCity ? ' (' + this.escapeHtml(dt.clinicCity) + ')' : ''}
+                      </div>
+                    ` : '')}
+
+                    ${dt.phone ? `
+                      <div style="font-size: 10px; color: #64748b; margin-top: 2px;">
+                        📞 ${this.escapeHtml(dt.phone)} ${dt.job ? `· Job ${this.escapeHtml(dt.job)}` : ''}
+                      </div>
+                    ` : ''}
+
+                    <div style="display: flex; justify-content: flex-end; gap: 4px; margin-top: 5px; padding-top: 4px; border-top: 1px solid rgba(255,255,255,0.06);">
+                      ${dt.status !== 'Completed' ? `
+                        <button class="btn btn-primary" style="padding: 2px 7px; font-size: 10px; background: #10b981; border: none; font-weight: 700; cursor: pointer;" onclick="window.tripPlanner.markDrugTestDone('${this.escapeJs(dt.employee)}', '${dateKey}')" title="Mark test completed today">
+                          ✅ Done
+                        </button>
+                      ` : `
+                        <span style="font-size: 10px; color: #34d399; font-weight: 700; display: flex; align-items: center; gap: 2px;">✓ Completed</span>
+                      `}
+                      <button class="btn btn-secondary" style="padding: 2px 6px; font-size: 10px; color: #c084fc; border-color: rgba(168, 85, 247, 0.3); cursor: pointer;" onclick="window.sheetNavigator.switchWorkspace('drug_testing')" title="View in DOT Drug Testing">
+                        🔍 Details
+                      </button>
+                    </div>
+                  </div>
+                `).join('')}
               </div>
-            `;
-          }
-        } else {
-          const hasOtherItems = (drugTests.length > 0) || (this.getManualTasksForDate(dateKey).length > 0);
-          tripsHtml = `
-            <div style="color: var(--text-muted); font-size: 11px; text-align: center; margin-top: ${hasOtherItems ? '4px' : '30px'}; border: 1px dashed var(--border-color); border-radius: 6px; padding: ${hasOtherItems ? '8px' : '14px'};">
-              ${isHoliday ? '🏖️ Holiday Day' : '+ Drop city here'}
             </div>
           `;
         }
 
-        // 3. Render Manual Tasks (Separate from PPE/Equipment tasks)
-        const manualTasks = this.getManualTasksForDate(dateKey);
-        let manualTasksHtml = '';
-        if (manualTasks.length > 0) {
-          const pendingCount = manualTasks.filter(m => m.status !== 'Complete').length;
-          manualTasksHtml = `
-            <div class="manual-tasks-day-section" style="margin-bottom: 8px; display: flex; flex-direction: column; gap: 5px;">
-              <div style="font-size: 10.5px; font-weight: 800; color: #93c5fd; display: flex; align-items: center; justify-content: space-between; padding: 3px 6px; background: rgba(59, 130, 246, 0.12); border-radius: 4px; border-left: 3px solid #3b82f6;">
-                <span style="display: flex; align-items: center; gap: 4px;">📋 Tasks (${pendingCount}/${manualTasks.length})</span>
-                <button class="btn btn-secondary" style="padding: 1px 6px; font-size: 9.5px; color: #93c5fd; border-color: rgba(59, 130, 246, 0.35); background: rgba(59, 130, 246, 0.08); cursor: pointer;" onclick="window.tripPlanner.openAddManualTaskModal('${dateKey}', '${this.escapeJs(day.dayName)}, ${this.escapeJs(day.formattedDate)}')" title="Add task to ${day.dayName}">+ Add</button>
-              </div>
-              ${manualTasks.map(mt => {
-                const isDone = mt.status === 'Complete';
-                const isCert = (mt.taskCategory === 'cert_class' || !!mt.certType);
+        // 2. Render Training Section (Classes Cody teaches)
+        const allManualTasks = this.getManualTasksForDate(dateKey);
+        const trainingClasses = allManualTasks.filter(m => m.taskCategory === 'cert_class' || !!m.certType);
+        const personalTasks = allManualTasks.filter(m => m.taskCategory === 'personal_task' && !m.certType);
 
-                if (isCert) {
+        let trainingHtml = '';
+        if (trainingClasses.length > 0) {
+          const isCollapsed = this.isSectionCollapsed(dateKey, 'training');
+          const pendingCount = trainingClasses.filter(m => m.status !== 'Complete').length;
+          trainingHtml = `
+            <div class="day-section-collapsible training-day-section" style="margin-bottom: 8px;">
+              <div style="font-size: 10.5px; font-weight: 800; color: #34d399; display: flex; align-items: center; justify-content: space-between; padding: 4px 7px; background: rgba(16, 185, 129, 0.12); border-radius: 4px; border-left: 3px solid #10b981; cursor: pointer; user-select: none;" onclick="window.tripPlanner.toggleSectionCollapse('${dateKey}', 'training')" title="Click to collapse / expand Training Classes">
+                <span style="display: flex; align-items: center; gap: 5px;">
+                  <span id="section-chevron-${dateKey}-training" style="font-size: 8px; width: 10px; display: inline-block;">${isCollapsed ? '▶' : '▼'}</span>
+                  <span>🎓 Training (${pendingCount}/${trainingClasses.length})</span>
+                </span>
+                <button class="btn btn-secondary" style="padding: 1px 6px; font-size: 9.5px; color: #34d399; border-color: rgba(16, 185, 129, 0.35); background: rgba(16, 185, 129, 0.08); cursor: pointer;" onclick="event.stopPropagation(); window.tripPlanner.openAddManualTaskModal('${dateKey}', '${this.escapeJs(day.dayName)}, ${this.escapeJs(day.formattedDate)}', 'cert_class')" title="Schedule Training Class on ${day.dayName}">+ Class</button>
+              </div>
+              <div id="section-body-${dateKey}-training" style="display: ${isCollapsed ? 'none' : 'flex'}; flex-direction: column; gap: 5px; margin-top: 5px;">
+                ${trainingClasses.map(mt => {
+                  const isDone = mt.status === 'Complete';
                   const empName = mt.employee || 'Unassigned Worker';
                   return `
                     <div class="manual-task-card cert-class-card" style="background: var(--bg-primary); border: 1px solid ${isDone ? 'rgba(16, 185, 129, 0.3)' : 'rgba(16, 185, 129, 0.4)'}; border-left: 4px solid ${isDone ? '#10b981' : '#059669'}; border-radius: 6px; padding: 7px 9px; box-shadow: 0 1px 4px rgba(0,0,0,0.25); opacity: ${isDone ? '0.65' : '1'}; transition: opacity 0.2s;">
@@ -1897,6 +1861,75 @@ class TripPlannerApp {
                           <button style="background: none; border: none; color: #64748b; cursor: pointer; padding: 1px 3px; font-size: 11px; line-height: 1; border-radius: 3px;" onmouseover="this.style.color='#60a5fa'" onmouseout="this.style.color='#64748b'" onclick="window.tripPlanner.openEditManualTaskModal('${this.escapeHtml(mt.id)}')" title="Edit Class">
                             ✏️
                           </button>
+                          <button style="background: none; border: none; color: #64748b; cursor: pointer; padding: 1px 4px; font-size: 12px; line-height: 1; border-radius: 3px;" onmouseover="this.style.color='#f87171'" onmouseout="this.style.color='#64748b'" onclick="window.tripPlanner.deleteManualTask('${this.escapeHtml(mt.id)}')" title="Delete Class">
+                            ✕
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            </div>
+          `;
+        }
+
+        // 3. Render Personal / Office Tasks
+        let officeHtml = '';
+        if (personalTasks.length > 0) {
+          const isCollapsed = this.isSectionCollapsed(dateKey, 'office');
+          const pendingCount = personalTasks.filter(m => m.status !== 'Complete').length;
+          officeHtml = `
+            <div class="day-section-collapsible office-tasks-day-section" style="margin-bottom: 8px;">
+              <div style="font-size: 10.5px; font-weight: 800; color: #93c5fd; display: flex; align-items: center; justify-content: space-between; padding: 4px 7px; background: rgba(59, 130, 246, 0.12); border-radius: 4px; border-left: 3px solid #3b82f6; cursor: pointer; user-select: none;" onclick="window.tripPlanner.toggleSectionCollapse('${dateKey}', 'office')" title="Click to collapse / expand Office Tasks">
+                <span style="display: flex; align-items: center; gap: 5px;">
+                  <span id="section-chevron-${dateKey}-office" style="font-size: 8px; width: 10px; display: inline-block;">${isCollapsed ? '▶' : '▼'}</span>
+                  <span>💼 Office Tasks (${pendingCount}/${personalTasks.length})</span>
+                </span>
+                <button class="btn btn-secondary" style="padding: 1px 6px; font-size: 9.5px; color: #93c5fd; border-color: rgba(59, 130, 246, 0.35); background: rgba(59, 130, 246, 0.08); cursor: pointer;" onclick="event.stopPropagation(); window.tripPlanner.openAddManualTaskModal('${dateKey}', '${this.escapeJs(day.dayName)}, ${this.escapeJs(day.formattedDate)}', 'personal_task')" title="Add Office Task">+ Task</button>
+              </div>
+              <div id="section-body-${dateKey}-office" style="display: ${isCollapsed ? 'none' : 'flex'}; flex-direction: column; gap: 5px; margin-top: 5px;">
+                ${personalTasks.map(mt => {
+                  const isDone = mt.status === 'Complete';
+                  const assignee = mt.assignedTo || 'Myself';
+                  return `
+                    <div class="manual-task-card personal-task-card" style="background: var(--bg-primary); border: 1px solid ${isDone ? 'rgba(16, 185, 129, 0.3)' : 'rgba(59, 130, 246, 0.3)'}; border-left: 4px solid ${isDone ? '#10b981' : (mt.priority === 'High' ? '#ef4444' : '#3b82f6')}; border-radius: 6px; padding: 7px 9px; box-shadow: 0 1px 4px rgba(0,0,0,0.25); opacity: ${isDone ? '0.65' : '1'}; transition: opacity 0.2s;">
+                      <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 6px;">
+                        <div style="display: flex; align-items: flex-start; gap: 7px; flex: 1; min-width: 0;">
+                          <input type="checkbox" ${isDone ? 'checked' : ''} onchange="window.tripPlanner.toggleManualTask('${this.escapeHtml(mt.id)}')" style="cursor: pointer; margin-top: 2px; accent-color: #10b981; width: 14px; height: 14px;" title="${isDone ? 'Mark Pending' : 'Mark Complete'}">
+                          <div style="flex: 1; min-width: 0;">
+                            <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 3px; flex-wrap: wrap;">
+                              <span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.3); font-size: 9px; font-weight: 800; padding: 1px 5px; border-radius: 3px;">
+                                💼 Personal / Office
+                              </span>
+                              ${mt.priority === 'High' ? `
+                                <span class="badge" style="background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.35); font-size: 9px; padding: 1px 4px;">
+                                  🔴 High
+                                </span>
+                              ` : ''}
+                              ${isDone ? `
+                                <span class="badge" style="background: rgba(16, 185, 129, 0.25); color: #a7f3d0; font-size: 9px; padding: 1px 4px;">
+                                  ✅ Completed
+                                </span>
+                              ` : ''}
+                            </div>
+                            <div style="font-size: 12px; font-weight: 700; color: ${isDone ? '#94a3b8' : '#f8fafc'}; text-decoration: ${isDone ? 'line-through' : 'none'}; word-break: break-word; line-height: 1.3;">
+                              ${this.escapeHtml(mt.title)}
+                            </div>
+                            <div style="font-size: 10.5px; color: #94a3b8; margin-top: 3px;">
+                              👤 <strong style="color: #cbd5e1;">Assigned:</strong> ${this.escapeHtml(assignee)}
+                            </div>
+                            <div style="font-size: 10px; color: #94a3b8; margin-top: 4px; display: flex; align-items: center; gap: 4px; flex-wrap: wrap;">
+                              ${mt.location ? `<span class="badge" style="background: rgba(255,255,255,0.06); color: #cbd5e1; font-size: 9px; padding: 1px 4px;">📍 ${this.escapeHtml(mt.location)}</span>` : ''}
+                              ${mt.time ? `<span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; font-size: 9px; padding: 1px 4px;">⏰ ${this.escapeHtml(mt.time)}</span>` : ''}
+                              ${mt.notes ? `<div style="color: var(--text-muted); font-size: 9.5px; margin-top: 2px; width: 100%; word-break: break-word;">📝 ${this.escapeHtml(mt.notes)}</div>` : ''}
+                            </div>
+                          </div>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 3px;">
+                          <button style="background: none; border: none; color: #64748b; cursor: pointer; padding: 1px 3px; font-size: 11px; line-height: 1; border-radius: 3px;" onmouseover="this.style.color='#60a5fa'" onmouseout="this.style.color='#64748b'" onclick="window.tripPlanner.openEditManualTaskModal('${this.escapeHtml(mt.id)}')" title="Edit Task">
+                            ✏️
+                          </button>
                           <button style="background: none; border: none; color: #64748b; cursor: pointer; padding: 1px 4px; font-size: 12px; line-height: 1; border-radius: 3px;" onmouseover="this.style.color='#f87171'" onmouseout="this.style.color='#64748b'" onclick="window.tripPlanner.deleteManualTask('${this.escapeHtml(mt.id)}')" title="Delete Task">
                             ✕
                           </button>
@@ -1904,80 +1937,160 @@ class TripPlannerApp {
                       </div>
                     </div>
                   `;
-                }
-
-                // Personal / Office Task
-                const assignee = mt.assignedTo || 'Myself';
-                return `
-                  <div class="manual-task-card personal-task-card" style="background: var(--bg-primary); border: 1px solid ${isDone ? 'rgba(16, 185, 129, 0.3)' : 'rgba(59, 130, 246, 0.3)'}; border-left: 4px solid ${isDone ? '#10b981' : (mt.priority === 'High' ? '#ef4444' : '#3b82f6')}; border-radius: 6px; padding: 7px 9px; box-shadow: 0 1px 4px rgba(0,0,0,0.25); opacity: ${isDone ? '0.65' : '1'}; transition: opacity 0.2s;">
-                    <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 6px;">
-                      <div style="display: flex; align-items: flex-start; gap: 7px; flex: 1; min-width: 0;">
-                        <input type="checkbox" ${isDone ? 'checked' : ''} onchange="window.tripPlanner.toggleManualTask('${this.escapeHtml(mt.id)}')" style="cursor: pointer; margin-top: 2px; accent-color: #10b981; width: 14px; height: 14px;" title="${isDone ? 'Mark Pending' : 'Mark Complete'}">
-                        <div style="flex: 1; min-width: 0;">
-                          <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 3px; flex-wrap: wrap;">
-                            <span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.3); font-size: 9px; font-weight: 800; padding: 1px 5px; border-radius: 3px;">
-                              💼 Personal / Office
-                            </span>
-                            ${mt.priority === 'High' ? `
-                              <span class="badge" style="background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.35); font-size: 9px; padding: 1px 4px;">
-                                🔴 High
-                              </span>
-                            ` : ''}
-                            ${isDone ? `
-                              <span class="badge" style="background: rgba(16, 185, 129, 0.25); color: #a7f3d0; font-size: 9px; padding: 1px 4px;">
-                                ✅ Completed
-                              </span>
-                            ` : ''}
-                          </div>
-                          <div style="font-size: 12px; font-weight: 700; color: ${isDone ? '#94a3b8' : '#f8fafc'}; text-decoration: ${isDone ? 'line-through' : 'none'}; word-break: break-word; line-height: 1.3;">
-                            ${this.escapeHtml(mt.title)}
-                          </div>
-                          <div style="font-size: 10.5px; color: #94a3b8; margin-top: 3px;">
-                            👤 <strong style="color: #cbd5e1;">Assigned:</strong> ${this.escapeHtml(assignee)}
-                          </div>
-                          <div style="font-size: 10px; color: #94a3b8; margin-top: 4px; display: flex; align-items: center; gap: 4px; flex-wrap: wrap;">
-                            ${mt.location ? `<span class="badge" style="background: rgba(255,255,255,0.06); color: #cbd5e1; font-size: 9px; padding: 1px 4px;">📍 ${this.escapeHtml(mt.location)}</span>` : ''}
-                            ${mt.time ? `<span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; font-size: 9px; padding: 1px 4px;">⏰ ${this.escapeHtml(mt.time)}</span>` : ''}
-                            ${mt.notes ? `<div style="color: var(--text-muted); font-size: 9.5px; margin-top: 2px; width: 100%; word-break: break-word;">📝 ${this.escapeHtml(mt.notes)}</div>` : ''}
-                          </div>
-                        </div>
-                      </div>
-                      <div style="display: flex; align-items: center; gap: 3px;">
-                        <button style="background: none; border: none; color: #64748b; cursor: pointer; padding: 1px 3px; font-size: 11px; line-height: 1; border-radius: 3px;" onmouseover="this.style.color='#60a5fa'" onmouseout="this.style.color='#64748b'" onclick="window.tripPlanner.openEditManualTaskModal('${this.escapeHtml(mt.id)}')" title="Edit Task">
-                          ✏️
-                        </button>
-                        <button style="background: none; border: none; color: #64748b; cursor: pointer; padding: 1px 4px; font-size: 12px; line-height: 1; border-radius: 3px;" onmouseover="this.style.color='#f87171'" onmouseout="this.style.color='#64748b'" onclick="window.tripPlanner.deleteManualTask('${this.escapeHtml(mt.id)}')" title="Delete Task">
-                          ✕
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                `;
-              }).join('')}
+                }).join('')}
+              </div>
             </div>
           `;
         }
 
-        const cardsHtml = drugTestsHtml + manualTasksHtml + tripsHtml;
+        // 4. Render Tasks (Sidebar Locations, Crews, & Equipment Swaps)
+        let tasksHtml = '';
+        let totalCrewTasksCount = 0;
+        trips.forEach(trip => {
+          const locInfo = locMap[trip.location] || null;
+          if (locInfo && locInfo.activeCrews) {
+            locInfo.activeCrews.forEach(c => {
+              const cTasks = window.taskManager ? window.taskManager.getTasksByCrew(c.crewId, weekMonday) : [];
+              totalCrewTasksCount += cTasks.length;
+            });
+          }
+        });
+
+        if (trips.length > 0) {
+          const isCollapsed = this.isSectionCollapsed(dateKey, 'tasks');
+          tasksHtml = `
+            <div class="day-section-collapsible tasks-day-section" style="margin-bottom: 8px;">
+              <div style="font-size: 10.5px; font-weight: 800; color: #38bdf8; display: flex; align-items: center; justify-content: space-between; padding: 4px 7px; background: rgba(56, 189, 248, 0.12); border-radius: 4px; border-left: 3px solid #38bdf8; cursor: pointer; user-select: none;" onclick="window.tripPlanner.toggleSectionCollapse('${dateKey}', 'tasks')" title="Click to collapse / expand Tasks">
+                <span style="display: flex; align-items: center; gap: 5px;">
+                  <span id="section-chevron-${dateKey}-tasks" style="font-size: 8px; width: 10px; display: inline-block;">${isCollapsed ? '▶' : '▼'}</span>
+                  <span>📋 Tasks (${totalCrewTasksCount > 0 ? `${totalCrewTasksCount} Tasks · ` : ''}${trips.length} ${trips.length === 1 ? 'Location' : 'Locations'})</span>
+                </span>
+                <span style="font-size: 9px; color: #7dd3fc; opacity: 0.85;">Crews & PPE</span>
+              </div>
+              <div id="section-body-${dateKey}-tasks" style="display: ${isCollapsed ? 'none' : 'flex'}; flex-direction: column; gap: 6px; margin-top: 5px;">
+                ${trips.map(trip => {
+                  const locInfo = locMap[trip.location] || null;
+                  const drive = this.getDriveTime(trip.location);
+
+                  return `
+                    <div class="location-card" draggable="true" data-date="${dateKey}" data-location="${this.escapeHtml(trip.location)}" style="border-left: 4px solid #38bdf8; background: var(--bg-primary); margin-bottom: 4px;">
+                      <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
+                        <div class="location-card-title" style="color: #60a5fa; font-size: 13.5px; font-weight: 800; display: flex; align-items: center; gap: 4px;">
+                          📍 ${this.escapeHtml(trip.location)}
+                        </div>
+                        <span class="badge" style="background: rgba(56, 189, 248, 0.2); color: #38bdf8; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px;">
+                          🚗 ${this.escapeHtml(drive.time)}
+                        </span>
+                      </div>
+                      
+                      <div class="location-card-meta" style="line-height: 1.4; margin-bottom: 6px;">
+                        <div style="color: #94a3b8; font-size: 10.5px;">Distance: <strong>${this.escapeHtml(drive.desc)}</strong></div>
+                        ${locInfo && locInfo.activeCrews.length > 0 ? `
+                          <div style="margin-top: 6px; padding-top: 6px; border-top: 1px solid rgba(255,255,255,0.08);">
+                            <div style="font-size: 11px; font-weight: 700; color: #4ade80; margin-bottom: 6px;">
+                              🟢 Active Crews & Tasks (${locInfo.activeCrews.length}):
+                            </div>
+                            ${locInfo.activeCrews.map(c => {
+                              const crewTasks = window.taskManager ? window.taskManager.getTasksByCrew(c.crewId, weekMonday) : [];
+                              const summary = this.getCrewTaskSummary(crewTasks);
+
+                              return `
+                                <div class="crew-task-box" onclick="window.tripPlanner.openCrewTasksModal('${this.escapeHtml(c.crewId)}', '${this.escapeHtml(trip.location)}', 'All', '${dateKey}')" title="Click to view all tasks for Crew ${this.escapeHtml(c.crewId)}">
+                                  <div style="font-size: 11px; color: #cbd5e1; display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                                    <span><strong style="color: #60a5fa;">Crew ${this.escapeHtml(c.crewId)}</strong> (${this.escapeHtml(c.foreman)})</span>
+                                    <div style="display: flex; align-items: center; gap: 4px;">
+                                      ${summary.overdue > 0 ? `
+                                        <span class="badge" style="background: #ef4444; color: #fff; font-size: 9px; font-weight: 700; padding: 1px 4px; border-radius: 3px;">
+                                          🔴 ${summary.overdue}
+                                        </span>
+                                      ` : ''}
+                                      <span class="badge" style="background: ${summary.total > 0 ? 'rgba(59, 130, 246, 0.25)' : 'rgba(16, 185, 129, 0.2)'}; color: ${summary.total > 0 ? '#93c5fd' : '#4ade80'}; font-size: 9px; font-weight: 700; padding: 1px 5px;">
+                                        ${summary.total > 0 ? `${summary.total} Tasks 🔍` : '✓ Current'}
+                                      </span>
+                                    </div>
+                                  </div>
+
+                                  <!-- Task Count Overview Pills -->
+                                  <div style="display: flex; flex-wrap: wrap; gap: 3px; margin-top: 3px;">
+                                    ${summary.gloves > 0 ? `<span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; font-size: 9px; padding: 1px 4px; border: 1px solid rgba(59, 130, 246, 0.3);">🧤 ${summary.gloves}</span>` : ''}
+                                    ${summary.sleeves > 0 ? `<span class="badge" style="background: rgba(168, 85, 247, 0.15); color: #d8b4fe; font-size: 9px; padding: 1px 4px; border: 1px solid rgba(168, 85, 247, 0.3);">🧤 ${summary.sleeves}</span>` : ''}
+                                    ${summary.blankets > 0 ? `<span class="badge" style="background: rgba(236, 72, 153, 0.15); color: #f472b6; font-size: 9px; padding: 1px 4px; border: 1px solid rgba(236, 72, 153, 0.3);">🛏️ ${summary.blankets}</span>` : ''}
+                                    ${summary.macks > 0 ? `<span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fcd34d; font-size: 9px; padding: 1px 4px; border: 1px solid rgba(245, 158, 11, 0.3);">⚡ ${summary.macks}</span>` : ''}
+                                    ${summary.equipment > 0 ? `<span class="badge" style="background: rgba(20, 184, 166, 0.15); color: #5eead4; font-size: 9px; padding: 1px 4px; border: 1px solid rgba(20, 184, 166, 0.3);">🧰 ${summary.equipment}</span>` : ''}
+                                    ${summary.training > 0 ? `<span class="badge" style="background: rgba(34, 197, 94, 0.15); color: #86efac; font-size: 9px; padding: 1px 4px; border: 1px solid rgba(34, 197, 94, 0.3);">🎓 ${summary.training}</span>` : ''}
+                                    ${summary.certs > 0 ? `<span class="badge" style="background: rgba(239, 68, 68, 0.15); color: #fca5a5; font-size: 9px; padding: 1px 4px; border: 1px solid rgba(239, 68, 68, 0.3);">📜 ${summary.certs}</span>` : ''}
+                                    ${summary.reports > 0 ? `<span class="badge" style="background: rgba(249, 115, 22, 0.15); color: #fdba74; font-size: 9px; padding: 1px 4px; border: 1px solid rgba(249, 115, 22, 0.3);">📋 ${summary.reports}</span>` : ''}
+                                    ${summary.drugTests > 0 ? `<span class="badge" style="background: rgba(139, 92, 246, 0.15); color: #c084fc; font-size: 9px; padding: 1px 4px; border: 1px solid rgba(139, 92, 246, 0.3);">🧪 ${summary.drugTests}</span>` : ''}
+                                    ${summary.total === 0 ? `<span style="font-size: 9px; color: #94a3b8; font-style: italic;">✓ No pending tasks</span>` : ''}
+                                  </div>
+                                </div>
+                              `;
+                            }).join('')}
+                          </div>
+                        ` : `
+                          <div style="margin-top: 4px; font-size: 11px; color: #94a3b8;">Base / Non-crew visit</div>
+                        `}
+                      </div>
+
+                      <div style="display: flex; justify-content: flex-end; margin-top: 4px;">
+                        <button class="btn btn-secondary" style="padding: 2px 7px; font-size: 9.5px; color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3);" onclick="window.tripPlanner.removeTrip('${dateKey}', '${this.escapeHtml(trip.location)}')">❌ Remove</button>
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
+
+                ${!isHoliday ? `
+                  <div style="color: var(--text-muted); font-size: 10.5px; text-align: center; border: 1px dashed rgba(255,255,255,0.1); border-radius: 6px; padding: 6px; opacity: 0.85;">
+                    + Drop another city from sidebar
+                  </div>
+                ` : ''}
+              </div>
+            </div>
+          `;
+        } else {
+          const hasOtherSections = (drugTests.length > 0) || (trainingClasses.length > 0) || (personalTasks.length > 0);
+          tasksHtml = `
+            <div class="tasks-drop-placeholder" style="margin-top: ${hasOtherSections ? '4px' : '20px'};">
+              <div style="color: var(--text-muted); font-size: 11px; text-align: center; border: 1px dashed var(--border-color); border-radius: 6px; padding: ${hasOtherSections ? '8px 6px' : '14px 10px'};">
+                ${isHoliday ? '🏖️ Holiday Day' : '+ Drop city / crew tasks from sidebar'}
+              </div>
+            </div>
+          `;
+        }
+
+        const cardsHtml = drugTestsHtml + trainingHtml + officeHtml + tasksHtml;
 
         col.innerHTML = `
           <div class="day-header" style="background: ${isHoliday ? 'linear-gradient(90deg, #854d0e 0%, #1e293b 100%)' : (drugTests.length > 0 ? 'linear-gradient(90deg, rgba(88, 28, 135, 0.4) 0%, #1e293b 100%)' : '#1e293b')};">
-            <div style="display: flex; align-items: center; gap: 4px; min-width: 0;">
+            <div style="display: flex; align-items: center; gap: 4px; min-width: 0; flex-wrap: wrap;">
               <span style="font-weight: 800; color: #f8fafc; white-space: nowrap;">${day.dayName}, ${day.formattedDate}</span>
               ${drugTests.length > 0 ? `
                 <span class="badge" style="background: rgba(168, 85, 247, 0.25); color: #d8b4fe; border: 1px solid rgba(168, 85, 247, 0.4); font-size: 9px; padding: 1px 4px; border-radius: 3px;" title="${drugTests.length} DOT Drug Test Appt(s) Scheduled">
                   🧪 ${drugTests.length}
                 </span>
               ` : ''}
-              ${manualTasks.length > 0 ? `
-                <span class="badge" style="background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.35); font-size: 9px; padding: 1px 4px; border-radius: 3px;" title="${manualTasks.length} Manual Task(s)">
-                  📋 ${manualTasks.filter(m => m.status !== 'Complete').length}
+              ${trainingClasses.length > 0 ? `
+                <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.35); font-size: 9px; padding: 1px 4px; border-radius: 3px;" title="${trainingClasses.length} Training Class(es)">
+                  🎓 ${trainingClasses.filter(t => t.status !== 'Complete').length}
+                </span>
+              ` : ''}
+              ${personalTasks.length > 0 ? `
+                <span class="badge" style="background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.35); font-size: 9px; padding: 1px 4px; border-radius: 3px;" title="${personalTasks.length} Office Task(s)">
+                  💼 ${personalTasks.filter(t => t.status !== 'Complete').length}
+                </span>
+              ` : ''}
+              ${totalCrewTasksCount > 0 ? `
+                <span class="badge" style="background: rgba(56, 189, 248, 0.2); color: #7dd3fc; border: 1px solid rgba(56, 189, 248, 0.35); font-size: 9px; padding: 1px 4px; border-radius: 3px;" title="${totalCrewTasksCount} Crew Task(s) from Sidebar">
+                  📋 ${totalCrewTasksCount}
                 </span>
               ` : ''}
             </div>
             <div style="display: flex; align-items: center; gap: 4px;">
-              <button class="btn btn-secondary" style="padding: 1px 5px; font-size: 9px; line-height: 1.2; background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 3px; cursor: pointer;" onclick="window.tripPlanner.openAddManualTaskModal('${dateKey}', '${this.escapeJs(day.dayName)}, ${this.escapeJs(day.formattedDate)}')" title="Add manual task to ${day.dayName}, ${day.formattedDate}">
-                ➕ Task
+              <button class="btn btn-secondary" style="padding: 1px 5px; font-size: 9px; line-height: 1.2; background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 3px; cursor: pointer;" onclick="window.tripPlanner.openAddManualTaskModal('${dateKey}', '${this.escapeJs(day.dayName)}, ${this.escapeJs(day.formattedDate)}', 'cert_class')" title="Schedule Training Class on ${day.dayName}">
+                🎓 + Class
+              </button>
+              <button class="btn btn-secondary" style="padding: 1px 5px; font-size: 9px; line-height: 1.2; background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 3px; cursor: pointer;" onclick="window.tripPlanner.openAddManualTaskModal('${dateKey}', '${this.escapeJs(day.dayName)}, ${this.escapeJs(day.formattedDate)}', 'personal_task')" title="Add Personal / Office Task on ${day.dayName}">
+                💼 + Task
               </button>
               <span class="badge" style="background: ${isHoliday ? '#ca8a04' : (day.isWorkDay ? '#0284c7' : '#475569')}; color: #fff; font-size: 9.5px; padding: 2px 5px; border-radius: 4px;">
                 ${isHoliday ? '🏖️ Holiday' : (day.isWorkDay ? 'Work' : 'Off')}

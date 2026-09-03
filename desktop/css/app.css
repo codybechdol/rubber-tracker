@@ -484,6 +484,15 @@ body {
   transform: translateY(-1px);
 }
 
+.day-section-collapsible {
+  border-radius: 6px;
+  transition: all 0.15s ease;
+}
+
+.day-section-collapsible:hover {
+  filter: brightness(1.04);
+}
+
 .failed-rubber-option-btn {
   cursor: pointer;
   outline: none;
