@@ -520,24 +520,25 @@ class SyncEngine {
     let html = `
       <div style="padding: 10px 14px; border-radius: 8px; font-size: 13px; font-weight: 500; margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; ${statusBg}">
         <span id="sync-modal-subtitle">${statusMessage}</span>
-        <span class="brand-badge" style="background: rgba(255,255,255,0.1);">${outbox.length} change${outbox.length === 1 ? '' : 's'}</span>
+        <span id="sync-modal-count-badge" class="brand-badge" style="background: rgba(255,255,255,0.1); transition: transform 0.2s ease, background-color 0.2s ease;">${outbox.length} change${outbox.length === 1 ? '' : 's'}</span>
       </div>
     `;
 
     if (outbox.length === 0) {
       html += `
-        <div style="padding: 30px; text-align: center; color: var(--text-muted);">
+        <div id="sync-modal-empty-state" style="padding: 30px; text-align: center; color: var(--text-muted); animation: fadeIn 0.3s ease;">
           <div style="font-size: 28px; margin-bottom: 8px;">✅</div>
           <div style="font-weight: 600; font-size: 14px;">No pending offline changes</div>
           <div style="font-size: 12px; margin-top: 4px;">All edits are fully in sync with Google Sheets.</div>
         </div>
       `;
     } else {
-      html += `<div style="display: flex; flex-direction: column; gap: 8px;">`;
+      html += `<div id="sync-mutations-list" style="display: flex; flex-direction: column; gap: 8px;">`;
       outbox.forEach((mut, idx) => {
         const item = this.formatMutation(mut);
+        const mutKey = mut.id || `mut_idx_${idx}`;
         html += `
-          <div style="background-color: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 14px; display: flex; align-items: flex-start; gap: 12px;">
+          <div id="sync-card-${mutKey}" data-mut-key="${mutKey}" class="sync-task-card" style="background-color: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 14px; display: flex; align-items: flex-start; gap: 12px; max-height: 140px; box-sizing: border-box; overflow: hidden; transition: all 0.35s cubic-bezier(0.4, 0, 0.2, 1); will-change: transform, opacity, max-height, margin;">
             <div style="font-size: 16px; margin-top: 2px;">${item.icon}</div>
             <div style="flex: 1; min-width: 0;">
               <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 4px;">
@@ -556,6 +557,93 @@ class SyncEngine {
     }
 
     body.innerHTML = html;
+  }
+
+  /**
+   * Animates pushed tasks falling off the modal list in real time with a cascading drop & fade
+   */
+  async animateTasksPushed(pushedChunk, remainingCount, totalCount) {
+    if (!pushedChunk || pushedChunk.length === 0) return;
+
+    const listEl = document.getElementById('sync-mutations-list');
+    const countBadge = document.getElementById('sync-modal-count-badge');
+
+    // Update count badge with a lively pulse effect
+    if (countBadge) {
+      countBadge.textContent = `${remainingCount} change${remainingCount === 1 ? '' : 's'}`;
+      countBadge.style.transform = 'scale(1.22)';
+      countBadge.style.backgroundColor = 'rgba(34, 197, 94, 0.35)';
+      countBadge.style.color = '#4ade80';
+      setTimeout(() => {
+        if (countBadge) {
+          countBadge.style.transform = 'scale(1)';
+          countBadge.style.backgroundColor = 'rgba(255,255,255,0.1)';
+          countBadge.style.color = '';
+        }
+      }, 250);
+    }
+
+    // Match cards in DOM for each pushed mutation
+    const cardsToAnimate = [];
+    pushedChunk.forEach((mut) => {
+      let card = null;
+      if (mut.id) {
+        card = document.getElementById(`sync-card-${mut.id}`) || (listEl ? listEl.querySelector(`[data-mut-key="${mut.id}"]`) : null);
+      }
+      if (!card && listEl) {
+        card = listEl.querySelector('.sync-task-card:not(.sync-card-falling)');
+      }
+      if (card && !card.classList.contains('sync-card-falling')) {
+        card.classList.add('sync-card-falling');
+        cardsToAnimate.push(card);
+      }
+    });
+
+    if (cardsToAnimate.length === 0) return;
+
+    // Cascade animation: each card flashes green and drops down away from the list
+    const animPromises = cardsToAnimate.map((card, cIdx) => {
+      return new Promise(resolve => {
+        setTimeout(() => {
+          // Success highlight
+          card.style.borderColor = 'rgba(34, 197, 94, 0.7)';
+          card.style.backgroundColor = 'rgba(34, 197, 94, 0.12)';
+          card.style.boxShadow = '0 0 14px rgba(34, 197, 94, 0.25)';
+
+          // Smooth drop & collapse ("fall off the list")
+          setTimeout(() => {
+            card.style.transform = 'translateY(16px) scale(0.96)';
+            card.style.opacity = '0';
+            card.style.maxHeight = '0px';
+            card.style.paddingTop = '0px';
+            card.style.paddingBottom = '0px';
+            card.style.marginTop = '0px';
+            card.style.marginBottom = '0px';
+            card.style.borderWidth = '0px';
+
+            setTimeout(() => {
+              if (card && card.parentNode) {
+                card.parentNode.removeChild(card);
+              }
+              resolve();
+            }, 320);
+          }, 100);
+        }, cIdx * 30);
+      });
+    });
+
+    await Promise.all(animPromises);
+
+    // If all tasks have fallen off, display the clean completion state
+    if (remainingCount === 0 && listEl) {
+      listEl.innerHTML = `
+        <div style="padding: 24px 16px; text-align: center; color: var(--text-muted); animation: fadeIn 0.3s ease;">
+          <div style="font-size: 32px; margin-bottom: 8px;">🎉</div>
+          <div style="font-weight: 700; font-size: 14px; color: #4ade80;">All Changes Successfully Pushed!</div>
+          <div style="font-size: 12px; margin-top: 4px; color: var(--text-secondary);">Google Sheets is now completely up to date.</div>
+        </div>
+      `;
+    }
   }
 
   showPendingChangesModal() {
@@ -668,6 +756,17 @@ class SyncEngine {
     }
 
     const currentOutbox = [...(this.db.getOutbox() || [])];
+    let needsIdSave = false;
+    currentOutbox.forEach((m, idx) => {
+      if (!m.id) {
+        m.id = `mut_${Date.now()}_${idx}_${Math.random().toString(36).substr(2, 6)}`;
+        needsIdSave = true;
+      }
+    });
+    if (needsIdSave) {
+      await this.db.saveOutbox(currentOutbox);
+    }
+
     const pushStartTime = Date.now();
     let currentBatchText = `Pushing ${currentOutbox.length} offline change(s) to Google Sheets...`;
 
@@ -804,6 +903,14 @@ class SyncEngine {
         this.renderOutboxBadge();
         totalPushed += chunk.length;
         i += chunk.length;
+
+        // REAL-TIME ANIMATION: Cascade-fall pushed tasks off the modal list
+        currentBatchText = `Pushed batch ${batchNum} (${totalPushed}/${totalCount} changes)...`;
+        const pushedSubTitleEl = document.getElementById('sync-modal-subtitle');
+        if (pushedSubTitleEl) {
+          pushedSubTitleEl.textContent = `${currentBatchText} (${this.formatDuration(Date.now() - pushStartTime)})`;
+        }
+        await this.animateTasksPushed(chunk, totalCount - totalPushed, totalCount);
       }
 
       clearInterval(pushTimerInterval);
@@ -822,7 +929,34 @@ class SyncEngine {
       const finalRemaining = this.db.getOutbox() || [];
       if (finalRemaining.length === 0) {
         this.updateStatusUI('synced', `Synced in ${durationFormatted}`);
-        this.renderModalChanges([], `✅ Successfully pushed all ${totalCount} change(s) in ${durationFormatted}!`, 'success', false);
+        const subTitleEl = document.getElementById('sync-modal-subtitle');
+        const countBadge = document.getElementById('sync-modal-count-badge');
+        const clearBtn = document.getElementById('sync-modal-clear-btn');
+        if (clearBtn) clearBtn.style.display = 'none';
+        if (subTitleEl) {
+          subTitleEl.textContent = `✅ Successfully pushed all ${totalCount} change(s) in ${durationFormatted}!`;
+          const banner = subTitleEl.parentElement;
+          if (banner) {
+            banner.style.backgroundColor = 'rgba(34, 197, 94, 0.15)';
+            banner.style.color = '#4ade80';
+            banner.style.border = '1px solid rgba(34, 197, 94, 0.3)';
+          }
+        }
+        if (countBadge) {
+          countBadge.textContent = '0 changes';
+          countBadge.style.backgroundColor = 'rgba(34, 197, 94, 0.2)';
+          countBadge.style.color = '#4ade80';
+        }
+        const listEl = document.getElementById('sync-mutations-list');
+        if (listEl && listEl.children.length === 0) {
+          listEl.innerHTML = `
+            <div style="padding: 24px 16px; text-align: center; color: var(--text-muted); animation: fadeIn 0.3s ease;">
+              <div style="font-size: 32px; margin-bottom: 8px;">🎉</div>
+              <div style="font-weight: 700; font-size: 14px; color: #4ade80;">All Changes Successfully Pushed!</div>
+              <div style="font-size: 12px; margin-top: 4px; color: var(--text-secondary);">Google Sheets is now completely up to date.</div>
+            </div>
+          `;
+        }
       } else {
         this.updateStatusUI('pending', `${finalRemaining.length} new change(s) queued`);
         this.renderModalChanges(finalRemaining, `✅ Pushed ${totalCount} change(s). ${finalRemaining.length} new change(s) queued for next push.`, 'info', true);
