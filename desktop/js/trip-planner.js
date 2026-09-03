@@ -178,6 +178,142 @@ class TripPlannerApp {
     } catch (e) {}
   }
 
+  getAvailableCertTypes() {
+    const certs = [
+      'CPR / AED (2-Yr)',
+      '1st Aid / First Aid (2-Yr)',
+      'CPR & 1st Aid Combo (2-Yr)',
+      'Pole Top Rescue (Annual)',
+      'Bucket Truck Rescue (Annual)',
+      'Forklift Operator Safety Training (3-Yr)',
+      'Dig Safe / 811 Excavation (2-Yr)',
+      'OSHA 10 Construction',
+      'OSHA 30 Construction',
+      'OSHA 1910 T&D Refresher',
+      'OSHA Trench Competent Person (3-Yr)',
+      'Rigging & Signaling / Signalperson (3-Yr)',
+      'Crane Safety & Practical Evaluation',
+      'Confined Space Entry & Rescue',
+      'Flagger & Traffic Control Certification',
+      'Defensive Driving / Smith System',
+      'Harassment & Workplace Safety (Annual)'
+    ];
+
+    if (window.certsConfigEngine && window.certsConfigEngine.certs) {
+      window.certsConfigEngine.certs.forEach(c => {
+        const name = c.name || c.label || c.key;
+        if (name && !certs.some(dc => dc.toLowerCase().includes(name.toLowerCase()))) {
+          certs.push(name);
+        }
+      });
+    }
+
+    return certs;
+  }
+
+  getEmployeeOptions() {
+    const empTable = this.db.getTable('employees');
+    if (!empTable || !empTable.rows) return [];
+
+    return empTable.rows
+      .map(r => {
+        const name = String(r['Name'] || r['Employee Name'] || r['Employee'] || '').trim();
+        const role = String(r['Job Classification'] || r['Role'] || r['Title'] || '').trim();
+        const crew = String(r['Job Number'] || r['Crew'] || '').trim();
+        const status = String(r['Status'] || '').trim().toLowerCase();
+        if (!name || status === 'terminated' || status === 'previous employee') return null;
+        return {
+          name: name,
+          role: role,
+          crew: crew,
+          display: role ? `${name} (${role}${crew ? ' · Crew ' + crew : ''})` : name
+        };
+      })
+      .filter(Boolean)
+      .sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  populateManualTaskDatalists() {
+    // Populate Certs Datalist
+    const certsDatalist = document.getElementById('trip-certs-datalist');
+    if (certsDatalist) {
+      const certs = this.getAvailableCertTypes();
+      certsDatalist.innerHTML = certs.map(c => `<option value="${this.escapeHtml(c)}">`).join('');
+    }
+
+    // Populate Employees Datalist
+    const empDatalist = document.getElementById('trip-employees-datalist');
+    if (empDatalist) {
+      const emps = this.getEmployeeOptions();
+      empDatalist.innerHTML = emps.map(e => `<option value="${this.escapeHtml(e.name)}">${this.escapeHtml(e.display)}</option>`).join('');
+    }
+  }
+
+  switchManualTaskTab(category) {
+    const activeCategoryInput = document.getElementById('manual-task-active-category');
+    if (activeCategoryInput) activeCategoryInput.value = category;
+
+    const certFields = document.getElementById('section-cert-class-fields');
+    const personalFields = document.getElementById('section-personal-task-fields');
+    const tabCert = document.getElementById('tab-btn-cert-class');
+    const tabPersonal = document.getElementById('tab-btn-personal-task');
+    const modalIcon = document.getElementById('manual-task-modal-icon');
+    const saveBtn = document.getElementById('btn-save-manual-task');
+    const saveBtnText = document.getElementById('btn-save-manual-task-text');
+
+    if (category === 'cert_class') {
+      if (certFields) certFields.style.display = 'flex';
+      if (personalFields) personalFields.style.display = 'none';
+
+      if (tabCert) {
+        tabCert.style.border = '1px solid #10b981';
+        tabCert.style.background = 'rgba(16, 185, 129, 0.2)';
+        tabCert.style.color = '#34d399';
+      }
+      if (tabPersonal) {
+        tabPersonal.style.border = '1px solid rgba(255, 255, 255, 0.1)';
+        tabPersonal.style.background = 'var(--bg-primary)';
+        tabPersonal.style.color = '#94a3b8';
+      }
+      if (modalIcon) modalIcon.textContent = '🎓';
+      if (saveBtn) {
+        saveBtn.style.background = '#10b981';
+        saveBtn.style.boxShadow = '0 2px 8px rgba(16, 185, 129, 0.4)';
+      }
+      if (saveBtnText) saveBtnText.textContent = 'Schedule Class';
+
+      setTimeout(() => {
+        const certInput = document.getElementById('manual-task-cert-type-input');
+        if (certInput) certInput.focus();
+      }, 50);
+    } else {
+      if (certFields) certFields.style.display = 'none';
+      if (personalFields) personalFields.style.display = 'flex';
+
+      if (tabPersonal) {
+        tabPersonal.style.border = '1px solid #3b82f6';
+        tabPersonal.style.background = 'rgba(59, 130, 246, 0.2)';
+        tabPersonal.style.color = '#93c5fd';
+      }
+      if (tabCert) {
+        tabCert.style.border = '1px solid rgba(255, 255, 255, 0.1)';
+        tabCert.style.background = 'var(--bg-primary)';
+        tabCert.style.color = '#94a3b8';
+      }
+      if (modalIcon) modalIcon.textContent = '💼';
+      if (saveBtn) {
+        saveBtn.style.background = '#3b82f6';
+        saveBtn.style.boxShadow = '0 2px 8px rgba(59, 130, 246, 0.4)';
+      }
+      if (saveBtnText) saveBtnText.textContent = 'Save Task';
+
+      setTimeout(() => {
+        const titleInput = document.getElementById('manual-task-personal-title-input');
+        if (titleInput) titleInput.focus();
+      }, 50);
+    }
+  }
+
   getManualTasksForDate(dateKey) {
     if (!this.manualTasks) this.manualTasks = this.loadManualTasks();
     return this.manualTasks.filter(t => t.dateKey === dateKey);
@@ -185,25 +321,58 @@ class TripPlannerApp {
 
   addManualTask(dateKey, taskData) {
     if (!this.manualTasks) this.manualTasks = this.loadManualTasks();
-    const title = (typeof taskData === 'string' ? taskData : taskData.title || '').trim();
-    if (!title) return null;
+    const isCert = (taskData.taskCategory === 'cert_class' || !!taskData.certType);
 
     const newTask = {
       id: 'mt_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+      taskCategory: isCert ? 'cert_class' : 'personal_task',
+      title: (taskData.title || (isCert ? taskData.certType : '')).trim(),
+      certType: (taskData.certType || '').trim(),
+      employee: (taskData.employee || '').trim(),
+      instructor: (taskData.instructor || 'Cody Bechdol (Self)').trim(),
+      assignedTo: (taskData.assignedTo || 'Myself').trim(),
       dateKey: dateKey,
-      title: title,
       location: (taskData.location || '').trim(),
       time: (taskData.time || '').trim(),
       priority: (taskData.priority || 'Normal').trim(),
       notes: (taskData.notes || '').trim(),
       status: 'Pending',
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      completedAt: null
     };
 
     this.manualTasks.push(newTask);
     this.saveManualTasks(this.manualTasks);
     this.renderPlanner();
     return newTask;
+  }
+
+  updateManualTask(taskId, taskData) {
+    if (!this.manualTasks) this.manualTasks = this.loadManualTasks();
+    const idx = this.manualTasks.findIndex(t => t.id === taskId);
+    if (idx === -1) return null;
+
+    const existing = this.manualTasks[idx];
+    const isCert = (taskData.taskCategory === 'cert_class' || !!taskData.certType);
+
+    this.manualTasks[idx] = {
+      ...existing,
+      taskCategory: isCert ? 'cert_class' : 'personal_task',
+      title: (taskData.title || (isCert ? taskData.certType : existing.title)).trim(),
+      certType: (taskData.certType !== undefined ? taskData.certType : existing.certType || '').trim(),
+      employee: (taskData.employee !== undefined ? taskData.employee : existing.employee || '').trim(),
+      instructor: (taskData.instructor !== undefined ? taskData.instructor : existing.instructor || 'Cody Bechdol (Self)').trim(),
+      assignedTo: (taskData.assignedTo !== undefined ? taskData.assignedTo : existing.assignedTo || 'Myself').trim(),
+      dateKey: taskData.dateKey || existing.dateKey,
+      location: (taskData.location !== undefined ? taskData.location : existing.location || '').trim(),
+      time: (taskData.time !== undefined ? taskData.time : existing.time || '').trim(),
+      priority: (taskData.priority !== undefined ? taskData.priority : existing.priority || 'Normal').trim(),
+      notes: (taskData.notes !== undefined ? taskData.notes : existing.notes || '').trim()
+    };
+
+    this.saveManualTasks(this.manualTasks);
+    this.renderPlanner();
+    return this.manualTasks[idx];
   }
 
   toggleManualTask(taskId) {
@@ -224,41 +393,121 @@ class TripPlannerApp {
     this.renderPlanner();
   }
 
-  openAddManualTaskModal(dateKey = '', displayDate = '') {
+  openAddManualTaskModal(dateKey = '', displayDate = '', defaultCategory = 'cert_class') {
     const modal = document.getElementById('manual-task-modal');
     if (!modal) return;
 
-    const titleEl = document.getElementById('manual-task-modal-title');
-    const dateInput = document.getElementById('manual-task-date-input');
-    const titleInput = document.getElementById('manual-task-title-input');
-    const locInput = document.getElementById('manual-task-loc-input');
-    const timeInput = document.getElementById('manual-task-time-input');
-    const prioInput = document.getElementById('manual-task-priority-input');
-    const notesInput = document.getElementById('manual-task-notes-input');
-    const editIdInput = document.getElementById('manual-task-edit-id');
+    this.populateManualTaskDatalists();
 
+    const titleEl = document.getElementById('manual-task-modal-title');
+    const editIdInput = document.getElementById('manual-task-edit-id');
     if (editIdInput) editIdInput.value = '';
-    if (titleInput) titleInput.value = '';
-    if (timeInput) timeInput.value = '';
-    if (prioInput) prioInput.value = 'Normal';
-    if (notesInput) notesInput.value = '';
 
     const targetDate = dateKey || new Date().toISOString().split('T')[0];
-    if (dateInput) dateInput.value = targetDate;
-
     const trips = this.getTripsForDate(targetDate);
-    if (locInput) {
-      locInput.value = trips.length > 0 ? trips[0].location : 'Helena HQ';
+    const defaultLoc = trips.length > 0 ? trips[0].location : 'Helena HQ';
+
+    // Reset Cert Class fields
+    const certTypeInput = document.getElementById('manual-task-cert-type-input');
+    const certEmpInput = document.getElementById('manual-task-employee-input');
+    const certDateInput = document.getElementById('manual-task-cert-date-input');
+    const certLocInput = document.getElementById('manual-task-cert-loc-input');
+    const certTimeInput = document.getElementById('manual-task-cert-time-input');
+    const certTrainerInput = document.getElementById('manual-task-cert-trainer-input');
+    const certNotesInput = document.getElementById('manual-task-cert-notes-input');
+
+    if (certTypeInput) certTypeInput.value = '';
+    if (certEmpInput) certEmpInput.value = '';
+    if (certDateInput) certDateInput.value = targetDate;
+    if (certLocInput) certLocInput.value = defaultLoc;
+    if (certTimeInput) certTimeInput.value = '';
+    if (certTrainerInput) certTrainerInput.value = 'Cody Bechdol (Self)';
+    if (certNotesInput) certNotesInput.value = '';
+
+    // Reset Personal Task fields
+    const pTitleInput = document.getElementById('manual-task-personal-title-input');
+    const pAssignedInput = document.getElementById('manual-task-assigned-to-input');
+    const pDateInput = document.getElementById('manual-task-personal-date-input');
+    const pLocInput = document.getElementById('manual-task-personal-loc-input');
+    const pPrioInput = document.getElementById('manual-task-personal-priority-input');
+    const pTimeInput = document.getElementById('manual-task-personal-time-input');
+    const pNotesInput = document.getElementById('manual-task-personal-notes-input');
+
+    if (pTitleInput) pTitleInput.value = '';
+    if (pAssignedInput) pAssignedInput.value = 'Myself';
+    if (pDateInput) pDateInput.value = targetDate;
+    if (pLocInput) pLocInput.value = defaultLoc === 'Helena HQ' ? 'Helena Office' : defaultLoc;
+    if (pPrioInput) pPrioInput.value = 'Normal';
+    if (pTimeInput) pTimeInput.value = '';
+    if (pNotesInput) pNotesInput.value = '';
+
+    if (titleEl) {
+      titleEl.textContent = displayDate ? `Schedule Task / Class • ${displayDate}` : `Schedule Task / Class (${targetDate})`;
+    }
+
+    this.switchManualTaskTab(defaultCategory);
+    modal.classList.add('active');
+  }
+
+  openEditManualTaskModal(taskId) {
+    if (!this.manualTasks) this.manualTasks = this.loadManualTasks();
+    const task = this.manualTasks.find(t => t.id === taskId);
+    if (!task) return;
+
+    const modal = document.getElementById('manual-task-modal');
+    if (!modal) return;
+
+    this.populateManualTaskDatalists();
+
+    const titleEl = document.getElementById('manual-task-modal-title');
+    const editIdInput = document.getElementById('manual-task-edit-id');
+    if (editIdInput) editIdInput.value = task.id;
+
+    const isCert = (task.taskCategory === 'cert_class' || !!task.certType);
+
+    if (isCert) {
+      const certTypeInput = document.getElementById('manual-task-cert-type-input');
+      const certEmpInput = document.getElementById('manual-task-employee-input');
+      const certDateInput = document.getElementById('manual-task-cert-date-input');
+      const certLocInput = document.getElementById('manual-task-cert-loc-input');
+      const certTimeInput = document.getElementById('manual-task-cert-time-input');
+      const certTrainerInput = document.getElementById('manual-task-cert-trainer-input');
+      const certNotesInput = document.getElementById('manual-task-cert-notes-input');
+
+      if (certTypeInput) certTypeInput.value = task.certType || task.title || '';
+      if (certEmpInput) certEmpInput.value = task.employee || '';
+      if (certDateInput) certDateInput.value = task.dateKey || '';
+      if (certLocInput) certLocInput.value = task.location || '';
+      if (certTimeInput) certTimeInput.value = task.time || '';
+      if (certTrainerInput) certTrainerInput.value = task.instructor || 'Cody Bechdol (Self)';
+      if (certNotesInput) certNotesInput.value = task.notes || '';
+
+      this.switchManualTaskTab('cert_class');
+    } else {
+      const pTitleInput = document.getElementById('manual-task-personal-title-input');
+      const pAssignedInput = document.getElementById('manual-task-assigned-to-input');
+      const pDateInput = document.getElementById('manual-task-personal-date-input');
+      const pLocInput = document.getElementById('manual-task-personal-loc-input');
+      const pPrioInput = document.getElementById('manual-task-personal-priority-input');
+      const pTimeInput = document.getElementById('manual-task-personal-time-input');
+      const pNotesInput = document.getElementById('manual-task-personal-notes-input');
+
+      if (pTitleInput) pTitleInput.value = task.title || '';
+      if (pAssignedInput) pAssignedInput.value = task.assignedTo || 'Myself';
+      if (pDateInput) pDateInput.value = task.dateKey || '';
+      if (pLocInput) pLocInput.value = task.location || '';
+      if (pPrioInput) pPrioInput.value = task.priority || 'Normal';
+      if (pTimeInput) pTimeInput.value = task.time || '';
+      if (pNotesInput) pNotesInput.value = task.notes || '';
+
+      this.switchManualTaskTab('personal_task');
     }
 
     if (titleEl) {
-      titleEl.textContent = displayDate ? `Add Manual Task • ${displayDate}` : `Add Manual Task (${targetDate})`;
+      titleEl.textContent = isCert ? `Edit Cert / Training Class` : `Edit Personal / Office Task`;
     }
 
     modal.classList.add('active');
-    setTimeout(() => {
-      if (titleInput) titleInput.focus();
-    }, 100);
   }
 
   closeManualTaskModal() {
@@ -267,32 +516,102 @@ class TripPlannerApp {
   }
 
   saveManualTaskFromModal() {
-    const dateInput = document.getElementById('manual-task-date-input');
-    const titleInput = document.getElementById('manual-task-title-input');
-    const locInput = document.getElementById('manual-task-loc-input');
-    const timeInput = document.getElementById('manual-task-time-input');
-    const prioInput = document.getElementById('manual-task-priority-input');
-    const notesInput = document.getElementById('manual-task-notes-input');
+    const editIdInput = document.getElementById('manual-task-edit-id');
+    const activeCategoryInput = document.getElementById('manual-task-active-category');
+    const editId = editIdInput ? editIdInput.value.trim() : '';
+    const category = activeCategoryInput ? activeCategoryInput.value : 'cert_class';
 
-    const title = titleInput ? titleInput.value.trim() : '';
-    const dateKey = dateInput ? dateInput.value.trim() : '';
+    if (category === 'cert_class') {
+      const certTypeInput = document.getElementById('manual-task-cert-type-input');
+      const certEmpInput = document.getElementById('manual-task-employee-input');
+      const certDateInput = document.getElementById('manual-task-cert-date-input');
+      const certLocInput = document.getElementById('manual-task-cert-loc-input');
+      const certTimeInput = document.getElementById('manual-task-cert-time-input');
+      const certTrainerInput = document.getElementById('manual-task-cert-trainer-input');
+      const certNotesInput = document.getElementById('manual-task-cert-notes-input');
 
-    if (!title) {
-      if (titleInput) titleInput.focus();
-      return;
+      const certType = certTypeInput ? certTypeInput.value.trim() : '';
+      const employee = certEmpInput ? certEmpInput.value.trim() : '';
+      const dateKey = certDateInput ? certDateInput.value.trim() : '';
+      const location = certLocInput ? certLocInput.value.trim() : '';
+      const time = certTimeInput ? certTimeInput.value.trim() : '';
+      const instructor = certTrainerInput ? certTrainerInput.value.trim() : 'Cody Bechdol (Self)';
+      const notes = certNotesInput ? certNotesInput.value.trim() : '';
+
+      if (!certType) {
+        if (certTypeInput) certTypeInput.focus();
+        return;
+      }
+      if (!employee) {
+        if (certEmpInput) certEmpInput.focus();
+        return;
+      }
+      if (!dateKey) {
+        if (certDateInput) certDateInput.focus();
+        return;
+      }
+
+      const taskData = {
+        taskCategory: 'cert_class',
+        title: certType,
+        certType: certType,
+        employee: employee,
+        instructor: instructor,
+        dateKey: dateKey,
+        location: location || 'Helena HQ',
+        time: time,
+        notes: notes,
+        priority: 'Normal'
+      };
+
+      if (editId) {
+        this.updateManualTask(editId, taskData);
+      } else {
+        this.addManualTask(dateKey, taskData);
+      }
+    } else {
+      const pTitleInput = document.getElementById('manual-task-personal-title-input');
+      const pAssignedInput = document.getElementById('manual-task-assigned-to-input');
+      const pDateInput = document.getElementById('manual-task-personal-date-input');
+      const pLocInput = document.getElementById('manual-task-personal-loc-input');
+      const pPrioInput = document.getElementById('manual-task-personal-priority-input');
+      const pTimeInput = document.getElementById('manual-task-personal-time-input');
+      const pNotesInput = document.getElementById('manual-task-personal-notes-input');
+
+      const title = pTitleInput ? pTitleInput.value.trim() : '';
+      const assignedTo = pAssignedInput ? pAssignedInput.value.trim() : 'Myself';
+      const dateKey = pDateInput ? pDateInput.value.trim() : '';
+      const location = pLocInput ? pLocInput.value.trim() : '';
+      const priority = pPrioInput ? pPrioInput.value : 'Normal';
+      const time = pTimeInput ? pTimeInput.value.trim() : '';
+      const notes = pNotesInput ? pNotesInput.value.trim() : '';
+
+      if (!title) {
+        if (pTitleInput) pTitleInput.focus();
+        return;
+      }
+      if (!dateKey) {
+        if (pDateInput) pDateInput.focus();
+        return;
+      }
+
+      const taskData = {
+        taskCategory: 'personal_task',
+        title: title,
+        assignedTo: assignedTo || 'Myself',
+        dateKey: dateKey,
+        location: location || 'Helena Office',
+        priority: priority,
+        time: time,
+        notes: notes
+      };
+
+      if (editId) {
+        this.updateManualTask(editId, taskData);
+      } else {
+        this.addManualTask(dateKey, taskData);
+      }
     }
-    if (!dateKey) {
-      if (dateInput) dateInput.focus();
-      return;
-    }
-
-    this.addManualTask(dateKey, {
-      title: title,
-      location: locInput ? locInput.value : '',
-      time: timeInput ? timeInput.value : '',
-      priority: prioInput ? prioInput.value : 'Normal',
-      notes: notesInput ? notesInput.value : ''
-    });
 
     this.closeManualTaskModal();
   }
@@ -1279,28 +1598,97 @@ class TripPlannerApp {
               </div>
               ${manualTasks.map(mt => {
                 const isDone = mt.status === 'Complete';
+                const isCert = (mt.taskCategory === 'cert_class' || !!mt.certType);
+
+                if (isCert) {
+                  const empName = mt.employee || 'Unassigned Worker';
+                  return `
+                    <div class="manual-task-card cert-class-card" style="background: var(--bg-primary); border: 1px solid ${isDone ? 'rgba(16, 185, 129, 0.3)' : 'rgba(16, 185, 129, 0.4)'}; border-left: 4px solid ${isDone ? '#10b981' : '#059669'}; border-radius: 6px; padding: 7px 9px; box-shadow: 0 1px 4px rgba(0,0,0,0.25); opacity: ${isDone ? '0.65' : '1'}; transition: opacity 0.2s;">
+                      <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 6px;">
+                        <div style="display: flex; align-items: flex-start; gap: 7px; flex: 1; min-width: 0;">
+                          <input type="checkbox" ${isDone ? 'checked' : ''} onchange="window.tripPlanner.toggleManualTask('${this.escapeHtml(mt.id)}')" style="cursor: pointer; margin-top: 2px; accent-color: #10b981; width: 14px; height: 14px;" title="${isDone ? 'Mark Pending' : 'Mark Class Complete'}">
+                          <div style="flex: 1; min-width: 0;">
+                            <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 3px; flex-wrap: wrap;">
+                              <span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); font-size: 9px; font-weight: 800; padding: 1px 5px; border-radius: 3px;">
+                                🎓 Cert Class
+                              </span>
+                              ${isDone ? `
+                                <span class="badge" style="background: rgba(16, 185, 129, 0.25); color: #a7f3d0; font-size: 9px; padding: 1px 4px;">
+                                  ✅ Completed
+                                </span>
+                              ` : ''}
+                            </div>
+                            <div style="font-size: 12px; font-weight: 800; color: ${isDone ? '#94a3b8' : '#f8fafc'}; text-decoration: ${isDone ? 'line-through' : 'none'}; word-break: break-word; line-height: 1.3;">
+                              ${this.escapeHtml(mt.certType || mt.title)}
+                            </div>
+                            <div style="font-size: 11px; font-weight: 700; color: #60a5fa; margin-top: 3px; display: flex; align-items: center; gap: 4px; cursor: pointer;" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(empName)}', 'cert_class');}" title="Click to view employee profile">
+                              <span>👤</span> <span style="text-decoration: underline dotted;">${this.escapeHtml(empName)}</span>
+                            </div>
+                            <div style="font-size: 10px; color: #94a3b8; margin-top: 4px; display: flex; align-items: center; gap: 4px; flex-wrap: wrap;">
+                              ${mt.location ? `<span class="badge" style="background: rgba(255,255,255,0.06); color: #cbd5e1; font-size: 9px; padding: 1px 4px;">📍 ${this.escapeHtml(mt.location)}</span>` : ''}
+                              ${mt.time ? `<span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #6ee7b7; font-size: 9px; padding: 1px 4px;">⏰ ${this.escapeHtml(mt.time)}</span>` : ''}
+                              ${mt.instructor ? `<span class="badge" style="background: rgba(255,255,255,0.04); color: #94a3b8; font-size: 9px; padding: 1px 4px;">👨‍🏫 ${this.escapeHtml(mt.instructor)}</span>` : ''}
+                              ${mt.notes ? `<div style="color: var(--text-muted); font-size: 9.5px; margin-top: 2px; width: 100%; word-break: break-word;">📝 ${this.escapeHtml(mt.notes)}</div>` : ''}
+                            </div>
+                          </div>
+                        </div>
+                        <div style="display: flex; align-items: center; gap: 3px;">
+                          <button style="background: none; border: none; color: #64748b; cursor: pointer; padding: 1px 3px; font-size: 11px; line-height: 1; border-radius: 3px;" onmouseover="this.style.color='#60a5fa'" onmouseout="this.style.color='#64748b'" onclick="window.tripPlanner.openEditManualTaskModal('${this.escapeHtml(mt.id)}')" title="Edit Class">
+                            ✏️
+                          </button>
+                          <button style="background: none; border: none; color: #64748b; cursor: pointer; padding: 1px 4px; font-size: 12px; line-height: 1; border-radius: 3px;" onmouseover="this.style.color='#f87171'" onmouseout="this.style.color='#64748b'" onclick="window.tripPlanner.deleteManualTask('${this.escapeHtml(mt.id)}')" title="Delete Task">
+                            ✕
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  `;
+                }
+
+                // Personal / Office Task
+                const assignee = mt.assignedTo || 'Myself';
                 return `
-                  <div class="manual-task-card" style="background: var(--bg-primary); border: 1px solid ${isDone ? 'rgba(16, 185, 129, 0.3)' : 'rgba(59, 130, 246, 0.3)'}; border-left: 4px solid ${isDone ? '#10b981' : (mt.priority === 'High' ? '#ef4444' : '#3b82f6')}; border-radius: 6px; padding: 6px 8px; box-shadow: 0 1px 4px rgba(0,0,0,0.2); opacity: ${isDone ? '0.65' : '1'}; transition: opacity 0.2s;">
+                  <div class="manual-task-card personal-task-card" style="background: var(--bg-primary); border: 1px solid ${isDone ? 'rgba(16, 185, 129, 0.3)' : 'rgba(59, 130, 246, 0.3)'}; border-left: 4px solid ${isDone ? '#10b981' : (mt.priority === 'High' ? '#ef4444' : '#3b82f6')}; border-radius: 6px; padding: 7px 9px; box-shadow: 0 1px 4px rgba(0,0,0,0.25); opacity: ${isDone ? '0.65' : '1'}; transition: opacity 0.2s;">
                     <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 6px;">
                       <div style="display: flex; align-items: flex-start; gap: 7px; flex: 1; min-width: 0;">
                         <input type="checkbox" ${isDone ? 'checked' : ''} onchange="window.tripPlanner.toggleManualTask('${this.escapeHtml(mt.id)}')" style="cursor: pointer; margin-top: 2px; accent-color: #10b981; width: 14px; height: 14px;" title="${isDone ? 'Mark Pending' : 'Mark Complete'}">
                         <div style="flex: 1; min-width: 0;">
-                          <div style="font-size: 11.5px; font-weight: 700; color: ${isDone ? '#94a3b8' : '#f8fafc'}; text-decoration: ${isDone ? 'line-through' : 'none'}; word-break: break-word; line-height: 1.3;">
+                          <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 3px; flex-wrap: wrap;">
+                            <span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.3); font-size: 9px; font-weight: 800; padding: 1px 5px; border-radius: 3px;">
+                              💼 Personal / Office
+                            </span>
+                            ${mt.priority === 'High' ? `
+                              <span class="badge" style="background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.35); font-size: 9px; padding: 1px 4px;">
+                                🔴 High
+                              </span>
+                            ` : ''}
+                            ${isDone ? `
+                              <span class="badge" style="background: rgba(16, 185, 129, 0.25); color: #a7f3d0; font-size: 9px; padding: 1px 4px;">
+                                ✅ Completed
+                              </span>
+                            ` : ''}
+                          </div>
+                          <div style="font-size: 12px; font-weight: 700; color: ${isDone ? '#94a3b8' : '#f8fafc'}; text-decoration: ${isDone ? 'line-through' : 'none'}; word-break: break-word; line-height: 1.3;">
                             ${this.escapeHtml(mt.title)}
                           </div>
-                          ${(mt.location || mt.time || mt.priority === 'High' || mt.notes) ? `
-                            <div style="font-size: 10px; color: #94a3b8; margin-top: 3px; display: flex; align-items: center; gap: 4px; flex-wrap: wrap;">
-                              ${mt.priority === 'High' ? `<span class="badge" style="background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.35); font-size: 9px; padding: 1px 4px;">🔴 High</span>` : ''}
-                              ${mt.location ? `<span class="badge" style="background: rgba(255,255,255,0.06); color: #cbd5e1; font-size: 9px; padding: 1px 4px;">📍 ${this.escapeHtml(mt.location)}</span>` : ''}
-                              ${mt.time ? `<span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; font-size: 9px; padding: 1px 4px;">⏰ ${this.escapeHtml(mt.time)}</span>` : ''}
-                              ${mt.notes ? `<div style="color: var(--text-muted); font-size: 9.5px; margin-top: 2px; width: 100%; word-break: break-word;">📝 ${this.escapeHtml(mt.notes)}</div>` : ''}
-                            </div>
-                          ` : ''}
+                          <div style="font-size: 10.5px; color: #94a3b8; margin-top: 3px;">
+                            👤 <strong style="color: #cbd5e1;">Assigned:</strong> ${this.escapeHtml(assignee)}
+                          </div>
+                          <div style="font-size: 10px; color: #94a3b8; margin-top: 4px; display: flex; align-items: center; gap: 4px; flex-wrap: wrap;">
+                            ${mt.location ? `<span class="badge" style="background: rgba(255,255,255,0.06); color: #cbd5e1; font-size: 9px; padding: 1px 4px;">📍 ${this.escapeHtml(mt.location)}</span>` : ''}
+                            ${mt.time ? `<span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; font-size: 9px; padding: 1px 4px;">⏰ ${this.escapeHtml(mt.time)}</span>` : ''}
+                            ${mt.notes ? `<div style="color: var(--text-muted); font-size: 9.5px; margin-top: 2px; width: 100%; word-break: break-word;">📝 ${this.escapeHtml(mt.notes)}</div>` : ''}
+                          </div>
                         </div>
                       </div>
-                      <button style="background: none; border: none; color: #64748b; cursor: pointer; padding: 1px 4px; font-size: 12px; line-height: 1; border-radius: 3px;" onmouseover="this.style.color='#f87171'" onmouseout="this.style.color='#64748b'" onclick="window.tripPlanner.deleteManualTask('${this.escapeHtml(mt.id)}')" title="Delete Task">
-                        ✕
-                      </button>
+                      <div style="display: flex; align-items: center; gap: 3px;">
+                        <button style="background: none; border: none; color: #64748b; cursor: pointer; padding: 1px 3px; font-size: 11px; line-height: 1; border-radius: 3px;" onmouseover="this.style.color='#60a5fa'" onmouseout="this.style.color='#64748b'" onclick="window.tripPlanner.openEditManualTaskModal('${this.escapeHtml(mt.id)}')" title="Edit Task">
+                          ✏️
+                        </button>
+                        <button style="background: none; border: none; color: #64748b; cursor: pointer; padding: 1px 4px; font-size: 12px; line-height: 1; border-radius: 3px;" onmouseover="this.style.color='#f87171'" onmouseout="this.style.color='#64748b'" onclick="window.tripPlanner.deleteManualTask('${this.escapeHtml(mt.id)}')" title="Delete Task">
+                          ✕
+                        </button>
+                      </div>
                     </div>
                   </div>
                 `;

@@ -850,57 +850,156 @@
 
   <!-- Add Manual Task Modal (Trip Planner) -->
   <div id="manual-task-modal" class="modal-overlay">
-    <div class="modal-box" style="max-width: 540px; width: 92%;">
+    <div class="modal-box" style="max-width: 580px; width: 92%; max-height: 90vh; display: flex; flex-direction: column;">
       <div class="modal-header" style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); color: white;">
         <div style="display: flex; align-items: center; gap: 8px;">
-          <span style="font-size: 18px;">📋</span>
-          <span id="manual-task-modal-title" style="font-weight: 800; font-size: 15px;">Add Manual Task</span>
+          <span style="font-size: 18px;" id="manual-task-modal-icon">📋</span>
+          <span id="manual-task-modal-title" style="font-weight: 800; font-size: 15px;">Schedule Task / Class</span>
         </div>
         <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 12px; background: rgba(0,0,0,0.2); border: none; color: white; cursor: pointer;" onclick="window.tripPlanner.closeManualTaskModal()">✕</button>
       </div>
-      <div class="modal-body" style="padding: 20px; display: flex; flex-direction: column; gap: 14px;">
+
+      <!-- Segmented Type Selector -->
+      <div style="display: flex; gap: 8px; padding: 14px 20px 0 20px; background: var(--bg-secondary); border-bottom: 1px solid var(--border-color);">
+        <button type="button" id="tab-btn-cert-class" class="btn" style="flex: 1; padding: 9px 12px; font-size: 12px; font-weight: 700; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid #10b981; background: rgba(16, 185, 129, 0.2); color: #34d399; transition: all 0.2s;" onclick="window.tripPlanner.switchManualTaskTab('cert_class')">
+          <span>🎓</span> Cert / Training Class
+        </button>
+        <button type="button" id="tab-btn-personal-task" class="btn" style="flex: 1; padding: 9px 12px; font-size: 12px; font-weight: 700; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid rgba(255, 255, 255, 0.1); background: var(--bg-primary); color: #94a3b8; transition: all 0.2s;" onclick="window.tripPlanner.switchManualTaskTab('personal_task')">
+          <span>💼</span> Personal / Office Task
+        </button>
+      </div>
+
+      <div class="modal-body" style="padding: 16px 20px 20px 20px; display: flex; flex-direction: column; gap: 14px; overflow-y: auto; max-height: 70vh;">
         <input type="hidden" id="manual-task-edit-id" value="">
-        <div>
-          <label style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; letter-spacing: 0.5px;">TASK TITLE / DESCRIPTION *</label>
-          <input type="text" id="manual-task-title-input" class="form-control" placeholder="e.g. Graybar supply pickup, shop organizing, truck 102 audit..." style="width: 100%; box-sizing: border-box; font-size: 13px; font-weight: 600; padding: 8px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;" onkeydown="if(event.key==='Enter'){window.tripPlanner.saveManualTaskFromModal();}">
-        </div>
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+        <input type="hidden" id="manual-task-active-category" value="cert_class">
+
+        <!-- ==================== SECTION A: CERT / TRAINING CLASS FIELDS ==================== -->
+        <div id="section-cert-class-fields" style="display: flex; flex-direction: column; gap: 12px;">
           <div>
-            <label style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; letter-spacing: 0.5px;">SCHEDULED DATE *</label>
-            <input type="date" id="manual-task-date-input" class="form-control" style="width: 100%; box-sizing: border-box; font-size: 13px; padding: 7px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
+            <label style="display: flex; justify-content: space-between; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; letter-spacing: 0.5px;">
+              <span>CERTIFICATION / CLASS TYPE *</span>
+              <span style="font-weight: 400; color: #34d399;">Select or enter custom class</span>
+            </label>
+            <input type="text" id="manual-task-cert-type-input" list="trip-certs-datalist" class="form-control" placeholder="e.g. CPR / AED (2-Yr), 1st Aid, Pole Top Rescue..." style="width: 100%; box-sizing: border-box; font-size: 13px; font-weight: 600; padding: 8px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;" onkeydown="if(event.key==='Enter'){window.tripPlanner.saveManualTaskFromModal();}">
+            <!-- Quick Chips for common certs Cody provides -->
+            <div style="display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap;">
+              <span class="badge" style="cursor: pointer; background: rgba(16, 185, 129, 0.15); color: #6ee7b7; border: 1px solid rgba(16, 185, 129, 0.3); font-size: 9.5px; padding: 2px 6px;" onclick="document.getElementById('manual-task-cert-type-input').value='CPR / AED (2-Yr)'">CPR / AED</span>
+              <span class="badge" style="cursor: pointer; background: rgba(16, 185, 129, 0.15); color: #6ee7b7; border: 1px solid rgba(16, 185, 129, 0.3); font-size: 9.5px; padding: 2px 6px;" onclick="document.getElementById('manual-task-cert-type-input').value='1st Aid / First Aid (2-Yr)'">1st Aid</span>
+              <span class="badge" style="cursor: pointer; background: rgba(16, 185, 129, 0.15); color: #6ee7b7; border: 1px solid rgba(16, 185, 129, 0.3); font-size: 9.5px; padding: 2px 6px;" onclick="document.getElementById('manual-task-cert-type-input').value='Pole Top Rescue (Annual)'">Pole Top Rescue</span>
+              <span class="badge" style="cursor: pointer; background: rgba(16, 185, 129, 0.15); color: #6ee7b7; border: 1px solid rgba(16, 185, 129, 0.3); font-size: 9.5px; padding: 2px 6px;" onclick="document.getElementById('manual-task-cert-type-input').value='Forklift Operator Safety Training (3-Yr)'">Forklift</span>
+              <span class="badge" style="cursor: pointer; background: rgba(16, 185, 129, 0.15); color: #6ee7b7; border: 1px solid rgba(16, 185, 129, 0.3); font-size: 9.5px; padding: 2px 6px;" onclick="document.getElementById('manual-task-cert-type-input').value='Dig Safe / 811 Excavation (2-Yr)'">Dig Safe</span>
+              <span class="badge" style="cursor: pointer; background: rgba(16, 185, 129, 0.15); color: #6ee7b7; border: 1px solid rgba(16, 185, 129, 0.3); font-size: 9.5px; padding: 2px 6px;" onclick="document.getElementById('manual-task-cert-type-input').value='OSHA Trench Competent Person (3-Yr)'">OSHA Trench</span>
+            </div>
           </div>
+
           <div>
-            <label style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; letter-spacing: 0.5px;">LOCATION / HUB</label>
-            <input type="text" id="manual-task-loc-input" list="trip-locations-datalist" class="form-control" placeholder="e.g. Helena HQ, Shop, Warehouse..." style="width: 100%; box-sizing: border-box; font-size: 13px; padding: 7px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
+            <label style="display: flex; justify-content: space-between; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; letter-spacing: 0.5px;">
+              <span>ASSIGN EMPLOYEE(S) *</span>
+              <span style="font-weight: 400; color: #60a5fa;">Search active employees or enter crew</span>
+            </label>
+            <input type="text" id="manual-task-employee-input" list="trip-employees-datalist" class="form-control" placeholder="Search by employee name, classification, or crew..." style="width: 100%; box-sizing: border-box; font-size: 13px; font-weight: 600; padding: 8px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;" onkeydown="if(event.key==='Enter'){window.tripPlanner.saveManualTaskFromModal();}">
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <div>
+              <label style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; letter-spacing: 0.5px;">DATE OF CLASS *</label>
+              <input type="date" id="manual-task-cert-date-input" class="form-control" style="width: 100%; box-sizing: border-box; font-size: 13px; padding: 7px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
+            </div>
+            <div>
+              <label style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; letter-spacing: 0.5px;">LOCATION / FACILITY *</label>
+              <input type="text" id="manual-task-cert-loc-input" list="trip-locations-datalist" class="form-control" placeholder="e.g. Helena HQ, Shop, Bozeman Yard..." style="width: 100%; box-sizing: border-box; font-size: 13px; padding: 7px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <div>
+              <label style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; letter-spacing: 0.5px;">TIME / WINDOW (OPTIONAL)</label>
+              <input type="text" id="manual-task-cert-time-input" class="form-control" placeholder="e.g. 09:00 AM, 8:00 AM - 12:00 PM" style="width: 100%; box-sizing: border-box; font-size: 13px; padding: 7px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
+            </div>
+            <div>
+              <label style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; letter-spacing: 0.5px;">INSTRUCTOR / TRAINER</label>
+              <input type="text" id="manual-task-cert-trainer-input" class="form-control" value="Cody Bechdol (Self)" style="width: 100%; box-sizing: border-box; font-size: 13px; padding: 7px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
+            </div>
+          </div>
+
+          <div>
+            <label style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; letter-spacing: 0.5px;">CLASS NOTES / INSTRUCTIONS (OPTIONAL)</label>
+            <textarea id="manual-task-cert-notes-input" class="form-control" rows="2" placeholder="Classroom prep, practical harness inspection, cards to issue..." style="width: 100%; box-sizing: border-box; font-size: 12px; resize: vertical; padding: 8px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;"></textarea>
           </div>
         </div>
-        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+
+        <!-- ==================== SECTION B: PERSONAL / OFFICE TASK FIELDS ==================== -->
+        <div id="section-personal-task-fields" style="display: none; flex-direction: column; gap: 12px;">
+          <div>
+            <label style="display: flex; justify-content: space-between; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; letter-spacing: 0.5px;">
+              <span>TASK TITLE / DESCRIPTION *</span>
+              <span style="font-weight: 400; color: #93c5fd;">Office & personal safety work</span>
+            </label>
+            <input type="text" id="manual-task-personal-title-input" class="form-control" placeholder="e.g. Submit monthly safety report, Graybar supply run, Audit truck 102..." style="width: 100%; box-sizing: border-box; font-size: 13px; font-weight: 600; padding: 8px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;" onkeydown="if(event.key==='Enter'){window.tripPlanner.saveManualTaskFromModal();}">
+            <!-- Quick Chips for common tasks -->
+            <div style="display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap;">
+              <span class="badge" style="cursor: pointer; background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.3); font-size: 9.5px; padding: 2px 6px;" onclick="document.getElementById('manual-task-personal-title-input').value='Graybar Supply Pickup'">Graybar Pickup</span>
+              <span class="badge" style="cursor: pointer; background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.3); font-size: 9.5px; padding: 2px 6px;" onclick="document.getElementById('manual-task-personal-title-input').value='Shop Organizing & Rubber Stock Count'">Shop Organizing</span>
+              <span class="badge" style="cursor: pointer; background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.3); font-size: 9.5px; padding: 2px 6px;" onclick="document.getElementById('manual-task-personal-title-input').value='Weekly Safety Compliance Report'">Weekly Report</span>
+              <span class="badge" style="cursor: pointer; background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.3); font-size: 9.5px; padding: 2px 6px;" onclick="document.getElementById('manual-task-personal-title-input').value='Vehicle & Tool Safety Audit'">Vehicle Audit</span>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <div>
+              <label style="display: flex; justify-content: space-between; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; letter-spacing: 0.5px;">
+                <span>ASSIGNED TO</span>
+                <span style="font-weight: 400; color: #a7f3d0; cursor: pointer;" onclick="document.getElementById('manual-task-assigned-to-input').value='Myself'">[Set to Myself]</span>
+              </label>
+              <input type="text" id="manual-task-assigned-to-input" class="form-control" value="Myself" style="width: 100%; box-sizing: border-box; font-size: 13px; padding: 7px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
+            </div>
+            <div>
+              <label style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; letter-spacing: 0.5px;">SCHEDULED DATE *</label>
+              <input type="date" id="manual-task-personal-date-input" class="form-control" style="width: 100%; box-sizing: border-box; font-size: 13px; padding: 7px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <div>
+              <label style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; letter-spacing: 0.5px;">LOCATION / HUB</label>
+              <input type="text" id="manual-task-personal-loc-input" list="trip-locations-datalist" class="form-control" placeholder="e.g. Helena Office, Shop, Warehouse..." style="width: 100%; box-sizing: border-box; font-size: 13px; padding: 7px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
+            </div>
+            <div>
+              <label style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; letter-spacing: 0.5px;">PRIORITY</label>
+              <select id="manual-task-personal-priority-input" class="form-control" style="width: 100%; box-sizing: border-box; font-size: 13px; padding: 7px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
+                <option value="Normal">Normal Priority</option>
+                <option value="High">🔴 High Priority</option>
+                <option value="Low">Low / Flexible</option>
+              </select>
+            </div>
+          </div>
+
           <div>
             <label style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; letter-spacing: 0.5px;">TIME / WINDOW (OPTIONAL)</label>
-            <input type="text" id="manual-task-time-input" class="form-control" placeholder="e.g. 09:00 AM, Morning, All Day" style="width: 100%; box-sizing: border-box; font-size: 13px; padding: 7px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
+            <input type="text" id="manual-task-personal-time-input" class="form-control" placeholder="e.g. 09:00 AM, Morning, All Day" style="width: 100%; box-sizing: border-box; font-size: 13px; padding: 7px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
           </div>
+
           <div>
-            <label style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; letter-spacing: 0.5px;">PRIORITY</label>
-            <select id="manual-task-priority-input" class="form-control" style="width: 100%; box-sizing: border-box; font-size: 13px; padding: 7px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
-              <option value="Normal">Normal Priority</option>
-              <option value="High">🔴 High Priority</option>
-              <option value="Low">Low / Flexible</option>
-            </select>
+            <label style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; letter-spacing: 0.5px;">NOTES / DETAILS (OPTIONAL)</label>
+            <textarea id="manual-task-personal-notes-input" class="form-control" rows="2" placeholder="Add any details, contact info, part numbers, or checklist items..." style="width: 100%; box-sizing: border-box; font-size: 12px; resize: vertical; padding: 8px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;"></textarea>
           </div>
-        </div>
-        <div>
-          <label style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; letter-spacing: 0.5px;">NOTES / INSTRUCTIONS (OPTIONAL)</label>
-          <textarea id="manual-task-notes-input" class="form-control" rows="2" placeholder="Add any details, contact info, part numbers, or checklist items..." style="width: 100%; box-sizing: border-box; font-size: 12px; resize: vertical; padding: 8px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;"></textarea>
         </div>
       </div>
+
       <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center; padding: 14px 20px; background: var(--bg-secondary); border-top: 1px solid var(--border-color);">
         <button class="btn btn-secondary" onclick="window.tripPlanner.closeManualTaskModal()">Cancel</button>
-        <button class="btn btn-primary" onclick="window.tripPlanner.saveManualTaskFromModal()" style="font-weight: 700; display: flex; align-items: center; gap: 6px; background: #3b82f6; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; color: #fff;">
-          <span>💾</span> Save Task
+        <button class="btn btn-primary" id="btn-save-manual-task" onclick="window.tripPlanner.saveManualTaskFromModal()" style="font-weight: 700; display: flex; align-items: center; gap: 6px; background: #10b981; border: none; padding: 8px 18px; border-radius: 6px; cursor: pointer; color: #fff; box-shadow: 0 2px 8px rgba(16, 185, 129, 0.4);">
+          <span>💾</span> <span id="btn-save-manual-task-text">Schedule Class</span>
         </button>
       </div>
     </div>
   </div>
+
+  <!-- Datalist for Trip Planner Certified Class Types -->
+  <datalist id="trip-certs-datalist"></datalist>
+
+  <!-- Datalist for Trip Planner Employees -->
+  <datalist id="trip-employees-datalist"></datalist>
 
   <!-- Datalist for Trip Planner Montana Locations & Hubs -->
   <datalist id="trip-locations-datalist">
