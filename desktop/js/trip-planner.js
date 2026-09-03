@@ -54,6 +54,7 @@ class TripPlannerApp {
       'California Sub': { mins: 840, time: '14h 00m', desc: '14h 00m (900 mi)', dir: 'Far' }
     };
     this.collapsedSections = this.loadCollapsedSections();
+    this.selectedClassCrews = [];
     this.selectedClassCrew = '';
     this.selectedClassAttendees = [];
     this._rosterExpanded = {};
@@ -524,24 +525,41 @@ class TripPlannerApp {
     const empTable = this.db.getTable('employees');
     if (!empTable || !empTable.rows) return [];
 
+    // Also check job_tracking to see if a foreman is known for this crew
+    let trackingForeman = '';
+    const jobTable = this.db.getTable('job_tracking');
+    if (jobTable && jobTable.rows) {
+      const jRow = jobTable.rows.find(r => {
+        const jNum = this.getSignificantJobNumber(String(r['Job Number'] || r['Crew'] || r['Job #'] || ''));
+        return jNum.toLowerCase() === cleanId;
+      });
+      if (jRow) {
+        trackingForeman = String(jRow['Foreman'] || jRow['Crew Lead'] || jRow['Lead'] || '').trim();
+      }
+    }
+
     const members = [];
     empTable.rows.forEach(r => {
       const status = String(r['Status'] || '').trim().toLowerCase();
       if (status === 'terminated' || status === 'previous employee') return;
       const rawJob = String(r['Job Number'] || r['Crew'] || '').trim();
+      const rawSecJob = String(r['Secondary Job Number'] || r['Secondary Job #'] || '').trim();
       const jobNum = this.getSignificantJobNumber(rawJob).toLowerCase();
+      const secJobNum = this.getSignificantJobNumber(rawSecJob).toLowerCase();
 
-      if (jobNum === cleanId) {
-        const name = String(r['Name'] || r['Employee Name'] || r['Employee'] || '').trim();
-        const role = String(r['Job Classification'] || r['Role'] || r['Title'] || '').trim();
-        if (name && !members.some(m => m.name.toLowerCase() === name.toLowerCase())) {
-          const isF = role === 'F' || role === 'GF' || role === 'SUP';
-          members.push({
-            name,
-            role,
-            isForeman: isF
-          });
-        }
+      const name = String(r['Employee Name'] || r['Name'] || r['Employee'] || '').trim();
+      const role = String(r['Job Classification'] || r['Role'] || r['Title'] || '').trim();
+      if (!name) return;
+
+      const isMatch = (jobNum === cleanId) || (secJobNum === cleanId) || (trackingForeman && name.toLowerCase() === trackingForeman.toLowerCase());
+
+      if (isMatch && !members.some(m => m.name.toLowerCase() === name.toLowerCase())) {
+        const isF = role === 'F' || role === 'GF' || role === 'SUP' || (trackingForeman && name.toLowerCase() === trackingForeman.toLowerCase()) || String(r['Crew Lead'] || '').toLowerCase() === 'yes';
+        members.push({
+          name,
+          role: role || (isF ? 'Foreman' : 'Lineman'),
+          isForeman: isF
+        });
       }
     });
 
@@ -554,16 +572,20 @@ class TripPlannerApp {
 
   resolveClassAttendees(task) {
     const result = {
-      crewId: task.crewId || '',
-      foreman: '',
+      crews: [],
+      crewIds: [],
       crewMembers: [],
       individualMembers: [],
       allAttendees: [],
-      totalCount: 0
+      totalCount: 0,
+      crewId: '',
+      foreman: ''
     };
 
     const empTable = this.db.getTable('employees');
     const empRows = (empTable && empTable.rows) ? empTable.rows : [];
+    const jobTable = this.db.getTable('job_tracking');
+    const jobRows = (jobTable && jobTable.rows) ? jobTable.rows : [];
 
     const findEmp = (name) => {
       const clean = String(name || '').trim().toLowerCase();
@@ -573,43 +595,60 @@ class TripPlannerApp {
       });
     };
 
-    if (task.crewId) {
-      const crewId = this.getSignificantJobNumber(task.crewId);
-      result.crewId = crewId;
+    // Extract all crew IDs (supports crewIds array or legacy comma-separated crewId)
+    const rawCrews = Array.isArray(task.crewIds) && task.crewIds.length > 0
+      ? task.crewIds
+      : (task.crewId ? String(task.crewId).split(',').map(s => s.trim()).filter(Boolean) : []);
 
-      const jobTable = this.db.getTable('job_tracking');
-      if (jobTable && jobTable.rows) {
-        const jobRow = jobTable.rows.find(r => {
-          const jNum = this.getSignificantJobNumber(String(r['Job Number'] || r['Crew'] || r['Job #'] || ''));
-          return jNum.toLowerCase() === crewId.toLowerCase();
-        });
-        if (jobRow) {
-          result.foreman = String(jobRow['Foreman'] || jobRow['Crew Lead'] || jobRow['Lead'] || '').trim();
-        }
+    const allAttendeesMap = new Map();
+
+    rawCrews.forEach(rawId => {
+      const crewId = this.getSignificantJobNumber(rawId);
+      if (!crewId) return;
+      if (!result.crewIds.includes(crewId)) result.crewIds.push(crewId);
+
+      let foreman = '';
+      const jobRow = jobRows.find(r => {
+        const jNum = this.getSignificantJobNumber(String(r['Job Number'] || r['Crew'] || r['Job #'] || ''));
+        return jNum.toLowerCase() === crewId.toLowerCase();
+      });
+      if (jobRow) {
+        foreman = String(jobRow['Foreman'] || jobRow['Crew Lead'] || jobRow['Lead'] || '').trim();
       }
 
       const members = this.getCrewMembers(crewId);
       members.forEach(m => {
-        if (m.isForeman && !result.foreman) result.foreman = m.name;
-        result.crewMembers.push(m);
-        if (!result.allAttendees.includes(m.name)) {
-          result.allAttendees.push(m.name);
+        if (m.isForeman && !foreman) foreman = m.name;
+        if (!allAttendeesMap.has(m.name.toLowerCase())) {
+          allAttendeesMap.set(m.name.toLowerCase(), { name: m.name, role: m.role, isForeman: m.isForeman, crewId: crewId });
         }
       });
 
-      if (result.foreman && !result.allAttendees.includes(result.foreman)) {
-        result.crewMembers.unshift({ name: result.foreman, role: 'Foreman', isForeman: true });
-        result.allAttendees.unshift(result.foreman);
+      if (foreman && !allAttendeesMap.has(foreman.toLowerCase())) {
+        allAttendeesMap.set(foreman.toLowerCase(), { name: foreman, role: 'Foreman', isForeman: true, crewId: crewId });
       }
-    }
 
+      result.crews.push({
+        crewId,
+        foreman,
+        members
+      });
+    });
+
+    // Populate crewMembers from all deduplicated crew attendees
+    allAttendeesMap.forEach(item => {
+      result.crewMembers.push(item);
+      result.allAttendees.push(item.name);
+    });
+
+    // Individual attendees
     const indList = Array.isArray(task.assignedEmployees)
       ? task.assignedEmployees
       : (task.employee && !task.employee.startsWith('Crew ') ? [task.employee] : []);
 
     indList.forEach(name => {
       const cleanName = String(name || '').trim();
-      if (cleanName && !result.allAttendees.includes(cleanName)) {
+      if (cleanName && !allAttendeesMap.has(cleanName.toLowerCase())) {
         const r = findEmp(cleanName);
         const role = r ? String(r['Job Classification'] || r['Role'] || r['Title'] || '').trim() : '';
         result.individualMembers.push({ name: cleanName, role });
@@ -618,6 +657,8 @@ class TripPlannerApp {
     });
 
     result.totalCount = result.allAttendees.length;
+    result.crewId = result.crewIds.join(', ');
+    result.foreman = result.crews.length > 0 ? result.crews[0].foreman : '';
     return result;
   }
 
@@ -733,67 +774,101 @@ class TripPlannerApp {
   }
 
   selectClassCrew(crewId) {
-    const cleanId = this.getSignificantJobNumber(crewId);
-    this.selectedClassCrew = cleanId;
+    this.addClassCrew(crewId);
+  }
+
+  addClassCrew(crewId) {
+    if (!crewId) return;
+    const cleanId = this.getSignificantJobNumber(String(crewId).trim());
+    if (!cleanId) return;
+    if (!this.selectedClassCrews) this.selectedClassCrews = [];
+    if (!this.selectedClassCrews.includes(cleanId)) {
+      this.selectedClassCrews.push(cleanId);
+    }
+    this.selectedClassCrew = this.selectedClassCrews[0] || '';
     const input = document.getElementById('manual-task-crew-input');
-    if (input) input.value = cleanId;
+    if (input) {
+      input.value = '';
+      input.focus();
+    }
     this.hideCrewDropdown();
-    this.updateClassCrewPreview();
+    this.renderAssignedCrewCards();
+    this.updateClassAttendeesSummary();
+  }
+
+  removeSelectedCrew(crewId) {
+    if (!this.selectedClassCrews) return;
+    const clean = this.getSignificantJobNumber(String(crewId).trim());
+    this.selectedClassCrews = this.selectedClassCrews.filter(c => c !== clean);
+    this.selectedClassCrew = this.selectedClassCrews[0] || '';
+    this.renderAssignedCrewCards();
     this.updateClassAttendeesSummary();
   }
 
   clearClassCrew() {
+    this.selectedClassCrews = [];
     this.selectedClassCrew = '';
     const input = document.getElementById('manual-task-crew-input');
     if (input) input.value = '';
-    this.updateClassCrewPreview();
+    this.renderAssignedCrewCards();
     this.updateClassAttendeesSummary();
   }
 
-  updateClassCrewPreview() {
-    const previewBox = document.getElementById('manual-task-crew-preview');
-    const clearBtn = document.getElementById('btn-clear-class-crew');
-    if (!previewBox) return;
+  renderAssignedCrewCards() {
+    const container = document.getElementById('manual-task-assigned-crews-container');
+    if (!container) return;
 
-    if (!this.selectedClassCrew) {
-      previewBox.style.display = 'none';
-      if (clearBtn) clearBtn.style.display = 'none';
+    if (!this.selectedClassCrews || this.selectedClassCrews.length === 0) {
+      container.innerHTML = '';
       return;
     }
 
-    const members = this.getCrewMembers(this.selectedClassCrew);
-    let foreman = 'Lead';
     const jobTable = this.db.getTable('job_tracking');
-    if (jobTable && jobTable.rows) {
-      const jobRow = jobTable.rows.find(r => this.getSignificantJobNumber(String(r['Job Number'] || r['Crew'] || '')).toLowerCase() === this.selectedClassCrew.toLowerCase());
-      if (jobRow) {
-        foreman = String(jobRow['Foreman'] || jobRow['Crew Lead'] || jobRow['Lead'] || 'Lead').trim();
+    const jobRows = (jobTable && jobTable.rows) ? jobTable.rows : [];
+
+    container.innerHTML = this.selectedClassCrews.map(cId => {
+      const members = this.getCrewMembers(cId);
+      let foreman = 'Lead';
+      const jRow = jobRows.find(r => this.getSignificantJobNumber(String(r['Job Number'] || r['Crew'] || '')).toLowerCase() === cId.toLowerCase());
+      if (jRow) {
+        foreman = String(jRow['Foreman'] || jRow['Crew Lead'] || jRow['Lead'] || 'Lead').trim();
+      } else if (members.length > 0 && members[0].isForeman) {
+        foreman = members[0].name;
       }
-    }
 
-    const titleEl = document.getElementById('manual-task-crew-preview-title');
-    const badgeEl = document.getElementById('manual-task-crew-preview-badge');
-    const foremanEl = document.getElementById('manual-task-crew-preview-foreman');
-    const membersEl = document.getElementById('manual-task-crew-preview-members');
+      return `
+        <div class="assigned-crew-card" style="background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.28); border-radius: 6px; padding: 8px 10px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <span style="font-size: 11.5px; font-weight: 800; color: #60a5fa;">🚚 Crew ${this.escapeHtml(cId)}</span>
+              <span style="font-size: 11px; color: #f8fafc;">👑 <strong>${this.escapeHtml(foreman)}</strong></span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; font-size: 9.5px; font-weight: 700; padding: 1px 6px;">
+                🟢 ${members.length} Linemen Scheduled
+              </span>
+              <button type="button" class="btn btn-secondary" style="padding: 2px 7px; font-size: 10.5px; color: #f87171; border-color: rgba(248,113,113,0.3); background: rgba(248,113,113,0.08); cursor: pointer;" onclick="window.tripPlanner.removeSelectedCrew('${this.escapeJs(cId)}')" title="Remove crew">✕</button>
+            </div>
+          </div>
+          <div style="font-size: 10px; color: #cbd5e1; display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px;">
+            ${members.length > 0 ? members.map(m => `
+              <span class="badge" style="background: rgba(255,255,255,0.06); color: #cbd5e1; font-size: 9px; padding: 2px 5px; border: 1px solid rgba(255,255,255,0.1); border-radius: 3px;">
+                ${m.isForeman ? '👑' : '👤'} ${this.escapeHtml(m.name)} ${m.role ? `(${this.escapeHtml(m.role)})` : ''}
+              </span>
+            `).join('') : `<span style="color: #94a3b8; font-style: italic; font-size: 9.5px;">No active linemen currently listed on Job #${this.escapeHtml(cId)} in Employees sheet.</span>`}
+          </div>
+        </div>
+      `;
+    }).join('') + `
+      <div style="font-size: 9.5px; color: #94a3b8; margin-top: 2px; font-style: italic;">
+        ⚡ Note: When new weekly crew sheets are imported, this class automatically updates to whoever is on these crews.
+      </div>
+    `;
+  }
 
-    if (titleEl) titleEl.textContent = `🚚 Crew ${this.selectedClassCrew}`;
-    if (badgeEl) badgeEl.textContent = `🟢 ${members.length} Linemen Scheduled`;
-    if (foremanEl) foremanEl.innerHTML = `👑 <strong>Foreman:</strong> <span style="color: #60a5fa;">${this.escapeHtml(foreman)}</span>`;
-
-    if (membersEl) {
-      if (members.length > 0) {
-        membersEl.innerHTML = members.map(m => `
-          <span class="badge" style="background: rgba(255,255,255,0.06); color: #cbd5e1; font-size: 9.5px; padding: 2px 6px; border: 1px solid rgba(255,255,255,0.1); border-radius: 3px;">
-            ${m.isForeman ? '👑' : '👤'} ${this.escapeHtml(m.name)} ${m.role ? `(${this.escapeHtml(m.role)})` : ''}
-          </span>
-        `).join('');
-      } else {
-        membersEl.innerHTML = `<span style="color: #94a3b8; font-style: italic;">No active linemen currently listed on Job #${this.escapeHtml(this.selectedClassCrew)} in Employees sheet.</span>`;
-      }
-    }
-
-    previewBox.style.display = 'block';
-    if (clearBtn) clearBtn.style.display = 'block';
+  updateClassCrewPreview() {
+    // Retained for backward-compatibility; redirects to renderAssignedCrewCards
+    this.renderAssignedCrewCards();
   }
 
   addClassAttendee(name) {
@@ -842,22 +917,29 @@ class TripPlannerApp {
     const summaryEl = document.getElementById('manual-task-attendees-summary');
     if (!summaryEl) return;
 
-    const crewMembers = this.selectedClassCrew ? this.getCrewMembers(this.selectedClassCrew) : [];
-    const indCount = (this.selectedClassAttendees || []).length;
-    const crewCount = crewMembers.length;
+    const allAttendeesMap = new Map();
+    const crewBreakdowns = [];
 
-    const allSet = new Set();
-    crewMembers.forEach(m => allSet.add(m.name.toLowerCase()));
-    (this.selectedClassAttendees || []).forEach(n => allSet.add(n.toLowerCase()));
-    const total = allSet.size;
+    (this.selectedClassCrews || []).forEach(cId => {
+      const members = this.getCrewMembers(cId);
+      members.forEach(m => allAttendeesMap.set(m.name.toLowerCase(), m.name));
+      crewBreakdowns.push(`${members.length} from Crew ${cId}`);
+    });
+
+    const indCount = (this.selectedClassAttendees || []).length;
+    (this.selectedClassAttendees || []).forEach(name => {
+      allAttendeesMap.set(name.toLowerCase(), name);
+    });
+
+    const total = allAttendeesMap.size;
 
     summaryEl.innerHTML = `
       <span>👥 Total Attendees: <strong style="color: ${total > 0 ? '#4ade80' : '#94a3b8'}; font-size: 12px;">${total} Linemen</strong></span>
       <span id="manual-task-attendees-detail" style="font-weight: normal; color: #94a3b8; font-size: 10.5px;">
-        ${crewCount > 0 ? `${crewCount} from Crew ${this.selectedClassCrew}` : ''}
-        ${crewCount > 0 && indCount > 0 ? ' + ' : ''}
+        ${crewBreakdowns.join(' + ')}
+        ${crewBreakdowns.length > 0 && indCount > 0 ? ' + ' : ''}
         ${indCount > 0 ? `${indCount} Individual${indCount > 1 ? 's' : ''}` : ''}
-        ${total === 0 ? 'Select a crew and/or individual employees' : ''}
+        ${total === 0 ? 'Select crews and/or individual employees' : ''}
       </span>
     `;
   }
@@ -1180,9 +1262,10 @@ class TripPlannerApp {
     if (certNotesInput) certNotesInput.value = '';
 
     // Reset Class attendees & crew
+    this.selectedClassCrews = [];
     this.selectedClassCrew = '';
     this.selectedClassAttendees = [];
-    this.updateClassCrewPreview();
+    this.renderAssignedCrewCards();
     this.renderClassAttendeeChips();
     this.updateClassAttendeesSummary();
 
@@ -1248,14 +1331,17 @@ class TripPlannerApp {
       if (certTrainerInput) certTrainerInput.value = task.instructor || 'Cody Bechdol (Self)';
       if (certNotesInput) certNotesInput.value = task.notes || '';
 
-      this.selectedClassCrew = task.crewId || '';
-      if (certCrewInput) certCrewInput.value = this.selectedClassCrew;
+      this.selectedClassCrews = Array.isArray(task.crewIds) && task.crewIds.length > 0
+        ? [...task.crewIds]
+        : (task.crewId ? String(task.crewId).split(',').map(s => this.getSignificantJobNumber(s.trim())).filter(Boolean) : []);
+      this.selectedClassCrew = this.selectedClassCrews[0] || '';
+      if (certCrewInput) certCrewInput.value = '';
 
       this.selectedClassAttendees = Array.isArray(task.assignedEmployees)
         ? [...task.assignedEmployees]
         : (task.employee && !task.employee.startsWith('Crew ') ? [task.employee] : []);
 
-      this.updateClassCrewPreview();
+      this.renderAssignedCrewCards();
       this.renderClassAttendeeChips();
       this.updateClassAttendeesSummary();
 
@@ -1324,22 +1410,26 @@ class TripPlannerApp {
         return;
       }
 
+      // Check if user typed a crew without selecting from dropdown
+      const leftoverCrew = certCrewInput ? certCrewInput.value.trim() : '';
+      if (leftoverCrew) {
+        const cleanLeftover = this.getSignificantJobNumber(leftoverCrew);
+        if (cleanLeftover && !this.selectedClassCrews.includes(cleanLeftover)) {
+          this.selectedClassCrews.push(cleanLeftover);
+        }
+      }
+
       // Check if user typed an employee without selecting from dropdown
       const leftoverEmp = certEmpInput ? certEmpInput.value.trim() : '';
       if (leftoverEmp && !this.selectedClassAttendees.some(n => n.toLowerCase() === leftoverEmp.toLowerCase())) {
         this.selectedClassAttendees.push(leftoverEmp);
       }
 
-      // Check if user typed a crew without selecting from dropdown
-      if (!this.selectedClassCrew && certCrewInput && certCrewInput.value.trim()) {
-        this.selectedClassCrew = this.getSignificantJobNumber(certCrewInput.value.trim());
-      }
-
-      const hasCrew = !!this.selectedClassCrew;
+      const hasCrews = (this.selectedClassCrews && this.selectedClassCrews.length > 0);
       const hasEmployees = (this.selectedClassAttendees && this.selectedClassAttendees.length > 0);
 
-      if (!hasCrew && !hasEmployees) {
-        alert('Please assign a Crew (Job #) or add at least one individual attendee to this class.');
+      if (!hasCrews && !hasEmployees) {
+        alert('Please assign at least one Crew (Job #) or add individual attendees to this class.');
         if (certCrewInput) certCrewInput.focus();
         return;
       }
@@ -1348,11 +1438,12 @@ class TripPlannerApp {
         taskCategory: 'cert_class',
         title: certType,
         certType: certType,
-        crewId: this.selectedClassCrew || '',
+        crewIds: [...this.selectedClassCrews],
+        crewId: this.selectedClassCrews.join(', '),
         assignedEmployees: [...this.selectedClassAttendees],
         employee: this.selectedClassAttendees.length > 0
           ? this.selectedClassAttendees[0]
-          : (this.selectedClassCrew ? `Crew ${this.selectedClassCrew}` : 'Unassigned'),
+          : (this.selectedClassCrews.length > 0 ? `Crew ${this.selectedClassCrews[0]}` : 'Unassigned'),
         instructor: instructor,
         dateKey: dateKey,
         location: location || 'Helena HQ',
@@ -2336,9 +2427,9 @@ class TripPlannerApp {
                                   ✅ Completed
                                 </span>
                               ` : ''}
-                              ${resolved.crewId ? `
+                              ${resolved.crews.length > 0 ? `
                                 <span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.3); font-size: 9px; font-weight: 700; padding: 1px 4px; border-radius: 3px;" title="Crew makeup auto-syncs with Employees sheet">
-                                  🔄 Crew ${this.escapeHtml(resolved.crewId)}
+                                  🔄 ${resolved.crews.length === 1 ? `Crew ${this.escapeHtml(resolved.crews[0].crewId)}` : `${resolved.crews.length} Crews (${resolved.crewIds.join(', ')})`}
                                 </span>
                               ` : ''}
                             </div>
@@ -2347,11 +2438,16 @@ class TripPlannerApp {
                             </div>
 
                             <!-- Attendees / Audience Header -->
-                            ${resolved.crewId ? `
+                            ${resolved.crews.length > 0 ? `
                               <div style="font-size: 11px; margin-top: 3px; color: #cbd5e1; line-height: 1.3;">
-                                <span>🚚 <strong>Crew ${this.escapeHtml(resolved.crewId)}</strong></span>
-                                ${resolved.foreman ? `<span> (${this.escapeHtml(resolved.foreman)})</span>` : ''}
-                                <span style="color: #94a3b8;"> · ${resolved.totalCount} Linemen</span>
+                                ${resolved.crews.length === 1 ? `
+                                  <span>🚚 <strong>Crew ${this.escapeHtml(resolved.crews[0].crewId)}</strong></span>
+                                  ${resolved.crews[0].foreman ? `<span> (${this.escapeHtml(resolved.crews[0].foreman)})</span>` : ''}
+                                  <span style="color: #94a3b8;"> · ${resolved.totalCount} Linemen</span>
+                                ` : `
+                                  <span>🚚 <strong>${resolved.crews.length} Crews:</strong> ${resolved.crews.map(c => `Crew ${this.escapeHtml(c.crewId)}${c.foreman ? ` (${this.escapeHtml(c.foreman)})` : ''}`).join(', ')}</span>
+                                  <span style="color: #94a3b8;"> · ${resolved.totalCount} Linemen</span>
+                                `}
                               </div>
                             ` : (resolved.totalCount > 0 ? `
                               <div style="font-size: 11px; margin-top: 3px; color: #cbd5e1; line-height: 1.3;">
@@ -2376,10 +2472,23 @@ class TripPlannerApp {
                                 <div style="font-size: 10px; font-weight: 700; color: #60a5fa; cursor: pointer; display: flex; align-items: center; gap: 4px; user-select: none;" onclick="window.tripPlanner.toggleClassRoster('${this.escapeHtml(mt.id)}')" title="Click to show/hide attendee list">
                                   <span id="class-roster-toggle-${this.escapeHtml(mt.id)}">${isRosterOpen ? '▼' : '▶'}</span>
                                   <span>📋 View Attendees (${resolved.totalCount})</span>
-                                  ${resolved.crewId ? `<span style="font-size: 9px; color: #34d399; margin-left: auto;">🔄 Synced</span>` : ''}
+                                  ${resolved.crews.length > 0 ? `<span style="font-size: 9px; color: #34d399; margin-left: auto;">🔄 Synced</span>` : ''}
                                 </div>
                                 <div id="class-roster-${this.escapeHtml(mt.id)}" style="display: ${isRosterOpen ? 'flex' : 'none'}; flex-direction: column; gap: 3px; margin-top: 5px; padding: 4px 6px; background: rgba(0,0,0,0.25); border-radius: 4px;">
-                                  ${resolved.crewMembers.map(m => `
+                                  ${resolved.crews.length > 1 ? resolved.crews.map(c => `
+                                    <div style="font-size: 9.5px; font-weight: 800; color: #93c5fd; margin-top: 4px; padding-bottom: 2px; border-bottom: 1px solid rgba(255,255,255,0.08); display: flex; justify-content: space-between; align-items: center;">
+                                      <span>🚚 Crew ${this.escapeHtml(c.crewId)} (${this.escapeHtml(c.foreman || 'Lead')})</span>
+                                      <span style="font-size: 8.5px; color: #34d399;">${c.members.length} linemen</span>
+                                    </div>
+                                    ${c.members.map(m => `
+                                      <div style="font-size: 10px; color: #cbd5e1; display: flex; justify-content: space-between; align-items: center; padding-left: 6px;">
+                                        <span style="cursor: pointer;" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(m.name)}');}" title="View employee profile">
+                                          ${m.isForeman ? '👑' : '👤'} <strong style="color: ${m.isForeman ? '#facc15' : '#60a5fa'}; text-decoration: underline dotted;">${this.escapeHtml(m.name)}</strong>
+                                        </span>
+                                        <span class="badge" style="font-size: 8.5px; padding: 1px 4px; background: rgba(255,255,255,0.06); color: #94a3b8;">${this.escapeHtml(m.role || (m.isForeman ? 'Foreman' : 'Crew'))}</span>
+                                      </div>
+                                    `).join('')}
+                                  `).join('') : resolved.crewMembers.map(m => `
                                     <div style="font-size: 10px; color: #cbd5e1; display: flex; justify-content: space-between; align-items: center;">
                                       <span style="cursor: pointer;" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(m.name)}');}" title="View employee profile">
                                         ${m.isForeman ? '👑' : '👤'} <strong style="color: ${m.isForeman ? '#facc15' : '#60a5fa'}; text-decoration: underline dotted;">${this.escapeHtml(m.name)}</strong>
@@ -2387,14 +2496,19 @@ class TripPlannerApp {
                                       <span class="badge" style="font-size: 8.5px; padding: 1px 4px; background: rgba(255,255,255,0.06); color: #94a3b8;">${this.escapeHtml(m.role || (m.isForeman ? 'Foreman' : 'Crew'))}</span>
                                     </div>
                                   `).join('')}
-                                  ${resolved.individualMembers.map(m => `
-                                    <div style="font-size: 10px; color: #cbd5e1; display: flex; justify-content: space-between; align-items: center;">
-                                      <span style="cursor: pointer;" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(m.name)}');}" title="View employee profile">
-                                        👤 <strong style="color: #60a5fa; text-decoration: underline dotted;">${this.escapeHtml(m.name)}</strong>
-                                      </span>
-                                      <span class="badge" style="font-size: 8.5px; padding: 1px 4px; background: rgba(59, 130, 246, 0.15); color: #93c5fd;">Individual</span>
+                                  ${resolved.individualMembers.length > 0 ? `
+                                    <div style="font-size: 9.5px; font-weight: 800; color: #a78bfa; margin-top: 4px; padding-bottom: 2px; border-bottom: 1px solid rgba(255,255,255,0.08);">
+                                      👤 Individual Attendees (${resolved.individualMembers.length})
                                     </div>
-                                  `).join('')}
+                                    ${resolved.individualMembers.map(m => `
+                                      <div style="font-size: 10px; color: #cbd5e1; display: flex; justify-content: space-between; align-items: center; padding-left: 6px;">
+                                        <span style="cursor: pointer;" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(m.name)}');}" title="View employee profile">
+                                          👤 <strong style="color: #60a5fa; text-decoration: underline dotted;">${this.escapeHtml(m.name)}</strong>
+                                        </span>
+                                        <span class="badge" style="font-size: 8.5px; padding: 1px 4px; background: rgba(59, 130, 246, 0.15); color: #93c5fd;">Individual</span>
+                                      </div>
+                                    `).join('')}
+                                  ` : ''}
                                 </div>
                               </div>
                             ` : ''}
