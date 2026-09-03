@@ -704,42 +704,87 @@ class EmployeeProfileEngine {
       });
     }
 
-    // Ensure all 16 standard company certifications are included in the qualification matrix
-    const standardCertTypes = [
-      'First Aid / CPR',
-      'Pole Top Rescue',
-      'Bucket Truck Rescue',
-      'Crane - Mobile',
-      'Rigging / Signal Person',
-      'CDL - Medical',
-      'OSHA 10/30',
-      'Diggers Hotline',
-      'Forklift / Telehandler',
-      'Defensive Driving',
-      'Substation Safety',
-      'Enclosed Space',
-      'MSHA',
-      'BNSF Safety',
-      'Crane Operator Eval',
-      'Helicopter Safety'
-    ];
+    // 3b. Align with Certification Requirements & Job Role Matrix (certs-config.js)
+    const configuredCerts = (window.certsConfigEngine && Array.isArray(window.certsConfigEngine.certs))
+      ? window.certsConfigEngine.certs
+      : (window.certsConfigEngine && typeof window.certsConfigEngine.loadConfig === 'function' ? window.certsConfigEngine.loadConfig() : []);
 
-    standardCertTypes.forEach(stdType => {
-      const normStd = this.normalizeName(stdType);
-      if (!matchedCerts.has(normStd) && !certifications.some(c => this.normalizeName(c.certType) === normStd)) {
-        certifications.push({
-          rowIdx: null,
-          rawRow: null,
-          certType: stdType,
-          expDate: 'No Date Set',
-          testDate: 'N/A',
-          daysLeft: null,
-          status: 'No Date Set',
-          smsStatus: '',
-          notes: ''
+    if (configuredCerts.length > 0) {
+      // Enrich existing matched cert rows with their official label & configuration
+      certifications.forEach(certObj => {
+        const cNorm = this.normalizeName(certObj.certType);
+        const cKey = String(certObj.certType).toLowerCase().trim();
+        const conf = configuredCerts.find(cf => {
+          const cfKey = String(cf.key || cf.name || '').toLowerCase().trim();
+          const cfLabel = String(cf.label || '').toLowerCase().trim();
+          return cfKey === cKey || cfLabel === cKey || this.normalizeName(cfKey) === cNorm || this.normalizeName(cfLabel) === cNorm;
         });
-      }
-    });
+        if (conf) {
+          certObj.label = conf.label || conf.name || conf.key;
+          certObj.termMonths = conf.termMonths;
+          certObj.isIssuedDate = !!conf.isIssuedDate;
+          certObj.config = conf;
+        } else {
+          certObj.label = certObj.certType;
+        }
+      });
+
+      // Ensure every cert defined in Requirements & Roles is represented for this employee
+      configuredCerts.forEach(conf => {
+        const cfKey = String(conf.key || conf.name || '').trim();
+        const cfKeyLower = cfKey.toLowerCase();
+        const cfNorm = this.normalizeName(cfKey);
+        const cfLabelNorm = this.normalizeName(conf.label || '');
+
+        const alreadyPresent = certifications.some(c => {
+          const cTypeLower = String(c.certType || '').toLowerCase().trim();
+          const cNorm = this.normalizeName(c.certType);
+          return cTypeLower === cfKeyLower || cNorm === cfNorm || cNorm === cfLabelNorm;
+        });
+
+        if (!alreadyPresent) {
+          const isRequired = (window.certsConfigEngine && typeof window.certsConfigEngine.isCertRequiredForEmployee === 'function')
+            ? window.certsConfigEngine.isCertRequiredForEmployee(cfKey, role)
+            : (conf.requirementScope === 'all');
+          const isNonExp = conf.isIssuedDate || conf.termMonths === 0;
+
+          certifications.push({
+            rowIdx: null,
+            rawRow: null,
+            certType: cfKey,
+            label: conf.label || cfKey,
+            expDate: isNonExp ? 'N/A' : 'N/A',
+            testDate: 'N/A',
+            daysLeft: null,
+            status: isRequired ? (isNonExp ? 'No Date Set' : 'Missing') : 'No Date Set',
+            smsStatus: '',
+            notes: '',
+            isRequired: isRequired,
+            termMonths: conf.termMonths,
+            isIssuedDate: isNonExp,
+            config: conf
+          });
+        }
+      });
+
+      // Sort certifications to follow the exact order in Requirements & Roles Matrix
+      const orderMap = new Map();
+      configuredCerts.forEach((cfg, idx) => {
+        const k = String(cfg.key || cfg.name || '').toLowerCase().trim();
+        const l = String(cfg.label || '').toLowerCase().trim();
+        orderMap.set(k, idx);
+        orderMap.set(l, idx);
+      });
+
+      certifications.sort((a, b) => {
+        const aKey = String(a.certType || '').toLowerCase().trim();
+        const bKey = String(b.certType || '').toLowerCase().trim();
+        const aOrder = orderMap.has(aKey) ? orderMap.get(aKey) : 999;
+        const bOrder = orderMap.has(bKey) ? orderMap.get(bKey) : 999;
+        if (aOrder !== bOrder) return aOrder - bOrder;
+        return (a.label || a.certType).localeCompare(b.label || b.certType);
+      });
+    }
 
     // 4. Scan Training Tracking for this employee / crew
     const trainingTable = snap.tables['training_tracking'];
@@ -1637,9 +1682,14 @@ class EmployeeProfileEngine {
         }
 
         html += `
-          <tr>
             <td style="font-weight: 700; text-align: left; color: #f8fafc;">
-              ${this.getCertIcon(c.certType)} ${this.escapeHtml(c.certType)}
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="font-size: 16px;">${this.getCertIcon(c.certType)}</span>
+                <div>
+                  <div style="font-size: 12.5px; font-weight: 700; color: #f8fafc;">${this.escapeHtml(c.label || c.certType)}</div>
+                  ${(c.label && c.label !== c.certType) ? `<div style="font-size: 9.5px; color: var(--text-muted); font-weight: 500;">Sheet Key: "${this.escapeHtml(c.certType)}"</div>` : ''}
+                </div>
+              </div>
             </td>
             <td style="text-align: center; font-weight: 700;">
               <button class="btn-cell-edit" title="Click to edit Expiration Date" onclick="window.employeeProfileEngine.openEditCertModal('${this.escapeHtml(data.displayName)}', '${this.escapeHtml(c.certType)}')">
@@ -1926,7 +1976,20 @@ class EmployeeProfileEngine {
    */
   isNonExpiringCert(certType) {
     const ct = String(certType || '').trim().toLowerCase();
-    return ct.includes('osha') || 
+    const ctNorm = this.normalizeName(certType);
+
+    if (window.certsConfigEngine && Array.isArray(window.certsConfigEngine.certs)) {
+      const conf = window.certsConfigEngine.certs.find(c => {
+        const k = String(c.key || c.name || '').toLowerCase().trim();
+        const l = String(c.label || '').toLowerCase().trim();
+        return k === ct || l === ct || this.normalizeName(k) === ctNorm || this.normalizeName(l) === ctNorm;
+      });
+      if (conf) {
+        return !!conf.isIssuedDate || conf.termMonths === 0;
+      }
+    }
+
+    return ct.includes('osha 1910') || 
            ct.includes('crane eval') || 
            ct.includes('bnsf') || 
            ct.includes('msha') || 
@@ -1938,29 +2001,49 @@ class EmployeeProfileEngine {
    * Returns validity cycle length and descriptive label for a certification
    */
   getCertCycleInfo(certType) {
-    if (this.isNonExpiringCert(certType)) {
-      return { isExpiring: false, years: null, label: 'Non-Expiring Qualification' };
-    }
     const ct = String(certType || '').trim().toLowerCase();
-    if (ct.includes('pole top') || ct.includes('harass') || ct.includes('coin cpr') || ct.includes('annual')) {
-      return { isExpiring: true, years: 1, label: '1-Year Cycle (Annual)' };
+    const ctNorm = this.normalizeName(certType);
+
+    if (window.certsConfigEngine && Array.isArray(window.certsConfigEngine.certs)) {
+      const conf = window.certsConfigEngine.certs.find(c => {
+        const k = String(c.key || c.name || '').toLowerCase().trim();
+        const l = String(c.label || '').toLowerCase().trim();
+        return k === ct || l === ct || this.normalizeName(k) === ctNorm || this.normalizeName(l) === ctNorm;
+      });
+
+      if (conf) {
+        if (conf.isIssuedDate || conf.termMonths === 0) {
+          return { isExpiring: false, years: null, months: 0, label: 'Non-Expiring (Completion Date)' };
+        }
+        const months = conf.termMonths || 12;
+        const years = months / 12;
+        const yearLabel = (years === 1) ? '1-Year Cycle (Annual)' : (Number.isInteger(years) ? `${years}-Year Cycle` : `${months} Months`);
+        return { isExpiring: true, years: years, months: months, label: yearLabel };
+      }
+    }
+
+    if (this.isNonExpiringCert(certType)) {
+      return { isExpiring: false, years: null, months: 0, label: 'Non-Expiring Qualification' };
+    }
+    if (ct.includes('pole top') || ct.includes('harass') || ct.includes('annual')) {
+      return { isExpiring: true, years: 1, months: 12, label: '1-Year Cycle (Annual)' };
     }
     if (ct.includes('cpr') || ct.includes('1st aid') || ct.includes('first aid')) {
-      return { isExpiring: true, years: 2, label: '2-Year Cycle' };
+      return { isExpiring: true, years: 2, months: 24, label: '2-Year Cycle' };
     }
     if (ct.includes('forklift') || ct.includes('trench') || ct.includes('rigging')) {
-      return { isExpiring: true, years: 3, label: '3-Year Cycle' };
+      return { isExpiring: true, years: 3, months: 36, label: '3-Year Cycle' };
     }
     if (ct.includes('crane')) {
-      return { isExpiring: true, years: 5, label: '5-Year Cycle' };
+      return { isExpiring: true, years: 5, months: 60, label: '5-Year Cycle' };
     }
     if (ct.includes('dl') || ct.includes('driver')) {
-      return { isExpiring: true, years: 8, label: '8-Year Cycle' };
+      return { isExpiring: true, years: 8, months: 96, label: '8-Year Cycle' };
     }
     if (ct.includes('mec') || ct.includes('dot') || ct.includes('medical') || ct.includes('physical')) {
-      return { isExpiring: true, years: 2, label: '2-Year Cycle (DOT)' };
+      return { isExpiring: true, years: 2, months: 24, label: '2-Year Cycle (DOT)' };
     }
-    return { isExpiring: true, years: 1, label: 'Standard Cycle (1-Year)' };
+    return { isExpiring: true, years: 1, months: 12, label: 'Standard Cycle (1-Year)' };
   }
 
   /**
@@ -1971,9 +2054,13 @@ class EmployeeProfileEngine {
     const parsed = (acqDate instanceof Date) ? acqDate : this.parseDate(acqDate);
     if (!parsed) return null;
     const cycle = this.getCertCycleInfo(certType);
-    if (!cycle.isExpiring || !cycle.years) return null;
+    if (!cycle.isExpiring) return null;
     const exp = new Date(parsed.getTime());
-    exp.setFullYear(exp.getFullYear() + cycle.years);
+    if (cycle.months) {
+      exp.setMonth(exp.getMonth() + cycle.months);
+    } else if (cycle.years) {
+      exp.setFullYear(exp.getFullYear() + cycle.years);
+    }
     return exp;
   }
 
@@ -1985,9 +2072,13 @@ class EmployeeProfileEngine {
     const parsed = (expDate instanceof Date) ? expDate : this.parseDate(expDate);
     if (!parsed) return null;
     const cycle = this.getCertCycleInfo(certType);
-    if (!cycle.isExpiring || !cycle.years) return null;
+    if (!cycle.isExpiring) return null;
     const acq = new Date(parsed.getTime());
-    acq.setFullYear(acq.getFullYear() - cycle.years);
+    if (cycle.months) {
+      acq.setMonth(acq.getMonth() - cycle.months);
+    } else if (cycle.years) {
+      acq.setFullYear(acq.getFullYear() - cycle.years);
+    }
     return acq;
   }
 
@@ -2080,8 +2171,9 @@ class EmployeeProfileEngine {
       certObj: certObj
     };
 
+    const displayTitle = (certObj && certObj.label) ? certObj.label : certType;
     if (titleEl) {
-      titleEl.innerHTML = `Edit Certification Dates: <strong>${this.escapeHtml(certType)}</strong>`;
+      titleEl.innerHTML = `Edit Certification Dates: <strong>${this.escapeHtml(displayTitle)}</strong>`;
     }
 
     body.innerHTML = `
@@ -2091,8 +2183,11 @@ class EmployeeProfileEngine {
           <div style="display: flex; align-items: center; gap: 10px;">
             <div style="font-size: 26px;">${this.getCertIcon(certType)}</div>
             <div>
-              <div style="font-size: 15px; font-weight: 800; color: #f8fafc;">${this.escapeHtml(certType)}</div>
-              <div style="font-size: 12px; color: #60a5fa; font-weight: 600;">👤 ${this.escapeHtml(empName)}</div>
+              <div style="font-size: 15px; font-weight: 800; color: #f8fafc;">${this.escapeHtml(displayTitle)}</div>
+              <div style="font-size: 11.5px; color: #94a3b8; margin-top: 2px;">
+                <span style="color: #60a5fa; font-weight: 600;">👤 ${this.escapeHtml(empName)}</span>
+                ${(displayTitle !== certType) ? ` · <span style="color: var(--text-muted);">Sheet Key: "${this.escapeHtml(certType)}"</span>` : ''}
+              </div>
             </div>
           </div>
           <div>
