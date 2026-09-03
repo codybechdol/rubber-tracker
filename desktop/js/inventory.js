@@ -1460,7 +1460,14 @@ class InventoryManager {
             return 0;
           });
 
-          const latest = sorted[sorted.length - 1];
+          // Guard: ignore rows with dates far in the future (> 30 days ahead of today) when determining the latest historical state
+          const maxFutureDate = Date.now() + (30 * 86400000);
+          const validDateRows = sorted.filter(r => {
+            const rawD = r['Date Assigned'] || r['Date'] || Object.values(r)[0] || '';
+            const d = this.parseDate(rawD);
+            return !d || d.getTime() <= maxFutureDate;
+          });
+          const latest = validDateRows.length > 0 ? validDateRows[validDateRows.length - 1] : sorted[sorted.length - 1];
           const rawDate = latest['Date Assigned'] || latest['Date'] || Object.values(latest)[0] || '';
           const dtObj = this.parseDate(rawDate);
           const assignedTo = String(latest['Assigned To'] || latest['Employee Name'] || latest['Employee'] || '').trim();
@@ -1535,7 +1542,7 @@ class InventoryManager {
             }
           } else if (isCurActiveEmployee && isHistReturned) {
             needsFix = true;
-          } else if (latestHist.dateObj && curDateObj && latestHist.dateObj.getTime() > curDateObj.getTime()) {
+          } else if (latestHist.dateObj && curDateObj && latestHist.dateObj.getTime() > curDateObj.getTime() && latestHist.dateObj.getTime() <= (Date.now() + 30 * 86400000)) {
             if (curAssignedLower !== histAssignedLower || curStatus.toLowerCase() !== histAssignedLower) {
               if (!isHistPreviousEmp || isCurActiveEmployee) {
                 needsFix = true;

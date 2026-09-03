@@ -1872,11 +1872,21 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
               var rItem = mut.rowData ? String(mut.rowData['Item #'] || mut.rowData['Item'] || mut.rowData['Serial #'] || '').trim().toLowerCase() : '';
               var rAssigned = mut.rowData ? String(mut.rowData['Assigned To'] || '').trim().toLowerCase() : '';
 
+              var formatCellVal = function(c) {
+                if (c instanceof Date && !isNaN(c.getTime())) {
+                  var m = c.getMonth() + 1;
+                  var day = c.getDate();
+                  var yr = c.getFullYear();
+                  return (m < 10 ? '0' + m : m) + '/' + (day < 10 ? '0' + day : day) + '/' + yr;
+                }
+                return String(c || '').trim().toLowerCase();
+              };
+
               var rowsToKeep = [data[0]]; // Always preserve headers
               var deletedCount = 0;
 
               for (var r = 1; r < data.length; r++) {
-                var rowVals = data[r].map(function(c) { return String(c || '').trim().toLowerCase(); });
+                var rowVals = data[r].map(formatCellVal);
                 var isMatch = false;
                 if (idStr) {
                   isMatch = (rowVals.indexOf(idStr) !== -1);
@@ -1887,7 +1897,7 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
                   isMatch = (matchDate && matchItem && matchAssigned);
                 }
 
-                if (isMatch) {
+                if (isMatch && deletedCount === 0) {
                   deletedCount++;
                 } else {
                   rowsToKeep.push(data[r]);

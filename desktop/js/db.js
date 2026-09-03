@@ -1024,7 +1024,7 @@ class LocalDatabase {
         const grDate = String(gr[0] || '').trim();
         const grItem = String(gr[1] || '').trim();
         const grAssigned = String(gr[5] || gr[4] || gr[3] || '').trim();
-        return (oDate ? grDate === oDate : true) && (oItem ? grItem === oItem : true);
+        return (oDate ? grDate === oDate : true) && (oItem ? grItem === oItem : true) && (oAssigned ? grAssigned.toLowerCase() === oAssigned.toLowerCase() : true);
       });
       if (gridIdx > 0) {
         table.rawGrid.splice(gridIdx, 1);
@@ -1089,11 +1089,13 @@ class LocalDatabase {
         gridIdx = targetRow._rowIdx - 1;
       } else {
         const oDate = String(targetRow['Date Assigned'] || targetRow['Date'] || '').trim();
+        const oAssigned = String(targetRow['Assigned To'] || targetRow['Employee Name'] || targetRow['Employee'] || '').trim();
         gridIdx = table.rawGrid.findIndex((gr, idx) => {
           if (idx === 0) return false;
           const grDate = String(gr[0] || '').trim();
           const grItem = String(gr[1] || '').trim();
-          return (oDate ? grDate === oDate : true) && (itemNum ? grItem === itemNum : true);
+          const grAssigned = String(gr[5] || gr[4] || gr[3] || '').trim();
+          return (oDate ? grDate === oDate : true) && (itemNum ? grItem === itemNum : true) && (oAssigned ? grAssigned.toLowerCase() === oAssigned.toLowerCase() : true);
         });
       }
     }

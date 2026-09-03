@@ -385,6 +385,8 @@ class ItemStatsEngine {
         retiredDays += days;
       }
 
+      const isFutureDate = startDate.getTime() > (Date.now() + 30 * 86400000);
+
       milestones.push({
         idx: i + 1,
         startDate: startDate,
@@ -398,6 +400,7 @@ class ItemStatsEngine {
         location: location || 'Helena',
         notes: notes,
         isCurrent: i === sorted.length - 1 && !isRetired,
+        isFutureDate: isFutureDate,
         isOriginRecord: i === 0,
         isPurchaseOrigin: i === 0 && isPurchaseOrigin,
         rawRow: current
@@ -869,6 +872,14 @@ class ItemStatsEngine {
           <h3 style="font-size: 14px; font-weight: 700; margin-bottom: 12px; display: flex; align-items: center; gap: 6px;">
             <span>🗺️</span> Complete Lifecycle Journey (${stats.milestones.length} Events)
           </h3>
+          ${stats.milestones.some(m => m.isFutureDate) ? `
+            <div style="background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.35); border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; display: flex; align-items: center; gap: 10px;">
+              <span style="font-size: 18px;">⚠️</span>
+              <div style="font-size: 12px; color: #fca5a5; line-height: 1.4;">
+                <strong>Future Date Anomaly Detected:</strong> This item has history entries dated far in the future (e.g. 2032). Click <strong>🗑️ Delete</strong> on the future card(s) below to remove them, or <strong>✏️ Edit</strong> to correct the year.
+              </div>
+            </div>
+          ` : ''}
           <div style="position: relative; padding-left: 20px; border-left: 2px solid var(--border-color); margin-left: 8px;">
     `;
 
@@ -890,6 +901,7 @@ class ItemStatsEngine {
                 <span style="font-size: 15px;">${m.state.icon}</span>
                 <span style="font-weight: 700; font-size: 13px; color: var(--text-primary);">${m.state.label}</span>
                 ${m.isCurrent ? `<span class="brand-badge" style="background: rgba(234, 179, 8, 0.2); color: #facc15; font-size: 10px;">Current</span>` : ''}
+                ${m.isFutureDate ? `<span class="brand-badge" style="background: rgba(239, 68, 68, 0.25); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4); font-size: 10px; font-weight: 700;">⚠️ Future Date (${m.startDateFormatted})</span>` : ''}
                 ${isPurchaseOrigin ? `<span class="brand-badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; font-size: 10px; font-weight: 700;">✨ Lifecycle Origin (Purchased New)</span>` : ''}
                 ${isOrigin && !stats.hasKnownPurchaseDate ? `<span class="brand-badge" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; font-size: 10px;">⏳ Tracking Baseline (Purchase Unknown)</span>` : ''}
               </div>
@@ -1687,7 +1699,9 @@ class ItemStatsEngine {
       newAssignedTo = 'On Shelf';
       newLocation = 'Helena';
       const today = new Date();
-      newDateAssigned = `${String(today.getMonth() + 1).padStart(2, '0')}/${String(today.getDate()).padStart(2, '0')}/${today.getFullYear()}`;
+      if (!newDateAssigned) {
+        newDateAssigned = `${String(today.getMonth() + 1).padStart(2, '0')}/${String(today.getDate()).padStart(2, '0')}/${today.getFullYear()}`;
+      }
 
       const hasEsl = (table.headers || []).some(h => /^esl\s*id$/i.test(h));
       const curEsl = row['ESL ID'] || '';
