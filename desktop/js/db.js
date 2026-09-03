@@ -2,6 +2,83 @@
  * db.js - Local Database & Offline Mutation Outbox Manager
  */
 
+/**
+ * SnapshotStorage - Lightweight IndexedDB wrapper for large database snapshots.
+ * Replaces localStorage (5MB limit) with IndexedDB (gigabytes quota) to prevent QuotaExceededError on tablets/mobile.
+ */
+class SnapshotStorage {
+  static get DB_NAME() { return 'SafetyAssistantDB'; }
+  static get STORE_NAME() { return 'snapshots'; }
+  static get DB_VERSION() { return 1; }
+
+  static async open() {
+    if (typeof window === 'undefined' || !window.indexedDB) return null;
+    return new Promise((resolve) => {
+      try {
+        const req = window.indexedDB.open(SnapshotStorage.DB_NAME, SnapshotStorage.DB_VERSION);
+        req.onupgradeneeded = (e) => {
+          const db = e.target.result;
+          if (!db.objectStoreNames.contains(SnapshotStorage.STORE_NAME)) {
+            db.createObjectStore(SnapshotStorage.STORE_NAME);
+          }
+        };
+        req.onsuccess = (e) => resolve(e.target.result);
+        req.onerror = () => resolve(null);
+      } catch (e) {
+        resolve(null);
+      }
+    });
+  }
+
+  static async get(key) {
+    const db = await SnapshotStorage.open();
+    if (!db) return null;
+    return new Promise((resolve) => {
+      try {
+        const tx = db.transaction(SnapshotStorage.STORE_NAME, 'readonly');
+        const store = tx.objectStore(SnapshotStorage.STORE_NAME);
+        const req = store.get(key);
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => resolve(null);
+      } catch (e) {
+        resolve(null);
+      }
+    });
+  }
+
+  static async set(key, value) {
+    const db = await SnapshotStorage.open();
+    if (!db) return false;
+    return new Promise((resolve) => {
+      try {
+        const tx = db.transaction(SnapshotStorage.STORE_NAME, 'readwrite');
+        const store = tx.objectStore(SnapshotStorage.STORE_NAME);
+        const req = store.put(value, key);
+        req.onsuccess = () => resolve(true);
+        req.onerror = () => resolve(false);
+      } catch (e) {
+        resolve(false);
+      }
+    });
+  }
+
+  static async delete(key) {
+    const db = await SnapshotStorage.open();
+    if (!db) return false;
+    return new Promise((resolve) => {
+      try {
+        const tx = db.transaction(SnapshotStorage.STORE_NAME, 'readwrite');
+        const store = tx.objectStore(SnapshotStorage.STORE_NAME);
+        const req = store.delete(key);
+        req.onsuccess = () => resolve(true);
+        req.onerror = () => resolve(false);
+      } catch (e) {
+        resolve(false);
+      }
+    });
+  }
+}
+
 class LocalDatabase {
   constructor() {
     this.snapshot = null;
@@ -10,23 +87,47 @@ class LocalDatabase {
   }
 
   async init() {
-    // Load snapshot from desktop API or localStorage
+    // Load snapshot from desktop API or IndexedDB / localStorage
     if (window.desktopAPI) {
       this.snapshot = await window.desktopAPI.getLocalSnapshot();
       this.outbox = await window.desktopAPI.getLocalOutbox() || [];
     } else {
-      const stored = localStorage.getItem('sa_snapshot');
-      if (stored) this.snapshot = JSON.parse(stored);
-      const storedOutbox = localStorage.getItem('sa_outbox');
-      if (storedOutbox) this.outbox = JSON.parse(storedOutbox);
+      // 1. Try IndexedDB first (virtually unlimited quota)
+      let loadedSnapshot = null;
+      try {
+        loadedSnapshot = await SnapshotStorage.get('sa_snapshot');
+      } catch (e) {
+        console.warn('Could not read from IndexedDB:', e);
+      }
+
+      // 2. Fallback to localStorage and auto-migrate to IndexedDB
+      if (!loadedSnapshot) {
+        try {
+          const stored = localStorage.getItem('sa_snapshot');
+          if (stored) {
+            loadedSnapshot = JSON.parse(stored);
+            // Migrate to IndexedDB and free localStorage
+            await SnapshotStorage.set('sa_snapshot', loadedSnapshot);
+            try { localStorage.removeItem('sa_snapshot'); } catch (e) {}
+          }
+        } catch (e) {
+          console.warn('Could not read/migrate from localStorage:', e);
+        }
+      }
+
+      this.snapshot = loadedSnapshot;
+
+      try {
+        const storedOutbox = localStorage.getItem('sa_outbox');
+        if (storedOutbox) this.outbox = JSON.parse(storedOutbox);
+      } catch (e) {
+        this.outbox = [];
+      }
     }
+
     if (this.snapshot) {
       this.normalizeSnapshot(this.snapshot);
-      if (window.desktopAPI) {
-        await window.desktopAPI.saveLocalSnapshot(this.snapshot);
-      } else {
-        localStorage.setItem('sa_snapshot', JSON.stringify(this.snapshot));
-      }
+      await this.persistSnapshot(this.snapshot);
     }
     this.notify();
     return this.snapshot;
@@ -41,12 +142,37 @@ class LocalDatabase {
       this.normalizeSnapshot(snapshot);
     }
     this.snapshot = snapshot;
+    await this.persistSnapshot(snapshot);
+    this.notify();
+  }
+
+  async persistSnapshot(snapshot = this.snapshot) {
+    if (!snapshot) return;
     if (window.desktopAPI) {
       await window.desktopAPI.saveLocalSnapshot(snapshot);
-    } else {
-      localStorage.setItem('sa_snapshot', JSON.stringify(snapshot));
+      return;
     }
-    this.notify();
+
+    // Web & Tablet / Mobile: Save to IndexedDB (virtually unlimited quota)
+    let savedToIdb = false;
+    try {
+      savedToIdb = await SnapshotStorage.set('sa_snapshot', snapshot);
+      if (savedToIdb) {
+        // Free up localStorage by removing the massive snapshot string
+        try { localStorage.removeItem('sa_snapshot'); } catch (e) {}
+      }
+    } catch (idbErr) {
+      console.warn('IndexedDB persist failed:', idbErr);
+    }
+
+    // Fallback to localStorage only if IndexedDB was unavailable
+    if (!savedToIdb) {
+      try {
+        localStorage.setItem('sa_snapshot', JSON.stringify(snapshot));
+      } catch (lsErr) {
+        console.warn('localStorage persist failed (quota exceeded):', lsErr);
+      }
+    }
   }
 
   getPlannedTrips() {
@@ -885,11 +1011,10 @@ class LocalDatabase {
         await this.applyLocalMutation(mutation);
         if (window.desktopAPI) {
           await window.desktopAPI.saveLocalOutbox(this.outbox);
-          await window.desktopAPI.saveLocalSnapshot(this.snapshot);
         } else {
-          localStorage.setItem('sa_outbox', JSON.stringify(this.outbox));
-          localStorage.setItem('sa_snapshot', JSON.stringify(this.snapshot));
+          try { localStorage.setItem('sa_outbox', JSON.stringify(this.outbox)); } catch (e) {}
         }
+        await this.persistSnapshot(this.snapshot);
         this.notify();
         return this.outbox[existingIdx];
       }
@@ -910,11 +1035,10 @@ class LocalDatabase {
         await this.applyLocalMutation(mutation);
         if (window.desktopAPI) {
           await window.desktopAPI.saveLocalOutbox(this.outbox);
-          await window.desktopAPI.saveLocalSnapshot(this.snapshot);
         } else {
-          localStorage.setItem('sa_outbox', JSON.stringify(this.outbox));
-          localStorage.setItem('sa_snapshot', JSON.stringify(this.snapshot));
+          try { localStorage.setItem('sa_outbox', JSON.stringify(this.outbox)); } catch (e) {}
         }
+        await this.persistSnapshot(this.snapshot);
         this.notify();
         return this.outbox[existingIdx];
       }
@@ -933,11 +1057,10 @@ class LocalDatabase {
 
     if (window.desktopAPI) {
       await window.desktopAPI.saveLocalOutbox(this.outbox);
-      await window.desktopAPI.saveLocalSnapshot(this.snapshot);
     } else {
-      localStorage.setItem('sa_outbox', JSON.stringify(this.outbox));
-      localStorage.setItem('sa_snapshot', JSON.stringify(this.snapshot));
+      try { localStorage.setItem('sa_outbox', JSON.stringify(this.outbox)); } catch (e) {}
     }
+    await this.persistSnapshot(this.snapshot);
 
     this.notify();
     return mutRecord;

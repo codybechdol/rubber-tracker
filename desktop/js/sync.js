@@ -1339,10 +1339,10 @@ class SyncEngine {
 
         try {
           const text = await file.text();
-          if (text.includes('quota') || text.includes('Quota') || text.startsWith('<!DOCTYPE') || text.startsWith('<html')) {
+          const isHtmlError = text.startsWith('<!DOCTYPE') || text.startsWith('<html') || (text.includes('Drive') && text.toLowerCase().includes('quota'));
+          if (isHtmlError) {
             const promptDirect = confirm(
-              '⚠️ Google Drive Download Quota Exceeded on this file!\n\n' +
-              'Google Drive limits how many times shared files can be downloaded from drive.google.com in a 24-hour window, so Drive returned an error page instead of the snapshot.\n\n' +
+              '⚠️ Google Drive returned an error/login page instead of the snapshot file!\n\n' +
               '💡 You don\'t need to download files from Google Drive! The app can download the complete database directly from Google Sheets.\n\n' +
               'Would you like to download the latest snapshot directly from Google Sheets right now?'
             );
@@ -1351,7 +1351,7 @@ class SyncEngine {
                 this.downloadLatestSnapshot();
               }, 100);
             }
-            resolve({ success: false, error: 'Quota exceeded in downloaded file' });
+            resolve({ success: false, error: 'HTML error page in downloaded file' });
             return;
           }
           const data = JSON.parse(text);
