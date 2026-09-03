@@ -296,7 +296,7 @@ const setChunkedScriptProperty = (baseKey, value) => {
   const keys = props.getKeys();
   const chunksToDelete = keys.filter(k => k.indexOf(`${baseKey}_chunk_`) === 0 || k === `${baseKey}_chunks`);
   if (chunksToDelete.length > 0) {
-    props.deleteProperties(chunksToDelete);
+    chunksToDelete.forEach(k => props.deleteProperty(k));
   }
   
   if (!value) return;
@@ -371,7 +371,7 @@ const deleteChunkedScriptProperty = (baseKey) => {
   const keys = props.getKeys();
   const chunksToDelete = keys.filter(k => k.indexOf(`${baseKey}_chunk_`) === 0 || k === `${baseKey}_chunks` || k === baseKey);
   if (chunksToDelete.length > 0) {
-    props.deleteProperties(chunksToDelete);
+    chunksToDelete.forEach(k => props.deleteProperty(k));
     Logger.log(`deleteChunkedScriptProperty: Deleted ${chunksToDelete.length} chunk property key(s) for "${baseKey}"`);
   }
 };
