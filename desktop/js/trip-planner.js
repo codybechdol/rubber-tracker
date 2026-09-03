@@ -233,20 +233,277 @@ class TripPlannerApp {
       .sort((a, b) => a.name.localeCompare(b.name));
   }
 
-  populateManualTaskDatalists() {
-    // Populate Certs Datalist
-    const certsDatalist = document.getElementById('trip-certs-datalist');
-    if (certsDatalist) {
-      const certs = this.getAvailableCertTypes();
-      certsDatalist.innerHTML = certs.map(c => `<option value="${this.escapeHtml(c)}">`).join('');
+  escapeHtml(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  escapeJs(str) {
+    if (!str) return '';
+    return String(str).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"');
+  }
+
+  setupManualTaskAutocomplete() {
+    if (this._manualTaskClickOutsideBound) return;
+    this._manualTaskClickOutsideBound = true;
+
+    document.addEventListener('mousedown', (e) => {
+      const empInput = document.getElementById('manual-task-employee-input');
+      const empDropdown = document.getElementById('manual-task-employee-dropdown');
+      if (empDropdown && empDropdown.style.display !== 'none') {
+        if (!empDropdown.contains(e.target) && e.target !== empInput) {
+          empDropdown.style.display = 'none';
+        }
+      }
+
+      const certInput = document.getElementById('manual-task-cert-type-input');
+      const certDropdown = document.getElementById('manual-task-cert-dropdown');
+      if (certDropdown && certDropdown.style.display !== 'none') {
+        if (!certDropdown.contains(e.target) && e.target !== certInput) {
+          certDropdown.style.display = 'none';
+        }
+      }
+    });
+  }
+
+  showEmployeeDropdown() {
+    this.setupManualTaskAutocomplete();
+    const input = document.getElementById('manual-task-employee-input');
+    this.filterEmployeeDropdown(input ? input.value : '');
+  }
+
+  filterEmployeeDropdown(query = '') {
+    const dropdown = document.getElementById('manual-task-employee-dropdown');
+    if (!dropdown) return;
+
+    const emps = this.getEmployeeOptions();
+    const q = String(query || '').trim().toLowerCase();
+
+    const filtered = q
+      ? emps.filter(e => e.name.toLowerCase().includes(q) || e.role.toLowerCase().includes(q) || e.crew.toLowerCase().includes(q))
+      : emps;
+
+    this.highlightedEmpIdx = -1;
+
+    if (filtered.length === 0) {
+      dropdown.innerHTML = `
+        <div style="padding: 10px 14px; font-size: 12px; color: var(--text-muted); text-align: center;">
+          No matching employees. Enter custom: "<strong>${this.escapeHtml(query)}</strong>"
+        </div>
+      `;
+      dropdown.style.display = 'block';
+      return;
     }
 
-    // Populate Employees Datalist
-    const empDatalist = document.getElementById('trip-employees-datalist');
-    if (empDatalist) {
-      const emps = this.getEmployeeOptions();
-      empDatalist.innerHTML = emps.map(e => `<option value="${this.escapeHtml(e.name)}">${this.escapeHtml(e.display)}</option>`).join('');
+    dropdown.innerHTML = filtered.map((e, idx) => `
+      <div class="emp-dropdown-item" data-idx="${idx}" data-name="${this.escapeHtml(e.name)}" style="padding: 8px 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.05); transition: background 0.15s ease;" onmouseenter="window.tripPlanner.setHighlightedEmp(${idx});" onmousedown="window.tripPlanner.selectEmployee(this.getAttribute('data-name'));">
+        <div style="font-size: 12.5px; font-weight: 700; color: #f8fafc; display: flex; align-items: center; gap: 6px;">
+          <span>👤</span>
+          <span>${this.escapeHtml(e.name)}</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 4px;">
+          ${e.role ? `<span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; font-size: 9.5px; padding: 1px 5px; border-radius: 3px;">${this.escapeHtml(e.role)}</span>` : ''}
+          ${e.crew ? `<span class="badge" style="background: rgba(255,255,255,0.06); color: #cbd5e1; font-size: 9.5px; padding: 1px 4px; border-radius: 3px;">Crew ${this.escapeHtml(e.crew)}</span>` : ''}
+        </div>
+      </div>
+    `).join('');
+
+    dropdown.style.display = 'block';
+  }
+
+  setHighlightedEmp(idx) {
+    this.highlightedEmpIdx = idx;
+    const dropdown = document.getElementById('manual-task-employee-dropdown');
+    if (!dropdown) return;
+    const items = dropdown.querySelectorAll('.emp-dropdown-item');
+    items.forEach((item, i) => {
+      if (i === idx) {
+        item.style.backgroundColor = 'rgba(59, 130, 246, 0.25)';
+        item.scrollIntoView({ block: 'nearest' });
+      } else {
+        item.style.backgroundColor = '';
+      }
+    });
+  }
+
+  handleEmployeeKeydown(e) {
+    const dropdown = document.getElementById('manual-task-employee-dropdown');
+    if (!dropdown || dropdown.style.display === 'none') {
+      if (e.key === 'ArrowDown') {
+        this.showEmployeeDropdown();
+        e.preventDefault();
+      } else if (e.key === 'Enter') {
+        this.saveManualTaskFromModal();
+      }
+      return;
     }
+
+    const items = dropdown.querySelectorAll('.emp-dropdown-item');
+    if (items.length === 0) {
+      if (e.key === 'Enter') this.saveManualTaskFromModal();
+      return;
+    }
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      let nextIdx = (this.highlightedEmpIdx !== undefined ? this.highlightedEmpIdx : -1) + 1;
+      if (nextIdx >= items.length) nextIdx = 0;
+      this.setHighlightedEmp(nextIdx);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      let prevIdx = (this.highlightedEmpIdx !== undefined ? this.highlightedEmpIdx : 0) - 1;
+      if (prevIdx < 0) prevIdx = items.length - 1;
+      this.setHighlightedEmp(prevIdx);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (this.highlightedEmpIdx >= 0 && this.highlightedEmpIdx < items.length) {
+        const name = items[this.highlightedEmpIdx].getAttribute('data-name');
+        if (name) this.selectEmployee(name);
+      } else {
+        this.hideEmployeeDropdown();
+      }
+    } else if (e.key === 'Escape') {
+      this.hideEmployeeDropdown();
+    }
+  }
+
+  selectEmployee(name) {
+    const input = document.getElementById('manual-task-employee-input');
+    if (input) {
+      input.value = name;
+      input.focus();
+    }
+    this.hideEmployeeDropdown();
+  }
+
+  hideEmployeeDropdown() {
+    const dropdown = document.getElementById('manual-task-employee-dropdown');
+    if (dropdown) dropdown.style.display = 'none';
+    this.highlightedEmpIdx = -1;
+  }
+
+  showCertDropdown() {
+    this.setupManualTaskAutocomplete();
+    const input = document.getElementById('manual-task-cert-type-input');
+    this.filterCertDropdown(input ? input.value : '');
+  }
+
+  filterCertDropdown(query = '') {
+    const dropdown = document.getElementById('manual-task-cert-dropdown');
+    if (!dropdown) return;
+
+    const certs = this.getAvailableCertTypes();
+    const q = String(query || '').trim().toLowerCase();
+
+    const filtered = q
+      ? certs.filter(c => c.toLowerCase().includes(q))
+      : certs;
+
+    this.highlightedCertIdx = -1;
+
+    if (filtered.length === 0) {
+      dropdown.innerHTML = `
+        <div style="padding: 10px 14px; font-size: 12px; color: var(--text-muted); text-align: center;">
+          Custom class: "<strong>${this.escapeHtml(query)}</strong>"
+        </div>
+      `;
+      dropdown.style.display = 'block';
+      return;
+    }
+
+    dropdown.innerHTML = filtered.map((c, idx) => `
+      <div class="cert-dropdown-item" data-idx="${idx}" data-cert="${this.escapeHtml(c)}" style="padding: 8px 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.05); transition: background 0.15s ease;" onmouseenter="window.tripPlanner.setHighlightedCert(${idx});" onmousedown="window.tripPlanner.selectCertType(this.getAttribute('data-cert'));">
+        <div style="font-size: 12.5px; font-weight: 700; color: #f8fafc; display: flex; align-items: center; gap: 6px;">
+          <span>🎓</span>
+          <span>${this.escapeHtml(c)}</span>
+        </div>
+      </div>
+    `).join('');
+
+    dropdown.style.display = 'block';
+  }
+
+  setHighlightedCert(idx) {
+    this.highlightedCertIdx = idx;
+    const dropdown = document.getElementById('manual-task-cert-dropdown');
+    if (!dropdown) return;
+    const items = dropdown.querySelectorAll('.cert-dropdown-item');
+    items.forEach((item, i) => {
+      if (i === idx) {
+        item.style.backgroundColor = 'rgba(16, 185, 129, 0.25)';
+        item.scrollIntoView({ block: 'nearest' });
+      } else {
+        item.style.backgroundColor = '';
+      }
+    });
+  }
+
+  handleCertKeydown(e) {
+    const dropdown = document.getElementById('manual-task-cert-dropdown');
+    if (!dropdown || dropdown.style.display === 'none') {
+      if (e.key === 'ArrowDown') {
+        this.showCertDropdown();
+        e.preventDefault();
+      } else if (e.key === 'Enter') {
+        this.saveManualTaskFromModal();
+      }
+      return;
+    }
+
+    const items = dropdown.querySelectorAll('.cert-dropdown-item');
+    if (items.length === 0) {
+      if (e.key === 'Enter') this.saveManualTaskFromModal();
+      return;
+    }
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      let nextIdx = (this.highlightedCertIdx !== undefined ? this.highlightedCertIdx : -1) + 1;
+      if (nextIdx >= items.length) nextIdx = 0;
+      this.setHighlightedCert(nextIdx);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      let prevIdx = (this.highlightedCertIdx !== undefined ? this.highlightedCertIdx : 0) - 1;
+      if (prevIdx < 0) prevIdx = items.length - 1;
+      this.setHighlightedCert(prevIdx);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (this.highlightedCertIdx >= 0 && this.highlightedCertIdx < items.length) {
+        const cert = items[this.highlightedCertIdx].getAttribute('data-cert');
+        if (cert) this.selectCertType(cert);
+      } else {
+        this.hideCertDropdown();
+      }
+    } else if (e.key === 'Escape') {
+      this.hideCertDropdown();
+    }
+  }
+
+  selectCertType(cert) {
+    const input = document.getElementById('manual-task-cert-type-input');
+    if (input) {
+      input.value = cert;
+      input.focus();
+    }
+    this.hideCertDropdown();
+  }
+
+  hideCertDropdown() {
+    const dropdown = document.getElementById('manual-task-cert-dropdown');
+    if (dropdown) dropdown.style.display = 'none';
+    this.highlightedCertIdx = -1;
+  }
+
+  closeManualTaskModal() {
+    const modal = document.getElementById('manual-task-modal');
+    if (modal) modal.classList.remove('active');
+    this.hideEmployeeDropdown();
+    this.hideCertDropdown();
   }
 
   switchManualTaskTab(category) {
@@ -397,7 +654,9 @@ class TripPlannerApp {
     const modal = document.getElementById('manual-task-modal');
     if (!modal) return;
 
-    this.populateManualTaskDatalists();
+    this.setupManualTaskAutocomplete();
+    this.hideEmployeeDropdown();
+    this.hideCertDropdown();
 
     const titleEl = document.getElementById('manual-task-modal-title');
     const editIdInput = document.getElementById('manual-task-edit-id');
@@ -457,7 +716,9 @@ class TripPlannerApp {
     const modal = document.getElementById('manual-task-modal');
     if (!modal) return;
 
-    this.populateManualTaskDatalists();
+    this.setupManualTaskAutocomplete();
+    this.hideEmployeeDropdown();
+    this.hideCertDropdown();
 
     const titleEl = document.getElementById('manual-task-modal-title');
     const editIdInput = document.getElementById('manual-task-edit-id');
