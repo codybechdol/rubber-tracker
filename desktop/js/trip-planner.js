@@ -54,6 +54,9 @@ class TripPlannerApp {
       'California Sub': { mins: 840, time: '14h 00m', desc: '14h 00m (900 mi)', dir: 'Far' }
     };
     this.collapsedSections = this.loadCollapsedSections();
+    this.selectedClassCrew = '';
+    this.selectedClassAttendees = [];
+    this._rosterExpanded = {};
   }
 
   loadCollapsedSections() {
@@ -110,6 +113,12 @@ class TripPlannerApp {
     this.setupSearchListeners();
     this.populateWeekDropdown();
     this.setWeeksToShow(this.weeksToShow || 8);
+
+    if (this.db && typeof this.db.on === 'function') {
+      this.db.on('change', () => {
+        this.renderPlanner();
+      });
+    }
   }
 
   setupSearchListeners() {
@@ -304,6 +313,14 @@ class TripPlannerApp {
         }
       }
 
+      const crewInput = document.getElementById('manual-task-crew-input');
+      const crewDropdown = document.getElementById('manual-task-crew-dropdown');
+      if (crewDropdown && crewDropdown.style.display !== 'none') {
+        if (!crewDropdown.contains(e.target) && e.target !== crewInput) {
+          crewDropdown.style.display = 'none';
+        }
+      }
+
       const certInput = document.getElementById('manual-task-cert-type-input');
       const certDropdown = document.getElementById('manual-task-cert-dropdown');
       if (certDropdown && certDropdown.style.display !== 'none') {
@@ -337,6 +354,11 @@ class TripPlannerApp {
       dropdown.innerHTML = `
         <div style="padding: 10px 14px; font-size: 12px; color: var(--text-muted); text-align: center;">
           No matching employees. Enter custom: "<strong>${this.escapeHtml(query)}</strong>"
+          <div style="margin-top: 6px;">
+            <button type="button" class="btn btn-secondary" style="padding: 2px 8px; font-size: 11px; color: #60a5fa;" onmousedown="window.tripPlanner.addClassAttendee('${this.escapeJs(query)}');">
+              + Add "${this.escapeHtml(query)}"
+            </button>
+          </div>
         </div>
       `;
       dropdown.style.display = 'block';
@@ -381,14 +403,28 @@ class TripPlannerApp {
         this.showEmployeeDropdown();
         e.preventDefault();
       } else if (e.key === 'Enter') {
-        this.saveManualTaskFromModal();
+        const input = document.getElementById('manual-task-employee-input');
+        if (input && input.value.trim()) {
+          this.addClassAttendee(input.value.trim());
+          e.preventDefault();
+        } else {
+          this.saveManualTaskFromModal();
+        }
       }
       return;
     }
 
     const items = dropdown.querySelectorAll('.emp-dropdown-item');
     if (items.length === 0) {
-      if (e.key === 'Enter') this.saveManualTaskFromModal();
+      if (e.key === 'Enter') {
+        const input = document.getElementById('manual-task-employee-input');
+        if (input && input.value.trim()) {
+          this.addClassAttendee(input.value.trim());
+          e.preventDefault();
+        } else {
+          this.saveManualTaskFromModal();
+        }
+      }
       return;
     }
 
@@ -408,7 +444,12 @@ class TripPlannerApp {
         const name = items[this.highlightedEmpIdx].getAttribute('data-name');
         if (name) this.selectEmployee(name);
       } else {
-        this.hideEmployeeDropdown();
+        const input = document.getElementById('manual-task-employee-input');
+        if (input && input.value.trim()) {
+          this.addClassAttendee(input.value.trim());
+        } else {
+          this.hideEmployeeDropdown();
+        }
       }
     } else if (e.key === 'Escape') {
       this.hideEmployeeDropdown();
@@ -416,18 +457,423 @@ class TripPlannerApp {
   }
 
   selectEmployee(name) {
-    const input = document.getElementById('manual-task-employee-input');
-    if (input) {
-      input.value = name;
-      input.focus();
-    }
-    this.hideEmployeeDropdown();
+    this.addClassAttendee(name);
   }
 
   hideEmployeeDropdown() {
     const dropdown = document.getElementById('manual-task-employee-dropdown');
     if (dropdown) dropdown.style.display = 'none';
     this.highlightedEmpIdx = -1;
+  }
+
+  /* ==================== CREW & ATTENDEE CLASS MANAGEMENT ==================== */
+
+  getActiveCrewOptions() {
+    const jobTable = this.db.getTable('job_tracking');
+    const crews = [];
+    const seen = new Set();
+
+    if (jobTable && jobTable.rows) {
+      jobTable.rows.forEach(r => {
+        const rawCrewId = String(r['Job Number'] || r['Crew'] || r['Job #'] || '').trim();
+        const crewId = this.getSignificantJobNumber(rawCrewId);
+        const foreman = String(r['Foreman'] || r['Crew Lead'] || r['Lead'] || '').trim();
+        const loc = this.cleanPhysicalLocation(String(r['Location'] || '').trim());
+        const jobName = String(r['Job Name'] || '').trim();
+        const status = String(r['Status'] || r['Job Status'] || '').trim().toLowerCase();
+
+        if (!crewId || seen.has(crewId)) return;
+        if (crewId.startsWith('002') || crewId.startsWith('005')) return;
+        if (status.includes('completed') || status.includes('on hold')) return;
+
+        seen.add(crewId);
+        crews.push({
+          crewId,
+          foreman: foreman || 'Lead',
+          location: loc || 'Helena',
+          jobName,
+          display: `Crew ${crewId} — ${foreman || 'Lead'}${loc ? ` (${loc})` : ''}`
+        });
+      });
+    }
+
+    const empTable = this.db.getTable('employees');
+    if (empTable && empTable.rows) {
+      empTable.rows.forEach(r => {
+        const rawCrewId = String(r['Job Number'] || r['Crew'] || '').trim();
+        const crewId = this.getSignificantJobNumber(rawCrewId);
+        if (!crewId || seen.has(crewId)) return;
+        if (crewId.startsWith('002') || crewId.startsWith('005')) return;
+        seen.add(crewId);
+        crews.push({
+          crewId,
+          foreman: 'Lead',
+          location: 'Helena',
+          jobName: '',
+          display: `Crew ${crewId}`
+        });
+      });
+    }
+
+    return crews.sort((a, b) => a.crewId.localeCompare(b.crewId));
+  }
+
+  getCrewMembers(crewId) {
+    if (!crewId) return [];
+    const cleanId = this.getSignificantJobNumber(String(crewId).trim()).toLowerCase();
+    const empTable = this.db.getTable('employees');
+    if (!empTable || !empTable.rows) return [];
+
+    const members = [];
+    empTable.rows.forEach(r => {
+      const status = String(r['Status'] || '').trim().toLowerCase();
+      if (status === 'terminated' || status === 'previous employee') return;
+      const rawJob = String(r['Job Number'] || r['Crew'] || '').trim();
+      const jobNum = this.getSignificantJobNumber(rawJob).toLowerCase();
+
+      if (jobNum === cleanId) {
+        const name = String(r['Name'] || r['Employee Name'] || r['Employee'] || '').trim();
+        const role = String(r['Job Classification'] || r['Role'] || r['Title'] || '').trim();
+        if (name && !members.some(m => m.name.toLowerCase() === name.toLowerCase())) {
+          const isF = role === 'F' || role === 'GF' || role === 'SUP';
+          members.push({
+            name,
+            role,
+            isForeman: isF
+          });
+        }
+      }
+    });
+
+    return members.sort((a, b) => {
+      if (a.isForeman && !b.isForeman) return -1;
+      if (!a.isForeman && b.isForeman) return 1;
+      return a.name.localeCompare(b.name);
+    });
+  }
+
+  resolveClassAttendees(task) {
+    const result = {
+      crewId: task.crewId || '',
+      foreman: '',
+      crewMembers: [],
+      individualMembers: [],
+      allAttendees: [],
+      totalCount: 0
+    };
+
+    const empTable = this.db.getTable('employees');
+    const empRows = (empTable && empTable.rows) ? empTable.rows : [];
+
+    const findEmp = (name) => {
+      const clean = String(name || '').trim().toLowerCase();
+      return empRows.find(r => {
+        const n = String(r['Name'] || r['Employee Name'] || r['Employee'] || '').trim().toLowerCase();
+        return n === clean;
+      });
+    };
+
+    if (task.crewId) {
+      const crewId = this.getSignificantJobNumber(task.crewId);
+      result.crewId = crewId;
+
+      const jobTable = this.db.getTable('job_tracking');
+      if (jobTable && jobTable.rows) {
+        const jobRow = jobTable.rows.find(r => {
+          const jNum = this.getSignificantJobNumber(String(r['Job Number'] || r['Crew'] || r['Job #'] || ''));
+          return jNum.toLowerCase() === crewId.toLowerCase();
+        });
+        if (jobRow) {
+          result.foreman = String(jobRow['Foreman'] || jobRow['Crew Lead'] || jobRow['Lead'] || '').trim();
+        }
+      }
+
+      const members = this.getCrewMembers(crewId);
+      members.forEach(m => {
+        if (m.isForeman && !result.foreman) result.foreman = m.name;
+        result.crewMembers.push(m);
+        if (!result.allAttendees.includes(m.name)) {
+          result.allAttendees.push(m.name);
+        }
+      });
+
+      if (result.foreman && !result.allAttendees.includes(result.foreman)) {
+        result.crewMembers.unshift({ name: result.foreman, role: 'Foreman', isForeman: true });
+        result.allAttendees.unshift(result.foreman);
+      }
+    }
+
+    const indList = Array.isArray(task.assignedEmployees)
+      ? task.assignedEmployees
+      : (task.employee && !task.employee.startsWith('Crew ') ? [task.employee] : []);
+
+    indList.forEach(name => {
+      const cleanName = String(name || '').trim();
+      if (cleanName && !result.allAttendees.includes(cleanName)) {
+        const r = findEmp(cleanName);
+        const role = r ? String(r['Job Classification'] || r['Role'] || r['Title'] || '').trim() : '';
+        result.individualMembers.push({ name: cleanName, role });
+        result.allAttendees.push(cleanName);
+      }
+    });
+
+    result.totalCount = result.allAttendees.length;
+    return result;
+  }
+
+  showCrewDropdown() {
+    this.setupManualTaskAutocomplete();
+    const input = document.getElementById('manual-task-crew-input');
+    this.filterCrewDropdown(input ? input.value : '');
+  }
+
+  filterCrewDropdown(query = '') {
+    const dropdown = document.getElementById('manual-task-crew-dropdown');
+    if (!dropdown) return;
+
+    const crews = this.getActiveCrewOptions();
+    const q = String(query || '').trim().toLowerCase();
+
+    const filtered = q
+      ? crews.filter(c => c.crewId.toLowerCase().includes(q) || c.foreman.toLowerCase().includes(q) || c.location.toLowerCase().includes(q) || c.jobName.toLowerCase().includes(q))
+      : crews;
+
+    this.highlightedCrewIdx = -1;
+
+    if (filtered.length === 0) {
+      dropdown.innerHTML = `
+        <div style="padding: 10px 14px; font-size: 12px; color: var(--text-muted); text-align: center;">
+          No matching active crews.
+          <div style="margin-top: 6px;">
+            <button type="button" class="btn btn-secondary" style="padding: 3px 8px; font-size: 11px; color: #60a5fa;" onmousedown="window.tripPlanner.selectClassCrew('${this.escapeJs(query)}');">
+              ✓ Assign Job #${this.escapeHtml(query)}
+            </button>
+          </div>
+        </div>
+      `;
+      dropdown.style.display = 'block';
+      return;
+    }
+
+    dropdown.innerHTML = filtered.map((c, idx) => `
+      <div class="crew-dropdown-item" data-idx="${idx}" data-crew="${this.escapeHtml(c.crewId)}" style="padding: 8px 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px; cursor: pointer; border-bottom: 1px solid rgba(255,255,255,0.05); transition: background 0.15s ease;" onmouseenter="window.tripPlanner.setHighlightedCrew(${idx});" onmousedown="window.tripPlanner.selectClassCrew(this.getAttribute('data-crew'));">
+        <div style="font-size: 12px; font-weight: 700; color: #f8fafc; display: flex; align-items: center; gap: 6px;">
+          <span>🚚</span>
+          <span style="color: #60a5fa;">Crew ${this.escapeHtml(c.crewId)}</span>
+          <span style="color: #cbd5e1; font-weight: normal;">— ${this.escapeHtml(c.foreman)}</span>
+        </div>
+        <div style="display: flex; align-items: center; gap: 4px;">
+          ${c.location ? `<span class="badge" style="background: rgba(255,255,255,0.06); color: #94a3b8; font-size: 9.5px; padding: 1px 4px; border-radius: 3px;">📍 ${this.escapeHtml(c.location)}</span>` : ''}
+        </div>
+      </div>
+    `).join('');
+
+    dropdown.style.display = 'block';
+  }
+
+  setHighlightedCrew(idx) {
+    this.highlightedCrewIdx = idx;
+    const dropdown = document.getElementById('manual-task-crew-dropdown');
+    if (!dropdown) return;
+    const items = dropdown.querySelectorAll('.crew-dropdown-item');
+    items.forEach((item, i) => {
+      if (i === idx) {
+        item.style.backgroundColor = 'rgba(59, 130, 246, 0.25)';
+        item.scrollIntoView({ block: 'nearest' });
+      } else {
+        item.style.backgroundColor = '';
+      }
+    });
+  }
+
+  handleCrewKeydown(e) {
+    const dropdown = document.getElementById('manual-task-crew-dropdown');
+    if (!dropdown || dropdown.style.display === 'none') {
+      if (e.key === 'ArrowDown') {
+        this.showCrewDropdown();
+        e.preventDefault();
+      }
+      return;
+    }
+
+    const items = dropdown.querySelectorAll('.crew-dropdown-item');
+    if (items.length === 0) return;
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      let next = (this.highlightedCrewIdx !== undefined ? this.highlightedCrewIdx : -1) + 1;
+      if (next >= items.length) next = 0;
+      this.setHighlightedCrew(next);
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      let prev = (this.highlightedCrewIdx !== undefined ? this.highlightedCrewIdx : 0) - 1;
+      if (prev < 0) prev = items.length - 1;
+      this.setHighlightedCrew(prev);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      if (this.highlightedCrewIdx >= 0 && this.highlightedCrewIdx < items.length) {
+        const crewId = items[this.highlightedCrewIdx].getAttribute('data-crew');
+        if (crewId) this.selectClassCrew(crewId);
+      } else {
+        const input = document.getElementById('manual-task-crew-input');
+        if (input && input.value.trim()) {
+          this.selectClassCrew(input.value.trim());
+        }
+        this.hideCrewDropdown();
+      }
+    } else if (e.key === 'Escape') {
+      this.hideCrewDropdown();
+    }
+  }
+
+  hideCrewDropdown() {
+    const dropdown = document.getElementById('manual-task-crew-dropdown');
+    if (dropdown) dropdown.style.display = 'none';
+    this.highlightedCrewIdx = -1;
+  }
+
+  selectClassCrew(crewId) {
+    const cleanId = this.getSignificantJobNumber(crewId);
+    this.selectedClassCrew = cleanId;
+    const input = document.getElementById('manual-task-crew-input');
+    if (input) input.value = cleanId;
+    this.hideCrewDropdown();
+    this.updateClassCrewPreview();
+    this.updateClassAttendeesSummary();
+  }
+
+  clearClassCrew() {
+    this.selectedClassCrew = '';
+    const input = document.getElementById('manual-task-crew-input');
+    if (input) input.value = '';
+    this.updateClassCrewPreview();
+    this.updateClassAttendeesSummary();
+  }
+
+  updateClassCrewPreview() {
+    const previewBox = document.getElementById('manual-task-crew-preview');
+    const clearBtn = document.getElementById('btn-clear-class-crew');
+    if (!previewBox) return;
+
+    if (!this.selectedClassCrew) {
+      previewBox.style.display = 'none';
+      if (clearBtn) clearBtn.style.display = 'none';
+      return;
+    }
+
+    const members = this.getCrewMembers(this.selectedClassCrew);
+    let foreman = 'Lead';
+    const jobTable = this.db.getTable('job_tracking');
+    if (jobTable && jobTable.rows) {
+      const jobRow = jobTable.rows.find(r => this.getSignificantJobNumber(String(r['Job Number'] || r['Crew'] || '')).toLowerCase() === this.selectedClassCrew.toLowerCase());
+      if (jobRow) {
+        foreman = String(jobRow['Foreman'] || jobRow['Crew Lead'] || jobRow['Lead'] || 'Lead').trim();
+      }
+    }
+
+    const titleEl = document.getElementById('manual-task-crew-preview-title');
+    const badgeEl = document.getElementById('manual-task-crew-preview-badge');
+    const foremanEl = document.getElementById('manual-task-crew-preview-foreman');
+    const membersEl = document.getElementById('manual-task-crew-preview-members');
+
+    if (titleEl) titleEl.textContent = `🚚 Crew ${this.selectedClassCrew}`;
+    if (badgeEl) badgeEl.textContent = `🟢 ${members.length} Linemen Scheduled`;
+    if (foremanEl) foremanEl.innerHTML = `👑 <strong>Foreman:</strong> <span style="color: #60a5fa;">${this.escapeHtml(foreman)}</span>`;
+
+    if (membersEl) {
+      if (members.length > 0) {
+        membersEl.innerHTML = members.map(m => `
+          <span class="badge" style="background: rgba(255,255,255,0.06); color: #cbd5e1; font-size: 9.5px; padding: 2px 6px; border: 1px solid rgba(255,255,255,0.1); border-radius: 3px;">
+            ${m.isForeman ? '👑' : '👤'} ${this.escapeHtml(m.name)} ${m.role ? `(${this.escapeHtml(m.role)})` : ''}
+          </span>
+        `).join('');
+      } else {
+        membersEl.innerHTML = `<span style="color: #94a3b8; font-style: italic;">No active linemen currently listed on Job #${this.escapeHtml(this.selectedClassCrew)} in Employees sheet.</span>`;
+      }
+    }
+
+    previewBox.style.display = 'block';
+    if (clearBtn) clearBtn.style.display = 'block';
+  }
+
+  addClassAttendee(name) {
+    if (!name) return;
+    const cleanName = String(name).trim();
+    if (!this.selectedClassAttendees) this.selectedClassAttendees = [];
+    if (!this.selectedClassAttendees.some(n => n.toLowerCase() === cleanName.toLowerCase())) {
+      this.selectedClassAttendees.push(cleanName);
+    }
+    const input = document.getElementById('manual-task-employee-input');
+    if (input) {
+      input.value = '';
+      input.focus();
+    }
+    this.hideEmployeeDropdown();
+    this.renderClassAttendeeChips();
+    this.updateClassAttendeesSummary();
+  }
+
+  removeClassAttendee(name) {
+    if (!this.selectedClassAttendees) return;
+    const clean = String(name).trim().toLowerCase();
+    this.selectedClassAttendees = this.selectedClassAttendees.filter(n => n.toLowerCase() !== clean);
+    this.renderClassAttendeeChips();
+    this.updateClassAttendeesSummary();
+  }
+
+  renderClassAttendeeChips() {
+    const container = document.getElementById('manual-task-attendee-chips');
+    if (!container) return;
+
+    if (!this.selectedClassAttendees || this.selectedClassAttendees.length === 0) {
+      container.innerHTML = `<span style="font-size: 10.5px; color: #64748b; font-style: italic;">No individual employees added yet.</span>`;
+      return;
+    }
+
+    container.innerHTML = this.selectedClassAttendees.map(name => `
+      <span class="badge" style="background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4); padding: 3px 8px; font-size: 11px; border-radius: 4px; display: inline-flex; align-items: center; gap: 6px;">
+        <span>👤 ${this.escapeHtml(name)}</span>
+        <span style="cursor: pointer; color: #f87171; font-weight: 800; font-size: 11px; line-height: 1;" onclick="window.tripPlanner.removeClassAttendee('${this.escapeJs(name)}')">✕</span>
+      </span>
+    `).join('');
+  }
+
+  updateClassAttendeesSummary() {
+    const summaryEl = document.getElementById('manual-task-attendees-summary');
+    if (!summaryEl) return;
+
+    const crewMembers = this.selectedClassCrew ? this.getCrewMembers(this.selectedClassCrew) : [];
+    const indCount = (this.selectedClassAttendees || []).length;
+    const crewCount = crewMembers.length;
+
+    const allSet = new Set();
+    crewMembers.forEach(m => allSet.add(m.name.toLowerCase()));
+    (this.selectedClassAttendees || []).forEach(n => allSet.add(n.toLowerCase()));
+    const total = allSet.size;
+
+    summaryEl.innerHTML = `
+      <span>👥 Total Attendees: <strong style="color: ${total > 0 ? '#4ade80' : '#94a3b8'}; font-size: 12px;">${total} Linemen</strong></span>
+      <span id="manual-task-attendees-detail" style="font-weight: normal; color: #94a3b8; font-size: 10.5px;">
+        ${crewCount > 0 ? `${crewCount} from Crew ${this.selectedClassCrew}` : ''}
+        ${crewCount > 0 && indCount > 0 ? ' + ' : ''}
+        ${indCount > 0 ? `${indCount} Individual${indCount > 1 ? 's' : ''}` : ''}
+        ${total === 0 ? 'Select a crew and/or individual employees' : ''}
+      </span>
+    `;
+  }
+
+  toggleClassRoster(taskId) {
+    if (!this._rosterExpanded) this._rosterExpanded = {};
+    this._rosterExpanded[taskId] = !this._rosterExpanded[taskId];
+    const el = document.getElementById(`class-roster-${taskId}`);
+    const icon = document.getElementById(`class-roster-toggle-${taskId}`);
+    if (el) {
+      const isOpen = this._rosterExpanded[taskId];
+      el.style.display = isOpen ? 'flex' : 'none';
+      if (icon) icon.textContent = isOpen ? '▼' : '▶';
+    } else {
+      this.renderPlanner();
+    }
   }
 
   showCertDropdown() {
@@ -628,6 +1074,8 @@ class TripPlannerApp {
       taskCategory: isCert ? 'cert_class' : 'personal_task',
       title: (taskData.title || (isCert ? taskData.certType : '')).trim(),
       certType: (taskData.certType || '').trim(),
+      crewId: (taskData.crewId || '').trim(),
+      assignedEmployees: Array.isArray(taskData.assignedEmployees) ? [...taskData.assignedEmployees] : [],
       employee: (taskData.employee || '').trim(),
       instructor: (taskData.instructor || 'Cody Bechdol (Self)').trim(),
       assignedTo: (taskData.assignedTo || 'Myself').trim(),
@@ -660,6 +1108,8 @@ class TripPlannerApp {
       taskCategory: isCert ? 'cert_class' : 'personal_task',
       title: (taskData.title || (isCert ? taskData.certType : existing.title)).trim(),
       certType: (taskData.certType !== undefined ? taskData.certType : existing.certType || '').trim(),
+      crewId: (taskData.crewId !== undefined ? taskData.crewId : existing.crewId || '').trim(),
+      assignedEmployees: (taskData.assignedEmployees !== undefined ? taskData.assignedEmployees : existing.assignedEmployees || []),
       employee: (taskData.employee !== undefined ? taskData.employee : existing.employee || '').trim(),
       instructor: (taskData.instructor !== undefined ? taskData.instructor : existing.instructor || 'Cody Bechdol (Self)').trim(),
       assignedTo: (taskData.assignedTo !== undefined ? taskData.assignedTo : existing.assignedTo || 'Myself').trim(),
@@ -699,6 +1149,7 @@ class TripPlannerApp {
 
     this.setupManualTaskAutocomplete();
     this.hideEmployeeDropdown();
+    this.hideCrewDropdown();
     this.hideCertDropdown();
 
     const titleEl = document.getElementById('manual-task-modal-title');
@@ -712,6 +1163,7 @@ class TripPlannerApp {
     // Reset Cert Class fields
     const certTypeInput = document.getElementById('manual-task-cert-type-input');
     const certEmpInput = document.getElementById('manual-task-employee-input');
+    const certCrewInput = document.getElementById('manual-task-crew-input');
     const certDateInput = document.getElementById('manual-task-cert-date-input');
     const certLocInput = document.getElementById('manual-task-cert-loc-input');
     const certTimeInput = document.getElementById('manual-task-cert-time-input');
@@ -720,11 +1172,19 @@ class TripPlannerApp {
 
     if (certTypeInput) certTypeInput.value = '';
     if (certEmpInput) certEmpInput.value = '';
+    if (certCrewInput) certCrewInput.value = '';
     if (certDateInput) certDateInput.value = targetDate;
     if (certLocInput) certLocInput.value = defaultLoc;
     if (certTimeInput) certTimeInput.value = '';
     if (certTrainerInput) certTrainerInput.value = 'Cody Bechdol (Self)';
     if (certNotesInput) certNotesInput.value = '';
+
+    // Reset Class attendees & crew
+    this.selectedClassCrew = '';
+    this.selectedClassAttendees = [];
+    this.updateClassCrewPreview();
+    this.renderClassAttendeeChips();
+    this.updateClassAttendeesSummary();
 
     // Reset Personal Task fields
     const pTitleInput = document.getElementById('manual-task-personal-title-input');
@@ -761,6 +1221,7 @@ class TripPlannerApp {
 
     this.setupManualTaskAutocomplete();
     this.hideEmployeeDropdown();
+    this.hideCrewDropdown();
     this.hideCertDropdown();
 
     const titleEl = document.getElementById('manual-task-modal-title');
@@ -772,6 +1233,7 @@ class TripPlannerApp {
     if (isCert) {
       const certTypeInput = document.getElementById('manual-task-cert-type-input');
       const certEmpInput = document.getElementById('manual-task-employee-input');
+      const certCrewInput = document.getElementById('manual-task-crew-input');
       const certDateInput = document.getElementById('manual-task-cert-date-input');
       const certLocInput = document.getElementById('manual-task-cert-loc-input');
       const certTimeInput = document.getElementById('manual-task-cert-time-input');
@@ -779,12 +1241,23 @@ class TripPlannerApp {
       const certNotesInput = document.getElementById('manual-task-cert-notes-input');
 
       if (certTypeInput) certTypeInput.value = task.certType || task.title || '';
-      if (certEmpInput) certEmpInput.value = task.employee || '';
+      if (certEmpInput) certEmpInput.value = '';
       if (certDateInput) certDateInput.value = task.dateKey || '';
       if (certLocInput) certLocInput.value = task.location || '';
       if (certTimeInput) certTimeInput.value = task.time || '';
       if (certTrainerInput) certTrainerInput.value = task.instructor || 'Cody Bechdol (Self)';
       if (certNotesInput) certNotesInput.value = task.notes || '';
+
+      this.selectedClassCrew = task.crewId || '';
+      if (certCrewInput) certCrewInput.value = this.selectedClassCrew;
+
+      this.selectedClassAttendees = Array.isArray(task.assignedEmployees)
+        ? [...task.assignedEmployees]
+        : (task.employee && !task.employee.startsWith('Crew ') ? [task.employee] : []);
+
+      this.updateClassCrewPreview();
+      this.renderClassAttendeeChips();
+      this.updateClassAttendeesSummary();
 
       this.switchManualTaskTab('cert_class');
     } else {
@@ -828,6 +1301,7 @@ class TripPlannerApp {
     if (category === 'cert_class') {
       const certTypeInput = document.getElementById('manual-task-cert-type-input');
       const certEmpInput = document.getElementById('manual-task-employee-input');
+      const certCrewInput = document.getElementById('manual-task-crew-input');
       const certDateInput = document.getElementById('manual-task-cert-date-input');
       const certLocInput = document.getElementById('manual-task-cert-loc-input');
       const certTimeInput = document.getElementById('manual-task-cert-time-input');
@@ -835,7 +1309,6 @@ class TripPlannerApp {
       const certNotesInput = document.getElementById('manual-task-cert-notes-input');
 
       const certType = certTypeInput ? certTypeInput.value.trim() : '';
-      const employee = certEmpInput ? certEmpInput.value.trim() : '';
       const dateKey = certDateInput ? certDateInput.value.trim() : '';
       const location = certLocInput ? certLocInput.value.trim() : '';
       const time = certTimeInput ? certTimeInput.value.trim() : '';
@@ -846,12 +1319,28 @@ class TripPlannerApp {
         if (certTypeInput) certTypeInput.focus();
         return;
       }
-      if (!employee) {
-        if (certEmpInput) certEmpInput.focus();
-        return;
-      }
       if (!dateKey) {
         if (certDateInput) certDateInput.focus();
+        return;
+      }
+
+      // Check if user typed an employee without selecting from dropdown
+      const leftoverEmp = certEmpInput ? certEmpInput.value.trim() : '';
+      if (leftoverEmp && !this.selectedClassAttendees.some(n => n.toLowerCase() === leftoverEmp.toLowerCase())) {
+        this.selectedClassAttendees.push(leftoverEmp);
+      }
+
+      // Check if user typed a crew without selecting from dropdown
+      if (!this.selectedClassCrew && certCrewInput && certCrewInput.value.trim()) {
+        this.selectedClassCrew = this.getSignificantJobNumber(certCrewInput.value.trim());
+      }
+
+      const hasCrew = !!this.selectedClassCrew;
+      const hasEmployees = (this.selectedClassAttendees && this.selectedClassAttendees.length > 0);
+
+      if (!hasCrew && !hasEmployees) {
+        alert('Please assign a Crew (Job #) or add at least one individual attendee to this class.');
+        if (certCrewInput) certCrewInput.focus();
         return;
       }
 
@@ -859,7 +1348,11 @@ class TripPlannerApp {
         taskCategory: 'cert_class',
         title: certType,
         certType: certType,
-        employee: employee,
+        crewId: this.selectedClassCrew || '',
+        assignedEmployees: [...this.selectedClassAttendees],
+        employee: this.selectedClassAttendees.length > 0
+          ? this.selectedClassAttendees[0]
+          : (this.selectedClassCrew ? `Crew ${this.selectedClassCrew}` : 'Unassigned'),
         instructor: instructor,
         dateKey: dateKey,
         location: location || 'Helena HQ',
@@ -1826,7 +2319,8 @@ class TripPlannerApp {
               <div id="section-body-${dateKey}-training" style="display: ${isCollapsed ? 'none' : 'flex'}; flex-direction: column; gap: 5px; margin-top: 5px;">
                 ${trainingClasses.map(mt => {
                   const isDone = mt.status === 'Complete';
-                  const empName = mt.employee || 'Unassigned Worker';
+                  const resolved = this.resolveClassAttendees(mt);
+                  const isRosterOpen = !!(this._rosterExpanded && this._rosterExpanded[mt.id]);
                   return `
                     <div class="manual-task-card cert-class-card" style="background: var(--bg-primary); border: 1px solid ${isDone ? 'rgba(16, 185, 129, 0.3)' : 'rgba(16, 185, 129, 0.4)'}; border-left: 4px solid ${isDone ? '#10b981' : '#059669'}; border-radius: 6px; padding: 7px 9px; box-shadow: 0 1px 4px rgba(0,0,0,0.25); opacity: ${isDone ? '0.65' : '1'}; transition: opacity 0.2s;">
                       <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 6px;">
@@ -1842,19 +2336,68 @@ class TripPlannerApp {
                                   ✅ Completed
                                 </span>
                               ` : ''}
+                              ${resolved.crewId ? `
+                                <span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.3); font-size: 9px; font-weight: 700; padding: 1px 4px; border-radius: 3px;" title="Crew makeup auto-syncs with Employees sheet">
+                                  🔄 Crew ${this.escapeHtml(resolved.crewId)}
+                                </span>
+                              ` : ''}
                             </div>
                             <div style="font-size: 12px; font-weight: 800; color: ${isDone ? '#94a3b8' : '#f8fafc'}; text-decoration: ${isDone ? 'line-through' : 'none'}; word-break: break-word; line-height: 1.3;">
                               ${this.escapeHtml(mt.certType || mt.title)}
                             </div>
-                            <div style="font-size: 11px; font-weight: 700; color: #60a5fa; margin-top: 3px; display: flex; align-items: center; gap: 4px; cursor: pointer;" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(empName)}', 'cert_class');}" title="Click to view employee profile">
-                              <span>👤</span> <span style="text-decoration: underline dotted;">${this.escapeHtml(empName)}</span>
-                            </div>
+
+                            <!-- Attendees / Audience Header -->
+                            ${resolved.crewId ? `
+                              <div style="font-size: 11px; margin-top: 3px; color: #cbd5e1; line-height: 1.3;">
+                                <span>🚚 <strong>Crew ${this.escapeHtml(resolved.crewId)}</strong></span>
+                                ${resolved.foreman ? `<span> (${this.escapeHtml(resolved.foreman)})</span>` : ''}
+                                <span style="color: #94a3b8;"> · ${resolved.totalCount} Linemen</span>
+                              </div>
+                            ` : (resolved.totalCount > 0 ? `
+                              <div style="font-size: 11px; margin-top: 3px; color: #cbd5e1; line-height: 1.3;">
+                                <span>👥 <strong>${resolved.totalCount} Attendee${resolved.totalCount > 1 ? 's' : ''}:</strong> ${this.escapeHtml(resolved.allAttendees.slice(0, 2).join(', '))}${resolved.totalCount > 2 ? ` +${resolved.totalCount - 2} more` : ''}</span>
+                              </div>
+                            ` : `
+                              <div style="font-size: 11px; margin-top: 3px; color: #94a3b8; font-style: italic;">
+                                Unassigned Attendees
+                              </div>
+                            `)}
+
                             <div style="font-size: 10px; color: #94a3b8; margin-top: 4px; display: flex; align-items: center; gap: 4px; flex-wrap: wrap;">
                               ${mt.location ? `<span class="badge" style="background: rgba(255,255,255,0.06); color: #cbd5e1; font-size: 9px; padding: 1px 4px;">📍 ${this.escapeHtml(mt.location)}</span>` : ''}
                               ${mt.time ? `<span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #6ee7b7; font-size: 9px; padding: 1px 4px;">⏰ ${this.escapeHtml(mt.time)}</span>` : ''}
                               ${mt.instructor ? `<span class="badge" style="background: rgba(255,255,255,0.04); color: #94a3b8; font-size: 9px; padding: 1px 4px;">👨‍🏫 ${this.escapeHtml(mt.instructor)}</span>` : ''}
                               ${mt.notes ? `<div style="color: var(--text-muted); font-size: 9.5px; margin-top: 2px; width: 100%; word-break: break-word;">📝 ${this.escapeHtml(mt.notes)}</div>` : ''}
                             </div>
+
+                            <!-- Expandable Attendee Roster -->
+                            ${resolved.totalCount > 0 ? `
+                              <div style="margin-top: 5px; padding-top: 4px; border-top: 1px solid rgba(255,255,255,0.06);">
+                                <div style="font-size: 10px; font-weight: 700; color: #60a5fa; cursor: pointer; display: flex; align-items: center; gap: 4px; user-select: none;" onclick="window.tripPlanner.toggleClassRoster('${this.escapeHtml(mt.id)}')" title="Click to show/hide attendee list">
+                                  <span id="class-roster-toggle-${this.escapeHtml(mt.id)}">${isRosterOpen ? '▼' : '▶'}</span>
+                                  <span>📋 View Attendees (${resolved.totalCount})</span>
+                                  ${resolved.crewId ? `<span style="font-size: 9px; color: #34d399; margin-left: auto;">🔄 Synced</span>` : ''}
+                                </div>
+                                <div id="class-roster-${this.escapeHtml(mt.id)}" style="display: ${isRosterOpen ? 'flex' : 'none'}; flex-direction: column; gap: 3px; margin-top: 5px; padding: 4px 6px; background: rgba(0,0,0,0.25); border-radius: 4px;">
+                                  ${resolved.crewMembers.map(m => `
+                                    <div style="font-size: 10px; color: #cbd5e1; display: flex; justify-content: space-between; align-items: center;">
+                                      <span style="cursor: pointer;" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(m.name)}');}" title="View employee profile">
+                                        ${m.isForeman ? '👑' : '👤'} <strong style="color: ${m.isForeman ? '#facc15' : '#60a5fa'}; text-decoration: underline dotted;">${this.escapeHtml(m.name)}</strong>
+                                      </span>
+                                      <span class="badge" style="font-size: 8.5px; padding: 1px 4px; background: rgba(255,255,255,0.06); color: #94a3b8;">${this.escapeHtml(m.role || (m.isForeman ? 'Foreman' : 'Crew'))}</span>
+                                    </div>
+                                  `).join('')}
+                                  ${resolved.individualMembers.map(m => `
+                                    <div style="font-size: 10px; color: #cbd5e1; display: flex; justify-content: space-between; align-items: center;">
+                                      <span style="cursor: pointer;" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(m.name)}');}" title="View employee profile">
+                                        👤 <strong style="color: #60a5fa; text-decoration: underline dotted;">${this.escapeHtml(m.name)}</strong>
+                                      </span>
+                                      <span class="badge" style="font-size: 8.5px; padding: 1px 4px; background: rgba(59, 130, 246, 0.15); color: #93c5fd;">Individual</span>
+                                    </div>
+                                  `).join('')}
+                                </div>
+                              </div>
+                            ` : ''}
                           </div>
                         </div>
                         <div style="display: flex; align-items: center; gap: 3px;">

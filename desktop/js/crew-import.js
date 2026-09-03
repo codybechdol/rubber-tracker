@@ -3137,6 +3137,9 @@ class CrewImportEngine {
       if (window.sheetNavigator) {
         window.sheetNavigator.renderCurrentSheet();
       }
+      if (window.tripPlanner && typeof window.tripPlanner.renderPlanner === 'function') {
+        window.tripPlanner.renderPlanner();
+      }
       this.resetImport();
     } catch (e) {
       alert(`❌ Error applying changes: ${e.message}`);

@@ -897,17 +897,67 @@
             </div>
           </div>
 
-          <!-- ASSIGN EMPLOYEE(S) -->
-          <div style="position: relative;">
-            <label style="display: flex; justify-content: space-between; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; letter-spacing: 0.5px;">
-              <span>ASSIGN EMPLOYEE(S) *</span>
-              <span style="font-weight: 400; color: #60a5fa;">Type to search name, role, or crew</span>
-            </label>
-            <div style="position: relative;">
-              <input type="text" id="manual-task-employee-input" class="form-control" placeholder="Search by employee name, classification, or crew..." autocomplete="off" style="width: 100%; box-sizing: border-box; font-size: 13px; font-weight: 600; padding: 8px 30px 8px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;" onfocus="window.tripPlanner.showEmployeeDropdown()" oninput="window.tripPlanner.filterEmployeeDropdown(this.value)" onkeydown="window.tripPlanner.handleEmployeeKeydown(event)">
-              <span style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); color: #64748b; font-size: 11px; pointer-events: none;">▼</span>
+          <!-- CLASS ATTENDEES & CREW ASSIGNMENT -->
+          <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 8px; padding: 12px 14px; display: flex; flex-direction: column; gap: 10px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span style="font-size: 11px; font-weight: 800; color: #93c5fd; letter-spacing: 0.5px; display: flex; align-items: center; gap: 5px;">
+                <span>👥</span> CLASS ATTENDEES & CREW ASSIGNMENT *
+              </span>
+              <span style="font-size: 10px; color: #34d399; display: flex; align-items: center; gap: 3px;">
+                🔄 Auto-syncs with Employees
+              </span>
             </div>
-            <div id="manual-task-employee-dropdown" style="display: none; position: absolute; left: 0; right: 0; top: 100%; max-height: 220px; overflow-y: auto; background: #0f172a; border: 1px solid #3b82f6; border-radius: 6px; box-shadow: 0 10px 25px rgba(0,0,0,0.7); z-index: 999999; margin-top: 4px;"></div>
+
+            <!-- Option 1: Assign by Crew (Job #) -->
+            <div style="position: relative;">
+              <label style="display: flex; justify-content: space-between; font-size: 10.5px; font-weight: 700; color: #cbd5e1; margin-bottom: 4px;">
+                <span>🚚 ASSIGN CREW (JOB #)</span>
+                <span style="font-weight: 400; color: #94a3b8;">Foreman + current weekly crew makeup</span>
+              </label>
+              <div style="display: flex; gap: 6px; align-items: center;">
+                <div style="position: relative; flex: 1;">
+                  <input type="text" id="manual-task-crew-input" class="form-control" placeholder="Select or type Job #: e.g. 018-26.2, 016-26.1..." autocomplete="off" style="width: 100%; box-sizing: border-box; font-size: 12.5px; font-weight: 600; padding: 7px 28px 7px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;" onfocus="window.tripPlanner.showCrewDropdown()" oninput="window.tripPlanner.filterCrewDropdown(this.value)" onkeydown="window.tripPlanner.handleCrewKeydown(event)">
+                  <span style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); color: #64748b; font-size: 10px; pointer-events: none;">▼</span>
+                </div>
+                <button type="button" id="btn-clear-class-crew" class="btn btn-secondary" style="padding: 6px 10px; font-size: 11px; color: #f87171; display: none;" onclick="window.tripPlanner.clearClassCrew()" title="Remove assigned crew">✕</button>
+              </div>
+              <div id="manual-task-crew-dropdown" style="display: none; position: absolute; left: 0; right: 0; top: 100%; max-height: 200px; overflow-y: auto; background: #0f172a; border: 1px solid #3b82f6; border-radius: 6px; box-shadow: 0 10px 25px rgba(0,0,0,0.7); z-index: 999999; margin-top: 4px;"></div>
+            </div>
+
+            <!-- Dynamic Live Crew Makeup Preview Box -->
+            <div id="manual-task-crew-preview" style="display: none; background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.25); border-radius: 6px; padding: 8px 10px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                <span id="manual-task-crew-preview-title" style="font-size: 11.5px; font-weight: 800; color: #60a5fa;"></span>
+                <span id="manual-task-crew-preview-badge" class="badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; font-size: 9.5px; font-weight: 700; padding: 1px 6px;"></span>
+              </div>
+              <div id="manual-task-crew-preview-foreman" style="font-size: 11px; color: #f8fafc; margin-bottom: 4px;"></div>
+              <div id="manual-task-crew-preview-members" style="font-size: 10.5px; color: #cbd5e1; display: flex; flex-wrap: wrap; gap: 4px;"></div>
+              <div style="font-size: 9.5px; color: #94a3b8; margin-top: 5px; font-style: italic;">
+                ⚡ Note: When new weekly crew sheets are imported, this class automatically updates to whoever is on this crew.
+              </div>
+            </div>
+
+            <!-- Option 2: Add Individual Attendees -->
+            <div style="position: relative; margin-top: 2px;">
+              <label style="display: flex; justify-content: space-between; font-size: 10.5px; font-weight: 700; color: #cbd5e1; margin-bottom: 4px;">
+                <span>👤 ADD INDIVIDUAL EMPLOYEES</span>
+                <span style="font-weight: 400; color: #60a5fa;">Pick specific workers to attend</span>
+              </label>
+              <div style="position: relative;">
+                <input type="text" id="manual-task-employee-input" class="form-control" placeholder="Type name, role, or crew to add attendee..." autocomplete="off" style="width: 100%; box-sizing: border-box; font-size: 12.5px; font-weight: 600; padding: 7px 28px 7px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;" onfocus="window.tripPlanner.showEmployeeDropdown()" oninput="window.tripPlanner.filterEmployeeDropdown(this.value)" onkeydown="window.tripPlanner.handleEmployeeKeydown(event)">
+                <span style="position: absolute; right: 10px; top: 50%; transform: translateY(-50%); color: #64748b; font-size: 10px; pointer-events: none;">▼</span>
+              </div>
+              <div id="manual-task-employee-dropdown" style="display: none; position: absolute; left: 0; right: 0; top: 100%; max-height: 220px; overflow-y: auto; background: #0f172a; border: 1px solid #3b82f6; border-radius: 6px; box-shadow: 0 10px 25px rgba(0,0,0,0.7); z-index: 999999; margin-top: 4px;"></div>
+            </div>
+
+            <!-- Selected Individual Employee Chips / Pills -->
+            <div id="manual-task-attendee-chips" style="display: flex; flex-wrap: wrap; gap: 5px; min-height: 20px;"></div>
+
+            <!-- Attendees Count Summary Strip -->
+            <div id="manual-task-attendees-summary" style="font-size: 11px; font-weight: 700; color: #94a3b8; display: flex; justify-content: space-between; align-items: center; padding-top: 6px; border-top: 1px solid rgba(255,255,255,0.06);">
+              <span>👥 Total Attendees: <strong style="color: #60a5fa;">0 selected</strong></span>
+              <span id="manual-task-attendees-detail" style="font-weight: normal; color: #94a3b8;">Select a crew and/or individual employees</span>
+            </div>
           </div>
 
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
