@@ -45,8 +45,100 @@ class EmployeeProfileEngine {
       .trim();
   }
 
+  static get FIRST_NAME_ALIAS_MAP() {
+    if (this._aliasMap) return this._aliasMap;
+    const groups = [
+      ['zakary', 'zachary', 'zackary', 'zack', 'zach', 'zac'],
+      ['michael', 'mike', 'mikey'],
+      ['william', 'bill', 'billy', 'will', 'willy', 'liam'],
+      ['robert', 'rob', 'robby', 'bobby', 'bob'],
+      ['richard', 'rick', 'ricky', 'dick', 'rich'],
+      ['james', 'jim', 'jimmy'],
+      ['john', 'jon', 'johnny', 'jonny', 'jonathan'],
+      ['joseph', 'joe', 'joey'],
+      ['thomas', 'tom', 'tommy'],
+      ['charles', 'charlie', 'chuck'],
+      ['christopher', 'chris'],
+      ['daniel', 'dan', 'danny'],
+      ['matthew', 'matt'],
+      ['anthony', 'tony'],
+      ['donald', 'don', 'donny'],
+      ['steven', 'stephen', 'steve'],
+      ['andrew', 'andy', 'drew'],
+      ['joshua', 'josh'],
+      ['kenneth', 'ken', 'kenny'],
+      ['brian', 'bryan'],
+      ['edward', 'ed', 'eddie', 'ted', 'teddy'],
+      ['ronald', 'ron', 'ronny'],
+      ['timothy', 'tim', 'timmy'],
+      ['jeffrey', 'jeff', 'geoffrey', 'geoff'],
+      ['jacob', 'jake'],
+      ['nicholas', 'nick', 'nicolas'],
+      ['eric', 'erik'],
+      ['larry', 'lawrence'],
+      ['benjamin', 'ben', 'benny'],
+      ['samuel', 'sam', 'sammy'],
+      ['gregory', 'greg'],
+      ['alexander', 'alex', 'alec'],
+      ['patrick', 'pat'],
+      ['frank', 'frankie', 'francis'],
+      ['raymond', 'ray'],
+      ['jack', 'jackson'],
+      ['dennis', 'denny'],
+      ['jerry', 'gerald'],
+      ['tyler', 'ty'],
+      ['aaron', 'aron'],
+      ['nathan', 'nate', 'nathaniel'],
+      ['douglas', 'doug'],
+      ['peter', 'pete'],
+      ['cody', 'kody', 'codie'],
+      ['cory', 'kory', 'corey'],
+      ['dustin', 'dusty'],
+      ['mitchell', 'mitch'],
+      ['cameron', 'cam'],
+      ['bradley', 'brad'],
+      ['clifford', 'clifton', 'cliff', 'clif'],
+      ['phillip', 'philip', 'phil'],
+      ['terry', 'terrence']
+    ];
+    const map = new Map();
+    groups.forEach(g => {
+      const canon = g[0];
+      g.forEach(name => map.set(name, canon));
+    });
+    this._aliasMap = map;
+    return this._aliasMap;
+  }
+
+  /**
+   * Checks whether two first names are equivalent (aliases, nicknames, prefix stems, or small typo/edit distance)
+   */
+  areFirstNamesEquivalent(f1, f2) {
+    if (!f1 || !f2) return false;
+    if (f1 === f2) return true;
+    const map = EmployeeProfileEngine.FIRST_NAME_ALIAS_MAP;
+    const c1 = map.get(f1) || f1;
+    const c2 = map.get(f2) || f2;
+    if (c1 === c2) return true;
+    if (f1.length >= 3 && f2.length >= 4 && (f2.startsWith(f1) || f1.startsWith(f2))) return true;
+    if (f1.length >= 4 && f2.length >= 4) {
+      const m = f1.length, n = f2.length;
+      const dp = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+      for (let i = 0; i <= m; i++) dp[i][0] = i;
+      for (let j = 0; j <= n; j++) dp[0][j] = j;
+      for (let i = 1; i <= m; i++) {
+        for (let j = 1; j <= n; j++) {
+          dp[i][j] = f1[i - 1] === f2[j - 1] ? dp[i - 1][j - 1] : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+        }
+      }
+      if (dp[m][n] <= 2) return true;
+    }
+    return false;
+  }
+
   /**
    * Matches employee name across different formats (e.g. "Darrell Swann" vs "Swann, Darrell" vs "Keenan O'Keefe" vs "O'Keefe, Keenan")
+   * Also supports first-name aliases and spelling variations (e.g. "Zakary Farmer" vs "Zachary Farmer" vs "Zack Farmer")
    */
   isNameMatch(nameA, nameB) {
     if (!nameA || !nameB) return false;
@@ -79,6 +171,28 @@ class EmployeeProfileEngine {
       const majorWords = shorter.filter(w => w.length > 1);
       if (majorWords.length >= 2 && majorWords.every(w => longerSet.has(w))) {
         return true;
+      }
+
+      // First-name alias and spelling variation equivalence check when last names match
+      const lastA = cleanWordsA[cleanWordsA.length - 1];
+      const lastB = cleanWordsB[cleanWordsB.length - 1];
+      if (lastA === lastB && lastA.length > 2) {
+        const firstA = cleanWordsA[0];
+        const firstB = cleanWordsB[0];
+        if (this.areFirstNamesEquivalent(firstA, firstB)) {
+          return true;
+        }
+      }
+
+      // Check attendee list or multi-person string where shorter is [First, Last]
+      if (shorter.length === 2 && longer.length > 2) {
+        const sFirst = shorter[0];
+        const sLast = shorter[1];
+        if (longerSet.has(sLast) && sLast.length > 2) {
+          if (longer.some(w => this.areFirstNamesEquivalent(sFirst, w))) {
+            return true;
+          }
+        }
       }
     }
 
@@ -794,19 +908,33 @@ class EmployeeProfileEngine {
         const lead = String(tr['Lead'] || tr['Crew Lead'] || tr['Foreman'] || '').trim();
         const crew = String(tr['Crew'] || tr['Job #'] || tr['Job Number'] || '').trim();
         const attendees = String(tr['Attendees'] || tr['Crew Members'] || '').trim();
+        const month = String(tr['Month'] || tr['Scheduled Month'] || 'N/A').trim();
+        const topic = String(tr['Topic'] || tr['Training Topic'] || tr['Training'] || 'Safety Training').trim();
+        const status = String(tr['Status'] || tr['Training Status'] || 'Scheduled').trim();
+        const hours = String(tr['Hours'] || '1.0').trim();
+        const completionDate = String(tr['Completion Date'] || tr['Date Completed'] || tr['Date'] || '').trim();
+        const trainer = String(tr['Trainer'] || tr['Instructor'] || '').trim();
+        const notes = String(tr['Notes'] || tr['Comments'] || '').trim();
 
         const isLeadMatch = this.isNameMatch(lead, displayName) || this.isNameMatch(lead, rawEmpName);
         const isAttendeeMatch = attendees && (this.isNameMatch(attendees, displayName) || this.isNameMatch(attendees, rawEmpName));
         const isCrewMatch = jobNumber && jobNumber !== 'N/A' && crew === jobNumber;
 
         if (isLeadMatch || isAttendeeMatch || isCrewMatch) {
+          const hasAttendeeList = attendees && attendees.length > 3 && attendees.toLowerCase() !== 'n/a' && attendees.toLowerCase() !== 'all';
+          const attended = isAttendeeMatch || isLeadMatch || (!hasAttendeeList && isCrewMatch);
+
           trainingList.push({
-            month: String(tr['Month'] || tr['Scheduled Month'] || 'N/A').trim(),
-            topic: String(tr['Topic'] || tr['Training Topic'] || tr['Training'] || 'Safety Training').trim(),
-            crew: crew,
-            lead: lead,
-            status: String(tr['Status'] || tr['Training Status'] || 'Scheduled').trim(),
-            hours: String(tr['Hours'] || '1.0').trim()
+            month,
+            topic,
+            crew,
+            lead,
+            status,
+            hours,
+            completionDate,
+            trainer,
+            notes,
+            attended
           });
         }
       });
@@ -830,7 +958,7 @@ class EmployeeProfileEngine {
           const eventLower = rawEvent.toLowerCase();
           const detailsLower = rawDetails.toLowerCase();
 
-          const isHire = eventLower.includes('new hire') || (eventLower.includes('hire') && !eventLower.includes('rehire'));
+          const isHire = eventLower.includes('new hire') || (eventLower.includes('hire') && !eventLower.includes('rehire')) || eventLower.includes('new employee');
           const isRehire = eventLower.includes('rehire');
           const isTerm = eventLower.includes('term') || eventLower.includes('quit') || eventLower.includes('departure') || eventLower.includes('layoff') || eventLower.includes('archive') || eventLower.includes('previous');
           const isRole = eventLower.includes('role') || eventLower.includes('promotion') || eventLower.includes('class');
@@ -838,6 +966,7 @@ class EmployeeProfileEngine {
           const detailsHasLoc = detailsLower.includes('location') || detailsLower.includes('rezone') || detailsLower.includes('moved to') || detailsLower.includes('transfer') || detailsLower.includes('changed from');
           const isCertEvent = eventLower.includes('cert') || eventLower.includes('cpr') || eventLower.includes('first aid') || eventLower.includes('osha') || eventLower.includes('crane') || eventLower.includes('license') || eventLower.includes('medical');
           const detailsHasCert = detailsLower.includes('cert') || detailsLower.includes('cpr') || detailsLower.includes('first aid') || detailsLower.includes('osha') || detailsLower.includes('crane') || detailsLower.includes('license') || detailsLower.includes('medical');
+          const isDrugTestEvent = eventLower.includes('drug') || eventLower.includes('alcohol') || eventLower.includes('dot test');
 
           if (isHire) {
             employeeHistory.push({
@@ -893,6 +1022,15 @@ class EmployeeProfileEngine {
               details: locDetails || `Location: ${rawLoc || 'Updated'}`,
               location: rawLoc,
               job: rawJob
+            });
+          } else if (isDrugTestEvent) {
+            employeeHistory.push({
+              type: 'drug_test',
+              date: dateStr,
+              event: '🧪 DOT Drug Test Completed',
+              details: rawDetails || 'DOT Testing record logged',
+              location: rawLoc || location || 'Helena',
+              job: rawJob || jobNumber || 'N/A'
             });
           } else if (isCertEvent || detailsHasCert) {
             employeeHistory.push({
@@ -985,18 +1123,19 @@ class EmployeeProfileEngine {
           const isDup = employeeHistory.some(e => e.type === 'cert' && e.date === dateUpdated && e.details.toLowerCase().includes(certName.toLowerCase()));
           if (!isDup) {
             let certDetail = `Valid · ${certName}`;
-            if (c.testDate && c.testDate !== 'N/A' && c.expDate && c.expDate !== 'N/A' && c.expDate !== 'No Date Set') {
-              certDetail = `Updated / Acquired: ${c.testDate} · Expires: ${c.expDate}`;
+            let certEvent = `📜 Cert Recorded: ${certName}`;
+            if (c.testDate && c.testDate !== 'N/A') {
+              certEvent = `📜 Cert Acquired / Renewed: ${certName}`;
+              certDetail = `Acquired / Renewed: ${c.testDate}${c.expDate && c.expDate !== 'N/A' && c.expDate !== 'No Date Set' ? ' · Expires: ' + c.expDate : ''}`;
             } else if (c.expDate && c.expDate !== 'N/A' && c.expDate !== 'No Date Set') {
+              certEvent = `📜 Cert Expiration Tracked: ${certName}`;
               certDetail = `Expires: ${c.expDate}`;
-            } else if (c.testDate && c.testDate !== 'N/A') {
-              certDetail = `Date Acquired: ${c.testDate}`;
             }
 
             employeeHistory.push({
               type: 'cert',
               date: dateUpdated,
-              event: `📜 Cert Recorded: ${certName}`,
+              event: certEvent,
               details: certDetail,
               location: location,
               job: jobNumber
@@ -1052,10 +1191,12 @@ class EmployeeProfileEngine {
           const schedDate = String(r['Scheduled Date'] || r[11] || '').trim();
           const schedTime = String(r['Scheduled Time'] || r[12] || '').trim();
           const meetingAddr = String(r['Meeting / Collection Address'] || r[13] || '').trim();
-          const status = String(r['Status'] || r[14] || '').trim();
-          const dateCompleted = String(r['Date Completed'] || r[15] || '').trim();
+          const status = String(r['Status'] || r['Test Status'] || r[14] || '').trim();
+          const dateCompleted = String(r['Date Completed'] || r['Date Done'] || r['Done'] || r['Completed Date'] || r[15] || '').trim();
           const paperworkNotes = String(r['Paperwork / Kit Notes'] || r[16] || '').trim();
           const notes = String(r['Notes'] || r[17] || '').trim();
+
+          const isCompleted = status.toLowerCase() === 'completed' || status.toLowerCase() === 'done' || (dateCompleted && dateCompleted !== 'N/A' && dateCompleted !== '');
 
           const testObj = {
             id: `dt_${idx + 1}`,
@@ -1073,7 +1214,7 @@ class EmployeeProfileEngine {
             dateCompleted,
             paperworkNotes,
             notes,
-            isCompleted: status.toLowerCase() === 'completed' || (dateCompleted && dateCompleted !== 'N/A' && dateCompleted !== '')
+            isCompleted
           };
 
           allDrugTests.push(testObj);
@@ -1081,17 +1222,66 @@ class EmployeeProfileEngine {
           if (testObj.isCompleted) {
             completedDrugTests.push(testObj);
 
-            // Add Milestone to Career History
-            employeeHistory.push({
+            // Add or enrich Milestone in Career History
+            const effectiveDate = dateCompleted || schedDate || 'Completed';
+            const clinicDesc = collectionType === 'Mobile Collector' 
+              ? (clinicName ? `Mobile (${clinicName})` : 'Mobile Collector') 
+              : (clinicName || 'Clinic Visit');
+            const locDesc = clinicCity || location || 'Helena';
+            const richDetails = [quarter, `${testType} (${classification})`, clinicDesc, meetingAddr ? `@ ${meetingAddr}` : '', notes].filter(Boolean).join(' · ');
+
+            const drugMilestone = {
               type: 'drug_test',
-              date: dateCompleted || schedDate,
+              date: effectiveDate,
               event: '🧪 DOT Drug Test Completed',
-              details: `${quarter} · ${testType} (${classification}) · ${collectionType === 'Mobile Collector' ? 'Mobile Collector' : (clinicName || 'Clinic')}${meetingAddr ? ' @ ' + meetingAddr : ''}${notes ? ' · ' + notes : ''}`,
-              location: clinicCity || location || 'Helena',
+              details: richDetails,
+              location: locDesc,
               job: jobNumber || 'N/A'
-            });
+            };
+
+            const dupIdx = employeeHistory.findIndex(e => e.type === 'drug_test' && (
+              (e.date && effectiveDate && e.date === effectiveDate) ||
+              (quarter && e.details && e.details.includes(quarter))
+            ));
+
+            if (dupIdx !== -1) {
+              employeeHistory[dupIdx] = drugMilestone;
+            } else {
+              employeeHistory.push(drugMilestone);
+            }
           } else if (status.toLowerCase() === 'scheduled' || schedDate) {
             scheduledDrugTests.push(testObj);
+          }
+        }
+      });
+    }
+
+    // 5c. Add Completed Training Modules into Career Milestones timeline
+    if (trainingList && trainingList.length > 0) {
+      trainingList.forEach(trObj => {
+        const isComplete = trObj.status.toLowerCase().includes('comp') || (trObj.completionDate && trObj.completionDate !== 'N/A' && trObj.completionDate !== '');
+        if (isComplete && trObj.attended !== false) {
+          const trainDate = trObj.completionDate || trObj.month || 'Completed';
+          const isDup = employeeHistory.some(e => e.type === 'training' && e.event.includes(trObj.topic) && e.date === trainDate);
+          if (!isDup) {
+            const trainDetails = [
+              trObj.month && trObj.month !== 'N/A' ? `Month: ${trObj.month}` : '',
+              trObj.crew ? `Crew: ${trObj.crew}` : (jobNumber && jobNumber !== 'N/A' ? `Crew: ${jobNumber}` : ''),
+              trObj.lead ? `Lead: ${trObj.lead}` : '',
+              trObj.hours ? `${trObj.hours} hrs` : '',
+              trObj.trainer ? `Trainer: ${trObj.trainer}` : '',
+              trObj.completionDate ? `Date: ${trObj.completionDate}` : '',
+              trObj.notes || ''
+            ].filter(Boolean).join(' · ');
+
+            employeeHistory.push({
+              type: 'training',
+              date: trainDate,
+              event: `🎓 Training Completed: ${trObj.topic}`,
+              details: trainDetails || 'Completed safety training module',
+              location: location || 'Helena',
+              job: trObj.crew || jobNumber || 'N/A'
+            });
           }
         }
       });
@@ -1783,13 +1973,15 @@ class EmployeeProfileEngine {
                   const styleMap = {
                     hire: { titleColor: '#10b981', borderColor: 'rgba(16, 185, 129, 0.35)', bg: 'rgba(16, 185, 129, 0.05)' },
                     rehire: { titleColor: '#f97316', borderColor: 'rgba(249, 115, 22, 0.35)', bg: 'rgba(249, 115, 22, 0.05)' },
-                    location: { titleColor: '#60a5fa', borderColor: 'rgba(59, 130, 246, 0.35)', bg: 'var(--bg-primary)' },
+                    location: { titleColor: '#60a5fa', borderColor: 'rgba(59, 130, 246, 0.35)', bg: 'rgba(59, 130, 246, 0.05)' },
                     role: { titleColor: '#a855f7', borderColor: 'rgba(168, 85, 247, 0.35)', bg: 'rgba(168, 85, 247, 0.05)' },
                     term: { titleColor: '#ef4444', borderColor: 'rgba(239, 68, 68, 0.35)', bg: 'rgba(239, 68, 68, 0.05)' },
-                    cert: { titleColor: '#f59e0b', borderColor: 'rgba(245, 158, 11, 0.35)', bg: 'var(--bg-primary)' },
-                    drug_test: { titleColor: '#c084fc', borderColor: 'rgba(192, 132, 252, 0.35)', bg: 'rgba(192, 132, 252, 0.08)' }
+                    cert: { titleColor: '#f59e0b', borderColor: 'rgba(245, 158, 11, 0.35)', bg: 'rgba(245, 158, 11, 0.05)' },
+                    drug_test: { titleColor: '#c084fc', borderColor: 'rgba(192, 132, 252, 0.35)', bg: 'rgba(192, 132, 252, 0.08)' },
+                    training: { titleColor: '#34d399', borderColor: 'rgba(52, 211, 153, 0.35)', bg: 'rgba(52, 211, 153, 0.06)' },
+                    general: { titleColor: '#94a3b8', borderColor: 'rgba(148, 163, 184, 0.35)', bg: 'var(--bg-primary)' }
                   };
-                  const s = styleMap[h.type] || styleMap.location;
+                  const s = styleMap[h.type] || styleMap.general;
 
                   return `
                     <div style="background: ${s.bg}; border: 1px solid ${s.borderColor}; border-radius: 6px; padding: 10px 12px; font-size: 12px;">

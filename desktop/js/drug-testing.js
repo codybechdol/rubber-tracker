@@ -799,10 +799,16 @@ class DrugTestingEngine {
 
   findTestRow(empName) {
     const t = this.getTestsTable();
+    const target = String(empName || '').trim();
     return (t.rows || []).find(r => {
       const q = String(r['Quarter'] || r[0] || '').trim();
       const n = String(r['Employee Name'] || r[1] || '').trim();
-      return q === this.currentQuarter && n.toLowerCase() === empName.toLowerCase();
+      if (q !== this.currentQuarter) return false;
+      if (n.toLowerCase() === target.toLowerCase()) return true;
+      if (window.employeeProfileEngine && typeof window.employeeProfileEngine.isNameMatch === 'function') {
+        return window.employeeProfileEngine.isNameMatch(n, target);
+      }
+      return false;
     });
   }
 

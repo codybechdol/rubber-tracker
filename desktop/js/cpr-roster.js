@@ -340,6 +340,9 @@ class CprRosterEngine {
 
   isNameMatch(nameA, nameB) {
     if (!nameA || !nameB) return false;
+    if (window.employeeProfileEngine && typeof window.employeeProfileEngine.isNameMatch === 'function') {
+      return window.employeeProfileEngine.isNameMatch(nameA, nameB);
+    }
     const normA = this.normalizeName(nameA);
     const normB = this.normalizeName(nameB);
     if (!normA || !normB) return false;
