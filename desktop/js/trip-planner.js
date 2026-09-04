@@ -247,6 +247,20 @@ class TripPlannerApp {
         t.dateKey = t.date;
         modified = true;
       }
+      if (t.time) {
+        // Auto-fix start AM typo if end is PM and start hour is 1..6 (e.g. "2:00 am / 4:30 pm" -> "2:00 pm / 4:30 pm")
+        const typoFix = t.time.replace(/^([0-9]{1,2}(?::[0-9]{2})?)\s*am(\s*[\/\-–—]\s*[0-9]{1,2}(?::[0-9]{2})?\s*pm)/i, (match, p1, p2) => {
+          const h = parseInt(p1.split(':')[0], 10);
+          if (h >= 1 && h <= 6) {
+            return `${p1} pm${p2}`;
+          }
+          return match;
+        });
+        if (typoFix !== t.time) {
+          t.time = typoFix;
+          modified = true;
+        }
+      }
     });
     if (modified) {
       this.db.saveManualTasks(tasks);
@@ -257,6 +271,198 @@ class TripPlannerApp {
   saveManualTasks(tasks) {
     this.manualTasks = tasks || this.manualTasks || [];
     this.db.saveManualTasks(this.manualTasks);
+  }
+
+  /**
+   * Parses various human-entered time formats (e.g. "8:00 AM", "2:00 pm / 4:30 pm", "8am-10:30am", "Morning")
+   * into minutes from midnight (0 - 1439) for accurate chronological sorting.
+   */
+  parseTimeToMinutes(timeStr) {
+    if (!timeStr || typeof timeStr !== 'string') return null;
+    const clean = timeStr.trim().toLowerCase();
+    if (!clean) return null;
+
+    if (clean === 'morning') return 8 * 60;
+    if (clean === 'noon' || clean === 'midday') return 12 * 60;
+    if (clean === 'afternoon') return 13 * 60;
+    if (clean === 'evening') return 17 * 60;
+
+    const rangeMatch = clean.match(/^([0-9]{1,2}(?::[0-9]{2})?\s*(?:am|pm|a|p)?)\s*(?:[\/\-–—]|to)\s*([0-9]{1,2}(?::[0-9]{2})?\s*(?:am|pm|a|p)?)/i);
+    let startPart = clean;
+    let endPart = null;
+
+    if (rangeMatch) {
+      startPart = rangeMatch[1].trim();
+      endPart = rangeMatch[2].trim();
+    }
+
+    const parseToken = (token) => {
+      if (!token) return null;
+      const m = token.match(/^([0-9]{1,2})(?::([0-9]{2}))?\s*(am|pm|a|p)?$/i);
+      if (!m) return null;
+      let hours = parseInt(m[1], 10);
+      const mins = m[2] ? parseInt(m[2], 10) : 0;
+      const modifier = m[3] ? m[3].toLowerCase() : null;
+      return { hours, mins, modifier };
+    };
+
+    let startParsed = parseToken(startPart);
+    if (!startParsed) {
+      const fallbackM = clean.match(/([0-9]{1,2})(?::([0-9]{2}))?\s*(am|pm|a|p)?/i);
+      if (fallbackM) {
+        startParsed = {
+          hours: parseInt(fallbackM[1], 10),
+          mins: fallbackM[2] ? parseInt(fallbackM[2], 10) : 0,
+          modifier: fallbackM[3] ? fallbackM[3].toLowerCase() : null
+        };
+      } else {
+        return null;
+      }
+    }
+
+    const endParsed = endPart ? parseToken(endPart) : null;
+    let { hours, mins, modifier } = startParsed;
+
+    const isPmMod = (mod) => mod === 'pm' || mod === 'p';
+    const isAmMod = (mod) => mod === 'am' || mod === 'a';
+
+    // Heuristic 1: If start has no AM/PM, but end time has AM/PM
+    if (!modifier && endParsed && endParsed.modifier) {
+      if (isPmMod(endParsed.modifier)) {
+        if (hours <= endParsed.hours || hours === 12) {
+          modifier = 'pm';
+        } else if (hours >= 7 && hours <= 11) {
+          modifier = 'am';
+        } else {
+          modifier = 'pm';
+        }
+      } else if (isAmMod(endParsed.modifier)) {
+        modifier = 'am';
+      }
+    }
+
+    // Heuristic 2: Auto-correct start AM typo if end is PM and start hour is 1..6 (e.g. "2:00 am / 4:30 pm" -> 2:00 PM)
+    if (modifier && isAmMod(modifier) && endParsed && isPmMod(endParsed.modifier)) {
+      if (hours >= 1 && hours <= 6 && endParsed.hours >= hours) {
+        modifier = 'pm';
+      }
+    }
+
+    // Heuristic 3: Workday hours heuristic if no modifier specified
+    if (!modifier) {
+      if (hours >= 1 && hours <= 6) {
+        modifier = 'pm';
+      } else if (hours >= 7 && hours <= 11) {
+        modifier = 'am';
+      } else if (hours === 12) {
+        modifier = 'pm';
+      }
+    }
+
+    // 24-hour normalization
+    if (isPmMod(modifier)) {
+      if (hours < 12) hours += 12;
+    } else if (isAmMod(modifier)) {
+      if (hours === 12) hours = 0;
+    }
+
+    return hours * 60 + mins;
+  }
+
+  /**
+   * Compares two human-entered time strings chronologically
+   */
+  compareTimes(timeAStr, timeBStr) {
+    const minA = this.parseTimeToMinutes(timeAStr);
+    const minB = this.parseTimeToMinutes(timeBStr);
+    if (minA !== null && minB !== null) {
+      if (minA !== minB) return minA - minB;
+    } else if (minA !== null) {
+      return -1; // timed tasks come before untimed
+    } else if (minB !== null) {
+      return 1;
+    }
+    return (timeAStr || '').localeCompare(timeBStr || '');
+  }
+
+  /**
+   * Compares two manual tasks (training classes or office tasks) for chronological ordering on the same day
+   */
+  compareTasksByTime(a, b) {
+    const timeComp = this.compareTimes(a.time, b.time);
+    if (timeComp !== 0) return timeComp;
+
+    // Custom orderSeq tie-breaker if user manually moved up/down
+    if (a.orderSeq !== undefined && b.orderSeq !== undefined && a.orderSeq !== b.orderSeq) {
+      return a.orderSeq - b.orderSeq;
+    }
+
+    // Pending tasks before Complete tasks
+    const aDone = a.status === 'Complete';
+    const bDone = b.status === 'Complete';
+    if (aDone !== bDone) return aDone ? 1 : -1;
+
+    // Tie-breaker: createdAt or title
+    if (a.createdAt && b.createdAt && a.createdAt !== b.createdAt) {
+      return a.createdAt.localeCompare(b.createdAt);
+    }
+    return (a.title || a.certType || '').localeCompare(b.title || b.certType || '');
+  }
+
+  /**
+   * Compares tasks by date, then chronologically by time
+   */
+  compareTasksByDateAndTime(a, b) {
+    const dateA = a.date || a.dateKey || '';
+    const dateB = b.date || b.dateKey || '';
+    if (dateA !== dateB) return dateA.localeCompare(dateB);
+    return this.compareTasksByTime(a, b);
+  }
+
+  /**
+   * Moves a task up (-1) or down (+1) in the visual list.
+   * If both tasks have scheduled times, swaps their times; otherwise swaps their orderSeq.
+   */
+  moveManualTask(taskId, direction) {
+    if (!this.manualTasks) this.manualTasks = this.loadManualTasks();
+    const task = this.manualTasks.find(t => t.id === taskId);
+    if (!task) return;
+
+    const dateKey = task.dateKey || task.date;
+    const isCert = (task.taskCategory === 'cert_class' || !!task.certType);
+
+    // Get all tasks for this date and category sorted by current display order
+    const dateTasks = this.manualTasks
+      .filter(t => (t.dateKey === dateKey || t.date === dateKey) && (isCert ? (t.taskCategory === 'cert_class' || !!t.certType) : (t.taskCategory === 'personal_task' && !t.certType)))
+      .sort((a, b) => this.compareTasksByTime(a, b));
+
+    const currentIdx = dateTasks.findIndex(t => t.id === taskId);
+    if (currentIdx === -1) return;
+
+    const targetIdx = currentIdx + direction;
+    if (targetIdx < 0 || targetIdx >= dateTasks.length) return;
+
+    const targetTask = dateTasks[targetIdx];
+
+    // If both tasks have different times, swap their scheduled times
+    if (task.time && targetTask.time && task.time !== targetTask.time) {
+      const tempTime = task.time;
+      task.time = targetTask.time;
+      targetTask.time = tempTime;
+    } else {
+      // Otherwise adjust orderSeq
+      if (task.orderSeq === undefined) task.orderSeq = currentIdx;
+      if (targetTask.orderSeq === undefined) targetTask.orderSeq = targetIdx;
+      const tempSeq = task.orderSeq;
+      task.orderSeq = targetTask.orderSeq;
+      targetTask.orderSeq = tempSeq;
+      if (task.orderSeq === targetTask.orderSeq) {
+        task.orderSeq += direction;
+      }
+    }
+
+    this.saveManualTasks(this.manualTasks);
+    this.renderPlanner();
   }
 
   normalizeCertClassName(name) {
@@ -1286,7 +1492,9 @@ class TripPlannerApp {
 
   getManualTasksForDate(dateKey) {
     if (!this.manualTasks) this.manualTasks = this.loadManualTasks();
-    return this.manualTasks.filter(t => (t.dateKey === dateKey || t.date === dateKey));
+    return this.manualTasks
+      .filter(t => (t.dateKey === dateKey || t.date === dateKey))
+      .sort((a, b) => this.compareTasksByTime(a, b));
   }
 
   addManualTask(dateKey, taskData) {
@@ -1546,8 +1754,16 @@ class TripPlannerApp {
 
       const certType = certTypeInput ? certTypeInput.value.trim() : '';
       const dateKey = certDateInput ? certDateInput.value.trim() : '';
-      const location = certLocInput ? certLocInput.value.trim() : '';
-      const time = certTimeInput ? certTimeInput.value.trim() : '';
+      let time = certTimeInput ? certTimeInput.value.trim() : '';
+      if (time) {
+        time = time.replace(/^([0-9]{1,2}(?::[0-9]{2})?)\s*am(\s*[\/\-–—]\s*[0-9]{1,2}(?::[0-9]{2})?\s*pm)/i, (match, p1, p2) => {
+          const h = parseInt(p1.split(':')[0], 10);
+          if (h >= 1 && h <= 6) {
+            return `${p1} pm${p2}`;
+          }
+          return match;
+        });
+      }
       const instructor = certTrainerInput ? certTrainerInput.value.trim() : 'Cody Bechdol (Self)';
       const notes = certNotesInput ? certNotesInput.value.trim() : '';
 
@@ -1621,7 +1837,16 @@ class TripPlannerApp {
       const dateKey = pDateInput ? pDateInput.value.trim() : '';
       const location = pLocInput ? pLocInput.value.trim() : '';
       const priority = pPrioInput ? pPrioInput.value : 'Normal';
-      const time = pTimeInput ? pTimeInput.value.trim() : '';
+      let time = pTimeInput ? pTimeInput.value.trim() : '';
+      if (time) {
+        time = time.replace(/^([0-9]{1,2}(?::[0-9]{2})?)\s*am(\s*[\/\-–—]\s*[0-9]{1,2}(?::[0-9]{2})?\s*pm)/i, (match, p1, p2) => {
+          const h = parseInt(p1.split(':')[0], 10);
+          if (h >= 1 && h <= 6) {
+            return `${p1} pm${p2}`;
+          }
+          return match;
+        });
+      }
       const notes = pNotesInput ? pNotesInput.value.trim() : '';
 
       if (!title) {
@@ -1827,9 +2052,8 @@ class TripPlannerApp {
 
     // Sort chronologically by time, then name
     matched.sort((a, b) => {
-      if (a.time && b.time) return a.time.localeCompare(b.time);
-      if (a.time) return -1;
-      if (b.time) return 1;
+      const timeDiff = this.compareTimes(a.time, b.time);
+      if (timeDiff !== 0) return timeDiff;
       return a.employee.localeCompare(b.employee);
     });
 
@@ -1971,7 +2195,7 @@ class TripPlannerApp {
     const allManual = this.manualTasks || [];
     const allClasses = allManual
       .filter(m => m.taskCategory === 'cert_class' || !!m.certType)
-      .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+      .sort((a, b) => this.compareTasksByDateAndTime(a, b));
 
     if (allClasses.length === 0) {
       alert('⚠️ No scheduled training classes found on the Trip Planner.\n\nPlease schedule a class first using "+ Class" or "Manual Task".');
@@ -2209,7 +2433,7 @@ class TripPlannerApp {
     const allManual = this.manualTasks || [];
     const allClasses = allManual
       .filter(m => m.taskCategory === 'cert_class' || !!m.certType)
-      .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+      .sort((a, b) => this.compareTasksByDateAndTime(a, b));
 
     const s = this._trainingEmailStartDate;
     const e = this._trainingEmailEndDate;
@@ -2279,7 +2503,7 @@ class TripPlannerApp {
     const allManual = this.manualTasks || [];
     const allClasses = allManual
       .filter(m => m.taskCategory === 'cert_class' || !!m.certType)
-      .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+      .sort((a, b) => this.compareTasksByDateAndTime(a, b));
     const s = this._trainingEmailStartDate;
     const e = this._trainingEmailEndDate;
     const matchingClasses = allClasses.filter(c => {
@@ -2340,7 +2564,7 @@ class TripPlannerApp {
     const allManual = this.manualTasks || [];
     const allClasses = allManual
       .filter(m => m.taskCategory === 'cert_class' || !!m.certType)
-      .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+      .sort((a, b) => this.compareTasksByDateAndTime(a, b));
 
     const s = this._trainingEmailStartDate;
     const e = this._trainingEmailEndDate;
@@ -2582,7 +2806,7 @@ class TripPlannerApp {
     const allManual = this.manualTasks || [];
     return allManual
       .filter(m => (m.taskCategory === 'cert_class' || !!m.certType) && this._trainingEmailSelectedClassIds && this._trainingEmailSelectedClassIds.has(m.id))
-      .sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+      .sort((a, b) => this.compareTasksByDateAndTime(a, b));
   }
 
   generateTrainingEmailHtml() {
@@ -3641,8 +3865,12 @@ class TripPlannerApp {
 
         // 2. Render Training Section (Classes Cody teaches)
         const allManualTasks = this.getManualTasksForDate(dateKey);
-        const trainingClasses = allManualTasks.filter(m => m.taskCategory === 'cert_class' || !!m.certType);
-        const personalTasks = allManualTasks.filter(m => m.taskCategory === 'personal_task' && !m.certType);
+        const trainingClasses = allManualTasks
+          .filter(m => m.taskCategory === 'cert_class' || !!m.certType)
+          .sort((a, b) => this.compareTasksByTime(a, b));
+        const personalTasks = allManualTasks
+          .filter(m => m.taskCategory === 'personal_task' && !m.certType)
+          .sort((a, b) => this.compareTasksByTime(a, b));
 
         let trainingHtml = '';
         if (trainingClasses.length > 0) {
@@ -3661,7 +3889,7 @@ class TripPlannerApp {
                 </div>
               </div>
               <div id="section-body-${dateKey}-training" style="display: ${isCollapsed ? 'none' : 'flex'}; flex-direction: column; gap: 5px; margin-top: 5px;">
-                ${trainingClasses.map(mt => {
+                ${trainingClasses.map((mt, classIdx) => {
                   const isDone = mt.status === 'Complete';
                   const resolved = this.resolveClassAttendees(mt);
                   const isRosterOpen = !!(this._rosterExpanded && this._rosterExpanded[mt.id]);
@@ -3768,6 +3996,14 @@ class TripPlannerApp {
                           </div>
                         </div>
                         <div style="display: flex; align-items: center; gap: 3px;">
+                          ${trainingClasses.length > 1 ? `
+                            <button style="background: none; border: none; color: ${classIdx > 0 ? '#94a3b8' : '#334155'}; cursor: ${classIdx > 0 ? 'pointer' : 'default'}; padding: 1px 2px; font-size: 10px; line-height: 1; border-radius: 3px;" ${classIdx > 0 ? `onclick="window.tripPlanner.moveManualTask('${this.escapeHtml(mt.id)}', -1)" onmouseover="this.style.color='#34d399'" onmouseout="this.style.color='#94a3b8'"` : 'disabled'} title="${classIdx > 0 ? 'Move Class Up' : ''}">
+                              ▲
+                            </button>
+                            <button style="background: none; border: none; color: ${classIdx < trainingClasses.length - 1 ? '#94a3b8' : '#334155'}; cursor: ${classIdx < trainingClasses.length - 1 ? 'pointer' : 'default'}; padding: 1px 2px; font-size: 10px; line-height: 1; border-radius: 3px;" ${classIdx < trainingClasses.length - 1 ? `onclick="window.tripPlanner.moveManualTask('${this.escapeHtml(mt.id)}', 1)" onmouseover="this.style.color='#34d399'" onmouseout="this.style.color='#94a3b8'"` : 'disabled'} title="${classIdx < trainingClasses.length - 1 ? 'Move Class Down' : ''}">
+                              ▼
+                            </button>
+                          ` : ''}
                           <button style="background: none; border: none; color: #34d399; cursor: pointer; padding: 1px 3px; font-size: 11.5px; line-height: 1; border-radius: 3px;" onmouseover="this.style.color='#10b981'" onmouseout="this.style.color='#34d399'" onclick="window.tripPlanner.openComposeTrainingEmailModal('${this.escapeHtml(mt.id)}')" title="Compose Email for this Class">
                             ✉️
                           </button>
@@ -3802,7 +4038,7 @@ class TripPlannerApp {
                 <button class="btn btn-secondary" style="padding: 1px 6px; font-size: 9.5px; color: #93c5fd; border-color: rgba(59, 130, 246, 0.35); background: rgba(59, 130, 246, 0.08); cursor: pointer;" onclick="event.stopPropagation(); window.tripPlanner.openAddManualTaskModal('${dateKey}', '${this.escapeJs(day.dayName)}, ${this.escapeJs(day.formattedDate)}', 'personal_task')" title="Add Office Task">+ Task</button>
               </div>
               <div id="section-body-${dateKey}-office" style="display: ${isCollapsed ? 'none' : 'flex'}; flex-direction: column; gap: 5px; margin-top: 5px;">
-                ${personalTasks.map(mt => {
+                ${personalTasks.map((mt, taskIdx) => {
                   const isDone = mt.status === 'Complete';
                   const assignee = mt.assignedTo || 'Myself';
                   return `
@@ -3840,6 +4076,14 @@ class TripPlannerApp {
                           </div>
                         </div>
                         <div style="display: flex; align-items: center; gap: 3px;">
+                          ${personalTasks.length > 1 ? `
+                            <button style="background: none; border: none; color: ${taskIdx > 0 ? '#94a3b8' : '#334155'}; cursor: ${taskIdx > 0 ? 'pointer' : 'default'}; padding: 1px 2px; font-size: 10px; line-height: 1; border-radius: 3px;" ${taskIdx > 0 ? `onclick="window.tripPlanner.moveManualTask('${this.escapeHtml(mt.id)}', -1)" onmouseover="this.style.color='#60a5fa'" onmouseout="this.style.color='#94a3b8'"` : 'disabled'} title="${taskIdx > 0 ? 'Move Task Up' : ''}">
+                              ▲
+                            </button>
+                            <button style="background: none; border: none; color: ${taskIdx < personalTasks.length - 1 ? '#94a3b8' : '#334155'}; cursor: ${taskIdx < personalTasks.length - 1 ? 'pointer' : 'default'}; padding: 1px 2px; font-size: 10px; line-height: 1; border-radius: 3px;" ${taskIdx < personalTasks.length - 1 ? `onclick="window.tripPlanner.moveManualTask('${this.escapeHtml(mt.id)}', 1)" onmouseover="this.style.color='#60a5fa'" onmouseout="this.style.color='#94a3b8'"` : 'disabled'} title="${taskIdx < personalTasks.length - 1 ? 'Move Task Down' : ''}">
+                              ▼
+                            </button>
+                          ` : ''}
                           <button style="background: none; border: none; color: #64748b; cursor: pointer; padding: 1px 3px; font-size: 11px; line-height: 1; border-radius: 3px;" onmouseover="this.style.color='#60a5fa'" onmouseout="this.style.color='#64748b'" onclick="window.tripPlanner.openEditManualTaskModal('${this.escapeHtml(mt.id)}')" title="Edit Task">
                             ✏️
                           </button>
