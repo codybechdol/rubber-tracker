@@ -151,28 +151,7 @@ class TripPlannerApp {
     }
   }
 
-  loadHolidays() {
-    try {
-      const raw = localStorage.getItem('sa_holidays');
-      if (raw) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          const map = {};
-          parsed.forEach(h => {
-            if (h && typeof h === 'object' && h.date) {
-              map[h.date] = h.name || 'Holiday';
-            } else if (typeof h === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(h)) {
-              map[h] = 'Holiday';
-            }
-          });
-          return map;
-        } else if (parsed && typeof parsed === 'object') {
-          return parsed;
-        }
-      }
-    } catch (e) {}
-
-    // Default US / Company holidays
+  getDefaultHolidays() {
     return {
       '2026-01-01': "New Year's Day",
       '2026-05-25': "Memorial Day",
@@ -186,11 +165,41 @@ class TripPlannerApp {
     };
   }
 
+  loadHolidays() {
+    try {
+      const raw = localStorage.getItem('sa_holidays');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const map = {};
+          parsed.forEach(h => {
+            if (h && typeof h === 'object' && h.date) {
+              map[h.date] = h.name || 'Holiday';
+            } else if (typeof h === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(h)) {
+              map[h] = 'Holiday';
+            }
+          });
+          if (Object.keys(map).length > 0) return map;
+        } else if (parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0) {
+          return parsed;
+        }
+      }
+    } catch (e) {}
+
+    // Default US / Company holidays (auto-seeded when missing or cleared)
+    const defaults = this.getDefaultHolidays();
+    try {
+      localStorage.setItem('sa_holidays', JSON.stringify(defaults));
+      this.saveHolidays(defaults);
+    } catch (_) {}
+    return defaults;
+  }
+
   saveHolidays(holidays) {
     this.holidaysMap = holidays;
     try {
       localStorage.setItem('sa_holidays', JSON.stringify(holidays));
-      const snap = this.db.getSnapshot();
+      const snap = this.db && typeof this.db.getSnapshot === 'function' ? this.db.getSnapshot() : null;
       if (snap) {
         if (!snap.configs) snap.configs = {};
         snap.configs.holidays = holidays;
@@ -210,11 +219,27 @@ class TripPlannerApp {
         });
       }
 
-      this.db.addMutation({
-        action: 'SET_HOLIDAYS',
-        holidays: cleanArray
-      });
+      if (this.db && typeof this.db.addMutation === 'function') {
+        this.db.addMutation({
+          action: 'SET_HOLIDAYS',
+          holidays: cleanArray
+        });
+      }
     } catch (e) {}
+  }
+
+  restoreDefaultHolidays() {
+    const defaults = this.getDefaultHolidays();
+    this.saveHolidays(defaults);
+    this.renderHolidaysModalContent();
+    this.renderPlanner();
+  }
+
+  addOrUpdateHoliday(dateKey, name = 'Holiday') {
+    if (!this.holidaysMap) this.holidaysMap = this.loadHolidays();
+    this.holidaysMap[dateKey] = name || 'Holiday';
+    this.saveHolidays(this.holidaysMap);
+    this.renderPlanner();
   }
 
   isDayHoliday(dateKey) {
@@ -2134,57 +2159,105 @@ class TripPlannerApp {
     if (modal) modal.style.display = 'none';
   }
 
+  getWeekdayShort(dKey) {
+    try {
+      const [y, m, d] = dKey.split('-').map(Number);
+      const dt = new Date(y, m - 1, d, 12, 0, 0);
+      return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][dt.getDay()];
+    } catch (_) {
+      return '';
+    }
+  }
+
   renderHolidaysModalContent() {
     const body = document.getElementById('holidays-modal-body');
     if (!body) return;
 
-    if (!this.holidaysMap) this.holidaysMap = this.loadHolidays();
-    const sortedKeys = Object.keys(this.holidaysMap).sort();
+    if (!this.holidaysMap || Object.keys(this.holidaysMap).length === 0) {
+      this.holidaysMap = this.loadHolidays();
+    }
+    const sortedKeys = Object.keys(this.holidaysMap || {}).sort();
 
     body.innerHTML = `
       <div style="display: flex; flex-direction: column; gap: 14px;">
-        <div style="background: linear-gradient(135deg, rgba(202, 138, 4, 0.15) 0%, rgba(161, 98, 7, 0.05) 100%); border: 1px solid rgba(202, 138, 4, 0.35); border-radius: 8px; padding: 12px 16px;">
-          <div style="font-size: 14px; font-weight: 700; color: #fde047; margin-bottom: 2px;">
-            🏖️ Holiday & Blackout Day Manager
+        <div style="background: linear-gradient(135deg, rgba(202, 138, 4, 0.18) 0%, rgba(161, 98, 7, 0.08) 100%); border: 1px solid rgba(202, 138, 4, 0.4); border-radius: 8px; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
+          <div>
+            <div style="font-size: 14px; font-weight: 700; color: #fde047; margin-bottom: 2px;">
+              🏖️ Holiday & Blackout Day Manager
+            </div>
+            <div style="font-size: 12px; color: var(--text-secondary);">
+              Holidays protect work days from trip drops and adjust safety compliance and timesheet calculations.
+            </div>
           </div>
-          <div style="font-size: 12px; color: var(--text-secondary);">
-            Holidays protect work days from trip drops and adjust safety compliance and timesheet calculations.
-          </div>
+          <button type="button" class="btn" onclick="window.tripPlanner.restoreDefaultHolidays()" style="font-size: 11px; font-weight: 700; color: #fde047; border: 1px solid rgba(253, 224, 71, 0.45); background: rgba(234, 179, 8, 0.18); padding: 5px 12px; border-radius: 6px; cursor: pointer; white-space: nowrap;" title="Restore standard company holiday calendar for 2026">
+            🔄 Restore 2026 Holidays
+          </button>
+        </div>
+
+        <!-- Quick Presets -->
+        <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 11.5px; padding: 0 4px;">
+          <span style="color: var(--text-muted); font-weight: 600;">Quick Presets:</span>
+          <button type="button" class="btn btn-secondary" style="padding: 2px 8px; font-size: 11px; color: #fde047; border-color: rgba(253, 224, 71, 0.35);" onclick="document.getElementById('new-holiday-date').value='2026-09-07'; document.getElementById('new-holiday-name').value='Labor Day';">
+            📅 Today (Labor Day - 09/07)
+          </button>
+          <button type="button" class="btn btn-secondary" style="padding: 2px 8px; font-size: 11px; color: #93c5fd; border-color: rgba(147, 197, 253, 0.35);" onclick="document.getElementById('new-holiday-date').value='2026-11-26'; document.getElementById('new-holiday-name').value='Thanksgiving Day';">
+            🦃 Thanksgiving (11/26)
+          </button>
+          <button type="button" class="btn btn-secondary" style="padding: 2px 8px; font-size: 11px; color: #34d399; border-color: rgba(52, 211, 153, 0.35);" onclick="document.getElementById('new-holiday-date').value='2026-12-25'; document.getElementById('new-holiday-name').value='Christmas Day';">
+            🎄 Christmas (12/25)
+          </button>
+          <button type="button" class="btn btn-secondary" style="padding: 2px 8px; font-size: 11px; color: #c084fc; border-color: rgba(192, 132, 252, 0.35);" onclick="document.getElementById('new-holiday-date').value='2027-01-01'; document.getElementById('new-holiday-name').value='New Year\\'s Day';">
+            🎉 New Year's (01/01)
+          </button>
         </div>
 
         <!-- Add Custom Holiday Row -->
         <div style="display: flex; gap: 8px; align-items: center; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px 14px;">
-          <input type="date" id="new-holiday-date" style="padding: 5px 8px; font-size: 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; color: #fff;">
-          <input type="text" id="new-holiday-name" placeholder="Holiday name (e.g. Memorial Day)" style="flex: 1; padding: 5px 8px; font-size: 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; color: #fff;">
-          <button class="btn btn-primary" onclick="window.tripPlanner.addNewHolidayFromModal()" style="font-size: 12px; font-weight: 700; background: #ca8a04; border: none; padding: 6px 12px;">
+          <input type="date" id="new-holiday-date" style="padding: 5px 8px; font-size: 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; color: #fff;" onkeydown="if(event.key==='Enter') window.tripPlanner.addNewHolidayFromModal()">
+          <input type="text" id="new-holiday-name" placeholder="Holiday name (e.g. Labor Day, Memorial Day)" style="flex: 1; padding: 5px 8px; font-size: 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; color: #fff;" onkeydown="if(event.key==='Enter') window.tripPlanner.addNewHolidayFromModal()">
+          <button class="btn btn-primary" onclick="window.tripPlanner.addNewHolidayFromModal()" style="font-size: 12px; font-weight: 700; background: #ca8a04; border: none; padding: 6px 14px; cursor: pointer;">
             ➕ Add Holiday
           </button>
         </div>
 
         <!-- Current Holidays List -->
-        <div style="max-height: 300px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-primary);">
+        <div style="max-height: 320px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-primary);">
           <table class="data-table" style="width: 100%; border-collapse: collapse; font-size: 12.5px;">
             <thead>
               <tr style="position: sticky; top: 0; background: #1e293b; z-index: 2;">
-                <th style="width: 130px;">Date</th>
-                <th>Holiday / Blackout Name</th>
-                <th style="width: 80px; text-align: center;">Action</th>
+                <th style="width: 150px; text-align: left; padding: 8px 12px;">Date</th>
+                <th style="text-align: left; padding: 8px 12px;">Holiday / Blackout Name</th>
+                <th style="width: 80px; text-align: center; padding: 8px 12px;">Action</th>
               </tr>
             </thead>
             <tbody>
               ${sortedKeys.length === 0 ? `
-                <tr><td colspan="3" style="padding: 20px; text-align: center; color: var(--text-muted);">No holidays configured.</td></tr>
-              ` : sortedKeys.map(dKey => `
                 <tr>
-                  <td style="font-weight: 700; color: #fde047; font-family: monospace;">${dKey}</td>
-                  <td style="font-weight: 600; color: #f8fafc;">${this.escapeHtml(this.holidaysMap[dKey])}</td>
-                  <td style="text-align: center;">
-                    <button class="btn btn-secondary" style="padding: 2px 6px; font-size: 11px; color: #f87171;" onclick="window.tripPlanner.deleteHolidayFromModal('${dKey}')">
-                      🗑️
+                  <td colspan="3" style="padding: 24px; text-align: center; color: var(--text-muted);">
+                    No holidays configured.
+                    <button class="btn btn-primary" onclick="window.tripPlanner.restoreDefaultHolidays()" style="margin-left: 10px; font-size: 11.5px; font-weight: 700; padding: 4px 12px; background: #ca8a04; border: none; border-radius: 4px; cursor: pointer;">
+                      Load Standard 2026 Holidays
                     </button>
                   </td>
                 </tr>
-              `).join('')}
+              ` : sortedKeys.map(dKey => {
+                const dayOfWeek = this.getWeekdayShort(dKey);
+                const isToday = dKey === this.formatIsoDate(new Date());
+                return `
+                  <tr style="${isToday ? 'background: rgba(202, 138, 4, 0.12);' : ''}">
+                    <td style="padding: 8px 12px; font-weight: 700; color: #fde047; font-family: monospace;">
+                      ${dKey}${dayOfWeek ? ` <span style="font-size: 11px; font-weight: 600; color: #94a3b8;">(${dayOfWeek})</span>` : ''}
+                      ${isToday ? ` <span class="badge" style="background: #ca8a04; font-size: 9px; padding: 1px 5px; border-radius: 3px; margin-left: 4px;">TODAY</span>` : ''}
+                    </td>
+                    <td style="padding: 8px 12px; font-weight: 600; color: #f8fafc;">${this.escapeHtml(this.holidaysMap[dKey])}</td>
+                    <td style="padding: 8px 12px; text-align: center;">
+                      <button class="btn btn-secondary" style="padding: 3px 8px; font-size: 11px; color: #f87171; cursor: pointer;" onclick="window.tripPlanner.deleteHolidayFromModal('${dKey}')" title="Delete holiday">
+                        🗑️
+                      </button>
+                    </td>
+                  </tr>
+                `;
+              }).join('')}
             </tbody>
           </table>
         </div>
@@ -2195,17 +2268,38 @@ class TripPlannerApp {
   addNewHolidayFromModal() {
     const dateInput = document.getElementById('new-holiday-date');
     const nameInput = document.getElementById('new-holiday-name');
-    if (!dateInput || !dateInput.value) {
-      alert('⚠️ Please choose a date.');
+    let rawDate = dateInput ? (dateInput.value || '').trim() : '';
+
+    if (!rawDate) {
+      alert('⚠️ Please select or enter a date for the holiday.');
       return;
     }
-    const dKey = dateInput.value;
+
+    let dKey = '';
+    if (/^\d{4}-\d{2}-\d{2}$/.test(rawDate)) {
+      dKey = rawDate;
+    } else if (/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/.test(rawDate)) {
+      const match = rawDate.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+      const mm = match[1].padStart(2, '0');
+      const dd = match[2].padStart(2, '0');
+      const yyyy = match[3];
+      dKey = `${yyyy}-${mm}-${dd}`;
+    } else {
+      const parsed = new Date(rawDate);
+      if (!isNaN(parsed.getTime())) {
+        dKey = this.formatIsoDate(parsed);
+      }
+    }
+
+    if (!dKey || !/^\d{4}-\d{2}-\d{2}$/.test(dKey)) {
+      alert('⚠️ Invalid date format. Please choose a date from the calendar picker or use YYYY-MM-DD / MM/DD/YYYY.');
+      return;
+    }
+
     const name = (nameInput && nameInput.value.trim()) ? nameInput.value.trim() : 'Company Holiday';
 
-    this.toggleHoliday(dKey, name);
+    this.addOrUpdateHoliday(dKey, name);
     this.renderHolidaysModalContent();
-    dateInput.value = '';
-    if (nameInput) nameInput.value = '';
   }
 
   deleteHolidayFromModal(dKey) {

@@ -161,7 +161,7 @@ class LocalDatabase {
           localStorage.setItem('sa_work_schedule', snapshot.configs.workSchedule);
         } catch (e) {}
       }
-      if (snapshot.configs.holidays) {
+      if (snapshot.configs.holidays && (Array.isArray(snapshot.configs.holidays) ? snapshot.configs.holidays.length > 0 : Object.keys(snapshot.configs.holidays).length > 0)) {
         try {
           localStorage.setItem('sa_holidays', JSON.stringify(snapshot.configs.holidays));
         } catch (e) {}

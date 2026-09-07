@@ -30277,14 +30277,42 @@ function setupAEDSheet() {
  * Each holiday: { date: 'YYYY-MM-DD', name: 'Holiday Name' }
  * Handles arrays, object maps, and null elements gracefully.
  * @return {Array}
+/**
+ * Returns standard company holiday dates for 2026.
+ * @return {Array<Object>}
+ */
+function getDefaultCompanyHolidays() {
+  return [
+    { date: '2026-01-01', name: "New Year's Day" },
+    { date: '2026-05-25', name: "Memorial Day" },
+    { date: '2026-07-03', name: "Independence Day (Observed)" },
+    { date: '2026-07-04', name: "Independence Day" },
+    { date: '2026-09-07', name: "Labor Day" },
+    { date: '2026-11-26', name: "Thanksgiving Day" },
+    { date: '2026-11-27', name: "Day After Thanksgiving" },
+    { date: '2026-12-24', name: "Christmas Eve" },
+    { date: '2026-12-25', name: "Christmas Day" }
+  ];
+}
+
+/**
+ * Returns all holidays from ScriptProperties as an array of { date: 'YYYY-MM-DD', name: '...' }.
+ * Seeds standard company holidays if HOLIDAYS has not yet been initialized.
+ * @return {Array<Object>}
  */
 function getHolidays() {
   var props = PropertiesService.getScriptProperties();
   var raw = props.getProperty('HOLIDAYS');
-  if (!raw) return [];
+  if (!raw) {
+    var defaults = getDefaultCompanyHolidays();
+    try {
+      props.setProperty('HOLIDAYS', JSON.stringify(defaults));
+    } catch (_) {}
+    return defaults;
+  }
   try {
     var parsed = JSON.parse(raw);
-    if (!parsed) return [];
+    if (!parsed) return getDefaultCompanyHolidays();
     var list = [];
     if (Array.isArray(parsed)) {
       for (var i = 0; i < parsed.length; i++) {
@@ -30302,10 +30330,17 @@ function getHolidays() {
         }
       }
     }
+    if (list.length === 0) {
+      var defaultsFallback = getDefaultCompanyHolidays();
+      try {
+        props.setProperty('HOLIDAYS', JSON.stringify(defaultsFallback));
+      } catch (_) {}
+      return defaultsFallback;
+    }
     return list;
   } catch (e) {
     Logger.log('getHolidays parse error: ' + e);
-    return [];
+    return getDefaultCompanyHolidays();
   }
 }
 /**
