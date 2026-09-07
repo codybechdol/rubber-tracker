@@ -30275,6 +30275,7 @@ function setupAEDSheet() {
 /**
  * Returns the array of holiday objects stored in ScriptProperties.
  * Each holiday: { date: 'YYYY-MM-DD', name: 'Holiday Name' }
+ * Handles arrays, object maps, and null elements gracefully.
  * @return {Array}
  */
 function getHolidays() {
@@ -30282,18 +30283,54 @@ function getHolidays() {
   var raw = props.getProperty('HOLIDAYS');
   if (!raw) return [];
   try {
-    return JSON.parse(raw);
+    var parsed = JSON.parse(raw);
+    if (!parsed) return [];
+    var list = [];
+    if (Array.isArray(parsed)) {
+      for (var i = 0; i < parsed.length; i++) {
+        var item = parsed[i];
+        if (item && typeof item === 'object' && item.date) {
+          list.push({ date: String(item.date).trim(), name: String(item.name || 'Holiday').trim() });
+        } else if (typeof item === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(item)) {
+          list.push({ date: item, name: 'Holiday' });
+        }
+      }
+    } else if (typeof parsed === 'object') {
+      for (var key in parsed) {
+        if (/^\d{4}-\d{2}-\d{2}$/.test(key)) {
+          list.push({ date: key, name: String(parsed[key] || 'Holiday').trim() });
+        }
+      }
+    }
+    return list;
   } catch (e) {
     Logger.log('getHolidays parse error: ' + e);
     return [];
   }
 }
 /**
- * Saves the full holidays array to ScriptProperties.
- * @param {Array} holidays
+ * Saves the full holidays array to ScriptProperties in standardized format.
+ * @param {Array|Object} holidays
  */
 function saveHolidays(holidays) {
-  PropertiesService.getScriptProperties().setProperty('HOLIDAYS', JSON.stringify(holidays || []));
+  var cleanList = [];
+  if (Array.isArray(holidays)) {
+    for (var i = 0; i < holidays.length; i++) {
+      var h = holidays[i];
+      if (h && typeof h === 'object' && h.date) {
+        cleanList.push({ date: String(h.date).trim(), name: String(h.name || 'Holiday').trim() });
+      } else if (typeof h === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(h)) {
+        cleanList.push({ date: h, name: 'Holiday' });
+      }
+    }
+  } else if (holidays && typeof holidays === 'object') {
+    for (var k in holidays) {
+      if (/^\d{4}-\d{2}-\d{2}$/.test(k)) {
+        cleanList.push({ date: k, name: String(holidays[k] || 'Holiday').trim() });
+      }
+    }
+  }
+  PropertiesService.getScriptProperties().setProperty('HOLIDAYS', JSON.stringify(cleanList));
 }
 /**
  * Checks whether a given dateKey (YYYY-MM-DD) is a holiday.
@@ -30303,7 +30340,7 @@ function saveHolidays(holidays) {
 function isHoliday(dateKey) {
   var holidays = getHolidays();
   for (var i = 0; i < holidays.length; i++) {
-    if (holidays[i].date === dateKey) return true;
+    if (holidays[i] && holidays[i].date === dateKey) return true;
   }
   return false;
 }
@@ -30319,7 +30356,7 @@ function toggleHoliday(dateKey, name, isOn) {
   var holidays = getHolidays();
   var idx = -1;
   for (var i = 0; i < holidays.length; i++) {
-    if (holidays[i].date === dateKey) { idx = i; break; }
+    if (holidays[i] && holidays[i].date === dateKey) { idx = i; break; }
   }
   if (isOn && idx === -1) {
     holidays.push({ date: dateKey, name: name || 'Holiday' });
@@ -30337,7 +30374,7 @@ function toggleHoliday(dateKey, name, isOn) {
 function getHolidayName(dateKey) {
   var holidays = getHolidays();
   for (var i = 0; i < holidays.length; i++) {
-    if (holidays[i].date === dateKey) return holidays[i].name;
+    if (holidays[i] && holidays[i].date === dateKey) return holidays[i].name;
   }
   return null;
 }
@@ -30349,7 +30386,9 @@ function getHolidayMap() {
   var holidays = getHolidays();
   var map = {};
   for (var i = 0; i < holidays.length; i++) {
-    map[holidays[i].date] = holidays[i].name;
+    if (holidays[i] && holidays[i].date) {
+      map[holidays[i].date] = holidays[i].name || 'Holiday';
+    }
   }
   return map;
 }
@@ -30364,7 +30403,9 @@ function showManageHolidaysDialog() {
     lines.push('  (none)');
   } else {
     for (var i = 0; i < holidays.length; i++) {
-      lines.push('  ' + holidays[i].date + '  ' + holidays[i].name);
+      if (holidays[i] && holidays[i].date) {
+        lines.push('  ' + holidays[i].date + '  ' + holidays[i].name);
+      }
     }
   }
   lines.push('');
@@ -33117,6 +33158,12 @@ function doGet(e) {
 
       return ContentService.createTextOutput(JSON.stringify(result))
         .setMimeType(ContentService.MimeType.JSON);
+    } else if (action === 'recalculateCompliance') {
+      var recResult = (typeof executeSyncApiRecalculateCompliance === 'function')
+        ? executeSyncApiRecalculateCompliance()
+        : { status: 'error', message: 'executeSyncApiRecalculateCompliance not found' };
+      return ContentService.createTextOutput(JSON.stringify(recResult))
+        .setMimeType(ContentService.MimeType.JSON);
     } else if (action === 'applyMutations' || action === 'checkConflicts') {
       var mutationsStr = e.parameter.mutations || '[]';
       var mutations = [];
@@ -33209,6 +33256,14 @@ function doPost(e) {
         prevResult: payload.prevResult || null
       });
       return ContentService.createTextOutput(JSON.stringify(procResult))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    if (action === 'recalculateCompliance') {
+      var recResult = (typeof executeSyncApiRecalculateCompliance === 'function')
+        ? executeSyncApiRecalculateCompliance()
+        : { status: 'error', message: 'executeSyncApiRecalculateCompliance not found' };
+      return ContentService.createTextOutput(JSON.stringify(recResult))
         .setMimeType(ContentService.MimeType.JSON);
     }
 

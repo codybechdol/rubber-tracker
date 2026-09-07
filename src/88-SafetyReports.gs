@@ -1828,15 +1828,23 @@ function calculateComplianceFromLogs(weekStartDate, options) {
   Logger.log("calculateComplianceFromLogs: isCurrentWeek = " + isCurrentWeek);
 
   // Load holiday map once for the week (date -> name)
-  var holidayMap = getHolidayMap();
+  var holidayMap = {};
+  try {
+    holidayMap = (typeof getHolidayMap === 'function') ? getHolidayMap() : {};
+  } catch (holErr) {
+    Logger.log("calculateComplianceFromLogs: Error loading holidayMap (non-fatal): " + holErr);
+    holidayMap = {};
+  }
   var holidayDatesThisWeek = [];
-  for (var hd = 0; hd < 7; hd++) {
-    var dayDate = new Date(weekBounds.weekStart.getTime());
-    dayDate.setDate(dayDate.getDate() + hd);
-    var dayKey = Utilities.formatDate(dayDate, tz, 'yyyy-MM-dd');
-    if (holidayMap[dayKey]) {
-      holidayDatesThisWeek.push(hd); // day-of-week index (0=Sun)
-      Logger.log("calculateComplianceFromLogs: holiday on day " + hd + " (" + dayKey + " = " + holidayMap[dayKey] + ")");
+  if (holidayMap && typeof holidayMap === 'object') {
+    for (var hd = 0; hd < 7; hd++) {
+      var dayDate = new Date(weekBounds.weekStart.getTime());
+      dayDate.setDate(dayDate.getDate() + hd);
+      var dayKey = Utilities.formatDate(dayDate, tz, 'yyyy-MM-dd');
+      if (holidayMap[dayKey]) {
+        holidayDatesThisWeek.push(hd); // day-of-week index (0=Sun)
+        Logger.log("calculateComplianceFromLogs: holiday on day " + hd + " (" + dayKey + " = " + holidayMap[dayKey] + ")");
+      }
     }
   }
   var weekHasHoliday = holidayDatesThisWeek.length > 0;
@@ -6036,7 +6044,16 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
     }
 
     var periodStr = isDateStr ? "since " + daysBack : "in the last " + daysBack + " days";
-    Browser.msgBox("No NEW safety emails found " + periodStr + ".\n\nAll emails in this period have already been processed. Safety Compliance sheet has been updated.");
+    try {
+      if (typeof Browser !== 'undefined' && Browser.msgBox && typeof SpreadsheetApp !== 'undefined') {
+        var ui = SpreadsheetApp.getUi();
+        if (ui) {
+          Browser.msgBox("No NEW safety emails found " + periodStr + ".\n\nAll emails in this period have already been processed. Safety Compliance sheet has been updated.");
+        }
+      }
+    } catch (msgErr) {
+      // Running in headless Web App context; ignore UI message box
+    }
     return { complete: true, totalThreads: 0, message: "No new emails found - all already processed" };
   }
 
@@ -14382,9 +14399,11 @@ function fixSafetyComplianceNotes() {
 
     // Build new notes text
     var notesParts = [];
-    if (compInfo.missingDays.length > 0) {
-      var dates = compInfo.missingDays.map(function(d) { return d.date; });
-      notesParts.push('Missing JHA: ' + dates.join(', '));
+    if (compInfo.missingDays && compInfo.missingDays.length > 0) {
+      var dates = compInfo.missingDays.filter(function(d) { return d && d.date; }).map(function(d) { return d.date; });
+      if (dates.length > 0) {
+        notesParts.push('Missing JHA: ' + dates.join(', '));
+      }
     }
     if (compInfo.weeklyMeetingMissing) {
       notesParts.push('Missing Weekly Safety Meeting for week of ' + compInfo.weekStartDisplay);
@@ -16765,6 +16784,37 @@ function findNonConfigCrewsInCurrentWeek(ss, currentWeekStart, config, tz) {
   }
 
   return nonConfigCrews;
+}
+
+/**
+ * Helper: Remove non-config crews from current week (silent, no UI)
+ */
+function removeNonConfigCrewsFromCurrentWeekSilent(ss, currentWeekStart, config, tz) {
+  var sheet = ss.getSheetByName('Safety Compliance');
+  if (!sheet || sheet.getLastRow() < 2) return 0;
+
+  var currentWeekKey = Utilities.formatDate(currentWeekStart, tz, 'yyyy-MM-dd');
+  var data = sheet.getDataRange().getValues();
+  var rowsToDelete = [];
+
+  for (var i = data.length - 1; i >= 1; i--) {
+    var rowWeek = data[i][0];
+    var rowJob = String(data[i][1] || '').trim();
+
+    if (!rowWeek || !rowJob) continue;
+
+    var rowWeekKey = Utilities.formatDate(new Date(rowWeek), tz, 'yyyy-MM-dd');
+
+    if (rowWeekKey === currentWeekKey && !config[rowJob]) {
+      rowsToDelete.push(i + 1);
+    }
+  }
+
+  for (var r = 0; r < rowsToDelete.length; r++) {
+    sheet.deleteRow(rowsToDelete[r]);
+  }
+
+  return rowsToDelete.length;
 }
 
 function autoComplianceCleanup(skipSyncCrews, reportTypeFilter) {

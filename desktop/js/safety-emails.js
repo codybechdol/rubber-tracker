@@ -149,8 +149,17 @@ class SafetyEmailsEngine {
   renderCompletionModalContent(container, stats) {
     const availableMonths = this.getAvailableMonths();
 
+    const warningBanner = stats.complianceError ? `
+      <div style="background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.4); border-radius: 8px; padding: 10px 14px; color: #fcd34d; font-size: 12px; line-height: 1.4;">
+        <strong>⚠️ Compliance Calculation Notice:</strong> Emails were logged, but matrix recalculation reported:
+        <div style="font-family: monospace; font-size: 11px; margin-top: 4px; color: #fef08a;">${this.escapeHtml(stats.complianceError)}</div>
+        You can use the <strong>🔄 Recalculate</strong> button on the toolbar to re-run compliance calculation.
+      </div>
+    ` : '';
+
     container.innerHTML = `
       <div style="display: flex; flex-direction: column; gap: 14px;">
+        ${warningBanner}
         <div style="background: linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(5, 150, 105, 0.05) 100%); border: 1px solid rgba(16, 185, 129, 0.4); border-radius: 8px; padding: 12px 18px; text-align: center;">
           <div style="font-size: 24px; margin-bottom: 4px;">✅</div>
           <h3 style="color: #6ee7b7; font-size: 15px; font-weight: 800; margin-bottom: 2px;">Safety Emails & Complete Audit Log</h3>
@@ -738,7 +747,8 @@ class SafetyEmailsEngine {
           totalThreads: totalThreads || totalProcessed + totalSkipped,
           totalLogs: totalLogs,
           cumulativeLogs: cumulativeLogs,
-          totalIssues: totalIssues
+          totalIssues: totalIssues,
+          complianceError: finalResult ? finalResult.complianceError : null
         });
       }
 
@@ -753,7 +763,12 @@ class SafetyEmailsEngine {
         `;
       }
 
-      window.syncEngine.updateStatusUI('synced', `Compliance updated (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`);
+      if (finalResult && finalResult.complianceError) {
+        console.warn('Compliance calculation reported error:', finalResult.complianceError);
+        window.syncEngine.updateStatusUI('error', 'Emails logged, but compliance calculation had an issue');
+      } else {
+        window.syncEngine.updateStatusUI('synced', `Compliance updated (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`);
+      }
 
     } catch (err) {
       console.error('runProcessEmails error:', err);
@@ -777,6 +792,58 @@ class SafetyEmailsEngine {
           <button class="btn btn-primary" onclick="window.safetyComplianceEngine.openProcessEmailsModal()">Try Again</button>
         `;
       }
+    } finally {
+      this.isProcessing = false;
+    }
+  }
+
+  /**
+   * Recalculates Safety Compliance matrix without re-scanning Gmail.
+   */
+  async runRecalculateCompliance() {
+    if (this.isProcessing) return;
+
+    const syncUrl = window.syncEngine ? window.syncEngine.getSyncUrl() : '';
+    if (!syncUrl) {
+      alert('⚠️ Please configure your Google Apps Script Web App sync URL first in Settings.');
+      return;
+    }
+
+    const confirmRecalc = confirm('Recalculate Safety Compliance matrix now?\n\nThis will evaluate all logged JHAs, weekly safety meetings, and monthly checklists for current and previous weeks and refresh your desktop view.');
+    if (!confirmRecalc) return;
+
+    this.isProcessing = true;
+    window.syncEngine.updateStatusUI('syncing', 'Recalculating Compliance...');
+
+    try {
+      const payload = {
+        action: 'recalculateCompliance'
+      };
+
+      const response = await window.syncEngine.executeNetworkRequest(syncUrl, 'POST', payload, 180000);
+      console.log('Recalculate compliance response:', response);
+
+      if (!response || !response.success) {
+        const errMsg = (response && (response.error || response.message || (response.result && response.result.error)))
+          ? (response.error || response.message || response.result.error)
+          : 'Failed to recalculate compliance.';
+        throw new Error(errMsg);
+      }
+
+      if (response.snapshot) {
+        await window.localDB.setSnapshot(response.snapshot);
+      }
+
+      if (window.sheetNavigator) {
+        window.sheetNavigator.renderSafetyCompliance();
+      }
+
+      window.syncEngine.updateStatusUI('synced', `Compliance recalculated (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`);
+      alert('✅ Safety Compliance matrix recalculated successfully! View has been updated.');
+    } catch (err) {
+      console.error('runRecalculateCompliance error:', err);
+      window.syncEngine.updateStatusUI('error', 'Recalculation failed');
+      alert(`❌ Failed to recalculate compliance:\n\n${err.message}`);
     } finally {
       this.isProcessing = false;
     }

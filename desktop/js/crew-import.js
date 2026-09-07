@@ -98,8 +98,8 @@ class CrewImportEngine {
   getNewHireConfig(empName, nh = null) {
     if (!this.newHireConfigs[empName]) {
       const defaultHireDate = this.rosterDate || this.parseRosterDate(this.selectedSheet);
-      const gloveDefault = nh?.historyRecord ? (nh.historyRecord['Glove Size'] || '10') : '10';
-      const sleeveDefault = nh?.historyRecord ? (nh.historyRecord['Sleeve Size'] || 'Regular') : 'Regular';
+      const gloveDefault = nh?.historyRecord ? (nh.historyRecord['Glove Size'] || 'N/A') : 'N/A';
+      const sleeveDefault = nh?.historyRecord ? (nh.historyRecord['Sleeve Size'] || 'N/A') : 'N/A';
       const phoneDefault = nh?.historyRecord ? (nh.historyRecord['Phone Number'] || '') : '';
       const classDefault = nh?.classification || nh?.role || '1 AP';
 
@@ -1655,10 +1655,13 @@ class CrewImportEngine {
           }
 
           // Queue UPDATE_ROW for Employees
+          const empRowIdx = row._rowIdx || (empTable.rows ? empTable.rows.indexOf(row) + 2 : null);
           await this.db.addMutation({
             action: 'UPDATE_ROW',
             sheetName: empTable.name,
             tableKey: 'employees',
+            employeeName: this.getEmpRowName(row) || change.employeeName,
+            row: empRowIdx,
             itemIdentifier: this.getEmpRowName(row) || change.employeeName,
             updatedFields: updatedFields
           });
@@ -1707,10 +1710,13 @@ class CrewImportEngine {
               });
             }
 
+            const empRowIdx = row._rowIdx || (empTable.rows ? empTable.rows.indexOf(row) + 2 : null);
             await this.db.addMutation({
               action: 'UPDATE_ROW',
               sheetName: empTable.name,
               tableKey: 'employees',
+              employeeName: this.getEmpRowName(row) || q.name,
+              row: empRowIdx,
               itemIdentifier: this.getEmpRowName(row) || q.name,
               updatedFields: updatedFields
             });
@@ -1745,10 +1751,13 @@ class CrewImportEngine {
               });
             }
 
+            const empRowIdx = row._rowIdx || (empTable.rows ? empTable.rows.indexOf(row) + 2 : null);
             await this.db.addMutation({
               action: 'UPDATE_ROW',
               sheetName: empTable.name,
               tableKey: 'employees',
+              employeeName: this.getEmpRowName(row) || q.name,
+              row: empRowIdx,
               itemIdentifier: this.getEmpRowName(row) || q.name,
               updatedFields: updatedFields
             });
@@ -1796,10 +1805,13 @@ class CrewImportEngine {
               });
             }
 
+            const empRowIdx = row._rowIdx || (empTable.rows ? empTable.rows.indexOf(row) + 2 : null);
             await this.db.addMutation({
               action: 'UPDATE_ROW',
               sheetName: empTable.name,
               tableKey: 'employees',
+              employeeName: this.getEmpRowName(row) || to.name,
+              row: empRowIdx,
               itemIdentifier: this.getEmpRowName(row) || to.name,
               updatedFields: updatedFields
             });
@@ -1826,8 +1838,8 @@ class CrewImportEngine {
       for (const nh of allNewEmps) {
         const cfg = this.getNewHireConfig(nh.name, nh);
         const hireDateFormatted = cfg.hireDate ? this.formatDateForSheet(cfg.hireDate) : (this.rosterDateFormatted || todayFormatted);
-        const gloveVal = cfg.gloveSize || (nh.historyRecord ? (nh.historyRecord['Glove Size'] || '10') : '10');
-        const sleeveVal = cfg.sleeveSize || (nh.historyRecord ? (nh.historyRecord['Sleeve Size'] || 'Regular') : 'Regular');
+        const gloveVal = cfg.gloveSize || (nh.historyRecord ? (nh.historyRecord['Glove Size'] || 'N/A') : 'N/A');
+        const sleeveVal = cfg.sleeveSize || (nh.historyRecord ? (nh.historyRecord['Sleeve Size'] || 'N/A') : 'N/A');
         const phoneVal = cfg.phone || (nh.historyRecord ? (nh.historyRecord['Phone Number'] || '') : '');
         const emailVal = cfg.email || '';
         const classVal = cfg.classification || nh.classification || 'JRY';
@@ -1864,10 +1876,13 @@ class CrewImportEngine {
           this.syncRowToRawGrid(empTable, targetEmpRow);
           appliedCount++;
 
+          const empRowIdx = targetEmpRow._rowIdx || (empTable.rows ? empTable.rows.indexOf(targetEmpRow) + 2 : null);
           await this.db.addMutation({
             action: 'UPDATE_ROW',
             sheetName: empTable.name,
             tableKey: 'employees',
+            employeeName: nh.name,
+            row: empRowIdx,
             itemIdentifier: nh.name,
             updatedFields: updatedFields
           });
@@ -2398,8 +2413,8 @@ class CrewImportEngine {
           <div style="display: flex; flex-direction: column; gap: 14px; margin-bottom: 24px;">
             ${deltas.newHires.map(nh => {
               const cfg = this.getNewHireConfig(nh.name, nh);
-              const gloveOptions = ['8', '8.5', '9', '9.5', '10', '10.5', '11', '11.5', '12', 'N/A'];
-              const sleeveOptions = ['Regular', 'Large', 'X-Large', 'N/A'];
+              const gloveOptions = ['N/A', '8', '8.5', '9', '9.5', '10', '10.5', '11', '11.5', '12'];
+              const sleeveOptions = ['N/A', 'Regular', 'Large', 'X-Large'];
 
               return `
                 <div class="new-hire-card" style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-left: 4px solid #10b981; border-radius: 8px; padding: 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.2);">
@@ -2666,6 +2681,45 @@ class CrewImportEngine {
       { key: 'skipSat', label: 'Sa', isWork: !days.skipSat }
     ];
 
+    // Determine which preset matches this crew's schedule for the dropdown
+    const validPresets = [
+      'Mon-Thu (4 10s)',
+      'Mon-Fri (5 10s)',
+      'Mon-Fri (5 8s)',
+      'Tue-Fri (4 10s)',
+      'Mon-Sat (6 10s)',
+      'Fri & Sat (Weekend)',
+      'Sat & Sun (Weekend)',
+      'Mon-Wed',
+      'Mon Only',
+      'Custom'
+    ];
+    let selectedSchedule = 'Mon-Thu (4 10s)';
+    const sLabel = String(crew.scheduleLabel || '').trim();
+    if (validPresets.includes(sLabel)) {
+      selectedSchedule = sLabel;
+    } else if (sLabel.includes('Fri-Sat') || sLabel.includes('Fri & Sat') || sLabel.includes('Fri/Sat') || sLabel.toLowerCase().includes('friday & saturday')) {
+      selectedSchedule = 'Fri & Sat (Weekend)';
+    } else if (sLabel.includes('Sat & Sun') || sLabel.includes('Sat-Sun') || sLabel.includes('Sat/Sun') || sLabel.includes('Weekend') || sLabel.toLowerCase().includes('saturday & sunday')) {
+      selectedSchedule = 'Sat & Sun (Weekend)';
+    } else if (sLabel.includes('Mon Only') || sLabel.includes('Monday Only')) {
+      selectedSchedule = 'Mon Only';
+    } else if (sLabel.includes('5 8') || sLabel.includes('5-8') || sLabel.includes('5/8')) {
+      selectedSchedule = 'Mon-Fri (5 8s)';
+    } else if (sLabel.includes('5 10') || sLabel.includes('5-10') || sLabel.includes('5/10')) {
+      selectedSchedule = 'Mon-Fri (5 10s)';
+    } else if (sLabel.includes('Mon-Sat') || sLabel.includes('6 10') || sLabel.includes('6-10')) {
+      selectedSchedule = 'Mon-Sat (6 10s)';
+    } else if (sLabel.includes('Tue-Fri') || sLabel.includes('T-F') || sLabel.includes('Tu-F') || sLabel.includes('Tues-Fri')) {
+      selectedSchedule = 'Tue-Fri (4 10s)';
+    } else if (sLabel.includes('Mon-Wed')) {
+      selectedSchedule = 'Mon-Wed';
+    } else if (sLabel.includes('Mon-Fri') || sLabel === 'M-F') {
+      selectedSchedule = 'Mon-Fri (5 10s)';
+    } else if (sLabel.includes('Mon-Thu') || sLabel === 'M-Th') {
+      selectedSchedule = 'Mon-Thu (4 10s)';
+    }
+
     return `
       <div class="crew-card" id="crew-card-${crew.jobNumber}" style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.2);">
         
@@ -2697,16 +2751,16 @@ class CrewImportEngine {
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
             <span style="font-size: 11px; font-weight: 700; color: var(--text-muted);">Work Schedule:</span>
             <select class="form-control" style="font-size: 11px; padding: 2px 6px; background: var(--bg-tertiary); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px;" onchange="window.crewImportEngine.setCrewSchedule('${crew.jobNumber}', this.value)">
-              <option value="Mon-Thu (4 10s)" ${crew.scheduleLabel.includes('Mon-Thu') ? 'selected' : ''}>Mon-Thu (4 10s)</option>
-              <option value="Mon-Fri (5 10s)" ${crew.scheduleLabel.includes('5 10') ? 'selected' : ''}>Mon-Fri (5 10s)</option>
-              <option value="Mon-Fri (5 8s)" ${crew.scheduleLabel.includes('5 8') ? 'selected' : ''}>Mon-Fri (5 8s)</option>
-              <option value="Tue-Fri (4 10s)" ${crew.scheduleLabel.includes('Tue-Fri') ? 'selected' : ''}>Tue-Fri (4 10s)</option>
-              <option value="Mon-Sat (6 10s)" ${crew.scheduleLabel.includes('Mon-Sat') || crew.scheduleLabel.includes('6 10') ? 'selected' : ''}>Mon-Sat (6 10s)</option>
-              <option value="Fri & Sat (Weekend)" ${crew.scheduleLabel.includes('Fri-Sat') || crew.scheduleLabel.includes('Fri & Sat') ? 'selected' : ''}>Fri & Sat (Weekend)</option>
-              <option value="Sat & Sun (Weekend)" ${crew.scheduleLabel.includes('Weekend') || crew.scheduleLabel.includes('Sat & Sun') ? 'selected' : ''}>Sat & Sun (Weekend)</option>
-              <option value="Mon-Wed" ${crew.scheduleLabel.includes('Mon-Wed') ? 'selected' : ''}>Mon-Wed</option>
-              <option value="Mon Only" ${crew.scheduleLabel.includes('Mon Only') || crew.scheduleLabel === 'Mon Only' ? 'selected' : ''}>Mon Only (Monday Only)</option>
-              <option value="Custom" ${crew.scheduleLabel === 'Custom' ? 'selected' : ''}>Custom Days</option>
+              <option value="Mon-Thu (4 10s)" ${selectedSchedule === 'Mon-Thu (4 10s)' ? 'selected' : ''}>Mon-Thu (4 10s)</option>
+              <option value="Mon-Fri (5 10s)" ${selectedSchedule === 'Mon-Fri (5 10s)' ? 'selected' : ''}>Mon-Fri (5 10s)</option>
+              <option value="Mon-Fri (5 8s)" ${selectedSchedule === 'Mon-Fri (5 8s)' ? 'selected' : ''}>Mon-Fri (5 8s)</option>
+              <option value="Tue-Fri (4 10s)" ${selectedSchedule === 'Tue-Fri (4 10s)' ? 'selected' : ''}>Tue-Fri (4 10s)</option>
+              <option value="Mon-Sat (6 10s)" ${selectedSchedule === 'Mon-Sat (6 10s)' ? 'selected' : ''}>Mon-Sat (6 10s)</option>
+              <option value="Fri & Sat (Weekend)" ${selectedSchedule === 'Fri & Sat (Weekend)' ? 'selected' : ''}>Fri & Sat (Weekend)</option>
+              <option value="Sat & Sun (Weekend)" ${selectedSchedule === 'Sat & Sun (Weekend)' ? 'selected' : ''}>Sat & Sun (Weekend)</option>
+              <option value="Mon-Wed" ${selectedSchedule === 'Mon-Wed' ? 'selected' : ''}>Mon-Wed</option>
+              <option value="Mon Only" ${selectedSchedule === 'Mon Only' ? 'selected' : ''}>Mon Only (Monday Only)</option>
+              <option value="Custom" ${selectedSchedule === 'Custom' ? 'selected' : ''}>Custom Days</option>
             </select>
           </div>
 
@@ -2865,6 +2919,7 @@ class CrewImportEngine {
 
     if (presetLabel === 'Custom') {
       crew.scheduleLabel = 'Custom';
+      if (crew.scheduleDays) crew.scheduleDays.label = 'Custom';
     } else {
       crew.scheduleLabel = presetLabel;
       crew.scheduleDays = this.getScheduleFlags(presetLabel);
@@ -2883,6 +2938,7 @@ class CrewImportEngine {
     // Toggle the skip boolean (true -> false, false -> true)
     crew.scheduleDays[dayKey] = !crew.scheduleDays[dayKey];
     crew.scheduleLabel = 'Custom';
+    crew.scheduleDays.label = 'Custom';
     this.render();
   }
 

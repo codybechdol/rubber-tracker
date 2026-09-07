@@ -132,15 +132,25 @@ function exportFullDatabaseSnapshot() {
     var rows = [];
     var rawGrid = [];
 
-    var isLogOrHistory = cfg.key.indexOf('history') !== -1 || cfg.key.indexOf('_log') !== -1;
-    var maxHistoryRows = 300;
+    var isHistory = cfg.key.indexOf('history') !== -1;
+    var isLog = cfg.key.indexOf('_log') !== -1;
+    var maxHistoryRows = 500;
     var startRowIndex = 0;
-    if (isLogOrHistory && data.length > maxHistoryRows + 10) {
+    var endRowIndex = data.length;
+
+    if (isHistory && data.length > maxHistoryRows + 10) {
+      // History sheets have newest rows appended at the bottom
       startRowIndex = data.length - maxHistoryRows;
+    } else if (isLog && data.length > maxHistoryRows + 10) {
+      // Log sheets (JHA, Weekly Safety, Monthly Checklist) are sorted newest-first at the top
+      endRowIndex = headerRowIdx + 1 + maxHistoryRows;
     }
 
     for (var r = 0; r < data.length; r++) {
-      if (r > headerRowIdx && isLogOrHistory && r < startRowIndex) {
+      if (r > headerRowIdx && isHistory && r < startRowIndex) {
+        continue;
+      }
+      if (r > headerRowIdx && isLog && r >= endRowIndex) {
         continue;
       }
 
@@ -2362,15 +2372,18 @@ function getRecentSafetyLogs(limit) {
     return '';
   }
 
-  // 1. JHA Log
+  // 1. JHA Log (sorted newest-first at the top)
   var jhaSheet = ss.getSheetByName('JHA Log');
   if (jhaSheet && jhaSheet.getLastRow() > 1) {
     var jData = jhaSheet.getDataRange().getValues();
-    var startJ = Math.max(1, jData.length - limit);
-    for (var r = jData.length - 1; r >= startJ; r--) {
+    var jCount = 0;
+    for (var r = 1; r < jData.length && jCount < limit; r++) {
       var row = jData[r];
       var emailId = String(row[5] || '').trim();
       var subject = String(row[4] || '').trim();
+      var jobNum = String(row[2] || '').trim();
+      if (!emailId && !subject && !jobNum) continue; // Skip month separator rows
+      jCount++;
       allLogs.push({
         id: 'jha_' + (r + 1),
         sheetName: 'JHA Log',
@@ -2378,7 +2391,7 @@ function getRecentSafetyLogs(limit) {
         rowIndex: r + 1,
         dateReceived: fmtDate(row[0], true),
         date: fmtDate(row[1], false),
-        jobNumber: String(row[2] || '').trim(),
+        jobNumber: jobNum,
         foreman: String(row[3] || '').trim(),
         subject: subject,
         emailId: emailId,
@@ -2391,15 +2404,18 @@ function getRecentSafetyLogs(limit) {
     }
   }
 
-  // 2. Weekly Safety Log
+  // 2. Weekly Safety Log (sorted newest-first at the top)
   var weeklySheet = ss.getSheetByName('Weekly Safety Log');
   if (weeklySheet && weeklySheet.getLastRow() > 1) {
     var wData = weeklySheet.getDataRange().getValues();
-    var startW = Math.max(1, wData.length - limit);
-    for (var rw = wData.length - 1; rw >= startW; rw--) {
+    var wCount = 0;
+    for (var rw = 1; rw < wData.length && wCount < limit; rw++) {
       var wRow = wData[rw];
       var wEmailId = String(wRow[5] || '').trim();
       var wSubject = String(wRow[4] || '').trim();
+      var wJob = String(wRow[2] || '').trim();
+      if (!wEmailId && !wSubject && !wJob) continue; // Skip month separator rows
+      wCount++;
       allLogs.push({
         id: 'weekly_' + (rw + 1),
         sheetName: 'Weekly Safety Log',
@@ -2407,7 +2423,7 @@ function getRecentSafetyLogs(limit) {
         rowIndex: rw + 1,
         dateReceived: fmtDate(wRow[0], true),
         date: fmtDate(wRow[1], false),
-        jobNumber: String(wRow[2] || '').trim(),
+        jobNumber: wJob,
         foreman: String(wRow[3] || '').trim(),
         subject: wSubject,
         emailId: wEmailId,
@@ -2419,15 +2435,18 @@ function getRecentSafetyLogs(limit) {
     }
   }
 
-  // 3. Monthly Checklist Log
+  // 3. Monthly Checklist Log (sorted newest-first at the top)
   var monthlySheet = ss.getSheetByName('Monthly Checklist Log');
   if (monthlySheet && monthlySheet.getLastRow() > 1) {
     var mData = monthlySheet.getDataRange().getValues();
-    var startM = Math.max(1, mData.length - limit);
-    for (var rm = mData.length - 1; rm >= startM; rm--) {
+    var mCount = 0;
+    for (var rm = 1; rm < mData.length && mCount < limit; rm++) {
       var mRow = mData[rm];
       var mEmailId = String(mRow[6] || '').trim();
       var mSubject = String(mRow[5] || '').trim();
+      var mJob = String(mRow[2] || '').trim();
+      if (!mEmailId && !mSubject && !mJob) continue; // Skip month separator rows
+      mCount++;
       allLogs.push({
         id: 'monthly_' + (rm + 1),
         sheetName: 'Monthly Checklist Log',
@@ -2435,7 +2454,7 @@ function getRecentSafetyLogs(limit) {
         rowIndex: rm + 1,
         dateReceived: fmtDate(mRow[0], true),
         date: fmtDate(mRow[1], false),
-        jobNumber: String(mRow[2] || '').trim(),
+        jobNumber: mJob,
         foreman: String(mRow[3] || '').trim(),
         vehicleNumber: String(mRow[4] || '').trim(),
         subject: mSubject,
@@ -2450,6 +2469,83 @@ function getRecentSafetyLogs(limit) {
   }
 
   return allLogs;
+}
+
+/**
+ * Executes a full compliance matrix recalculation and returns fresh snapshot.
+ */
+function executeSyncApiRecalculateCompliance() {
+  var ss = typeof getActiveSpreadsheetSafe === 'function' ? getActiveSpreadsheetSafe() : SpreadsheetApp.getActiveSpreadsheet();
+  var tz = (ss && ss.getSpreadsheetTimeZone()) || Session.getScriptTimeZone() || 'America/Denver';
+  var today = new Date();
+  var currentWeek = getWeekBoundaries(today);
+  var previousWeek = getWeekBoundaries(new Date(currentWeek.weekStart.getTime() - 7 * 24 * 60 * 60 * 1000));
+  var results = { success: true, weeksProcessed: 0, compliant: 0, missing: 0 };
+
+  try {
+    // 1. Calculate & update previous week (past deadline - creates tasks)
+    if (typeof calculateComplianceFromLogs === 'function' && typeof updateComplianceSheetFromLogs === 'function') {
+      var prevData = calculateComplianceFromLogs(previousWeek.weekStart, { ignoreResolved: true });
+      if (prevData) {
+        updateComplianceSheetFromLogs(prevData, { ignoreResolved: true });
+        if (typeof createMissingReportTasks === 'function') {
+          createMissingReportTasks(prevData);
+        }
+        results.weeksProcessed++;
+        results.compliant += prevData.compliantCount || 0;
+        results.missing += prevData.missingCount || 0;
+      }
+
+      // 2. Calculate & update current week
+      var currData = calculateComplianceFromLogs(currentWeek.weekStart, { ignoreResolved: true });
+      if (currData) {
+        updateComplianceSheetFromLogs(currData, { ignoreResolved: true });
+        results.weeksProcessed++;
+        results.compliant += currData.compliantCount || 0;
+        results.missing += currData.missingCount || 0;
+      }
+
+      // 3. Format compliance sheet
+      if (typeof formatComplianceSheetByWeek === 'function') {
+        formatComplianceSheetByWeek();
+      }
+
+      // 4. Auto-cleanup non-config crews & fix logs
+      if (typeof autoComplianceCleanup === 'function') {
+        try {
+          autoComplianceCleanup(true);
+        } catch (cleanErr) {
+          Logger.log('executeSyncApiRecalculateCompliance cleanup error: ' + cleanErr);
+        }
+      }
+    }
+  } catch (err) {
+    Logger.log('executeSyncApiRecalculateCompliance error: ' + err);
+    results.success = false;
+    results.error = err.toString();
+  }
+
+  SpreadsheetApp.flush();
+
+  var freshSnapshot = null;
+  if (typeof exportFullDatabaseSnapshot === 'function') {
+    try {
+      freshSnapshot = exportFullDatabaseSnapshot();
+      if (freshSnapshot && typeof generateAndStoreSyncSnapshot === 'function') {
+        generateAndStoreSyncSnapshot(freshSnapshot);
+      }
+    } catch (eSnap) {
+      Logger.log('executeSyncApiRecalculateCompliance snapshot error: ' + eSnap);
+    }
+  }
+
+  return {
+    status: results.success ? 'ok' : 'error',
+    success: results.success,
+    error: results.error || null,
+    result: results,
+    snapshot: freshSnapshot
+  };
 }
 
 /**

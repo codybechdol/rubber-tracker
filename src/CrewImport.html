@@ -620,7 +620,7 @@
               <div class="col-md-6">
                 <label class="form-label small">Glove Size</label>
                 <select class="form-select form-select-sm" id="newEmpGloveSize">
-                  <option value="">Select size...</option>
+                  <option value="N/A" selected>N/A</option>
                   <option value="8">8</option>
                   <option value="8.5">8.5</option>
                   <option value="9">9</option>
@@ -630,17 +630,15 @@
                   <option value="11">11</option>
                   <option value="11.5">11.5</option>
                   <option value="12">12</option>
-                  <option value="N/A">N/A</option>
                 </select>
               </div>
               <div class="col-md-6">
                 <label class="form-label small">Sleeve Size</label>
                 <select class="form-select form-select-sm" id="newEmpSleeveSize">
-                  <option value="">Select size...</option>
+                  <option value="N/A" selected>N/A</option>
                   <option value="Regular">Regular</option>
                   <option value="Large">Large</option>
                   <option value="X-Large">X-Large</option>
-                  <option value="N/A">N/A</option>
                 </select>
               </div>
             </div>
@@ -2096,9 +2094,9 @@
         var history = nh.historyData;
         var isRehire = history !== null;
 
-        // Pre-fill values from history
-        var prefillGlove = (isRehire && history.gloveSize) ? history.gloveSize : '';
-        var prefillSleeve = (isRehire && history.sleeveSize) ? history.sleeveSize : '';
+        // Pre-fill values from history (default to N/A for new hires)
+        var prefillGlove = (isRehire && history.gloveSize) ? history.gloveSize : 'N/A';
+        var prefillSleeve = (isRehire && history.sleeveSize) ? history.sleeveSize : 'N/A';
         var prefillPhone = (isRehire && history.phone) ? history.phone : '';
         var prefillDate = ''; // Leave blank — user enters the actual start date
 
@@ -2163,8 +2161,7 @@
         html += '<div>';
         html += '<label class="form-label mb-0" style="font-size: 11px; color: #5f6368;">Glove</label>';
         html += '<select class="form-select form-select-sm" id="nh-glove-' + i + '" style="width: 90px; font-size: 12px;">';
-        html += '<option value="">—</option>';
-        var gloveSizes = ['8', '8.5', '9', '9.5', '10', '10.5', '11', '11.5', '12', 'N/A'];
+        var gloveSizes = ['N/A', '8', '8.5', '9', '9.5', '10', '10.5', '11', '11.5', '12'];
         for (var gs = 0; gs < gloveSizes.length; gs++) {
           var gSel = (prefillGlove === gloveSizes[gs]) ? ' selected' : '';
           html += '<option value="' + gloveSizes[gs] + '"' + gSel + '>' + gloveSizes[gs] + '</option>';
@@ -2176,8 +2173,7 @@
         html += '<div>';
         html += '<label class="form-label mb-0" style="font-size: 11px; color: #5f6368;">Sleeve</label>';
         html += '<select class="form-select form-select-sm" id="nh-sleeve-' + i + '" style="width: 100px; font-size: 12px;">';
-        html += '<option value="">—</option>';
-        var sleeveSizes = ['Regular', 'Large', 'X-Large', 'N/A'];
+        var sleeveSizes = ['N/A', 'Regular', 'Large', 'X-Large'];
         for (var ss = 0; ss < sleeveSizes.length; ss++) {
           var sSel = (prefillSleeve === sleeveSizes[ss]) ? ' selected' : '';
           html += '<option value="' + sleeveSizes[ss] + '"' + sSel + '>' + sleeveSizes[ss] + '</option>';
@@ -6531,8 +6527,8 @@
       document.getElementById('newEmpEmail').value = '';
       document.getElementById('newEmpMPEmail').value = '';
       document.getElementById('newEmpNotificationEmails').value = '';
-      document.getElementById('newEmpGloveSize').selectedIndex = 0;
-      document.getElementById('newEmpSleeveSize').selectedIndex = 0;
+      document.getElementById('newEmpGloveSize').value = 'N/A';
+      document.getElementById('newEmpSleeveSize').value = 'N/A';
 
       // Show the modal
       var modal = new bootstrap.Modal(document.getElementById('newEmployeeModal'));
@@ -8824,8 +8820,8 @@
       document.getElementById('newEmpEmail').value = '';
       document.getElementById('newEmpMPEmail').value = '';
       document.getElementById('newEmpNotificationEmails').value = '';
-      document.getElementById('newEmpGloveSize').selectedIndex = 0;
-      document.getElementById('newEmpSleeveSize').selectedIndex = 0;
+      document.getElementById('newEmpGloveSize').value = 'N/A';
+      document.getElementById('newEmpSleeveSize').value = 'N/A';
 
       // Show the modal
       var modal = new bootstrap.Modal(document.getElementById('newEmployeeModal'));

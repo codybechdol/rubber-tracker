@@ -182,8 +182,8 @@ class SyncEngine {
     const isJobTrackingSheet = tableKey === 'job_tracking';
 
     // Resolve context from local db row or mutation payload
-    let employeeName = mut.employeeName || mut.empName || '';
-    let itemNumber = mut.itemNumber || mut.itemNum || mut.serialNum || mut.itemIdentifier || mut.serial || '';
+    let employeeName = mut.employeeName || mut.empName || (isEmployeeSheet ? (mut.itemIdentifier || mut.employee) : '') || '';
+    let itemNumber = (!isEmployeeSheet && !isJobTrackingSheet) ? (mut.itemNumber || mut.itemNum || mut.serialNum || mut.itemIdentifier || mut.serial || '') : (mut.itemNumber || mut.itemNum || mut.serialNum || '');
     let certName = mut.certName || mut.certType || mut.itemType || '';
     let fieldHeader = mut.header || mut.colName || (mut.col ? `Column ${mut.col}` : 'Field');
     let rowData = mut.rowData || {};
@@ -191,8 +191,12 @@ class SyncEngine {
     const table = this.db && typeof this.db.getTable === 'function' ? this.db.getTable(tableKey) : null;
     let targetRow = null;
 
-    if (table && table.rows && mut.row) {
-      targetRow = table.rows.find(r => r._rowIdx === mut.row) || table.rows[mut.row - 2] || table.rows[mut.row - 1];
+    if (table && table.rows) {
+      if (mut.row) {
+        targetRow = table.rows.find(r => r._rowIdx === mut.row) || table.rows[mut.row - 2] || table.rows[mut.row - 1];
+      } else if (isEmployeeSheet && employeeName) {
+        targetRow = table.rows.find(r => (r['Name'] || r['Employee Name'] || '').toLowerCase().trim() === employeeName.toLowerCase().trim());
+      }
     }
 
     const isHvtOrPs = tableKey.includes('hv') || tableKey.includes('phasing') || sheet.toLowerCase().includes('hv') || sheet.toLowerCase().includes('phasing');
@@ -229,7 +233,8 @@ class SyncEngine {
       itemNumber = String(itemNumber).replace(/^#+/, '').trim();
     }
 
-    const row = mut.row || '?';
+    const resolvedRow = mut.row || (targetRow ? (targetRow._rowIdx || targetRow.row) : null);
+    const row = resolvedRow || '?';
     const oldVal = mut.oldValue !== undefined && mut.oldValue !== null && String(mut.oldValue).trim() !== '' ? `"${mut.oldValue}"` : '(Empty)';
     const newVal = mut.value !== undefined && mut.value !== null && String(mut.value).trim() !== '' ? `"${mut.value}"` : '(Empty)';
 
@@ -285,8 +290,14 @@ class SyncEngine {
         title = `${eqIcon} ${itemLabel}${empSuffix} • Updated`;
         desc = `<span style="color: #60a5fa; font-weight: 700;">${itemLabel}</span> <span style="color: var(--text-muted); font-size: 11px;">(Row ${row}):</span> Record data updated`;
       } else if (isEmployeeSheet) {
-        title = `👤 Employee: ${employeeName || `Row ${row}`} • Updated`;
-        desc = `<span style="color: var(--text-muted); font-size: 11px;">Row ${row}:</span> Employee record updated`;
+        const empLabel = employeeName ? employeeName : (row !== '?' ? `Row ${row}` : 'Record');
+        title = `👤 Employee: ${empLabel} • Updated`;
+        const fieldDetails = (mut.updatedFields && Object.keys(mut.updatedFields).length > 0)
+          ? Object.entries(mut.updatedFields).slice(0, 3).map(([k, v]) => `${k}: <strong>${v || '(Empty)'}</strong>`).join(' • ')
+          : (Object.keys(rowData || {}).length > 0
+              ? Object.entries(rowData).slice(0, 3).map(([k, v]) => `${k}: <strong>${v || '(Empty)'}</strong>`).join(' • ')
+              : 'Employee record updated');
+        desc = `${row !== '?' ? `<span style="color: var(--text-muted); font-size: 11px;">Row ${row}:</span> ` : ''}${fieldDetails}`;
       } else {
         title = `📝 Updated Row ${row} on ${sheet}`;
         desc = Object.entries(rowData || {}).slice(0, 3).map(([k, v]) => `${k}: <strong>${v}</strong>`).join(' • ') || 'Row updated';

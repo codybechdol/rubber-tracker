@@ -154,7 +154,22 @@ class TripPlannerApp {
   loadHolidays() {
     try {
       const raw = localStorage.getItem('sa_holidays');
-      if (raw) return JSON.parse(raw);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          const map = {};
+          parsed.forEach(h => {
+            if (h && typeof h === 'object' && h.date) {
+              map[h.date] = h.name || 'Holiday';
+            } else if (typeof h === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(h)) {
+              map[h] = 'Holiday';
+            }
+          });
+          return map;
+        } else if (parsed && typeof parsed === 'object') {
+          return parsed;
+        }
+      }
     } catch (e) {}
 
     // Default US / Company holidays
@@ -180,9 +195,24 @@ class TripPlannerApp {
         if (!snap.configs) snap.configs = {};
         snap.configs.holidays = holidays;
       }
+
+      // Convert map to canonical server array of { date, name }
+      const cleanArray = [];
+      if (Array.isArray(holidays)) {
+        holidays.forEach(h => {
+          if (h && h.date) cleanArray.push({ date: h.date, name: h.name || 'Holiday' });
+        });
+      } else if (holidays && typeof holidays === 'object') {
+        Object.keys(holidays).forEach(k => {
+          if (/^\d{4}-\d{2}-\d{2}$/.test(k)) {
+            cleanArray.push({ date: k, name: holidays[k] || 'Holiday' });
+          }
+        });
+      }
+
       this.db.addMutation({
         action: 'SET_HOLIDAYS',
-        holidays: holidays
+        holidays: cleanArray
       });
     } catch (e) {}
   }
