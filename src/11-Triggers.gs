@@ -664,7 +664,8 @@ function onEditHandler(e) {
             'OSHA 1910',
             'BNSF',
             'MSHA',
-            'EICA Basic Helicopter Line Construction Safety'
+            'EICA Basic Helicopter Line Construction Safety',
+            'NECA Basic Helicopter Line Construction Safety'
           ];
           try {
             var configRaw = PropertiesService.getScriptProperties().getProperty('EXPIRING_CERTS_CONFIG');
@@ -681,7 +682,8 @@ function onEditHandler(e) {
             }
           } catch (e) {}
 
-          var isNonExpiring = nonExpiring.indexOf(certType) !== -1;
+          var cTypeLower = certType.toLowerCase();
+          var isNonExpiring = nonExpiring.indexOf(certType) !== -1 || cTypeLower.indexOf('helicopter') !== -1 || cTypeLower.indexOf('helo') !== -1;
           var expDateCell = sheet.getRange(editedRow, 4); // Col D (4): Expiration Date
           var daysCell = sheet.getRange(editedRow, 7);    // Col G (7): Days Until Expiration
           var statusCell = sheet.getRange(editedRow, 8);  // Col H (8): Status

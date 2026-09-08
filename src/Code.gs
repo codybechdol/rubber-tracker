@@ -2413,7 +2413,8 @@ function getCertTypeDefaults() {
     'Forklift Operator Safety Training',
     'Rigging & Signaling/Signalperson & Spotter Cert',
     'Harassment Training',
-    'EICA Basic Helicopter Line Construction Safety'
+    'EICA Basic Helicopter Line Construction Safety',
+    'NECA Basic Helicopter Line Construction Safety'
   ];
 
   var nonExpiring = [
@@ -2421,7 +2422,8 @@ function getCertTypeDefaults() {
     'OSHA 1910',
     'BNSF',
     'MSHA',
-    'EICA Basic Helicopter Line Construction Safety'
+    'EICA Basic Helicopter Line Construction Safety',
+    'NECA Basic Helicopter Line Construction Safety'
   ];
 
   var defaultChecked = [
@@ -2449,7 +2451,7 @@ function getCertTypeDefaults() {
     'O': 'Forklift Operator Safety Training',
     'P': 'Rigging & Signaling/Signalperson & Spotter Cert',
     'Q': 'Harassment Training',
-    'R': 'EICA Basic Helicopter Line Construction Safety',
+    'R': 'NECA Basic Helicopter Line Construction Safety',
     'S': 'Pole Top Rescue'
   };
 
@@ -2486,8 +2488,16 @@ function calculateCertExpirationDate(certType, acquiredDate) {
   var acq = (acquiredDate instanceof Date) ? acquiredDate : parseDateNoon(String(acquiredDate));
   if (!acq || isNaN(acq.getTime())) return null;
 
-  var exp = new Date(acq.getTime());
   var typeLower = String(certType || '').trim().toLowerCase();
+
+  // Non-expiring certifications return null (no expiration date)
+  if (typeLower.indexOf('helicopter') !== -1 || typeLower.indexOf('helo') !== -1 ||
+      typeLower === 'crane evaluation' || typeLower === 'osha 1910' ||
+      typeLower === 'bnsf' || typeLower === 'msha') {
+    return null;
+  }
+
+  var exp = new Date(acq.getTime());
 
   if (typeLower === 'pole top rescue' || typeLower === 'coin cpr' || typeLower === 'harassment training') {
     exp.setFullYear(exp.getFullYear() + 1);
@@ -3499,7 +3509,8 @@ function parseExcelCertDataMultiRow(pastedText, columnMapping) {
     'OSHA 1910',
     'BNSF',
     'MSHA',
-    'EICA Basic Helicopter Line Construction Safety'
+    'EICA Basic Helicopter Line Construction Safety',
+    'NECA Basic Helicopter Line Construction Safety'
   ];
 
   // Header keywords to skip - these are not employee names
@@ -3615,7 +3626,7 @@ function parseExcelCertDataMultiRow(pastedText, columnMapping) {
         }
       }
 
-      var isIssuedType = (certType === 'Crane Evaluation' || certType === 'OSHA 1910' || certType === 'MSHA' || certType === 'OSHA Trench Comp Person' || certType.indexOf('Operator Safety') !== -1);
+      var isIssuedType = (certType === 'Crane Evaluation' || certType === 'OSHA 1910' || certType === 'MSHA' || certType === 'OSHA Trench Comp Person' || certType.indexOf('Operator Safety') !== -1 || certType.toLowerCase().indexOf('helicopter') !== -1);
 
       var finalAcqDateStr = null;
       var finalExpDateStr = null;
@@ -4843,11 +4854,15 @@ function sortExpiringCertsSheet(sheet) {
     'OSHA Trench Comp Person',
     'Forklift',
     'Forklift Operator Safety Training',
-    'EICA Basic Helicopter Line Construction Safety'
+    'EICA Basic Helicopter Line Construction Safety',
+    'NECA Basic Helicopter Line Construction Safety'
   ];
 
   function getCertSortIndex(certType) {
     var idx = CERT_ORDER.indexOf(certType);
+    if (idx === -1 && certType && certType.toLowerCase().indexOf('helicopter') !== -1) {
+      idx = CERT_ORDER.indexOf('NECA Basic Helicopter Line Construction Safety');
+    }
     return idx === -1 ? 999 : idx;
   }
 
@@ -4857,7 +4872,8 @@ function sortExpiringCertsSheet(sheet) {
     'OSHA 1910',
     'BNSF',
     'MSHA',
-    'EICA Basic Helicopter Line Construction Safety'
+    'EICA Basic Helicopter Line Construction Safety',
+    'NECA Basic Helicopter Line Construction Safety'
   ];
   try {
     var configRaw = PropertiesService.getScriptProperties().getProperty('EXPIRING_CERTS_CONFIG');
@@ -4922,7 +4938,7 @@ function sortExpiringCertsSheet(sheet) {
       }
     }
 
-    if (nonExpiringList.indexOf(rowCert) !== -1) {
+    if (nonExpiringList.indexOf(rowCert) !== -1 || (rowCert && rowCert.toLowerCase().indexOf('helicopter') !== -1)) {
       var acqVal = values[v][2];
       var expVal = values[v][3];
       if (!acqVal && expVal && String(expVal).trim() !== 'N/A') {
