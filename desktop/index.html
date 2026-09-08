@@ -170,6 +170,9 @@
             <button class="btn" id="btn-new-item" style="background: #2563eb; color: white; padding: 6px 14px; font-size: 12px;" onclick="window.inventoryManager.showNewItemModal(window.sheetNavigator.currentSheetKey)">
               ➕ New Item
             </button>
+            <button class="btn" id="btn-new-employee" style="background: linear-gradient(135deg, #10b981, #059669); color: white; padding: 6px 14px; font-size: 12px; font-weight: 700; display: none; align-items: center; gap: 5px;" onclick="window.sheetNavigator.showNewEmployeeModal()" title="Add a new employee to the active Employees sheet">
+              <span>👤</span> New Employee
+            </button>
             <button class="btn btn-secondary" id="btn-transfer-equipment-top" style="padding: 6px 12px; font-size: 12px; display: inline-flex; align-items: center; gap: 5px; border-color: #0284c7; color: #38bdf8;" onclick="window.inventoryManager.openTransferEquipmentModal()" title="Transfer truck & crew equipment (Blankets, MACKs, HV Testers, Phasing Sets, AED, Grounds, Hot Sticks) from outgoing to incoming Foreman">
               <span>⚡</span> Transfer Equipment
             </button>
@@ -857,6 +860,217 @@
       </div>
       <div class="modal-footer" id="employee-profile-modal-footer">
         <button class="btn btn-primary" onclick="window.employeeProfileEngine.closeProfileModal()">Close Profile</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add New Employee Modal -->
+  <div id="new-employee-modal" class="modal-overlay" style="z-index: 1050;">
+    <div class="modal-box" style="max-width: 680px; width: 95%; max-height: 90vh;">
+      <div class="modal-header" style="background: linear-gradient(135deg, #059669 0%, #047857 100%); color: white; padding: 14px 20px;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 20px;">👤</span>
+          <span id="new-employee-modal-title" style="font-weight: 700; font-size: 16px;">Add New Employee</span>
+        </div>
+        <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 12px; background: rgba(0,0,0,0.2); border: none; color: white; cursor: pointer;" onclick="window.sheetNavigator.closeNewEmployeeModal()">✕</button>
+      </div>
+      
+      <div class="modal-body" style="max-height: 75vh; overflow-y: auto; padding: 20px;">
+        <!-- Rehire Alert Banner -->
+        <div id="new-emp-rehire-banner" style="display: none; background: rgba(14, 165, 233, 0.12); border: 1px solid #0284c7; border-radius: 8px; padding: 12px 14px; margin-bottom: 16px;">
+          <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 10px;">
+            <div>
+              <div style="font-weight: 700; color: #38bdf8; font-size: 13px; display: flex; align-items: center; gap: 6px;">
+                <span>🔄</span> Rehire Detected
+              </div>
+              <div id="new-emp-rehire-msg" style="font-size: 12px; color: #bae6fd; margin-top: 3px;">
+                Previous records found for this employee.
+              </div>
+            </div>
+            <button type="button" class="btn" id="btn-prefill-rehire" style="background: #0284c7; color: white; font-size: 11px; padding: 4px 10px; font-weight: 600; white-space: nowrap;" onclick="window.sheetNavigator.prefillFromRehire()">
+              ⚡ Pre-fill Info
+            </button>
+          </div>
+        </div>
+
+        <!-- Active Duplicate Warning -->
+        <div id="new-emp-dup-banner" style="display: none; background: rgba(239, 68, 68, 0.12); border: 1px solid #dc2626; border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; font-size: 12.5px; color: #fca5a5;">
+          <span style="font-weight: 700;">⚠️ Notice:</span> <span id="new-emp-dup-msg">An active employee with this name already exists.</span>
+        </div>
+
+        <!-- Pending New Hire Banner -->
+        <div id="new-emp-pending-banner" style="display: none; background: rgba(245, 158, 11, 0.12); border: 1px solid #d97706; border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; font-size: 12.5px; color: #fde68a;">
+          <span>🕐</span> <strong>Pending New Hire</strong> — Future start date selected. Equipment can be pre-assigned now. Employee will be excluded from swap reports and task collection until their Hire Date.
+        </div>
+
+        <form id="new-employee-form" onsubmit="event.preventDefault(); window.sheetNavigator.submitNewEmployee();">
+          <!-- Section 1: Basic & Location Info -->
+          <div style="margin-bottom: 18px;">
+            <div style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; border-bottom: 1px solid var(--border-color); padding-bottom: 4px;">
+              📍 Basic & Location Information
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+              <div>
+                <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px; color: var(--text-main);">
+                  Full Name <span style="color: #ef4444;">*</span>
+                </label>
+                <input type="text" id="new-emp-name" class="form-control" placeholder="e.g., Jane Doe" required oninput="window.sheetNavigator.onNewEmployeeNameInput(this.value)" style="width: 100%; padding: 8px 10px; border-radius: 6px; background: var(--bg-primary); color: var(--text-main); border: 1px solid var(--border-color); font-size: 13px;">
+              </div>
+              <div>
+                <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px; color: var(--text-main);">
+                  Hire Date <span style="color: #ef4444;">*</span>
+                </label>
+                <input type="date" id="new-emp-hire-date" class="form-control" required onchange="window.sheetNavigator.checkNewEmployeePendingStatus()" style="width: 100%; padding: 8px 10px; border-radius: 6px; background: var(--bg-primary); color: var(--text-main); border: 1px solid var(--border-color); font-size: 13px;">
+                <div style="font-size: 10.5px; color: var(--text-muted); margin-top: 2px;">Future date = Pending New Hire</div>
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+              <div>
+                <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px; color: var(--text-main);">
+                  Location <span style="color: #ef4444;">*</span>
+                </label>
+                <select id="new-emp-location" class="form-control" required onchange="window.sheetNavigator.onNewEmpLocationChange()" style="width: 100%; padding: 8px 10px; border-radius: 6px; background: var(--bg-primary); color: var(--text-main); border: 1px solid var(--border-color); font-size: 13px;">
+                  <option value="">Select location...</option>
+                </select>
+                <div id="new-emp-location-hint" style="font-size: 10.5px; color: var(--text-muted); margin-top: 2px;">"Unknown" is only for Pending Hires</div>
+
+                <!-- Inline New Location Form -->
+                <div id="new-emp-inline-loc-form" style="display: none; margin-top: 8px; padding: 10px; background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 6px;">
+                  <div style="font-size: 11.5px; font-weight: 700; color: #60a5fa; margin-bottom: 6px;">➕ Add New City/Location</div>
+                  <input type="text" id="new-emp-custom-loc-name" placeholder="City Name (e.g., Hamilton)" style="width: 100%; padding: 6px 8px; margin-bottom: 6px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-primary); color: var(--text-main); font-size: 12px;">
+                  <div style="display: flex; gap: 6px;">
+                    <button type="button" class="btn" style="background: #2563eb; color: white; padding: 4px 8px; font-size: 11px;" onclick="window.sheetNavigator.saveCustomLocation()">Save</button>
+                    <button type="button" class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px;" onclick="window.sheetNavigator.cancelCustomLocation()">Cancel</button>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px; color: var(--text-main);">
+                  Job Number / Crew
+                </label>
+                <input type="text" id="new-emp-job-number" list="new-emp-job-datalist" class="form-control" placeholder="e.g., 005-26.1, 029-26.04" onchange="window.sheetNavigator.onNewEmpJobNumberChange()" style="width: 100%; padding: 8px 10px; border-radius: 6px; background: var(--bg-primary); color: var(--text-main); border: 1px solid var(--border-color); font-size: 13px;">
+                <datalist id="new-emp-job-datalist"></datalist>
+                <div style="font-size: 10.5px; color: var(--text-muted); margin-top: 2px;">Leave blank if crew is TBD</div>
+              </div>
+            </div>
+
+            <div>
+              <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px; color: var(--text-main);">
+                Job Classification / Trade Rank <span style="color: #ef4444;">*</span>
+              </label>
+              <select id="new-emp-classification" class="form-control" required style="width: 100%; padding: 8px 10px; border-radius: 6px; background: var(--bg-primary); color: var(--text-main); border: 1px solid var(--border-color); font-size: 13px;">
+                <option value="">Select classification...</option>
+                <option value="AP 1">AP 1 - Apprentice 1st Year</option>
+                <option value="AP 2">AP 2 - Apprentice 2nd Year</option>
+                <option value="AP 3">AP 3 - Apprentice 3rd Year</option>
+                <option value="AP 4">AP 4 - Apprentice 4th Year</option>
+                <option value="AP 5">AP 5 - Apprentice 5th Year</option>
+                <option value="AP 6">AP 6 - Apprentice 6th Year</option>
+                <option value="AP 7">AP 7 - Apprentice 7th Year</option>
+                <option value="ST 1">ST 1 - Sub Tech 1st Year</option>
+                <option value="ST 2">ST 2 - Sub Tech 2nd Year</option>
+                <option value="ST 3">ST 3 - Sub Tech 3rd Year</option>
+                <option value="ST 4">ST 4 - Sub Tech 4th Year</option>
+                <option value="ST 5">ST 5 - Sub Tech 5th Year</option>
+                <option value="ST 6">ST 6 - Sub Tech 6th Year</option>
+                <option value="ST 7">ST 7 - Sub Tech 7th Year</option>
+                <option value="JRY">JRY - Journeyman Lineman</option>
+                <option value="WT">WT - White Ticket Lineman</option>
+                <option value="F">F - Foreman</option>
+                <option value="GF">GF - General Foreman</option>
+                <option value="SUP">SUP - Supervisor</option>
+                <option value="JRY OP">JRY OP - Journeyman Operator</option>
+                <option value="OP">OP - Operator</option>
+                <option value="GTO F">GTO F - GTO Foreman</option>
+                <option value="GTO">GTO - General Trade Operator</option>
+                <option value="EO 1">EO 1 - Equipment Operator 1</option>
+                <option value="EO 2">EO 2 - Equipment Operator 2</option>
+              </select>
+            </div>
+          </div>
+
+          <!-- Section 2: Contact Details -->
+          <div style="margin-bottom: 18px;">
+            <div style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; border-bottom: 1px solid var(--border-color); padding-bottom: 4px;">
+              📞 Contact Details
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+              <div>
+                <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px; color: var(--text-main);">
+                  Phone Number
+                </label>
+                <input type="text" id="new-emp-phone" class="form-control" placeholder="(406) 555-1234" style="width: 100%; padding: 8px 10px; border-radius: 6px; background: var(--bg-primary); color: var(--text-main); border: 1px solid var(--border-color); font-size: 13px;">
+              </div>
+              <div>
+                <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px; color: var(--text-main);">
+                  MP Work Email / ID
+                </label>
+                <input type="text" id="new-emp-mp-email" class="form-control" placeholder="e.g., team12 or work email" style="width: 100%; padding: 8px 10px; border-radius: 6px; background: var(--bg-primary); color: var(--text-main); border: 1px solid var(--border-color); font-size: 13px;">
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+              <div>
+                <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px; color: var(--text-main);">
+                  Personal Email
+                </label>
+                <input type="text" id="new-emp-email" class="form-control" placeholder="e.g., user@example.com" style="width: 100%; padding: 8px 10px; border-radius: 6px; background: var(--bg-primary); color: var(--text-main); border: 1px solid var(--border-color); font-size: 13px;">
+              </div>
+              <div>
+                <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px; color: var(--text-main);">
+                  Notification Contact
+                </label>
+                <input type="text" id="new-emp-notifications" class="form-control" placeholder="Optional notification recipient" style="width: 100%; padding: 8px 10px; border-radius: 6px; background: var(--bg-primary); color: var(--text-main); border: 1px solid var(--border-color); font-size: 13px;">
+              </div>
+            </div>
+          </div>
+
+          <!-- Section 3: PPE & Equipment Sizes -->
+          <div style="margin-bottom: 12px;">
+            <div style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; border-bottom: 1px solid var(--border-color); padding-bottom: 4px;">
+              🧤 PPE & Equipment Sizes
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+              <div>
+                <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px; color: var(--text-main);">
+                  Glove Size
+                </label>
+                <select id="new-emp-glove-size" class="form-control" style="width: 100%; padding: 8px 10px; border-radius: 6px; background: var(--bg-primary); color: var(--text-main); border: 1px solid var(--border-color); font-size: 13px;">
+                  <option value="N/A" selected>N/A</option>
+                  <option value="8">8</option>
+                  <option value="8.5">8.5</option>
+                  <option value="9">9</option>
+                  <option value="9.5">9.5</option>
+                  <option value="10">10</option>
+                  <option value="10.5">10.5</option>
+                  <option value="11">11</option>
+                  <option value="11.5">11.5</option>
+                  <option value="12">12</option>
+                </select>
+              </div>
+              <div>
+                <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px; color: var(--text-main);">
+                  Sleeve Size
+                </label>
+                <select id="new-emp-sleeve-size" class="form-control" style="width: 100%; padding: 8px 10px; border-radius: 6px; background: var(--bg-primary); color: var(--text-main); border: 1px solid var(--border-color); font-size: 13px;">
+                  <option value="N/A" selected>N/A</option>
+                  <option value="Regular">Regular</option>
+                  <option value="Large">Large</option>
+                  <option value="X-Large">X-Large</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div style="display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; border-top: 1px solid var(--border-color); padding-top: 14px;">
+            <button type="button" class="btn btn-secondary" onclick="window.sheetNavigator.closeNewEmployeeModal()">Cancel</button>
+            <button type="submit" class="btn" id="btn-save-new-employee" style="background: linear-gradient(135deg, #10b981, #059669); color: white; font-weight: 700; padding: 8px 18px; display: inline-flex; align-items: center; gap: 6px; box-shadow: 0 2px 8px rgba(16, 185, 129, 0.35);">
+              <span>💾</span> Save Employee
+            </button>
+          </div>
+        </form>
       </div>
     </div>
   </div>

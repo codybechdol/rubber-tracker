@@ -851,6 +851,7 @@ class SheetNavigator {
 
     // Toggle Action Buttons in Toolbar
     const btnNewItem = document.getElementById('btn-new-item');
+    const btnNewEmployee = document.getElementById('btn-new-employee');
     const btnGenSwaps = document.getElementById('btn-generate-swaps');
     const btnFixDates = document.getElementById('btn-fix-changeout-dates');
     const btnReconcileHist = document.getElementById('btn-reconcile-history');
@@ -870,6 +871,10 @@ class SheetNavigator {
 
     if (btnImportCrews) {
       btnImportCrews.style.display = isEmployeeOrJobSheet ? 'inline-block' : 'none';
+    }
+
+    if (btnNewEmployee) {
+      btnNewEmployee.style.display = (isEmployeeOrJobSheet || isInventorySheet) ? 'inline-flex' : 'none';
     }
 
     if (btnNewItem) {
@@ -3558,6 +3563,585 @@ class SheetNavigator {
       .replace(/"/g, '&quot;')
       .replace(/[\n\r]/g, ' ');
   }
+
+  // ==========================================
+  // NEW EMPLOYEE MODAL & SUBMISSION WORKFLOW
+  // ==========================================
+
+  showNewEmployeeModal() {
+    const modal = document.getElementById('new-employee-modal');
+    if (!modal) return;
+
+    // Reset form
+    const form = document.getElementById('new-employee-form');
+    if (form) form.reset();
+
+    // Reset banners
+    const rehireBanner = document.getElementById('new-emp-rehire-banner');
+    if (rehireBanner) {
+      rehireBanner.style.display = 'none';
+      rehireBanner.style.background = 'rgba(14, 165, 233, 0.12)';
+      rehireBanner.style.borderColor = '#0284c7';
+    }
+    const dupBanner = document.getElementById('new-emp-dup-banner');
+    if (dupBanner) dupBanner.style.display = 'none';
+    const inlineLocForm = document.getElementById('new-emp-inline-loc-form');
+    if (inlineLocForm) inlineLocForm.style.display = 'none';
+    const saveBtn = document.getElementById('btn-save-new-employee');
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.innerHTML = '<span>💾</span> Save Employee';
+    }
+    this._detectedRehireData = null;
+
+    // Set today as default hire date (local timezone, not UTC)
+    const now = new Date();
+    const mm = ('0' + (now.getMonth() + 1)).slice(-2);
+    const dd = ('0' + now.getDate()).slice(-2);
+    const todayIso = `${now.getFullYear()}-${mm}-${dd}`;
+    const hireDateInput = document.getElementById('new-emp-hire-date');
+    if (hireDateInput) hireDateInput.value = todayIso;
+
+    // Populate Location dropdown
+    const locSelect = document.getElementById('new-emp-location');
+    if (locSelect) {
+      locSelect.innerHTML = '<option value="">Select location...</option>';
+
+      const locSet = new Set();
+      const statusLocations = [
+        'vacation', 'light duty', 'weeds', 'leave', 'previous employee',
+        'medical', "worker's comp", 'unknown', 'on shelf', 'not repairable',
+        'in testing', 'packed for testing', 'packed for delivery', 'destroyed',
+        'failed rubber', 'reclaimed'
+      ];
+
+      const addLoc = (loc) => {
+        if (!loc) return;
+        const clean = String(loc).replace(/\s*\([^)]*\)/g, '').trim();
+        if (clean && !statusLocations.includes(clean.toLowerCase())) {
+          locSet.add(clean);
+        }
+      };
+
+      const empTable = this.db.getTable('employees');
+      if (empTable && empTable.rows) {
+        empTable.rows.forEach(r => addLoc(r['Location']));
+      }
+
+      const jtTable = this.db.getTable('job_tracking');
+      if (jtTable && jtTable.rows) {
+        jtTable.rows.forEach(r => addLoc(r['Location']));
+      }
+
+      const locTable = this.db.getTable('locations');
+      if (locTable && locTable.rows) {
+        locTable.rows.forEach(r => addLoc(r['Location'] || r['Name']));
+      }
+
+      // Default common locations if table is empty
+      ['Helena', 'Bozeman', 'Great Falls', 'Billings', 'Missoula', 'Belgrade', 'Butte', 'Big Sky', 'Kalispell'].forEach(l => locSet.add(l));
+
+      const sortedLocs = Array.from(locSet).sort((a, b) => a.localeCompare(b));
+      sortedLocs.forEach(loc => {
+        const opt = document.createElement('option');
+        opt.value = loc;
+        opt.textContent = loc;
+        locSelect.appendChild(opt);
+      });
+
+      // Add Unknown option (for pending new hires)
+      const unknownOpt = document.createElement('option');
+      unknownOpt.value = 'Unknown';
+      unknownOpt.textContent = 'Unknown (Pending Hires only)';
+      locSelect.appendChild(unknownOpt);
+
+      // Add "+ Add New Location..."
+      const addNewOpt = document.createElement('option');
+      addNewOpt.value = '__ADD_NEW__';
+      addNewOpt.textContent = '➕ Add New City/Location...';
+      addNewOpt.style.color = '#38bdf8';
+      addNewOpt.style.fontWeight = 'bold';
+      locSelect.appendChild(addNewOpt);
+    }
+
+    // Populate Job Numbers datalist
+    const jobDatalist = document.getElementById('new-emp-job-datalist');
+    if (jobDatalist) {
+      jobDatalist.innerHTML = '';
+      const jtTable = this.db.getTable('job_tracking');
+      if (jtTable && jtTable.rows) {
+        const seenJobs = new Set();
+        jtTable.rows.forEach(r => {
+          const jNum = String(r['Job Number'] || r['Crew'] || '').trim();
+          const jLoc = String(r['Location'] || '').trim();
+          const jName = String(r['Job Name'] || r['Foreman'] || '').trim();
+          if (jNum && !seenJobs.has(jNum)) {
+            seenJobs.add(jNum);
+            const opt = document.createElement('option');
+            opt.value = jNum;
+            opt.label = `${jLoc ? jLoc + ' • ' : ''}${jName || ''}`;
+            jobDatalist.appendChild(opt);
+          }
+        });
+      }
+    }
+
+    this.checkNewEmployeePendingStatus();
+
+    modal.classList.add('active');
+    const nameInput = document.getElementById('new-emp-name');
+    if (nameInput) setTimeout(() => nameInput.focus(), 50);
+  }
+
+  openNewEmployeeModal() {
+    this.showNewEmployeeModal();
+  }
+
+  closeNewEmployeeModal() {
+    const modal = document.getElementById('new-employee-modal');
+    if (modal) modal.classList.remove('active');
+  }
+
+  checkNewEmployeePendingStatus() {
+    const hireDateInput = document.getElementById('new-emp-hire-date');
+    const pendingBanner = document.getElementById('new-emp-pending-banner');
+    const locHint = document.getElementById('new-emp-location-hint');
+    if (!hireDateInput || !pendingBanner) return;
+
+    const hireDateStr = hireDateInput.value;
+    let isPending = false;
+    if (hireDateStr) {
+      const parts = hireDateStr.split('-');
+      if (parts.length === 3) {
+        const hireDate = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10), 12, 0, 0);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        isPending = hireDate > today;
+      }
+    }
+
+    pendingBanner.style.display = isPending ? 'block' : 'none';
+    if (locHint) {
+      locHint.textContent = isPending
+        ? '✓ Future start date: "Unknown" is available if location is TBD'
+        : '"Unknown" is only for Pending Hires (future start dates)';
+      locHint.style.color = isPending ? '#38bdf8' : 'var(--text-muted)';
+    }
+  }
+
+  onNewEmpLocationChange() {
+    const locSelect = document.getElementById('new-emp-location');
+    const inlineForm = document.getElementById('new-emp-inline-loc-form');
+    if (!locSelect || !inlineForm) return;
+
+    if (locSelect.value === '__ADD_NEW__') {
+      inlineForm.style.display = 'block';
+      const nameInput = document.getElementById('new-emp-custom-loc-name');
+      if (nameInput) {
+        nameInput.value = '';
+        nameInput.focus();
+      }
+      locSelect.value = '';
+    } else {
+      inlineForm.style.display = 'none';
+    }
+  }
+
+  saveCustomLocation() {
+    const nameInput = document.getElementById('new-emp-custom-loc-name');
+    const locSelect = document.getElementById('new-emp-location');
+    const inlineForm = document.getElementById('new-emp-inline-loc-form');
+    const newLoc = String(nameInput ? nameInput.value : '').trim();
+    if (!newLoc) {
+      alert('Please enter a location name.');
+      return;
+    }
+
+    if (locSelect) {
+      const opt = document.createElement('option');
+      opt.value = newLoc;
+      opt.textContent = newLoc;
+      const addNewOpt = locSelect.querySelector('option[value="__ADD_NEW__"]');
+      if (addNewOpt) {
+        locSelect.insertBefore(opt, addNewOpt);
+      } else {
+        locSelect.appendChild(opt);
+      }
+      locSelect.value = newLoc;
+    }
+    if (inlineForm) inlineForm.style.display = 'none';
+  }
+
+  cancelCustomLocation() {
+    const inlineForm = document.getElementById('new-emp-inline-loc-form');
+    const locSelect = document.getElementById('new-emp-location');
+    if (inlineForm) inlineForm.style.display = 'none';
+    if (locSelect) locSelect.value = '';
+  }
+
+  onNewEmpJobNumberChange() {
+    const jobInput = document.getElementById('new-emp-job-number');
+    const locSelect = document.getElementById('new-emp-location');
+    if (!jobInput || !locSelect) return;
+    const val = String(jobInput.value || '').trim();
+    if (!val) return;
+
+    const jtTable = this.db.getTable('job_tracking');
+    if (jtTable && jtTable.rows) {
+      const match = jtTable.rows.find(r => {
+        const jNum = String(r['Job Number'] || r['Crew'] || '').trim();
+        return jNum.toLowerCase() === val.toLowerCase();
+      });
+      if (match) {
+        const crewLoc = String(match['Location'] || '').trim();
+        if (crewLoc && (!locSelect.value || locSelect.value === 'Unknown')) {
+          for (let i = 0; i < locSelect.options.length; i++) {
+            if (locSelect.options[i].value.toLowerCase() === crewLoc.toLowerCase()) {
+              locSelect.selectedIndex = i;
+              break;
+            }
+          }
+        }
+      }
+    }
+  }
+
+  onNewEmployeeNameInput(rawName) {
+    const name = String(rawName || '').trim();
+    const rehireBanner = document.getElementById('new-emp-rehire-banner');
+    const dupBanner = document.getElementById('new-emp-dup-banner');
+    const saveBtn = document.getElementById('btn-save-new-employee');
+    this._detectedRehireData = null;
+
+    if (!name || name.length < 2) {
+      if (rehireBanner) rehireBanner.style.display = 'none';
+      if (dupBanner) dupBanner.style.display = 'none';
+      if (saveBtn) saveBtn.innerHTML = '<span>💾</span> Save Employee';
+      return;
+    }
+
+    const isMatch = (target) => {
+      if (!target) return false;
+      if (window.employeeProfileEngine && typeof window.employeeProfileEngine.isNameMatch === 'function') {
+        return window.employeeProfileEngine.isNameMatch(name, target);
+      }
+      return name.toLowerCase() === String(target).toLowerCase().trim();
+    };
+
+    // 1. Check for duplicate ACTIVE employee
+    const empTable = this.db.getTable('employees');
+    let activeMatch = null;
+    if (empTable && empTable.rows) {
+      activeMatch = empTable.rows.find(r => {
+        const rName = r['Name'] || r['Employee Name'] || '';
+        const lastDay = r['Last Day'] || '';
+        return isMatch(rName) && !lastDay;
+      });
+    }
+
+    if (activeMatch) {
+      if (dupBanner) {
+        dupBanner.style.display = 'block';
+        const msg = document.getElementById('new-emp-dup-msg');
+        const crew = activeMatch['Job Number'] || 'No Crew';
+        const loc = activeMatch['Location'] || 'No Location';
+        if (msg) msg.textContent = `An active employee named "${activeMatch['Name'] || activeMatch['Employee Name']}" already exists on Crew ${crew} (${loc}).`;
+      }
+    } else {
+      if (dupBanner) dupBanner.style.display = 'none';
+    }
+
+    // 2. Search for former employee / rehire records in previous_employees, employee_history, or inactive rows in employees
+    let prevData = null;
+    const prevTable = this.db.getTable('previous_employees');
+    if (prevTable && prevTable.rows) {
+      const pRow = prevTable.rows.find(r => isMatch(r['Name'] || r['Employee Name']));
+      if (pRow) prevData = pRow;
+    }
+
+    if (!prevData && empTable && empTable.rows) {
+      const inactRow = empTable.rows.find(r => isMatch(r['Name'] || r['Employee Name']) && r['Last Day']);
+      if (inactRow) prevData = inactRow;
+    }
+
+    const histTable = this.db.getTable('employee_history');
+    let histRow = null;
+    if (histTable && histTable.rows) {
+      for (let i = histTable.rows.length - 1; i >= 0; i--) {
+        const r = histTable.rows[i];
+        if (isMatch(r['Employee Name'] || r['Name'])) {
+          histRow = r;
+          break;
+        }
+      }
+    }
+
+    if (prevData || histRow) {
+      this._detectedRehireData = {
+        name: (prevData && (prevData['Name'] || prevData['Employee Name'])) || (histRow && (histRow['Employee Name'] || histRow['Name'])),
+        phone: (prevData && prevData['Phone Number']) || (histRow && histRow['Phone Number']) || '',
+        email: (prevData && prevData['Email Address']) || (histRow && histRow['Email Address']) || '',
+        mpEmail: (prevData && prevData['MP Email']) || (histRow && histRow['MP Email']) || '',
+        notificationEmails: (prevData && prevData['Notification Emails']) || (histRow && histRow['Notification Emails']) || '',
+        classification: (prevData && (prevData['Job Classification'] || prevData['Class'])) || (histRow && (histRow['Job Classification'] || histRow['Class'])) || '',
+        gloveSize: (prevData && prevData['Glove Size']) || '',
+        sleeveSize: (prevData && prevData['Sleeve Size']) || ''
+      };
+
+      if (rehireBanner) {
+        rehireBanner.style.display = 'block';
+        rehireBanner.style.background = 'rgba(14, 165, 233, 0.12)';
+        rehireBanner.style.borderColor = '#0284c7';
+        rehireBanner.innerHTML = `
+          <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 10px;">
+            <div>
+              <div style="font-weight: 700; color: #38bdf8; font-size: 13px; display: flex; align-items: center; gap: 6px;">
+                <span>🔄</span> Rehire Detected
+              </div>
+              <div id="new-emp-rehire-msg" style="font-size: 12px; color: #bae6fd; margin-top: 3px;">
+                Previous records found for <strong>${this.escapeHtml(this._detectedRehireData.name)}</strong>. Click "Pre-fill Info" to restore contact details, trade rank, and PPE sizes.
+              </div>
+            </div>
+            <button type="button" class="btn" id="btn-prefill-rehire" style="background: #0284c7; color: white; font-size: 11px; padding: 4px 10px; font-weight: 600; white-space: nowrap;" onclick="window.sheetNavigator.prefillFromRehire()">
+              ⚡ Pre-fill Info
+            </button>
+          </div>
+        `;
+      }
+      if (saveBtn) saveBtn.innerHTML = '<span>🔄</span> Save & Rehire Employee';
+    } else {
+      if (rehireBanner) rehireBanner.style.display = 'none';
+      if (saveBtn) saveBtn.innerHTML = '<span>💾</span> Save Employee';
+    }
+  }
+
+  prefillFromRehire() {
+    if (!this._detectedRehireData) return;
+    const d = this._detectedRehireData;
+    if (d.phone) {
+      const phoneInput = document.getElementById('new-emp-phone');
+      if (phoneInput) phoneInput.value = d.phone;
+    }
+    if (d.email) {
+      const emailInput = document.getElementById('new-emp-email');
+      if (emailInput) emailInput.value = d.email;
+    }
+    if (d.mpEmail) {
+      const mpEmailInput = document.getElementById('new-emp-mp-email');
+      if (mpEmailInput) mpEmailInput.value = d.mpEmail;
+    }
+    if (d.notificationEmails) {
+      const notifInput = document.getElementById('new-emp-notifications');
+      if (notifInput) notifInput.value = d.notificationEmails;
+    }
+    if (d.classification) {
+      const classSelect = document.getElementById('new-emp-classification');
+      if (classSelect) {
+        for (let i = 0; i < classSelect.options.length; i++) {
+          if (classSelect.options[i].value.toLowerCase() === d.classification.toLowerCase()) {
+            classSelect.selectedIndex = i;
+            break;
+          }
+        }
+      }
+    }
+    if (d.gloveSize) {
+      const gSelect = document.getElementById('new-emp-glove-size');
+      if (gSelect) gSelect.value = d.gloveSize;
+    }
+    if (d.sleeveSize) {
+      const sSelect = document.getElementById('new-emp-sleeve-size');
+      if (sSelect) sSelect.value = d.sleeveSize;
+    }
+
+    const rehireBanner = document.getElementById('new-emp-rehire-banner');
+    if (rehireBanner) {
+      rehireBanner.style.background = 'rgba(16, 185, 129, 0.12)';
+      rehireBanner.style.borderColor = '#10b981';
+      rehireBanner.innerHTML = `<span style="color: #34d399; font-weight: 600; font-size: 12px;">✅ Restored previous contact info and PPE sizes for ${this.escapeHtml(d.name)}!</span>`;
+    }
+  }
+
+  async submitNewEmployee() {
+    const nameInput = document.getElementById('new-emp-name');
+    const hireDateInput = document.getElementById('new-emp-hire-date');
+    const locSelect = document.getElementById('new-emp-location');
+    const jobInput = document.getElementById('new-emp-job-number');
+    const classSelect = document.getElementById('new-emp-classification');
+    const phoneInput = document.getElementById('new-emp-phone');
+    const mpEmailInput = document.getElementById('new-emp-mp-email');
+    const emailInput = document.getElementById('new-emp-email');
+    const notifInput = document.getElementById('new-emp-notifications');
+    const gloveSelect = document.getElementById('new-emp-glove-size');
+    const sleeveSelect = document.getElementById('new-emp-sleeve-size');
+    const saveBtn = document.getElementById('btn-save-new-employee');
+
+    const fullName = String(nameInput ? nameInput.value : '').trim();
+    if (!fullName) {
+      alert('Please enter employee full name.');
+      if (nameInput) nameInput.focus();
+      return;
+    }
+
+    const rawHireDate = hireDateInput ? hireDateInput.value : '';
+    if (!rawHireDate) {
+      alert('Please select a Hire Date.');
+      if (hireDateInput) hireDateInput.focus();
+      return;
+    }
+
+    const location = String(locSelect ? locSelect.value : '').trim();
+    if (!location) {
+      alert('Please select a Location.');
+      if (locSelect) locSelect.focus();
+      return;
+    }
+
+    const classification = String(classSelect ? classSelect.value : '').trim();
+    if (!classification) {
+      alert('Please select a Job Classification / Trade Rank.');
+      if (classSelect) classSelect.focus();
+      return;
+    }
+
+    // Format Hire Date to MM/DD/YYYY
+    let hireDateFormatted = rawHireDate;
+    let isPending = false;
+    if (rawHireDate.includes('-')) {
+      const parts = rawHireDate.split('-');
+      if (parts.length === 3) {
+        hireDateFormatted = `${parts[1]}/${parts[2]}/${parts[0]}`;
+        const hDate = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10), 12, 0, 0);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        isPending = hDate > today;
+      }
+    }
+
+    if (location.toLowerCase() === 'unknown' && !isPending) {
+      alert('"Unknown" location is only permitted for Pending New Hires with a future start date. Please select a real location.');
+      if (locSelect) locSelect.focus();
+      return;
+    }
+
+    const jobNumber = String(jobInput ? jobInput.value : '').trim();
+    const phoneNumber = String(phoneInput ? phoneInput.value : '').trim();
+    const mpEmail = String(mpEmailInput ? mpEmailInput.value : '').trim();
+    const emailAddress = String(emailInput ? emailInput.value : '').trim();
+    const notificationEmails = String(notifInput ? notifInput.value : '').trim();
+    const gloveSize = String(gloveSelect ? gloveSelect.value : 'N/A').trim();
+    const sleeveSize = String(sleeveSelect ? sleeveSelect.value : 'N/A').trim();
+
+    const isRehire = Boolean(this._detectedRehireData);
+
+    if (saveBtn) {
+      saveBtn.disabled = true;
+      saveBtn.innerHTML = '<span>⏳</span> Saving...';
+    }
+
+    try {
+      const newEmpRow = {
+        'Name': fullName,
+        'Employee Name': fullName,
+        'Verify': '',
+        'Location': location,
+        'Job Number': jobNumber,
+        'Job #': jobNumber,
+        'Phone Number': phoneNumber,
+        'Notification Emails': notificationEmails,
+        'MP Email': mpEmail,
+        'Email Address': emailAddress,
+        'Glove Size': gloveSize,
+        'Sleeve Size': sleeveSize,
+        'Hire Date': hireDateFormatted,
+        'Last Day': '',
+        'Last Day Reason': '',
+        'Job Classification': classification,
+        'Status': isPending ? 'Pending' : 'Active'
+      };
+
+      // Add row to Employees table
+      await this.db.addRow('employees', newEmpRow, isRehire ? 'Rehire' : 'New Hire');
+
+      // Record in Employee History
+      const now = new Date();
+      const mm = ('0' + (now.getMonth() + 1)).slice(-2);
+      const dd = ('0' + now.getDate()).slice(-2);
+      const todayFormatted = `${mm}/${dd}/${now.getFullYear()}`;
+
+      const histRow = {
+        'Date': todayFormatted,
+        'Employee Name': fullName,
+        'Name': fullName,
+        'Event Type': isRehire ? 'Rehired' : 'New Hire',
+        'Location': location,
+        'Job Number': jobNumber,
+        'Hire Date': hireDateFormatted,
+        'Rehire Date': isRehire ? hireDateFormatted : '',
+        'Last Day': '',
+        'Last Day Reason': '',
+        'Notes': isPending
+          ? `Pending New Hire (starts ${hireDateFormatted}) on Crew ${jobNumber || 'TBD'} (${location}) as ${classification}`
+          : `${isRehire ? 'Rehired' : 'New hire'} on Crew ${jobNumber || 'TBD'} (${location}) as ${classification}`
+      };
+
+      await this.db.addRow('employee_history', histRow);
+
+      // Auto-apply cert requirements to Expiring Certs matrix
+      if (window.certsConfigEngine && typeof window.certsConfigEngine.applyRequirementsToMatrix === 'function') {
+        try {
+          await window.certsConfigEngine.applyRequirementsToMatrix(false);
+        } catch (certErr) {
+          console.warn('Could not auto-apply certs matrix:', certErr);
+        }
+      }
+
+      // Persist snapshot
+      if (typeof this.db.setSnapshot === 'function') {
+        await this.db.setSnapshot(this.db.snapshot);
+      }
+
+      this.closeNewEmployeeModal();
+
+      // If user is on Employees sheet, switch/refresh grid
+      this.currentSheetKey = 'employees';
+      const searchInput = document.getElementById('sheet-search-input');
+      if (searchInput) {
+        searchInput.value = '';
+        this.searchTerm = '';
+      }
+      this.renderTabsBar();
+      this.renderCurrentSheet();
+
+      // Show toast
+      const toastMsg = isPending
+        ? `⏳ Pending employee "${fullName}" saved! Starts ${hireDateFormatted}.`
+        : `✅ Successfully added ${fullName} (${location}${jobNumber ? ' • ' + jobNumber : ''})!`;
+      if (window.inventoryManager && typeof window.inventoryManager.showToast === 'function') {
+        window.inventoryManager.showToast(toastMsg);
+      } else {
+        alert(toastMsg);
+      }
+    } catch (err) {
+      console.error('Error saving new employee:', err);
+      alert('Error saving employee: ' + (err.message || err));
+    } finally {
+      if (saveBtn) {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = '<span>💾</span> Save Employee';
+      }
+    }
+  }
 }
 
 window.sheetNavigator = new SheetNavigator(window.localDB);
+
+// Escape key closes modals
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    const empModal = document.getElementById('new-employee-modal');
+    if (empModal && empModal.classList.contains('active')) {
+      window.sheetNavigator.closeNewEmployeeModal();
+    }
+  }
+});
