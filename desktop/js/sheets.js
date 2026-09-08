@@ -214,6 +214,13 @@ class SheetNavigator {
     }
   }
 
+  openDrugTestingWorkspace() {
+    const navItem = document.querySelector('.nav-item[data-view="drug-testing-view"]');
+    if (navItem) {
+      navItem.click();
+    }
+  }
+
   renderActiveView() {
     const activeView = document.querySelector('.view-container.active');
     if (activeView) {
@@ -964,14 +971,34 @@ class SheetNavigator {
     const btnFixDates = document.getElementById('btn-fix-changeout-dates');
     const btnReconcileHist = document.getElementById('btn-reconcile-history');
     const btnImportCrews = document.getElementById('btn-import-crews');
+    const btnTransferEquip = document.getElementById('btn-transfer-equipment-top');
+    const btnManageDrug = document.getElementById('btn-manage-drug-tests');
     const btnPushClean = document.getElementById('btn-push-clean-sheet');
 
-    const isInventorySheet = !sheetMeta?.isSwap && sheetMeta?.key !== 'employees' && sheetMeta?.key !== 'job_tracking';
+    const INVENTORY_KEYS = [
+      'gloves', 'sleeves', 'blankets', 'macks',
+      'hv_testers', 'phasing_sets', 'aed', 'grounds', 'hot_sticks'
+    ];
+    const isEmployeeOrJobSheet = this.currentSheetKey === 'employees' || this.currentSheetKey === 'job_tracking';
+    const isInventorySheet = INVENTORY_KEYS.includes(this.currentSheetKey);
     const isSwapSheet = Boolean(sheetMeta?.isSwap);
-    const isEmployeeOrJobSheet = sheetMeta?.key === 'employees' || sheetMeta?.key === 'job_tracking';
+    const isDrugTestSheet = this.currentSheetKey === 'dot_drug_tests' || this.currentSheetKey === 'drug_test_clinics';
+
+    const singularItemNames = {
+      gloves: 'Glove',
+      sleeves: 'Sleeve',
+      blankets: 'Blanket',
+      macks: 'MACK',
+      hv_testers: 'HV Tester',
+      phasing_sets: 'Phasing Set',
+      aed: 'AED',
+      grounds: 'Ground',
+      hot_sticks: 'Hot Stick'
+    };
 
     if (btnPushClean) {
-      btnPushClean.style.display = (tableData && tableData.rows) ? 'inline-block' : 'none';
+      const hasData = Boolean(tableData && ((tableData.rows && tableData.rows.length > 0) || (tableData.rawGrid && tableData.rawGrid.length > 0)));
+      btnPushClean.style.display = hasData ? 'inline-block' : 'none';
       if (sheetMeta) {
         btnPushClean.title = `Push full clean ${sheetMeta.label} table directly to Google Sheets`;
       }
@@ -982,26 +1009,45 @@ class SheetNavigator {
     }
 
     if (btnNewEmployee) {
-      btnNewEmployee.style.display = (isEmployeeOrJobSheet || isInventorySheet) ? 'inline-flex' : 'none';
+      btnNewEmployee.style.display = isEmployeeOrJobSheet ? 'inline-flex' : 'none';
+    }
+
+    if (btnTransferEquip) {
+      btnTransferEquip.style.display = (isEmployeeOrJobSheet || isInventorySheet) ? 'inline-flex' : 'none';
     }
 
     if (btnNewItem) {
       btnNewItem.style.display = isInventorySheet ? 'inline-block' : 'none';
       if (isInventorySheet) {
-        btnNewItem.innerHTML = `➕ New ${sheetMeta.label.replace(/^.*? /, '').replace(/s$/, '')}`;
+        const singularName = singularItemNames[this.currentSheetKey] || (sheetMeta ? sheetMeta.label.replace(/^.*? /, '').replace(/s$/, '') : 'Item');
+        btnNewItem.innerHTML = `➕ New ${singularName}`;
+        btnNewItem.title = `Add a new ${singularName} to active ${sheetMeta?.label || 'inventory'}`;
       }
     }
 
     if (btnGenSwaps) {
       btnGenSwaps.style.display = (isSwapSheet || isInventorySheet) ? 'inline-block' : 'none';
+      if (sheetMeta) {
+        btnGenSwaps.title = `Generate upcoming change-out and calibration swap reports`;
+      }
     }
 
     if (btnFixDates) {
       btnFixDates.style.display = isInventorySheet ? 'inline-block' : 'none';
+      if (isInventorySheet && sheetMeta) {
+        btnFixDates.title = `Recalculate and update change-out dates for ${sheetMeta.label}`;
+      }
     }
 
     if (btnReconcileHist) {
       btnReconcileHist.style.display = (isInventorySheet || isSwapSheet) ? 'inline-block' : 'none';
+      if (sheetMeta) {
+        btnReconcileHist.title = `Reconcile active inventory with latest History records`;
+      }
+    }
+
+    if (btnManageDrug) {
+      btnManageDrug.style.display = isDrugTestSheet ? 'inline-flex' : 'none';
     }
 
     // Update dynamic multi-filter bar for inventory sheets
