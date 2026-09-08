@@ -2213,7 +2213,7 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
 function executeSyncApiProcessSafetyEmails(options) {
   options = options || {};
   var daysBack = options.daysBack || 7;
-  var batchSize = options.batchSize || 10;
+  var batchSize = options.batchSize || 5;
   var newOnlyMode = options.newOnlyMode !== false;
   var skipPdfExtraction = options.skipPdfExtraction === true;
   var endDate = options.endDate || null;
@@ -2222,6 +2222,19 @@ function executeSyncApiProcessSafetyEmails(options) {
 
   if (typeof processSafetyEmails !== 'function') {
     return { success: false, error: 'processSafetyEmails function not found in backend' };
+  }
+
+  // Clear batch state if starting fresh from UI
+  if (options.resetBatch === true) {
+    try {
+      var scriptProps = PropertiesService.getScriptProperties();
+      scriptProps.deleteProperty('SAFETY_BATCH_START');
+      scriptProps.deleteProperty('SAFETY_BATCH_DATE_FILTER');
+      scriptProps.deleteProperty('SAFETY_BATCH_REPORT_TYPE_FILTER');
+      CacheService.getScriptCache().removeAll(['SAFETY_BATCH_CREWS', 'SAFETY_BATCH_EMP_DATA', 'SAFETY_BATCH_EMAIL_IDS']);
+    } catch (eReset) {
+      Logger.log('executeSyncApiProcessSafetyEmails reset error: ' + eReset);
+    }
   }
 
   // If client explicitly requests the final post-processing step
@@ -2248,9 +2261,6 @@ function executeSyncApiProcessSafetyEmails(options) {
     if (typeof exportFullDatabaseSnapshot === 'function') {
       try {
         freshSnapshot = exportFullDatabaseSnapshot();
-        if (freshSnapshot && typeof generateAndStoreSyncSnapshot === 'function') {
-          generateAndStoreSyncSnapshot(freshSnapshot);
-        }
       } catch (eSnap) {
         Logger.log('executeSyncApiProcessSafetyEmails snapshot error: ' + eSnap);
       }
@@ -2298,9 +2308,10 @@ function executeSyncApiProcessSafetyEmails(options) {
     };
   }
 
-  // If completed directly in single step:
+  // If completed directly in single step (e.g. 0 new emails found):
   var postResult = result;
-  if (typeof runSafetyEmailPostProcessing === 'function') {
+  // If no new emails were found, processSafetyEmails already updated weeks/compliance; don't repeat full post-processing
+  if (result.totalThreads > 0 && typeof runSafetyEmailPostProcessing === 'function') {
     try {
       postResult = runSafetyEmailPostProcessing(reportTypeFilter, result);
     } catch (ePost) {
@@ -2322,9 +2333,6 @@ function executeSyncApiProcessSafetyEmails(options) {
   if (typeof exportFullDatabaseSnapshot === 'function') {
     try {
       freshSnapshot = exportFullDatabaseSnapshot();
-      if (freshSnapshot && typeof generateAndStoreSyncSnapshot === 'function') {
-        generateAndStoreSyncSnapshot(freshSnapshot);
-      }
     } catch (eSnap) {
       Logger.log('executeSyncApiProcessSafetyEmails snapshot error: ' + eSnap);
     }

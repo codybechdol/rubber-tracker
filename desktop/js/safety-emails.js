@@ -640,22 +640,34 @@ class SafetyEmailsEngine {
         const payload = {
           action: 'processSafetyEmails',
           daysBack: daysBack,
-          batchSize: 10,
+          batchSize: 5,
           reportTypeFilter: reportTypeFilter,
           newOnlyMode: newOnlyMode,
           skipPdfExtraction: skipPdfExtraction,
           endDate: endDate,
           isPostProcessing: isPostProcessing,
-          prevResult: lastResult
+          prevResult: lastResult,
+          resetBatch: (batchIndex === 1 && !isPostProcessing)
         };
 
         const response = await window.syncEngine.executeNetworkRequest(syncUrl, 'POST', payload, 180000);
         console.log(`Safety email batch #${batchIndex} response:`, response);
 
+        // Guard against receiving a raw database snapshot on server timeout/redirect
+        if (response && response.version && response.tables && !response.result) {
+          throw new Error('The Google Apps Script server timed out while scanning emails. Please try running with "Fast Mode" enabled or with a shorter date range.');
+        }
+
         if (!response || !response.success) {
-          const errMsg = (response && (response.error || response.message)) 
+          let errMsg = (response && (response.error || response.message)) 
             ? (response.error || response.message) 
-            : (response ? JSON.stringify(response) : 'No response from Apps Script server.');
+            : 'No response from Apps Script server.';
+          if (typeof errMsg === 'object') {
+            errMsg = JSON.stringify(errMsg);
+          }
+          if (errMsg.length > 250) {
+            errMsg = errMsg.substring(0, 250) + '...';
+          }
           throw new Error(errMsg);
         }
 
@@ -772,15 +784,19 @@ class SafetyEmailsEngine {
 
     } catch (err) {
       console.error('runProcessEmails error:', err);
+      let displayError = (err && err.message) ? err.message : 'An error occurred while processing emails.';
+      if (displayError.length > 300) {
+        displayError = displayError.substring(0, 300) + '... (See console for full details)';
+      }
       if (body) {
         body.innerHTML = `
           <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 8px; padding: 16px 20px;">
             <div style="font-size: 14px; font-weight: 700; color: #fca5a5; margin-bottom: 6px;">❌ Processing Error</div>
-            <div style="font-size: 12.5px; color: var(--text-secondary); line-height: 1.5; margin-bottom: 12px;">
-              ${this.escapeHtml(err.message)}
+            <div style="font-size: 12.5px; color: var(--text-secondary); line-height: 1.5; margin-bottom: 12px; word-break: break-word;">
+              ${this.escapeHtml(displayError)}
             </div>
             <div style="font-size: 11.5px; color: var(--text-muted);">
-              Tip: Verify that your Google Account has Gmail permissions enabled for the Apps Script project.
+              Tip: If processing large attachments or many emails, try enabling <strong>⚡ Fast Mode</strong> or selecting <strong>📅 Last 7 Days</strong>.
             </div>
           </div>
         `;

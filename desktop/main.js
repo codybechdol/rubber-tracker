@@ -174,6 +174,13 @@ function makeGoogleAppsScriptRequest(targetUrl, method = 'GET', data = null) {
           if (!redirectUrl.startsWith('http')) {
             redirectUrl = new URL(redirectUrl, currentUrl).href;
           }
+
+          // If a POST request redirects back to the script exec URL (rather than the usercontent echo URL),
+          // it indicates that Google Apps Script failed to complete the POST execution (gateway timeout).
+          if (isPost && redirectCount > 0 && redirectUrl.includes('script.google.com') && redirectUrl.includes('/exec')) {
+            return reject(new Error('The Google Apps Script server timed out or failed to complete processing. Please try running with Fast Mode enabled or with a smaller date range.'));
+          }
+
           return requestWithRedirect(redirectUrl, 'GET', null, redirectCount + 1);
         }
 

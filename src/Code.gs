@@ -33250,7 +33250,7 @@ function doGet(e) {
       var flatRes = flattenAllFormulasAndCleanDatabase(true);
       return ContentService.createTextOutput(JSON.stringify(flatRes))
         .setMimeType(ContentService.MimeType.JSON);
-    } else if (action === 'getSnapshot' || !action) {
+    } else if (action === 'getSnapshot') {
       var snapshotJson = (typeof getFastSnapshotFromDriveOrExport === 'function')
         ? getFastSnapshotFromDriveOrExport()
         : JSON.stringify(exportFullDatabaseSnapshot());
@@ -33258,7 +33258,7 @@ function doGet(e) {
         .setMimeType(ContentService.MimeType.JSON);
     }
 
-    return ContentService.createTextOutput(JSON.stringify({ status: 'ok' }))
+    return ContentService.createTextOutput(JSON.stringify({ status: 'ok', message: 'Safety Assistant Web App API active' }))
       .setMimeType(ContentService.MimeType.JSON);
 
   } catch (err) {
@@ -33298,13 +33298,14 @@ function doPost(e) {
     if (action === 'processSafetyEmails') {
       var procResult = executeSyncApiProcessSafetyEmails({
         daysBack: payload.daysBack || 7,
-        batchSize: payload.batchSize || 50,
+        batchSize: payload.batchSize || 5,
         reportTypeFilter: payload.reportTypeFilter || 'ALL',
         newOnlyMode: payload.newOnlyMode !== false,
         skipPdfExtraction: payload.skipPdfExtraction === true,
         endDate: payload.endDate || null,
         isPostProcessing: payload.isPostProcessing === true,
-        prevResult: payload.prevResult || null
+        prevResult: payload.prevResult || null,
+        resetBatch: payload.resetBatch === true
       });
       return ContentService.createTextOutput(JSON.stringify(procResult))
         .setMimeType(ContentService.MimeType.JSON);
