@@ -2244,6 +2244,10 @@ function executeSyncApiProcessSafetyEmails(options) {
       scriptProps.deleteProperty('SAFETY_BATCH_START');
       scriptProps.deleteProperty('SAFETY_BATCH_DATE_FILTER');
       scriptProps.deleteProperty('SAFETY_BATCH_REPORT_TYPE_FILTER');
+      scriptProps.deleteProperty('SAFETY_BATCH_TOTAL_THREADS');
+      if (typeof setChunkedScriptProperty === 'function') {
+        setChunkedScriptProperty('SAFETY_BATCH_THREAD_IDS', '');
+      }
       CacheService.getScriptCache().removeAll(['SAFETY_BATCH_CREWS', 'SAFETY_BATCH_EMP_DATA', 'SAFETY_BATCH_EMAIL_IDS']);
     } catch (eReset) {
       Logger.log('executeSyncApiProcessSafetyEmails reset error: ' + eReset);
@@ -2252,6 +2256,17 @@ function executeSyncApiProcessSafetyEmails(options) {
 
   // If client explicitly requests the final post-processing step
   if (isPostProcessingStep) {
+    try {
+      var cleanupProps = PropertiesService.getScriptProperties();
+      cleanupProps.deleteProperty('SAFETY_BATCH_START');
+      cleanupProps.deleteProperty('SAFETY_BATCH_DATE_FILTER');
+      cleanupProps.deleteProperty('SAFETY_BATCH_REPORT_TYPE_FILTER');
+      cleanupProps.deleteProperty('SAFETY_BATCH_TOTAL_THREADS');
+      if (typeof setChunkedScriptProperty === 'function') {
+        setChunkedScriptProperty('SAFETY_BATCH_THREAD_IDS', '');
+      }
+    } catch (eClean) {}
+
     var postResult = {};
     if (typeof runSafetyEmailPostProcessing === 'function') {
       try {
@@ -2290,7 +2305,7 @@ function executeSyncApiProcessSafetyEmails(options) {
 
   var result = null;
   try {
-    result = processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction, endDate, reportTypeFilter, 20000);
+    result = processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction, endDate, reportTypeFilter, 16000);
   } catch (err) {
     Logger.log('executeSyncApiProcessSafetyEmails batch error: ' + err.toString());
     return {

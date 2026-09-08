@@ -640,7 +640,7 @@ class SafetyEmailsEngine {
         const payload = {
           action: 'processSafetyEmails',
           daysBack: daysBack,
-          batchSize: skipPdfExtraction ? 10 : 2,
+          batchSize: skipPdfExtraction ? 25 : 15,
           reportTypeFilter: reportTypeFilter,
           newOnlyMode: newOnlyMode,
           skipPdfExtraction: skipPdfExtraction,

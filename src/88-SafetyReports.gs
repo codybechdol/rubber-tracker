@@ -5986,35 +5986,81 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
   ];
 
   var allThreads = [];
-  queries.forEach(function(query) {
-    try {
-      var threads = [];
-      if (!newOnlyMode) {
-        // Paged search to overcome GmailApp's default 500-thread search limit during full reprocesses
-        var start = 0;
-        var pageSize = 500;
-        var page;
-        do {
-          page = GmailApp.search(query, start, pageSize);
-          threads = threads.concat(page);
-          start += pageSize;
-        } while (page.length === pageSize && threads.length < 3000);
-      } else {
-        // Single search for normal fast daily processing
-        threads = GmailApp.search(query);
+  var allThreadIds = [];
+
+  if (!isFirstBatch) {
+    // Continuation batch: load cached thread IDs to skip 10-15s of repeated Gmail searches
+    var cachedThreadIdsStr = (typeof getChunkedScriptProperty === 'function')
+      ? getChunkedScriptProperty('SAFETY_BATCH_THREAD_IDS')
+      : null;
+    if (cachedThreadIdsStr) {
+      try {
+        allThreadIds = JSON.parse(cachedThreadIdsStr);
+        Logger.log("Continuation batch: loaded " + allThreadIds.length + " cached thread IDs (skipped repeated Gmail searches)");
+      } catch (eParse) {
+        allThreadIds = [];
       }
-      allThreads = allThreads.concat(threads);
-      Logger.log("Query: " + query + " - Found " + threads.length + " threads");
-    } catch (e) {
-      Logger.log("Error with query: " + query + " - " + e.toString());
     }
-  });
+  }
 
-  Logger.log("Total threads found: " + allThreads.length);
+  // If first batch or if cache was empty/missing, run the Gmail searches
+  if (allThreadIds.length === 0) {
+    queries.forEach(function(query) {
+      try {
+        var threads = [];
+        if (!newOnlyMode) {
+          // Paged search to overcome GmailApp's default 500-thread search limit during full reprocesses
+          var start = 0;
+          var pageSize = 500;
+          var page;
+          do {
+            page = GmailApp.search(query, start, pageSize);
+            threads = threads.concat(page);
+            start += pageSize;
+          } while (page.length === pageSize && threads.length < 3000);
+        } else {
+          // Single search for normal fast daily processing
+          threads = GmailApp.search(query);
+        }
+        allThreads = allThreads.concat(threads);
+        Logger.log("Query: " + query + " - Found " + threads.length + " threads");
+      } catch (e) {
+        Logger.log("Error with query: " + query + " - " + e.toString());
+      }
+    });
 
-  if (allThreads.length === 0) {
+    // Deduplicate thread IDs while preserving order
+    var threadIdMap = {};
+    for (var ti = 0; ti < allThreads.length; ti++) {
+      var tid = allThreads[ti].getId();
+      if (!threadIdMap[tid]) {
+        threadIdMap[tid] = true;
+        allThreadIds.push(tid);
+      }
+    }
+
+    // Cache thread IDs for continuation batches
+    if (allThreadIds.length > 0 && typeof setChunkedScriptProperty === 'function') {
+      try {
+        setChunkedScriptProperty('SAFETY_BATCH_THREAD_IDS', JSON.stringify(allThreadIds));
+        props.setProperty('SAFETY_BATCH_TOTAL_THREADS', String(allThreadIds.length));
+      } catch (eCache) {
+        Logger.log("Could not cache thread IDs: " + eCache);
+      }
+    }
+  }
+
+  var totalThreadsCount = allThreadIds.length || allThreads.length;
+  Logger.log("Total threads available: " + totalThreadsCount);
+
+  if (totalThreadsCount === 0) {
     props.deleteProperty('SAFETY_BATCH_START');
     props.deleteProperty('SAFETY_BATCH_DATE_FILTER');
+    props.deleteProperty('SAFETY_BATCH_REPORT_TYPE_FILTER');
+    props.deleteProperty('SAFETY_BATCH_TOTAL_THREADS');
+    if (typeof setChunkedScriptProperty === 'function') {
+      setChunkedScriptProperty('SAFETY_BATCH_THREAD_IDS', '');
+    }
     batchCache.removeAll(['SAFETY_BATCH_CREWS', 'SAFETY_BATCH_EMP_DATA', 'SAFETY_BATCH_EMAIL_IDS']);
 
     // Still run compliance calculation to ensure current/previous weeks are created
@@ -6125,8 +6171,21 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
   }
 
   // Process only this batch
-  var batchEnd = Math.min(batchStart + batchSize, allThreads.length);
-  var batchThreads = allThreads.slice(batchStart, batchEnd);
+  var batchEnd = Math.min(batchStart + batchSize, totalThreadsCount);
+  var batchThreads = [];
+  if (allThreads.length >= batchEnd) {
+    batchThreads = allThreads.slice(batchStart, batchEnd);
+  } else {
+    var sliceIds = allThreadIds.slice(batchStart, batchEnd);
+    for (var s = 0; s < sliceIds.length; s++) {
+      try {
+        var th = GmailApp.getThreadById(sliceIds[s]);
+        if (th) batchThreads.push(th);
+      } catch (eTh) {
+        Logger.log("Could not fetch thread " + sliceIds[s] + ": " + eTh);
+      }
+    }
+  }
 
   // Time tracking - stop before execution limit (default 5.5 min for triggers, or custom e.g. 25s for Web App HTTP)
   var MAX_EXECUTION_MS = (typeof maxExecutionMs === 'number' && maxExecutionMs > 0) ? maxExecutionMs : (5.5 * 60 * 1000);
@@ -6179,9 +6238,8 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
     employeeData: employeeData
   };
 
-  // Auto-cleanup old log entries (>90 days) on first batch of normal runs only.
-  // Skipping cleanup during historical reprocesses prevents deleting the data we are trying to rebuild.
-  if (batchStart === 0 && newOnlyMode) {
+  // Auto-cleanup old log entries (>90 days) on first batch of normal runs only (defer if running under Web App timeout budget)
+  if (batchStart === 0 && newOnlyMode && MAX_EXECUTION_MS > 30000) {
     var cleanupResult = cleanupOldLogEntries(90);
     Logger.log("Auto-cleanup: Removed " + (cleanupResult.jhaDeleted + cleanupResult.weeklyDeleted + cleanupResult.monthlyDeleted) + " old log entries");
   }
@@ -6208,6 +6266,9 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
         noJobNumber: 0       // No job number could be extracted
       };
 
+      var newEmailsParsedThisBatch = 0;
+      var maxNewEmailsPerBatch = skipPdfExtraction ? 15 : 1;
+
       for (var tidx = 0; tidx < batchThreads.length && !timedOut; tidx++) {
         var thread = batchThreads[tidx];
         var messages = thread.getMessages();
@@ -6216,11 +6277,12 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
           var message = messages[midx];
           var messageId = (thread ? thread.getId() : '') || message.getId();
 
-          // Check time remaining - if under 30 seconds, stop processing
+          // Check time remaining - if under 10 seconds remaining, stop processing
           var elapsedMs = new Date().getTime() - startTime;
           if (elapsedMs > MAX_EXECUTION_MS) {
-            Logger.log("\u23F1\uFE0F Timeout prevention: Stopping after " + Math.round(elapsedMs/1000) + " seconds to avoid 6-minute limit");
+            Logger.log("⏱️ Timeout prevention: Stopping after " + Math.round(elapsedMs/1000) + " seconds");
             timedOut = true;
+            lastProcessedIndex = tidx;
             break;
           }
 
@@ -6247,6 +6309,8 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
           var parsed = parseSafetyEmail(message, skipPdfExtraction);
           lastProcessedIndex = tidx;
           if (parsed) {
+            newEmailsParsedThisBatch++;
+            lastProcessedIndex = tidx + 1;
             // === OPTION B: Log to audit trail sheets ===
             // This creates a complete audit trail in JHA Log, Weekly Safety Log, Monthly Checklist Log
             // Pass existingEmailIds for fast duplicate check and to track newly logged items
@@ -6390,30 +6454,41 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
             skipReasons.parseFailed++;
           }
         } // end messages loop
+
+        // If we have parsed enough new emails (with PDFs), stop this batch early to return clean JSON
+        if (newEmailsParsedThisBatch >= maxNewEmailsPerBatch) {
+          Logger.log("Batch budget reached (" + newEmailsParsedThisBatch + " new email(s) parsed). Returning batch.");
+          timedOut = true;
+          lastProcessedIndex = tidx + 1;
+          break;
+        }
       } // end threads loop
 
-      // If we timed out, save progress and return early
+      // If we timed out or reached batch budget, save progress and return early
       if (timedOut) {
         writeCollectedSafetyLogs(rowsCollector);
         var actualProcessed = batchStart + lastProcessedIndex;
+        if (actualProcessed <= batchStart && batchThreads.length > 0) {
+          actualProcessed = batchStart + 1;
+        }
         props.setProperty('SAFETY_BATCH_START', actualProcessed.toString());
-        Logger.log("Timed out - saved progress at thread " + actualProcessed + " of " + allThreads.length);
+        Logger.log("Batch stopped - saved progress at thread " + actualProcessed + " of " + totalThreadsCount);
 
         return {
           complete: false,
           timedOut: true,
           batchNumber: Math.floor(batchStart / batchSize) + 1,
-          totalBatches: Math.ceil(allThreads.length / batchSize),
+          totalBatches: Math.ceil(totalThreadsCount / batchSize),
           processedThisBatch: processedCount,
           skippedThisBatch: skippedCount,
           uncreditedThisBatch: uncreditedThisBatch,
           skipReasons: skipReasons,
           issuesThisBatch: issues.length,
-          totalThreads: allThreads.length,
+          totalThreads: totalThreadsCount,
           threadsProcessed: actualProcessed,
-          threadsRemaining: allThreads.length - actualProcessed,
+          threadsRemaining: Math.max(0, totalThreadsCount - actualProcessed),
           elapsedSeconds: Math.round((new Date().getTime() - startTime) / 1000),
-          message: "Stopping to prevent timeout. Click 'Continue Processing' to resume."
+          message: "Stopping to prevent timeout. Continuing..."
         };
       }
 
@@ -6535,10 +6610,10 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
         }
       }
 
-      var isComplete = batchEnd >= allThreads.length;
+      var isComplete = batchEnd >= totalThreadsCount;
       writeCollectedSafetyLogs(rowsCollector);
 
-      Logger.log('Batch processed ' + processedCount + ' new email(s), skipped ' + skippedCount + '. Progress: ' + batchEnd + ' / ' + allThreads.length);
+      Logger.log('Batch processed ' + processedCount + ' new email(s), skipped ' + skippedCount + '. Progress: ' + batchEnd + ' / ' + totalThreadsCount);
 
       // Cache email IDs for next batch
       try {
@@ -6551,6 +6626,10 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
         props.deleteProperty('SAFETY_BATCH_START');
         props.deleteProperty('SAFETY_BATCH_DATE_FILTER');
         props.deleteProperty('SAFETY_BATCH_REPORT_TYPE_FILTER');
+        props.deleteProperty('SAFETY_BATCH_TOTAL_THREADS');
+        if (typeof setChunkedScriptProperty === 'function') {
+          setChunkedScriptProperty('SAFETY_BATCH_THREAD_IDS', '');
+        }
         batchCache.removeAll(['SAFETY_BATCH_CREWS', 'SAFETY_BATCH_EMP_DATA', 'SAFETY_BATCH_EMAIL_IDS']);
 
         var today = new Date();
@@ -6572,7 +6651,7 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
           complete: false,
           isPostProcessing: true, // Signals client dialog to call runSafetyEmailPostProcessing
           batchNumber: Math.floor(batchStart / batchSize) + 1,
-          totalBatches: Math.ceil(allThreads.length / batchSize),
+          totalBatches: Math.ceil(totalThreadsCount / batchSize),
           processedThisBatch: processedCount,
           skippedThisBatch: skippedCount,
           uncreditedThisBatch: uncreditedThisBatch,
@@ -6580,7 +6659,7 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
           issuesThisBatch: issues.length,
           complianceRecordsAdded: complianceRecords.length,
           logsCreated: logsCreated,
-          totalThreads: allThreads.length,
+          totalThreads: totalThreadsCount,
           threadsProcessed: batchEnd,
           threadsRemaining: 0,
           newOnlyMode: newOnlyMode,
@@ -6588,14 +6667,14 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
         };
       } else {
         props.setProperty('SAFETY_BATCH_START', batchEnd.toString());
-        Logger.log("Batch complete. Progress: " + batchEnd + " / " + allThreads.length);
+        Logger.log("Batch complete. Progress: " + batchEnd + " / " + totalThreadsCount);
       }
 
       var result = {
         complete: isComplete,
         earlyExit: false,
         batchNumber: Math.floor(batchStart / batchSize) + 1,
-        totalBatches: Math.ceil(allThreads.length / batchSize),
+        totalBatches: Math.ceil(totalThreadsCount / batchSize),
         processedThisBatch: processedCount,
         skippedThisBatch: skippedCount,
         uncreditedThisBatch: uncreditedThisBatch,
@@ -6603,9 +6682,9 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
         issuesThisBatch: issues.length,
         complianceRecordsAdded: complianceRecords.length,
         logsCreated: logsCreated,
-        totalThreads: allThreads.length,
+        totalThreads: totalThreadsCount,
         threadsProcessed: batchEnd,
-        threadsRemaining: allThreads.length - batchEnd,
+        threadsRemaining: Math.max(0, totalThreadsCount - batchEnd),
         newOnlyMode: newOnlyMode,
         lastProcessedDate: lastProcessedTimestamp
       };
@@ -7619,6 +7698,10 @@ function parseSafetyEmail(message, skipPdfExtraction) {
         }
 
         pdfCount++;
+        if (pdfCount > 3) {
+          Logger.log("Reached max 3 PDFs limit per email to prevent timeout. Skipping remaining PDFs.");
+          break;
+        }
         Logger.log("Extracting " + reportType + " PDF #" + pdfCount + ": " + attachment.getName() + " (" + Math.round(attachment.getSize()/1024) + "KB)");
 
         try {

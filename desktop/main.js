@@ -142,9 +142,15 @@ const https = require('https');
 
 function makeGoogleAppsScriptRequest(targetUrl, method = 'GET', data = null) {
   return new Promise((resolve, reject) => {
+    const wasOriginallyPost = method === 'POST';
+
     function requestWithRedirect(currentUrl, currentMethod, currentData, redirectCount = 0) {
       if (redirectCount > 5) {
-        return reject(new Error('Too many redirects'));
+        return resolve({
+          success: false,
+          statusCode: 504,
+          error: 'The Google Apps Script server timed out or redirected too many times. Please try running with Fast Mode enabled or with a smaller date range.'
+        });
       }
 
       const parsedUrl = new URL(currentUrl);
@@ -175,10 +181,14 @@ function makeGoogleAppsScriptRequest(targetUrl, method = 'GET', data = null) {
             redirectUrl = new URL(redirectUrl, currentUrl).href;
           }
 
-          // If a POST request redirects back to the script exec URL (rather than the usercontent echo URL),
+          // If a request redirects back to the script exec URL (rather than the usercontent echo URL),
           // it indicates that Google Apps Script failed to complete the POST execution (gateway timeout).
-          if (isPost && redirectCount > 0 && redirectUrl.includes('script.google.com') && redirectUrl.includes('/exec')) {
-            return reject(new Error('The Google Apps Script server timed out or failed to complete processing. Please try running with Fast Mode enabled or with a smaller date range.'));
+          if (redirectCount > 0 && redirectUrl.includes('script.google.com') && redirectUrl.includes('/exec')) {
+            return resolve({
+              success: false,
+              statusCode: 504,
+              error: 'The Google Apps Script server timed out while processing. Please try running with Fast Mode enabled or with a smaller date range.'
+            });
           }
 
           return requestWithRedirect(redirectUrl, 'GET', null, redirectCount + 1);
@@ -192,7 +202,19 @@ function makeGoogleAppsScriptRequest(targetUrl, method = 'GET', data = null) {
             const json = JSON.parse(responseBody);
             resolve({ success: true, statusCode: res.statusCode, data: json });
           } catch (e) {
-            resolve({ success: false, statusCode: res.statusCode, raw: responseBody, error: 'Web App returned non-JSON response. Please verify in Google Sheets: Extensions > Apps Script > Deploy > Manage deployments, and ensure "Who has access" is set to "Anyone".' });
+            let errorMsg = 'Web App returned non-JSON response.';
+            if (res.statusCode === 404) {
+              errorMsg = 'Google Apps Script Web App returned 404 Not Found. The server may have timed out or the deployment URL is invalid.';
+            } else if (res.statusCode >= 500) {
+              errorMsg = `Google Apps Script server error (HTTP ${res.statusCode}). The script may have timed out or exceeded memory limits.`;
+            } else if (responseBody.includes('Google Docs - Exception') || responseBody.includes('exceeded maximum execution time') || responseBody.includes('Timed out')) {
+              errorMsg = 'The Google Apps Script server timed out or failed to complete processing. Please try running with Fast Mode enabled or with a smaller date range.';
+            } else if (responseBody.includes('ServiceLogin') || responseBody.includes('accounts.google.com')) {
+              errorMsg = 'Google returned a login page. Please verify in Google Sheets: Extensions > Apps Script > Deploy > Manage deployments, and ensure "Who has access" is set to "Anyone".';
+            } else {
+              errorMsg = `The Google Apps Script server returned a non-JSON response (HTTP ${res.statusCode}). Please try running with Fast Mode enabled or with a smaller date range.`;
+            }
+            resolve({ success: false, statusCode: res.statusCode, raw: responseBody, error: errorMsg });
           }
         });
       });
