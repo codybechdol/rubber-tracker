@@ -1619,15 +1619,503 @@ class TripPlannerApp {
     return this.manualTasks[idx];
   }
 
-  toggleManualTask(taskId) {
+  async toggleManualTask(taskId) {
     if (!this.manualTasks) this.manualTasks = this.loadManualTasks();
     const task = this.manualTasks.find(t => t.id === taskId);
     if (task) {
-      task.status = task.status === 'Complete' ? 'Pending' : 'Complete';
-      task.completedAt = task.status === 'Complete' ? new Date().toISOString() : null;
+      const isCert = (task.taskCategory === 'cert_class' || !!task.certType);
+      const willBeComplete = (task.status !== 'Complete');
+
+      task.status = willBeComplete ? 'Complete' : 'Pending';
+      task.completedAt = willBeComplete ? new Date().toISOString() : null;
       this.saveManualTasks(this.manualTasks);
       this.renderPlanner();
+
+      if (isCert) {
+        if (willBeComplete) {
+          await this.syncClassCompletionToExpiringCerts(task);
+        } else {
+          this.showToast('Class status set to Pending. (Existing cert records on Expiring Certs preserved).');
+        }
+      }
     }
+  }
+
+  /**
+   * Automatically updates Date Acquired, Expiration Date, Days Until Expiration, and Status
+   * for all scheduled attendees of a completed training class on the Expiring Certs page.
+   */
+  async syncClassCompletionToExpiringCerts(task) {
+    try {
+      if (!this.db) return;
+      const certsTable = this.db.getTable('expiring_certs');
+      if (!certsTable || !certsTable.rows) return;
+
+      const rawDate = task.dateKey || task.date || new Date().toISOString().split('T')[0];
+      let acqDateStr = '';
+      if (/^\d{4}-\d{2}-\d{2}$/.test(rawDate)) {
+        const p = rawDate.split('-');
+        acqDateStr = `${p[1]}/${p[2]}/${p[0]}`;
+      } else if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(rawDate)) {
+        const p = rawDate.split('/');
+        acqDateStr = `${p[0].padStart(2, '0')}/${p[1].padStart(2, '0')}/${p[2]}`;
+      } else {
+        const d = new Date(rawDate);
+        if (!isNaN(d.getTime())) {
+          acqDateStr = `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${d.getFullYear()}`;
+        }
+      }
+      if (!acqDateStr) acqDateStr = new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+
+      const resolved = this.resolveClassAttendees(task);
+      const attendeeNames = resolved && Array.isArray(resolved.allAttendees) ? resolved.allAttendees : [];
+      if (attendeeNames.length === 0) {
+        this.showToast('Class marked Complete. (No attendees found to update on Expiring Certs).');
+        return;
+      }
+
+      const targetCertDefs = this.normalizeClassCertDefs(task.certType || task.title || '');
+      if (!targetCertDefs || targetCertDefs.length === 0) return;
+
+      const headers = certsTable.headers || ['Employee Name', 'Item Type', 'Date Acquired', 'Expiration Date', 'Location', 'Job #', 'Days Until Expiration', 'Status', 'SMS'];
+      let colAcq = -1, colExp = -1, colDays = -1, colStat = -1, colSms = -1;
+      headers.forEach((h, idx) => {
+        const hl = String(h || '').toLowerCase().trim();
+        if (/date.*acq|acq.*date|test.*date|issue.*date|class.*date/.test(hl) && colAcq === -1) colAcq = idx + 1;
+        else if (/expir.*date|expir/.test(hl) && colExp === -1) colExp = idx + 1;
+        else if (/days/.test(hl) && colDays === -1) colDays = idx + 1;
+        else if (/^status$/.test(hl) && colStat === -1) colStat = idx + 1;
+        else if (/sms/.test(hl) && colSms === -1) colSms = idx + 1;
+      });
+      if (colAcq === -1) colAcq = 3;
+      if (colExp === -1) colExp = 4;
+      if (colDays === -1) colDays = 7;
+      if (colStat === -1) colStat = 8;
+      if (colSms === -1) colSms = 9;
+
+      const empTable = this.db.getTable('employees');
+      const empRows = (empTable && empTable.rows) ? empTable.rows : [];
+
+      let updatedCount = 0;
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      for (const attendee of attendeeNames) {
+        const cleanAttendee = String(attendee || '').trim();
+        if (!cleanAttendee) continue;
+
+        const empRow = empRows.find(r => this.isEmployeeNameMatch(r['Employee Name'] || r['Name'] || r['Employee'] || '', cleanAttendee));
+        const empLoc = empRow ? String(empRow['Location'] || 'Helena').trim() : 'Helena';
+        const empJob = empRow ? String(empRow['Job Number'] || empRow['Crew'] || '').trim() : '';
+
+        for (const certDef of targetCertDefs) {
+          let expDateStr = '';
+          let daysLeft = null;
+          let status = 'OK';
+
+          if (certDef.isNonExp) {
+            expDateStr = 'N/A';
+            daysLeft = null;
+            status = 'OK';
+          } else {
+            const parts = acqDateStr.split('/');
+            const m = parseInt(parts[0], 10) - 1;
+            const d = parseInt(parts[1], 10);
+            const y = parseInt(parts[2], 10);
+            const expDateObj = new Date(y, m, d);
+            expDateObj.setMonth(expDateObj.getMonth() + (certDef.months || 12));
+
+            const expM = String(expDateObj.getMonth() + 1).padStart(2, '0');
+            const expD = String(expDateObj.getDate()).padStart(2, '0');
+            const expY = expDateObj.getFullYear();
+            expDateStr = `${expM}/${expD}/${expY}`;
+
+            const expMidnight = new Date(expDateObj.getFullYear(), expDateObj.getMonth(), expDateObj.getDate());
+            daysLeft = Math.round((expMidnight - today) / (1000 * 60 * 60 * 24));
+
+            if (daysLeft < 0) status = 'EXPIRED';
+            else if (daysLeft <= 30) status = 'CRITICAL';
+            else if (daysLeft <= 60) status = 'WARNING';
+            else if (daysLeft <= 90) status = 'UPCOMING';
+            else status = 'OK';
+          }
+
+          // Match existing row in expiring_certs
+          let matchedRow = certsTable.rows.find(r => {
+            const rEmp = r['Employee Name'] || r['Employee'] || r['Name'] || '';
+            const rCert = r['Item Type'] || r['Cert Type'] || r['Type'] || '';
+            return this.isEmployeeNameMatch(rEmp, cleanAttendee) && this.isCertRowMatch(rCert, certDef);
+          });
+
+          if (matchedRow) {
+            let rowIdx = matchedRow._rowIdx;
+            if (!rowIdx) {
+              const idxInRows = certsTable.rows.indexOf(matchedRow);
+              if (idxInRows !== -1) rowIdx = idxInRows + 2;
+            }
+
+            const oldAcq = matchedRow['Date Acquired'] || matchedRow['Acquired Date'] || '';
+            const oldExp = matchedRow['Expiration Date'] || matchedRow['Expiration'] || '';
+            const oldStat = matchedRow['Status'] || '';
+            const oldDays = matchedRow['Days Until Expiration'] || '';
+
+            matchedRow['Date Acquired'] = acqDateStr;
+            matchedRow['Expiration Date'] = expDateStr;
+            matchedRow['Days Until Expiration'] = daysLeft !== null ? String(daysLeft) : (certDef.isNonExp ? 'N/A' : '');
+            matchedRow['Status'] = status;
+            matchedRow['SMS'] = '';
+
+            if (certsTable.rawGrid && rowIdx && certsTable.rawGrid[rowIdx - 1]) {
+              certsTable.rawGrid[rowIdx - 1][colAcq - 1] = acqDateStr;
+              certsTable.rawGrid[rowIdx - 1][colExp - 1] = expDateStr;
+              if (colDays !== -1) certsTable.rawGrid[rowIdx - 1][colDays - 1] = daysLeft !== null ? String(daysLeft) : (certDef.isNonExp ? 'N/A' : '');
+              if (colStat !== -1) certsTable.rawGrid[rowIdx - 1][colStat - 1] = status;
+              if (colSms !== -1) certsTable.rawGrid[rowIdx - 1][colSms - 1] = '';
+            }
+
+            if (rowIdx) {
+              if (acqDateStr !== oldAcq) {
+                await this.db.addMutation({
+                  action: 'UPDATE_CELL',
+                  sheetName: 'Expiring Certs',
+                  row: rowIdx,
+                  col: colAcq,
+                  header: headers[colAcq - 1] || 'Date Acquired',
+                  oldValue: oldAcq,
+                  value: acqDateStr
+                });
+              }
+              if (expDateStr !== oldExp) {
+                await this.db.addMutation({
+                  action: 'UPDATE_CELL',
+                  sheetName: 'Expiring Certs',
+                  row: rowIdx,
+                  col: colExp,
+                  header: headers[colExp - 1] || 'Expiration Date',
+                  oldValue: oldExp,
+                  value: expDateStr
+                });
+              }
+              if (colDays !== -1 && String(daysLeft) !== String(oldDays)) {
+                await this.db.addMutation({
+                  action: 'UPDATE_CELL',
+                  sheetName: 'Expiring Certs',
+                  row: rowIdx,
+                  col: colDays,
+                  header: headers[colDays - 1] || 'Days Until Expiration',
+                  oldValue: oldDays,
+                  value: daysLeft !== null ? String(daysLeft) : (certDef.isNonExp ? 'N/A' : '')
+                });
+              }
+              if (colStat !== -1 && status !== oldStat) {
+                await this.db.addMutation({
+                  action: 'UPDATE_CELL',
+                  sheetName: 'Expiring Certs',
+                  row: rowIdx,
+                  col: colStat,
+                  header: headers[colStat - 1] || 'Status',
+                  oldValue: oldStat,
+                  value: status
+                });
+              }
+            }
+            updatedCount++;
+          } else {
+            // Add new row if missing
+            const newRow = {
+              'Employee Name': cleanAttendee,
+              'Name': cleanAttendee,
+              'Item Type': certDef.canonical,
+              'Cert Type': certDef.canonical,
+              'Date Acquired': acqDateStr,
+              'Expiration Date': expDateStr,
+              'Location': empLoc,
+              'Job #': empJob,
+              'Days Until Expiration': daysLeft !== null ? String(daysLeft) : (certDef.isNonExp ? 'N/A' : ''),
+              'Status': status,
+              'SMS': ''
+            };
+            newRow._rowIdx = certsTable.rows.length + 2;
+            certsTable.rows.push(newRow);
+            certsTable.rowCount = certsTable.rows.length;
+
+            if (certsTable.rawGrid) {
+              const rowArr = headers.map(h => newRow[h] !== undefined ? newRow[h] : '');
+              certsTable.rawGrid.push(rowArr);
+              certsTable.maxRows = certsTable.rawGrid.length;
+            }
+
+            await this.db.addMutation({
+              action: 'ADD_ROW',
+              sheetName: 'Expiring Certs',
+              tableKey: 'expiring_certs',
+              rowData: newRow
+            });
+            updatedCount++;
+          }
+        }
+      }
+
+      await this.db.persistSnapshot(this.db.snapshot);
+
+      if (window.sheetNavigator && window.sheetNavigator.currentSheetKey === 'expiring_certs') {
+        window.sheetNavigator.renderExpiringCerts();
+      }
+
+      const labels = targetCertDefs.map(c => c.label).join(' & ');
+      this.showToast(`🎓 Class Completed! Updated ${labels} cert dates for ${attendeeNames.length} attendee(s) on Expiring Certs.`);
+    } catch (err) {
+      console.error('Error syncing class completion to Expiring Certs:', err);
+      this.showToast('Class marked Complete, but error updating Expiring Certs: ' + (err.message || err), true);
+    }
+  }
+
+  normalizeClassCertDefs(certName) {
+    const clean = String(certName || '').toLowerCase().trim();
+
+    // Check custom configuration from certsConfigEngine or localStorage
+    if (window.certsConfigEngine && Array.isArray(window.certsConfigEngine.certs) && window.certsConfigEngine.certs.length > 0) {
+      const conf = window.certsConfigEngine.certs.find(c => {
+        const k = String(c.key || c.name || '').toLowerCase().trim();
+        const l = String(c.label || '').toLowerCase().trim();
+        return k === clean || l === clean || clean.includes(k) || (k.length > 3 && clean.includes(k));
+      });
+      if (conf) {
+        const isNonExp = !!conf.isIssuedDate || conf.termMonths === 0;
+        return [{
+          key: conf.key || conf.name,
+          canonical: conf.label || conf.name || conf.key,
+          label: conf.label || conf.name || conf.key,
+          isNonExp: isNonExp,
+          months: isNonExp ? null : (conf.termMonths || 12),
+          aliases: [conf.key.toLowerCase(), (conf.label || '').toLowerCase()]
+        }];
+      }
+    }
+
+    const hasCpr = clean.includes('cpr');
+    const has1stAid = clean.includes('1st aid') || clean.includes('first aid');
+
+    if (hasCpr && has1stAid) {
+      return [
+        { key: 'cpr', canonical: 'CPR', label: 'CPR', isNonExp: false, months: 24, aliases: ['cpr'] },
+        { key: '1st aid', canonical: '1st Aid', label: '1st Aid', isNonExp: false, months: 24, aliases: ['1st aid', 'first aid'] }
+      ];
+    }
+
+    if (clean.includes('helicopter') || clean.includes('helo') || clean.includes('eica')) {
+      return [{
+        key: 'eica',
+        canonical: 'EICA Basic Helicopter Line Construction Safety',
+        label: 'Helicopter Line Construction Safety',
+        isNonExp: true,
+        aliases: ['helicopter', 'helo', 'eica']
+      }];
+    }
+
+    if (clean.includes('pole top') || clean.includes('poletop') || clean.includes('bucket rescue')) {
+      return [{
+        key: 'pole top',
+        canonical: 'Pole Top Rescue',
+        label: 'Pole Top Rescue',
+        isNonExp: false,
+        months: 12,
+        aliases: ['pole top', 'poletop', 'bucket rescue']
+      }];
+    }
+
+    if (clean.includes('cpr')) {
+      return [{
+        key: 'cpr',
+        canonical: 'CPR',
+        label: 'CPR',
+        isNonExp: false,
+        months: 24,
+        aliases: ['cpr']
+      }];
+    }
+
+    if (clean.includes('1st aid') || clean.includes('first aid')) {
+      return [{
+        key: '1st aid',
+        canonical: '1st Aid',
+        label: '1st Aid',
+        isNonExp: false,
+        months: 24,
+        aliases: ['1st aid', 'first aid']
+      }];
+    }
+
+    if (clean.includes('forklift')) {
+      const isOp = clean.includes('safety') || clean.includes('operator') || clean.includes('eval');
+      return [{
+        key: isOp ? 'forklift operator safety training' : 'forklift',
+        canonical: isOp ? 'Forklift Operator Safety Training' : 'Forklift',
+        label: isOp ? 'Forklift Operator Safety Training' : 'Forklift',
+        isNonExp: isOp,
+        months: isOp ? null : 36,
+        aliases: ['forklift']
+      }];
+    }
+
+    if (clean.includes('trench') || clean.includes('excavation')) {
+      return [{
+        key: 'osha trench comp person',
+        canonical: 'OSHA Trench Comp Person',
+        label: 'OSHA Trench Competent Person',
+        isNonExp: true,
+        aliases: ['trench', 'excavation']
+      }];
+    }
+
+    if (clean.includes('rigging') || clean.includes('signalperson') || clean.includes('spotter')) {
+      return [{
+        key: 'rigging',
+        canonical: 'Rigging & Signaling/Signalperson & Spotter Cert',
+        label: 'Rigging & Signaling',
+        isNonExp: false,
+        months: 36,
+        aliases: ['rigging', 'signalperson', 'spotter']
+      }];
+    }
+
+    if (clean.includes('harassment')) {
+      return [{
+        key: 'harassment training',
+        canonical: 'Harassment Training',
+        label: 'Harassment Training',
+        isNonExp: false,
+        months: 12,
+        aliases: ['harassment']
+      }];
+    }
+
+    if (clean.includes('dig safe') || clean.includes('digsafe') || clean.includes('811')) {
+      return [{
+        key: 'dig safe',
+        canonical: 'Dig Safe',
+        label: 'Dig Safe (811)',
+        isNonExp: false,
+        months: 24,
+        aliases: ['dig safe', 'digsafe', '811']
+      }];
+    }
+
+    if (clean.includes('crane eval') || clean.includes('crane evaluation')) {
+      return [{
+        key: 'crane evaluation',
+        canonical: 'Crane Evaluation',
+        label: 'Crane Evaluation',
+        isNonExp: true,
+        aliases: ['crane eval', 'crane evaluation']
+      }];
+    }
+
+    if (clean.includes('crane')) {
+      return [{
+        key: 'crane cert',
+        canonical: 'Crane Cert',
+        label: 'Crane Cert',
+        isNonExp: false,
+        months: 60,
+        aliases: ['crane cert', 'crane']
+      }];
+    }
+
+    if (clean.includes('osha')) {
+      return [{
+        key: 'osha 1910',
+        canonical: 'OSHA 1910',
+        label: 'OSHA 1910',
+        isNonExp: true,
+        aliases: ['osha']
+      }];
+    }
+
+    if (clean.includes('msha')) {
+      return [{
+        key: 'msha',
+        canonical: 'MSHA',
+        label: 'MSHA',
+        isNonExp: true,
+        aliases: ['msha']
+      }];
+    }
+
+    if (clean.includes('bnsf')) {
+      return [{
+        key: 'bnsf',
+        canonical: 'BNSF',
+        label: 'BNSF',
+        isNonExp: true,
+        aliases: ['bnsf']
+      }];
+    }
+
+    return [{
+      key: clean,
+      canonical: certName,
+      label: certName,
+      isNonExp: false,
+      months: 12,
+      aliases: [clean]
+    }];
+  }
+
+  isEmployeeNameMatch(a, b) {
+    if (!a || !b) return false;
+    const clean = (s) => String(s).toLowerCase().replace(/[^\w\s]/g, '').replace(/\s+/g, ' ').trim();
+    const sA = clean(a);
+    const sB = clean(b);
+    if (sA === sB) return true;
+    const pA = sA.split(' ');
+    const pB = sB.split(' ');
+    if (pA.length >= 2 && pB.length >= 2) {
+      if (pA[0] === pB[pB.length - 1] && pA[pA.length - 1] === pB[0]) return true;
+    }
+    return false;
+  }
+
+  isCertRowMatch(rowCertType, certDef) {
+    if (!rowCertType || !certDef) return false;
+    const rc = String(rowCertType).toLowerCase().trim();
+    const tc = String(certDef.canonical || '').toLowerCase().trim();
+    const tk = String(certDef.key || '').toLowerCase().trim();
+    if (rc === tc || rc === tk) return true;
+    if (certDef.aliases && certDef.aliases.some(a => rc.includes(a))) return true;
+    return rc.includes(tk) || (tk && rc.includes(tk.split(' ')[0]));
+  }
+
+  showToast(msg, isError = false) {
+    const existing = document.getElementById('app-toast');
+    if (existing) {
+      if (typeof existing.remove === 'function') existing.remove();
+      else if (existing.parentNode) existing.parentNode.removeChild(existing);
+    }
+    const toast = document.createElement('div');
+    toast.id = 'app-toast';
+    toast.style.cssText = `
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: ${isError ? '#ef4444' : '#10b981'};
+      color: #ffffff;
+      padding: 10px 18px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+      z-index: 99999;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      animation: fadeIn 0.2s ease-out;
+    `;
+    toast.textContent = msg;
+    document.body.appendChild(toast);
+    setTimeout(() => {
+      if (toast && toast.parentNode) toast.parentNode.removeChild(toast);
+    }, 4500);
   }
 
   deleteManualTask(taskId) {
@@ -4031,6 +4519,9 @@ class TripPlannerApp {
                               ${isDone ? `
                                 <span class="badge" style="background: rgba(16, 185, 129, 0.25); color: #a7f3d0; font-size: 9px; padding: 1px 4px;">
                                   ✅ Completed
+                                </span>
+                                <span class="badge" style="background: rgba(59, 130, 246, 0.18); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.35); font-size: 9px; font-weight: 700; padding: 1px 4px; border-radius: 3px;" title="Certification records synced to Expiring Certs">
+                                  🔄 Certs Updated
                                 </span>
                               ` : ''}
                               ${resolved.crews.length > 0 ? `
