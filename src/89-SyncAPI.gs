@@ -2113,6 +2113,18 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
     }
   }
 
+  // Auto deduplicate and refresh formulas if Expiring Certs was modified
+  if (!skipPostProcessing && (sheetsModified['Expiring Certs'] || sheetsModified['expiring_certs'])) {
+    try {
+      var expSheet = ss.getSheetByName('Expiring Certs');
+      if (expSheet && typeof sortExpiringCertsSheet === 'function') {
+        sortExpiringCertsSheet(expSheet);
+      }
+    } catch (expErr) {
+      Logger.log('applyBatchSyncMutations auto sortExpiringCertsSheet error: ' + expErr);
+    }
+  }
+
   // Auto Save & Backup on Push:
   // 1. Run targeted fast history save and location sync on modified equipment sheets
   if (!skipPostProcessing && appliedCount > 0) {

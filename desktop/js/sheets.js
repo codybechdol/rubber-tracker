@@ -505,6 +505,13 @@ class SheetNavigator {
       }
     }
 
+    // Automatically deduplicate any duplicate certification rows
+    try {
+      await this.deduplicateExpiringCerts(true);
+    } catch (e) {
+      console.warn('Could not auto-deduplicate expiring certs:', e);
+    }
+
     if (searchInput) {
       this.searchTerm = (searchInput.value || '').toLowerCase().trim();
       if (!searchInput.dataset.bound) {
@@ -520,6 +527,107 @@ class SheetNavigator {
 
     const tableData = this.db.getTable(this.currentSheetKey);
     this.renderStandardTable(container, countBadge, tableData);
+  }
+
+  /**
+   * Deduplicates expiring certs records: for any duplicate (employee, cert) pair,
+   * preserves the single best record (preferring newest expiration date, then newest acquired date).
+   */
+  async deduplicateExpiringCerts(silent = false) {
+    const tableData = this.db ? this.db.getTable('expiring_certs') : null;
+    if (!tableData || !tableData.rows || tableData.rows.length === 0) return 0;
+
+    const parseTime = (val) => {
+      if (!val || val === 'N/A' || val === '' || val === 'No Date Set') return 0;
+      const d = new Date(val);
+      return (d && !isNaN(d.getTime())) ? d.getTime() : 0;
+    };
+
+    const groups = new Map();
+    tableData.rows.forEach(r => {
+      const emp = String(r['Employee Name'] || r['Name'] || '').trim().toLowerCase();
+      const cert = String(r['Item Type'] || r['Cert Type'] || '').trim().toLowerCase();
+      const key = `${emp}|${cert}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(r);
+    });
+
+    let removedCount = 0;
+    const cleanRows = [];
+
+    groups.forEach((group) => {
+      if (group.length === 1) {
+        cleanRows.push(group[0]);
+      } else {
+        removedCount += (group.length - 1);
+        group.sort((a, b) => {
+          const expA = parseTime(a['Expiration Date']);
+          const expB = parseTime(b['Expiration Date']);
+          if (expA !== expB) return expB - expA; // Newest expiration date first
+          const acqA = parseTime(a['Date Acquired']);
+          const acqB = parseTime(b['Date Acquired']);
+          if (acqA !== acqB) return acqB - acqA; // Newest acquired date first
+          const statA = String(a['Status'] || '').trim().toLowerCase();
+          const statB = String(b['Status'] || '').trim().toLowerCase();
+          const isGoodA = (statA && statA !== 'no date set' && statA !== 'missing');
+          const isGoodB = (statB && statB !== 'no date set' && statB !== 'missing');
+          if (isGoodA && !isGoodB) return -1;
+          if (!isGoodA && isGoodB) return 1;
+          return 0;
+        });
+        cleanRows.push(group[0]);
+      }
+    });
+
+    if (removedCount > 0) {
+      tableData.rows = cleanRows;
+      tableData.rows.forEach((r, idx) => {
+        r._rowIdx = idx + 2;
+      });
+
+      if (tableData.headers) {
+        tableData.rawGrid = [tableData.headers];
+        tableData.rows.forEach(r => {
+          tableData.rawGrid.push(tableData.headers.map(h => r[h] !== undefined ? r[h] : ''));
+        });
+        tableData.maxRows = tableData.rawGrid.length;
+      }
+      tableData.rowCount = tableData.rows.length;
+
+      if (this.db && typeof this.db.addMutation === 'function') {
+        await this.db.addMutation({
+          action: 'REPLACE_TABLE_DATA',
+          sheetName: 'Expiring Certs',
+          tableKey: 'expiring_certs',
+          headers: tableData.headers,
+          rows: tableData.rows,
+          rawGrid: tableData.rawGrid
+        });
+      }
+
+      if (typeof this.db.setSnapshot === 'function' && this.db.snapshot) {
+        await this.db.setSnapshot(this.db.snapshot);
+      } else if (window.desktopAPI && typeof window.desktopAPI.saveLocalSnapshot === 'function') {
+        await window.desktopAPI.saveLocalSnapshot(this.db.snapshot);
+      }
+
+      if (!silent) {
+        if (typeof showToast === 'function') {
+          showToast(`🧹 Removed ${removedCount} duplicate certification records!`, 'success');
+        } else {
+          alert(`🧹 Cleaned up ${removedCount} duplicate certification records!`);
+        }
+        this.renderExpiringCerts();
+      }
+    } else if (!silent) {
+      if (typeof showToast === 'function') {
+        showToast('All certification records are unique. No duplicates found.', 'info');
+      } else {
+        alert('All certification records are unique. No duplicates found.');
+      }
+    }
+
+    return removedCount;
   }
 
   /**
@@ -2191,6 +2299,7 @@ class SheetNavigator {
             <button class="btn btn-secondary ${isStatSorted ? 'active' : ''}" style="padding: 2px 7px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('status')">🏷️ Status${dirArrow(isStatSorted)}</button>
             <button class="btn btn-secondary ${isLocSorted ? 'active' : ''}" style="padding: 2px 7px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('location')">📍 Location${dirArrow(isLocSorted)}</button>
             <button class="btn btn-secondary ${isJobSorted ? 'active' : ''}" style="padding: 2px 7px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('jobNumber')">🔢 Job #${dirArrow(isJobSorted)}</button>
+            <button class="btn btn-secondary" style="padding: 2px 7px; font-size: 11px; white-space: nowrap; margin-left: auto; color: #60a5fa;" onclick="window.sheetNavigator.deduplicateExpiringCerts(false)" title="Clean up any duplicate certification records">🧹 Deduplicate</button>
           </div>
         </div>
       `;

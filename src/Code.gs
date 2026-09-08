@@ -3048,14 +3048,39 @@ function syncExpiringCertsSheetFullRoster() {
         if (!rEmp || !rCert) continue;
 
         var key = rEmp.toLowerCase() + '|' + rCert.toLowerCase();
-        existingRowMap[key] = {
-          acqDate: exAcqCol !== -1 ? rRow[exAcqCol] : null,
-          expDate: exExpCol !== -1 ? rRow[exExpCol] : null,
-          location: exLocCol !== -1 ? rRow[exLocCol] : '',
-          jobNum: exJobCol !== -1 ? rRow[exJobCol] : '',
-          status: exStatusCol !== -1 ? String(rRow[exStatusCol] || '').trim() : '',
-          sms: exSmsCol !== -1 ? rRow[exSmsCol] : ''
-        };
+        var curAcq = exAcqCol !== -1 ? rRow[exAcqCol] : null;
+        var curExp = exExpCol !== -1 ? rRow[exExpCol] : null;
+
+        if (!existingRowMap[key]) {
+          existingRowMap[key] = {
+            acqDate: curAcq,
+            expDate: curExp,
+            location: exLocCol !== -1 ? rRow[exLocCol] : '',
+            jobNum: exJobCol !== -1 ? rRow[exJobCol] : '',
+            status: exStatusCol !== -1 ? String(rRow[exStatusCol] || '').trim() : '',
+            sms: exSmsCol !== -1 ? rRow[exSmsCol] : ''
+          };
+        } else {
+          // Compare dates to preserve the newest record if duplicate rows exist
+          var parseTimeForDup = function(v) {
+            if (!v || v === 'N/A') return 0;
+            var d = (v instanceof Date) ? v : parseDateNoon(String(v));
+            return (d && !isNaN(d.getTime())) ? d.getTime() : 0;
+          };
+          var exTime = parseTimeForDup(existingRowMap[key].expDate);
+          var curTime = parseTimeForDup(curExp);
+          if (curTime > exTime) {
+            existingRowMap[key].expDate = curExp;
+            if (curAcq) existingRowMap[key].acqDate = curAcq;
+            if (exStatusCol !== -1 && rRow[exStatusCol]) existingRowMap[key].status = String(rRow[exStatusCol]).trim();
+          } else if (curTime === exTime) {
+            var exAcqTime = parseTimeForDup(existingRowMap[key].acqDate);
+            var curAcqTime = parseTimeForDup(curAcq);
+            if (curAcqTime > exAcqTime) {
+              existingRowMap[key].acqDate = curAcq;
+            }
+          }
+        }
       }
     }
 
@@ -4967,7 +4992,58 @@ function sortExpiringCertsSheet(sheet) {
     filteredValues.push(values[v]);
   }
 
-  values = filteredValues;
+  // Deduplicate records in memory: for any duplicate (employee, cert) rows, keep the single best/newest record
+  var parseTimeSafe = function(val) {
+    if (!val || val === 'N/A' || val === '' || val === 'No Date Set') return 0;
+    var d = (val instanceof Date) ? val : parseDateNoon(String(val));
+    return (d && !isNaN(d.getTime())) ? d.getTime() : 0;
+  };
+
+  var dedupGroups = {};
+  for (var f = 0; f < filteredValues.length; f++) {
+    var row = filteredValues[f];
+    var empKey = String(row[0] || '').trim().toLowerCase();
+    var certKey = String(row[1] || '').trim().toLowerCase();
+    var groupKey = empKey + '|' + certKey;
+    if (!dedupGroups[groupKey]) {
+      dedupGroups[groupKey] = [];
+    }
+    dedupGroups[groupKey].push(row);
+  }
+
+  var dedupedValues = [];
+  var dupsRemoved = 0;
+
+  for (var gKey in dedupGroups) {
+    var group = dedupGroups[gKey];
+    if (group.length === 1) {
+      dedupedValues.push(group[0]);
+    } else {
+      dupsRemoved += (group.length - 1);
+      group.sort(function(a, b) {
+        var expA = parseTimeSafe(a[3]);
+        var expB = parseTimeSafe(b[3]);
+        if (expA !== expB) return expB - expA; // Newest expiration date first
+        var acqA = parseTimeSafe(a[2]);
+        var acqB = parseTimeSafe(b[2]);
+        if (acqA !== acqB) return acqB - acqA; // Newest acquired date first
+        var statA = String(a[7] || '').trim().toLowerCase();
+        var statB = String(b[7] || '').trim().toLowerCase();
+        var isGoodA = (statA && statA !== 'no date set' && statA !== 'missing');
+        var isGoodB = (statB && statB !== 'no date set' && statB !== 'missing');
+        if (isGoodA && !isGoodB) return -1;
+        if (!isGoodA && isGoodB) return 1;
+        return 0;
+      });
+      dedupedValues.push(group[0]);
+    }
+  }
+
+  if (dupsRemoved > 0) {
+    Logger.log('sortExpiringCertsSheet: Purged ' + dupsRemoved + ' duplicate certification rows.');
+  }
+
+  values = dedupedValues;
 
   // Sort values in memory
   values.sort(function(a, b) {
@@ -5148,6 +5224,31 @@ function sortExpiringCertsSheet(sheet) {
   applyExpiringCertsFormatting(sheet, values.length);
 
   Logger.log('sortExpiringCertsSheet: Sorted ' + values.length + ' rows with formulas refreshed.');
+}
+
+/**
+ * Deduplicates and sorts the Expiring Certs sheet, preserving the newest date for any duplicate records.
+ * Can be run manually from menu or trigger.
+ * @return {Object} Result object
+ */
+function dedupeExpiringCertsSheet() {
+  try {
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var sheet = ss.getSheetByName('Expiring Certs');
+    if (!sheet) return { success: false, message: 'Expiring Certs sheet not found' };
+    sortExpiringCertsSheet(sheet);
+    if (typeof patchSyncSnapshotInDrive === 'function') {
+      try {
+        patchSyncSnapshotInDrive({ 'Expiring Certs': true });
+      } catch (pErr) {
+        Logger.log('dedupeExpiringCertsSheet patchSyncSnapshotInDrive error: ' + pErr);
+      }
+    }
+    return { success: true, message: 'Expiring Certs deduplicated and sorted successfully.' };
+  } catch (e) {
+    Logger.log('Error in dedupeExpiringCertsSheet: ' + e.message);
+    return { success: false, error: e.message };
+  }
 }
 
 /**
@@ -33337,6 +33438,12 @@ function doPost(e) {
         success: true,
         message: 'Training attendees and crew leads synchronized'
       })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    if (action === 'dedupeExpiringCerts') {
+      var dedupeRes = dedupeExpiringCertsSheet();
+      return ContentService.createTextOutput(JSON.stringify(dedupeRes))
+        .setMimeType(ContentService.MimeType.JSON);
     }
 
     if (action === 'getSnapshot') {
