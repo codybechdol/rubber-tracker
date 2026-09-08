@@ -140,6 +140,15 @@ class LocalDatabase {
 
   async setSnapshot(snapshot) {
     if (snapshot) {
+      if (snapshot.isPartial && this.snapshot && this.snapshot.tables) {
+        for (const [k, v] of Object.entries(snapshot.tables || {})) {
+          this.snapshot.tables[k] = v;
+        }
+        if (snapshot.configs && this.snapshot.configs) {
+          Object.assign(this.snapshot.configs, snapshot.configs);
+        }
+        snapshot = this.snapshot;
+      }
       this.normalizeSnapshot(snapshot);
     }
     this.snapshot = snapshot;

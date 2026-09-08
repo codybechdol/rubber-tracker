@@ -33198,9 +33198,11 @@ function doGet(e) {
       var newOnlyMode = e.parameter.newOnlyMode !== 'false';
       var skipPdfExtraction = e.parameter.skipPdfExtraction === 'true';
       var endDate = e.parameter.endDate || null;
+      var batchSize = parseInt(e.parameter.batchSize || (skipPdfExtraction ? '10' : '2'), 10);
 
       var result = executeSyncApiProcessSafetyEmails({
         daysBack: daysBack,
+        batchSize: batchSize,
         reportTypeFilter: reportTypeFilter,
         newOnlyMode: newOnlyMode,
         skipPdfExtraction: skipPdfExtraction,
@@ -33296,12 +33298,13 @@ function doPost(e) {
     }
 
     if (action === 'processSafetyEmails') {
+      var skipPdfExtraction = payload.skipPdfExtraction === true;
       var procResult = executeSyncApiProcessSafetyEmails({
         daysBack: payload.daysBack || 7,
-        batchSize: payload.batchSize || 5,
+        batchSize: payload.batchSize || (skipPdfExtraction ? 10 : 2),
         reportTypeFilter: payload.reportTypeFilter || 'ALL',
         newOnlyMode: payload.newOnlyMode !== false,
-        skipPdfExtraction: payload.skipPdfExtraction === true,
+        skipPdfExtraction: skipPdfExtraction,
         endDate: payload.endDate || null,
         isPostProcessing: payload.isPostProcessing === true,
         prevResult: payload.prevResult || null,

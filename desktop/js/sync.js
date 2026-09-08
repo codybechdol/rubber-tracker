@@ -35,18 +35,15 @@ class SyncEngine {
   async executeNetworkRequest(url, method = 'GET', body = null, timeoutMs = 120000) {
     // 1. If running inside Electron desktop app, use native Node HTTPS bridge
     if (window.desktopAPI && typeof window.desktopAPI.sendSyncRequest === 'function') {
-      try {
-        const res = await window.desktopAPI.sendSyncRequest({ url, method, body });
-        if (res && res.success && res.data) {
-          return res.data;
-        } else if (res && res.data) {
-          return res.data;
-        } else if (res && res.error) {
-          throw new Error(res.error);
-        }
-      } catch (ipcErr) {
-        console.warn('Native Electron sync bridge error, trying browser fetch fallback:', ipcErr);
+      const res = await window.desktopAPI.sendSyncRequest({ url, method, body });
+      if (res && res.success && res.data) {
+        return res.data;
+      } else if (res && res.data) {
+        return res.data;
+      } else if (res && res.error) {
+        throw new Error(res.error);
       }
+      throw new Error((res && res.message) ? res.message : 'No response from desktop sync bridge.');
     }
 
     // 2. Try browser Fetch API first

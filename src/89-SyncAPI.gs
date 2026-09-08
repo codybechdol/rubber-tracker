@@ -32,11 +32,20 @@ var COLS_SAFE = (typeof COLS !== 'undefined' && COLS) ? COLS : {
  * Uses a single-pass getValues() read per sheet with fast in-memory formatting
  * to eliminate getDisplayValues() RPC overhead across all 34 sheets.
  *
- * @return {Object} The complete database snapshot
+ * @param {Array<string>} [tableKeysFilter] - Optional list of table keys to export (e.g. ['safety_compliance']) for fast partial sync
+ * @return {Object} The complete or partial database snapshot
  */
-function exportFullDatabaseSnapshot() {
+function exportFullDatabaseSnapshot(tableKeysFilter) {
   var ss = typeof getActiveSpreadsheetSafe === 'function' ? getActiveSpreadsheetSafe() : SpreadsheetApp.getActiveSpreadsheet();
   var timestamp = new Date();
+
+  var filterSet = null;
+  if (Array.isArray(tableKeysFilter) && tableKeysFilter.length > 0) {
+    filterSet = {};
+    for (var f = 0; f < tableKeysFilter.length; f++) {
+      filterSet[tableKeysFilter[f]] = true;
+    }
+  }
 
   function fastDateString(d) {
     if (!(d instanceof Date) || isNaN(d.getTime())) return '';
@@ -99,6 +108,9 @@ function exportFullDatabaseSnapshot() {
 
   for (var i = 0; i < sheetConfigs.length; i++) {
     var cfg = sheetConfigs[i];
+    if (filterSet && !filterSet[cfg.key]) {
+      continue;
+    }
     var sheet = ss.getSheetByName(cfg.name);
     if (!sheet && cfg.key === 'previous_employees') {
       sheet = ss.getSheetByName('Previous Employee') || ss.getSheetByName('Previous Employees') || ss.getSheetByName('Past Employees');
@@ -246,7 +258,8 @@ function exportFullDatabaseSnapshot() {
     spreadsheetName: ss.getName(),
     exportedAt: timestamp.toISOString(),
     timezone: ss.getSpreadsheetTimeZone(),
-    configs: {
+    isPartial: !!filterSet,
+    configs: filterSet ? null : {
       holidays: holidays,
       workSchedule: workSchedule,
       driveTimeMap: driveTimeMap,
@@ -2213,9 +2226,9 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
 function executeSyncApiProcessSafetyEmails(options) {
   options = options || {};
   var daysBack = options.daysBack || 7;
-  var batchSize = options.batchSize || 5;
-  var newOnlyMode = options.newOnlyMode !== false;
   var skipPdfExtraction = options.skipPdfExtraction === true;
+  var batchSize = options.batchSize || (skipPdfExtraction ? 10 : 2);
+  var newOnlyMode = options.newOnlyMode !== false;
   var endDate = options.endDate || null;
   var reportTypeFilter = options.reportTypeFilter || 'ALL';
   var isPostProcessingStep = options.isPostProcessing === true;
@@ -2260,7 +2273,8 @@ function executeSyncApiProcessSafetyEmails(options) {
     var freshSnapshot = null;
     if (typeof exportFullDatabaseSnapshot === 'function') {
       try {
-        freshSnapshot = exportFullDatabaseSnapshot();
+        var safetyTables = ['safety_compliance', 'jha_log', 'weekly_safety_log', 'monthly_checklist_log', 'safety_equipment_needs'];
+        freshSnapshot = exportFullDatabaseSnapshot(safetyTables);
       } catch (eSnap) {
         Logger.log('executeSyncApiProcessSafetyEmails snapshot error: ' + eSnap);
       }
@@ -2276,7 +2290,7 @@ function executeSyncApiProcessSafetyEmails(options) {
 
   var result = null;
   try {
-    result = processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction, endDate, reportTypeFilter);
+    result = processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction, endDate, reportTypeFilter, 20000);
   } catch (err) {
     Logger.log('executeSyncApiProcessSafetyEmails batch error: ' + err.toString());
     return {
@@ -2332,7 +2346,8 @@ function executeSyncApiProcessSafetyEmails(options) {
   var freshSnapshot = null;
   if (typeof exportFullDatabaseSnapshot === 'function') {
     try {
-      freshSnapshot = exportFullDatabaseSnapshot();
+      var safetyTables = ['safety_compliance', 'jha_log', 'weekly_safety_log', 'monthly_checklist_log', 'safety_equipment_needs'];
+      freshSnapshot = exportFullDatabaseSnapshot(safetyTables);
     } catch (eSnap) {
       Logger.log('executeSyncApiProcessSafetyEmails snapshot error: ' + eSnap);
     }

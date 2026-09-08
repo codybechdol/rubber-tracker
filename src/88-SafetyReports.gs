@@ -5785,10 +5785,13 @@ function applyStatusFormatting(sheet, startRow, numRows) {
  * @param {number} batchSize - Number of threads per batch (default 5 for speed)
  * @param {boolean} newOnlyMode - Only process emails since last run (default true)
  * @param {boolean} skipPdfExtraction - Skip slow PDF extraction, use subject date only (default false)
+ * @param {string} [endDate] - Optional end date filter
+ * @param {string} [reportTypeFilter] - Filter for report type ('ALL', 'JHA', 'WEEKLY', 'MONTHLY')
+ * @param {number} [maxExecutionMs] - Optional maximum execution time in ms (e.g. 25000 for Web App calls)
  */
-function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction, endDate, reportTypeFilter) {
+function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction, endDate, reportTypeFilter, maxExecutionMs) {
   if (!daysBack) daysBack = 7;
-  if (!batchSize) batchSize = 5; // REDUCED from 10 to 5 for better timeout handling
+  if (!batchSize) batchSize = (skipPdfExtraction === true) ? 10 : 2; // Default 2 when extracting PDFs to prevent timeouts
   if (newOnlyMode === undefined) newOnlyMode = true; // Default to new-only mode
   if (skipPdfExtraction === undefined) skipPdfExtraction = false; // Default to extracting PDFs
   if (!reportTypeFilter) reportTypeFilter = 'ALL';
@@ -6125,8 +6128,8 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
   var batchEnd = Math.min(batchStart + batchSize, allThreads.length);
   var batchThreads = allThreads.slice(batchStart, batchEnd);
 
-  // Time tracking - stop 30 seconds before the 6-minute limit
-  var MAX_EXECUTION_MS = 5.5 * 60 * 1000; // 5.5 minutes = 330 seconds
+  // Time tracking - stop before execution limit (default 5.5 min for triggers, or custom e.g. 25s for Web App HTTP)
+  var MAX_EXECUTION_MS = (typeof maxExecutionMs === 'number' && maxExecutionMs > 0) ? maxExecutionMs : (5.5 * 60 * 1000);
   var timedOut = false;
 
   // === OPTION B: Build job resolution context for logging ===
@@ -7589,35 +7592,7 @@ function parseSafetyEmail(message, skipPdfExtraction) {
     var fullText = body;
     var jhaDateOverrides = []; // Holds dates extracted from PDF for JHAs (may have multiple per email)
 
-    // Extract PDF content for Safety Checklist reports (required - all data is in PDF)
-    // This is slow (~5-10 seconds per PDF) but necessary for equipment issues
-    // NOTE: Can be skipped with skipPdfExtraction=true for compliance-only mode
-    if (reportType === "Safety Checklist" && !skipPdfExtraction) {
-      Logger.log("Processing Safety Checklist PDF for job " + jobNumber + "...");
-      var attachments = message.getAttachments();
-
-      for (var i = 0; i < attachments.length; i++) {
-        var attachment = attachments[i];
-        var contentType = attachment.getContentType();
-        var fileName = attachment.getName().toLowerCase();
-
-        if (contentType === 'application/pdf' || fileName.endsWith('.pdf')) {
-          Logger.log("Extracting PDF: " + attachment.getName() + " (" + Math.round(attachment.getSize()/1024) + "KB)");
-          try {
-            // Convert PDF to text using Drive API (slow ~5-10 seconds)
-            var pdfText = extractTextFromPDF(attachment);
-            if (pdfText && pdfText.length > 50) {
-              fullText += "\n\n[PDF CONTENT]\n" + pdfText;
-              Logger.log("Extracted " + pdfText.length + " chars from PDF");
-            }
-          } catch (pdfError) {
-            Logger.log("PDF extraction failed: " + pdfError.toString());
-          }
-          // Only process first PDF per email
-          break;
-        }
-      }
-    } else if (reportType === "Safety Checklist" && skipPdfExtraction) {
+    if (reportType === "Safety Checklist" && skipPdfExtraction) {
       Logger.log("⚡ FAST MODE: Skipping Safety Checklist PDF extraction for job " + jobNumber + " - equipment issues won't be extracted");
     }
 
