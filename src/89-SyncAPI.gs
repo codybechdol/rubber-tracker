@@ -189,6 +189,11 @@ function exportFullDatabaseSnapshot(tableKeysFilter) {
           var hName = headers[c];
           if (hName) {
             rowObj[hName] = rawVal instanceof Date ? formattedStr : rawVal;
+            if (hName.toLowerCase() === 'date recieved') {
+              rowObj['Date Received'] = rowObj[hName];
+            } else if (hName.toLowerCase() === 'date received') {
+              rowObj['Date Recieved'] = rowObj[hName];
+            }
           }
         }
       }

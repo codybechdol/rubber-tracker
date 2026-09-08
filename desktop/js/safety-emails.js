@@ -1152,6 +1152,23 @@ class SafetyEmailsEngine {
       return '';
     }
 
+    function getLogRowDateReceived(row) {
+      if (!row) return '';
+      const v = row['Date Received'] || row['Date Recieved'] || row['date_received'] || row['date_recieved'] ||
+                row['Date_Received'] || row['Date_Recieved'] || row.dateReceived || row.dateRecieved ||
+                row['Received'] || row['received'] || '';
+      if (!v && v !== 0) return '';
+      if (v instanceof Date) {
+        const m = String(v.getMonth() + 1).padStart(2, '0');
+        const d = String(v.getDate()).padStart(2, '0');
+        const y = v.getFullYear();
+        const hr = String(v.getHours()).padStart(2, '0');
+        const mn = String(v.getMinutes()).padStart(2, '0');
+        return (v.getHours() !== 0 || v.getMinutes() !== 0) ? `${m}/${d}/${y} ${hr}:${mn}` : `${m}/${d}/${y}`;
+      }
+      return String(v).trim();
+    }
+
     // JHA Log
     const jhaTbl = snap.tables.jha_log;
     if (jhaTbl && jhaTbl.rows) {
@@ -1164,8 +1181,8 @@ class SafetyEmailsEngine {
           sheetName: 'JHA Log',
           type: 'JHA',
           rowIndex: r._rowIdx || (idx + 2),
-          dateReceived: r['Date Received'] || '',
-          date: r['Date Created'] || '',
+          dateReceived: getLogRowDateReceived(r),
+          date: r['Date Created'] || r['Date Completed'] || r['Work Date'] || r.date || '',
           jobNumber: jobNum,
           foreman: r['Foreman'] || '',
           subject: subject,
@@ -1190,7 +1207,7 @@ class SafetyEmailsEngine {
           sheetName: 'Weekly Safety Log',
           type: 'Weekly Safety Meeting',
           rowIndex: r._rowIdx || (idx + 2),
-          dateReceived: r['Date Received'] || '',
+          dateReceived: getLogRowDateReceived(r),
           date: r['Week Of'] || '',
           jobNumber: jobNum,
           foreman: r['Foreman'] || '',
@@ -1216,7 +1233,7 @@ class SafetyEmailsEngine {
           sheetName: 'Monthly Checklist Log',
           type: 'Monthly Checklist',
           rowIndex: r._rowIdx || (idx + 2),
-          dateReceived: r['Date Received'] || '',
+          dateReceived: getLogRowDateReceived(r),
           date: r['Report Date'] || '',
           jobNumber: jobNum,
           foreman: r['Foreman'] || '',
