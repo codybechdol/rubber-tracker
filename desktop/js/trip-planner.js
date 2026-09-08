@@ -1560,20 +1560,20 @@ class TripPlannerApp {
     const newTask = {
       id: 'mt_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
       taskCategory: isCert ? 'cert_class' : 'personal_task',
-      title: (taskData.title || (isCert ? certTypeVal : '')).trim(),
+      title: String(taskData.title || (isCert ? certTypeVal : '')).trim(),
       certType: certTypeVal,
       crewIds: Array.isArray(taskData.crewIds) ? [...taskData.crewIds] : [],
-      crewId: (taskData.crewId || '').trim(),
+      crewId: String(taskData.crewId || '').trim(),
       assignedEmployees: Array.isArray(taskData.assignedEmployees) ? [...taskData.assignedEmployees] : [],
-      employee: (taskData.employee || '').trim(),
-      instructor: (taskData.instructor || 'Cody Bechdol (Self)').trim(),
-      assignedTo: (taskData.assignedTo || 'Myself').trim(),
+      employee: String(taskData.employee || '').trim(),
+      instructor: String(taskData.instructor || 'Cody Bechdol (Self)').trim(),
+      assignedTo: String(taskData.assignedTo || 'Myself').trim(),
       dateKey: dateKey,
       date: dateKey,
-      location: (taskData.location || '').trim(),
-      time: (taskData.time || '').trim(),
-      priority: (taskData.priority || 'Normal').trim(),
-      notes: (taskData.notes || '').trim(),
+      location: String(taskData.location || '').trim(),
+      time: String(taskData.time || '').trim(),
+      priority: String(taskData.priority || 'Normal').trim(),
+      notes: String(taskData.notes || '').trim(),
       status: 'Pending',
       createdAt: new Date().toISOString(),
       completedAt: null
@@ -1593,25 +1593,25 @@ class TripPlannerApp {
     const existing = this.manualTasks[idx];
     const isCert = (taskData.taskCategory === 'cert_class' || !!taskData.certType);
     const dateVal = taskData.dateKey || taskData.date || existing.dateKey || existing.date;
-    const certTypeVal = (taskData.certType !== undefined ? taskData.certType : existing.certType || '').trim();
+    const certTypeVal = (taskData.certType !== undefined ? String(taskData.certType) : existing.certType || '').trim();
 
     this.manualTasks[idx] = {
       ...existing,
       taskCategory: isCert ? 'cert_class' : 'personal_task',
-      title: (taskData.title || (isCert ? certTypeVal : existing.title)).trim(),
+      title: String(taskData.title !== undefined ? taskData.title : (isCert ? certTypeVal : existing.title || '')).trim(),
       certType: certTypeVal,
       crewIds: (taskData.crewIds !== undefined ? [...taskData.crewIds] : (existing.crewIds ? [...existing.crewIds] : [])),
-      crewId: (taskData.crewId !== undefined ? taskData.crewId : existing.crewId || '').trim(),
+      crewId: (taskData.crewId !== undefined ? String(taskData.crewId) : existing.crewId || '').trim(),
       assignedEmployees: (taskData.assignedEmployees !== undefined ? [...taskData.assignedEmployees] : (existing.assignedEmployees ? [...existing.assignedEmployees] : [])),
-      employee: (taskData.employee !== undefined ? taskData.employee : existing.employee || '').trim(),
-      instructor: (taskData.instructor !== undefined ? taskData.instructor : existing.instructor || 'Cody Bechdol (Self)').trim(),
-      assignedTo: (taskData.assignedTo !== undefined ? taskData.assignedTo : existing.assignedTo || 'Myself').trim(),
+      employee: (taskData.employee !== undefined ? String(taskData.employee) : existing.employee || '').trim(),
+      instructor: (taskData.instructor !== undefined ? String(taskData.instructor) : existing.instructor || 'Cody Bechdol (Self)').trim(),
+      assignedTo: (taskData.assignedTo !== undefined ? String(taskData.assignedTo) : existing.assignedTo || 'Myself').trim(),
       dateKey: dateVal,
       date: dateVal,
-      location: (taskData.location !== undefined ? taskData.location : existing.location || '').trim(),
-      time: (taskData.time !== undefined ? taskData.time : existing.time || '').trim(),
-      priority: (taskData.priority !== undefined ? taskData.priority : existing.priority || 'Normal').trim(),
-      notes: (taskData.notes !== undefined ? taskData.notes : existing.notes || '').trim()
+      location: (taskData.location !== undefined ? String(taskData.location) : existing.location || '').trim(),
+      time: (taskData.time !== undefined ? String(taskData.time) : existing.time || '').trim(),
+      priority: (taskData.priority !== undefined ? String(taskData.priority) : existing.priority || 'Normal').trim(),
+      notes: (taskData.notes !== undefined ? String(taskData.notes) : existing.notes || '').trim()
     };
 
     this.saveManualTasks(this.manualTasks);
@@ -1809,6 +1809,7 @@ class TripPlannerApp {
 
       const certType = certTypeInput ? certTypeInput.value.trim() : '';
       const dateKey = certDateInput ? certDateInput.value.trim() : '';
+      const location = certLocInput ? certLocInput.value.trim() : 'Helena HQ';
       let time = certTimeInput ? certTimeInput.value.trim() : '';
       if (time) {
         time = time.replace(/^([0-9]{1,2}(?::[0-9]{2})?)\s*am(\s*[\/\-–—]\s*[0-9]{1,2}(?::[0-9]{2})?\s*pm)/i, (match, p1, p2) => {
