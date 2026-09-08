@@ -934,28 +934,7 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
                   var assignedVal = String(mut.value || '').trim();
                   var assignedValLower = assignedVal.toLowerCase();
 
-                  // 1. Run standard Apps Script trigger handler
-                  try {
-                    if ((isGlove || isSleeve) && typeof handleInventoryAssignedToChange === 'function') {
-                      handleInventoryAssignedToChange(ss, sheet, sheetName, mut.row, mut.value);
-                    } else if (isBlanket && typeof handleBlanketAssignedToChange === 'function') {
-                      handleBlanketAssignedToChange(ss, sheet, mut.row, mut.value);
-                    } else if (isMack && typeof handleMackAssignedToChange === 'function') {
-                      handleMackAssignedToChange(ss, sheet, mut.row, mut.value);
-                    } else if (isHVTester && typeof handleHVTesterAssignedToChange === 'function') {
-                      handleHVTesterAssignedToChange(ss, sheet, mut.row, mut.value);
-                    } else if (isPhasingSet && typeof handlePhasingSetAssignedToChange === 'function') {
-                      handlePhasingSetAssignedToChange(ss, sheet, mut.row, mut.value);
-                    } else if (isAED && typeof handleAEDAssignedToChange === 'function') {
-                      handleAEDAssignedToChange(ss, sheet, mut.row, mut.value);
-                    } else if (isGrounds && typeof handleGroundAssignedToChange === 'function') {
-                      handleGroundAssignedToChange(ss, sheet, mut.row, mut.value);
-                    } else if (isHotSticks && typeof handleHotStickAssignedToChange === 'function') {
-                      handleHotStickAssignedToChange(ss, sheet, mut.row, mut.value);
-                    }
-                  } catch (assignedHandlerErr) {
-                    Logger.log('AssignedTo handler error on ' + sheetName + ': ' + assignedHandlerErr);
-                  }
+                  // 1. Direct fast update for Status, Location, and Change Out Date (bypasses 30s ScriptLock from onEdit triggers)
 
                   // 2. Direct guarantee update for Status and Location
                   var newStatus = '';
@@ -2147,12 +2126,14 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
       }
     }
 
-    try {
-      if (typeof saveHistoryFast === 'function') {
-        saveHistoryFast(true, sheetsModified);
+    if (options && options.saveHistory === true) {
+      try {
+        if (typeof saveHistoryFast === 'function') {
+          saveHistoryFast(true, sheetsModified);
+        }
+      } catch (histErr) {
+        Logger.log('applyBatchSyncMutations auto saveHistoryFast error: ' + histErr);
       }
-    } catch (histErr) {
-      Logger.log('applyBatchSyncMutations auto saveHistoryFast error: ' + histErr);
     }
 
     // 2. Fast sub-second patch of the .JSON snapshot in Google Drive for modified sheets or configs

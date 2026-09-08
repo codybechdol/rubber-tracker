@@ -838,12 +838,11 @@ class SyncEngine {
 
       while (i < totalCount) {
         batchNum++;
-        // Push full-table swaps 1 at a time to prevent payload limits; standard cell edits 10 per batch
+        // Push full-table swaps 1 at a time; standard edits 4 per batch to avoid Google gateway limits
         const currentMut = currentOutbox[i];
         const isLargePayload = currentMut && (currentMut.action === 'REPLACE_SWAP_TABLE' || currentMut.action === 'REPLACE_TABLE_DATA' || currentMut.action === 'SYNC_FULL_TABLE' || (currentMut.rawGrid && currentMut.rawGrid.length > 5));
-        const chunkSize = isLargePayload ? 1 : 10;
+        const chunkSize = isLargePayload ? 1 : 4;
         const chunk = currentOutbox.slice(i, i + chunkSize);
-        const isLastChunk = (i + chunk.length >= totalCount);
 
         // Sanitize: never allow a header-only rawGrid to wipe out valid row objects
         chunk.forEach(m => {
@@ -860,24 +859,48 @@ class SyncEngine {
         this.updateStatusUI('syncing', `Pushing batch ${batchNum} (${Math.min(i + chunk.length, totalCount)}/${totalCount})...`);
 
         let pushResult = null;
-        try {
-          pushResult = await this.executeNetworkRequest(this.syncUrl, 'POST', {
-            action: 'applyMutations',
-            mutations: chunk,
-            detectConflicts: false,
-            force: true,
-            skipPostProcessing: !isLastChunk,
-            returnSnapshot: false
-          });
-        } catch (pushErr) {
-          const encodedChunk = encodeURIComponent(JSON.stringify(chunk));
-          if (encodedChunk.length < 1800) {
-            console.warn('POST push failed, trying GET fallback:', pushErr);
-            const getUrl = `${this.syncUrl}?action=applyMutations&mutations=${encodedChunk}&detectConflicts=false&force=true&skipPostProcessing=${!isLastChunk}&returnSnapshot=false`;
-            pushResult = await this.executeNetworkRequest(getUrl, 'GET');
-          } else {
-            throw pushErr;
+        let lastBatchErr = null;
+        const maxAttempts = 3;
+        const retryDelays = [1500, 3500, 7000];
+
+        for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+          try {
+            pushResult = await this.executeNetworkRequest(this.syncUrl, 'POST', {
+              action: 'applyMutations',
+              mutations: chunk,
+              detectConflicts: false,
+              force: true,
+              skipPostProcessing: true,
+              returnSnapshot: false
+            });
+            if (pushResult && (pushResult.success || pushResult.status === 'ok')) {
+              break;
+            }
+          } catch (pushErr) {
+            lastBatchErr = pushErr;
+            const encodedChunk = encodeURIComponent(JSON.stringify(chunk));
+            if (encodedChunk.length < 1800) {
+              try {
+                const getUrl = `${this.syncUrl}?action=applyMutations&mutations=${encodedChunk}&detectConflicts=false&force=true&skipPostProcessing=true&returnSnapshot=false`;
+                pushResult = await this.executeNetworkRequest(getUrl, 'GET');
+                if (pushResult && (pushResult.success || pushResult.status === 'ok')) {
+                  break;
+                }
+              } catch (getErr) {
+                lastBatchErr = getErr;
+              }
+            }
           }
+
+          if (attempt < maxAttempts) {
+            const delay = retryDelays[attempt - 1];
+            console.warn(`Batch ${batchNum} attempt ${attempt} failed, retrying in ${delay}ms...`, lastBatchErr);
+            await new Promise(r => setTimeout(r, delay));
+          }
+        }
+
+        if (!pushResult && lastBatchErr) {
+          throw lastBatchErr;
         }
 
         lastPushResult = pushResult;
@@ -926,6 +949,9 @@ class SyncEngine {
           pushedSubTitleEl.textContent = `${currentBatchText} (${this.formatDuration(Date.now() - pushStartTime)})`;
         }
         await this.animateTasksPushed(chunk, totalCount - totalPushed, totalCount);
+        if (i < totalCount) {
+          await new Promise(r => setTimeout(r, 1000));
+        }
       }
 
       clearInterval(pushTimerInterval);
