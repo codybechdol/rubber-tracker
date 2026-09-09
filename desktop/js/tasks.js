@@ -149,8 +149,21 @@ class TaskManagerApp {
 
         const category = this.categorizeTask(rawType, sourceSheet);
 
-        // Filter out future monthly training until the month arrives
-        if (category === 'Training' || sourceSheet === 'Training Tracking' || rawType.toLowerCase().includes('training')) {
+        // If this is a Training task and trainTable is available, delegate to direct harvest (Step 3) to prevent duplicate records and ensure full attendee rosters
+        const isTrainingTask = category === 'Training' ||
+          sourceSheet === 'Training Tracking' ||
+          rawType.toLowerCase().includes('training') ||
+          itemType.toLowerCase().includes('training') ||
+          currentItem.toLowerCase().includes('training') ||
+          notes.toLowerCase().includes('training') ||
+          taskId.toLowerCase().startsWith('trainingtracking_') ||
+          taskId.toLowerCase().startsWith('training_');
+        if (isTrainingTask) {
+          const trainTable = this.db.getTable('training_tracking');
+          if (trainTable && trainTable.rows && trainTable.rows.length > 0) {
+            return; // Skip metadata training record; Step 3 will harvest rich row directly from training_tracking table!
+          }
+          // Filter out future monthly training until the month arrives
           if (this.isFutureTrainingMonth(dueDate, targetDate) || this.isFutureTrainingMonth(currentItem, targetDate)) {
             return; // Skip future month training
           }
@@ -262,6 +275,15 @@ class TaskManagerApp {
           }
         }
 
+        // Reconcile with live safety_compliance table: if missing safety reports have been turned in (even late, '✅ L'), excused with a note, marked N/A, or week is Complete/Resolved, skip it!
+        if (category === 'Safety Reports' || rawType.toLowerCase().includes('safety report') || sourceSheet.toLowerCase().includes('safety compliance') || (taskId && taskId.toLowerCase().startsWith('safetycompliance_'))) {
+          const compTable = this.db.getTable('safety_compliance');
+          if (compTable && this.isSafetyReportTaskResolved(taskObj, compTable)) {
+            r['Status'] = 'Complete';
+            return; // Skip resolved safety report task!
+          }
+        }
+
         if (!seenTaskKeys.has(taskKey)) {
           seenTaskKeys.add(taskKey);
           if (taskId) seenTaskKeys.add(taskId.toLowerCase());
@@ -351,6 +373,7 @@ class TaskManagerApp {
         const crewId = String(r['Crew #'] || r['Crew'] || r['Job Number'] || r['Job #'] || '').trim();
         const lead = String(r['Lead'] || r['Crew Lead'] || r['Foreman'] || '').trim();
         const attendees = String(r['Attendees'] || r['Crew Members'] || '').trim();
+        const crewForeman = lead || (jobLookup[crewId]?.foreman) || 'Lead';
 
         // Skip completed or N/A
         if (status.toLowerCase() === 'complete' || status.toLowerCase() === 'n/a') return;
@@ -364,11 +387,14 @@ class TaskManagerApp {
         const isOverdue = isPastMonth && !status.toLowerCase().includes('complete');
 
         const loc = (jobLookup[crewId]?.location) || 'Helena';
-        const foreman = lead || (jobLookup[crewId]?.foreman) || 'Lead';
-        const taskKey = `training_${crewId}_${topic}_${month}`.toLowerCase();
+        const sigCrew = this.getSignificantJobNumber(crewId);
+        const taskKey = `training_${sigCrew || crewId}_${topic}_${month}`.toLowerCase();
+        const altKey = `training_${crewId}_${topic}_${month}`.toLowerCase();
+        if (r._rowIdx) seenTaskKeys.add(`trainingtracking_${r._rowIdx}`.toLowerCase());
 
-        if (!seenTaskKeys.has(taskKey) && crewId) {
+        if (!seenTaskKeys.has(taskKey) && !seenTaskKeys.has(altKey) && crewId) {
           seenTaskKeys.add(taskKey);
+          seenTaskKeys.add(altKey);
           allTasks.push({
             id: `training_${idx + 1}`,
             sourceSheet: 'Training Tracking',
@@ -376,9 +402,9 @@ class TaskManagerApp {
             type: '🎓 Safety Training',
             itemType: topic,
             currentItem: `Month: ${month}`,
-            employee: attendees ? `Crew Members: ${attendees}` : (foreman ? `Lead: ${foreman}` : `Crew ${crewId}`),
+            employee: attendees ? `Crew Members: ${attendees}` : (crewForeman ? `Lead: ${crewForeman}` : `Crew ${crewId}`),
             crewId: crewId,
-            foreman: foreman,
+            foreman: crewForeman,
             location: this.cleanLocation(loc),
             dueDate: month || 'Current Month',
             scheduledDate: '',
@@ -649,6 +675,138 @@ class TaskManagerApp {
     }
 
     return false;
+  }
+
+  isSafetyReportTaskResolved(task, compTable) {
+    if (!compTable || !compTable.rows || compTable.rows.length === 0) return false;
+
+    // 1. Extract crew / job number
+    let taskJobNum = this.getSignificantJobNumber(task.crewId || '');
+    if (!taskJobNum && task.id) {
+      const m = task.id.match(/SafetyCompliance_([0-9]{3}-[0-9]{2})/i);
+      if (m) taskJobNum = this.getSignificantJobNumber(m[1]);
+    }
+    if (!taskJobNum && task._rawRow) {
+      taskJobNum = this.getSignificantJobNumber(task._rawRow['Job Number'] || task._rawRow['Crew'] || task._rawRow['SourceRow'] || '');
+    }
+
+    // 2. Extract week start date (MM/DD/YYYY)
+    let weekDateStr = '';
+    if (task.id) {
+      const m = task.id.match(/SafetyCompliance_[0-9]{3}-[0-9]{2}_([0-9]{1,2}[-\/][0-9]{1,2}[-\/][0-9]{2,4})/i);
+      if (m) weekDateStr = m[1].replace(/-/g, '/');
+    }
+    if (!weekDateStr && task.dueDate) {
+      const due = this.parseDate(task.dueDate);
+      if (due) {
+        const ws = new Date(due);
+        ws.setDate(ws.getDate() - 6);
+        const m = String(ws.getMonth() + 1).padStart(2, '0');
+        const d = String(ws.getDate()).padStart(2, '0');
+        weekDateStr = `${m}/${d}/${ws.getFullYear()}`;
+      }
+    }
+
+    const normDateStr = (str) => {
+      if (!str) return '';
+      const clean = String(str).replace(/-/g, '/').split(' ')[0].trim();
+      const d = this.parseDate(clean);
+      if (!d) return clean;
+      return `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${d.getFullYear()}`;
+    };
+
+    const targetWeekNorm = normDateStr(weekDateStr);
+
+    // Find matching row for this crew
+    const crewRows = compTable.rows.filter(r => {
+      const rJob = this.getSignificantJobNumber(r['Job Number'] || r['Crew'] || r['Job #'] || '');
+      const rForeman = String(r['Foreman'] || r['Lead'] || '').toLowerCase().trim();
+      const tForeman = String(task.foreman || task.employee || '').toLowerCase().trim();
+      const jobMatches = taskJobNum && rJob && (rJob === taskJobNum || rJob.startsWith(taskJobNum) || taskJobNum.startsWith(rJob));
+      const foremanMatches = tForeman && rForeman && (tForeman.includes(rForeman) || rForeman.includes(tForeman));
+      return jobMatches || (foremanMatches && !taskJobNum);
+    });
+
+    if (crewRows.length === 0) return false;
+
+    let matchingRow = null;
+    if (targetWeekNorm) {
+      matchingRow = crewRows.find(r => normDateStr(r['Week Start'] || r['Week'] || r['Date']) === targetWeekNorm);
+    }
+    if (!matchingRow && crewRows.length > 0) {
+      matchingRow = crewRows[crewRows.length - 1];
+    }
+    if (!matchingRow) return false;
+
+    // Check row status
+    const rowStatus = String(matchingRow['Status'] || '').trim().toLowerCase();
+    if (rowStatus === 'complete' || rowStatus === 'resolved') {
+      return true;
+    }
+
+    // Helper: is a cell resolved (submitted on time, submitted late, N/A, or excused with a note)?
+    const isCellResolved = (val) => {
+      if (val === null || val === undefined) return false;
+      const str = String(val).trim();
+      if (!str) return false;
+      if (str.toUpperCase() === 'N/A') return true;
+      if (str.includes('✅')) return true; // ✅ or ✅ L
+      if (str.includes('❌')) return false; // Missing
+      if (str.includes('⏳')) return false; // Pending
+      // If there's any reason/excuse text without a ❌, it's excused!
+      return true;
+    };
+
+    // Parse specific missing dates from notes
+    const notes = String(task.notes || '').trim();
+    const itemType = String(task.itemType || '').toLowerCase();
+    const textToCheck = `${notes} ${itemType}`.toLowerCase();
+
+    const dayKeys = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const dateRegex = /\b(\d{1,2}\/\d{1,2}(?:\/\d{2,4})?)\b/g;
+    const dateMatches = [...notes.matchAll(dateRegex)].map(m => m[1]);
+
+    if (dateMatches.length > 0) {
+      let allSpecifiedResolved = true;
+      for (const dStr of dateMatches) {
+        const d = this.parseDate(dStr);
+        if (d) {
+          const dayName = dayKeys[d.getDay()];
+          const cellVal = matchingRow[dayName];
+          if (!isCellResolved(cellVal)) {
+            allSpecifiedResolved = false;
+            break;
+          }
+        }
+      }
+
+      if (allSpecifiedResolved) {
+        if (textToCheck.includes('weekly') || textToCheck.includes('meeting')) {
+          const wmVal = matchingRow['Weekly Meeting'] || matchingRow['Meeting'] || matchingRow['Weekly Safety Meeting'];
+          if (!isCellResolved(wmVal)) return false;
+        }
+        return true;
+      }
+      return false;
+    }
+
+    // If no specific dates in notes, check all days for ❌
+    let hasMissing = false;
+    for (const day of dayKeys) {
+      const cellVal = matchingRow[day];
+      if (cellVal && String(cellVal).includes('❌')) {
+        hasMissing = true;
+        break;
+      }
+    }
+    if (textToCheck.includes('weekly') || textToCheck.includes('meeting')) {
+      const wmVal = matchingRow['Weekly Meeting'] || matchingRow['Meeting'] || matchingRow['Weekly Safety Meeting'];
+      if (wmVal && String(wmVal).includes('❌')) {
+        hasMissing = true;
+      }
+    }
+
+    return !hasMissing;
   }
 
   isFutureTrainingMonth(monthStr, targetDate = new Date()) {

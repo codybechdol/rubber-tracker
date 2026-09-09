@@ -596,6 +596,19 @@ class TripPlannerApp {
       ].forEach(addCert);
     }
 
+    // 3. Monthly Safety Training Topics from Training Tracking (OSHA ET&D, Quarterly Refreshers, etc.)
+    const trainTable = this.db ? this.db.getTable('training_tracking') : null;
+    if (trainTable && trainTable.rows) {
+      const parsedNow = new Date();
+      trainTable.rows.forEach(r => {
+        const topic = String(r['Topic'] || r['Training Topic'] || r['Training'] || '').trim();
+        const month = String(r['Month'] || r['Scheduled Month'] || '').trim();
+        if (!topic) return;
+        if (window.taskManager && window.taskManager.isFutureTrainingMonth(month, parsedNow)) return;
+        addCert(topic);
+      });
+    }
+
     return certsList;
   }
 
@@ -1634,8 +1647,9 @@ class TripPlannerApp {
       if (isCert) {
         if (willBeComplete) {
           await this.syncClassCompletionToExpiringCerts(task);
+          await this.syncClassCompletionToTrainingTracking(task);
         } else {
-          this.showToast('Class status set to Pending. (Existing cert records on Expiring Certs preserved).');
+          this.showToast('Class status set to Pending. (Existing cert records preserved).');
         }
       }
     }
@@ -1867,6 +1881,246 @@ class TripPlannerApp {
     } catch (err) {
       console.error('Error syncing class completion to Expiring Certs:', err);
       this.showToast('Class marked Complete, but error updating Expiring Certs: ' + (err.message || err), true);
+    }
+  }
+
+  formatDateKeyToSlash(dateKey) {
+    if (!dateKey) return new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+    const str = String(dateKey).trim();
+    if (/^\d{4}-\d{2}-\d{2}$/.test(str)) {
+      const p = str.split('-');
+      return `${p[1]}/${p[2]}/${p[0]}`;
+    }
+    if (/^\d{1,2}\/\d{1,2}\/\d{4}$/.test(str)) {
+      const p = str.split('/');
+      return `${p[0].padStart(2, '0')}/${p[1].padStart(2, '0')}/${p[2]}`;
+    }
+    return str;
+  }
+
+  /**
+   * Syncs completion of a manual training class that corresponds to a Monthly Safety Training topic
+   * into the Training Tracking sheet for all assigned crews.
+   */
+  async syncClassCompletionToTrainingTracking(task) {
+    try {
+      if (!this.db) return;
+      const trainTable = this.db.getTable('training_tracking');
+      if (!trainTable || !trainTable.rows) return;
+
+      const rawTopic = String(task.certType || task.title || '').trim();
+      const topicLower = rawTopic.toLowerCase();
+
+      // Find if any rows in training_tracking match this topic
+      const topicMatches = trainTable.rows.filter(r => {
+        const t = String(r['Topic'] || r['Training Topic'] || r['Training'] || '').trim().toLowerCase();
+        return t && (t === topicLower || t.includes(topicLower) || topicLower.includes(t));
+      });
+
+      if (topicMatches.length === 0) return;
+
+      const rawDate = task.dateKey || task.date || new Date().toISOString().split('T')[0];
+      const completionDateFormatted = this.formatDateKeyToSlash(rawDate);
+
+      // Collect target crew numbers
+      const targetCrews = new Set();
+      if (Array.isArray(task.crewIds)) {
+        task.crewIds.forEach(c => {
+          const sig = this.getSignificantJobNumber(c);
+          if (sig) targetCrews.add(sig.toLowerCase());
+          targetCrews.add(String(c).trim().toLowerCase());
+        });
+      }
+      if (task.crewId) {
+        String(task.crewId).split(',').forEach(c => {
+          const sig = this.getSignificantJobNumber(c.trim());
+          if (sig) targetCrews.add(sig.toLowerCase());
+          targetCrews.add(c.trim().toLowerCase());
+        });
+      }
+
+      const headers = trainTable.headers || ['Month', 'Crew #', 'Lead', 'Training Topic', 'Status', 'Date Completed', 'Attendees'];
+      let colStatus = -1, colDate = -1;
+      headers.forEach((h, idx) => {
+        const hl = String(h || '').toLowerCase().trim();
+        if ((hl === 'status' || hl === 'training status') && colStatus === -1) colStatus = idx + 1;
+        else if ((hl.includes('date') || hl.includes('completion')) && colDate === -1) colDate = idx + 1;
+      });
+      if (colStatus === -1) colStatus = 5;
+      if (colDate === -1) colDate = 6;
+
+      let updatedCount = 0;
+      for (const row of topicMatches) {
+        const cRaw = String(row['Crew #'] || row['Crew'] || row['Job Number'] || row['Job #'] || '').trim();
+        const cSig = this.getSignificantJobNumber(cRaw).toLowerCase();
+
+        // If specific crews were assigned to the class, only match those crews
+        if (targetCrews.size > 0 && !targetCrews.has(cSig) && !targetCrews.has(cRaw.toLowerCase())) {
+          continue;
+        }
+
+        const oldStatus = row['Status'] || row['Training Status'] || '';
+        const oldDate = row['Date Completed'] || row['Date'] || '';
+        const rowIdx = row._rowIdx || (trainTable.rows.indexOf(row) + 2);
+
+        row['Status'] = 'Completed';
+        row['Training Status'] = 'Completed';
+        row['Date Completed'] = completionDateFormatted;
+        row['Date'] = completionDateFormatted;
+
+        if (trainTable.rawGrid && trainTable.rawGrid[rowIdx - 1]) {
+          if (colStatus !== -1) trainTable.rawGrid[rowIdx - 1][colStatus - 1] = 'Completed';
+          if (colDate !== -1) trainTable.rawGrid[rowIdx - 1][colDate - 1] = completionDateFormatted;
+        }
+
+        if (rowIdx) {
+          await this.db.addMutation({
+            action: 'UPDATE_CELL',
+            sheetName: 'Training Tracking',
+            row: rowIdx,
+            col: colStatus,
+            header: headers[colStatus - 1] || 'Status',
+            oldValue: oldStatus,
+            value: 'Completed'
+          });
+
+          if (colDate !== -1) {
+            await this.db.addMutation({
+              action: 'UPDATE_CELL',
+              sheetName: 'Training Tracking',
+              row: rowIdx,
+              col: colDate,
+              header: headers[colDate - 1] || 'Date Completed',
+              oldValue: oldDate,
+              value: completionDateFormatted
+            });
+          }
+        }
+        updatedCount++;
+      }
+
+      if (updatedCount > 0) {
+        await this.db.persistSnapshot(this.db.snapshot);
+        if (window.sheetNavigator && window.sheetNavigator.currentSheetKey === 'training_tracking') {
+          window.sheetNavigator.renderSheet('training_tracking');
+        }
+        this.showToast(`🎓 Synced "${rawTopic}" completion to Training Tracking for ${updatedCount} crew(s).`);
+      }
+    } catch (err) {
+      console.error('Error syncing class completion to Training Tracking:', err);
+    }
+  }
+
+  /**
+   * Toggles the completion status of a Monthly Safety Training record directly on the Training Tracking sheet.
+   */
+  async toggleMonthlyTraining(crewId, topic, month, dateKey, rowIdxHint = 0) {
+    try {
+      if (!this.db) return;
+      const trainTable = this.db.getTable('training_tracking');
+      if (!trainTable || !trainTable.rows) return;
+
+      const sigTarget = this.getSignificantJobNumber(crewId).toLowerCase();
+      const topicTarget = String(topic || '').trim().toLowerCase();
+      const monthTarget = String(month || '').trim().toLowerCase();
+
+      let targetRow = null;
+      if (rowIdxHint) {
+        targetRow = trainTable.rows.find(r => r._rowIdx === rowIdxHint);
+      }
+      if (!targetRow) {
+        targetRow = trainTable.rows.find(r => {
+          const cRaw = String(r['Crew #'] || r['Crew'] || r['Job Number'] || r['Job #'] || '').trim();
+          const cSig = this.getSignificantJobNumber(cRaw).toLowerCase();
+          const crewMatches = cSig === sigTarget || cRaw.toLowerCase() === crewId.toLowerCase();
+          const rTopic = String(r['Topic'] || r['Training Topic'] || r['Training'] || '').trim().toLowerCase();
+          const topicMatches = rTopic === topicTarget || rTopic.includes(topicTarget) || topicTarget.includes(rTopic);
+          const rMonth = String(r['Month'] || r['Scheduled Month'] || '').trim().toLowerCase();
+          const monthMatches = !monthTarget || rMonth.includes(monthTarget) || monthTarget.includes(rMonth);
+          return crewMatches && topicMatches && monthMatches;
+        });
+      }
+
+      if (!targetRow) {
+        this.showToast('Could not find corresponding Training Tracking record.', true);
+        return;
+      }
+
+      const curStatus = String(targetRow['Status'] || targetRow['Training Status'] || '').trim().toLowerCase();
+      const willBeComplete = (curStatus !== 'completed' && curStatus !== 'complete' && curStatus !== 'done');
+
+      const headers = trainTable.headers || ['Month', 'Crew #', 'Lead', 'Training Topic', 'Status', 'Date Completed', 'Attendees'];
+      let colStatus = -1;
+      let colDate = -1;
+
+      headers.forEach((h, idx) => {
+        const hl = String(h || '').toLowerCase().trim();
+        if ((hl === 'status' || hl === 'training status') && colStatus === -1) colStatus = idx + 1;
+        else if ((hl.includes('date') || hl.includes('completion')) && colDate === -1) colDate = idx + 1;
+      });
+
+      if (colStatus === -1) colStatus = 5;
+      if (colDate === -1) colDate = 6;
+
+      const completionDateFormatted = dateKey ? this.formatDateKeyToSlash(dateKey) : new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+      const newStatus = willBeComplete ? 'Completed' : 'Scheduled';
+      const newDateVal = willBeComplete ? completionDateFormatted : '';
+
+      const rowIdx = targetRow._rowIdx || (trainTable.rows.indexOf(targetRow) + 2);
+
+      const oldStatus = targetRow['Status'] || targetRow['Training Status'] || '';
+      const oldDate = targetRow['Date Completed'] || targetRow['Date'] || '';
+
+      // Update in-memory objects
+      targetRow['Status'] = newStatus;
+      targetRow['Training Status'] = newStatus;
+      targetRow['Date Completed'] = newDateVal;
+      targetRow['Date'] = newDateVal;
+
+      if (trainTable.rawGrid && trainTable.rawGrid[rowIdx - 1]) {
+        if (colStatus !== -1) trainTable.rawGrid[rowIdx - 1][colStatus - 1] = newStatus;
+        if (colDate !== -1) trainTable.rawGrid[rowIdx - 1][colDate - 1] = newDateVal;
+      }
+
+      // Record mutations for sync
+      if (rowIdx) {
+        await this.db.addMutation({
+          action: 'UPDATE_CELL',
+          sheetName: 'Training Tracking',
+          row: rowIdx,
+          col: colStatus,
+          header: headers[colStatus - 1] || 'Status',
+          oldValue: oldStatus,
+          value: newStatus
+        });
+
+        if (colDate !== -1) {
+          await this.db.addMutation({
+            action: 'UPDATE_CELL',
+            sheetName: 'Training Tracking',
+            row: rowIdx,
+            col: colDate,
+            header: headers[colDate - 1] || 'Date Completed',
+            oldValue: oldDate,
+            value: newDateVal
+          });
+        }
+      }
+
+      await this.db.persistSnapshot(this.db.snapshot);
+
+      if (window.sheetNavigator && window.sheetNavigator.currentSheetKey === 'training_tracking') {
+        window.sheetNavigator.renderSheet('training_tracking');
+      }
+
+      this.showToast(willBeComplete
+        ? `🎓 Marked "${topic}" Completed for Crew ${crewId}!`
+        : `↩ Set "${topic}" for Crew ${crewId} back to Scheduled.`);
+
+      this.renderPlanner();
+    } catch (err) {
+      console.error('Error updating monthly training:', err);
+      this.showToast('Error updating training status: ' + (err.message || err), true);
     }
   }
 
@@ -4091,6 +4345,8 @@ class TripPlannerApp {
    */
   getCrewTaskSummary(crewTasks) {
     const activeTasks = (crewTasks || []).filter(t => String(t.status || '').toLowerCase() !== 'complete');
+    // Operational checklist tasks (excluding training which has its own dedicated section in the Trip Planner)
+    const checklistTasks = activeTasks.filter(t => t.category !== 'Training' && t.sourceSheet !== 'Training Tracking' && !(t.type || '').toLowerCase().includes('training'));
     let gloves = 0;
     let sleeves = 0;
     let blankets = 0;
@@ -4102,7 +4358,7 @@ class TripPlannerApp {
     let drugTests = 0;
     let overdue = 0;
 
-    activeTasks.forEach(t => {
+    checklistTasks.forEach(t => {
       if (t.isOverdue || String(t.status || '').toLowerCase() === 'overdue') overdue++;
       const type = String(t.type || '').toLowerCase();
       const item = String(t.itemType || '').toLowerCase();
@@ -4120,8 +4376,6 @@ class TripPlannerApp {
         macks++;
       } else if (cat === 'equipment' || type.includes('tester') || type.includes('phasing') || type.includes('aed') || type.includes('ground') || type.includes('stick') || type.includes('equipment') || type.includes('jumper') || type.includes('cone') || type.includes('first aid')) {
         equipment++;
-      } else if (cat === 'training' || type.includes('training')) {
-        training++;
       } else if (cat === 'certs' || type.includes('cert') || type.includes('cpr') || type.includes('crane') || type.includes('rescue')) {
         certs++;
       } else if (cat === 'safety reports' || type.includes('safety report') || type.includes('meeting') || type.includes('compliance') || type.includes('jha') || type.includes('checklist')) {
@@ -4131,8 +4385,14 @@ class TripPlannerApp {
       }
     });
 
+    activeTasks.forEach(t => {
+      const cat = String(t.category || '').toLowerCase();
+      const type = String(t.type || '').toLowerCase();
+      if (cat === 'training' || type.includes('training')) training++;
+    });
+
     return {
-      total: activeTasks.length,
+      total: checklistTasks.length,
       overdue,
       gloves,
       sleeves,
@@ -4476,7 +4736,7 @@ class TripPlannerApp {
           `;
         }
 
-        // 2. Render Training Section (Classes Cody teaches)
+        // 2. Render Training Section (Classes Cody teaches + Monthly Safety Trainings for visited crews)
         const allManualTasks = this.getManualTasksForDate(dateKey);
         const trainingClasses = allManualTasks
           .filter(m => m.taskCategory === 'cert_class' || !!m.certType)
@@ -4485,16 +4745,83 @@ class TripPlannerApp {
           .filter(m => m.taskCategory === 'personal_task' && !m.certType)
           .sort((a, b) => this.compareTasksByTime(a, b));
 
+        // Collect monthly trainings from Training Tracking for crews scheduled to be visited on this date
+        const monthlyTrainings = [];
+        const trainTable = this.db ? this.db.getTable('training_tracking') : null;
+        if (trainTable && trainTable.rows && trips.length > 0) {
+          const visitedCrewIds = new Set();
+          trips.forEach(trip => {
+            const locInfo = locMap[trip.location] || null;
+            if (locInfo && locInfo.activeCrews) {
+              locInfo.activeCrews.forEach(c => {
+                const sig = this.getSignificantJobNumber(c.crewId);
+                if (sig) visitedCrewIds.add(sig.toLowerCase());
+                visitedCrewIds.add(String(c.crewId).trim().toLowerCase());
+              });
+            }
+          });
+
+          const parsedDayDate = this.parseDate(dateKey) || new Date();
+
+          trainTable.rows.forEach(r => {
+            const crewRaw = String(r['Crew #'] || r['Crew'] || r['Job Number'] || r['Job #'] || '').trim();
+            const sig = this.getSignificantJobNumber(crewRaw);
+            const matchesCrew = (sig && visitedCrewIds.has(sig.toLowerCase())) || visitedCrewIds.has(crewRaw.toLowerCase());
+            if (!matchesCrew) return;
+
+            const status = String(r['Status'] || r['Training Status'] || '').trim();
+            const sLower = status.toLowerCase();
+            if (sLower === 'n/a' || sLower === 'cancelled' || sLower === 'canceled') return;
+
+            const month = String(r['Month'] || r['Scheduled Month'] || '').trim();
+            // Exclude future training months
+            if (window.taskManager && window.taskManager.isFutureTrainingMonth(month, parsedDayDate)) {
+              return;
+            }
+
+            const topic = String(r['Topic'] || r['Training Topic'] || r['Training'] || 'Safety Training').trim();
+            const lead = String(r['Lead'] || r['Crew Lead'] || r['Foreman'] || '').trim();
+            const attendees = String(r['Attendees'] || r['Crew Members'] || '').trim();
+            const dateDone = String(r['Date Completed'] || r['Completed Date'] || r['Date'] || '').trim();
+            const isDone = sLower === 'completed' || sLower === 'complete' || sLower === 'done' || !!dateDone;
+
+            // Check if already captured in trainingClasses
+            const hasManualMatch = trainingClasses.some(mt => {
+              const mtTopic = String(mt.certType || mt.title || '').toLowerCase();
+              const topicMatches = mtTopic.includes(topic.toLowerCase()) || topic.toLowerCase().includes(mtTopic);
+              const crewMatches = (mt.crewIds && mt.crewIds.includes(sig)) || String(mt.crewId || '').includes(crewRaw);
+              return topicMatches && crewMatches;
+            });
+
+            if (!hasManualMatch) {
+              monthlyTrainings.push({
+                isMonthlyTraining: true,
+                crewId: crewRaw,
+                lead: lead,
+                topic: topic,
+                month: month,
+                attendees: attendees,
+                status: isDone ? 'Complete' : 'Scheduled',
+                isOverdue: !isDone && window.taskManager && window.taskManager.isPastTrainingMonth(month, parsedDayDate),
+                dateDone: dateDone,
+                _rowIdx: r._rowIdx
+              });
+            }
+          });
+        }
+
+        const totalTrainings = trainingClasses.length + monthlyTrainings.length;
+        const pendingTrainingsCount = trainingClasses.filter(m => m.status !== 'Complete').length + monthlyTrainings.filter(m => m.status !== 'Complete').length;
+
         let trainingHtml = '';
-        if (trainingClasses.length > 0) {
+        if (totalTrainings > 0) {
           const isCollapsed = this.isSectionCollapsed(dateKey, 'training');
-          const pendingCount = trainingClasses.filter(m => m.status !== 'Complete').length;
           trainingHtml = `
             <div class="day-section-collapsible training-day-section" style="margin-bottom: 8px;">
-              <div style="font-size: 10.5px; font-weight: 800; color: #34d399; display: flex; align-items: center; justify-content: space-between; padding: 4px 7px; background: rgba(16, 185, 129, 0.12); border-radius: 4px; border-left: 3px solid #10b981; cursor: pointer; user-select: none;" onclick="window.tripPlanner.toggleSectionCollapse('${dateKey}', 'training')" title="Click to collapse / expand Training Classes">
+              <div style="font-size: 10.5px; font-weight: 800; color: #34d399; display: flex; align-items: center; justify-content: space-between; padding: 4px 7px; background: rgba(16, 185, 129, 0.12); border-radius: 4px; border-left: 3px solid #10b981; cursor: pointer; user-select: none;" onclick="window.tripPlanner.toggleSectionCollapse('${dateKey}', 'training')" title="Click to collapse / expand Training Classes & Monthly Trainings">
                 <span style="display: flex; align-items: center; gap: 5px;">
                   <span id="section-chevron-${dateKey}-training" style="font-size: 8px; width: 10px; display: inline-block;">${isCollapsed ? '▶' : '▼'}</span>
-                  <span>🎓 Training (${pendingCount}/${trainingClasses.length})</span>
+                  <span>🎓 Training (${pendingTrainingsCount}/${totalTrainings})</span>
                 </span>
                 <div style="display: flex; gap: 4px; align-items: center;">
                   <button class="btn btn-secondary" style="padding: 1px 6px; font-size: 9.5px; color: #34d399; border-color: rgba(16, 185, 129, 0.35); background: rgba(16, 185, 129, 0.08); cursor: pointer;" onclick="event.stopPropagation(); window.tripPlanner.openComposeTrainingEmailModalForDate('${dateKey}')" title="Compose email for scheduled training classes on ${day.dayName}">📧 Email</button>
@@ -4634,6 +4961,71 @@ class TripPlannerApp {
                     </div>
                   `;
                 }).join('')}
+                ${monthlyTrainings.map(tr => {
+                  const isDone = tr.status === 'Complete';
+                  return `
+                    <div class="manual-task-card monthly-training-card" style="background: var(--bg-primary); border: 1px solid ${isDone ? 'rgba(16, 185, 129, 0.3)' : 'rgba(59, 130, 246, 0.35)'}; border-left: 4px solid ${isDone ? '#10b981' : '#3b82f6'}; border-radius: 6px; padding: 7px 9px; box-shadow: 0 1px 4px rgba(0,0,0,0.25); opacity: ${isDone ? '0.65' : '1'}; transition: opacity 0.2s;">
+                      <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 6px;">
+                        <div style="display: flex; align-items: flex-start; gap: 7px; flex: 1; min-width: 0;">
+                          <input type="checkbox" ${isDone ? 'checked' : ''} onchange="window.tripPlanner.toggleMonthlyTraining('${this.escapeJs(tr.crewId)}', '${this.escapeJs(tr.topic)}', '${this.escapeJs(tr.month)}', '${dateKey}', ${tr._rowIdx || 0})" style="cursor: pointer; margin-top: 2px; accent-color: #10b981; width: 14px; height: 14px;" title="${isDone ? 'Mark Incomplete' : 'Mark Monthly Training Complete'}">
+                          <div style="flex: 1; min-width: 0;">
+                            <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 3px; flex-wrap: wrap;">
+                              <span class="badge" style="background: rgba(59, 130, 246, 0.18); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.35); font-size: 9px; font-weight: 800; padding: 1px 5px; border-radius: 3px;">
+                                🎓 Monthly Training
+                              </span>
+                              <span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); font-size: 9px; font-weight: 700; padding: 1px 4px; border-radius: 3px;">
+                                🚚 Crew ${this.escapeHtml(tr.crewId)}
+                              </span>
+                              ${tr.month ? `
+                                <span class="badge" style="background: rgba(168, 85, 247, 0.15); color: #c084fc; font-size: 9px; padding: 1px 4px; border-radius: 3px;">
+                                  📅 ${this.escapeHtml(tr.month)}
+                                </span>
+                              ` : ''}
+                              ${isDone ? `
+                                <span class="badge" style="background: rgba(16, 185, 129, 0.25); color: #a7f3d0; font-size: 9px; padding: 1px 4px;">
+                                  ✅ Completed${tr.dateDone ? ` (${this.escapeHtml(tr.dateDone)})` : ''}
+                                </span>
+                              ` : (tr.isOverdue ? `
+                                <span class="badge" style="background: rgba(239, 68, 68, 0.2); color: #f87171; font-size: 9px; padding: 1px 4px;">
+                                  🔴 Overdue
+                                </span>
+                              ` : `
+                                <span class="badge" style="background: rgba(234, 179, 8, 0.2); color: #facc15; font-size: 9px; padding: 1px 4px;">
+                                  ⏳ Scheduled
+                                </span>
+                              `)}
+                            </div>
+
+                            <div style="font-size: 12px; font-weight: 800; color: ${isDone ? '#94a3b8' : '#f8fafc'}; text-decoration: ${isDone ? 'line-through' : 'none'}; word-break: break-word; line-height: 1.3;">
+                              ${this.escapeHtml(tr.topic)}
+                            </div>
+
+                            <div style="font-size: 11px; margin-top: 3px; color: #cbd5e1; line-height: 1.3;">
+                              <span>👤 <strong>Lead:</strong> ${this.escapeHtml(tr.lead || 'Lead')}</span>
+                              ${tr.attendees ? `
+                                <div style="font-size: 10px; color: #94a3b8; margin-top: 2px;">
+                                  👥 <strong>Crew Members:</strong> ${this.escapeHtml(tr.attendees)}
+                                </div>
+                              ` : ''}
+                            </div>
+                          </div>
+                        </div>
+
+                        <div>
+                          ${!isDone ? `
+                            <button class="btn btn-primary" style="padding: 2px 7px; font-size: 10px; background: #10b981; border: none; font-weight: 700; cursor: pointer; border-radius: 3px;" onclick="window.tripPlanner.toggleMonthlyTraining('${this.escapeJs(tr.crewId)}', '${this.escapeJs(tr.topic)}', '${this.escapeJs(tr.month)}', '${dateKey}', ${tr._rowIdx || 0})" title="Mark Monthly Training Complete">
+                              ✅ Done
+                            </button>
+                          ` : `
+                            <button class="btn btn-secondary" style="padding: 2px 5px; font-size: 9px; color: #94a3b8; border: 1px solid rgba(255,255,255,0.1); cursor: pointer; border-radius: 3px;" onclick="window.tripPlanner.toggleMonthlyTraining('${this.escapeJs(tr.crewId)}', '${this.escapeJs(tr.topic)}', '${this.escapeJs(tr.month)}', '${dateKey}', ${tr._rowIdx || 0})" title="Re-open Training">
+                              ↩
+                            </button>
+                          `}
+                        </div>
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
               </div>
             </div>
           `;
@@ -4724,7 +5116,8 @@ class TripPlannerApp {
           if (locInfo && locInfo.activeCrews) {
             locInfo.activeCrews.forEach(c => {
               const cTasks = window.taskManager ? window.taskManager.getTasksByCrew(c.crewId, weekMonday) : [];
-              totalCrewTasksCount += cTasks.length;
+              const cSummary = this.getCrewTaskSummary(cTasks);
+              totalCrewTasksCount += cSummary.total;
             });
           }
         });
@@ -4790,7 +5183,6 @@ class TripPlannerApp {
                                     ${summary.blankets > 0 ? `<span class="badge" style="background: rgba(236, 72, 153, 0.15); color: #f472b6; font-size: 9px; padding: 1px 4px; border: 1px solid rgba(236, 72, 153, 0.3);">🛏️ ${summary.blankets}</span>` : ''}
                                     ${summary.macks > 0 ? `<span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fcd34d; font-size: 9px; padding: 1px 4px; border: 1px solid rgba(245, 158, 11, 0.3);">⚡ ${summary.macks}</span>` : ''}
                                     ${summary.equipment > 0 ? `<span class="badge" style="background: rgba(20, 184, 166, 0.15); color: #5eead4; font-size: 9px; padding: 1px 4px; border: 1px solid rgba(20, 184, 166, 0.3);">🧰 ${summary.equipment}</span>` : ''}
-                                    ${summary.training > 0 ? `<span class="badge" style="background: rgba(34, 197, 94, 0.15); color: #86efac; font-size: 9px; padding: 1px 4px; border: 1px solid rgba(34, 197, 94, 0.3);">🎓 ${summary.training}</span>` : ''}
                                     ${summary.certs > 0 ? `<span class="badge" style="background: rgba(239, 68, 68, 0.15); color: #fca5a5; font-size: 9px; padding: 1px 4px; border: 1px solid rgba(239, 68, 68, 0.3);">📜 ${summary.certs}</span>` : ''}
                                     ${summary.reports > 0 ? `<span class="badge" style="background: rgba(249, 115, 22, 0.15); color: #fdba74; font-size: 9px; padding: 1px 4px; border: 1px solid rgba(249, 115, 22, 0.3);">📋 ${summary.reports}</span>` : ''}
                                     ${summary.drugTests > 0 ? `<span class="badge" style="background: rgba(139, 92, 246, 0.15); color: #c084fc; font-size: 9px; padding: 1px 4px; border: 1px solid rgba(139, 92, 246, 0.3);">🧪 ${summary.drugTests}</span>` : ''}
@@ -4821,7 +5213,7 @@ class TripPlannerApp {
             </div>
           `;
         } else {
-          const hasOtherSections = (drugTests.length > 0) || (trainingClasses.length > 0) || (personalTasks.length > 0);
+          const hasOtherSections = (drugTests.length > 0) || (totalTrainings > 0) || (personalTasks.length > 0);
           tasksHtml = `
             <div class="tasks-drop-placeholder" style="margin-top: ${hasOtherSections ? '4px' : '20px'};">
               <div style="color: var(--text-muted); font-size: 11px; text-align: center; border: 1px dashed var(--border-color); border-radius: 6px; padding: ${hasOtherSections ? '8px 6px' : '14px 10px'};">
@@ -4842,9 +5234,9 @@ class TripPlannerApp {
                   🧪 ${drugTests.length}
                 </span>
               ` : ''}
-              ${trainingClasses.length > 0 ? `
-                <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.35); font-size: 9px; padding: 1px 4px; border-radius: 3px;" title="${trainingClasses.length} Training Class(es)">
-                  🎓 ${trainingClasses.filter(t => t.status !== 'Complete').length}
+              ${totalTrainings > 0 ? `
+                <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.35); font-size: 9px; padding: 1px 4px; border-radius: 3px;" title="${totalTrainings} Training Session(s) (${pendingTrainingsCount} Pending)">
+                  🎓 ${pendingTrainingsCount}
                 </span>
               ` : ''}
               ${personalTasks.length > 0 ? `
@@ -4989,7 +5381,6 @@ class TripPlannerApp {
                       <div style="display: flex; flex-wrap: wrap; gap: 2px; margin-top: 2px;">
                         ${summary.gloves > 0 ? `<span style="font-size: 9px; color: #93c5fd;">🧤${summary.gloves}</span>` : ''}
                         ${summary.sleeves > 0 ? `<span style="font-size: 9px; color: #d8b4fe;">🧤${summary.sleeves}</span>` : ''}
-                        ${summary.training > 0 ? `<span style="font-size: 9px; color: #86efac;">🎓${summary.training}</span>` : ''}
                         ${summary.certs > 0 ? `<span style="font-size: 9px; color: #fca5a5;">📜${summary.certs}</span>` : ''}
                         ${summary.equipment > 0 || summary.macks > 0 ? `<span style="font-size: 9px; color: #5eead4;">⚡${summary.equipment + summary.macks}</span>` : ''}
                         ${summary.reports > 0 ? `<span style="font-size: 9px; color: #fdba74;">📋${summary.reports}</span>` : ''}
@@ -5036,9 +5427,11 @@ class TripPlannerApp {
     if (!modal || !body) return;
 
     const targetDate = targetDateKey ? this.parseDate(targetDateKey) : this.currentDate;
+    if (filterCat === 'Training') filterCat = 'All';
 
-    // Get active (non-completed) tasks for this crew
-    const allCrewTasks = window.taskManager ? window.taskManager.getTasksByCrew(crewId, targetDate, false) : [];
+    // Get active (non-completed) operational tasks for this crew (monthly classroom trainings are managed under the day column 🎓 Training section)
+    const rawCrewTasks = window.taskManager ? window.taskManager.getTasksByCrew(crewId, targetDate, false) : [];
+    const allCrewTasks = rawCrewTasks.filter(t => t.category !== 'Training' && t.sourceSheet !== 'Training Tracking' && !(t.type || '').toLowerCase().includes('training') && !(t.itemType || '').toLowerCase().includes('training'));
     const summary = this.getCrewTaskSummary(allCrewTasks);
 
     // Get crew details from Job Tracking
@@ -5068,8 +5461,6 @@ class TripPlannerApp {
       filtered = filtered.filter(t => t.category === 'PPE' || (t.type || '').toLowerCase().includes('glove') || (t.type || '').toLowerCase().includes('sleeve') || (t.type || '').toLowerCase().includes('blanket'));
     } else if (filterCat === 'Equipment') {
       filtered = filtered.filter(t => t.category === 'Equipment' || (t.type || '').toLowerCase().includes('mack') || (t.type || '').toLowerCase().includes('tester') || (t.type || '').toLowerCase().includes('phasing') || (t.type || '').toLowerCase().includes('aed') || (t.type || '').toLowerCase().includes('ground') || (t.type || '').toLowerCase().includes('stick') || (t.type || '').toLowerCase().includes('equipment') || (t.type || '').toLowerCase().includes('jumper') || (t.type || '').toLowerCase().includes('cone') || (t.type || '').toLowerCase().includes('first aid'));
-    } else if (filterCat === 'Training') {
-      filtered = filtered.filter(t => t.category === 'Training' || (t.type || '').toLowerCase().includes('training'));
     } else if (filterCat === 'Certs') {
       filtered = filtered.filter(t => t.category === 'Certs' || (t.type || '').toLowerCase().includes('cert') || (t.type || '').toLowerCase().includes('cpr') || (t.type || '').toLowerCase().includes('crane') || (t.type || '').toLowerCase().includes('rescue'));
     } else if (filterCat === 'Reports') {
@@ -5117,9 +5508,6 @@ class TripPlannerApp {
         </button>
         <button class="btn btn-secondary ${filterCat === 'Equipment' ? 'active' : ''}" style="padding: 3px 10px; font-size: 11.5px;" onclick="window.tripPlanner.openCrewTasksModal('${this.escapeHtml(crewId)}', '${this.escapeHtml(loc)}', 'Equipment', '${safeDateKey}')">
           ⚡ Tool & Equipment (${summary.macks + summary.equipment})
-        </button>
-        <button class="btn btn-secondary ${filterCat === 'Training' ? 'active' : ''}" style="padding: 3px 10px; font-size: 11.5px;" onclick="window.tripPlanner.openCrewTasksModal('${this.escapeHtml(crewId)}', '${this.escapeHtml(loc)}', 'Training', '${safeDateKey}')">
-          🎓 Safety Training (${summary.training})
         </button>
         <button class="btn btn-secondary ${filterCat === 'Certs' ? 'active' : ''}" style="padding: 3px 10px; font-size: 11.5px;" onclick="window.tripPlanner.openCrewTasksModal('${this.escapeHtml(crewId)}', '${this.escapeHtml(loc)}', 'Certs', '${safeDateKey}')">
           📜 Certifications (${summary.certs})

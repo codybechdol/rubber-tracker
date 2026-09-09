@@ -1269,6 +1269,7 @@ class CrewImportEngine {
     const empTable = this.db.getTable('employees') || { rows: [] };
     const jtTable = this.db.getTable('job_tracking') || { rows: [] };
     const histTable = this.db.getTable('employee_history') || { rows: [] };
+    const prevTable = this.db.getTable('previous_employees') || this.db.getTable('previous_employee') || this.db.getTable('past_employees') || { rows: [] };
     const activeEmps = empTable.rows || [];
     const activeJobs = jtTable.rows || [];
 
@@ -1410,49 +1411,21 @@ class CrewImportEngine {
         Boolean(this.findMatchingEmployee(empName, [{ 'Employee Name': q.name }, { 'Employee Name': q.rosterName }]))
       ));
 
-      // Match against active Employees table in local DB
+      // Match against Employees table in local DB
       const existing = this.findMatchingEmployee(empName, activeEmps);
 
-      if (isExplicitNewHire) {
-        // Explicitly tagged as NEW HIRE in Excel cell (e.g. "Owen Hunter 1 ap NEW HIRE")
-        newHires.push({
-          name: empName,
-          role: primaryOcc.emp.role || primaryClass,
-          classification: primaryClass,
-          location: primaryLoc,
-          jobNumber: primaryJob,
-          secondaryJobNumber: secJobNum,
-          crewNumber: primaryOcc.crew.jobNumber,
-          isRehire: false,
-          historyRecord: null,
-          targetRow: existing || null
-        });
-      } else if (!existing) {
-        // Not found in active Employees -> Check Employee History for rehire
-        const foundHist = this.findMatchingEmployee(empName, histTable.rows || []);
-        // Active scheduled departures or active employees are never rehires
-        const isRehire = !isScheduledDeparture && !!foundHist;
+      const existingLoc = existing ? (this.getEmpRowLocation(existing) || '').toLowerCase() : '';
+      const existingStatus = existing ? String(existing['Status'] || '').toLowerCase() : '';
+      const isExistingPreviousEmployee = existing && (
+        existingLoc === 'previous employee' || existingLoc.includes('previous') ||
+        existingStatus === 'previous employee' || existingStatus.includes('inactive') ||
+        existingStatus.includes('terminated') || existingStatus.includes('departed')
+      );
 
-        const newHireObj = {
-          name: empName,
-          role: primaryOcc.emp.role || primaryClass,
-          classification: primaryClass,
-          location: primaryLoc,
-          jobNumber: primaryJob,
-          secondaryJobNumber: secJobNum,
-          crewNumber: primaryOcc.crew.jobNumber,
-          isRehire: isRehire,
-          historyRecord: foundHist || null,
-          targetRow: null
-        };
-
-        if (newHireObj.isRehire) {
-          rehires.push(newHireObj);
-        } else {
-          newHires.push(newHireObj);
-        }
-      } else {
-        // Active Existing Employee -> cross-reference changes
+      if (existing && !isExistingPreviousEmployee) {
+        // Active Existing Employee: already exists on Employees sheet and is currently active!
+        // Note: Even if the Excel cell still has "NEW HIRE" printed next to their name (common in utility crew sheets where "NEW HIRE" text lingers for weeks),
+        // they are ALREADY in the system. Do NOT flag as a new hire or ask for hire date/PPE sizes.
         const dbName = this.getEmpRowName(existing) || empName;
         const oldLoc = this.getEmpRowLocation(existing);
         const oldJob = this.getEmpRowJobNumber(existing);
@@ -1503,7 +1476,7 @@ class CrewImportEngine {
         }
 
         // 3. Role / Classification Change
-        if (primaryClass && oldClass && oldClass.toLowerCase() !== primaryClass.toLowerCase()) {
+        if (primaryClass && (!oldClass || oldClass.toLowerCase() !== primaryClass.toLowerCase())) {
           changeItem.newClassification = primaryClass;
           changeItem.changes.push(`Role: ${oldClass || 'None'} → ${primaryClass}`);
           if (changeItem.type === 'Update') changeItem.type = 'Role Change';
@@ -1521,6 +1494,31 @@ class CrewImportEngine {
 
         if (changed) {
           matchedEmployeeChanges.push(changeItem);
+        }
+      } else {
+        // Not an active existing employee: either in Employees as Previous Employee, or not on Employees sheet at all.
+        // Check Previous Employees table and Employee History table for rehire status.
+        const foundPrev = prevTable && prevTable.rows ? this.findMatchingEmployee(empName, prevTable.rows) : null;
+        const foundHist = this.findMatchingEmployee(empName, histTable.rows || []);
+        const isRehire = !isScheduledDeparture && (isExistingPreviousEmployee || !!foundPrev || !!foundHist);
+
+        const newHireObj = {
+          name: existing ? (this.getEmpRowName(existing) || empName) : empName,
+          role: primaryOcc.emp.role || primaryClass,
+          classification: primaryClass,
+          location: primaryLoc,
+          jobNumber: primaryJob,
+          secondaryJobNumber: secJobNum,
+          crewNumber: primaryOcc.crew.jobNumber,
+          isRehire: isRehire,
+          historyRecord: foundPrev || foundHist || null,
+          targetRow: existing || null
+        };
+
+        if (newHireObj.isRehire) {
+          rehires.push(newHireObj);
+        } else {
+          newHires.push(newHireObj);
         }
       }
     }

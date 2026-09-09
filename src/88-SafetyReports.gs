@@ -14421,10 +14421,11 @@ function fixSafetyComplianceNotes() {
   var taskColIdx = {};
   for (var h = 0; h < taskHeaders.length; h++) {
     var header = String(taskHeaders[h]).toLowerCase().trim();
-    if (header === 'taskid') taskColIdx.taskID = h;
+    if (header === 'taskid' || header === 'task id') taskColIdx.taskID = h;
     if (header === 'notes') taskColIdx.notes = h;
     if (header === 'status') taskColIdx.status = h;
-    if (header === 'lastmodified') taskColIdx.lastModified = h;
+    if (header === 'completeddate' || header === 'completed date') taskColIdx.completedDate = h;
+    if (header === 'lastmodified' || header === 'last modified') taskColIdx.lastModified = h;
   }
 
   var updatedCount = 0;
@@ -14468,8 +14469,21 @@ function fixSafetyComplianceNotes() {
     }
 
     if (notesParts.length === 0) {
-      // No missing items - task may have been resolved
-      Logger.log('fixSafetyComplianceNotes: No missing items for ' + taskId + ' - skipping');
+      // No missing items - task has been resolved!
+      if (taskColIdx.status !== undefined) {
+        taskSheet.getRange(i + 1, taskColIdx.status + 1).setValue('Complete');
+      }
+      if (taskColIdx.completedDate !== undefined) {
+        taskSheet.getRange(i + 1, taskColIdx.completedDate + 1).setValue(now);
+      }
+      if (taskColIdx.notes !== undefined) {
+        taskSheet.getRange(i + 1, taskColIdx.notes + 1).setValue('Resolved (All reports submitted)');
+      }
+      if (taskColIdx.lastModified !== undefined) {
+        taskSheet.getRange(i + 1, taskColIdx.lastModified + 1).setValue(now);
+      }
+      updatedCount++;
+      Logger.log('fixSafetyComplianceNotes: Marked ' + taskId + ' as Complete (all reports resolved)');
       continue;
     }
 
@@ -16944,6 +16958,14 @@ function autoComplianceCleanup(skipSyncCrews, reportTypeFilter) {
       Logger.log('autoComplianceCleanup: Re-applied Gmail hyperlinks for filter=' + filter);
     } catch (e) {
       Logger.log('autoComplianceCleanup: Link re-apply error (non-fatal): ' + e.toString());
+    }
+
+    // Step 5: Synchronize and auto-resolve Safety Compliance tasks in Task Metadata
+    try {
+      fixSafetyComplianceNotes();
+      Logger.log('autoComplianceCleanup: Synchronized Safety Compliance tasks in Task Metadata');
+    } catch (e) {
+      Logger.log('autoComplianceCleanup: Task metadata sync error (non-fatal): ' + e.toString());
     }
 
     Logger.log('autoComplianceCleanup: Complete');
