@@ -1491,7 +1491,12 @@
           <span id="process-safety-emails-modal-icon" style="font-size: 18px;">📋</span>
           <span id="process-safety-emails-modal-title" style="font-weight: 800; font-size: 15px;">Safety Documentation & Audit Logs</span>
         </div>
-        <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 12px; background: rgba(0,0,0,0.2); border: none; color: white; cursor: pointer;" onclick="window.safetyComplianceEngine.closeProcessEmailsModal()">✕</button>
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <button class="btn btn-secondary" id="btn-minimize-process-emails" style="padding: 3px 9px; font-size: 12px; background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.15); color: #a7f3d0; cursor: pointer; display: none; align-items: center; gap: 4px; border-radius: 4px;" onclick="window.safetyComplianceEngine.minimizeProcessEmailsModal()" title="Run in Background (Keep using the app and making edits while emails scan)">
+            <span>🗕</span> Run in Background
+          </button>
+          <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 12px; background: rgba(0,0,0,0.2); border: none; color: white; cursor: pointer;" onclick="window.safetyComplianceEngine.closeProcessEmailsModal()" title="Close">✕</button>
+        </div>
       </div>
       <div class="modal-body" id="process-safety-emails-modal-body" style="max-height: 75vh; overflow-y: auto; padding: 20px;">
         <!-- Injected dynamically by safety-emails.js -->
@@ -1502,6 +1507,25 @@
           <span>🚀</span> Process Safety Emails Now
         </button>
       </div>
+    </div>
+  </div>
+
+  <!-- Floating Background Safety Emails Scanner Widget -->
+  <div id="safety-emails-bg-widget" class="safety-bg-pill" style="display: none;" onclick="window.safetyComplianceEngine.restoreProcessEmailsModal()">
+    <div class="safety-bg-spinner" id="safety-bg-spinner"></div>
+    <div class="safety-bg-info">
+      <div class="safety-bg-title">
+        <span id="safety-bg-title-text">📬 Scanning Emails</span>
+        <span id="safety-bg-pct" style="color: #6ee7b7; font-weight: 800; margin-left: 4px;">0%</span>
+      </div>
+      <div class="safety-bg-sub" id="safety-bg-sub">Connecting to Gmail...</div>
+      <div class="safety-bg-bar-track">
+        <div id="safety-bg-bar" class="safety-bg-bar" style="width: 5%;"></div>
+      </div>
+    </div>
+    <div class="safety-bg-actions">
+      <button class="safety-bg-expand-btn" title="Open Full Progress Modal" onclick="event.stopPropagation(); window.safetyComplianceEngine.restoreProcessEmailsModal();">↗️</button>
+      <button class="safety-bg-dismiss-btn" id="safety-bg-dismiss-btn" title="Dismiss" style="display: none;" onclick="event.stopPropagation(); window.safetyComplianceEngine.dismissBackgroundWidget();">✕</button>
     </div>
   </div>
 

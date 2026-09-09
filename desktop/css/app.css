@@ -1047,5 +1047,120 @@ body.inspector-mode .brand-badge {
   }
 }
 
+/* Floating Background Safety Emails Scanner Widget */
+.safety-bg-pill {
+  position: fixed;
+  bottom: 24px;
+  right: 24px;
+  z-index: 9999;
+  background: linear-gradient(135deg, #064e3b 0%, #0f172a 100%);
+  border: 1px solid #10b981;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.6), 0 0 16px rgba(16, 185, 129, 0.35);
+  border-radius: 12px;
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  color: #f8fafc;
+  min-width: 290px;
+  max-width: 420px;
+  animation: slideInUp 0.3s ease-out;
+}
 
+.safety-bg-pill:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 14px 30px -5px rgba(0, 0, 0, 0.7), 0 0 22px rgba(16, 185, 129, 0.5);
+  border-color: #34d399;
+}
 
+.safety-bg-pill.completed {
+  background: linear-gradient(135deg, #065f46 0%, #0f172a 100%);
+  border-color: #34d399;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.6), 0 0 18px rgba(52, 211, 153, 0.4);
+}
+
+.safety-bg-pill.error {
+  background: linear-gradient(135deg, #7f1d1d 0%, #0f172a 100%);
+  border-color: #ef4444;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.6), 0 0 18px rgba(239, 68, 68, 0.4);
+}
+
+.safety-bg-spinner {
+  width: 20px;
+  height: 20px;
+  border: 2.5px solid rgba(16, 185, 129, 0.25);
+  border-top-color: #34d399;
+  border-radius: 50%;
+  animation: spin 0.85s linear infinite;
+  flex-shrink: 0;
+}
+
+.safety-bg-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.safety-bg-title {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #f8fafc;
+  display: flex;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.safety-bg-sub {
+  font-size: 11px;
+  color: #94a3b8;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.safety-bg-bar-track {
+  width: 100%;
+  height: 4px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+  overflow: hidden;
+  margin-top: 4px;
+}
+
+.safety-bg-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #10b981 0%, #34d399 100%);
+  border-radius: 2px;
+  transition: width 0.3s ease;
+}
+
+.safety-bg-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.safety-bg-expand-btn,
+.safety-bg-dismiss-btn {
+  background: rgba(255, 255, 255, 0.1);
+  border: none;
+  border-radius: 6px;
+  color: #f8fafc;
+  padding: 4px 6px;
+  font-size: 12px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s ease;
+}
+
+.safety-bg-expand-btn:hover,
+.safety-bg-dismiss-btn:hover {
+  background: rgba(255, 255, 255, 0.25);
+}

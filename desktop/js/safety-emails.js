@@ -7,6 +7,9 @@ class SafetyEmailsEngine {
   constructor(db) {
     this.db = db;
     this.isProcessing = false;
+    this.isMinimized = false;
+    this.cancelRequested = false;
+    this.bgDismissTimer = null;
     this.activeCategoryFilter = 'all';
     this.selectedMonthFilter = 'all';
     this.activeSortOption = 'date_desc';
@@ -536,13 +539,146 @@ class SafetyEmailsEngine {
     modal.style.display = 'flex';
   }
 
+  showToast(msg, isError = false) {
+    const existing = document.getElementById('app-toast');
+    if (existing) {
+      if (typeof existing.remove === 'function') existing.remove();
+      else if (existing.parentNode) existing.parentNode.removeChild(existing);
+    }
+    const toast = document.createElement('div');
+    toast.id = 'app-toast';
+    toast.style.cssText = `
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      background: ${isError ? '#ef4444' : '#10b981'};
+      color: #ffffff;
+      padding: 10px 18px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+      z-index: 99999;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      animation: slideInUp 0.2s ease-out;
+    `;
+    toast.innerHTML = msg;
+    document.body.appendChild(toast);
+    setTimeout(() => {
+      if (toast && toast.parentNode) toast.parentNode.removeChild(toast);
+    }, 4500);
+  }
+
+  minimizeProcessEmailsModal() {
+    this.isMinimized = true;
+    const modal = document.getElementById('process-safety-emails-modal');
+    if (modal) modal.style.display = 'none';
+
+    const widget = document.getElementById('safety-emails-bg-widget');
+    if (widget) widget.style.display = 'flex';
+
+    this.showToast('📬 Email scan is continuing in the background. You can navigate and make edits freely!');
+  }
+
+  restoreProcessEmailsModal() {
+    this.isMinimized = false;
+    const widget = document.getElementById('safety-emails-bg-widget');
+    if (widget) widget.style.display = 'none';
+
+    const modal = document.getElementById('process-safety-emails-modal');
+    if (modal) modal.style.display = 'flex';
+  }
+
+  cancelProcessEmails() {
+    if (!this.isProcessing) return;
+    this.cancelRequested = true;
+    const subEl = document.getElementById('proc-live-sub');
+    if (subEl) subEl.textContent = '🛑 Stopping scan after current batch finishes...';
+    this.updateBackgroundWidget({ sub: 'Stopping after current batch...' });
+    this.showToast('🛑 Safety email scanner will stop after the current batch finishes.');
+  }
+
+  dismissBackgroundWidget() {
+    const widget = document.getElementById('safety-emails-bg-widget');
+    if (widget) widget.style.display = 'none';
+  }
+
+  updateBackgroundWidget(opts = {}) {
+    const widget = document.getElementById('safety-emails-bg-widget');
+    if (!widget) return;
+
+    if (opts.pct !== undefined) {
+      const pctEl = document.getElementById('safety-bg-pct');
+      if (pctEl) pctEl.textContent = `${opts.pct}%`;
+      const barEl = document.getElementById('safety-bg-bar');
+      if (barEl) barEl.style.width = `${Math.max(5, opts.pct)}%`;
+    }
+
+    if (opts.title) {
+      const titleEl = document.getElementById('safety-bg-title-text');
+      if (titleEl) titleEl.textContent = opts.title;
+    }
+
+    if (opts.sub) {
+      const subEl = document.getElementById('safety-bg-sub');
+      if (subEl) subEl.textContent = opts.sub;
+    }
+
+    if (opts.status === 'completed') {
+      widget.classList.add('completed');
+      widget.classList.remove('error');
+      const spinner = document.getElementById('safety-bg-spinner');
+      if (spinner) {
+        spinner.style.animation = 'none';
+        spinner.style.border = 'none';
+        spinner.textContent = '✅';
+        spinner.style.fontSize = '18px';
+      }
+      const dismissBtn = document.getElementById('safety-bg-dismiss-btn');
+      if (dismissBtn) dismissBtn.style.display = 'flex';
+    } else if (opts.status === 'error') {
+      widget.classList.add('error');
+      widget.classList.remove('completed');
+      const spinner = document.getElementById('safety-bg-spinner');
+      if (spinner) {
+        spinner.style.animation = 'none';
+        spinner.style.border = 'none';
+        spinner.textContent = '❌';
+        spinner.style.fontSize = '18px';
+      }
+      const dismissBtn = document.getElementById('safety-bg-dismiss-btn');
+      if (dismissBtn) dismissBtn.style.display = 'flex';
+    } else {
+      widget.classList.remove('completed', 'error');
+      const spinner = document.getElementById('safety-bg-spinner');
+      if (spinner) {
+        spinner.textContent = '';
+        spinner.style.fontSize = '';
+        spinner.style.border = '2.5px solid rgba(16, 185, 129, 0.25)';
+        spinner.style.borderTopColor = '#34d399';
+        spinner.style.animation = 'spin 0.85s linear infinite';
+      }
+      const dismissBtn = document.getElementById('safety-bg-dismiss-btn');
+      if (dismissBtn) dismissBtn.style.display = 'none';
+    }
+  }
+
   closeProcessEmailsModal() {
+    if (this.isProcessing) {
+      this.minimizeProcessEmailsModal();
+      return;
+    }
     const modal = document.getElementById('process-safety-emails-modal');
     if (modal) modal.style.display = 'none';
   }
 
   async runProcessEmails() {
-    if (this.isProcessing) return;
+    if (this.isProcessing) {
+      this.restoreProcessEmailsModal();
+      return;
+    }
 
     const syncUrl = window.syncEngine.getSyncUrl();
     if (!syncUrl) {
@@ -583,6 +719,11 @@ class SafetyEmailsEngine {
     const skipPdfExtraction = fastModeEl ? fastModeEl.checked : false;
 
     this.isProcessing = true;
+    this.isMinimized = false;
+    this.cancelRequested = false;
+
+    const minBtn = document.getElementById('btn-minimize-process-emails');
+    if (minBtn) minBtn.style.display = 'inline-flex';
 
     const body = document.getElementById('process-safety-emails-modal-body');
     const footer = document.getElementById('process-safety-emails-modal-footer');
@@ -618,9 +759,27 @@ class SafetyEmailsEngine {
 
     if (footer) {
       footer.innerHTML = `
-        <button class="btn btn-secondary" disabled style="opacity: 0.5;">Processing...</button>
+        <div style="display: flex; justify-content: space-between; align-items: center; width: 100%;">
+          <button class="btn btn-secondary" onclick="window.safetyComplianceEngine.minimizeProcessEmailsModal()" style="font-weight: 600; color: #a7f3d0; border: 1px solid rgba(16, 185, 129, 0.4); background: rgba(6, 78, 59, 0.4); display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 6px 12px;" title="Keep scanning in the background while you use other tabs and make edits">
+            <span>🗕</span> Run in Background
+          </button>
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span class="spinner" style="width: 14px; height: 14px; border: 2px solid rgba(16, 185, 129, 0.2); border-top-color: #10b981; border-radius: 50%; display: inline-block; animation: spin 0.85s linear infinite;"></span>
+            <span style="font-size: 12px; color: var(--text-muted);">Scanning Gmail...</span>
+            <button class="btn btn-secondary" onclick="window.safetyComplianceEngine.cancelProcessEmails()" style="font-size: 11px; padding: 4px 8px; color: #fca5a5; border-color: rgba(239, 68, 68, 0.3); background: rgba(239, 68, 68, 0.1);" title="Finish current batch and save progress">
+              🛑 Stop After Batch
+            </button>
+          </div>
+        </div>
       `;
     }
+
+    this.updateBackgroundWidget({
+      title: '📬 Scanning Emails',
+      sub: `Connecting to Gmail (${reportTypeFilter})...`,
+      pct: 0,
+      status: 'scanning'
+    });
 
     try {
       let totalThreads = 0;
@@ -636,11 +795,18 @@ class SafetyEmailsEngine {
       let batchIndex = 1;
 
       while (!isComplete) {
+        if (this.cancelRequested) {
+          console.log('User requested cancellation of safety email scanning.');
+          isComplete = true;
+          break;
+        }
+
         console.log(`Executing safety email batch #${batchIndex}...`);
         const payload = {
           action: 'processSafetyEmails',
           daysBack: daysBack,
-          batchSize: skipPdfExtraction ? 25 : 15,
+          // Safe batch sizes: 3 threads when extracting PDFs to guarantee executions finish under 18s and never 404/timeout!
+          batchSize: skipPdfExtraction ? 20 : 3,
           reportTypeFilter: reportTypeFilter,
           newOnlyMode: newOnlyMode,
           skipPdfExtraction: skipPdfExtraction,
@@ -650,7 +816,36 @@ class SafetyEmailsEngine {
           resetBatch: (batchIndex === 1 && !isPostProcessing)
         };
 
-        const response = await window.syncEngine.executeNetworkRequest(syncUrl, 'POST', payload, 180000);
+        // Resilient network request with automatic retry on temporary server/gateway hiccups
+        let response = null;
+        let batchAttempts = 0;
+        while (batchAttempts < 3) {
+          batchAttempts++;
+          try {
+            response = await window.syncEngine.executeNetworkRequest(syncUrl, 'POST', payload, 180000);
+            if (response && response.success) {
+              break;
+            }
+            if (batchAttempts < 3) {
+              console.warn(`Safety email batch #${batchIndex} attempt ${batchAttempts} returned non-success, retrying in 2.5s:`, response);
+              const subEl = document.getElementById('proc-live-sub');
+              if (subEl) subEl.textContent = `Server busy, retrying batch #${batchIndex} (attempt ${batchAttempts + 1}/3)...`;
+              this.updateBackgroundWidget({ sub: `Retrying batch #${batchIndex} (${batchAttempts + 1}/3)...` });
+              await new Promise(r => setTimeout(r, 2500));
+            }
+          } catch (netErr) {
+            if (batchAttempts < 3) {
+              console.warn(`Safety email batch #${batchIndex} attempt ${batchAttempts} network error, retrying in 2.5s:`, netErr);
+              const subEl = document.getElementById('proc-live-sub');
+              if (subEl) subEl.textContent = `Network timeout, retrying batch #${batchIndex} (attempt ${batchAttempts + 1}/3)...`;
+              this.updateBackgroundWidget({ sub: `Retrying batch #${batchIndex} (${batchAttempts + 1}/3)...` });
+              await new Promise(r => setTimeout(r, 2500));
+            } else {
+              throw netErr;
+            }
+          }
+        }
+
         console.log(`Safety email batch #${batchIndex} response:`, response);
 
         // Guard against receiving a raw database snapshot on server timeout/redirect
@@ -713,6 +908,11 @@ class SafetyEmailsEngine {
           statsTextEl.textContent = `${totalProcessed} logged • ${totalSkipped} skipped • ${totalIssues} equipment issues`;
         }
 
+        this.updateBackgroundWidget({
+          pct: pct,
+          sub: totalThreads > 0 ? `Scanned ${processedSoFar} of ${totalThreads} (${pct}%) • Batch #${batchIndex}` : `Scanned ${processedSoFar} emails...`
+        });
+
         // Check if finished
         if (response.complete === true) {
           isComplete = true;
@@ -731,6 +931,11 @@ class SafetyEmailsEngine {
             barEl.textContent = "95%";
             barEl.style.background = "linear-gradient(90deg, #3b82f6 0%, #10b981 100%)";
           }
+          this.updateBackgroundWidget({
+            title: '🛡️ Finalizing Compliance',
+            sub: 'Calculating scores & updating matrix...',
+            pct: 95
+          });
         }
 
         batchIndex++;
@@ -739,10 +944,16 @@ class SafetyEmailsEngine {
       // Update local database snapshot if fresh snapshot returned
       if (finalSnapshot) {
         await window.localDB.setSnapshot(finalSnapshot);
-        if (window.sheetNavigator) {
+        // Only refresh safety compliance view if the user is currently on it
+        // (Prevents interrupting user if they navigated to Trip Planner or Inventory)
+        const activeView = document.querySelector('.view-container.active');
+        if (activeView && activeView.id === 'safety-compliance-view' && window.sheetNavigator) {
           window.sheetNavigator.renderSafetyCompliance();
         }
       }
+
+      // Hide header minimize button
+      if (minBtn) minBtn.style.display = 'none';
 
       // Save logs in memory
       this.currentLogs = (finalResult && finalResult.recentLogs && finalResult.recentLogs.length > 0)
@@ -754,6 +965,7 @@ class SafetyEmailsEngine {
 
       const totalLogs = (cumulativeLogs.jha || 0) + (cumulativeLogs.weekly || 0) + (cumulativeLogs.monthly || 0);
 
+      // Render completion content so it's ready in modal
       if (body) {
         this.renderCompletionModalContent(body, {
           totalThreads: totalThreads || totalProcessed + totalSkipped,
@@ -782,12 +994,26 @@ class SafetyEmailsEngine {
         window.syncEngine.updateStatusUI('synced', `Compliance updated (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`);
       }
 
+      // If running in background, update floating widget and show completion toast
+      if (this.isMinimized) {
+        this.updateBackgroundWidget({
+          title: '✅ Email Processing Complete',
+          sub: `${totalLogs} logged • ${totalIssues} issues • Click to view report`,
+          pct: 100,
+          status: 'completed'
+        });
+        this.showToast(`🎉 Safety email processing complete! <strong>${totalLogs} emails logged</strong>, ${totalIssues} equipment issues. <a href="javascript:void(0)" onclick="window.safetyComplianceEngine.restoreProcessEmailsModal()" style="color: #fef08a; text-decoration: underline; margin-left: 6px; font-weight: 700;">View Report</a>`);
+      }
+
     } catch (err) {
       console.error('runProcessEmails error:', err);
       let displayError = (err && err.message) ? err.message : 'An error occurred while processing emails.';
       if (displayError.length > 300) {
         displayError = displayError.substring(0, 300) + '... (See console for full details)';
       }
+
+      if (minBtn) minBtn.style.display = 'none';
+
       if (body) {
         body.innerHTML = `
           <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 8px; padding: 16px 20px;">
@@ -808,8 +1034,19 @@ class SafetyEmailsEngine {
           <button class="btn btn-primary" onclick="window.safetyComplianceEngine.openProcessEmailsModal()">Try Again</button>
         `;
       }
+
+      if (this.isMinimized) {
+        this.updateBackgroundWidget({
+          title: '❌ Email Processing Error',
+          sub: `${displayError.substring(0, 45)}... Click to view`,
+          status: 'error'
+        });
+        this.showToast(`⚠️ Error processing safety emails: ${this.escapeHtml(displayError.substring(0, 80))}. <a href="javascript:void(0)" onclick="window.safetyComplianceEngine.restoreProcessEmailsModal()" style="color: #fef08a; text-decoration: underline; margin-left: 6px; font-weight: 700;">View Details</a>`, true);
+      }
     } finally {
       this.isProcessing = false;
+      const minBtn = document.getElementById('btn-minimize-process-emails');
+      if (minBtn) minBtn.style.display = 'none';
     }
   }
 
