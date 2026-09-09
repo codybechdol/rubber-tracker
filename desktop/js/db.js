@@ -148,6 +148,50 @@ class LocalDatabase {
           Object.assign(this.snapshot.configs, snapshot.configs);
         }
         snapshot = this.snapshot;
+      } else if (this.snapshot && this.snapshot.tables && snapshot.tables) {
+        // Full snapshot download: Protect local history from being truncated or wiped out!
+        const historyTableKeys = [
+          'gloves_history', 'sleeves_history', 'blankets_history', 'macks_history',
+          'hv_testers_history', 'phasing_sets_history', 'aed_history', 'grounds_history',
+          'hot_sticks_history', 'employee_history'
+        ];
+
+        historyTableKeys.forEach(histKey => {
+          const oldTable = this.snapshot.tables[histKey];
+          const newTable = snapshot.tables[histKey];
+          if (oldTable && oldTable.rows && oldTable.rows.length > 0) {
+            if (!newTable || !newTable.rows || newTable.rows.length === 0) {
+              snapshot.tables[histKey] = oldTable;
+            } else {
+              // Build index of incoming server rows
+              const newKeySet = new Set();
+              newTable.rows.forEach(r => {
+                const item = String(r['Item #'] || r['Serial #'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['ESL ID'] || '').trim().toLowerCase();
+                const date = String(r['Date Assigned'] || r['Date'] || Object.values(r)[0] || '').trim();
+                const assigned = String(r['Assigned To'] || '').trim().toLowerCase();
+                if (item) newKeySet.add(`${item}|${date}|${assigned}`);
+              });
+
+              // Merge any local rows that the server snapshot did not include
+              let mergedAny = false;
+              oldTable.rows.forEach(r => {
+                const item = String(r['Item #'] || r['Serial #'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['ESL ID'] || '').trim().toLowerCase();
+                const date = String(r['Date Assigned'] || r['Date'] || Object.values(r)[0] || '').trim();
+                const assigned = String(r['Assigned To'] || '').trim().toLowerCase();
+                const rowKey = `${item}|${date}|${assigned}`;
+                if (item && !newKeySet.has(rowKey)) {
+                  newTable.rows.push(r);
+                  newKeySet.add(rowKey);
+                  mergedAny = true;
+                }
+              });
+
+              if (mergedAny) {
+                newTable.rowCount = newTable.rows.length;
+              }
+            }
+          }
+        });
       }
       this.normalizeSnapshot(snapshot);
     }

@@ -144,24 +144,17 @@ function exportFullDatabaseSnapshot(tableKeysFilter) {
     var rows = [];
     var rawGrid = [];
 
-    var isHistory = cfg.key.indexOf('history') !== -1;
     var isLog = cfg.key.indexOf('_log') !== -1;
-    var maxHistoryRows = 500;
+    var maxLogRows = 500;
     var startRowIndex = 0;
     var endRowIndex = data.length;
 
-    if (isHistory && data.length > maxHistoryRows + 10) {
-      // History sheets have newest rows appended at the bottom
-      startRowIndex = data.length - maxHistoryRows;
-    } else if (isLog && data.length > maxHistoryRows + 10) {
+    if (isLog && data.length > maxLogRows + 10) {
       // Log sheets (JHA, Weekly Safety, Monthly Checklist) are sorted newest-first at the top
-      endRowIndex = headerRowIdx + 1 + maxHistoryRows;
+      endRowIndex = headerRowIdx + 1 + maxLogRows;
     }
 
     for (var r = 0; r < data.length; r++) {
-      if (r > headerRowIdx && isHistory && r < startRowIndex) {
-        continue;
-      }
       if (r > headerRowIdx && isLog && r >= endRowIndex) {
         continue;
       }

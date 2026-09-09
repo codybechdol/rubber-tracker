@@ -715,10 +715,41 @@ class ItemStatsEngine {
 
     const firstRow = groupRows[0] || {};
     let metaChips = [];
-    headers.forEach(h => {
-      const hl = h.toLowerCase();
-      if (['size', 'class', 'type', 'kv', 'model', 'length'].includes(hl) && firstRow[h]) {
-        metaChips.push(`<span class="brand-badge" style="font-size: 11px;">${h}: ${firstRow[h]}</span>`);
+    const metaOrder = ['size', 'class', 'type', 'kv', 'model', 'length'];
+    metaOrder.forEach(f => {
+      let val = '';
+      let displayKey = f.charAt(0).toUpperCase() + f.slice(1);
+
+      // Check foundActive first (current active record is most authoritative for size/class)
+      if (foundActive) {
+        for (const k of Object.keys(foundActive)) {
+          if (k.toLowerCase() === f) {
+            const v = foundActive[k];
+            if (v !== undefined && v !== null && String(v).trim() !== '') {
+              val = String(v).trim();
+              displayKey = k;
+              break;
+            }
+          }
+        }
+      }
+
+      // If not found in active, fallback to firstRow from history
+      if (!val && firstRow) {
+        for (const k of Object.keys(firstRow)) {
+          if (k.toLowerCase() === f) {
+            const v = firstRow[k];
+            if (v !== undefined && v !== null && String(v).trim() !== '') {
+              val = String(v).trim();
+              displayKey = k;
+              break;
+            }
+          }
+        }
+      }
+
+      if (val !== '') {
+        metaChips.push(`<span class="brand-badge" style="font-size: 11px;">${displayKey}: ${this.escapeHtml(val)}</span>`);
       }
     });
 
