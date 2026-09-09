@@ -18,6 +18,7 @@ class CrewImportEngine {
     this.computedDeltas = null;
     this.savedLeadSelections = {};
     this.manualLeadOverrides = {};
+    this.deselectedChangeIds = new Set();
     this.activeStep = 1; // 1: Upload, 2: Review Crews, 3: Configure New Hires, 4: Review Changes & Apply
   }
 
@@ -510,6 +511,7 @@ class CrewImportEngine {
     this.selectedSheet = sheetName;
     this.rosterDate = this.parseRosterDate(sheetName);
     this.rosterDateFormatted = this.formatDateForSheet(this.rosterDate);
+    if (this.deselectedChangeIds) this.deselectedChangeIds.clear();
     const sheet = this.workbook.Sheets[sheetName];
     const data = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '' });
 
@@ -1265,6 +1267,142 @@ class CrewImportEngine {
     return null;
   }
 
+  extractDepartureDate(noteText, referenceDate = null) {
+    if (!noteText) return '';
+    const text = String(noteText).trim();
+    // Match date formats: 9-3, 9/3, 09-03, 9/3/26, 09/03/2026, etc.
+    const match = text.match(/\b(\d{1,2})[-\/](\d{1,2})(?:[-\/](\d{2,4}))?\b/);
+    if (match) {
+      const month = parseInt(match[1], 10);
+      const day = parseInt(match[2], 10);
+      let year = match[3] ? parseInt(match[3], 10) : null;
+      if (year !== null && year < 100) {
+        year += 2000;
+      }
+      if (!year) {
+        if (referenceDate instanceof Date && !isNaN(referenceDate.getTime())) {
+          year = referenceDate.getFullYear();
+        } else {
+          year = new Date().getFullYear();
+        }
+      }
+      if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+        const mm = String(month).padStart(2, '0');
+        const dd = String(day).padStart(2, '0');
+        return `${mm}/${dd}/${year}`;
+      }
+    }
+    return '';
+  }
+
+  isChangeSelected(changeId) {
+    if (!changeId) return true;
+    return !this.deselectedChangeIds || !this.deselectedChangeIds.has(changeId);
+  }
+
+  toggleChange(changeId, isChecked) {
+    if (!changeId) return;
+    if (!this.deselectedChangeIds) this.deselectedChangeIds = new Set();
+    if (isChecked) {
+      this.deselectedChangeIds.delete(changeId);
+    } else {
+      this.deselectedChangeIds.add(changeId);
+    }
+    this.updateStep3SelectionUI();
+  }
+
+  toggleAllChanges(isChecked) {
+    if (!this.deselectedChangeIds) this.deselectedChangeIds = new Set();
+    const allIds = this.getAllChangeIds();
+    if (isChecked) {
+      this.deselectedChangeIds.clear();
+    } else {
+      allIds.forEach(id => this.deselectedChangeIds.add(id));
+    }
+    this.updateStep3SelectionUI();
+  }
+
+  toggleCategoryChanges(categoryKey, isChecked) {
+    if (!this.computedDeltas) return;
+    if (!this.deselectedChangeIds) this.deselectedChangeIds = new Set();
+    const items = this.computedDeltas[categoryKey] || [];
+    items.forEach(item => {
+      const id = item.changeId;
+      if (id) {
+        if (isChecked) {
+          this.deselectedChangeIds.delete(id);
+        } else {
+          this.deselectedChangeIds.add(id);
+        }
+      }
+    });
+    this.updateStep3SelectionUI();
+  }
+
+  getAllChangeIds() {
+    if (!this.computedDeltas) return [];
+    const d = this.computedDeltas;
+    const ids = [];
+    (d.newHires || []).forEach(x => x.changeId && ids.push(x.changeId));
+    (d.rehires || []).forEach(x => x.changeId && ids.push(x.changeId));
+    (d.quits || []).forEach(x => x.changeId && ids.push(x.changeId));
+    (d.timeOff || []).forEach(x => x.changeId && ids.push(x.changeId));
+    (d.transfers || []).forEach(x => x.changeId && ids.push(x.changeId));
+    (d.roleChanges || []).forEach(x => x.changeId && ids.push(x.changeId));
+    (d.secondaryChanges || []).forEach(x => x.changeId && ids.push(x.changeId));
+    (d.positionUpdates || []).forEach(x => x.changeId && ids.push(x.changeId));
+    (d.newJobsDetected || []).forEach(x => x.changeId && ids.push(x.changeId));
+    return ids;
+  }
+
+  getSelectedChangesCount() {
+    const allIds = this.getAllChangeIds();
+    return allIds.filter(id => this.isChangeSelected(id)).length;
+  }
+
+  updateStep3SelectionUI() {
+    const allIds = this.getAllChangeIds();
+    const totalCount = allIds.length;
+    const selectedCount = this.getSelectedChangesCount();
+
+    // Update checkboxes and row styling
+    const checkboxes = document.querySelectorAll('.ci-change-checkbox');
+    checkboxes.forEach(cb => {
+      const id = cb.getAttribute('data-change-id');
+      if (id) {
+        const selected = this.isChangeSelected(id);
+        cb.checked = selected;
+        const row = cb.closest('tr');
+        if (row) {
+          row.style.opacity = selected ? '1' : '0.45';
+          row.style.filter = selected ? 'none' : 'grayscale(0.6)';
+        }
+      }
+    });
+
+    // Update master select-all checkbox
+    const selectAllCb = document.getElementById('ci-select-all-changes');
+    if (selectAllCb) {
+      selectAllCb.checked = (selectedCount === totalCount && totalCount > 0);
+      selectAllCb.indeterminate = (selectedCount > 0 && selectedCount < totalCount);
+    }
+
+    // Update counter badge
+    const badge = document.getElementById('ci-step3-counter-badge');
+    if (badge) {
+      badge.textContent = `${selectedCount} of ${totalCount} Selected`;
+    }
+
+    // Update apply button
+    const applyBtn = document.getElementById('ci-step3-apply-btn');
+    if (applyBtn) {
+      applyBtn.innerHTML = `<span>💾</span> Apply Crew Changes (${selectedCount} Updates)`;
+      applyBtn.disabled = (selectedCount === 0);
+      applyBtn.style.opacity = selectedCount === 0 ? '0.5' : '1';
+      applyBtn.style.cursor = selectedCount === 0 ? 'not-allowed' : 'pointer';
+    }
+  }
+
   computeChangeDeltas() {
     const empTable = this.db.getTable('employees') || { rows: [] };
     const jtTable = this.db.getTable('job_tracking') || { rows: [] };
@@ -1292,6 +1430,7 @@ class CrewImportEngine {
     const transfers = [];
     const roleChanges = [];
     const secondaryChanges = [];
+    const positionUpdates = [];
     const newJobsDetected = [];
     const quits = [];
     const timeOff = [];
@@ -1302,6 +1441,7 @@ class CrewImportEngine {
       if (crew.excluded) continue;
       if (!jtMap.has(crew.jobNumber)) {
         newJobsDetected.push({
+          changeId: 'nj_' + crew.jobNumber,
           jobNumber: crew.jobNumber,
           location: crew.location,
           suggestedForeman: crew.lead ? crew.lead.name : '',
@@ -1326,7 +1466,8 @@ class CrewImportEngine {
 
     // 3. Process Quits & Terminations from bottom special sections
     for (const q of (this.specialCircumstances?.quits || [])) {
-      const match = this.findMatchingEmployee(q.name, activeEmps);
+      const match = this.findMatchingEmployee(q.name, activeEmps) ||
+                    (prevTable.rows ? this.findMatchingEmployee(q.name, prevTable.rows) : null);
       const dbName = match ? (this.getEmpRowName(match) || q.name) : q.name;
       const oldLoc = match ? this.getEmpRowLocation(match) : '';
       const oldJob = match ? this.getEmpRowJobNumber(match) : '';
@@ -1345,7 +1486,28 @@ class CrewImportEngine {
       const primaryCrew = isScheduledDeparture ? crewOccurrences[0].crew : null;
       const primaryEmp = isScheduledDeparture ? crewOccurrences[0].emp : null;
 
+      const departureDate = this.extractDepartureDate(q.note || q.rawText, this.rosterDate);
+
+      // Check if this employee is ALREADY recorded as a Previous Employee or terminated
+      const isAlreadyPreviousEmployee = Boolean(
+        (match && (
+          (this.getEmpRowLocation(match) || '').toLowerCase().includes('previous') ||
+          String(match['Status'] || '').toLowerCase().includes('previous') ||
+          String(match['Status'] || '').toLowerCase().includes('inactive') ||
+          String(match['Status'] || '').toLowerCase().includes('terminated') ||
+          String(match['Status'] || '').toLowerCase().includes('departed')
+        )) ||
+        (prevTable.rows && Boolean(this.findMatchingEmployee(q.name, prevTable.rows))) ||
+        (histTable.rows && histTable.rows.some(h => {
+          const hName = h['Employee Name'] || h['Name'] || '';
+          const hEvent = String(h['Event Type'] || h['Event'] || '').toLowerCase();
+          return (hEvent.includes('termination') || hEvent.includes('departure') || hEvent.includes('quit')) &&
+            this.cleanNameForMatch(hName) === cleanQName;
+        }))
+      );
+
       quits.push({
+        changeId: 'quit_' + cleanQName,
         name: dbName,
         rosterName: q.name,
         targetRow: match || null,
@@ -1353,6 +1515,8 @@ class CrewImportEngine {
         oldLocation: oldLoc,
         note: q.note || q.rawText,
         rawText: q.rawText,
+        departureDate: departureDate,
+        isAlreadyPreviousEmployee: isAlreadyPreviousEmployee,
         isScheduledDeparture: isScheduledDeparture,
         activeCrewJob: primaryCrew ? primaryCrew.jobNumber : '',
         activeCrewRole: primaryEmp ? primaryEmp.role : ''
@@ -1380,6 +1544,7 @@ class CrewImportEngine {
       const primaryCrew = isAlsoOnActiveCrew ? crewOccurrences[0].crew : null;
 
       timeOff.push({
+        changeId: 'to_' + cleanTOName,
         name: dbName,
         rosterName: to.name,
         targetRow: match || null,
@@ -1400,7 +1565,7 @@ class CrewImportEngine {
       const empName = primaryOcc.emp.name;
       const primaryJob = primaryOcc.emp.fullJobNumber;
       const primaryLoc = primaryOcc.crew.location;
-      const primaryClass = primaryOcc.emp.classification || 'JRY';
+      const rosterExplicitClass = (primaryOcc.emp.classification || '').trim();
       const secJobNum = secOccs.map(s => s.emp.fullJobNumber).filter(Boolean).join(', ');
       const isExplicitNewHire = occurrences.some(o => o.emp.isNewHire);
 
@@ -1424,15 +1589,18 @@ class CrewImportEngine {
 
       if (existing && !isExistingPreviousEmployee) {
         // Active Existing Employee: already exists on Employees sheet and is currently active!
-        // Note: Even if the Excel cell still has "NEW HIRE" printed next to their name (common in utility crew sheets where "NEW HIRE" text lingers for weeks),
-        // they are ALREADY in the system. Do NOT flag as a new hire or ask for hire date/PPE sizes.
         const dbName = this.getEmpRowName(existing) || empName;
         const oldLoc = this.getEmpRowLocation(existing);
         const oldJob = this.getEmpRowJobNumber(existing);
         const oldClass = this.getEmpRowClassification(existing);
         const oldSecJob = this.getEmpRowSecJob(existing);
 
+        // Preserve oldClass for existing employees when roster does not specify a role token
+        const primaryClass = rosterExplicitClass || oldClass || 'JRY';
+
+        const cleanEmpName = this.cleanNameForMatch(dbName);
         const changeItem = {
+          changeId: 'emp_' + cleanEmpName,
           employeeName: dbName,
           rosterName: empName,
           targetRow: existing,
@@ -1450,7 +1618,7 @@ class CrewImportEngine {
 
         let changed = false;
 
-        // 1. Crew Transfer: only if moving to a different crew base (e.g. 013-26 -> 029-26 or 009-26 -> 056-26)
+        // 1. Crew Transfer vs Position Renumbering
         if (this.isCrewTransfer(oldJob, primaryJob)) {
           changeItem.newJobNumber = primaryJob;
           changeItem.changes.push(`Job #: ${oldJob || 'None'} → ${primaryJob}`);
@@ -1458,9 +1626,11 @@ class CrewImportEngine {
           transfers.push(changeItem);
           changed = true;
         } else if (primaryJob && oldJob !== primaryJob) {
-          // Intra-crew position renumbering or formatting normalization (e.g. 043-26.04 -> 043-26.1 or 043-26.3 -> 043-26.03)
+          // Intra-crew position renumbering or formatting normalization (e.g. 043-26.04 -> 043-26.1)
           changeItem.newJobNumber = primaryJob;
           changeItem.changes.push(`Job #: ${oldJob || 'None'} → ${primaryJob}`);
+          if (changeItem.type === 'Update') changeItem.type = 'Position Update';
+          positionUpdates.push(changeItem);
           changed = true;
         }
 
@@ -1475,11 +1645,11 @@ class CrewImportEngine {
           changed = true;
         }
 
-        // 3. Role / Classification Change
-        if (primaryClass && (!oldClass || oldClass.toLowerCase() !== primaryClass.toLowerCase())) {
-          changeItem.newClassification = primaryClass;
-          changeItem.changes.push(`Role: ${oldClass || 'None'} → ${primaryClass}`);
-          if (changeItem.type === 'Update') changeItem.type = 'Role Change';
+        // 3. Role / Classification Change: ONLY IF EXPLICIT IN ROSTER AND DIFFERS FROM EXISTING
+        if (rosterExplicitClass && oldClass && rosterExplicitClass.toLowerCase() !== oldClass.toLowerCase()) {
+          changeItem.newClassification = rosterExplicitClass;
+          changeItem.changes.push(`Role: ${oldClass || 'None'} → ${rosterExplicitClass}`);
+          if (changeItem.type === 'Update' || changeItem.type === 'Position Update') changeItem.type = 'Role Change';
           roleChanges.push(changeItem);
           changed = true;
         }
@@ -1502,7 +1672,10 @@ class CrewImportEngine {
         const foundHist = this.findMatchingEmployee(empName, histTable.rows || []);
         const isRehire = !isScheduledDeparture && (isExistingPreviousEmployee || !!foundPrev || !!foundHist);
 
+        const primaryClass = rosterExplicitClass || 'JRY';
+        const cleanEmpName = this.cleanNameForMatch(empName);
         const newHireObj = {
+          changeId: (isRehire ? 'rh_' : 'nh_') + cleanEmpName,
           name: existing ? (this.getEmpRowName(existing) || empName) : empName,
           role: primaryOcc.emp.role || primaryClass,
           classification: primaryClass,
@@ -1529,6 +1702,7 @@ class CrewImportEngine {
       transfers: transfers,
       roleChanges: roleChanges,
       secondaryChanges: secondaryChanges,
+      positionUpdates: positionUpdates,
       newJobsDetected: newJobsDetected,
       quits: quits,
       timeOff: timeOff,
@@ -1635,6 +1809,9 @@ class CrewImportEngine {
       const notesKey = getEmpFieldKey(empTable.headers, 'notes');
 
       for (const change of matchedEmployeeChanges) {
+        if (!this.isChangeSelected(change.changeId)) {
+          continue;
+        }
         const row = change.targetRow || this.findMatchingEmployee(change.rosterName || change.employeeName, empTable.rows);
         if (row) {
           const updatedFields = {};
@@ -1695,15 +1872,116 @@ class CrewImportEngine {
       }
 
       // Process Quits / Terminations
+      const prevTable = this.db.getTable('previous_employees') || this.db.getTable('previous_employee') || this.db.getTable('past_employees') || this.db.getTable('Previous Employees');
+
       for (const q of (quits || [])) {
+        if (!this.isChangeSelected(q.changeId)) {
+          continue;
+        }
+
         const row = q.targetRow || this.findMatchingEmployee(q.rosterName || q.name, empTable.rows);
-        if (row) {
+        const departureDate = q.departureDate || this.extractDepartureDate(q.note || q.rawText, this.rosterDate) || todayFormatted;
+        const reasonVal = (q.note && /fire/i.test(q.note)) ? 'Fired' : ((q.note && /layoff/i.test(q.note)) ? 'Layoff' : ((q.note && /resign/i.test(q.note)) ? 'Resigned' : 'Quit'));
+
+        if (q.isAlreadyPreviousEmployee) {
+          // Employee is ALREADY recorded as a Previous Employee - DO NOT create duplicate rows!
+          // 1. Update previous_employees sheet if present
+          if (prevTable && prevTable.rows) {
+            const prevRow = this.findMatchingEmployee(q.rosterName || q.name, prevTable.rows);
+            if (prevRow) {
+              const prevLastDayKey = getEmpFieldKey(prevTable.headers, 'last day') || 'Last Day';
+              const prevReasonKey = getEmpFieldKey(prevTable.headers, 'last day reason') || 'Last Day Reason';
+              const prevNotesKey = getEmpFieldKey(prevTable.headers, 'notes') || 'Notes';
+
+              const prevUpdated = {};
+              prevRow[prevLastDayKey] = departureDate;
+              prevUpdated[prevLastDayKey] = departureDate;
+
+              prevRow[prevReasonKey] = reasonVal;
+              prevUpdated[prevReasonKey] = reasonVal;
+
+              if (q.note) {
+                prevRow[prevNotesKey] = q.note;
+                prevUpdated[prevNotesKey] = q.note;
+              }
+              this.syncRowToRawGrid(prevTable, prevRow);
+              appliedCount++;
+
+              const prevRowIdx = prevRow._rowIdx || (prevTable.rows.indexOf(prevRow) + 2);
+              await this.db.addMutation({
+                action: 'UPDATE_ROW',
+                sheetName: prevTable.name || 'Previous Employees',
+                tableKey: 'previous_employees',
+                employeeName: this.getEmpRowName(prevRow) || q.name,
+                row: prevRowIdx,
+                itemIdentifier: this.getEmpRowName(prevRow) || q.name,
+                updatedFields: prevUpdated
+              });
+            }
+          }
+
+          // 2. Update employee_history existing termination row (DO NOT ADD_ROW to avoid duplicate entries)
+          if (histTable && histTable.rows) {
+            const histNameKey = histTable.headers.find(h => /name/i.test(h)) || 'Employee Name';
+            const histEventKey = histTable.headers.find(h => /event/i.test(h)) || 'Event Type';
+            const histDateKey = histTable.headers.find(h => /date/i.test(h)) || 'Date';
+            const histNotesKey = histTable.headers.find(h => /note/i.test(h)) || 'Notes';
+
+            const cleanQName = this.cleanNameForMatch(q.name);
+            const existingHist = histTable.rows.find(h => {
+              const hName = this.cleanNameForMatch(h[histNameKey] || '');
+              const hEvent = String(h[histEventKey] || '').toLowerCase();
+              return hName === cleanQName && (hEvent.includes('termination') || hEvent.includes('departure') || hEvent.includes('quit'));
+            });
+
+            if (existingHist) {
+              existingHist[histDateKey] = departureDate;
+              if (q.note) existingHist[histNotesKey] = `Quit / Leaving: ${q.note}`;
+              this.syncRowToRawGrid(histTable, existingHist);
+              const histRowIdx = existingHist._rowIdx || (histTable.rows.indexOf(existingHist) + 2);
+              await this.db.addMutation({
+                action: 'UPDATE_ROW',
+                sheetName: histTable.name || 'Employee History',
+                tableKey: 'employee_history',
+                employeeName: existingHist[histNameKey] || q.name,
+                row: histRowIdx,
+                itemIdentifier: existingHist[histNameKey] || q.name,
+                updatedFields: {
+                  [histDateKey]: departureDate,
+                  [histNotesKey]: existingHist[histNotesKey]
+                }
+              });
+            }
+          }
+
+          // 3. Update employees sheet if row is present
+          if (row) {
+            const updatedFields = {};
+            if (statusKey) { row[statusKey] = 'Previous Employee'; updatedFields[statusKey] = 'Previous Employee'; }
+            else if (locKey) { row[locKey] = 'Previous Employee'; updatedFields[locKey] = 'Previous Employee'; }
+            if (lastDayKey) { row[lastDayKey] = departureDate; updatedFields[lastDayKey] = departureDate; }
+            if (lastDayReasonKey) { row[lastDayReasonKey] = reasonVal; updatedFields[lastDayReasonKey] = reasonVal; }
+            if (notesKey && q.note) { row[notesKey] = q.note; updatedFields[notesKey] = q.note; }
+            this.syncRowToRawGrid(empTable, row);
+            appliedCount++;
+
+            const empRowIdx = row._rowIdx || (empTable.rows ? empTable.rows.indexOf(row) + 2 : null);
+            await this.db.addMutation({
+              action: 'UPDATE_ROW',
+              sheetName: empTable.name || 'Employees',
+              tableKey: 'employees',
+              employeeName: this.getEmpRowName(row) || q.name,
+              row: empRowIdx,
+              itemIdentifier: this.getEmpRowName(row) || q.name,
+              updatedFields: updatedFields
+            });
+          }
+        } else if (row) {
           const updatedFields = {};
           if (q.isScheduledDeparture) {
-            // Employee is still actively working on a crew this week until their last day (e.g. Dillon Deane on 052-26)
-            const reasonVal = (q.note && /fire/i.test(q.note)) ? 'Fired' : ((q.note && /layoff/i.test(q.note)) ? 'Layoff' : ((q.note && /resign/i.test(q.note)) ? 'Resigned' : 'Quit'));
+            // Employee is still actively working on a crew this week until their last day
             if (statusKey) { row[statusKey] = 'Active'; updatedFields[statusKey] = 'Active'; }
-            if (lastDayKey) { row[lastDayKey] = '08/27/2026'; updatedFields[lastDayKey] = '08/27/2026'; }
+            if (lastDayKey) { row[lastDayKey] = departureDate; updatedFields[lastDayKey] = departureDate; }
             if (lastDayReasonKey) { row[lastDayReasonKey] = reasonVal; updatedFields[lastDayReasonKey] = reasonVal; }
             if (notesKey) {
               const curNote = String(row[notesKey] || '').trim();
@@ -1717,7 +1995,7 @@ class CrewImportEngine {
 
             if (histTable) {
               const histRow = {
-                'Date': todayFormatted,
+                'Date': departureDate,
                 'Employee Name': this.getEmpRowName(row) || q.name,
                 'Event Type': 'Scheduled Departure',
                 'Location': this.getEmpRowLocation(row) || '',
@@ -1748,17 +2026,16 @@ class CrewImportEngine {
             });
           } else {
             // Immediate Termination: employee is not on any crew this week
-            const reasonVal = (q.note && /fire/i.test(q.note)) ? 'Fired' : ((q.note && /layoff/i.test(q.note)) ? 'Layoff' : ((q.note && /resign/i.test(q.note)) ? 'Resigned' : 'Quit'));
             if (statusKey) { row[statusKey] = 'Previous Employee'; updatedFields[statusKey] = 'Previous Employee'; }
             else if (locKey) { row[locKey] = 'Previous Employee'; updatedFields[locKey] = 'Previous Employee'; }
-            if (lastDayKey) { row[lastDayKey] = todayFormatted; updatedFields[lastDayKey] = todayFormatted; }
+            if (lastDayKey) { row[lastDayKey] = departureDate; updatedFields[lastDayKey] = departureDate; }
             if (lastDayReasonKey) { row[lastDayReasonKey] = reasonVal; updatedFields[lastDayReasonKey] = reasonVal; }
             this.syncRowToRawGrid(empTable, row);
             appliedCount++;
 
             if (histTable) {
               const histRow = {
-                'Date': todayFormatted,
+                'Date': departureDate,
                 'Employee Name': this.getEmpRowName(row) || q.name,
                 'Event Type': 'Termination',
                 'Location': this.getEmpRowLocation(row) || '',
@@ -1793,6 +2070,9 @@ class CrewImportEngine {
 
       // Process Full-Week Time Off (e.g. John Baker, Ben Lapka, James Erickson, Chad Cliff, Andrew West)
       for (const to of (timeOff || [])) {
+        if (!this.isChangeSelected(to.changeId)) {
+          continue;
+        }
         if (to.isFullWeekOff) {
           const row = to.targetRow || this.findMatchingEmployee(to.rosterName || to.name, empTable.rows);
           if (row) {
@@ -1862,6 +2142,9 @@ class CrewImportEngine {
       const emailKey = getEmpFieldKey(empTable.headers, 'email address') || getEmpFieldKey(empTable.headers, 'email') || getEmpFieldKey(empTable.headers, 'mp email');
 
       for (const nh of allNewEmps) {
+        if (!this.isChangeSelected(nh.changeId)) {
+          continue;
+        }
         const cfg = this.getNewHireConfig(nh.name, nh);
         const hireDateFormatted = cfg.hireDate ? this.formatDateForSheet(cfg.hireDate) : (this.rosterDateFormatted || todayFormatted);
         const gloveVal = cfg.gloveSize || (nh.historyRecord ? (nh.historyRecord['Glove Size'] || 'N/A') : 'N/A');
@@ -1979,6 +2262,9 @@ class CrewImportEngine {
         });
 
         const isNewJob = !jobRow;
+        if (isNewJob && !this.isChangeSelected('nj_' + crew.jobNumber)) {
+          continue;
+        }
         const foremanName = crew.lead ? crew.lead.name : '';
         const crewSize = crew.crewSize;
         const physicalLoc = crew.location;
@@ -2527,10 +2813,15 @@ class CrewImportEngine {
     }
 
     if (this.activeStep === 4 || (this.activeStep === 3 && !hasNewHires)) {
+      const allIds = this.getAllChangeIds();
+      const totalCount = allIds.length;
+      const selectedCount = this.getSelectedChangesCount();
+      const allSelected = selectedCount === totalCount && totalCount > 0;
+
       return `
         <div>
           <!-- Changes Summary Stats -->
-          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 20px;">
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 20px;">
             <div style="background: var(--bg-secondary); border-left: 4px solid #10b981; border-radius: 8px; padding: 10px 12px;">
               <div style="font-size: 10px; color: var(--text-muted); font-weight: 700;">NEW HIRES</div>
               <div style="font-size: 20px; font-weight: 800; color: #10b981;">${deltas ? deltas.newHires.length : 0}</div>
@@ -2546,6 +2837,10 @@ class CrewImportEngine {
             <div style="background: var(--bg-secondary); border-left: 4px solid #ef4444; border-radius: 8px; padding: 10px 12px;">
               <div style="font-size: 10px; color: var(--text-muted); font-weight: 700;">QUITS / LEAVING</div>
               <div style="font-size: 20px; font-weight: 800; color: #ef4444;">${deltas && deltas.quits ? deltas.quits.length : 0}</div>
+            </div>
+            <div style="background: var(--bg-secondary); border-left: 4px solid #818cf8; border-radius: 8px; padding: 10px 12px;">
+              <div style="font-size: 10px; color: var(--text-muted); font-weight: 700;">POSITION UPDATES</div>
+              <div style="font-size: 20px; font-weight: 800; color: #818cf8;">${deltas && deltas.positionUpdates ? deltas.positionUpdates.length : 0}</div>
             </div>
             <div style="background: var(--bg-secondary); border-left: 4px solid #f59e0b; border-radius: 8px; padding: 10px 12px;">
               <div style="font-size: 10px; color: var(--text-muted); font-weight: 700;">TIME OFF (THIS WK)</div>
@@ -2563,19 +2858,35 @@ class CrewImportEngine {
 
           <!-- Changes Table View -->
           <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 16px; margin-bottom: 20px;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
-              <h3 style="font-size: 15px; font-weight: 800; color: var(--text-primary); margin: 0;">
-                Detected Personnel & Crew Updates
-              </h3>
-              <span class="badge" style="background: var(--bg-tertiary); color: var(--text-muted); font-size: 11px; padding: 4px 8px; border-radius: 4px; font-weight: 700;">
-                ${deltas ? deltas.totalChanges : 0} Total Updates
-              </span>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 8px;">
+              <div>
+                <h3 style="font-size: 15px; font-weight: 800; color: var(--text-primary); margin: 0;">
+                  Detected Personnel & Crew Updates
+                </h3>
+                <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 3px;">
+                  Review changes below. Uncheck any update to exclude it before applying.
+                </div>
+              </div>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span id="ci-step3-counter-badge" class="badge" style="background: var(--bg-tertiary); color: #60a5fa; font-size: 11px; padding: 4px 10px; border-radius: 4px; font-weight: 700; border: 1px solid rgba(59, 130, 246, 0.3);">
+                  ${selectedCount} of ${totalCount} Selected
+                </span>
+                <button type="button" class="btn btn-secondary" style="font-size: 11px; padding: 4px 10px; border-radius: 4px; cursor: pointer;" onclick="window.crewImportEngine.toggleAllChanges(true)">
+                  Select All
+                </button>
+                <button type="button" class="btn btn-secondary" style="font-size: 11px; padding: 4px 10px; border-radius: 4px; cursor: pointer;" onclick="window.crewImportEngine.toggleAllChanges(false)">
+                  Deselect All
+                </button>
+              </div>
             </div>
             
             <div style="max-height: 440px; overflow-y: auto;">
               <table style="width: 100%; border-collapse: collapse; font-size: 12px; text-align: left;">
                 <thead>
-                  <tr style="background: var(--bg-tertiary); color: var(--text-muted); font-size: 11px;">
+                  <tr style="background: var(--bg-tertiary); color: var(--text-muted); font-size: 11px; position: sticky; top: 0; z-index: 2;">
+                    <th style="padding: 8px 10px; width: 36px; text-align: center;">
+                      <input type="checkbox" id="ci-select-all-changes" onchange="window.crewImportEngine.toggleAllChanges(this.checked)" ${allSelected ? 'checked' : ''} style="cursor: pointer;" title="Select / Deselect All Updates">
+                    </th>
                     <th style="padding: 8px 12px;">Employee / Job</th>
                     <th style="padding: 8px 12px;">Type</th>
                     <th style="padding: 8px 12px;">Changes & Assignments</th>
@@ -2585,8 +2896,12 @@ class CrewImportEngine {
                   ${deltas ? deltas.newHires.map(nh => {
                     const cfg = this.getNewHireConfig(nh.name, nh);
                     const formattedDate = cfg.hireDate ? this.formatDateForSheet(cfg.hireDate) : (this.rosterDateFormatted || '');
+                    const isSelected = this.isChangeSelected(nh.changeId);
                     return `
-                      <tr style="border-bottom: 1px solid var(--border-color);">
+                      <tr style="border-bottom: 1px solid var(--border-color); ${isSelected ? '' : 'opacity: 0.45; filter: grayscale(0.6);'}">
+                        <td style="padding: 8px 10px; text-align: center;">
+                          <input type="checkbox" class="ci-change-checkbox" data-change-id="${nh.changeId}" onchange="window.crewImportEngine.toggleChange('${nh.changeId}', this.checked)" ${isSelected ? 'checked' : ''} style="cursor: pointer;">
+                        </td>
                         <td style="padding: 8px 12px; font-weight: 700; color: #10b981;">👤 ${this.escapeHtml(nh.name)}</td>
                         <td style="padding: 8px 12px;"><span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #10b981; padding: 2px 6px; border-radius: 4px; font-weight: 700;">New Hire</span></td>
                         <td style="padding: 8px 12px; color: var(--text-muted);">Location: <strong style="color: var(--text-primary);">${this.escapeHtml(nh.location)}</strong>, Job: <strong style="color: #60a5fa; font-family: monospace;">${this.escapeHtml(nh.jobNumber)}</strong>, Start: <strong style="color: #10b981;">${this.escapeHtml(formattedDate)}</strong>, Gloves: <strong style="color: #facc15;">${this.escapeHtml(cfg.gloveSize)}</strong>, Sleeves: <strong style="color: #facc15;">${this.escapeHtml(cfg.sleeveSize)}</strong>, Role: <strong style="color: var(--text-primary);">${this.escapeHtml(cfg.classification)}</strong></td>
@@ -2594,69 +2909,142 @@ class CrewImportEngine {
                     `;
                   }).join('') : ''}
 
-                  ${deltas ? (deltas.quits || []).map(q => `
-                    <tr style="border-bottom: 1px solid var(--border-color); background: ${q.isScheduledDeparture ? 'rgba(245, 158, 11, 0.04)' : 'rgba(239, 68, 68, 0.04)'};">
-                      <td style="padding: 8px 12px; font-weight: 700; color: ${q.isScheduledDeparture ? '#f59e0b' : '#ef4444'};">
-                        ${q.isScheduledDeparture ? '⏳' : '🚪'} ${this.escapeHtml(q.name)}
-                      </td>
-                      <td style="padding: 8px 12px;">
-                        <span class="badge" style="background: ${q.isScheduledDeparture ? 'rgba(245, 158, 11, 0.2)' : 'rgba(239, 68, 68, 0.2)'}; color: ${q.isScheduledDeparture ? '#f59e0b' : '#ef4444'}; padding: 2px 6px; border-radius: 4px; font-weight: 700;">
-                          ${q.isScheduledDeparture ? 'Scheduled Departure' : 'Quit / Leaving'}
-                        </span>
-                      </td>
-                      <td style="padding: 8px 12px; color: ${q.isScheduledDeparture ? '#fbbf24' : '#f87171'}; font-weight: 600;">
-                        ${this.escapeHtml(q.note)} ${q.isScheduledDeparture && q.activeCrewJob ? `<span style="color: #60a5fa; margin-left: 8px; font-weight: 700;">(Active ${q.activeCrewRole ? this.escapeHtml(q.activeCrewRole) + ' ' : ''}on ${this.escapeHtml(q.activeCrewJob)} until 8/27)</span>` : ''}
-                      </td>
-                    </tr>
-                  `).join('') : ''}
+                  ${deltas ? (deltas.quits || []).map(q => {
+                    const isSelected = this.isChangeSelected(q.changeId);
+                    const isPrev = q.isAlreadyPreviousEmployee;
+                    const isSched = q.isScheduledDeparture;
+                    const badgeText = isPrev ? 'Update Previous Employee' : (isSched ? 'Scheduled Departure' : 'Quit / Leaving');
+                    const badgeBg = isPrev ? 'rgba(59, 130, 246, 0.2)' : (isSched ? 'rgba(245, 158, 11, 0.2)' : 'rgba(239, 68, 68, 0.2)');
+                    const badgeColor = isPrev ? '#60a5fa' : (isSched ? '#f59e0b' : '#ef4444');
+                    return `
+                      <tr style="border-bottom: 1px solid var(--border-color); background: ${isPrev ? 'rgba(59, 130, 246, 0.04)' : (isSched ? 'rgba(245, 158, 11, 0.04)' : 'rgba(239, 68, 68, 0.04)')}; ${isSelected ? '' : 'opacity: 0.45; filter: grayscale(0.6);'}">
+                        <td style="padding: 8px 10px; text-align: center;">
+                          <input type="checkbox" class="ci-change-checkbox" data-change-id="${q.changeId}" onchange="window.crewImportEngine.toggleChange('${q.changeId}', this.checked)" ${isSelected ? 'checked' : ''} style="cursor: pointer;">
+                        </td>
+                        <td style="padding: 8px 12px; font-weight: 700; color: ${badgeColor};">
+                          ${isPrev ? '🔄' : (isSched ? '⏳' : '🚪')} ${this.escapeHtml(q.name)}
+                        </td>
+                        <td style="padding: 8px 12px;">
+                          <span class="badge" style="background: ${badgeBg}; color: ${badgeColor}; padding: 2px 6px; border-radius: 4px; font-weight: 700;">
+                            ${badgeText}
+                          </span>
+                        </td>
+                        <td style="padding: 8px 12px; color: ${isPrev ? '#93c5fd' : (isSched ? '#fbbf24' : '#f87171')}; font-weight: 600;">
+                          ${isPrev
+                            ? `🔄 Update Existing Record: Last Day → <strong style="color: #60a5fa;">${q.departureDate || '09/03/2026'}</strong> (${this.escapeHtml(q.note)})`
+                            : `${this.escapeHtml(q.note)} ${isSched && q.activeCrewJob ? `<span style="color: #60a5fa; margin-left: 8px; font-weight: 700;">(Active ${q.activeCrewRole ? this.escapeHtml(q.activeCrewRole) + ' ' : ''}on ${this.escapeHtml(q.activeCrewJob)} until ${q.departureDate || 'last day'})</span>` : ''}`
+                          }
+                        </td>
+                      </tr>
+                    `;
+                  }).join('') : ''}
 
-                  ${deltas ? deltas.transfers.map(tr => `
-                    <tr style="border-bottom: 1px solid var(--border-color);">
-                      <td style="padding: 8px 12px; font-weight: 700; color: var(--text-primary);">👤 ${this.escapeHtml(tr.employeeName)}</td>
-                      <td style="padding: 8px 12px;"><span class="badge" style="background: rgba(59, 130, 246, 0.2); color: #60a5fa; padding: 2px 6px; border-radius: 4px; font-weight: 700;">Transfer</span></td>
-                      <td style="padding: 8px 12px; color: #60a5fa; font-weight: 600;">${this.escapeHtml(tr.changes.join(' | '))}</td>
-                    </tr>
-                  `).join('') : ''}
+                  ${deltas ? deltas.transfers.map(tr => {
+                    const isSelected = this.isChangeSelected(tr.changeId);
+                    return `
+                      <tr style="border-bottom: 1px solid var(--border-color); ${isSelected ? '' : 'opacity: 0.45; filter: grayscale(0.6);'}">
+                        <td style="padding: 8px 10px; text-align: center;">
+                          <input type="checkbox" class="ci-change-checkbox" data-change-id="${tr.changeId}" onchange="window.crewImportEngine.toggleChange('${tr.changeId}', this.checked)" ${isSelected ? 'checked' : ''} style="cursor: pointer;">
+                        </td>
+                        <td style="padding: 8px 12px; font-weight: 700; color: var(--text-primary);">👤 ${this.escapeHtml(tr.employeeName)}</td>
+                        <td style="padding: 8px 12px;"><span class="badge" style="background: rgba(59, 130, 246, 0.2); color: #60a5fa; padding: 2px 6px; border-radius: 4px; font-weight: 700;">Transfer</span></td>
+                        <td style="padding: 8px 12px; color: #60a5fa; font-weight: 600;">${this.escapeHtml(tr.changes.join(' | '))}</td>
+                      </tr>
+                    `;
+                  }).join('') : ''}
 
-                  ${deltas ? (deltas.timeOff || []).map(to => `
-                    <tr style="border-bottom: 1px solid var(--border-color); background: rgba(245, 158, 11, 0.04);">
-                      <td style="padding: 8px 12px; font-weight: 700; color: #f59e0b;">🏖️ ${this.escapeHtml(to.name)}</td>
-                      <td style="padding: 8px 12px;"><span class="badge" style="background: rgba(245, 158, 11, 0.2); color: #f59e0b; padding: 2px 6px; border-radius: 4px; font-weight: 700;">${to.isFullWeekOff ? 'Time Off (Full Wk)' : 'Time Off (Partial Wk)'}</span></td>
-                      <td style="padding: 8px 12px; color: #fbbf24; font-weight: 600;">
-                        ${this.escapeHtml(to.note)}
-                        ${to.isFullWeekOff && to.oldJob ? `<span style="color: #60a5fa; margin-left: 8px;">(Moving off ${this.escapeHtml(to.oldJob)} → ${this.escapeHtml(to.oldLocation ? to.oldLocation.replace(/\\s*\\([^)]*\\)/g, '') : '')} (Vacation))</span>` : ''}
-                        ${!to.isFullWeekOff && to.activeCrewJob ? `<span style="color: #10b981; margin-left: 8px;">(Working on ${this.escapeHtml(to.activeCrewJob)})</span>` : ''}
-                      </td>
-                    </tr>
-                  `).join('') : ''}
+                  ${deltas ? (deltas.timeOff || []).map(to => {
+                    const isSelected = this.isChangeSelected(to.changeId);
+                    return `
+                      <tr style="border-bottom: 1px solid var(--border-color); background: rgba(245, 158, 11, 0.04); ${isSelected ? '' : 'opacity: 0.45; filter: grayscale(0.6);'}">
+                        <td style="padding: 8px 10px; text-align: center;">
+                          <input type="checkbox" class="ci-change-checkbox" data-change-id="${to.changeId}" onchange="window.crewImportEngine.toggleChange('${to.changeId}', this.checked)" ${isSelected ? 'checked' : ''} style="cursor: pointer;">
+                        </td>
+                        <td style="padding: 8px 12px; font-weight: 700; color: #f59e0b;">🏖️ ${this.escapeHtml(to.name)}</td>
+                        <td style="padding: 8px 12px;"><span class="badge" style="background: rgba(245, 158, 11, 0.2); color: #f59e0b; padding: 2px 6px; border-radius: 4px; font-weight: 700;">${to.isFullWeekOff ? 'Time Off (Full Wk)' : 'Time Off (Partial Wk)'}</span></td>
+                        <td style="padding: 8px 12px; color: #fbbf24; font-weight: 600;">
+                          ${this.escapeHtml(to.note)}
+                          ${to.isFullWeekOff && to.oldJob ? `<span style="color: #60a5fa; margin-left: 8px;">(Moving off ${this.escapeHtml(to.oldJob)} → ${this.escapeHtml(to.oldLocation ? to.oldLocation.replace(/\\s*\\([^)]*\\)/g, '') : '')} (Vacation))</span>` : ''}
+                          ${!to.isFullWeekOff && to.activeCrewJob ? `<span style="color: #10b981; margin-left: 8px;">(Working on ${this.escapeHtml(to.activeCrewJob)})</span>` : ''}
+                        </td>
+                      </tr>
+                    `;
+                  }).join('') : ''}
 
-                  ${deltas ? deltas.roleChanges.map(rc => `
-                    <tr style="border-bottom: 1px solid var(--border-color);">
-                      <td style="padding: 8px 12px; font-weight: 700; color: var(--text-primary);">👤 ${this.escapeHtml(rc.employeeName)}</td>
-                      <td style="padding: 8px 12px;"><span class="badge" style="background: rgba(139, 92, 246, 0.2); color: #a78bfa; padding: 2px 6px; border-radius: 4px; font-weight: 700;">Role Change</span></td>
-                      <td style="padding: 8px 12px; color: #a78bfa; font-weight: 600;">${this.escapeHtml(rc.changes.join(' | '))}</td>
-                    </tr>
-                  `).join('') : ''}
+                  ${deltas ? deltas.roleChanges.map(rc => {
+                    const isSelected = this.isChangeSelected(rc.changeId);
+                    return `
+                      <tr style="border-bottom: 1px solid var(--border-color); ${isSelected ? '' : 'opacity: 0.45; filter: grayscale(0.6);'}">
+                        <td style="padding: 8px 10px; text-align: center;">
+                          <input type="checkbox" class="ci-change-checkbox" data-change-id="${rc.changeId}" onchange="window.crewImportEngine.toggleChange('${rc.changeId}', this.checked)" ${isSelected ? 'checked' : ''} style="cursor: pointer;">
+                        </td>
+                        <td style="padding: 8px 12px; font-weight: 700; color: var(--text-primary);">👤 ${this.escapeHtml(rc.employeeName)}</td>
+                        <td style="padding: 8px 12px;"><span class="badge" style="background: rgba(139, 92, 246, 0.2); color: #a78bfa; padding: 2px 6px; border-radius: 4px; font-weight: 700;">Role Change</span></td>
+                        <td style="padding: 8px 12px; color: #a78bfa; font-weight: 600;">${this.escapeHtml(rc.changes.join(' | '))}</td>
+                      </tr>
+                    `;
+                  }).join('') : ''}
 
-                  ${deltas ? deltas.rehires.map(rh => `
-                    <tr style="border-bottom: 1px solid var(--border-color);">
-                      <td style="padding: 8px 12px; font-weight: 700; color: #f59e0b;">👤 ${this.escapeHtml(rh.name)}</td>
-                      <td style="padding: 8px 12px;"><span class="badge" style="background: rgba(245, 158, 11, 0.2); color: #f59e0b; padding: 2px 6px; border-radius: 4px; font-weight: 700;">Rehire</span></td>
-                      <td style="padding: 8px 12px; color: var(--text-muted);">Rejoining at Location: <strong style="color: var(--text-primary);">${this.escapeHtml(rh.location)}</strong>, Job: <strong style="color: #60a5fa; font-family: monospace;">${this.escapeHtml(rh.jobNumber)}</strong></td>
-                    </tr>
-                  `).join('') : ''}
+                  ${deltas ? (deltas.positionUpdates || []).map(pu => {
+                    const isSelected = this.isChangeSelected(pu.changeId);
+                    return `
+                      <tr style="border-bottom: 1px solid var(--border-color); ${isSelected ? '' : 'opacity: 0.45; filter: grayscale(0.6);'}">
+                        <td style="padding: 8px 10px; text-align: center;">
+                          <input type="checkbox" class="ci-change-checkbox" data-change-id="${pu.changeId}" onchange="window.crewImportEngine.toggleChange('${pu.changeId}', this.checked)" ${isSelected ? 'checked' : ''} style="cursor: pointer;">
+                        </td>
+                        <td style="padding: 8px 12px; font-weight: 700; color: var(--text-primary);">👤 ${this.escapeHtml(pu.employeeName)}</td>
+                        <td style="padding: 8px 12px;"><span class="badge" style="background: rgba(99, 102, 241, 0.2); color: #818cf8; padding: 2px 6px; border-radius: 4px; font-weight: 700;">Position Update</span></td>
+                        <td style="padding: 8px 12px; color: #818cf8; font-weight: 600;">${this.escapeHtml(pu.changes.join(' | '))}</td>
+                      </tr>
+                    `;
+                  }).join('') : ''}
 
-                  ${deltas ? deltas.newJobsDetected.map(nj => `
-                    <tr style="border-bottom: 1px solid var(--border-color);">
-                      <td style="padding: 8px 12px; font-weight: 700; color: #06b6d4; font-family: monospace;">📋 ${this.escapeHtml(nj.jobNumber)}</td>
-                      <td style="padding: 8px 12px;"><span class="badge" style="background: rgba(6, 182, 212, 0.2); color: #06b6d4; padding: 2px 6px; border-radius: 4px; font-weight: 700;">New Job</span></td>
-                      <td style="padding: 8px 12px; color: var(--text-muted);">New Job in ${this.escapeHtml(nj.location)} (Crew Size: ${nj.crewSize}, Lead: ${this.escapeHtml(nj.suggestedForeman || 'TBD')}, Sched: ${this.escapeHtml(nj.scheduleLabel)})</td>
-                    </tr>
-                  `).join('') : ''}
+                  ${deltas ? (deltas.secondaryChanges || []).map(sc => {
+                    if (deltas.transfers.includes(sc) || deltas.roleChanges.includes(sc) || (deltas.positionUpdates && deltas.positionUpdates.includes(sc))) return '';
+                    const isSelected = this.isChangeSelected(sc.changeId);
+                    return `
+                      <tr style="border-bottom: 1px solid var(--border-color); ${isSelected ? '' : 'opacity: 0.45; filter: grayscale(0.6);'}">
+                        <td style="padding: 8px 10px; text-align: center;">
+                          <input type="checkbox" class="ci-change-checkbox" data-change-id="${sc.changeId}" onchange="window.crewImportEngine.toggleChange('${sc.changeId}', this.checked)" ${isSelected ? 'checked' : ''} style="cursor: pointer;">
+                        </td>
+                        <td style="padding: 8px 12px; font-weight: 700; color: var(--text-primary);">👤 ${this.escapeHtml(sc.employeeName)}</td>
+                        <td style="padding: 8px 12px;"><span class="badge" style="background: rgba(245, 158, 11, 0.2); color: #f59e0b; padding: 2px 6px; border-radius: 4px; font-weight: 700;">Secondary Job</span></td>
+                        <td style="padding: 8px 12px; color: #fbbf24; font-weight: 600;">${this.escapeHtml(sc.changes.join(' | '))}</td>
+                      </tr>
+                    `;
+                  }).join('') : ''}
+
+                  ${deltas ? deltas.rehires.map(rh => {
+                    const isSelected = this.isChangeSelected(rh.changeId);
+                    return `
+                      <tr style="border-bottom: 1px solid var(--border-color); ${isSelected ? '' : 'opacity: 0.45; filter: grayscale(0.6);'}">
+                        <td style="padding: 8px 10px; text-align: center;">
+                          <input type="checkbox" class="ci-change-checkbox" data-change-id="${rh.changeId}" onchange="window.crewImportEngine.toggleChange('${rh.changeId}', this.checked)" ${isSelected ? 'checked' : ''} style="cursor: pointer;">
+                        </td>
+                        <td style="padding: 8px 12px; font-weight: 700; color: #f59e0b;">👤 ${this.escapeHtml(rh.name)}</td>
+                        <td style="padding: 8px 12px;"><span class="badge" style="background: rgba(245, 158, 11, 0.2); color: #f59e0b; padding: 2px 6px; border-radius: 4px; font-weight: 700;">Rehire</span></td>
+                        <td style="padding: 8px 12px; color: var(--text-muted);">Rejoining at Location: <strong style="color: var(--text-primary);">${this.escapeHtml(rh.location)}</strong>, Job: <strong style="color: #60a5fa; font-family: monospace;">${this.escapeHtml(rh.jobNumber)}</strong></td>
+                      </tr>
+                    `;
+                  }).join('') : ''}
+
+                  ${deltas ? deltas.newJobsDetected.map(nj => {
+                    const isSelected = this.isChangeSelected(nj.changeId);
+                    return `
+                      <tr style="border-bottom: 1px solid var(--border-color); ${isSelected ? '' : 'opacity: 0.45; filter: grayscale(0.6);'}">
+                        <td style="padding: 8px 10px; text-align: center;">
+                          <input type="checkbox" class="ci-change-checkbox" data-change-id="${nj.changeId}" onchange="window.crewImportEngine.toggleChange('${nj.changeId}', this.checked)" ${isSelected ? 'checked' : ''} style="cursor: pointer;">
+                        </td>
+                        <td style="padding: 8px 12px; font-weight: 700; color: #06b6d4; font-family: monospace;">📋 ${this.escapeHtml(nj.jobNumber)}</td>
+                        <td style="padding: 8px 12px;"><span class="badge" style="background: rgba(6, 182, 212, 0.2); color: #06b6d4; padding: 2px 6px; border-radius: 4px; font-weight: 700;">New Job</span></td>
+                        <td style="padding: 8px 12px; color: var(--text-muted);">New Job in ${this.escapeHtml(nj.location)} (Crew Size: ${nj.crewSize}, Lead: ${this.escapeHtml(nj.suggestedForeman || 'TBD')}, Sched: ${this.escapeHtml(nj.scheduleLabel)})</td>
+                      </tr>
+                    `;
+                  }).join('') : ''}
 
                   ${!deltas || deltas.totalChanges === 0 ? `
                     <tr>
-                      <td colspan="3" style="padding: 24px; text-align: center; color: var(--text-muted);">
+                      <td colspan="4" style="padding: 24px; text-align: center; color: var(--text-muted);">
                         No changes detected. The database is already in sync with this Excel roster!
                       </td>
                     </tr>
@@ -2671,8 +3059,8 @@ class CrewImportEngine {
             <button class="btn btn-secondary" onclick="window.crewImportEngine.goToStep(${hasNewHires ? 3 : 2})" style="font-size: 13px; cursor: pointer;">
               ${hasNewHires ? '⬅️ Back to New Hires' : '⬅️ Back to Crews'}
             </button>
-            <button class="btn btn-primary" onclick="window.crewImportEngine.executeApply()" style="font-size: 14px; font-weight: 800; padding: 10px 24px; background: #10b981; border-color: #10b981; display: inline-flex; align-items: center; gap: 8px; box-shadow: 0 2px 8px rgba(16, 185, 129, 0.4); cursor: pointer;">
-              <span>💾</span> Apply Crew Changes (${deltas ? deltas.totalChanges : 0} Updates)
+            <button id="ci-step3-apply-btn" class="btn btn-primary" onclick="window.crewImportEngine.executeApply()" style="font-size: 14px; font-weight: 800; padding: 10px 24px; background: #10b981; border-color: #10b981; display: inline-flex; align-items: center; gap: 8px; box-shadow: 0 2px 8px rgba(16, 185, 129, 0.4); cursor: pointer; ${selectedCount === 0 ? 'opacity: 0.5; cursor: not-allowed;' : ''}" ${selectedCount === 0 ? 'disabled' : ''}>
+              <span>💾</span> Apply Crew Changes (${selectedCount} Updates)
             </button>
           </div>
         </div>
@@ -3204,12 +3592,24 @@ class CrewImportEngine {
     this.selectedSheet = null;
     this.parsedCrews = [];
     this.computedDeltas = null;
+    if (this.deselectedChangeIds) this.deselectedChangeIds.clear();
     this.activeStep = 1;
     this.render();
   }
 
   async executeApply() {
-    if (!confirm('Are you sure you want to apply all detected changes to Employees and Job Tracking?')) {
+    const selectedCount = this.getSelectedChangesCount();
+    const totalCount = this.getAllChangeIds().length;
+    if (selectedCount === 0) {
+      alert('Please select at least one change to apply.');
+      return;
+    }
+
+    const confirmMsg = selectedCount === totalCount
+      ? `Are you sure you want to apply all ${totalCount} detected changes to Employees and Job Tracking?`
+      : `Are you sure you want to apply the ${selectedCount} selected changes (out of ${totalCount} total) to Employees and Job Tracking?`;
+
+    if (!confirm(confirmMsg)) {
       return;
     }
 
