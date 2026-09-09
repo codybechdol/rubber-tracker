@@ -21,6 +21,9 @@ class InventoryManager {
   init() {
     this.createModalHtml();
     this.bindEvents();
+    setTimeout(() => {
+      this.syncInventoryLocations(true);
+    }, 600);
   }
 
   /**
@@ -1508,9 +1511,18 @@ class InventoryManager {
           const latest = validDateRows.length > 0 ? validDateRows[validDateRows.length - 1] : sorted[sorted.length - 1];
           const rawDate = latest['Date Assigned'] || latest['Date'] || Object.values(latest)[0] || '';
           const dtObj = this.parseDate(rawDate);
-          const assignedTo = String(latest['Assigned To'] || latest['Employee Name'] || latest['Employee'] || '').trim();
-          const loc = String(latest['Location'] || '').trim();
+          let assignedTo = String(latest['Assigned To'] || latest['Employee Name'] || latest['Employee'] || '').trim();
+          let loc = String(latest['Location'] || '').trim();
           const notes = String(latest['Notes'] || latest['Note'] || '').trim();
+
+          // Resolve employee name and location through resolver to prevent raw initials or mismatched cities
+          if (window.employeeResolver) {
+            const res = window.employeeResolver.resolve(assignedTo);
+            if (res.match && !res.isStatus) {
+              assignedTo = res.employeeName;
+              loc = res.location || loc;
+            }
+          }
 
           historyMap.set(normKey, {
             itemNum: getItemIdentifier(latest, histHeaders),
@@ -1723,6 +1735,149 @@ class InventoryManager {
       alert('Error during reconciliation: ' + (err.message || err));
       this.showToast('⚠️ Reconciliation error: ' + (err.message || err));
       return [];
+    }
+  }
+
+  /**
+   * Synchronizes all active assigned equipment locations with the employee directory.
+   * Matches employees by canonical name and alternate names (aliases), updating the item's
+   * location to the lineman's verified physical city (e.g. Ennis for Payton Johnson).
+   */
+  async syncInventoryLocations(silent = false) {
+    try {
+      console.log('📍 syncInventoryLocations starting...');
+      if (!window.employeeResolver && typeof EmployeeNameResolver !== 'undefined') {
+        window.employeeResolver = new EmployeeNameResolver(this.db);
+      }
+      if (!window.employeeResolver) return 0;
+
+      const categories = [
+        { key: 'gloves', sheetName: 'Gloves' },
+        { key: 'sleeves', sheetName: 'Sleeves' },
+        { key: 'blankets', sheetName: 'Blankets' },
+        { key: 'macks', sheetName: 'MACKs' },
+        { key: 'hv_testers', sheetName: 'HV Testers' },
+        { key: 'phasing_sets', sheetName: 'Phasing Sets' },
+        { key: 'aed', sheetName: 'AED' },
+        { key: 'grounds', sheetName: 'Grounds' },
+        { key: 'hot_sticks', sheetName: 'Hot Sticks' }
+      ];
+
+      let updateCount = 0;
+
+      for (const cat of categories) {
+        const table = this.db.getTable(cat.key);
+        if (!table || !table.rows || !table.rows.length) continue;
+
+        const headers = table.headers || [];
+        const locCol = headers.find(h => /^location$/i.test(h));
+        const assignCol = headers.find(h => /assigned\s*to|^assigned$|^holder$/i.test(h));
+        const chgOutCol = headers.find(h => /change\s*out/i.test(h));
+        const testDateCol = headers.find(h => /test\s*date|calibration/i.test(h));
+
+        if (!locCol || !assignCol) continue;
+        const locColIdx = headers.indexOf(locCol);
+
+        for (let rIdx = 0; rIdx < table.rows.length; rIdx++) {
+          const row = table.rows[rIdx];
+          const assignedVal = String(row[assignCol] || '').trim();
+          if (!assignedVal) continue;
+
+          // Non-employee holders are skipped
+          const nonEmpHolders = ['on shelf', 'in testing', 'packed for testing', 'packed for delivery', 'failed rubber', 'failed', 'lost', 'destroyed', 'new', 'unassigned', 'n/a', '—', '-'];
+          if (nonEmpHolders.includes(assignedVal.toLowerCase())) continue;
+
+          const res = window.employeeResolver.resolve(assignedVal);
+          if (res.match && !res.isStatus && res.location) {
+            const expectedLoc = res.location;
+            const currentLoc = String(row[locCol] || '').trim();
+
+            if (currentLoc.toLowerCase() !== expectedLoc.toLowerCase()) {
+              console.log(`[syncInventoryLocations] Updating ${cat.sheetName} item #${row['Item #'] || row['Serial #'] || row['Glove'] || rIdx + 1}: ${currentLoc} -> ${expectedLoc} (${res.employeeName})`);
+              row[locCol] = expectedLoc;
+
+              // Also normalize assigned name if it was raw initials
+              if (row[assignCol] !== res.employeeName && row[assignCol].includes('.')) {
+                row[assignCol] = res.employeeName;
+                const aIdx = headers.indexOf(assignCol);
+                if (aIdx !== -1 && table.rawGrid && table.rawGrid[rIdx + 1]) {
+                  table.rawGrid[rIdx + 1][aIdx] = res.employeeName;
+                }
+                await this.db.addMutation({
+                  action: 'UPDATE_CELL',
+                  sheetName: cat.sheetName,
+                  row: rIdx + 2,
+                  col: aIdx + 1,
+                  header: assignCol,
+                  value: res.employeeName
+                });
+              }
+
+              if (locColIdx !== -1 && table.rawGrid && table.rawGrid[rIdx + 1]) {
+                table.rawGrid[rIdx + 1][locColIdx] = expectedLoc;
+              }
+
+              // Recalculate Change Out Date if location changed
+              if (chgOutCol && row[chgOutCol] && row[chgOutCol] !== 'N/A') {
+                const curDateAssigned = row['Date Assigned'] || row['Date'] || '';
+                const curTestDate = testDateCol ? row[testDateCol] : '';
+                const newChgOut = this.calculateChangeOutDate(
+                  curDateAssigned || curTestDate,
+                  expectedLoc,
+                  res.employeeName,
+                  cat.key,
+                  { testDate: curTestDate, calibrationDate: curTestDate }
+                );
+                if (newChgOut && newChgOut !== 'N/A' && newChgOut !== row[chgOutCol]) {
+                  row[chgOutCol] = newChgOut;
+                  const cIdx = headers.indexOf(chgOutCol);
+                  if (cIdx !== -1 && table.rawGrid && table.rawGrid[rIdx + 1]) {
+                    table.rawGrid[rIdx + 1][cIdx] = newChgOut;
+                  }
+                  await this.db.addMutation({
+                    action: 'UPDATE_CELL',
+                    sheetName: cat.sheetName,
+                    row: rIdx + 2,
+                    col: cIdx + 1,
+                    header: chgOutCol,
+                    value: newChgOut
+                  });
+                }
+              }
+
+              await this.db.addMutation({
+                action: 'UPDATE_CELL',
+                sheetName: cat.sheetName,
+                row: rIdx + 2,
+                col: locColIdx + 1,
+                header: locCol,
+                value: expectedLoc
+              });
+
+              updateCount++;
+            }
+          }
+        }
+      }
+
+      if (updateCount > 0) {
+        if (this.db.snapshot) {
+          await this.db.setSnapshot(this.db.snapshot);
+        }
+        if (window.sheetNavigator) {
+          window.sheetNavigator.renderCurrentSheet();
+        }
+        if (!silent) {
+          this.showToast(`📍 Synced ${updateCount} equipment locations with Employees.`);
+        }
+      } else if (!silent) {
+        this.showToast('✅ All equipment locations are already in sync with Employees.');
+      }
+
+      return updateCount;
+    } catch (e) {
+      console.error('Error in syncInventoryLocations:', e);
+      return 0;
     }
   }
 

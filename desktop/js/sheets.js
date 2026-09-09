@@ -2742,6 +2742,9 @@ class SheetNavigator {
     // Attach inline edit handlers
     container.querySelectorAll('td.editable').forEach(td => {
       let initialVal = '';
+      const header = (td.dataset.header || '').toLowerCase();
+      const isAssignedCol = (header.includes('assigned') || header === 'holder') && !header.includes('date');
+
       td.addEventListener('focus', (e) => {
         const targetCell = td;
         const cellTextSpan = targetCell.querySelector('.cell-text');
@@ -2750,11 +2753,22 @@ class SheetNavigator {
         } else {
           initialVal = targetCell.textContent.trim().replace(/^👤\s*/, '').trim();
         }
+        if (isAssignedCol) {
+          const currentText = (cellTextSpan ? cellTextSpan.textContent : td.textContent).trim().replace(/^👤\s*/, '').trim();
+          this.showCellAutocomplete(td, currentText);
+        }
       });
+
+      if (isAssignedCol) {
+        td.addEventListener('input', (e) => {
+          const cellTextSpan = td.querySelector('.cell-text');
+          const currentText = (cellTextSpan ? cellTextSpan.textContent : td.textContent).trim().replace(/^👤\s*/, '').trim();
+          this.showCellAutocomplete(td, currentText);
+        });
+      }
 
       // Quick calendar picker on double-click for date cells
       td.addEventListener('dblclick', (e) => {
-        const header = (td.dataset.header || '').toLowerCase();
         if (header.includes('date') || header.includes('expiration') || header.includes('calibration')) {
           const targetCell = td;
           const currentText = targetCell.textContent.trim();
@@ -2793,7 +2807,43 @@ class SheetNavigator {
         }
       });
 
+      td.addEventListener('keydown', (e) => {
+        const dropdown = document.getElementById('cell-autocomplete-dropdown');
+        const isDropdownOpen = dropdown && dropdown.style.display === 'block';
+
+        if (isAssignedCol && isDropdownOpen) {
+          if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            this.navigateAutocomplete(1);
+            return;
+          }
+          if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            this.navigateAutocomplete(-1);
+            return;
+          }
+          if (e.key === 'Enter' || e.key === 'Tab') {
+            e.preventDefault();
+            this.selectActiveAutocomplete(td);
+            return;
+          }
+          if (e.key === 'Escape') {
+            e.preventDefault();
+            this.closeCellAutocomplete();
+            return;
+          }
+        }
+
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          this.closeCellAutocomplete();
+          td.blur();
+        }
+      });
+
       td.addEventListener('blur', async (e) => {
+        setTimeout(() => this.closeCellAutocomplete(), 200);
+
         try {
           const targetCell = td;
           const cellTextSpan = targetCell.querySelector('.cell-text');
@@ -2856,6 +2906,39 @@ class SheetNavigator {
           const isUnreconciledShelf = (isAssignedCol || isStatusCol) && isOnShelf && isInventorySheet && tableRow && (tableRow['Status'] !== 'On Shelf' || tableRow['Location'] !== 'Helena');
 
           if (newVal === initialVal && !isUnreconciledShelf) return; // No change made!
+
+          // Strict validation & Auto-resolution for Assigned To column
+          let assignedResolved = null;
+          if (isAssignedCol && newVal) {
+            if (window.employeeResolver) {
+              assignedResolved = window.employeeResolver.resolve(newVal, initialVal);
+              if (!assignedResolved.match) {
+                console.warn(`[Strict Assigned To] Rejected unrecognized employee/status: "${newVal}"`);
+                if (window.showToast) {
+                  window.showToast(`Unrecognized employee name: "${newVal}". Please select a valid employee from the list.`, 'warning');
+                } else {
+                  alert(`Unrecognized employee name: "${newVal}".\n\nPlease select an active employee or valid status (e.g. On Shelf).`);
+                }
+
+                // Revert to initialVal
+                if (initialVal) {
+                  const nonEmpHolders = ['on shelf', 'in testing', 'packed for testing', 'packed for delivery', 'failed rubber', 'failed', 'lost', 'destroyed', 'new', 'unassigned', 'n/a', '—', '-'];
+                  if (!nonEmpHolders.includes(initialVal.toLowerCase())) {
+                    targetCell.innerHTML = `<span class="profile-link-badge" style="color: #60a5fa; cursor: pointer; margin-right: 4px; display: inline-block;" title="Click to view assignments & certs for ${this.escapeHtml(initialVal)}" onclick="event.stopPropagation(); if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(initialVal)}');}">👤</span><span class="cell-text" style="font-weight: 600; color: #93c5fd;">${this.escapeHtml(initialVal)}</span>`;
+                  } else {
+                    targetCell.textContent = initialVal;
+                  }
+                } else {
+                  targetCell.textContent = '';
+                }
+                return;
+              }
+
+              // Automatically choose the correct spelling / canonical alias
+              newVal = assignedResolved.employeeName || newVal;
+              targetCell.textContent = newVal;
+            }
+          }
 
           const queueCell = async (hName, val, skipHistory = false) => {
             if (!hName || val === undefined || !tableData) return;
@@ -3042,9 +3125,13 @@ class SheetNavigator {
             // When Assigned To is changed to an employee, prompt for Date Assigned and update atomically
             if (isAssignedCol && isAssignedToEmp) {
               const empTable = this.db.getTable('employees');
-              let empLoc = 'Helena';
-              if (empTable && empTable.rows) {
-                const empMatch = empTable.rows.find(e => String(e['Name'] || e['Employee Name'] || Object.values(e)[0] || '').trim().toLowerCase() === curAssignedLower);
+              let empLoc = (assignedResolved && assignedResolved.location) ? assignedResolved.location : 'Helena';
+              if (empTable && empTable.rows && (!assignedResolved || empLoc === 'Helena')) {
+                const empMatch = empTable.rows.find(e => {
+                  const eName = String(e['Name'] || e['Employee Name'] || Object.values(e)[0] || '').trim().toLowerCase();
+                  const eAlt = String(e['Alternate Names'] || '').trim().toLowerCase();
+                  return eName === curAssignedLower || eAlt.includes(curAssignedLower);
+                });
                 if (empMatch) {
                   const rawLoc = String(empMatch['Location'] || '').trim();
                   empLoc = (window.getPhysicalLocation ? window.getPhysicalLocation(rawLoc) : rawLoc) || 'Helena';
@@ -3053,7 +3140,16 @@ class SheetNavigator {
 
               const assignDetails = await this.promptAssignItemDetails(itemIdentifier, curAssigned, empLoc);
               if (!assignDetails) {
-                targetCell.textContent = initialVal;
+                if (initialVal) {
+                  const nonEmpHolders = ['on shelf', 'in testing', 'packed for testing', 'packed for delivery', 'failed rubber', 'failed', 'lost', 'destroyed', 'new', 'unassigned', 'n/a', '—', '-'];
+                  if (!nonEmpHolders.includes(initialVal.toLowerCase())) {
+                    targetCell.innerHTML = `<span class="profile-link-badge" style="color: #60a5fa; cursor: pointer; margin-right: 4px; display: inline-block;" title="Click to view assignments & certs for ${this.escapeHtml(initialVal)}" onclick="event.stopPropagation(); if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(initialVal)}');}">👤</span><span class="cell-text" style="font-weight: 600; color: #93c5fd;">${this.escapeHtml(initialVal)}</span>`;
+                  } else {
+                    targetCell.textContent = initialVal;
+                  }
+                } else {
+                  targetCell.textContent = '';
+                }
                 return;
               }
 
@@ -3354,14 +3450,20 @@ class SheetNavigator {
           console.error('Error committing inline edit:', err);
         }
       });
+    });
 
-      td.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') {
-          e.preventDefault();
-          td.blur();
+    // Close autocomplete dropdown when clicking outside
+    if (!this._hasAutocompleteDocListener) {
+      this._hasAutocompleteDocListener = true;
+      document.addEventListener('click', (e) => {
+        const dropdown = document.getElementById('cell-autocomplete-dropdown');
+        if (dropdown && dropdown.style.display === 'block') {
+          if (!dropdown.contains(e.target) && !e.target.closest('td.editable')) {
+            this.closeCellAutocomplete();
+          }
         }
       });
-    });
+    }
 
     // Attach checkbox toggle handlers
     container.querySelectorAll('[data-toggle-checkbox]').forEach(cb => {
@@ -3803,6 +3905,119 @@ class SheetNavigator {
         }
       }, 50);
     });
+  }
+
+  showCellAutocomplete(td, query) {
+    if (!window.employeeResolver || !td) return;
+    const results = window.employeeResolver.search(query, 10);
+    if (!results || results.length === 0) {
+      this.closeCellAutocomplete();
+      return;
+    }
+
+    let dropdown = document.getElementById('cell-autocomplete-dropdown');
+    if (!dropdown) {
+      dropdown = document.createElement('div');
+      dropdown.id = 'cell-autocomplete-dropdown';
+      dropdown.className = 'cell-autocomplete-dropdown';
+      document.body.appendChild(dropdown);
+    }
+
+    this._activeAutocompleteCell = td;
+    this._autocompleteResults = results;
+    this._autocompleteIndex = 0; // Default highlight first candidate
+
+    // Position relative to cell
+    const rect = td.getBoundingClientRect();
+    const dropdownHeight = Math.min(results.length * 52 + 10, 320);
+    const spaceBelow = window.innerHeight - rect.bottom;
+
+    dropdown.style.left = `${Math.max(10, Math.min(window.innerWidth - 300, rect.left))}px`;
+    dropdown.style.width = `${Math.max(260, rect.width)}px`;
+
+    if (spaceBelow < dropdownHeight && rect.top > dropdownHeight) {
+      dropdown.style.top = `${rect.top - dropdownHeight - 4}px`;
+    } else {
+      dropdown.style.top = `${rect.bottom + 4}px`;
+    }
+
+    dropdown.innerHTML = results.map((item, idx) => {
+      const isAct = idx === 0 ? 'active' : '';
+      const aliasHtml = item.aliasMatch ? `<div class="item-alias">${this.escapeHtml(item.aliasMatch)}</div>` : '';
+      return `
+        <div class="cell-autocomplete-item ${isAct}" data-index="${idx}">
+          <div class="item-icon">${item.icon || '👤'}</div>
+          <div class="item-details">
+            <div class="item-title">${this.escapeHtml(item.name)}</div>
+            <div class="item-sub">${this.escapeHtml(item.subText || '')}</div>
+            ${aliasHtml}
+          </div>
+        </div>
+      `;
+    }).join('');
+
+    dropdown.style.display = 'block';
+
+    // Click handler for suggestion items
+    dropdown.querySelectorAll('.cell-autocomplete-item').forEach(el => {
+      el.onmousedown = (e) => {
+        e.preventDefault(); // Prevent td from blurring before click completes
+      };
+      el.onclick = (e) => {
+        e.stopPropagation();
+        const idx = parseInt(el.dataset.index, 10);
+        if (!isNaN(idx) && this._autocompleteResults && this._autocompleteResults[idx]) {
+          this.selectActiveAutocomplete(td, this._autocompleteResults[idx]);
+        }
+      };
+    });
+  }
+
+  navigateAutocomplete(direction) {
+    const dropdown = document.getElementById('cell-autocomplete-dropdown');
+    if (!dropdown || !this._autocompleteResults || this._autocompleteResults.length === 0) return;
+
+    this._autocompleteIndex = (this._autocompleteIndex + direction + this._autocompleteResults.length) % this._autocompleteResults.length;
+
+    const items = dropdown.querySelectorAll('.cell-autocomplete-item');
+    items.forEach((it, idx) => {
+      if (idx === this._autocompleteIndex) {
+        it.classList.add('active');
+        it.scrollIntoView({ block: 'nearest' });
+      } else {
+        it.classList.remove('active');
+      }
+    });
+  }
+
+  selectActiveAutocomplete(td, selectedItem = null) {
+    const item = selectedItem || (this._autocompleteResults && this._autocompleteResults[this._autocompleteIndex]);
+    if (!item || !td) {
+      this.closeCellAutocomplete();
+      return;
+    }
+
+    const cellTextSpan = td.querySelector('.cell-text');
+    if (cellTextSpan) {
+      cellTextSpan.textContent = item.name;
+    } else {
+      td.textContent = item.name;
+    }
+
+    td._autocompleteSelected = item;
+    this.closeCellAutocomplete();
+    td.blur();
+  }
+
+  closeCellAutocomplete() {
+    const dropdown = document.getElementById('cell-autocomplete-dropdown');
+    if (dropdown) {
+      dropdown.style.display = 'none';
+      dropdown.innerHTML = '';
+    }
+    this._activeAutocompleteCell = null;
+    this._autocompleteResults = null;
+    this._autocompleteIndex = -1;
   }
 
   showJobLifecycleModal(jobNum) {

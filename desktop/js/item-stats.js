@@ -1154,6 +1154,8 @@ class ItemStatsEngine {
       itemMeta.location = String(foundInv['Location'] || 'Helena');
     }
 
+    const currentItemAssignedTo = foundInv ? String(foundInv['Assigned To'] || foundInv['Holder'] || '').trim() : '';
+
     lines.forEach(line => {
       line = line.trim();
       if (!line) return;
@@ -1185,52 +1187,71 @@ class ItemStatsEngine {
       let location = 'Helena';
       let notes = '';
 
-      if (targetLower.includes('failed visual')) {
-        assignedTo = 'Failed Rubber';
-        notes = 'Failed Visual';
-        location = 'Helena';
-      } else if (targetLower.includes('failed rubber') || targetLower.includes('failed test') || targetLower === 'failed') {
-        assignedTo = 'Failed Rubber';
-        notes = 'Failed Test';
-        location = 'Helena';
-      } else if (targetLower.includes('destroyed') || targetLower.includes('not repairable')) {
-        assignedTo = 'Failed Rubber';
-        notes = 'Destroyed';
-        location = 'Helena';
-      } else if (targetLower.includes('lost') || targetLower.includes('missing')) {
-        assignedTo = 'Lost';
-        location = 'Lost';
-        notes = 'Lost';
-      } else if (targetLower.includes('packed for testing') || targetLower.includes('ready for test')) {
-        assignedTo = 'Packed For Testing';
-        location = "Cody's Truck";
-        notes = 'Packed on truck';
-      } else if (targetLower.includes('packed for delivery') || targetLower.includes('ready for delivery')) {
-        assignedTo = 'Packed For Delivery';
-        location = "Cody's Truck";
-        notes = 'Packed on truck';
-      } else if (targetLower.includes('in testing') || targetLower.includes('lab') || targetLower.includes('arnett') || targetLower.includes('jm test')) {
-        assignedTo = 'In Testing';
-        location = 'Arnett / JM Test';
-        notes = 'Sent to lab';
-      } else if (targetLower.includes('on shelf') || targetLower === 'shelf' || targetLower === 'storage' || targetLower === 'unassigned') {
-        assignedTo = 'On Shelf';
-        location = 'Helena';
-        notes = 'On Shelf';
-      } else if (targetLower === 'new' || targetLower === 'newly purchased' || targetLower === 'brand new' || targetLower === 'new purchase' || targetLower.startsWith('new (')) {
-        assignedTo = 'New';
-        location = 'Helena';
-        notes = 'Initial Purchase (On Shelf)';
-      } else {
-        const matchedEmp = empLookup[targetLower];
-        if (matchedEmp) {
-          assignedTo = matchedEmp.name;
-          location = matchedEmp.location || 'Helena';
-          notes = 'Assigned to ' + matchedEmp.name;
+      if (window.employeeResolver) {
+        const res = window.employeeResolver.resolve(rawTarget, currentItemAssignedTo);
+        if (res.match) {
+          if (res.isStatus) {
+            assignedTo = res.status;
+            location = res.location || 'Helena';
+            notes = res.notes || res.status;
+          } else {
+            assignedTo = res.employeeName;
+            location = res.location || 'Helena';
+            notes = 'Assigned to ' + res.employeeName;
+          }
         } else {
           assignedTo = rawTarget;
           location = 'Helena';
           notes = 'Assigned';
+        }
+      } else {
+        if (targetLower.includes('failed visual')) {
+          assignedTo = 'Failed Rubber';
+          notes = 'Failed Visual';
+          location = 'Helena';
+        } else if (targetLower.includes('failed rubber') || targetLower.includes('failed test') || targetLower === 'failed') {
+          assignedTo = 'Failed Rubber';
+          notes = 'Failed Test';
+          location = 'Helena';
+        } else if (targetLower.includes('destroyed') || targetLower.includes('not repairable')) {
+          assignedTo = 'Failed Rubber';
+          notes = 'Destroyed';
+          location = 'Helena';
+        } else if (targetLower.includes('lost') || targetLower.includes('missing')) {
+          assignedTo = 'Lost';
+          location = 'Lost';
+          notes = 'Lost';
+        } else if (targetLower.includes('packed for testing') || targetLower.includes('ready for test')) {
+          assignedTo = 'Packed For Testing';
+          location = "Cody's Truck";
+          notes = 'Packed on truck';
+        } else if (targetLower.includes('packed for delivery') || targetLower.includes('ready for delivery')) {
+          assignedTo = 'Packed For Delivery';
+          location = "Cody's Truck";
+          notes = 'Packed on truck';
+        } else if (targetLower.includes('in testing') || targetLower.includes('lab') || targetLower.includes('arnett') || targetLower.includes('jm test')) {
+          assignedTo = 'In Testing';
+          location = 'Arnett / JM Test';
+          notes = 'Sent to lab';
+        } else if (targetLower.includes('on shelf') || targetLower === 'shelf' || targetLower === 'storage' || targetLower === 'unassigned') {
+          assignedTo = 'On Shelf';
+          location = 'Helena';
+          notes = 'On Shelf';
+        } else if (targetLower === 'new' || targetLower === 'newly purchased' || targetLower === 'brand new' || targetLower === 'new purchase' || targetLower.startsWith('new (')) {
+          assignedTo = 'New';
+          location = 'Helena';
+          notes = 'Initial Purchase (On Shelf)';
+        } else {
+          const matchedEmp = empLookup[targetLower];
+          if (matchedEmp) {
+            assignedTo = matchedEmp.name;
+            location = matchedEmp.location || 'Helena';
+            notes = 'Assigned to ' + matchedEmp.name;
+          } else {
+            assignedTo = rawTarget;
+            location = 'Helena';
+            notes = 'Assigned';
+          }
         }
       }
 

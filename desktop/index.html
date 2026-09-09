@@ -2032,7 +2032,8 @@
   <script src="js/sync.js?v=20260909_45"></script>
   <script src="js/gps.js?v=20260901_25"></script>
   <script src="js/scanner.js?v=20260901_25"></script>
-  <script src="js/inventory.js?v=20260901_25"></script>
+  <script src="js/employee-resolver.js?v=20260909_50"></script>
+  <script src="js/inventory.js?v=20260909_50"></script>
   <script src="js/swaps.js?v=20260901_25"></script>
   <script src="js/crew-import.js?v=20260901_25"></script>
   <script src="js/item-stats.js?v=20260903_36"></script>
@@ -2193,6 +2194,7 @@
 
       document.getElementById('sync-url-input').value = window.syncEngine.getSyncUrl();
       const snapshot = await window.localDB.init();
+      window.employeeResolver = new EmployeeNameResolver(window.localDB);
 
       window.gpsEngine = new GpsEngine(window.localDB);
       window.cameraScanner = new CameraScannerEngine(window.localDB);

@@ -12662,34 +12662,101 @@ function parseAndImportItemHistoryLog(equipmentType, itemNum, logText) {
 
     // Build employee lookup from Employees sheet (cached in memory)
     var empLookup = {};
+    var empList = [];
     var empSheet = ss.getSheetByName(SHEET_EMPLOYEES || 'Employees');
     if (empSheet && empSheet.getLastRow() > 1) {
       var empRows = empSheet.getLastRow() - 1;
-      var empData = empSheet.getRange(1, 1, empRows + 1, Math.min(6, empSheet.getLastColumn())).getValues();
+      var empLastCol = empSheet.getLastColumn();
+      var empData = empSheet.getRange(1, 1, empRows + 1, empLastCol).getValues();
       var empHeaders = empData[0].map(function(h) { return String(h).toLowerCase().trim(); });
       var nameCol = empHeaders.indexOf('employee name');
       if (nameCol === -1) nameCol = empHeaders.indexOf('name');
       if (nameCol === -1) nameCol = 0;
       var locCol = empHeaders.indexOf('location');
+      var altCol = empHeaders.indexOf('alternate names');
+      if (altCol === -1) altCol = empHeaders.indexOf('alias');
+      if (altCol === -1) altCol = empHeaders.indexOf('aliases');
 
-      for (var e = 1; e < empData.length; e++) {
-        var fullName = String(empData[e][nameCol] || '').trim();
-        var empLoc = locCol !== -1 ? String(empData[e][locCol] || '').trim() : 'Helena';
-        if (!fullName) continue;
+      function indexNameVariant(variantStr, resultName, resultLoc, canonical) {
+        if (!variantStr) return;
+        var clean = String(variantStr).trim();
+        if (!clean) return;
+        var lower = clean.toLowerCase();
+        var noPunct = lower.replace(/[.\-_]+/g, ' ').replace(/\s+/g, ' ').trim();
+        
+        var record = { name: resultName, location: resultLoc, canonical: canonical };
+        if (!empLookup[lower]) empLookup[lower] = record;
+        if (!empLookup[noPunct]) empLookup[noPunct] = record;
 
-        var cleanFull = fullName.toLowerCase();
-        empLookup[cleanFull] = { name: fullName, location: empLoc };
-
-        var parts = fullName.split(/\s+/);
+        var parts = clean.split(/\s+/);
         if (parts.length >= 2) {
           var first = parts[0];
           var last = parts[parts.length - 1];
-          empLookup[(first.charAt(0) + '. ' + last).toLowerCase()] = { name: fullName, location: empLoc };
-          empLookup[(first.charAt(0) + ' ' + last).toLowerCase()] = { name: fullName, location: empLoc };
-          empLookup[(first.charAt(0) + '.' + last).toLowerCase()] = { name: fullName, location: empLoc };
-          empLookup[(first + ' ' + last.charAt(0) + '.').toLowerCase()] = { name: fullName, location: empLoc };
-          empLookup[(first + ' ' + last.charAt(0)).toLowerCase()] = { name: fullName, location: empLoc };
+          var fInit = first.charAt(0);
+
+          var inits = [
+            (fInit + '. ' + last).toLowerCase(),
+            (fInit + ' ' + last).toLowerCase(),
+            (fInit + '.' + last).toLowerCase(),
+            (first + ' ' + last.charAt(0) + '.').toLowerCase(),
+            (first + ' ' + last.charAt(0)).toLowerCase()
+          ];
+          for (var k = 0; k < inits.length; k++) {
+            if (!empLookup[inits[k]]) empLookup[inits[k]] = record;
+          }
+
+          // Hyphenated last name sub-parts e.g. "Miller-Johnson" -> "Johnson", "Miller"
+          if (last.indexOf('-') !== -1) {
+            var lastSub = last.split('-');
+            for (var s = 0; s < lastSub.length; s++) {
+              var lp = lastSub[s].trim();
+              if (lp.length > 2) {
+                var lpInit1 = (fInit + '. ' + lp).toLowerCase();
+                var lpInit2 = (fInit + ' ' + lp).toLowerCase();
+                if (!empLookup[lpInit1]) empLookup[lpInit1] = record;
+                if (!empLookup[lpInit2]) empLookup[lpInit2] = record;
+              }
+            }
+          }
         }
+      }
+
+      for (var e = 1; e < empData.length; e++) {
+        var fullName = String(empData[e][nameCol] || '').trim();
+        var rawLoc = locCol !== -1 ? String(empData[e][locCol] || '').trim() : 'Helena';
+        var empLoc = (typeof getPhysicalLocation === 'function' ? getPhysicalLocation(rawLoc) : rawLoc.replace(/\s*\([^)]*\)/g, '').trim()) || 'Helena';
+        if (!fullName) continue;
+
+        var altNames = [];
+        if (altCol !== -1 && empData[e][altCol]) {
+          var altRaw = String(empData[e][altCol]).trim();
+          if (altRaw) {
+            altNames = altRaw.split(/[;,]+/).map(function(s) { return s.trim(); }).filter(Boolean);
+          }
+        }
+
+        // 1. Index canonical full name
+        indexNameVariant(fullName, fullName, empLoc, fullName);
+
+        // 2. Index each alternate name
+        for (var a = 0; a < altNames.length; a++) {
+          indexNameVariant(altNames[a], altNames[a], empLoc, fullName);
+        }
+
+        // 3. For any alias with the same last name as an abbreviated legacy log entry (e.g. "P. Johnson" -> "Payton Johnson")
+        for (var a = 0; a < altNames.length; a++) {
+          var aParts = altNames[a].split(/\s+/);
+          if (aParts.length >= 2) {
+            var aFirst = aParts[0];
+            var aLast = aParts[aParts.length - 1];
+            var aInit1 = (aFirst.charAt(0) + '. ' + aLast).toLowerCase();
+            var aInit2 = (aFirst.charAt(0) + ' ' + aLast).toLowerCase();
+            empLookup[aInit1] = { name: altNames[a], location: empLoc, canonical: fullName };
+            empLookup[aInit2] = { name: altNames[a], location: empLoc, canonical: fullName };
+          }
+        }
+
+        empList.push({ canonical: fullName, location: empLoc, aliases: altNames });
       }
     }
 
@@ -12698,7 +12765,7 @@ function parseAndImportItemHistoryLog(equipmentType, itemNum, logText) {
     var invSheet = ss.getSheetByName(invSheetName);
     if (invSheet && invSheet.getLastRow() > 1) {
       var numInvRows = invSheet.getLastRow() - 1;
-      var numInvCols = Math.min(12, invSheet.getLastColumn());
+      var numInvCols = Math.min(13, invSheet.getLastColumn());
       var invData = invSheet.getRange(1, 1, numInvRows + 1, numInvCols).getValues();
       var invHeaders = invData[0].map(function(h) { return String(h).toLowerCase().trim(); });
       
@@ -12719,6 +12786,8 @@ function parseAndImportItemHistoryLog(equipmentType, itemNum, logText) {
       var typeCol = invHeaders.indexOf('type');
       var serCol = invHeaders.indexOf('serial #');
       var locCol = invHeaders.indexOf('location');
+      var assignCol = invHeaders.indexOf('assigned to');
+      if (assignCol === -1) assignCol = invHeaders.indexOf('holder');
 
       for (var r = 1; r < invData.length; r++) {
         var iNum = String(invData[r][itemCol] || '').trim();
@@ -12733,7 +12802,8 @@ function parseAndImportItemHistoryLog(equipmentType, itemNum, logText) {
           length: lenCol !== -1 ? String(invData[r][lenCol] || '') : '',
           type: typeCol !== -1 ? String(invData[r][typeCol] || '') : '',
           serial: serCol !== -1 ? String(invData[r][serCol] || '') : '',
-          location: locCol !== -1 ? String(invData[r][locCol] || 'Helena') : 'Helena'
+          location: locCol !== -1 ? String(invData[r][locCol] || 'Helena') : 'Helena',
+          assignedTo: assignCol !== -1 ? String(invData[r][assignCol] || '') : ''
         };
 
         if (iNum) invMetaMap[iNum] = metaObj;
@@ -12859,15 +12929,49 @@ function parseAndImportItemHistoryLog(equipmentType, itemNum, logText) {
         location = 'Helena';
         notes = 'Initial Purchase (On Shelf)';
       } else {
-        var matchedEmp = empLookup[targetLower];
+        var cleanTarget = rawTarget.replace(/[.\-_]+/g, ' ').replace(/\s+/g, ' ').trim();
+        var matchedEmp = empLookup[targetLower] || empLookup[cleanTarget.toLowerCase()];
+        
         if (matchedEmp) {
-          assignedTo = matchedEmp.name;
+          var resolvedName = matchedEmp.name;
+          if (invMetaMap[currentItemNum] && invMetaMap[currentItemNum].assignedTo) {
+            var curInvAssigned = invMetaMap[currentItemNum].assignedTo.trim();
+            if (curInvAssigned.toLowerCase() === (matchedEmp.canonical || '').toLowerCase()) {
+              resolvedName = matchedEmp.canonical;
+            } else if (matchedEmp.name.toLowerCase() === curInvAssigned.toLowerCase()) {
+              resolvedName = curInvAssigned;
+            }
+          }
+
+          assignedTo = resolvedName;
           location = matchedEmp.location || 'Helena';
-          notes = 'Assigned to ' + matchedEmp.name;
+          notes = 'Assigned to ' + resolvedName;
         } else {
-          assignedTo = rawTarget;
-          location = 'Helena';
-          notes = 'Assigned';
+          // Fallback: check fuzzy match if available
+          var fuzzyMatched = null;
+          if (typeof fuzzyMatchEmployeeName === 'function' && empList.length > 0) {
+            var candidateNames = [];
+            for (var el = 0; el < empList.length; el++) {
+              candidateNames.push(empList[el].canonical);
+              for (var al = 0; al < empList[el].aliases.length; al++) {
+                candidateNames.push(empList[el].aliases[al]);
+              }
+            }
+            var fMatch = fuzzyMatchEmployeeName(rawTarget, candidateNames);
+            if (fMatch && empLookup[fMatch.toLowerCase()]) {
+              fuzzyMatched = empLookup[fMatch.toLowerCase()];
+            }
+          }
+
+          if (fuzzyMatched) {
+            assignedTo = fuzzyMatched.name;
+            location = fuzzyMatched.location || 'Helena';
+            notes = 'Assigned to ' + fuzzyMatched.name;
+          } else {
+            assignedTo = rawTarget;
+            location = 'Helena';
+            notes = 'Assigned';
+          }
         }
       }
 
