@@ -428,9 +428,13 @@ class SheetNavigator {
     } else if (type === 'locationJob') {
       const locCol = findCol(['location']);
       const jobCol = findCol(['job number', 'job #']);
-      this.multiSort = [locCol, jobCol];
-      this.sortCol = null;
-      this.sortDir = 'asc';
+      if (this.multiSort && this.multiSort[0] === locCol && this.multiSort[1] === jobCol) {
+        this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc';
+      } else {
+        this.multiSort = [locCol, jobCol];
+        this.sortCol = null;
+        this.sortDir = 'asc';
+      }
     } else if (type === 'name') {
       const col = findCol(['employee name', 'name', 'employee']);
       if (this.sortCol === col) {
@@ -2215,13 +2219,14 @@ class SheetNavigator {
 
       const isFiltered = this.filterCertType !== 'all' || this.filterCertEmployee !== 'all' || this.filterCertStatus !== 'all' || this.filterCertLocation !== 'all' || Boolean(this.searchTerm);
 
-      const isNameSorted = this.sortCol && (this.sortCol.toLowerCase().includes('name') || this.sortCol.toLowerCase().includes('employee'));
-      const isCertSorted = this.sortCol && (this.sortCol.toLowerCase().includes('type') || this.sortCol.toLowerCase().includes('cert'));
-      const isExpSorted = this.sortCol && this.sortCol.toLowerCase().includes('expiration');
-      const isDaysSorted = this.sortCol && this.sortCol.toLowerCase().includes('days');
-      const isStatSorted = this.sortCol && this.sortCol.toLowerCase().includes('status');
-      const isLocSorted = this.sortCol && this.sortCol.toLowerCase().includes('location');
-      const isJobSorted = this.sortCol && (this.sortCol.toLowerCase().includes('job') || this.sortCol.toLowerCase().includes('crew'));
+      const isNameSorted = this.sortCol && (this.sortCol.toLowerCase().includes('name') || this.sortCol.toLowerCase().includes('employee')) && !this.multiSort;
+      const isCertSorted = this.sortCol && (this.sortCol.toLowerCase().includes('type') || this.sortCol.toLowerCase().includes('cert')) && !this.multiSort;
+      const isExpSorted = this.sortCol && this.sortCol.toLowerCase().includes('expiration') && !this.multiSort;
+      const isDaysSorted = this.sortCol && this.sortCol.toLowerCase().includes('days') && !this.multiSort;
+      const isStatSorted = this.sortCol && this.sortCol.toLowerCase().includes('status') && !this.multiSort;
+      const isLocSorted = this.sortCol && this.sortCol.toLowerCase().includes('location') && !this.multiSort;
+      const isJobSorted = this.sortCol && (this.sortCol.toLowerCase().includes('job') || this.sortCol.toLowerCase().includes('crew')) && !this.multiSort;
+      const isLocJobSorted = this.multiSort && this.multiSort.length >= 2 && this.multiSort[0] && this.multiSort[0].toLowerCase().includes('location') && this.multiSort[1] && (this.multiSort[1].toLowerCase().includes('job') || this.multiSort[1].toLowerCase().includes('crew'));
 
       presetBarHtml = `
         <div style="background: var(--bg-secondary); border-bottom: 1px solid var(--border-color);">
@@ -2275,6 +2280,9 @@ class SheetNavigator {
                 <div style="font-size: 9px; text-transform: uppercase; color: #cbd5e1; font-weight: 700;">Missing</div>
                 <div style="font-size: 12px; font-weight: 800; color: #cbd5e1;">${missAll}</div>
               </div>
+            </div>
+            <div style="margin-left: auto; display: flex; gap: 6px;">
+              <button class="btn btn-secondary" style="font-size: 11px; padding: 3px 8px;" onclick="if(window.certsConfigEngine){window.certsConfigEngine.showConfigModal();}">⚙️ Requirements Matrix</button>
             </div>
           </div>
 
@@ -2345,7 +2353,7 @@ class SheetNavigator {
             <button class="btn btn-secondary ${isStatSorted ? 'active' : ''}" style="padding: 2px 7px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('status')">🏷️ Status${dirArrow(isStatSorted)}</button>
             <button class="btn btn-secondary ${isLocSorted ? 'active' : ''}" style="padding: 2px 7px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('location')">📍 Location${dirArrow(isLocSorted)}</button>
             <button class="btn btn-secondary ${isJobSorted ? 'active' : ''}" style="padding: 2px 7px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('jobNumber')">🔢 Job #${dirArrow(isJobSorted)}</button>
-            <button class="btn btn-secondary" style="padding: 2px 7px; font-size: 11px; white-space: nowrap; margin-left: auto; color: #60a5fa;" onclick="window.sheetNavigator.deduplicateExpiringCerts(false)" title="Clean up any duplicate certification records">🧹 Deduplicate</button>
+            <button class="btn btn-secondary ${isLocJobSorted ? 'active' : ''}" style="padding: 2px 7px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('locationJob')">📍+🔢 Location then Job #${dirArrow(isLocJobSorted)}</button>
           </div>
         </div>
       `;
@@ -2468,13 +2476,14 @@ class SheetNavigator {
         `;
       }
 
-      // Location Divider Banner for Employees (when sorted by Location or Location + Job #)
-      const isSortedByLoc = this.sortCol === 'Location' || (this.multiSort && this.multiSort[0] === 'Location');
-      if (isEmployees && isSortedByLoc && currentLocVal && currentLocVal !== lastRenderedLoc) {
+      // Location Divider Banner for Employees & Expiring Certs (when sorted by Location or Location + Job #)
+      const isSortedByLoc = (this.sortCol && this.sortCol.toLowerCase().includes('location')) || (this.multiSort && this.multiSort[0] && this.multiSort[0].toLowerCase().includes('location'));
+      if ((isEmployees || this.currentSheetKey === 'expiring_certs') && isSortedByLoc && currentLocVal && currentLocVal !== lastRenderedLoc) {
         lastRenderedLoc = currentLocVal;
+        const extraColSpan = (this.currentSheetKey === 'expiring_certs') ? 1 : 0;
         html += `
           <tr style="background: linear-gradient(90deg, #4c1d95 0%, #1e293b 100%);">
-            <td colspan="${headers.length}" style="padding: 8px 16px; font-size: 13px; font-weight: 800; color: #c4b5fd; text-align: left; border-top: 3px solid #8b5cf6; border-bottom: 1px solid #8b5cf6;">
+            <td colspan="${headers.length + extraColSpan}" style="padding: 8px 16px; font-size: 13px; font-weight: 800; color: #c4b5fd; text-align: left; border-top: 3px solid #8b5cf6; border-bottom: 1px solid #8b5cf6;">
               📍 Location: ${this.escapeHtml(currentLocVal)}
             </td>
           </tr>
@@ -2587,18 +2596,24 @@ class SheetNavigator {
               customCellHtml = `<span class="badge" style="background-color: #475569; color: #fff; padding: 2px 8px; border-radius: 4px; font-weight: 700;">🚫 Declined</span>`;
             } else if (sUpper === 'NOT REQUIRED' || sUpper.includes('NOT REQ')) {
               customCellHtml = `<span class="badge" style="background-color: #334155; color: #94a3b8; padding: 2px 8px; border-radius: 4px; font-weight: 600;">⚪ Not Required</span>`;
+            } else if (sUpper === 'NO DATE SET' || sUpper.includes('NO DATE')) {
+              customCellHtml = `<span class="badge" style="background-color: #475569; color: #cbd5e1; padding: 2px 8px; border-radius: 4px; font-weight: 600;">⚪ No Date Set</span>`;
             }
           } else if (hLower.includes('days')) {
-            const num = parseFloat(vStr);
-            if (!isNaN(num)) {
-              if (num <= 0) {
-                customCellHtml = `<span style="color: #ef4444; font-weight: 800;">${this.escapeHtml(vStr)}d</span>`;
-              } else if (num <= 30) {
-                customCellHtml = `<span style="color: #f97316; font-weight: 700;">${this.escapeHtml(vStr)}d</span>`;
-              } else if (num <= 60) {
-                customCellHtml = `<span style="color: #eab308; font-weight: 600;">${this.escapeHtml(vStr)}d</span>`;
-              } else {
-                customCellHtml = `<span style="color: #4ade80;">${this.escapeHtml(vStr)}d</span>`;
+            if (vStr === 'N/A' || vStr === 'n/a' || vStr === 'No Date Set') {
+              customCellHtml = `<span style="color: var(--text-muted); font-size: 11px; font-weight: 600;">${this.escapeHtml(vStr)}</span>`;
+            } else {
+              const num = parseFloat(vStr);
+              if (!isNaN(num)) {
+                if (num <= 0) {
+                  customCellHtml = `<span style="color: #ef4444; font-weight: 800;">${this.escapeHtml(vStr)}d</span>`;
+                } else if (num <= 30) {
+                  customCellHtml = `<span style="color: #f97316; font-weight: 700;">${this.escapeHtml(vStr)}d</span>`;
+                } else if (num <= 60) {
+                  customCellHtml = `<span style="color: #eab308; font-weight: 600;">${this.escapeHtml(vStr)}d</span>`;
+                } else {
+                  customCellHtml = `<span style="color: #4ade80;">${this.escapeHtml(vStr)}d</span>`;
+                }
               }
             }
           } else if (hLower.includes('employee') || hLower === 'name') {
@@ -3118,6 +3133,147 @@ class SheetNavigator {
           // 3. If Date Assigned was edited on an inventory sheet, sync date to matching history entry
           if (isInventorySheet && hLower.includes('date assigned') && tableRow) {
             await this.db.recordItemHistoryEvent(sheetName, tableRow, tableRow['Notes'] || '');
+          }
+
+          // 4. If Expiration Date or Date Acquired was edited on Expiring Certs, auto-reconcile Days and Status
+          if (this.currentSheetKey === 'expiring_certs' && tableRow && tableData) {
+            const isExpDateEdit = hLower.includes('expiration date') || hLower === 'expiration';
+            const isAcqDateEdit = hLower.includes('date acquired') || hLower === 'acquired';
+            const itemType = String(tableRow['Item Type'] || tableRow['Certification'] || tableRow['Cert Type'] || '').trim();
+            const itemTypeLower = itemType.toLowerCase();
+
+            let isNonExpCert = itemTypeLower.includes('trench') || itemTypeLower.includes('crane eval') ||
+              itemTypeLower.includes('1910') || itemTypeLower.includes('bnsf') || itemTypeLower.includes('msha') ||
+              itemTypeLower.includes('helo') || itemTypeLower.includes('helicopter');
+
+            if (window.certsConfig && typeof window.certsConfig.isNonExpiringCert === 'function') {
+              if (window.certsConfig.isNonExpiringCert(itemType)) isNonExpCert = true;
+            }
+
+            const daysColName = (tableData.headers || []).find(h => /days\s*until\s*expiration|^days$/i.test(h));
+            const statusColName = (tableData.headers || []).find(h => /^status$/i.test(h));
+            const expColName = (tableData.headers || []).find(h => /expiration\s*date|^expiration$/i.test(h));
+            const acqColName = (tableData.headers || []).find(h => /date\s*acquired|^acquired$/i.test(h));
+
+            if (isExpDateEdit) {
+              const valTrimmed = String(newVal || '').trim();
+              const isValNA = valTrimmed.toUpperCase() === 'N/A' || valTrimmed.toLowerCase() === 'no date set' || !valTrimmed;
+
+              if (isValNA || isNonExpCert) {
+                const targetExp = 'N/A';
+                const targetDays = 'N/A';
+                const curAcq = String((acqColName ? tableRow[acqColName] : '') || '').trim();
+                const hasAcq = curAcq && curAcq !== 'N/A' && curAcq !== 'No Date Set';
+                const targetStatus = hasAcq ? 'OK' : 'No Date Set';
+
+                if (expColName) { tableRow[expColName] = targetExp; newVal = targetExp; }
+                if (daysColName) {
+                  tableRow[daysColName] = targetDays;
+                  await queueCell(daysColName, targetDays);
+                  updateRowCell(daysColName, targetDays);
+                }
+                if (statusColName) {
+                  tableRow[statusColName] = targetStatus;
+                  await queueCell(statusColName, targetStatus);
+                  updateRowCell(statusColName, targetStatus);
+                }
+              } else {
+                const expDateObj = new Date(valTrimmed);
+                if (!isNaN(expDateObj.getTime())) {
+                  const todayZero = new Date();
+                  todayZero.setHours(0, 0, 0, 0);
+                  const expZero = new Date(expDateObj);
+                  expZero.setHours(0, 0, 0, 0);
+                  const diffDays = Math.ceil((expZero.getTime() - todayZero.getTime()) / (1000 * 60 * 60 * 24));
+
+                  let targetStatus = 'OK';
+                  if (diffDays < 0) targetStatus = 'EXPIRED';
+                  else if (diffDays <= 30) targetStatus = 'CRITICAL';
+                  else if (diffDays <= 60) targetStatus = 'WARNING';
+                  else if (diffDays <= 90) targetStatus = 'UPCOMING';
+
+                  if (daysColName) {
+                    tableRow[daysColName] = diffDays;
+                    await queueCell(daysColName, diffDays);
+                    updateRowCell(daysColName, diffDays);
+                  }
+                  if (statusColName) {
+                    tableRow[statusColName] = targetStatus;
+                    await queueCell(statusColName, targetStatus);
+                    updateRowCell(statusColName, targetStatus);
+                  }
+                }
+              }
+            } else if (isAcqDateEdit && isNonExpCert) {
+              const curAcq = String(newVal || '').trim();
+              const hasAcq = curAcq && curAcq !== 'N/A' && curAcq !== 'No Date Set';
+              const targetStatus = hasAcq ? 'OK' : 'No Date Set';
+
+              if (expColName && tableRow[expColName] !== 'N/A') {
+                tableRow[expColName] = 'N/A';
+                await queueCell(expColName, 'N/A');
+                updateRowCell(expColName, 'N/A');
+              }
+              if (daysColName && tableRow[daysColName] !== 'N/A') {
+                tableRow[daysColName] = 'N/A';
+                await queueCell(daysColName, 'N/A');
+                updateRowCell(daysColName, 'N/A');
+              }
+              if (statusColName && tableRow[statusColName] !== targetStatus) {
+                tableRow[statusColName] = targetStatus;
+                await queueCell(statusColName, targetStatus);
+                updateRowCell(statusColName, targetStatus);
+              }
+            }
+          }
+
+          // 5. If Location or Job Number was edited on Employees sheet, auto-sync to Expiring Certs table
+          if (this.currentSheetKey === 'employees' && tableRow) {
+            const isLocEdit = hLower === 'location';
+            const isJobEdit = hLower === 'job number' || hLower === 'job #' || hLower === 'job';
+            if (isLocEdit || isJobEdit) {
+              const empName = String(tableRow['Employee Name'] || tableRow['Name'] || Object.values(tableRow)[0] || '').trim();
+              if (empName) {
+                const certsTable = this.db.getTable('expiring_certs');
+                if (certsTable && certsTable.rows) {
+                  let matched = 0;
+                  const empNameLower = empName.toLowerCase();
+                  certsTable.rows.forEach(cr => {
+                    const cName = String(cr['Employee Name'] || cr['Name'] || Object.values(cr)[0] || '').trim().toLowerCase();
+                    if (cName === empNameLower) {
+                      if (isLocEdit) cr['Location'] = newVal;
+                      if (isJobEdit) cr['Job #'] = newVal;
+                      matched++;
+                    }
+                  });
+                  if (matched > 0) {
+                    if (certsTable.headers && certsTable.rawGrid) {
+                      const locIdx = certsTable.headers.indexOf('Location');
+                      const jobIdx = certsTable.headers.indexOf('Job #');
+                      certsTable.rows.forEach((cr, rIdx) => {
+                        if (certsTable.rawGrid[rIdx + 1]) {
+                          if (isLocEdit && locIdx !== -1) certsTable.rawGrid[rIdx + 1][locIdx] = cr['Location'];
+                          if (isJobEdit && jobIdx !== -1) certsTable.rawGrid[rIdx + 1][jobIdx] = cr['Job #'];
+                        }
+                      });
+                    }
+                    if (typeof this.db.saveLocalSnapshot === 'function') {
+                      await this.db.saveLocalSnapshot();
+                    }
+                    if (typeof this.db.addMutation === 'function') {
+                      this.db.addMutation({
+                        action: 'REPLACE_TABLE_DATA',
+                        sheetName: 'Expiring Certs',
+                        tableKey: 'expiring_certs',
+                        headers: certsTable.headers,
+                        rows: certsTable.rows,
+                        rawGrid: certsTable.rawGrid
+                      }).catch(e => console.warn('Mutation error updating certs:', e));
+                    }
+                  }
+                }
+              }
+            }
           }
 
           syncTableRowToGrid();

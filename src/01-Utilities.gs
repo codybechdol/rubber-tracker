@@ -588,21 +588,28 @@ function calculateNextJobNumberSuffix(sheet, baseJobNumber, classification) {
   }
   
   // Determine if lead classification
-  var isLead = ['SUP', 'F', 'GTO F', 'GF'].indexOf(String(classification).toUpperCase().trim()) !== -1;
+  var cUpper = String(classification || '').toUpperCase().trim();
+  var isLead = [
+    'SUP', 'SUPERVISOR', 'SUPERINTENDENT',
+    'GF', 'GENERAL FOREMAN',
+    'F', 'FOREMAN',
+    'GTO F', 'GTO FOREMAN'
+  ].indexOf(cUpper) !== -1 || /^F\b/.test(cUpper) || /FOREMAN/i.test(cUpper) || /SUPERVISOR/i.test(cUpper);
   
-  if (isLead) {
+  if (isLead && existingSuffixes.indexOf(1) === -1) {
     return baseJobNumber + '.1';
-  } else {
-    var nextSuf = 2;
-    existingSuffixes.sort(function(a, b) { return a - b; });
-    for (var s = 0; s < existingSuffixes.length; s++) {
-      var val = existingSuffixes[s];
-      if (val >= nextSuf) {
-        nextSuf = val + 1;
-      }
-    }
-    return baseJobNumber + '.' + nextSuf;
   }
+  
+  var nextSuf = 2;
+  existingSuffixes.sort(function(a, b) { return a - b; });
+  for (var s = 0; s < existingSuffixes.length; s++) {
+    var val = existingSuffixes[s];
+    if (val >= nextSuf) {
+      nextSuf = val + 1;
+    }
+  }
+  var sufStr = nextSuf < 10 ? ('0' + nextSuf) : String(nextSuf);
+  return baseJobNumber + '.' + sufStr;
 }
 
 /**

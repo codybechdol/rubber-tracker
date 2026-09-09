@@ -186,6 +186,37 @@ class CrewImportEngine {
     return 999;
   }
 
+  /**
+   * Retrieves effective role for an employee, checking cell parse first and falling back
+   * to existing database records on the Employees table when Excel omits tags.
+   */
+  getEffectiveRole(emp) {
+    if (!emp) return '';
+    if (emp.classification && emp.classification.trim()) return emp.classification.trim();
+    if (emp.role && emp.role.trim()) return emp.role.trim();
+
+    try {
+      const empTable = this.db ? this.db.getTable('employees') : null;
+      if (empTable && empTable.rows && emp.name) {
+        const empNameLower = emp.name.toLowerCase().trim();
+        for (const sheetEmp of empTable.rows) {
+          const sheetName = String(sheetEmp['Employee Name'] || sheetEmp['Name'] || Object.values(sheetEmp)[0] || '').toLowerCase().trim();
+          if (sheetName === empNameLower) {
+            const cls = String(sheetEmp['Job Classification'] || sheetEmp['Classification'] || sheetEmp['Role'] || '').trim();
+            if (cls) {
+              emp.classificationFromDB = cls;
+              return cls;
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Error fetching effective role from employees table:', e);
+    }
+
+    return '';
+  }
+
   detectCrewLead(crewNumber, employees) {
     if (!employees || employees.length === 0) return null;
 
@@ -206,7 +237,7 @@ class CrewImportEngine {
     let bestPriority = 999;
 
     for (const emp of employees) {
-      const priority = this.getRolePriority(emp.classification || emp.role);
+      const priority = this.getRolePriority(this.getEffectiveRole(emp));
       if (priority < bestPriority) {
         bestPriority = priority;
         bestCandidate = emp;
@@ -591,15 +622,15 @@ class CrewImportEngine {
 
       // Sort employees by classification hierarchy
       employees.sort((a, b) => {
-        const pA = this.getRolePriority(a.classification || a.role);
-        const pB = this.getRolePriority(b.classification || b.role);
+        const pA = this.getRolePriority(this.getEffectiveRole(a));
+        const pB = this.getRolePriority(this.getEffectiveRole(b));
         return pA - pB;
       });
 
-      // Assign position numbers: e.g. 013-26.01, 013-26.02
+      // Assign position numbers: e.g. 013-26.1, 013-26.02
       employees.forEach((emp, idx) => {
         emp.position = idx + 1;
-        const posStr = String(idx + 1).padStart(2, '0');
+        const posStr = idx === 0 ? '1' : String(idx + 1).padStart(2, '0');
         emp.fullJobNumber = `${header.jobNumber}.${posStr}`;
       });
 
@@ -864,7 +895,7 @@ class CrewImportEngine {
         // Re-number crew positions
         crew.employees.forEach((e, idx) => {
           e.position = idx + 1;
-          const posStr = String(idx + 1).padStart(2, '0');
+          const posStr = idx === 0 ? '1' : String(idx + 1).padStart(2, '0');
           e.fullJobNumber = `${crew.jobNumber}.${posStr}`;
         });
         crew.crewSize = crew.employees.length;
@@ -891,7 +922,7 @@ class CrewImportEngine {
       crew.employees = crew.employees.filter(e => this.cleanNameForMatch(e.name) !== cleanTarget);
       crew.employees.forEach((e, idx) => {
         e.position = idx + 1;
-        const posStr = String(idx + 1).padStart(2, '0');
+        const posStr = idx === 0 ? '1' : String(idx + 1).padStart(2, '0');
         e.fullJobNumber = `${crew.jobNumber}.${posStr}`;
       });
       crew.crewSize = crew.employees.length;
@@ -931,10 +962,10 @@ class CrewImportEngine {
         }
 
         // Re-sort and renumber
-        base.employees.sort((a, b) => this.getRolePriority(a.classification || a.role) - this.getRolePriority(b.classification || b.role));
+        base.employees.sort((a, b) => this.getRolePriority(this.getEffectiveRole(a)) - this.getRolePriority(this.getEffectiveRole(b)));
         base.employees.forEach((emp, idx) => {
           emp.position = idx + 1;
-          const posStr = String(idx + 1).padStart(2, '0');
+          const posStr = idx === 0 ? '1' : String(idx + 1).padStart(2, '0');
           emp.fullJobNumber = `${base.jobNumber}.${posStr}`;
         });
 
@@ -1457,9 +1488,10 @@ class CrewImportEngine {
           changeItem.type = 'Transfer';
           transfers.push(changeItem);
           changed = true;
-        } else if (primaryJob && !this.areJobNumbersEquivalent(oldJob, primaryJob)) {
-          // Intra-crew position renumbering (e.g. 020-26.02 -> 020-26.01)
+        } else if (primaryJob && oldJob !== primaryJob) {
+          // Intra-crew position renumbering or formatting normalization (e.g. 043-26.04 -> 043-26.1 or 043-26.3 -> 043-26.03)
           changeItem.newJobNumber = primaryJob;
+          changeItem.changes.push(`Job #: ${oldJob || 'None'} → ${primaryJob}`);
           changed = true;
         }
 

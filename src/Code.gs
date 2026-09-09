@@ -2493,7 +2493,7 @@ function calculateCertExpirationDate(certType, acquiredDate) {
   // Non-expiring certifications return null (no expiration date)
   if (typeLower.indexOf('helicopter') !== -1 || typeLower.indexOf('helo') !== -1 ||
       typeLower === 'crane evaluation' || typeLower === 'osha 1910' ||
-      typeLower === 'bnsf' || typeLower === 'msha') {
+      typeLower === 'bnsf' || typeLower === 'msha' || typeLower.indexOf('trench') !== -1) {
     return null;
   }
 
@@ -2503,7 +2503,7 @@ function calculateCertExpirationDate(certType, acquiredDate) {
     exp.setFullYear(exp.getFullYear() + 1);
   } else if (typeLower === 'red cross cpr' || typeLower === 'cpr' || typeLower === '1st aid' || typeLower === 'first aid') {
     exp.setFullYear(exp.getFullYear() + 2);
-  } else if (typeLower.indexOf('forklift') !== -1 || typeLower.indexOf('trench') !== -1 || typeLower.indexOf('rigging') !== -1) {
+  } else if (typeLower.indexOf('forklift') !== -1 || typeLower.indexOf('rigging') !== -1) {
     exp.setFullYear(exp.getFullYear() + 3);
   } else if (typeLower === 'crane cert') {
     exp.setFullYear(exp.getFullYear() + 5);
@@ -2530,11 +2530,16 @@ function calculateCertAcquiredDate(certType, expirationDate) {
   var acq = new Date(exp.getTime());
   var typeLower = String(certType || '').trim().toLowerCase();
 
+  if (typeLower.indexOf('trench') !== -1 || typeLower.indexOf('helicopter') !== -1 || typeLower.indexOf('helo') !== -1 ||
+      typeLower === 'crane evaluation' || typeLower === 'osha 1910' || typeLower === 'bnsf' || typeLower === 'msha') {
+    return exp; // For non-expiring, expirationDate is actually the acquired date if provided
+  }
+
   if (typeLower === 'pole top rescue' || typeLower === 'coin cpr' || typeLower === 'harassment training') {
     acq.setFullYear(acq.getFullYear() - 1);
   } else if (typeLower === 'red cross cpr' || typeLower === 'cpr' || typeLower === '1st aid' || typeLower === 'first aid') {
     acq.setFullYear(acq.getFullYear() - 2);
-  } else if (typeLower.indexOf('forklift') !== -1 || typeLower.indexOf('trench') !== -1 || typeLower.indexOf('rigging') !== -1) {
+  } else if (typeLower.indexOf('forklift') !== -1 || typeLower.indexOf('rigging') !== -1) {
     acq.setFullYear(acq.getFullYear() - 3);
   } else if (typeLower === 'crane cert') {
     acq.setFullYear(acq.getFullYear() - 5);
@@ -2590,7 +2595,7 @@ function getExpiringCertsSetupConfig() {
           { name: 'OSHA 1910', category: 'non_expiring', termMonths: 0, requireRehireReevaluation: false, active: true, requirementScope: 'all', requiredJobClasses: [], allowDeclined: false },
           { name: 'BNSF', category: 'non_expiring', termMonths: 0, requireRehireReevaluation: false, active: true, requirementScope: 'optional', requiredJobClasses: [], allowDeclined: true },
           { name: 'MSHA', category: 'non_expiring', termMonths: 0, requireRehireReevaluation: false, active: true, requirementScope: 'optional', requiredJobClasses: [], allowDeclined: true },
-          { name: 'OSHA Trench Comp Person', category: 'standard', termMonths: 36, requireRehireReevaluation: false, active: true, requirementScope: 'job_class', requiredJobClasses: ['F', 'GTO F', 'GF', 'SUP'], allowDeclined: true },
+          { name: 'OSHA Trench Comp Person', category: 'non_expiring', termMonths: 0, requireRehireReevaluation: false, active: true, requirementScope: 'job_class', requiredJobClasses: ['F', 'GTO F', 'GF', 'SUP'], allowDeclined: true },
           { name: 'Rigging & Signaling/Signalperson & Spotter Cert', category: 'standard', termMonths: 36, requireRehireReevaluation: false, active: true, requirementScope: 'job_class', requiredJobClasses: ['F', 'GTO F', 'GF', 'JRY', 'JRY OP'], allowDeclined: true },
           { name: 'EICA Basic Helicopter Line Construction Safety', category: 'non_expiring', termMonths: 0, requireRehireReevaluation: false, active: true, requirementScope: 'optional', requiredJobClasses: [], allowDeclined: true }
         ];
@@ -2617,6 +2622,10 @@ function getExpiringCertsSetupConfig() {
           var nameLower = String(c.name || '').trim().toLowerCase();
           if (nameLower === '1st aid' || nameLower === 'cpr' || nameLower === 'first aid') {
             c.category = 'variable';
+            c.termMonths = 0;
+          }
+          if (nameLower === 'osha trench comp person') {
+            c.category = 'non_expiring';
             c.termMonths = 0;
           }
           if (defaultJobClassCerts[nameLower]) {
@@ -2661,7 +2670,7 @@ function getExpiringCertsSetupConfig() {
     { name: 'OSHA 1910', category: 'non_expiring', termMonths: 0, requireRehireReevaluation: false, active: true, requirementScope: 'all', requiredJobClasses: [], allowDeclined: false },
     { name: 'BNSF', category: 'non_expiring', termMonths: 0, requireRehireReevaluation: false, active: true, requirementScope: 'optional', requiredJobClasses: [], allowDeclined: true },
     { name: 'MSHA', category: 'non_expiring', termMonths: 0, requireRehireReevaluation: false, active: true, requirementScope: 'optional', requiredJobClasses: [], allowDeclined: true },
-    { name: 'OSHA Trench Comp Person', category: 'standard', termMonths: 36, requireRehireReevaluation: false, active: true, requirementScope: 'job_class', requiredJobClasses: ['F', 'GTO F', 'GF', 'SUP'], allowDeclined: true },
+    { name: 'OSHA Trench Comp Person', category: 'non_expiring', termMonths: 0, requireRehireReevaluation: false, active: true, requirementScope: 'job_class', requiredJobClasses: ['F', 'GTO F', 'GF', 'SUP'], allowDeclined: true },
     { name: 'Rigging & Signaling/Signalperson & Spotter Cert', category: 'standard', termMonths: 36, requireRehireReevaluation: false, active: true, requirementScope: 'job_class', requiredJobClasses: ['F', 'GTO F', 'GF', 'JRY', 'JRY OP'], allowDeclined: true },
     { name: 'EICA Basic Helicopter Line Construction Safety', category: 'non_expiring', termMonths: 0, requireRehireReevaluation: false, active: true, requirementScope: 'optional', requiredJobClasses: [], allowDeclined: true }
   ];

@@ -58,7 +58,7 @@ class CertsConfigEngine {
       { key: 'Harassment Training', name: 'Harassment Training', label: 'Harassment Training', termMonths: 12, requirementScope: 'all', requiredJobClasses: [], isIssuedDate: false, custom: false },
       { key: 'Pole Top Rescue', name: 'Pole Top Rescue', label: 'Pole Top Rescue', termMonths: 12, requirementScope: 'job_class', requiredJobClasses: ['F', 'GF', 'SUP', 'GTO F', 'JRY', 'WT', 'GTO', 'AP 1-7', 'ST 1-7'], isIssuedDate: false, custom: false },
       { key: 'OSHA 1910', name: 'OSHA 1910', label: 'OSHA 1910 / 10 / 30', termMonths: 0, requirementScope: 'all', requiredJobClasses: [], isIssuedDate: true, custom: false },
-      { key: 'OSHA Trench Comp Person', name: 'OSHA Trench Comp Person', label: 'OSHA Trench Competent Person', termMonths: 36, requirementScope: 'job_class', requiredJobClasses: ['F', 'GF', 'SUP', 'GTO F'], isIssuedDate: true, custom: false },
+      { key: 'OSHA Trench Comp Person', name: 'OSHA Trench Comp Person', label: 'OSHA Trench Competent Person', termMonths: 0, requirementScope: 'job_class', requiredJobClasses: ['F', 'GF', 'SUP', 'GTO F'], isIssuedDate: true, custom: false },
       { key: 'Crane Cert', name: 'Crane Cert', label: 'Crane Certification', termMonths: 60, requirementScope: 'job_class', requiredJobClasses: ['F', 'GF', 'SUP', 'JRY OP', 'OP', 'EO 1', 'EO 2'], isIssuedDate: false, custom: false },
       { key: 'Crane Evaluation', name: 'Crane Evaluation', label: 'Crane Evaluation', termMonths: 0, requirementScope: 'job_class', requiredJobClasses: ['F', 'GF', 'SUP', 'JRY OP', 'OP', 'EO 1', 'EO 2'], isIssuedDate: true, custom: false },
       { key: 'Forklift', name: 'Forklift', label: 'Forklift Certification', termMonths: 36, requirementScope: 'job_class', requiredJobClasses: ['F', 'GF', 'SUP', 'JRY OP', 'OP', 'EO 1', 'EO 2', 'WT'], isIssuedDate: false, custom: false },
@@ -92,6 +92,14 @@ class CertsConfigEngine {
             const dcKey = dc.key.toLowerCase().trim();
             if (!existingKeys.has(dcKey) && !deletedKeys.has(dcKey)) {
               filtered.push(dc);
+            }
+          });
+          // Ensure non-expiring rules like OSHA Trench Comp Person are normalized if saved previously with termMonths
+          filtered.forEach(c => {
+            const cName = String(c.key || c.name || '').toLowerCase().trim();
+            if (cName.includes('trench') && (c.isIssuedDate || c.termMonths === 0)) {
+              c.termMonths = 0;
+              c.isIssuedDate = true;
             }
           });
           return filtered;
@@ -613,6 +621,9 @@ class CertsConfigEngine {
     this.closeEditCertModal();
     this.renderConfigModal();
 
+    // Immediately reconcile existing matrix records with the updated cert definition
+    await this.applyRequirementsToMatrix(false);
+
     if (window.sheetNavigator && (window.sheetNavigator.currentSheetKey === 'expiring_certs' || document.getElementById('expiring-certs-view')?.classList.contains('active'))) {
       window.sheetNavigator.renderExpiringCerts();
     }
@@ -721,7 +732,8 @@ class CertsConfigEngine {
   }
 
   /**
-   * Scans active employees against configured certification requirements and creates any missing matrix rows.
+   * Scans active employees against configured certification requirements, syncs current employee
+   * location and job number, reconciles non-expiring and expiring cert rows, and creates missing rows.
    */
   async applyRequirementsToMatrix(showAlert = true) {
     const empTable = this.db.getTable('employees');
@@ -738,6 +750,37 @@ class CertsConfigEngine {
              !name.toLowerCase().includes('former') && !job.startsWith('002-') && !job.includes('previous');
     });
 
+    // Build fast lookup of active employees
+    const empByName = new Map();
+    (empTable.rows || []).forEach(e => {
+      const name = String(e['Employee Name'] || e['Name'] || Object.values(e)[0] || '').trim();
+      if (name) {
+        empByName.set(name.toLowerCase(), {
+          name: name,
+          loc: String(e['Location'] || 'Helena').trim(),
+          job: String(e['Job Number'] || e['Job #'] || '').trim(),
+          classification: String(e['Job Classification'] || e['Classification'] || e['Role'] || '').trim()
+        });
+      }
+    });
+
+    // Build canonical cert definition lookup map
+    const certMap = new Map();
+    (this.certs || []).forEach(c => {
+      const k = String(c.key || c.name || '').toLowerCase().trim();
+      if (k) certMap.set(k, c);
+      if (c.name) certMap.set(String(c.name).toLowerCase().trim(), c);
+      if (c.label) certMap.set(String(c.label).toLowerCase().trim(), c);
+    });
+
+    // Canonical key normalizer matching certs-import
+    const normalizeKey = (c) => {
+      if (window.certsImportEngine && typeof window.certsImportEngine.normalizeCertKey === 'function') {
+        return window.certsImportEngine.normalizeCertKey(c);
+      }
+      return String(c || '').toLowerCase().trim();
+    };
+
     // Ensure certTable headers exist
     if (!certTable.headers || certTable.headers.length === 0) {
       certTable.headers = ['Employee Name', 'Item Type', 'Date Acquired', 'Expiration Date', 'Location', 'Job #', 'Days Until Expiration', 'Status', 'SMS'];
@@ -745,11 +788,133 @@ class CertsConfigEngine {
     if (!certTable.rows) certTable.rows = [];
     if (!certTable.rawGrid) certTable.rawGrid = [certTable.headers];
 
-    // Build existing employee|cert map
+    let reconciledExistingCount = 0;
+    let syncedEmpDetailsCount = 0;
+
+    const parseDateObj = (val) => {
+      if (!val || val === 'N/A' || val === 'No Date Set') return null;
+      const d = new Date(val);
+      return (!isNaN(d.getTime())) ? d : null;
+    };
+
+    const formatDateStr = (d) => {
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${m}/${day}/${d.getFullYear()}`;
+    };
+
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+
+    // 1. Reconcile ALL existing rows against current employee info and cert requirements
+    (certTable.rows || []).forEach(r => {
+      const empName = String(r['Employee Name'] || r['Name'] || Object.values(r)[0] || '').trim();
+      const empNameLower = empName.toLowerCase();
+      const itemType = String(r['Item Type'] || r['Certification'] || r['Cert Type'] || '').trim();
+      const itemNorm = normalizeKey(itemType);
+
+      // 1A. Auto-sync Location and Job Number from Employees sheet
+      if (empByName.has(empNameLower)) {
+        const activeEmp = empByName.get(empNameLower);
+        if (activeEmp.loc && r['Location'] !== activeEmp.loc) {
+          r['Location'] = activeEmp.loc;
+          syncedEmpDetailsCount++;
+        }
+        if (activeEmp.job && r['Job #'] !== activeEmp.job) {
+          r['Job #'] = activeEmp.job;
+          syncedEmpDetailsCount++;
+        }
+      }
+
+      // 1B. Reconcile Cert Validity
+      let certDef = certMap.get(itemNorm) || certMap.get(itemType.toLowerCase());
+      if (!certDef) {
+        // Try partial match
+        for (let [k, cd] of certMap.entries()) {
+          if (itemNorm.includes(k) || k.includes(itemNorm)) {
+            certDef = cd;
+            break;
+          }
+        }
+      }
+
+      if (certDef) {
+        const isNonExp = certDef.isIssuedDate || certDef.termMonths === 0 || itemNorm.includes('trench');
+        const curAcquired = String(r['Date Acquired'] || '').trim();
+        const curExp = String(r['Expiration Date'] || '').trim();
+
+        if (isNonExp) {
+          let rowChanged = false;
+          // If expiration date exists and acquired date is empty, transfer old date to Date Acquired
+          if (curExp && curExp !== 'N/A' && curExp !== 'No Date Set' && !curAcquired) {
+            r['Date Acquired'] = curExp;
+            rowChanged = true;
+          }
+          if (r['Expiration Date'] !== 'N/A') {
+            r['Expiration Date'] = 'N/A';
+            rowChanged = true;
+          }
+          if (r['Days Until Expiration'] !== 'N/A') {
+            r['Days Until Expiration'] = 'N/A';
+            rowChanged = true;
+          }
+          const hasAcq = r['Date Acquired'] && r['Date Acquired'] !== 'N/A' && r['Date Acquired'] !== 'No Date Set';
+          const newStatus = hasAcq ? 'OK' : 'No Date Set';
+          if (r['Status'] !== newStatus) {
+            r['Status'] = newStatus;
+            rowChanged = true;
+          }
+          if (rowChanged) reconciledExistingCount++;
+        } else if (certDef.termMonths > 0) {
+          let rowChanged = false;
+          // Expiring cert: if Date Acquired exists and Expiration Date is missing or was N/A
+          if (curAcquired && (!curExp || curExp === 'N/A' || curExp === 'No Date Set')) {
+            const acqD = parseDateObj(curAcquired);
+            if (acqD) {
+              const expD = new Date(acqD);
+              expD.setMonth(expD.getMonth() + certDef.termMonths);
+              r['Expiration Date'] = formatDateStr(expD);
+              rowChanged = true;
+            }
+          }
+          // Recalculate days and status from Expiration Date
+          const expD = parseDateObj(r['Expiration Date']);
+          if (expD) {
+            const diffTime = expD.getTime() - now.getTime();
+            const daysLeft = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+            if (r['Days Until Expiration'] !== daysLeft) {
+              r['Days Until Expiration'] = daysLeft;
+              rowChanged = true;
+            }
+            let calcStatus = 'OK';
+            if (daysLeft < 0) calcStatus = 'EXPIRED';
+            else if (daysLeft <= 30) calcStatus = 'CRITICAL';
+            else if (daysLeft <= 60) calcStatus = 'WARNING';
+            else if (daysLeft <= 90) calcStatus = 'UPCOMING';
+            if (r['Status'] !== calcStatus) {
+              r['Status'] = calcStatus;
+              rowChanged = true;
+            }
+          } else if (!r['Expiration Date'] || r['Expiration Date'] === 'No Date Set') {
+            if (r['Days Until Expiration'] !== 'MISSING' && r['Days Until Expiration'] !== 'N/A') {
+              r['Days Until Expiration'] = 'MISSING';
+              rowChanged = true;
+            }
+            if (r['Status'] !== 'MISSING') {
+              r['Status'] = 'MISSING';
+              rowChanged = true;
+            }
+          }
+          if (rowChanged) reconciledExistingCount++;
+        }
+      }
+    });
+
+    // 2. Build existing employee|cert map to identify missing required certs
     const existingMap = new Set();
     (certTable.rows || []).forEach(r => {
       const eName = String(r['Employee Name'] || r['Name'] || Object.values(r)[0] || '').trim().toLowerCase();
-      const cType = String(r['Item Type'] || r['Certification'] || r['Cert Type'] || '').trim().toLowerCase();
+      const cType = normalizeKey(r['Item Type'] || r['Certification'] || r['Cert Type'] || '');
       if (eName && cType) {
         existingMap.add(`${eName}|${cType}`);
       }
@@ -765,22 +930,23 @@ class CertsConfigEngine {
 
       for (let cert of this.certs) {
         const certKey = cert.key || cert.name;
-        const lookupKey = `${empName.toLowerCase()}|${certKey.toLowerCase()}`;
+        const normKey = normalizeKey(certKey);
+        const lookupKey = `${empName.toLowerCase()}|${normKey}`;
 
         // If required and not yet in matrix, add row!
         if (!existingMap.has(lookupKey)) {
           const isRequired = this.isCertRequiredForEmployee(certKey, jobClass);
           if (isRequired) {
-            const isNonExp = cert.isIssuedDate || cert.termMonths === 0;
+            const isNonExp = cert.isIssuedDate || cert.termMonths === 0 || normKey.includes('trench');
             const newRow = {
               'Employee Name': empName,
               'Item Type': certKey,
               'Date Acquired': '',
-              'Expiration Date': '',
+              'Expiration Date': isNonExp ? 'N/A' : '',
               'Location': empLoc,
               'Job #': empJob,
-              'Days Until Expiration': isNonExp ? '' : 'MISSING',
-              'Status': isNonExp ? 'OK' : 'MISSING',
+              'Days Until Expiration': isNonExp ? 'N/A' : 'MISSING',
+              'Status': isNonExp ? 'No Date Set' : 'MISSING',
               'SMS': ''
             };
             newRowsToAdd.push(newRow);
@@ -790,36 +956,53 @@ class CertsConfigEngine {
       }
     }
 
+    const totalModified = reconciledExistingCount + syncedEmpDetailsCount + newRowsToAdd.length;
+
     if (newRowsToAdd.length > 0) {
       console.log(`Adding ${newRowsToAdd.length} missing required cert rows to local database...`);
       for (let newRow of newRowsToAdd) {
         certTable.rows.push(newRow);
-        if (certTable.rawGrid && certTable.headers) {
-          const gridArr = certTable.headers.map(h => newRow[h] !== undefined ? newRow[h] : '');
-          certTable.rawGrid.push(gridArr);
-          certTable.maxRows = certTable.rawGrid.length;
-        }
-        // Queue for sync to Google Sheets
-        if (this.db && typeof this.db.addMutation === 'function') {
-          await this.db.addMutation({
-            action: 'ADD_ROW',
-            sheetName: 'Expiring Certs',
-            tableKey: 'expiring_certs',
-            rowData: newRow
-          });
-        }
+      }
+    }
+
+    if (totalModified > 0) {
+      console.log(`applyRequirementsToMatrix: ${reconciledExistingCount} cert records reconciled, ${syncedEmpDetailsCount} employee location/jobs synced, ${newRowsToAdd.length} missing rows added.`);
+      
+      // Rebuild rawGrid and update counts
+      if (certTable.headers) {
+        certTable.rawGrid = [certTable.headers];
+        certTable.rows.forEach(r => {
+          certTable.rawGrid.push(certTable.headers.map(h => r[h] !== undefined ? r[h] : ''));
+        });
+        certTable.maxRows = certTable.rawGrid.length;
       }
       certTable.rowCount = certTable.rows.length;
+
+      // Queue full replacement sync mutation
+      if (this.db && typeof this.db.addMutation === 'function') {
+        await this.db.addMutation({
+          action: 'REPLACE_TABLE_DATA',
+          sheetName: 'Expiring Certs',
+          tableKey: 'expiring_certs',
+          headers: certTable.headers,
+          rows: certTable.rows,
+          rawGrid: certTable.rawGrid
+        });
+      }
+
       if (typeof this.db.setSnapshot === 'function' && this.db.snapshot) {
         await this.db.setSnapshot(this.db.snapshot);
+      } else if (window.desktopAPI && typeof window.desktopAPI.saveLocalSnapshot === 'function') {
+        await window.desktopAPI.saveLocalSnapshot(this.db.snapshot);
       }
+
       if (window.sheetNavigator && (window.sheetNavigator.currentSheetKey === 'expiring_certs' || document.getElementById('expiring-certs-view')?.classList.contains('active'))) {
         window.sheetNavigator.renderExpiringCerts();
       }
     }
 
     if (showAlert) {
-      alert(`✅ Certification Requirements Applied!\n\n• ${newRowsToAdd.length} missing required rows created across ${activeEmployees.length} active employees.\n• All requirements are now up to date.`);
+      alert(`✅ Certification Requirements & Sync Applied!\n\n• ${reconciledExistingCount} certification records updated (validity/non-expiring).\n• ${syncedEmpDetailsCount} records synced with current employee Location and Job #.\n• ${newRowsToAdd.length} missing required rows created across ${activeEmployees.length} active employees.\n• All requirements and matrix records are now up to date.`);
     }
   }
 
