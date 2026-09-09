@@ -13538,7 +13538,7 @@ function createBackupSnapshotFast(forceFullCopy) {
 
   } catch (e) {
     logEvent('Backup failed: ' + e, 'ERROR');
-    ss.toast('Backup failed: ' + e.message, '❌ Error', 10);
+    try { ss.toast('Backup failed: ' + e.message, '❌ Error', 10); } catch (tErr) {}
     return null;
   }
 }
@@ -33564,6 +33564,36 @@ function doPost(e) {
       var dedupeRes = dedupeExpiringCertsSheet();
       return ContentService.createTextOutput(JSON.stringify(dedupeRes))
         .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    if (action === 'createBackup' || action === 'finalizePushAndBackup') {
+      var forceFullCopy = payload.forceFullCopy === true;
+      var bkFile = null;
+      try {
+        if (typeof createBackupSnapshotFast === 'function') {
+          bkFile = createBackupSnapshotFast(forceFullCopy);
+        }
+      } catch (bkErr) {
+        Logger.log('doPost createBackup error: ' + bkErr);
+      }
+
+      var snapFile = null;
+      try {
+        if (typeof generateAndStoreSyncSnapshot === 'function') {
+          snapFile = generateAndStoreSyncSnapshot();
+        }
+      } catch (snapErr) {
+        Logger.log('doPost generateAndStoreSyncSnapshot error: ' + snapErr);
+      }
+
+      return ContentService.createTextOutput(JSON.stringify({
+        status: 'ok',
+        success: true,
+        backupCreated: !!bkFile,
+        backupName: bkFile ? bkFile.getName() : null,
+        snapshotUpdated: !!snapFile,
+        timestamp: new Date().toISOString()
+      })).setMimeType(ContentService.MimeType.JSON);
     }
 
     if (action === 'getSnapshot') {
