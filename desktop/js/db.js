@@ -811,7 +811,8 @@ class LocalDatabase {
     if (!itemNum) return;
 
     const assignedTo = String(itemRow['Assigned To'] || itemRow['Status'] || 'On Shelf').trim();
-    const location = String(itemRow['Location'] || 'Helena').trim();
+    const cleanLoc = window.getPhysicalLocation ? window.getPhysicalLocation(itemRow['Location']) : itemRow['Location'];
+    const location = String(cleanLoc || itemRow['Location'] || 'Helena').trim();
     const notes = reasonNote || itemRow['Notes'] || '';
 
     // Check if the latest history entry for this item already has the identical assignedTo and location
@@ -1823,12 +1824,21 @@ class LocalDatabase {
           }
 
           // D. If status, location, or assigned to changed on an inventory sheet, auto-record history transition
-          if (hLower === 'status' || hLower === 'item status' || hLower === 'assigned to' || hLower.includes('assigned to') || hLower === 'location') {
-            const reason = (row['Status'] === 'Failed Rubber' || row['Assigned To'] === 'Failed Rubber') ? 'Failed Rubber' :
-                           (row['Status'] === 'Lost' || row['Assigned To'] === 'Lost') ? 'Lost' :
-                           (row['Status'] === 'In Testing' || row['Assigned To'] === 'In Testing') ? 'In Testing' :
-                           row['Notes'] || '';
-            await this.recordItemHistoryEvent(table.name, row, reason);
+          if (!mut.skipHistory) {
+            if (hLower === 'status' || hLower === 'item status' || hLower === 'assigned to' || hLower.includes('assigned to') || hLower === 'location') {
+              const sAssigned = String(row['Assigned To'] || '').trim().toLowerCase();
+              const sStatus = String(row['Status'] || '').trim().toLowerCase();
+              // Guard against intermediate multi-cell states (e.g. status changed to Assigned while holder is still On Shelf)
+              const isTransitional = (sStatus === 'assigned' && sAssigned === 'on shelf') ||
+                                     (sStatus === 'on shelf' && sAssigned && !['on shelf', '', 'unassigned'].includes(sAssigned));
+              if (!isTransitional) {
+                const reason = (row['Status'] === 'Failed Rubber' || row['Assigned To'] === 'Failed Rubber') ? 'Failed Rubber' :
+                               (row['Status'] === 'Lost' || row['Assigned To'] === 'Lost') ? 'Lost' :
+                               (row['Status'] === 'In Testing' || row['Assigned To'] === 'In Testing') ? 'In Testing' :
+                               row['Notes'] || '';
+                await this.recordItemHistoryEvent(table.name, row, reason);
+              }
+            }
           }
         }
       }

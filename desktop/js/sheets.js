@@ -2855,7 +2855,7 @@ class SheetNavigator {
 
           if (newVal === initialVal && !isUnreconciledShelf) return; // No change made!
 
-          const queueCell = async (hName, val) => {
+          const queueCell = async (hName, val, skipHistory = false) => {
             if (!hName || val === undefined || !tableData) return;
             const cIdx = (tableData.headers || []).indexOf(hName);
             if (cIdx !== -1) {
@@ -2866,7 +2866,8 @@ class SheetNavigator {
                 col: cIdx + 1,
                 header: hName,
                 itemIdentifier: itemIdentifier,
-                value: val
+                value: val,
+                skipHistory: skipHistory
               });
             }
           };
@@ -3008,14 +3009,14 @@ class SheetNavigator {
 
             syncTableRowToGrid();
 
-            if (assignedColName) { await queueCell(assignedColName, 'On Shelf'); updateRowCell(assignedColName, 'On Shelf'); }
-            if (statusColName) { await queueCell(statusColName, 'On Shelf'); updateRowCell(statusColName, 'On Shelf'); }
-            if (locationColName) { await queueCell(locationColName, 'Helena'); updateRowCell(locationColName, 'Helena'); }
-            if (dateAssignedColName) { await queueCell(dateAssignedColName, todayFormatted); updateRowCell(dateAssignedColName, todayFormatted); }
-            if (testDateColName && shelfDetails.testDate) { await queueCell(testDateColName, shelfDetails.testDate); updateRowCell(testDateColName, shelfDetails.testDate); }
-            if (eslColName && shelfDetails.eslId) { await queueCell(eslColName, shelfDetails.eslId); updateRowCell(eslColName, shelfDetails.eslId); }
-            if (pickedColName) { await queueCell(pickedColName, ''); updateRowCell(pickedColName, ''); }
-            if (chgOutColName && calculatedShelfDate) { await queueCell(chgOutColName, calculatedShelfDate); updateRowCell(chgOutColName, calculatedShelfDate); }
+            if (assignedColName) { await queueCell(assignedColName, 'On Shelf', true); updateRowCell(assignedColName, 'On Shelf'); }
+            if (statusColName) { await queueCell(statusColName, 'On Shelf', true); updateRowCell(statusColName, 'On Shelf'); }
+            if (locationColName) { await queueCell(locationColName, 'Helena', true); updateRowCell(locationColName, 'Helena'); }
+            if (dateAssignedColName) { await queueCell(dateAssignedColName, todayFormatted, true); updateRowCell(dateAssignedColName, todayFormatted); }
+            if (testDateColName && shelfDetails.testDate) { await queueCell(testDateColName, shelfDetails.testDate, true); updateRowCell(testDateColName, shelfDetails.testDate); }
+            if (eslColName && shelfDetails.eslId) { await queueCell(eslColName, shelfDetails.eslId, true); updateRowCell(eslColName, shelfDetails.eslId); }
+            if (pickedColName) { await queueCell(pickedColName, '', true); updateRowCell(pickedColName, ''); }
+            if (chgOutColName && calculatedShelfDate) { await queueCell(chgOutColName, calculatedShelfDate, true); updateRowCell(chgOutColName, calculatedShelfDate); }
 
             await this.db.recordItemHistoryEvent(sheetName, tableRow, `Returned to Shelf (Test Date: ${shelfDetails.testDate || todayFormatted})`);
             flashSuccess();
@@ -3027,50 +3028,95 @@ class SheetNavigator {
             const statusColName = (tableData.headers || []).find(h => /^status$|^item\s*status$/i.test(h));
             const locationColName = (tableData.headers || []).find(h => /^location$/i.test(h));
             const pickedColName = (tableData.headers || []).find(h => /^picked\s*for$/i.test(h));
+            const dateAssignedColName = (tableData.headers || []).find(h => /date\s*assigned/i.test(h));
+            const chgOutColName = (tableData.headers || []).find(h => /change\s*out/i.test(h));
+            const testDateColName = (tableData.headers || []).find(h => /test\s*date|calibration/i.test(h));
 
             const curAssigned = isAssignedCol ? newVal : String(tableRow[assignedColName] || '').trim();
             const curAssignedLower = curAssigned.toLowerCase();
             const nonEmpHolders = ['on shelf', 'in testing', 'packed for testing', 'packed for delivery', 'failed rubber', 'failed', 'lost', 'destroyed', 'new', 'unassigned', 'n/a', '—', '-'];
             const isAssignedToEmp = curAssigned && !nonEmpHolders.includes(curAssignedLower);
 
-            // When Assigned To is set or Date Assigned is entered for an assigned item, remove Picked For
-            if (isAssignedToEmp) {
-              if (pickedColName && tableRow[pickedColName]) {
-                tableRow[pickedColName] = '';
-                const pIdx = (tableData.headers || []).indexOf(pickedColName);
-                if (pIdx !== -1) {
-                  if (tableData.rawGrid && tableData.rawGrid[actualRowIdx - 1]) tableData.rawGrid[actualRowIdx - 1][pIdx] = '';
-                  await queueCell(pickedColName, '');
-                  updateRowCell(pickedColName, '');
+            // When Assigned To is changed to an employee, prompt for Date Assigned and update atomically
+            if (isAssignedCol && isAssignedToEmp) {
+              const empTable = this.db.getTable('employees');
+              let empLoc = 'Helena';
+              if (empTable && empTable.rows) {
+                const empMatch = empTable.rows.find(e => String(e['Name'] || e['Employee Name'] || Object.values(e)[0] || '').trim().toLowerCase() === curAssignedLower);
+                if (empMatch) {
+                  const rawLoc = String(empMatch['Location'] || '').trim();
+                  empLoc = (window.getPhysicalLocation ? window.getPhysicalLocation(rawLoc) : rawLoc) || 'Helena';
                 }
               }
 
-              // Auto-update Status to Assigned and Location to employee location if Assigned To changed
-              if (isAssignedCol) {
-                if (statusColName && tableRow[statusColName] !== 'Assigned') {
-                  tableRow[statusColName] = 'Assigned';
-                  const sIdx = (tableData.headers || []).indexOf(statusColName);
-                  if (sIdx !== -1) {
-                    if (tableData.rawGrid && tableData.rawGrid[actualRowIdx - 1]) tableData.rawGrid[actualRowIdx - 1][sIdx] = 'Assigned';
-                    await queueCell(statusColName, 'Assigned');
-                    updateRowCell(statusColName, 'Assigned');
-                  }
-                }
-                const empTable = this.db.getTable('employees');
-                let empLoc = '';
-                if (empTable && empTable.rows) {
-                  const empMatch = empTable.rows.find(e => String(e['Name'] || e['Employee Name'] || Object.values(e)[0] || '').trim().toLowerCase() === curAssignedLower);
-                  if (empMatch) empLoc = String(empMatch['Location'] || '').trim();
-                }
-                if (empLoc && locationColName) {
-                  tableRow[locationColName] = empLoc;
-                  const lIdx = (tableData.headers || []).indexOf(locationColName);
-                  if (lIdx !== -1) {
-                    if (tableData.rawGrid && tableData.rawGrid[actualRowIdx - 1]) tableData.rawGrid[actualRowIdx - 1][lIdx] = empLoc;
-                    await queueCell(locationColName, empLoc);
-                    updateRowCell(locationColName, empLoc);
-                  }
-                }
+              const assignDetails = await this.promptAssignItemDetails(itemIdentifier, curAssigned, empLoc);
+              if (!assignDetails) {
+                targetCell.textContent = initialVal;
+                return;
+              }
+
+              const chosenDate = assignDetails.dateAssigned || todayFormatted;
+              const chosenLoc = assignDetails.location || empLoc;
+
+              // Apply in-memory row updates
+              if (pickedColName) tableRow[pickedColName] = '';
+              if (statusColName) tableRow[statusColName] = 'Assigned';
+              if (locationColName) tableRow[locationColName] = chosenLoc;
+              if (dateAssignedColName) tableRow[dateAssignedColName] = chosenDate;
+              if (assignedColName) tableRow[assignedColName] = curAssigned;
+
+              // Recalculate Change Out Date
+              const curTestDate = testDateColName ? (tableRow[testDateColName] || '') : '';
+              let calculatedChgOut = '';
+              if (window.inventoryManager && typeof window.inventoryManager.calculateChangeOutDate === 'function') {
+                calculatedChgOut = window.inventoryManager.calculateChangeOutDate(
+                  chosenDate || curTestDate,
+                  chosenLoc,
+                  curAssigned,
+                  this.currentSheetKey,
+                  { testDate: curTestDate, calibrationDate: curTestDate }
+                );
+              }
+              if (calculatedChgOut && chgOutColName && calculatedChgOut !== 'N/A') {
+                tableRow[chgOutColName] = calculatedChgOut;
+              }
+
+              syncTableRowToGrid();
+
+              // Update UI cells
+              if (pickedColName) updateRowCell(pickedColName, '');
+              if (statusColName) updateRowCell(statusColName, 'Assigned');
+              if (locationColName) updateRowCell(locationColName, chosenLoc);
+              if (dateAssignedColName) updateRowCell(dateAssignedColName, chosenDate);
+              if (assignedColName) updateRowCell(assignedColName, curAssigned);
+              if (chgOutColName && calculatedChgOut && calculatedChgOut !== 'N/A') {
+                updateRowCell(chgOutColName, calculatedChgOut);
+              }
+
+              // Queue cell updates with skipHistory = true to prevent intermediate phantom events
+              if (pickedColName) await queueCell(pickedColName, '', true);
+              if (statusColName) await queueCell(statusColName, 'Assigned', true);
+              if (locationColName) await queueCell(locationColName, chosenLoc, true);
+              if (dateAssignedColName) await queueCell(dateAssignedColName, chosenDate, true);
+              if (assignedColName) await queueCell(assignedColName, curAssigned, true);
+              if (chgOutColName && calculatedChgOut && calculatedChgOut !== 'N/A') {
+                await queueCell(chgOutColName, calculatedChgOut, true);
+              }
+
+              // Record history event ONCE with fully consistent row
+              await this.db.recordItemHistoryEvent(sheetName, tableRow, `Assigned to ${curAssigned}`);
+              flashSuccess();
+              return;
+            }
+
+            // When Date Assigned is entered for an assigned item, remove Picked For
+            if (isAssignedToEmp && pickedColName && tableRow[pickedColName]) {
+              tableRow[pickedColName] = '';
+              const pIdx = (tableData.headers || []).indexOf(pickedColName);
+              if (pIdx !== -1) {
+                if (tableData.rawGrid && tableData.rawGrid[actualRowIdx - 1]) tableData.rawGrid[actualRowIdx - 1][pIdx] = '';
+                await queueCell(pickedColName, '', true);
+                updateRowCell(pickedColName, '');
               }
             }
           }
@@ -3608,6 +3654,152 @@ class SheetNavigator {
         testInput.focus();
         testInput.select();
       }
+    });
+  }
+
+  promptAssignItemDetails(itemIdentifier, employeeName, defaultLocation = 'Helena') {
+    return new Promise((resolve) => {
+      const modal = document.getElementById('assign-item-modal');
+      const today = new Date();
+      const todayFormatted = `${String(today.getMonth() + 1).padStart(2, '0')}/${String(today.getDate()).padStart(2, '0')}/${today.getFullYear()}`;
+      const todayIso = today.toISOString().split('T')[0];
+
+      const yesterday = new Date(today);
+      yesterday.setDate(yesterday.getDate() - 1);
+      const yesterdayFormatted = `${String(yesterday.getMonth() + 1).padStart(2, '0')}/${String(yesterday.getDate()).padStart(2, '0')}/${yesterday.getFullYear()}`;
+      const yesterdayIso = yesterday.toISOString().split('T')[0];
+
+      if (!modal) {
+        const dPrompt = prompt(`Assign Item #${itemIdentifier || ''} to ${employeeName}.\nEnter Date Assigned (MM/DD/YYYY):`, todayFormatted);
+        if (!dPrompt) return resolve(null);
+        return resolve({ dateAssigned: dPrompt.trim(), location: defaultLocation });
+      }
+
+      const titleEl = document.getElementById('assign-modal-title');
+      if (titleEl) {
+        titleEl.textContent = itemIdentifier ? `Assign Item #${itemIdentifier}` : `Assign Item`;
+      }
+
+      const subtitleEl = document.getElementById('assign-item-subtitle');
+      if (subtitleEl) {
+        subtitleEl.textContent = `Assigning to ${employeeName}`;
+      }
+
+      const empNameEl = document.getElementById('assign-modal-emp-name');
+      if (empNameEl) {
+        empNameEl.textContent = employeeName;
+      }
+
+      const dateInput = document.getElementById('assign-modal-date');
+      const datePicker = document.getElementById('assign-modal-date-picker');
+      const locInput = document.getElementById('assign-modal-location');
+      const quickToday = document.getElementById('assign-quick-today');
+      const quickYesterday = document.getElementById('assign-quick-yesterday');
+
+      const cleanLoc = (window.getPhysicalLocation ? window.getPhysicalLocation(defaultLocation) : defaultLocation) || 'Helena';
+
+      if (dateInput) dateInput.value = todayFormatted;
+      if (datePicker) datePicker.value = todayIso;
+      if (locInput) locInput.value = cleanLoc;
+
+      if (datePicker && dateInput) {
+        datePicker.onchange = () => {
+          if (datePicker.value) {
+            const p = datePicker.value.split('-');
+            dateInput.value = `${p[1]}/${p[2]}/${p[0]}`;
+          }
+        };
+      }
+
+      if (dateInput && datePicker) {
+        dateInput.oninput = () => {
+          const val = dateInput.value.trim();
+          if (/^\d{2}\/\d{2}\/\d{4}$/.test(val)) {
+            const p = val.split('/');
+            datePicker.value = `${p[2]}-${p[0]}-${p[1]}`;
+          }
+        };
+      }
+
+      if (quickToday && dateInput && datePicker) {
+        quickToday.onclick = (e) => {
+          e.preventDefault();
+          dateInput.value = todayFormatted;
+          datePicker.value = todayIso;
+        };
+      }
+
+      if (quickYesterday && dateInput && datePicker) {
+        quickYesterday.onclick = (e) => {
+          e.preventDefault();
+          dateInput.value = yesterdayFormatted;
+          datePicker.value = yesterdayIso;
+        };
+      }
+
+      const closeBtn = document.getElementById('assign-modal-close');
+      const cancelBtn = document.getElementById('assign-modal-cancel');
+      const confirmBtn = document.getElementById('assign-modal-confirm');
+
+      const cleanup = () => {
+        modal.classList.remove('active');
+        modal.style.display = 'none';
+        modal.onclick = null;
+        if (closeBtn) closeBtn.onclick = null;
+        if (cancelBtn) cancelBtn.onclick = null;
+        if (confirmBtn) confirmBtn.onclick = null;
+        if (datePicker) datePicker.onchange = null;
+        if (dateInput) dateInput.oninput = null;
+        if (quickToday) quickToday.onclick = null;
+        if (quickYesterday) quickYesterday.onclick = null;
+        document.removeEventListener('keydown', handleEsc);
+      };
+
+      const handleEsc = (e) => {
+        if (e.key === 'Escape') {
+          cleanup();
+          resolve(null);
+        }
+      };
+
+      const handleCancel = () => {
+        cleanup();
+        resolve(null);
+      };
+
+      const handleConfirm = () => {
+        let dVal = dateInput ? dateInput.value.trim() : '';
+        if (!dVal) dVal = todayFormatted;
+
+        if (dVal.includes('-')) {
+          const p = dVal.split('-');
+          if (p.length === 3) dVal = `${p[1]}/${p[2]}/${p[0]}`;
+        }
+
+        const lVal = locInput ? locInput.value.trim() : defaultLocation;
+        const cleanL = (window.getPhysicalLocation ? window.getPhysicalLocation(lVal) : lVal) || 'Helena';
+
+        cleanup();
+        resolve({ dateAssigned: dVal, location: cleanL });
+      };
+
+      modal.onclick = (e) => {
+        if (e.target === modal) handleCancel();
+      };
+      if (closeBtn) closeBtn.onclick = handleCancel;
+      if (cancelBtn) cancelBtn.onclick = handleCancel;
+      if (confirmBtn) confirmBtn.onclick = handleConfirm;
+
+      document.addEventListener('keydown', handleEsc);
+
+      modal.style.display = 'flex';
+      modal.classList.add('active');
+      setTimeout(() => {
+        if (dateInput) {
+          dateInput.focus();
+          dateInput.select();
+        }
+      }, 50);
     });
   }
 

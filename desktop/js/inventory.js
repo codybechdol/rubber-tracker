@@ -24,6 +24,44 @@ class InventoryManager {
   }
 
   /**
+   * Cleans an employee or inventory location string by stripping parenthetical status
+   * annotations (e.g., 'Butte (Medical)' -> 'Butte'), mapping docks to cities,
+   * and falling back to 'Helena' for pure employee statuses.
+   * Matches canonical logic from 01-Utilities.gs.
+   */
+  getPhysicalLocation(location) {
+    if (!location) return '';
+    let locStr = String(location).trim();
+    const parenIdx = locStr.indexOf('(');
+    if (parenIdx !== -1) {
+      locStr = locStr.substring(0, parenIdx).trim();
+    }
+    const dockMap = {
+      'three rivers dock': 'Three Rivers',
+      'three rivers': 'Three Rivers',
+      'helena dock': 'Helena',
+      'belgrade dock': 'Belgrade',
+      'bozeman dock': 'Bozeman',
+      'great falls dock': 'Great Falls',
+      'billings dock': 'Billings',
+      'butte dock': 'Butte',
+      'missoula dock': 'Missoula',
+      'kalispell dock': 'Kalispell',
+      'rattlesnake sub': 'Helena',
+      'gold creek trans dock': 'Gold Creek',
+      'texas dock': 'Texas'
+    };
+    const mapped = dockMap[locStr.toLowerCase()];
+    if (mapped) return mapped;
+
+    const statusLocations = ['vacation', 'light duty', 'weeds', 'leave', 'previous employee', 'medical', "worker's comp", 'unknown'];
+    if (statusLocations.includes(locStr.toLowerCase())) {
+      return 'Helena';
+    }
+    return locStr;
+  }
+
+  /**
    * Calculates the Change Out Date based on equipment rules
    *
    * GLOVES:
@@ -2110,5 +2148,6 @@ class InventoryManager {
 }
 
 window.inventoryManager = new InventoryManager(window.localDB);
+window.getPhysicalLocation = (loc) => window.inventoryManager.getPhysicalLocation(loc);
 
 

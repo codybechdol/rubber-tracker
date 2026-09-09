@@ -847,7 +847,7 @@ class ItemStatsEngine {
             </div>
             <div>
               <label style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 4px;">ASSIGNED TO</label>
-              <input type="text" id="dossier-edit-assigned-to" list="new-item-employees-datalist" class="form-control" value="${this.escapeHtml(curAssignedTo)}">
+              <input type="text" id="dossier-edit-assigned-to" list="new-item-employees-datalist" class="form-control" value="${this.escapeHtml(curAssignedTo)}" oninput="window.itemStatsEngine.handleDossierAssignedToInput(this.value)">
             </div>
             <div>
               <button class="btn btn-primary" style="width: 100%; font-weight: 700; padding: 7px 12px; display: flex; align-items: center; justify-content: center; gap: 6px;" onclick="window.itemStatsEngine.saveDossierItemEdits('${this.escapeHtml(sheetKey)}', '${this.escapeHtml(cleanItemKey)}')">
@@ -1623,6 +1623,45 @@ class ItemStatsEngine {
   }
 
   /**
+   * Auto-adjusts status, location, and date assigned when an employee name is entered in the Dossier
+   */
+  handleDossierAssignedToInput(val) {
+    const trimmed = String(val || '').trim();
+    if (!trimmed) return;
+    const lower = trimmed.toLowerCase();
+    const nonEmpHolders = ['on shelf', 'in testing', 'packed for testing', 'packed for delivery', 'failed rubber', 'failed', 'lost', 'destroyed', 'new', 'unassigned', 'n/a', '—', '-'];
+    if (nonEmpHolders.includes(lower)) {
+      if (lower === 'on shelf') {
+        const statEl = document.getElementById('dossier-edit-status');
+        const locEl = document.getElementById('dossier-edit-location');
+        if (statEl) statEl.value = 'On Shelf';
+        if (locEl) locEl.value = 'Helena';
+      }
+      return;
+    }
+
+    const statEl = document.getElementById('dossier-edit-status');
+    const locEl = document.getElementById('dossier-edit-location');
+    const dateEl = document.getElementById('dossier-edit-date-assigned');
+
+    if (statEl) statEl.value = 'Assigned';
+
+    const empTable = this.db ? this.db.getTable('employees') : (window.localDB ? window.localDB.getTable('employees') : null);
+    if (empTable && empTable.rows) {
+      const empMatch = empTable.rows.find(e => String(e['Name'] || e['Employee Name'] || Object.values(e)[0] || '').trim().toLowerCase() === lower);
+      if (empMatch) {
+        const rawLoc = String(empMatch['Location'] || '').trim();
+        const cleanLoc = (window.getPhysicalLocation ? window.getPhysicalLocation(rawLoc) : rawLoc) || 'Helena';
+        if (locEl) locEl.value = cleanLoc;
+      }
+    }
+
+    if (dateEl && !dateEl.value) {
+      dateEl.value = new Date().toISOString().split('T')[0];
+    }
+  }
+
+  /**
    * Saves updated dates, status, location, or assignment from the Dossier modal
    */
   async saveDossierItemEdits(sheetKey, cleanItemKey) {
@@ -1671,7 +1710,15 @@ class ItemStatsEngine {
     const newDateAssigned = dateAssignedInput ? formatToMdY(dateAssignedInput.value.trim()) : '';
     let newStatus = statusSelect ? statusSelect.value.trim() : (row['Status'] || '');
     let newLocation = locationInput ? locationInput.value.trim() : (row['Location'] || '');
+    newLocation = (window.getPhysicalLocation ? window.getPhysicalLocation(newLocation) : newLocation) || newLocation;
     let newAssignedTo = assignedToInput ? assignedToInput.value.trim() : (row['Assigned To'] || '');
+
+    const nonEmpHolders = ['on shelf', 'in testing', 'packed for testing', 'packed for delivery', 'failed rubber', 'failed', 'lost', 'destroyed', 'new', 'unassigned', 'n/a', '—', '-'];
+    if (newAssignedTo && !nonEmpHolders.includes(newAssignedTo.toLowerCase())) {
+      if (newStatus.toLowerCase() === 'on shelf') {
+        newStatus = 'Assigned';
+      }
+    }
 
     const isFailedRubber = newStatus.toLowerCase() === 'failed rubber' || newAssignedTo.toLowerCase() === 'failed rubber';
     let failedReason = '';
@@ -1755,7 +1802,7 @@ class ItemStatsEngine {
 
     // Queue UPDATE_CELL mutations for sync
     const sheetName = table.name || activeSheetKey;
-    const addCellMutation = async (hName, val) => {
+    const addCellMutation = async (hName, val, skipHistory = true) => {
       if (!hName || val === undefined) return;
       const colIdx = table.headers.indexOf(hName);
       if (colIdx !== -1 && rowIdx) {
@@ -1765,7 +1812,8 @@ class ItemStatsEngine {
           row: rowIdx,
           col: colIdx + 1,
           header: hName,
-          value: val
+          value: val,
+          skipHistory: skipHistory
         });
       }
     };
