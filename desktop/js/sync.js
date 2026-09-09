@@ -66,7 +66,7 @@ class SyncEngine {
           if (text.includes('ServiceLogin') || text.includes('accounts.google.com')) {
             throw new Error('Google returned a login/access page. Please verify in Google Sheets: Extensions > Apps Script > Deploy > Manage Deployments, and ensure "Who has access" is set to "Anyone".');
           }
-          throw new Error('Google Apps Script server returned an error or timed out. Please try running with "Fast Mode" enabled.');
+          throw new Error('Google Apps Script server returned an error or timed out. Please try running with a smaller date range or try again.');
         }
         throw parseErr;
       }
@@ -95,7 +95,7 @@ class SyncEngine {
                 if (xhr.responseText.includes('ServiceLogin') || xhr.responseText.includes('accounts.google.com')) {
                   reject(new Error('Google returned a login/access page. Please ensure "Who has access" is set to "Anyone".'));
                 } else {
-                  reject(new Error('Google Apps Script server returned an error or timed out. Please try running with "Fast Mode" enabled.'));
+                  reject(new Error('Google Apps Script server returned an error or timed out. Please try running with a smaller date range or try again.'));
                 }
               } else {
                 reject(new Error('Invalid JSON response: ' + pErr.message));

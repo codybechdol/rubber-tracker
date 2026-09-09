@@ -149,7 +149,7 @@ function makeGoogleAppsScriptRequest(targetUrl, method = 'GET', data = null) {
         return resolve({
           success: false,
           statusCode: 504,
-          error: 'The Google Apps Script server timed out or redirected too many times. Please try running with Fast Mode enabled or with a smaller date range.'
+          error: 'The Google Apps Script server timed out or redirected too many times. Please try selecting a smaller date range or try again.'
         });
       }
 
@@ -187,7 +187,7 @@ function makeGoogleAppsScriptRequest(targetUrl, method = 'GET', data = null) {
             return resolve({
               success: false,
               statusCode: 504,
-              error: 'The Google Apps Script server timed out while processing. Please try running with Fast Mode enabled or with a smaller date range.'
+              error: 'The Google Apps Script server timed out while processing. Please try selecting a smaller date range or try again.'
             });
           }
 
@@ -208,11 +208,11 @@ function makeGoogleAppsScriptRequest(targetUrl, method = 'GET', data = null) {
             } else if (res.statusCode >= 500) {
               errorMsg = `Google Apps Script server error (HTTP ${res.statusCode}). The script may have timed out or exceeded memory limits.`;
             } else if (responseBody.includes('Google Docs - Exception') || responseBody.includes('exceeded maximum execution time') || responseBody.includes('Timed out')) {
-              errorMsg = 'The Google Apps Script server timed out or failed to complete processing. Please try running with Fast Mode enabled or with a smaller date range.';
+              errorMsg = 'The Google Apps Script server timed out or failed to complete processing. Please try selecting a smaller date range or try again.';
             } else if (responseBody.includes('ServiceLogin') || responseBody.includes('accounts.google.com')) {
               errorMsg = 'Google returned a login page. Please verify in Google Sheets: Extensions > Apps Script > Deploy > Manage deployments, and ensure "Who has access" is set to "Anyone".';
             } else {
-              errorMsg = `The Google Apps Script server returned a non-JSON response (HTTP ${res.statusCode}). Please try running with Fast Mode enabled or with a smaller date range.`;
+              errorMsg = `The Google Apps Script server returned a non-JSON response (HTTP ${res.statusCode}). Please try selecting a smaller date range or try again.`;
             }
             resolve({ success: false, statusCode: res.statusCode, raw: responseBody, error: errorMsg });
           }

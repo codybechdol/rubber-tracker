@@ -516,14 +516,6 @@ class SafetyEmailsEngine {
             </div>
           </div>
         </div>
-
-        <!-- Advanced Options -->
-        <div style="display: flex; align-items: center; justify-content: space-between; padding: 0 4px;">
-          <label style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary); cursor: pointer;">
-            <input type="checkbox" id="proc-fast-mode" style="accent-color: #10b981;">
-            <span>⚡ Fast Mode (Skip full PDF OCR text extraction to speed up scan)</span>
-          </label>
-        </div>
       </div>
     `;
 
@@ -715,8 +707,7 @@ class SafetyEmailsEngine {
       daysBack = parseInt(scopeVal, 10) || 7;
     }
 
-    const fastModeEl = document.getElementById('proc-fast-mode');
-    const skipPdfExtraction = fastModeEl ? fastModeEl.checked : false;
+    const skipPdfExtraction = false;
 
     this.isProcessing = true;
     this.isMinimized = false;
@@ -850,7 +841,7 @@ class SafetyEmailsEngine {
 
         // Guard against receiving a raw database snapshot on server timeout/redirect
         if (response && response.version && response.tables && !response.result) {
-          throw new Error('The Google Apps Script server timed out while scanning emails. Please try running with "Fast Mode" enabled or with a shorter date range.');
+          throw new Error('The Google Apps Script server timed out while scanning emails. Please try selecting a shorter date range (e.g. Last 7 Days) or try again.');
         }
 
         if (!response || !response.success) {
@@ -1022,7 +1013,7 @@ class SafetyEmailsEngine {
               ${this.escapeHtml(displayError)}
             </div>
             <div style="font-size: 11.5px; color: var(--text-muted);">
-              Tip: If processing large attachments or many emails, try enabling <strong>⚡ Fast Mode</strong> or selecting <strong>📅 Last 7 Days</strong>.
+              Tip: If processing many emails, try selecting <strong>📅 Last 7 Days</strong> or clicking <strong>🗕 Run in Background</strong> to continue working while it scans.
             </div>
           </div>
         `;
