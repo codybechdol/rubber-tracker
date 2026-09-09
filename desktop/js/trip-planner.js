@@ -5633,10 +5633,360 @@ class TripPlannerApp {
   }
 
   completeTaskInModal(taskId, crewId, location) {
+    const allTasks = window.taskManager ? window.taskManager.collectAllTasks() : [];
+    const task = allTasks.find(x => x.id === taskId);
+
+    // If it's a Safety Report task, open the Resolution Modal with options!
+    if (task && (task.category === 'Safety Reports' || String(task.type).toLowerCase().includes('safety report') || String(task.id).toLowerCase().startsWith('safetycompliance_'))) {
+      this.openSafetyReportResolutionModal(task, crewId, location);
+      return;
+    }
+
     if (window.taskManager) {
       window.taskManager.completeTask(taskId);
       this.openCrewTasksModal(crewId, location, this.activeModalCat, this.activeModalDateKey);
       this.renderPlanner();
+    }
+  }
+
+  openSafetyReportResolutionModal(task, crewId, location) {
+    const modal = document.getElementById('safety-report-resolution-modal');
+    const body = document.getElementById('safety-report-res-body');
+    const title = document.getElementById('safety-report-res-title');
+    if (!modal || !body) return;
+
+    this.currentResolutionTask = { task, crewId, location };
+
+    const foreman = task.foreman || task.employee || 'Foreman';
+    const compTable = this.db.getTable('safety_compliance');
+
+    // Extract week date info
+    let targetWeekNorm = '';
+    if (task.id) {
+      const m = task.id.match(/SafetyCompliance_[0-9]{3}-[0-9]{2}_([0-9]{1,2}[-\/][0-9]{1,2}[-\/][0-9]{2,4})/i);
+      if (m) targetWeekNorm = m[1].replace(/-/g, '/');
+    }
+    if (!targetWeekNorm && task.notes) {
+      const m = String(task.notes).match(/week of (\d{1,2}[-\/]\d{1,2}[-\/]\d{2,4})/i);
+      if (m) targetWeekNorm = m[1].replace(/-/g, '/');
+    }
+    if (!targetWeekNorm && task.dueDate) {
+      const due = window.taskManager ? window.taskManager.parseDate(task.dueDate) : new Date(task.dueDate);
+      if (due && !isNaN(due.getTime())) {
+        const ws = new Date(due);
+        ws.setDate(ws.getDate() - 6);
+        const m = String(ws.getMonth() + 1).padStart(2, '0');
+        const d = String(ws.getDate()).padStart(2, '0');
+        targetWeekNorm = `${m}/${d}/${ws.getFullYear()}`;
+      }
+    }
+
+    // Match row in safety_compliance
+    let matchingRow = null;
+    if (compTable && compTable.rows) {
+      const taskJobNum = window.taskManager ? window.taskManager.getSignificantJobNumber(crewId || '') : crewId;
+      const crewRows = compTable.rows.filter(r => {
+        const rJob = window.taskManager ? window.taskManager.getSignificantJobNumber(r['Job Number'] || r['Crew'] || '') : r['Job Number'];
+        const rForeman = String(r['Foreman'] || r['Lead'] || '').toLowerCase().trim();
+        const tForeman = String(foreman).toLowerCase().trim();
+        const jobMatches = taskJobNum && rJob && (rJob === taskJobNum || rJob.startsWith(taskJobNum) || taskJobNum.startsWith(rJob));
+        const foremanMatches = tForeman && rForeman && (tForeman.includes(rForeman) || rForeman.includes(tForeman));
+        return jobMatches || (foremanMatches && !taskJobNum);
+      });
+
+      if (targetWeekNorm) {
+        matchingRow = crewRows.find(r => {
+          const rWeek = String(r['Week Start'] || r['Week'] || '').replace(/-/g, '/');
+          return rWeek.includes(targetWeekNorm);
+        });
+      }
+      if (!matchingRow && crewRows.length > 0) {
+        matchingRow = crewRows[crewRows.length - 1];
+      }
+    }
+
+    // Determine missing items that need resolution
+    const missingItems = [];
+    const dayKeys = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const dayFullNames = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+    const isCellResolved = (val) => {
+      if (val === null || val === undefined) return true;
+      const str = String(val).trim();
+      if (!str) return true;
+      if (str.toUpperCase() === 'N/A') return true;
+      if (str.includes('✅')) return true;
+      if (str.includes('❌')) return false;
+      if (str.includes('⏳')) return false;
+      return true;
+    };
+
+    if (matchingRow) {
+      const rowWeekStart = matchingRow['Week Start'] || matchingRow['Week'] || targetWeekNorm;
+      const weekStartObj = window.taskManager ? window.taskManager.parseDate(rowWeekStart) : new Date(rowWeekStart);
+
+      for (let i = 0; i < dayKeys.length; i++) {
+        const cellVal = matchingRow[dayKeys[i]];
+        if (!isCellResolved(cellVal)) {
+          let dateStr = '';
+          if (weekStartObj && !isNaN(weekStartObj.getTime())) {
+            const d = new Date(weekStartObj);
+            d.setDate(d.getDate() + i);
+            dateStr = `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${d.getFullYear()}`;
+          }
+          missingItems.push({
+            type: 'JHA',
+            dayKey: dayKeys[i],
+            dayName: dayFullNames[i],
+            date: dateStr,
+            currentVal: cellVal || '❌'
+          });
+        }
+      }
+
+      const wmVal = matchingRow['Weekly Meeting'] || matchingRow['Meeting'];
+      if (!isCellResolved(wmVal)) {
+        missingItems.push({
+          type: 'WeeklyMeeting',
+          dayKey: 'Weekly Meeting',
+          dayName: 'Weekly Safety Meeting',
+          date: targetWeekNorm,
+          currentVal: wmVal || '❌'
+        });
+      }
+    }
+
+    // Fallback if matching row had no missing items parsed or not found: infer from task.notes / task.itemType
+    if (missingItems.length === 0) {
+      const notes = String(task.notes || '');
+      const itemType = String(task.itemType || '');
+      if (notes.includes('Weekly') || itemType.includes('Weekly')) {
+        missingItems.push({
+          type: 'WeeklyMeeting',
+          dayKey: 'Weekly Meeting',
+          dayName: 'Weekly Safety Meeting',
+          date: targetWeekNorm,
+          currentVal: '❌'
+        });
+      }
+      const jhaMatches = [...notes.matchAll(/(\d{1,2}\/\d{1,2}\/\d{2,4})/g)].map(m => m[1]);
+      jhaMatches.forEach(dStr => {
+        if (dStr !== targetWeekNorm) {
+          missingItems.push({
+            type: 'JHA',
+            dayKey: 'Thu',
+            dayName: 'JHA',
+            date: dStr,
+            currentVal: '❌'
+          });
+        }
+      });
+    }
+
+    this.currentResolutionMissingItems = missingItems;
+    this.currentResolutionMatchingRow = matchingRow;
+
+    if (title) {
+      title.textContent = `Resolve Missing Safety Reports — Crew ${crewId}`;
+    }
+
+    body.innerHTML = `
+      <!-- Foreman & Crew Banner -->
+      <div style="background: linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.9) 100%); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 16px; margin-bottom: 16px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+        <div>
+          <div style="font-size: 14px; font-weight: 800; color: #f8fafc;">
+            Crew ${this.escapeHtml(crewId)} • Foreman: <span style="color: #60a5fa;">${this.escapeHtml(foreman)}</span>
+          </div>
+          <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 2px;">
+            Target Week: <strong style="color: #93c5fd;">Week of ${this.escapeHtml(targetWeekNorm || 'N/A')}</strong>
+          </div>
+        </div>
+        <span class="badge" style="background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.35); font-size: 11px; font-weight: 700; padding: 3px 8px;">
+          ${missingItems.length} Report${missingItems.length > 1 ? 's' : ''} to Resolve
+        </span>
+      </div>
+
+      <!-- Missing Reports Form List -->
+      <div style="display: flex; flex-direction: column; gap: 12px; margin-bottom: 16px;">
+        ${missingItems.map((item, idx) => `
+          <div style="background: var(--bg-primary); border: 1px solid var(--border-color); border-left: 4px solid #ef4444; border-radius: 6px; padding: 12px 14px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 6px;">
+              <span style="font-weight: 700; font-size: 13px; color: #f8fafc;">
+                ${item.type === 'WeeklyMeeting' ? '🗣️ Weekly Safety Meeting' : `📋 JHA: ${this.escapeHtml(item.dayName)}`}
+                ${item.date ? `<span style="color: #94a3b8; font-size: 11px; font-weight: normal;">(${this.escapeHtml(item.date)})</span>` : ''}
+              </span>
+              <span class="badge" style="background: rgba(239, 68, 68, 0.2); color: #f87171; font-size: 10.5px;">Currently: ❌ Missing</span>
+            </div>
+
+            <label style="font-size: 11.5px; color: var(--text-secondary); display: block; margin-bottom: 4px; font-weight: 600;">
+              Select Resolution Reason *
+            </label>
+            <select class="form-control resolution-reason-select" data-item-idx="${idx}" style="font-size: 12.5px; background: var(--bg-secondary); color: #f8fafc; border: 1px solid var(--border-color); padding: 7px 10px; border-radius: 5px; width: 100%;">
+              <option value="C">✅ Completed (Verified sent on tablet / received)</option>
+              <option value="A">❌A App / Outbox Stuck (Form submitted, internet/app didn't send)</option>
+              <option value="D">❌D Did Not Do (Report was not completed)</option>
+              <option value="F">❌F Forgot to Send (Completed on site, forgot to hit send)</option>
+              <option value="W">❌W Did Not Work / Weather / Off (Excused absence)</option>
+              <option value="L">✅L Late Submission (Turned in after cutoff)</option>
+            </select>
+          </div>
+        `).join('')}
+      </div>
+
+      <!-- Additional Explanation Notes -->
+      <div style="margin-bottom: 12px;">
+        <label style="font-size: 12px; font-weight: 600; color: #f8fafc; display: block; margin-bottom: 4px;">
+          📝 Additional Notes / Details (Optional)
+        </label>
+        <textarea id="safety-res-additional-notes" class="form-control" rows="2" style="font-size: 12px; background: var(--bg-secondary); color: #f8fafc; border: 1px solid var(--border-color); border-radius: 5px; width: 100%; resize: vertical;" placeholder="e.g. Foreman showed sent outbox timestamp on iPad; internet failed in canyon..."></textarea>
+      </div>
+
+      <div style="background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.25); border-radius: 6px; padding: 10px 14px; font-size: 11.5px; color: #93c5fd; line-height: 1.4;">
+        💡 <strong>What will happen:</strong> This will update the <strong>Safety Compliance</strong> matrix with your resolution codes (e.g. <code>❌A</code> for App Outbox Stuck, <code>✅</code> for Verified on Tablet, <code>❌D</code> for Did Not Do), update the week status to <strong>Resolved</strong>, and mark this task as <strong>Complete</strong>.
+      </div>
+    `;
+
+    modal.classList.add('active');
+  }
+
+  closeSafetyReportResolutionModal() {
+    const modal = document.getElementById('safety-report-resolution-modal');
+    if (modal) modal.classList.remove('active');
+    this.currentResolutionTask = null;
+    this.currentResolutionMissingItems = null;
+    this.currentResolutionMatchingRow = null;
+  }
+
+  async saveSafetyReportResolution() {
+    if (!this.currentResolutionTask) return;
+
+    const { task, crewId, location } = this.currentResolutionTask;
+    const items = this.currentResolutionMissingItems || [];
+    const matchingRow = this.currentResolutionMatchingRow;
+    const notesEl = document.getElementById('safety-res-additional-notes');
+    const addlNotes = notesEl ? notesEl.value.trim() : '';
+
+    const reasonCodeMap = {
+      'C': '✅',
+      'A': '❌A',
+      'D': '❌D',
+      'F': '❌F',
+      'W': '❌W',
+      'L': '✅L'
+    };
+
+    const reasonLabelMap = {
+      'C': 'Completed (Verified)',
+      'A': 'App / Outbox Stuck',
+      'D': 'Did Not Do',
+      'F': 'Forgot to Send',
+      'W': 'Did Not Work / Weather',
+      'L': 'Late Submission'
+    };
+
+    const selects = document.querySelectorAll('.resolution-reason-select');
+    const resolutionsSummary = [];
+
+    // Apply resolutions to safety_compliance table in database
+    const compTable = this.db.getTable('safety_compliance');
+    const dayColMap = {
+      'Sun': 4, 'Mon': 5, 'Tue': 6, 'Wed': 7, 'Thu': 8, 'Fri': 9, 'Sat': 10,
+      'Weekly Meeting': 11
+    };
+
+    selects.forEach(sel => {
+      const idx = parseInt(sel.getAttribute('data-item-idx'), 10);
+      const item = items[idx];
+      if (!item) return;
+
+      const choiceKey = sel.value;
+      const code = reasonCodeMap[choiceKey] || '✅';
+      const label = reasonLabelMap[choiceKey] || choiceKey;
+
+      resolutionsSummary.push(`${item.dayName}: ${label} [${code}]`);
+
+      if (matchingRow) {
+        if (item.type === 'WeeklyMeeting') {
+          matchingRow['Weekly Meeting'] = code;
+          if (matchingRow._rowIdx && this.db && typeof this.db.addMutation === 'function') {
+            this.db.addMutation({
+              action: 'UPDATE_CELL',
+              sheetName: 'Safety Compliance',
+              row: matchingRow._rowIdx,
+              col: 11,
+              value: code
+            });
+          }
+        } else if (item.type === 'JHA') {
+          matchingRow[item.dayKey] = code;
+          const colNum = dayColMap[item.dayKey] || 4;
+          if (matchingRow._rowIdx && this.db && typeof this.db.addMutation === 'function') {
+            this.db.addMutation({
+              action: 'UPDATE_CELL',
+              sheetName: 'Safety Compliance',
+              row: matchingRow._rowIdx,
+              col: colNum,
+              value: code
+            });
+          }
+        }
+      }
+    });
+
+    // Update row status in safety_compliance to 'Resolved'
+    if (matchingRow) {
+      const allResolved = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].every(d => {
+        const val = String(matchingRow[d] || '').trim();
+        return !val || val === 'N/A' || val.includes('✅') || val.startsWith('❌') || val.includes('Resolved');
+      });
+
+      const wmVal = String(matchingRow['Weekly Meeting'] || '').trim();
+      const wmResolved = !wmVal || wmVal === 'N/A' || wmVal.includes('✅') || wmVal.startsWith('❌');
+
+      if (allResolved && wmResolved) {
+        matchingRow['Status'] = 'Resolved';
+        if (matchingRow._rowIdx && this.db && typeof this.db.addMutation === 'function') {
+          this.db.addMutation({
+            action: 'UPDATE_CELL',
+            sheetName: 'Safety Compliance',
+            row: matchingRow._rowIdx,
+            col: 13,
+            value: 'Resolved'
+          });
+        }
+      }
+
+      matchingRow['Updated'] = new Date().toISOString().split('T')[0];
+      if (matchingRow._rowIdx && this.db && typeof this.db.addMutation === 'function') {
+        this.db.addMutation({
+          action: 'UPDATE_CELL',
+          sheetName: 'Safety Compliance',
+          row: matchingRow._rowIdx,
+          col: 14,
+          value: matchingRow['Updated']
+        });
+      }
+
+      if (compTable && typeof this.db.saveTable === 'function') {
+        this.db.saveTable('safety_compliance');
+      }
+    }
+
+    // Complete the task in taskManager with forceDirect = true
+    const fullResolutionNotes = `Resolved: ${resolutionsSummary.join('; ')}${addlNotes ? ` — ${addlNotes}` : ''}`;
+    if (window.taskManager) {
+      window.taskManager.completeTask(task.id, true);
+    }
+
+    // Close resolution modal
+    this.closeSafetyReportResolutionModal();
+
+    // Re-render checklist modal and Trip Planner
+    this.openCrewTasksModal(crewId, location, this.activeModalCat, this.activeModalDateKey);
+    this.renderPlanner();
+
+    if (window.showAlert) {
+      window.showAlert(`✓ Saved resolution for Crew ${crewId} and marked task complete!`, 'success');
     }
   }
 

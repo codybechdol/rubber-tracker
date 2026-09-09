@@ -2544,9 +2544,11 @@ class SheetNavigator {
           if (vStr === '✅' || vStr === '✅L' || vStr.startsWith('✅')) {
             const isLate = vStr.includes('L');
             customCellHtml = `<span style="font-size: 14px; display: inline-flex; align-items: center; justify-content: center; gap: 2px;" title="${isLate ? 'Completed Late (Received after deadline)' : 'Submitted on time'}">✅${isLate ? '<span style="font-size: 9.5px; font-weight: 800; color: #f59e0b;">L</span>' : ''}</span>`;
-          } else if (vStr === '❌' || vStr === '❌W' || vStr.startsWith('❌')) {
-            const isWarning = vStr.includes('W');
-            customCellHtml = `<span style="font-size: 14px; display: inline-flex; align-items: center; justify-content: center; gap: 2px;" title="${isWarning ? 'Missing Report Warning' : 'Missing Report'}">❌${isWarning ? '<span style="font-size: 9.5px; font-weight: 800; color: #ef4444;">W</span>' : ''}</span>`;
+          } else if (vStr === '❌' || vStr.startsWith('❌')) {
+            const letter = vStr.replace('❌', '').trim();
+            const badgeColor = letter === 'A' ? '#38bdf8' : (letter === 'W' ? '#fbbf24' : (letter === 'D' ? '#ef4444' : '#c084fc'));
+            const desc = letter === 'A' ? 'App / Outbox Stuck' : (letter === 'W' ? 'Weather / Excused' : (letter === 'D' ? 'Did Not Do' : (letter === 'F' ? 'Forgot to Send' : 'Missing Report')));
+            customCellHtml = `<span style="font-size: 14px; display: inline-flex; align-items: center; justify-content: center; gap: 2px;" title="${desc}">❌${letter ? `<span style="font-size: 9.5px; font-weight: 800; color: ${badgeColor};">${letter}</span>` : ''}</span>`;
           } else if (vStr === '⏳' || vStr.includes('⏳')) {
             customCellHtml = `<span style="font-size: 14px;" title="Pending / Not yet submitted">⏳</span>`;
           } else if (vStr === 'N/A' || vStr === 'n/a') {

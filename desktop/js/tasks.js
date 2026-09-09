@@ -1195,16 +1195,24 @@ class TaskManagerApp {
     `;
   }
 
-  completeTask(taskId) {
+  completeTask(taskId, forceDirect = false) {
+    const allTasks = this.collectAllTasks();
+    const task = allTasks.find(x => x.id === taskId);
+
+    // If it's a Safety Report task, delegate to the resolution modal!
+    if (!forceDirect && task && (task.category === 'Safety Reports' || String(task.type).toLowerCase().includes('safety report') || String(task.id).toLowerCase().startsWith('safetycompliance_'))) {
+      if (window.tripPlanner && typeof window.tripPlanner.openSafetyReportResolutionModal === 'function') {
+        window.tripPlanner.openSafetyReportResolutionModal(task, task.crewId, task.location);
+        return;
+      }
+    }
+
     const todayStr = new Date().toISOString().split('T')[0];
 
     // Dismiss task so it never re-appears in active views
     if (this.db && typeof this.db.addDismissedTask === 'function') {
       this.db.addDismissedTask(taskId);
     }
-
-    const allTasks = this.collectAllTasks();
-    const task = allTasks.find(x => x.id === taskId);
 
     // If it's a drug test task, mark it complete in DrugTestingEngine as well
     if (taskId.startsWith('dt_') || taskId.startsWith('dot_drug_tests_')) {
