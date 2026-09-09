@@ -4421,7 +4421,7 @@ class TripPlannerApp {
                 ${drugTests.map(dt => `
                   <div class="drug-test-appointment-card" style="background: var(--bg-primary); border: 1px solid rgba(168, 85, 247, 0.35); border-left: 4px solid #a855f7; border-radius: 6px; padding: 8px 10px; box-shadow: 0 2px 6px rgba(0,0,0,0.25);">
                     <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px;">
-                      <div style="font-weight: 700; font-size: 12.5px; color: #f8fafc; cursor: pointer;" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(dt.employee)}', 'drug_tests');}" title="Click to view employee profile">
+                      <div style="font-weight: 700; font-size: 12.5px; color: #f8fafc; cursor: pointer;" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(dt.employee)}', 'history');}" title="Click to view employee profile">
                         👤 <span style="color: #60a5fa; text-decoration: underline dotted;">${this.escapeHtml(dt.employee)}</span>
                       </div>
                       <span class="badge" style="font-size: 9.5px; padding: 1px 5px; font-weight: 700; ${dt.time ? 'background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4);' : 'background: rgba(148, 163, 184, 0.15); color: #94a3b8;'}">

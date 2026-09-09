@@ -618,9 +618,9 @@ class EmployeeProfileEngine {
     if (!snap || !snap.tables) return;
 
     const profileData = this.compileProfileData(snap, employeeName);
-    if (!profileData) return;
-
-    this.currentActiveTab = initialTab || 'equipment';
+    let targetTab = initialTab || 'equipment';
+    if (targetTab === 'drug_tests') targetTab = 'history';
+    this.currentActiveTab = targetTab;
     this.currentEquipmentFilter = 'all';
     this.currentEmployeeData = profileData;
 
@@ -1251,6 +1251,33 @@ class EmployeeProfileEngine {
             }
           } else if (status.toLowerCase() === 'scheduled' || schedDate) {
             scheduledDrugTests.push(testObj);
+
+            // Add Scheduled appointment into Career History
+            const clinicDesc = collectionType === 'Mobile Collector' 
+              ? (clinicName ? `Mobile (${clinicName})` : 'Mobile Collector') 
+              : (clinicName || 'Clinic Visit');
+            const locDesc = clinicCity || location || 'Helena';
+            const richDetails = [quarter, `${testType} (${classification})`, clinicDesc, meetingAddr ? `@ ${meetingAddr}` : '', notes].filter(Boolean).join(' · ');
+
+            const scheduledMilestone = {
+              type: 'drug_test',
+              date: schedDate || 'Scheduled',
+              event: '🗓️ DOT Drug Test Scheduled',
+              details: richDetails,
+              location: locDesc,
+              job: jobNumber || 'N/A'
+            };
+
+            const dupIdx = employeeHistory.findIndex(e => e.type === 'drug_test' && (
+              (e.date && schedDate && e.date === schedDate) ||
+              (quarter && e.details && e.details.includes(quarter))
+            ));
+
+            if (dupIdx !== -1) {
+              employeeHistory[dupIdx] = scheduledMilestone;
+            } else {
+              employeeHistory.push(scheduledMilestone);
+            }
           }
         }
       });
@@ -1487,11 +1514,6 @@ class EmployeeProfileEngine {
                 style="padding: 7px 14px; font-size: 12px; font-weight: 700;" 
                 onclick="window.employeeProfileEngine.setTab('history')">
           🎓 Training & Lifecycle (${data.trainingList.length + data.employeeHistory.length})
-        </button>
-        <button class="btn ${this.currentActiveTab === 'drug_tests' ? 'btn-primary' : 'btn-secondary'}" 
-                style="padding: 7px 14px; font-size: 12px; font-weight: 700;" 
-                onclick="window.employeeProfileEngine.setTab('drug_tests')">
-          🧪 DOT Drug Tests (${data.completedDrugTests.length})
         </button>
       </div>
 
