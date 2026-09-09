@@ -12950,16 +12950,23 @@ function parseAndImportItemHistoryLog(equipmentType, itemNum, logText) {
           // Fallback: check fuzzy match if available
           var fuzzyMatched = null;
           if (typeof fuzzyMatchEmployeeName === 'function' && empList.length > 0) {
-            var candidateNames = [];
+            var candidateObjects = [];
             for (var el = 0; el < empList.length; el++) {
-              candidateNames.push(empList[el].canonical);
-              for (var al = 0; al < empList[el].aliases.length; al++) {
-                candidateNames.push(empList[el].aliases[al]);
-              }
+              candidateObjects.push({
+                name: empList[el].canonical,
+                alternateNames: (empList[el].aliases || []).join(';')
+              });
             }
-            var fMatch = fuzzyMatchEmployeeName(rawTarget, candidateNames);
-            if (fMatch && empLookup[fMatch.toLowerCase()]) {
-              fuzzyMatched = empLookup[fMatch.toLowerCase()];
+            try {
+              var fMatch = fuzzyMatchEmployeeName(rawTarget, candidateObjects);
+              if (fMatch && fMatch.employeeName) {
+                var fKey = String(fMatch.employeeName).toLowerCase().trim();
+                if (empLookup[fKey]) {
+                  fuzzyMatched = empLookup[fKey];
+                }
+              }
+            } catch (fuzzyErr) {
+              Logger.log('Fuzzy match error: ' + fuzzyErr);
             }
           }
 
@@ -12970,7 +12977,7 @@ function parseAndImportItemHistoryLog(equipmentType, itemNum, logText) {
           } else {
             assignedTo = rawTarget;
             location = 'Helena';
-            notes = 'Assigned';
+            notes = 'Assigned to ' + rawTarget;
           }
         }
       }

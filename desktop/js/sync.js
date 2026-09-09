@@ -840,7 +840,13 @@ class SyncEngine {
         batchNum++;
         // Push full-table swaps 1 at a time; standard edits 4 per batch to avoid Google gateway limits
         const currentMut = currentOutbox[i];
-        const isLargePayload = currentMut && (currentMut.action === 'REPLACE_SWAP_TABLE' || currentMut.action === 'REPLACE_TABLE_DATA' || currentMut.action === 'SYNC_FULL_TABLE' || (currentMut.rawGrid && currentMut.rawGrid.length > 5));
+        const isLargePayload = currentMut && (
+          currentMut.action === 'REPLACE_SWAP_TABLE' || 
+          currentMut.action === 'REPLACE_TABLE_DATA' || 
+          currentMut.action === 'SYNC_FULL_TABLE' || 
+          currentMut.action === 'IMPORT_HISTORY_LOG' || 
+          (currentMut.rawGrid && currentMut.rawGrid.length > 5)
+        );
         const chunkSize = isLargePayload ? 1 : 4;
         const chunk = currentOutbox.slice(i, i + chunkSize);
 
@@ -872,7 +878,7 @@ class SyncEngine {
               force: true,
               skipPostProcessing: true,
               returnSnapshot: false
-            });
+            }, 45000);
             if (pushResult && (pushResult.success || pushResult.status === 'ok')) {
               break;
             }
