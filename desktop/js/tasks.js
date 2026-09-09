@@ -678,6 +678,10 @@ class TaskManagerApp {
   }
 
   isSafetyReportTaskResolved(task, compTable) {
+    return this.reconcileSafetyReportTask(task, compTable);
+  }
+
+  reconcileSafetyReportTask(task, compTable) {
     if (!compTable || !compTable.rows || compTable.rows.length === 0) return false;
 
     // 1. Extract crew / job number
@@ -692,15 +696,27 @@ class TaskManagerApp {
 
     // 2. Extract week start date (MM/DD/YYYY)
     let weekDateStr = '';
+    let targetWeekDate = null;
     if (task.id) {
       const m = task.id.match(/SafetyCompliance_[0-9]{3}-[0-9]{2}_([0-9]{1,2}[-\/][0-9]{1,2}[-\/][0-9]{2,4})/i);
-      if (m) weekDateStr = m[1].replace(/-/g, '/');
+      if (m) {
+        weekDateStr = m[1].replace(/-/g, '/');
+        targetWeekDate = this.parseDate(weekDateStr);
+      }
     }
-    if (!weekDateStr && task.dueDate) {
+    if (!targetWeekDate && task.notes) {
+      const m = String(task.notes).match(/week of (\d{1,2}[-\/]\d{1,2}[-\/]\d{2,4})/i);
+      if (m) {
+        weekDateStr = m[1].replace(/-/g, '/');
+        targetWeekDate = this.parseDate(weekDateStr);
+      }
+    }
+    if (!targetWeekDate && task.dueDate) {
       const due = this.parseDate(task.dueDate);
       if (due) {
         const ws = new Date(due);
         ws.setDate(ws.getDate() - 6);
+        targetWeekDate = ws;
         const m = String(ws.getMonth() + 1).padStart(2, '0');
         const d = String(ws.getDate()).padStart(2, '0');
         weekDateStr = `${m}/${d}/${ws.getFullYear()}`;
@@ -741,72 +757,89 @@ class TaskManagerApp {
     // Check row status
     const rowStatus = String(matchingRow['Status'] || '').trim().toLowerCase();
     if (rowStatus === 'complete' || rowStatus === 'resolved') {
+      task.status = 'Complete';
+      task.isOverdue = false;
+      if (task._rawRow) task._rawRow['Status'] = 'Complete';
       return true;
     }
 
-    // Helper: is a cell resolved (submitted on time, submitted late, N/A, or excused with a note)?
+    // Helper: is a cell resolved (submitted on time '✅', submitted late '✅ L', 'N/A', or excused with a note)?
     const isCellResolved = (val) => {
-      if (val === null || val === undefined) return false;
+      if (val === null || val === undefined) return true;
       const str = String(val).trim();
-      if (!str) return false;
+      if (!str) return true;
       if (str.toUpperCase() === 'N/A') return true;
-      if (str.includes('✅')) return true; // ✅ or ✅ L
+      if (str.includes('✅')) return true; // ✅ or ✅ L or ✅L
       if (str.includes('❌')) return false; // Missing
       if (str.includes('⏳')) return false; // Pending
       // If there's any reason/excuse text without a ❌, it's excused!
       return true;
     };
 
-    // Parse specific missing dates from notes
-    const notes = String(task.notes || '').trim();
-    const itemType = String(task.itemType || '').toLowerCase();
-    const textToCheck = `${notes} ${itemType}`.toLowerCase();
+    // Determine row week start date object
+    const rawWeekStart = matchingRow['Week Start'] || matchingRow['Week'] || matchingRow['Date'];
+    const rowWeekStartObj = this.parseDate(rawWeekStart) || targetWeekDate;
 
+    // Check which days in the 7-day week (Sun..Sat) are still missing a JHA
     const dayKeys = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-    const dateRegex = /\b(\d{1,2}\/\d{1,2}(?:\/\d{2,4})?)\b/g;
-    const dateMatches = [...notes.matchAll(dateRegex)].map(m => m[1]);
+    const stillMissingJHADates = [];
 
-    if (dateMatches.length > 0) {
-      let allSpecifiedResolved = true;
-      for (const dStr of dateMatches) {
-        const d = this.parseDate(dStr);
-        if (d) {
-          const dayName = dayKeys[d.getDay()];
-          const cellVal = matchingRow[dayName];
-          if (!isCellResolved(cellVal)) {
-            allSpecifiedResolved = false;
-            break;
-          }
+    if (rowWeekStartObj) {
+      for (let i = 0; i < dayKeys.length; i++) {
+        const dayKey = dayKeys[i];
+        const cellVal = matchingRow[dayKey];
+        if (!isCellResolved(cellVal)) {
+          const d = new Date(rowWeekStartObj);
+          d.setDate(d.getDate() + i);
+          const m = String(d.getMonth() + 1).padStart(2, '0');
+          const dayNum = String(d.getDate()).padStart(2, '0');
+          stillMissingJHADates.push(`${m}/${dayNum}/${d.getFullYear()}`);
         }
       }
-
-      if (allSpecifiedResolved) {
-        if (textToCheck.includes('weekly') || textToCheck.includes('meeting')) {
-          const wmVal = matchingRow['Weekly Meeting'] || matchingRow['Meeting'] || matchingRow['Weekly Safety Meeting'];
-          if (!isCellResolved(wmVal)) return false;
-        }
-        return true;
-      }
-      return false;
     }
 
-    // If no specific dates in notes, check all days for ❌
-    let hasMissing = false;
-    for (const day of dayKeys) {
-      const cellVal = matchingRow[day];
-      if (cellVal && String(cellVal).includes('❌')) {
-        hasMissing = true;
-        break;
-      }
-    }
-    if (textToCheck.includes('weekly') || textToCheck.includes('meeting')) {
-      const wmVal = matchingRow['Weekly Meeting'] || matchingRow['Meeting'] || matchingRow['Weekly Safety Meeting'];
-      if (wmVal && String(wmVal).includes('❌')) {
-        hasMissing = true;
-      }
+    // Check Weekly Meeting
+    const wmVal = matchingRow['Weekly Meeting'] || matchingRow['Meeting'] || matchingRow['Weekly Safety Meeting'];
+    const isWeeklyMeetingMissing = !isCellResolved(wmVal);
+
+    // If neither JHAs nor Weekly Meeting are missing, the entire task is resolved!
+    if (stillMissingJHADates.length === 0 && !isWeeklyMeetingMissing) {
+      task.status = 'Complete';
+      task.isOverdue = false;
+      if (task._rawRow) task._rawRow['Status'] = 'Complete';
+      return true;
     }
 
-    return !hasMissing;
+    // If still missing items, dynamically reconcile itemType and notes to reflect ONLY what is actually missing!
+    const weekStartDisplay = targetWeekNorm || (rowWeekStartObj ? `${String(rowWeekStartObj.getMonth() + 1).padStart(2, '0')}/${String(rowWeekStartObj.getDate()).padStart(2, '0')}/${rowWeekStartObj.getFullYear()}` : 'the week');
+
+    let newItemType = '';
+    const newNotesParts = [];
+
+    if (stillMissingJHADates.length > 0) {
+      newNotesParts.push('Missing JHA: ' + stillMissingJHADates.join(', '));
+    }
+    if (isWeeklyMeetingMissing) {
+      newNotesParts.push('Missing Weekly Safety Meeting for week of ' + weekStartDisplay);
+    }
+
+    if (stillMissingJHADates.length > 0 && isWeeklyMeetingMissing) {
+      newItemType = 'JHA + Weekly Meeting';
+    } else if (stillMissingJHADates.length > 0) {
+      newItemType = 'JHA';
+    } else if (isWeeklyMeetingMissing) {
+      newItemType = 'Weekly Meeting';
+    }
+
+    task.itemType = newItemType;
+    task.notes = newNotesParts.join('; ');
+    if (task._rawRow) {
+      task._rawRow['ItemType'] = newItemType;
+      task._rawRow['Item Type'] = newItemType;
+      task._rawRow['Notes'] = task.notes;
+    }
+
+    return false; // Still active, but itemType and notes are updated live!
   }
 
   isFutureTrainingMonth(monthStr, targetDate = new Date()) {

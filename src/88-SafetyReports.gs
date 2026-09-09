@@ -14366,7 +14366,12 @@ function fixSafetyComplianceNotes() {
     if (weekStart instanceof Date) {
       weekStartStr = Utilities.formatDate(weekStart, Session.getScriptTimeZone(), 'MM-dd-yyyy');
     } else {
-      weekStartStr = String(weekStart).replace(/\//g, '-');
+      var parsedWS = (typeof parseDateNoon === 'function') ? parseDateNoon(String(weekStart)) : new Date(weekStart);
+      if (parsedWS && !isNaN(parsedWS.getTime())) {
+        weekStartStr = Utilities.formatDate(parsedWS, Session.getScriptTimeZone(), 'MM-dd-yyyy');
+      } else {
+        weekStartStr = String(weekStart).replace(/\//g, '-').trim();
+      }
     }
 
     var key = jobNumber + '_' + weekStartStr;
@@ -14409,6 +14414,11 @@ function fixSafetyComplianceNotes() {
       weeklyMeetingMissing: weeklyMeetingMissing,
       weekStartDisplay: weekStartDisplay
     };
+
+    var sigJob = (typeof getSignificantJobNumber === 'function') ? getSignificantJobNumber(jobNumber) : jobNumber;
+    if (sigJob && sigJob !== jobNumber) {
+      complianceLookup[sigJob + '_' + weekStartStr] = complianceLookup[key];
+    }
   }
 
   Logger.log('fixSafetyComplianceNotes: Built lookup with ' + Object.keys(complianceLookup).length + ' entries');
@@ -14422,6 +14432,7 @@ function fixSafetyComplianceNotes() {
   for (var h = 0; h < taskHeaders.length; h++) {
     var header = String(taskHeaders[h]).toLowerCase().trim();
     if (header === 'taskid' || header === 'task id') taskColIdx.taskID = h;
+    if (header === 'itemtype' || header === 'item type') taskColIdx.itemType = h;
     if (header === 'notes') taskColIdx.notes = h;
     if (header === 'status') taskColIdx.status = h;
     if (header === 'completeddate' || header === 'completed date') taskColIdx.completedDate = h;
@@ -14449,22 +14460,26 @@ function fixSafetyComplianceNotes() {
     var jobNumber = parts[1];
     var weekDatePart = parts[2]; // MM-DD-YYYY
     var key = jobNumber + '_' + weekDatePart;
+    var sigJob = (typeof getSignificantJobNumber === 'function') ? getSignificantJobNumber(jobNumber) : jobNumber;
 
-    var compInfo = complianceLookup[key];
+    var compInfo = complianceLookup[key] || (sigJob ? complianceLookup[sigJob + '_' + weekDatePart] : null);
     if (!compInfo) {
       Logger.log('fixSafetyComplianceNotes: No compliance data found for key=' + key);
       continue;
     }
 
-    // Build new notes text
+    // Build new notes text and itemType
     var notesParts = [];
-    if (compInfo.missingDays && compInfo.missingDays.length > 0) {
+    var hasMissingJHAs = compInfo.missingDays && compInfo.missingDays.length > 0;
+    var hasMissingMeeting = compInfo.weeklyMeetingMissing;
+
+    if (hasMissingJHAs) {
       var dates = compInfo.missingDays.filter(function(d) { return d && d.date; }).map(function(d) { return d.date; });
       if (dates.length > 0) {
         notesParts.push('Missing JHA: ' + dates.join(', '));
       }
     }
-    if (compInfo.weeklyMeetingMissing) {
+    if (hasMissingMeeting) {
       notesParts.push('Missing Weekly Safety Meeting for week of ' + compInfo.weekStartDisplay);
     }
 
@@ -14487,21 +14502,39 @@ function fixSafetyComplianceNotes() {
       continue;
     }
 
-    var newNotes = notesParts.join(', ');
+    var newItemType = '';
+    if (hasMissingJHAs && hasMissingMeeting) {
+      newItemType = 'JHA + Weekly Meeting';
+    } else if (hasMissingJHAs) {
+      newItemType = 'JHA';
+    } else if (hasMissingMeeting) {
+      newItemType = 'Weekly Meeting';
+    }
+
+    var newNotes = notesParts.join('; ');
     var existingNotes = String(taskRow[taskColIdx.notes] || '').trim();
+    var existingItemType = (taskColIdx.itemType !== undefined) ? String(taskRow[taskColIdx.itemType] || '').trim() : '';
+
+    var taskNeedsUpdate = false;
 
     // Check if notes need updating
     if (existingNotes !== newNotes) {
-      // Update notes
       taskSheet.getRange(i + 1, taskColIdx.notes + 1).setValue(newNotes);
+      taskNeedsUpdate = true;
+    }
 
-      // Update last modified
+    // Check if itemType needs updating (e.g., from 'JHA + Weekly Meeting' to 'Weekly Meeting')
+    if (taskColIdx.itemType !== undefined && newItemType && existingItemType !== newItemType) {
+      taskSheet.getRange(i + 1, taskColIdx.itemType + 1).setValue(newItemType);
+      taskNeedsUpdate = true;
+    }
+
+    if (taskNeedsUpdate) {
       if (taskColIdx.lastModified !== undefined) {
         taskSheet.getRange(i + 1, taskColIdx.lastModified + 1).setValue(now);
       }
-
       updatedCount++;
-      Logger.log('fixSafetyComplianceNotes: Updated ' + taskId + ' notes to: ' + newNotes);
+      Logger.log('fixSafetyComplianceNotes: Updated ' + taskId + ' itemType to: ' + newItemType + ', notes to: ' + newNotes);
     }
   }
 
