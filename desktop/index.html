@@ -729,12 +729,36 @@
 
   <!-- Item Lifecycle Dossier Modal -->
   <div id="item-lifecycle-modal" class="modal-overlay">
-    <div class="modal-box" style="max-width: 1260px; width: 95%; max-height: 88vh;">
-      <div class="modal-header">
+    <div class="modal-box" style="max-width: 1260px; width: 95%; max-height: 88vh; position: relative;">
+      <!-- Floating Book Navigation Buttons for Mouse/Desktop -->
+      <button id="dossier-floating-prev" class="dossier-floating-nav-btn dossier-floating-prev" title="Previous Item in Section (Swipe Right or ← Arrow)" onclick="window.itemStatsEngine.pageDossier(-1)">
+        <span class="dossier-chevron">❮</span>
+        <span class="dossier-nav-tooltip" id="dossier-tooltip-prev">Prev</span>
+      </button>
+      <button id="dossier-floating-next" class="dossier-floating-nav-btn dossier-floating-next" title="Next Item in Section (Swipe Left or → Arrow)" onclick="window.itemStatsEngine.pageDossier(1)">
+        <span class="dossier-chevron">❯</span>
+        <span class="dossier-nav-tooltip" id="dossier-tooltip-next">Next</span>
+      </button>
+
+      <div class="modal-header" style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
         <div style="display: flex; align-items: center; gap: 8px;">
           <span style="font-size: 18px;">📊</span>
-          <span id="item-lifecycle-modal-title">Item Lifecycle Dossier</span>
+          <span id="item-lifecycle-modal-title" style="font-weight: 700; font-size: 15px;">Item Lifecycle Dossier</span>
         </div>
+
+        <!-- Book Navigation Bar in Header -->
+        <div id="dossier-header-book-nav" class="dossier-book-nav-container">
+          <button id="dossier-header-prev-btn" class="btn btn-secondary dossier-nav-btn" onclick="window.itemStatsEngine.pageDossier(-1)" title="Previous Item in Section (← Arrow or Swipe Right)">
+            <span>❮</span> <span id="dossier-header-prev-text">Prev</span>
+          </button>
+          <span id="dossier-page-indicator" class="brand-badge dossier-page-badge" onclick="window.itemStatsEngine.promptJumpToItem()" title="Click to jump to specific item number">
+            <span>📖</span> <span id="dossier-page-counter-text">Item 1 of 1</span>
+          </span>
+          <button id="dossier-header-next-btn" class="btn btn-secondary dossier-nav-btn" onclick="window.itemStatsEngine.pageDossier(1)" title="Next Item in Section (→ Arrow or Swipe Left)">
+            <span id="dossier-header-next-text">Next</span> <span>❯</span>
+          </button>
+        </div>
+
         <div style="display: flex; align-items: center; gap: 8px;">
           <button class="btn btn-secondary" style="font-size: 11px; padding: 4px 10px; display: flex; align-items: center; gap: 4px;" onclick="window.itemStatsEngine.openImportLogModal()">
             <span>📥</span> Import History Log
@@ -745,8 +769,22 @@
       <div class="modal-body" id="item-lifecycle-modal-body" style="max-height: 75vh; overflow-y: auto; padding: 20px;">
         <!-- Injected dynamically by item-stats.js -->
       </div>
-      <div class="modal-footer" id="item-lifecycle-modal-footer">
-        <button class="btn btn-primary" onclick="window.itemStatsEngine.closeDossierModal()">Close Dossier</button>
+      <div class="modal-footer" id="item-lifecycle-modal-footer" style="display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <button id="dossier-footer-prev-btn" class="btn btn-secondary" style="font-size: 12px; display: inline-flex; align-items: center; gap: 5px;" onclick="window.itemStatsEngine.pageDossier(-1)">
+            <span>❮</span> <span id="dossier-footer-prev-text">Previous</span>
+          </button>
+          <span id="dossier-footer-page-text" style="font-size: 12px; color: var(--text-muted); font-weight: 600;">Item 1 of 1</span>
+          <button id="dossier-footer-next-btn" class="btn btn-secondary" style="font-size: 12px; display: inline-flex; align-items: center; gap: 5px;" onclick="window.itemStatsEngine.pageDossier(1)">
+            <span id="dossier-footer-next-text">Next</span> <span>❯</span>
+          </button>
+        </div>
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <span style="font-size: 11px; color: var(--text-muted); display: inline-flex; align-items: center; gap: 4px;" class="dossier-desktop-hint">
+            <span>💡</span> Swipe or use <kbd class="dossier-kbd">←</kbd> <kbd class="dossier-kbd">→</kbd> keys to flip pages
+          </span>
+          <button class="btn btn-primary" onclick="window.itemStatsEngine.closeDossierModal()">Close Dossier</button>
+        </div>
       </div>
     </div>
   </div>
@@ -2036,7 +2074,7 @@
   <script src="js/inventory.js?v=20260909_50"></script>
   <script src="js/swaps.js?v=20260901_25"></script>
   <script src="js/crew-import.js?v=20260901_25"></script>
-  <script src="js/item-stats.js?v=20260903_36"></script>
+  <script src="js/item-stats.js?v=20260909_52"></script>
   <script src="js/sms-dialog.js?v=20260901_25"></script>
   <script src="js/employee-profile.js?v=20260901_25"></script>
   <script src="js/safety-emails.js?v=20260909_45"></script>
@@ -2044,7 +2082,7 @@
   <script src="js/cpr-roster.js?v=20260901_25"></script>
   <script src="js/certs-import.js?v=20260901_25"></script>
   <script src="js/time-breakdown.js?v=20260901_25"></script>
-  <script src="js/sheets.js?v=20260903_36"></script>
+  <script src="js/sheets.js?v=20260909_52"></script>
   <script src="js/history.js?v=20260901_25"></script>
   <script src="js/previous-employees.js?v=20260901_25"></script>
   <script src="js/tasks.js?v=20260901_25"></script>

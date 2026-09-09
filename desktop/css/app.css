@@ -1243,3 +1243,266 @@ body.inspector-mode .brand-badge {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+
+/* ==========================================================================
+   Dossier Book-Like Paging & Navigation Styles
+   ========================================================================== */
+
+.dossier-floating-nav-btn {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 44px;
+  height: 64px;
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(59, 130, 246, 0.4);
+  color: #93c5fd;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  z-index: 1050;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 4px 18px rgba(0, 0, 0, 0.5);
+  user-select: none;
+}
+
+.dossier-floating-nav-btn:hover:not(:disabled) {
+  background: rgba(30, 58, 138, 0.95);
+  border-color: #60a5fa;
+  color: #ffffff;
+  box-shadow: 0 6px 24px rgba(59, 130, 246, 0.6);
+  transform: translateY(-50%) scale(1.1);
+}
+
+.dossier-floating-nav-btn:active:not(:disabled) {
+  transform: translateY(-50%) scale(0.96);
+}
+
+.dossier-floating-nav-btn:disabled {
+  opacity: 0.2;
+  cursor: not-allowed;
+  border-color: rgba(148, 163, 184, 0.2);
+  color: #64748b;
+  box-shadow: none;
+  pointer-events: none;
+}
+
+.dossier-floating-prev {
+  left: 10px;
+}
+
+.dossier-floating-next {
+  right: 10px;
+}
+
+.dossier-chevron {
+  font-size: 22px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.dossier-nav-tooltip {
+  position: absolute;
+  bottom: -28px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #0f172a;
+  color: #e2e8f0;
+  padding: 3px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+  border: 1px solid rgba(59, 130, 246, 0.4);
+}
+
+.dossier-floating-nav-btn:hover .dossier-nav-tooltip {
+  opacity: 1;
+}
+
+.dossier-book-nav-container {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 12px;
+}
+
+.dossier-nav-btn {
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  background: rgba(30, 41, 59, 0.7);
+  color: #93c5fd;
+  border-radius: 6px;
+  transition: all 0.15s ease;
+}
+
+.dossier-nav-btn:hover:not(:disabled) {
+  background: rgba(59, 130, 246, 0.25);
+  color: #ffffff;
+  border-color: #60a5fa;
+}
+
+.dossier-nav-btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.dossier-page-badge {
+  background: rgba(59, 130, 246, 0.15);
+  border: 1px solid rgba(59, 130, 246, 0.4);
+  color: #93c5fd;
+  font-size: 12px;
+  font-weight: 700;
+  padding: 4px 12px;
+  border-radius: 20px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  user-select: none;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.dossier-page-badge:hover {
+  background: rgba(59, 130, 246, 0.3);
+  color: #ffffff;
+  border-color: #60a5fa;
+}
+
+.dossier-kbd {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 3px;
+  padding: 1px 5px;
+  font-family: monospace;
+  font-size: 10px;
+  color: #cbd5e1;
+}
+
+/* Book Page Turn 3D Animations */
+@keyframes dossierBookTurnForward {
+  0% {
+    transform: perspective(1200px) rotateY(0deg) translateX(0);
+    opacity: 1;
+    filter: blur(0px);
+  }
+  100% {
+    transform: perspective(1200px) rotateY(-10deg) translateX(-45px);
+    opacity: 0;
+    filter: blur(1px);
+  }
+}
+
+@keyframes dossierBookEnterForward {
+  0% {
+    transform: perspective(1200px) rotateY(10deg) translateX(45px);
+    opacity: 0;
+    filter: blur(1px);
+  }
+  100% {
+    transform: perspective(1200px) rotateY(0deg) translateX(0);
+    opacity: 1;
+    filter: blur(0px);
+  }
+}
+
+@keyframes dossierBookTurnBackward {
+  0% {
+    transform: perspective(1200px) rotateY(0deg) translateX(0);
+    opacity: 1;
+    filter: blur(0px);
+  }
+  100% {
+    transform: perspective(1200px) rotateY(10deg) translateX(45px);
+    opacity: 0;
+    filter: blur(1px);
+  }
+}
+
+@keyframes dossierBookEnterBackward {
+  0% {
+    transform: perspective(1200px) rotateY(-10deg) translateX(-45px);
+    opacity: 0;
+    filter: blur(1px);
+  }
+  100% {
+    transform: perspective(1200px) rotateY(0deg) translateX(0);
+    opacity: 1;
+    filter: blur(0px);
+  }
+}
+
+.dossier-turn-forward {
+  animation: dossierBookTurnForward 0.14s cubic-bezier(0.4, 0, 1, 1) forwards;
+  pointer-events: none;
+}
+
+.dossier-enter-forward {
+  animation: dossierBookEnterForward 0.22s cubic-bezier(0, 0, 0.2, 1) forwards;
+}
+
+.dossier-turn-backward {
+  animation: dossierBookTurnBackward 0.14s cubic-bezier(0.4, 0, 1, 1) forwards;
+  pointer-events: none;
+}
+
+.dossier-enter-backward {
+  animation: dossierBookEnterBackward 0.22s cubic-bezier(0, 0, 0.2, 1) forwards;
+}
+
+/* Page Turn Toast Indicator */
+.dossier-turn-toast {
+  position: absolute;
+  top: 18px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(15, 23, 42, 0.95);
+  border: 1px solid rgba(59, 130, 246, 0.5);
+  color: #f8fafc;
+  padding: 6px 16px;
+  border-radius: 30px;
+  font-size: 13px;
+  font-weight: 700;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+  z-index: 1100;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  animation: dossierToastFade 0.9s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+@keyframes dossierToastFade {
+  0% { opacity: 0; transform: translate(-50%, -10px) scale(0.95); }
+  15% { opacity: 1; transform: translate(-50%, 0) scale(1); }
+  75% { opacity: 1; transform: translate(-50%, 0) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, -8px) scale(0.98); }
+}
+
+@media (max-width: 768px) {
+  .dossier-floating-nav-btn {
+    width: 38px;
+    height: 52px;
+  }
+  .dossier-floating-prev { left: 4px; }
+  .dossier-floating-next { right: 4px; }
+  .dossier-desktop-hint { display: none !important; }
+}
+
+@media (max-width: 520px) {
+  .dossier-floating-nav-btn { display: none !important; }
+}
+

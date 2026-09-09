@@ -7,6 +7,12 @@
 class ItemStatsEngine {
   constructor(db) {
     this.db = db;
+    this.currentSectionItems = [];
+    this.currentActiveItemIndex = -1;
+    this.currentActiveItemKey = null;
+    this.currentActiveSheetKey = null;
+    this._bookListenersInitialized = false;
+    this.initBookPagingListeners();
   }
 
   parseDate(val) {
@@ -576,22 +582,373 @@ class ItemStatsEngine {
     `;
   }
 
-  openDossierModal(itemKey, sheetKey) {
+  initBookPagingListeners() {
+    if (this._bookListenersInitialized) return;
+    this._bookListenersInitialized = true;
+
+    // 1. Keyboard Navigation (ArrowLeft / ArrowRight / PageUp / PageDown)
+    window.addEventListener('keydown', (e) => {
+      const modal = document.getElementById('item-lifecycle-modal');
+      if (!modal || !modal.classList.contains('active')) return;
+
+      // Do not intercept if user is typing in an input, textarea, or select
+      const activeEl = document.activeElement;
+      if (activeEl && (activeEl.tagName === 'INPUT' || activeEl.tagName === 'TEXTAREA' || activeEl.tagName === 'SELECT')) {
+        return;
+      }
+
+      // If an overlay modal is open on top of dossier, don't intercept
+      const impModal = document.getElementById('import-history-log-modal');
+      if (impModal && impModal.classList.contains('active')) return;
+      const editMModal = document.getElementById('edit-milestone-modal');
+      if (editMModal && (editMModal.classList.contains('active') || editMModal.style.display !== 'none')) return;
+
+      if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+        e.preventDefault();
+        this.pageDossier(-1);
+      } else if (e.key === 'ArrowRight' || e.key === 'PageDown') {
+        e.preventDefault();
+        this.pageDossier(1);
+      } else if (e.key === 'Escape') {
+        e.preventDefault();
+        this.closeDossierModal();
+      }
+    });
+
+    // 2. Touch & Swipe Gestures (for phone, tablet, touch laptop screen)
+    const setupTouch = () => {
+      const modal = document.getElementById('item-lifecycle-modal');
+      const modalBox = modal ? modal.querySelector('.modal-box') : null;
+      if (!modalBox || modalBox._touchBound) return;
+      modalBox._touchBound = true;
+
+      let startX = 0;
+      let startY = 0;
+      let startTime = 0;
+      let isTracking = false;
+
+      modalBox.addEventListener('touchstart', (e) => {
+        if (!e.touches || e.touches.length !== 1) return;
+        const target = e.target;
+        if (target && (target.tagName === 'INPUT' || target.tagName === 'SELECT' || target.tagName === 'TEXTAREA' || target.closest('button, input, select, textarea'))) {
+          return;
+        }
+        startX = e.touches[0].clientX;
+        startY = e.touches[0].clientY;
+        startTime = Date.now();
+        isTracking = true;
+      }, { passive: true });
+
+      modalBox.addEventListener('touchmove', () => {}, { passive: true });
+
+      modalBox.addEventListener('touchend', (e) => {
+        if (!isTracking || !e.changedTouches || e.changedTouches.length === 0) return;
+        isTracking = false;
+
+        const endX = e.changedTouches[0].clientX;
+        const endY = e.changedTouches[0].clientY;
+        const deltaX = endX - startX;
+        const deltaY = endY - startY;
+        const elapsed = Date.now() - startTime;
+
+        // Swipe horizontal threshold
+        if (elapsed < 800 && Math.abs(deltaX) >= 45 && Math.abs(deltaX) > Math.abs(deltaY) * 1.25) {
+          if (deltaX < 0) {
+            // Swipe Left -> Next Page (forward)
+            this.pageDossier(1);
+          } else {
+            // Swipe Right -> Previous Page (backward)
+            this.pageDossier(-1);
+          }
+        }
+      }, { passive: true });
+
+      modalBox.addEventListener('touchcancel', () => {
+        isTracking = false;
+      }, { passive: true });
+    };
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', setupTouch);
+    } else {
+      setupTouch();
+    }
+  }
+
+  getSectionItemList(sheetKey, activeItemKey) {
+    const activeSheetKey = (sheetKey || 'gloves').replace('_history', '');
+    const cleanActive = String(activeItemKey || '').trim();
+
+    // Check if sheetNavigator has active sheet open with filtered/sorted rows
+    if (window.sheetNavigator && window.sheetNavigator.currentSheetKey === activeSheetKey) {
+      const navRows = window.sheetNavigator.currentFilteredRows || (window.sheetNavigator.currentSheetData ? window.sheetNavigator.currentSheetData.rows : null);
+      if (navRows && navRows.length > 0) {
+        const headers = window.sheetNavigator.currentSheetData ? (window.sheetNavigator.currentSheetData.headers || []) : [];
+        const primaryHeader = headers.length > 0 ? headers[0] : '';
+        const navItems = [];
+        const seen = new Set();
+        navRows.forEach(r => {
+          let val = '';
+          if (primaryHeader && r[primaryHeader] !== undefined) {
+            val = String(r[primaryHeader] || '').trim();
+          } else if (Array.isArray(r)) {
+            val = String(r[0] || '').trim();
+          }
+          if (val && !seen.has(val.toLowerCase())) {
+            seen.add(val.toLowerCase());
+            navItems.push(val);
+          }
+        });
+        if (navItems.length > 0) {
+          if (cleanActive && !seen.has(cleanActive.toLowerCase())) {
+            navItems.push(cleanActive);
+          }
+          return navItems;
+        }
+      }
+    }
+
+    const activeTable = this.db ? this.db.getTable(activeSheetKey) : null;
+    const histTable = this.db ? this.db.getTable(activeSheetKey + '_history') : null;
+
+    const items = [];
+    const seen = new Set();
+
+    const isItemHeader = (h, isHist) => {
+      const hl = (h || '').toLowerCase().trim();
+      if (isHist) return /^(item|serial)/i.test(hl);
+      return (
+        hl === 'glove' || hl === 'gloves' || hl === 'glove #' || hl === 'glove#' ||
+        hl === 'sleeve' || hl === 'sleeves' || hl === 'sleeve #' || hl === 'sleeve#' ||
+        hl === 'blanket' || hl === 'blankets' || hl === 'blanket #' || hl === 'blanket#' ||
+        hl === 'mack' || hl === 'macks' || hl === 'mack #' || hl === 'mack#' ||
+        hl === 'hvt #' || hl === 'hvt' || hl === 'hvt#' ||
+        hl === 'phasing set' || hl === 'phasing set #' ||
+        hl === 'aed' || hl === 'aed #' ||
+        hl === 'serial #' || hl === 'serial#' || hl === 'serial' ||
+        hl === 'item #' || hl === 'item#' || hl === 'item' || hl === 'items'
+      );
+    };
+
+    const addFromTable = (t, isHist) => {
+      if (!t || !t.rows || t.rows.length === 0) return;
+      const headers = t.headers || [];
+      let itemHeader = headers.find(h => isItemHeader(h, isHist));
+      if (!itemHeader && headers.length > 0) {
+        itemHeader = isHist && headers.length > 1 ? headers[1] : headers[0];
+      }
+
+      t.rows.forEach(r => {
+        let val = '';
+        if (itemHeader && r[itemHeader] !== undefined) {
+          val = String(r[itemHeader] || '').trim();
+        } else if (Array.isArray(r)) {
+          val = String(r[isHist ? 1 : 0] || '').trim();
+        } else {
+          for (const k in r) {
+            if (isItemHeader(k, isHist)) {
+              val = String(r[k] || '').trim();
+              if (val) break;
+            }
+          }
+        }
+        if (val && !seen.has(val.toLowerCase())) {
+          seen.add(val.toLowerCase());
+          items.push(val);
+        }
+      });
+    };
+
+    if (activeTable) addFromTable(activeTable, false);
+    if (histTable) addFromTable(histTable, true);
+
+    if (cleanActive && !seen.has(cleanActive.toLowerCase())) {
+      items.push(cleanActive);
+    }
+
+    // Natural alphanumeric sorting (e.g. 1001, 1002 ... 1030, 1031, 1032 ...)
+    items.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+
+    return items;
+  }
+
+  pageDossier(direction) {
+    if (!this.currentSectionItems || this.currentSectionItems.length <= 1) {
+      this.showPageTurnToast('No additional items in this section');
+      return;
+    }
+
+    const newIdx = this.currentActiveItemIndex + direction;
+    if (newIdx < 0) {
+      this.showPageTurnToast('Reached first item in section', 'start');
+      return;
+    }
+    if (newIdx >= this.currentSectionItems.length) {
+      this.showPageTurnToast('Reached last item in section', 'end');
+      return;
+    }
+
+    const nextItemKey = this.currentSectionItems[newIdx];
+    const sheetKey = this.currentActiveSheetKey || 'gloves';
+
+    const body = document.getElementById('item-lifecycle-modal-body');
+    if (body) {
+      const turnClass = direction > 0 ? 'dossier-turn-forward' : 'dossier-turn-backward';
+      const enterClass = direction > 0 ? 'dossier-enter-forward' : 'dossier-enter-backward';
+
+      body.classList.remove('dossier-turn-forward', 'dossier-turn-backward', 'dossier-enter-forward', 'dossier-enter-backward');
+      body.classList.add(turnClass);
+
+      setTimeout(() => {
+        this.openDossierModal(nextItemKey, sheetKey, { direction });
+        const newBody = document.getElementById('item-lifecycle-modal-body');
+        if (newBody) {
+          newBody.scrollTop = 0;
+          newBody.classList.remove(turnClass);
+          newBody.classList.add(enterClass);
+          setTimeout(() => {
+            newBody.classList.remove(enterClass);
+          }, 240);
+        }
+      }, 120);
+    } else {
+      this.openDossierModal(nextItemKey, sheetKey);
+    }
+  }
+
+  updateBookNavControls(cleanItemKey, sheetTitle) {
+    const totalItems = this.currentSectionItems ? this.currentSectionItems.length : 0;
+    const curIdx = this.currentActiveItemIndex;
+    const pageNum = curIdx >= 0 ? curIdx + 1 : 1;
+
+    const prevItemKey = (curIdx > 0 && this.currentSectionItems) ? this.currentSectionItems[curIdx - 1] : null;
+    const nextItemKey = (curIdx < totalItems - 1 && this.currentSectionItems) ? this.currentSectionItems[curIdx + 1] : null;
+
+    // Header Prev / Next Buttons
+    const headerPrevBtn = document.getElementById('dossier-header-prev-btn');
+    const headerPrevText = document.getElementById('dossier-header-prev-text');
+    if (headerPrevBtn) {
+      headerPrevBtn.disabled = !prevItemKey;
+      if (headerPrevText) headerPrevText.textContent = prevItemKey ? `Prev (#${prevItemKey})` : 'Prev';
+      headerPrevBtn.title = prevItemKey ? `Previous: #${prevItemKey} (Swipe Right or ← Arrow)` : 'Beginning of section';
+    }
+
+    const headerNextBtn = document.getElementById('dossier-header-next-btn');
+    const headerNextText = document.getElementById('dossier-header-next-text');
+    if (headerNextBtn) {
+      headerNextBtn.disabled = !nextItemKey;
+      if (headerNextText) headerNextText.textContent = nextItemKey ? `Next (#${nextItemKey})` : 'Next';
+      headerNextBtn.title = nextItemKey ? `Next: #${nextItemKey} (Swipe Left or → Arrow)` : 'End of section';
+    }
+
+    // Header Page Counter Badge
+    const pageCounterText = document.getElementById('dossier-page-counter-text');
+    if (pageCounterText) {
+      pageCounterText.textContent = totalItems > 1 ? `Item ${pageNum} of ${totalItems}` : `#${cleanItemKey}`;
+    }
+
+    // Floating Chevrons
+    const floatPrev = document.getElementById('dossier-floating-prev');
+    const tooltipPrev = document.getElementById('dossier-tooltip-prev');
+    if (floatPrev) {
+      floatPrev.disabled = !prevItemKey;
+      if (tooltipPrev) tooltipPrev.textContent = prevItemKey ? `Prev (#${prevItemKey})` : 'Start';
+    }
+
+    const floatNext = document.getElementById('dossier-floating-next');
+    const tooltipNext = document.getElementById('dossier-tooltip-next');
+    if (floatNext) {
+      floatNext.disabled = !nextItemKey;
+      if (tooltipNext) tooltipNext.textContent = nextItemKey ? `Next (#${nextItemKey})` : 'End';
+    }
+
+    // Footer Prev / Next Buttons
+    const footerPrevBtn = document.getElementById('dossier-footer-prev-btn');
+    const footerPrevText = document.getElementById('dossier-footer-prev-text');
+    if (footerPrevBtn) {
+      footerPrevBtn.disabled = !prevItemKey;
+      if (footerPrevText) footerPrevText.textContent = prevItemKey ? `Previous (#${prevItemKey})` : 'Previous';
+    }
+
+    const footerNextBtn = document.getElementById('dossier-footer-next-btn');
+    const footerNextText = document.getElementById('dossier-footer-next-text');
+    if (footerNextBtn) {
+      footerNextBtn.disabled = !nextItemKey;
+      if (footerNextText) footerNextText.textContent = nextItemKey ? `Next (#${nextItemKey})` : 'Next';
+    }
+
+    const footerPageText = document.getElementById('dossier-footer-page-text');
+    if (footerPageText) {
+      footerPageText.textContent = totalItems > 1 ? `Item ${pageNum} of ${totalItems} (${sheetTitle})` : `${sheetTitle} #${cleanItemKey}`;
+    }
+  }
+
+  showPageTurnToast(msg, type) {
+    const modalBox = document.querySelector('#item-lifecycle-modal .modal-box');
+    if (!modalBox) return;
+
+    const old = modalBox.querySelector('.dossier-turn-toast');
+    if (old) old.remove();
+
+    const toast = document.createElement('div');
+    toast.className = 'dossier-turn-toast';
+    toast.innerHTML = `<span>📖</span> <span>${this.escapeHtml(msg)}</span>`;
+    if (type === 'start' || type === 'end') {
+      toast.style.borderColor = 'rgba(245, 158, 11, 0.6)';
+    }
+    modalBox.appendChild(toast);
+    setTimeout(() => { if (toast.parentNode) toast.remove(); }, 950);
+  }
+
+  promptJumpToItem() {
+    if (!this.currentSectionItems || this.currentSectionItems.length <= 1) return;
+    const total = this.currentSectionItems.length;
+    const current = this.currentActiveItemKey;
+    const input = prompt(`Jump to item number in this section (${total} items total):`, current || '');
+    if (input && input.trim()) {
+      const target = input.trim().toLowerCase();
+      const targetNum = parseInt(target, 10);
+      const match = this.currentSectionItems.find(k => 
+        k.toLowerCase() === target || 
+        (!isNaN(targetNum) && parseInt(k, 10) === targetNum)
+      );
+      if (match) {
+        this.openDossierModal(match, this.currentActiveSheetKey);
+      } else {
+        alert(`Item #${input} was not found in this section.`);
+      }
+    }
+  }
+
+  openDossierModal(itemKey, sheetKey, options = {}) {
     const modal = document.getElementById('item-lifecycle-modal');
     const body = document.getElementById('item-lifecycle-modal-body');
     const titleEl = document.getElementById('item-lifecycle-modal-title');
     if (!modal || !body) return;
 
-    const tableData = this.db.getTable(sheetKey);
-    const rows = tableData ? (tableData.rows || []) : [];
-    const headers = tableData ? (tableData.headers || []) : [];
+    this.initBookPagingListeners();
 
     const cleanItemKey = String(itemKey || '').trim();
     this.currentActiveItemKey = cleanItemKey;
     this.currentActiveSheetKey = sheetKey;
 
+    // Build ordered list of items for this equipment section
+    this.currentSectionItems = this.getSectionItemList(sheetKey, cleanItemKey);
     const numKey = parseInt(cleanItemKey, 10);
     const isPureNumKey = !isNaN(numKey) && String(numKey) === cleanItemKey;
+
+    this.currentActiveItemIndex = this.currentSectionItems.findIndex(k => {
+      if (k.toLowerCase() === cleanItemKey.toLowerCase()) return true;
+      const kNum = parseInt(k, 10);
+      return !isNaN(numKey) && !isNaN(kNum) && numKey === kNum;
+    });
+    if (this.currentActiveItemIndex === -1 && this.currentSectionItems.length > 0) {
+      this.currentActiveItemIndex = 0;
+    }
+
+    const tableData = this.db.getTable(sheetKey);
+    const rows = tableData ? (tableData.rows || []) : [];
+    const headers = tableData ? (tableData.headers || []) : [];
 
     let groupRows = rows.filter(r => {
       for (const k in r) {
@@ -709,6 +1066,7 @@ class ItemStatsEngine {
           <div style="font-size: 12px; margin-top: 6px;">Sync with Google Sheets or check the <strong>📜 History Records</strong> workspace.</div>
         </div>
       `;
+      this.updateBookNavControls(cleanItemKey, sheetTitle);
       modal.classList.add('active');
       return;
     }
@@ -1034,11 +1392,20 @@ class ItemStatsEngine {
 
     body.innerHTML = html;
     modal.classList.add('active');
+    this.updateBookNavControls(cleanItemKey, sheetTitle);
+
+    if (options && options.direction) {
+      this.showPageTurnToast(`${sheetTitle} #${cleanItemKey} (${this.currentActiveItemIndex + 1} of ${this.currentSectionItems.length})`);
+    }
   }
 
   closeDossierModal() {
     const modal = document.getElementById('item-lifecycle-modal');
     if (modal) modal.classList.remove('active');
+    const body = document.getElementById('item-lifecycle-modal-body');
+    if (body) {
+      body.classList.remove('dossier-turn-forward', 'dossier-turn-backward', 'dossier-enter-forward', 'dossier-enter-backward');
+    }
   }
 
   openImportLogModal(prefillItemKey, prefillSheetKey) {
