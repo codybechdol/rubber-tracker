@@ -627,11 +627,10 @@ class CrewImportEngine {
         return pA - pB;
       });
 
-      // Assign position numbers: e.g. 013-26.1, 013-26.02
+      // Assign position numbers: e.g. 013-26.1, 013-26.2, 013-26.3
       employees.forEach((emp, idx) => {
         emp.position = idx + 1;
-        const posStr = idx === 0 ? '1' : String(idx + 1).padStart(2, '0');
-        emp.fullJobNumber = `${header.jobNumber}.${posStr}`;
+        emp.fullJobNumber = `${header.jobNumber}.${idx + 1}`;
       });
 
       let sched = this.getScheduleTypeFromHeader(header.fullText);
@@ -895,8 +894,7 @@ class CrewImportEngine {
         // Re-number crew positions
         crew.employees.forEach((e, idx) => {
           e.position = idx + 1;
-          const posStr = idx === 0 ? '1' : String(idx + 1).padStart(2, '0');
-          e.fullJobNumber = `${crew.jobNumber}.${posStr}`;
+          e.fullJobNumber = `${crew.jobNumber}.${idx + 1}`;
         });
         crew.crewSize = crew.employees.length;
       }
@@ -922,8 +920,7 @@ class CrewImportEngine {
       crew.employees = crew.employees.filter(e => this.cleanNameForMatch(e.name) !== cleanTarget);
       crew.employees.forEach((e, idx) => {
         e.position = idx + 1;
-        const posStr = idx === 0 ? '1' : String(idx + 1).padStart(2, '0');
-        e.fullJobNumber = `${crew.jobNumber}.${posStr}`;
+        e.fullJobNumber = `${crew.jobNumber}.${idx + 1}`;
       });
       crew.crewSize = crew.employees.length;
     }
@@ -965,8 +962,7 @@ class CrewImportEngine {
         base.employees.sort((a, b) => this.getRolePriority(this.getEffectiveRole(a)) - this.getRolePriority(this.getEffectiveRole(b)));
         base.employees.forEach((emp, idx) => {
           emp.position = idx + 1;
-          const posStr = idx === 0 ? '1' : String(idx + 1).padStart(2, '0');
-          emp.fullJobNumber = `${base.jobNumber}.${posStr}`;
+          emp.fullJobNumber = `${base.jobNumber}.${idx + 1}`;
         });
 
         merged.push(base);

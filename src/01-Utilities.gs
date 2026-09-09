@@ -608,8 +608,7 @@ function calculateNextJobNumberSuffix(sheet, baseJobNumber, classification) {
       nextSuf = val + 1;
     }
   }
-  var sufStr = nextSuf < 10 ? ('0' + nextSuf) : String(nextSuf);
-  return baseJobNumber + '.' + sufStr;
+  return baseJobNumber + '.' + nextSuf;
 }
 
 /**
