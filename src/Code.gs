@@ -33485,7 +33485,9 @@ function doGet(e) {
     } else if (action === 'getSafetyPdf') {
       var emailId = e.parameter.emailId || '';
       var subject = e.parameter.subject || '';
-      var pdfRes = getSafetyEmailPdf(emailId, subject);
+      var pdfRes = (typeof getSafetyEmailPdf === 'function')
+        ? getSafetyEmailPdf(emailId, subject)
+        : { success: false, error: 'getSafetyEmailPdf function not found in backend' };
       return ContentService.createTextOutput(JSON.stringify(pdfRes))
         .setMimeType(ContentService.MimeType.JSON);
     } else if (action === 'reconcileInventoryFromHistory') {
@@ -33591,7 +33593,9 @@ function doPost(e) {
     }
 
     if (action === 'getSafetyPdf') {
-      var pdfResult = getSafetyEmailPdf(payload.emailId, payload.subject);
+      var pdfResult = (typeof getSafetyEmailPdf === 'function')
+        ? getSafetyEmailPdf(payload.emailId, payload.subject)
+        : { success: false, error: 'getSafetyEmailPdf function not found in backend' };
       return ContentService.createTextOutput(JSON.stringify(pdfResult))
         .setMimeType(ContentService.MimeType.JSON);
     }

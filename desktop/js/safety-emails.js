@@ -1188,23 +1188,28 @@ class SafetyEmailsEngine {
       let pdfData = this.pdfCache.get(cacheKey);
 
       if (!pdfData) {
-        const response = await fetch(syncUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-          body: JSON.stringify({
-            action: 'getSafetyPdf',
-            emailId: log.emailId || '',
-            subject: log.subject || ''
-          })
-        });
+        const payload = {
+          action: 'getSafetyPdf',
+          emailId: log.emailId || '',
+          subject: log.subject || ''
+        };
 
-        if (!response.ok) {
-          throw new Error(`Server returned HTTP ${response.status}`);
+        let resJson = null;
+        if (window.syncEngine && typeof window.syncEngine.executeNetworkRequest === 'function') {
+          resJson = await window.syncEngine.executeNetworkRequest(syncUrl, 'POST', payload, 60000);
+        } else if (window.desktopAPI && typeof window.desktopAPI.sendSyncRequest === 'function') {
+          const apiRes = await window.desktopAPI.sendSyncRequest({ url: syncUrl, method: 'POST', body: payload });
+          resJson = apiRes ? (apiRes.data || apiRes) : null;
+        } else {
+          // Browser fallback: send via GET with query parameters which redirects cleanly in browser
+          const getUrl = `${syncUrl}?action=getSafetyPdf&emailId=${encodeURIComponent(log.emailId || '')}&subject=${encodeURIComponent(log.subject || '')}`;
+          const response = await fetch(getUrl);
+          if (!response.ok) throw new Error(`Server returned HTTP ${response.status}`);
+          resJson = await response.json();
         }
 
-        const resJson = await response.json();
-        if (!resJson.success || !resJson.base64) {
-          throw new Error(resJson.error || 'Failed to extract PDF attachment.');
+        if (!resJson || !resJson.success || !resJson.base64) {
+          throw new Error((resJson && resJson.error) || 'Failed to extract PDF attachment.');
         }
 
         pdfData = resJson;
@@ -1218,16 +1223,41 @@ class SafetyEmailsEngine {
         byteNumbers[i] = byteCharacters.charCodeAt(i);
       }
       const byteArray = new Uint8Array(byteNumbers);
-      const blob = new Blob([byteArray], { type: pdfData.contentType || 'application/pdf' });
+      // Guarantee proper application/pdf MIME type even if email server reported application/octet-stream
+      const mimeType = (pdfData.filename && pdfData.filename.toLowerCase().endsWith('.pdf')) ? 'application/pdf' : (pdfData.contentType || 'application/pdf');
+      const blob = new Blob([byteArray], { type: mimeType });
       const blobUrl = URL.createObjectURL(blob);
 
       if (downloadBtn) {
         downloadBtn.href = blobUrl;
         downloadBtn.download = pdfData.filename || `${log.type.replace(/\s+/g, '_')}_${log.jobNumber}.pdf`;
+        downloadBtn.onclick = async (e) => {
+          if (window.desktopAPI && typeof window.desktopAPI.savePdfToFile === 'function') {
+            e.preventDefault();
+            await window.desktopAPI.savePdfToFile(pdfData.base64, pdfData.filename || `${log.type.replace(/\s+/g, '_')}_${log.jobNumber}.pdf`);
+          }
+        };
       }
 
       if (popoutBtn) {
         popoutBtn.href = blobUrl;
+        popoutBtn.onclick = async (e) => {
+          if (window.desktopAPI && typeof window.desktopAPI.openPdfExternally === 'function') {
+            e.preventDefault();
+            await window.desktopAPI.openPdfExternally(pdfData.base64, pdfData.filename || 'SafetyDocument.pdf');
+          }
+        };
+      }
+
+      if (gmailBtn) {
+        gmailBtn.href = log.gmailUrl || '#';
+        gmailBtn.style.display = log.gmailUrl ? 'inline-flex' : 'none';
+        gmailBtn.onclick = (e) => {
+          if (log.gmailUrl && window.desktopAPI && typeof window.desktopAPI.openExternal === 'function') {
+            e.preventDefault();
+            window.desktopAPI.openExternal(log.gmailUrl);
+          }
+        };
       }
 
       if (subtitleEl) {
@@ -1235,7 +1265,14 @@ class SafetyEmailsEngine {
       }
 
       body.innerHTML = `
-        <iframe src="${blobUrl}#view=FitH" style="width: 100%; height: 100%; border: none; background: #1e293b;"></iframe>
+        <object data="${blobUrl}#view=FitH&toolbar=1" type="application/pdf" style="width: 100%; height: 100%; border: none; background: #1e293b;">
+          <iframe src="${blobUrl}#view=FitH" style="width: 100%; height: 100%; border: none; background: #1e293b;">
+            <div style="padding: 30px; text-align: center; color: var(--text-secondary);">
+              <p>Preview cannot be rendered inline in this view.</p>
+              <button class="btn btn-primary" onclick="if (window.desktopAPI) window.desktopAPI.openPdfExternally('${pdfData.base64}', '${pdfData.filename || 'SafetyDocument.pdf'}')">Open in System PDF Viewer</button>
+            </div>
+          </iframe>
+        </object>
       `;
 
     } catch (err) {
@@ -1245,9 +1282,9 @@ class SafetyEmailsEngine {
           <div style="font-size: 14px; font-weight: 700; margin-bottom: 6px;">Could not load PDF document directly</div>
           <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 20px; line-height: 1.5;">${this.escapeHtml(err.message || 'Unknown error')}</div>
           ${log.gmailUrl ? `
-            <a href="${this.escapeHtml(log.gmailUrl)}" target="_blank" class="btn btn-primary" style="font-weight: 700; background: #10b981; border: none; display: inline-flex; align-items: center; gap: 6px; padding: 8px 18px; text-decoration: none;">
+            <button onclick="if (window.desktopAPI) { window.desktopAPI.openExternal('${this.escapeHtml(log.gmailUrl)}'); } else { window.open('${this.escapeHtml(log.gmailUrl)}', '_blank'); }" class="btn btn-primary" style="font-weight: 700; background: #10b981; border: none; display: inline-flex; align-items: center; gap: 6px; padding: 8px 18px; cursor: pointer; color: white; border-radius: 6px;">
               <span>✉️</span> Open Email in Gmail Instead
-            </a>
+            </button>
           ` : ''}
         </div>
       `;

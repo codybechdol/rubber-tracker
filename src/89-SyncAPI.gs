@@ -2597,12 +2597,30 @@ function getSafetyEmailPdf(emailId, subject) {
       } catch (e) {
         Logger.log('getSafetyEmailPdf: Could not find message by ID ' + baseId + ': ' + e);
       }
+
+      // If message ID failed, check if baseId was a thread ID
+      if (!message) {
+        try {
+          var thread = GmailApp.getThreadById(baseId);
+          if (thread) {
+            var tmsgs = thread.getMessages();
+            if (tmsgs && tmsgs.length > 0) {
+              message = tmsgs[tmsgs.length - 1];
+            }
+          }
+        } catch (tErr) {
+          Logger.log('getSafetyEmailPdf: Could not find thread by ID ' + baseId + ': ' + tErr);
+        }
+      }
     }
 
     if (!message && subject && String(subject).trim()) {
       try {
-        var cleanSubj = String(subject).trim();
+        var cleanSubj = String(subject).trim().replace(/["']/g, ' ').replace(/\s+/g, ' ');
         var threads = GmailApp.search('subject:"' + cleanSubj + '"', 0, 1);
+        if (!threads || threads.length === 0) {
+          threads = GmailApp.search('subject:' + cleanSubj, 0, 1);
+        }
         if (threads && threads.length > 0) {
           var msgs = threads[0].getMessages();
           message = msgs[msgs.length - 1];
@@ -2639,12 +2657,17 @@ function getSafetyEmailPdf(emailId, subject) {
 
     var bytes = pdfAttachment.getBytes();
     var base64 = Utilities.base64Encode(bytes);
+    var filename = pdfAttachment.getName();
+    var contentType = pdfAttachment.getContentType() || 'application/pdf';
+    if (filename && filename.toLowerCase().endsWith('.pdf')) {
+      contentType = 'application/pdf';
+    }
 
     return {
       success: true,
-      filename: pdfAttachment.getName(),
+      filename: filename,
       sizeBytes: bytes.length,
-      contentType: pdfAttachment.getContentType() || 'application/pdf',
+      contentType: contentType,
       base64: base64
     };
   } catch (err) {

@@ -24,7 +24,8 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.js'),
       nodeIntegration: false,
       contextIsolation: true,
-      sandbox: false
+      sandbox: false,
+      plugins: true
     }
   });
 
@@ -251,3 +252,35 @@ ipcMain.handle('open-external', async (event, url) => {
   }
   return { success: true };
 });
+
+ipcMain.handle('open-pdf-externally', async (event, { base64Data, filename }) => {
+  try {
+    const tempDir = path.join(app.getPath('temp'), 'SafetyAssistant');
+    if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
+    const safeName = (filename || 'document.pdf').replace(/[^a-zA-Z0-9._-]/g, '_');
+    const filePath = path.join(tempDir, safeName);
+    const buffer = Buffer.from(base64Data, 'base64');
+    fs.writeFileSync(filePath, buffer);
+    await shell.openPath(filePath);
+    return { success: true, filePath };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('save-pdf-to-file', async (event, { base64Data, defaultFilename }) => {
+  try {
+    const { filePath, canceled } = await dialog.showSaveDialog(mainWindow, {
+      title: 'Save PDF Document',
+      defaultPath: defaultFilename || 'SafetyDocument.pdf',
+      filters: [{ name: 'PDF Document', extensions: ['pdf'] }]
+    });
+    if (canceled || !filePath) return { success: false, canceled: true };
+    const buffer = Buffer.from(base64Data, 'base64');
+    fs.writeFileSync(filePath, buffer);
+    return { success: true, filePath };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+

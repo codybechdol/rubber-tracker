@@ -932,8 +932,9 @@ class SheetNavigator {
     }
 
     try {
-      const res = await fetch(`${syncUrl}?action=syncTrainingAttendees`);
-      const json = await res.json();
+      const json = (window.syncEngine && typeof window.syncEngine.executeNetworkRequest === 'function')
+        ? await window.syncEngine.executeNetworkRequest(syncUrl, 'POST', { action: 'syncTrainingAttendees' })
+        : await (await fetch(`${syncUrl}?action=syncTrainingAttendees`)).json();
       if (json && (json.success || json.status === 'ok')) {
         alert('✅ Training attendees and crew leads successfully synchronized with active crew rosters!');
       } else {
