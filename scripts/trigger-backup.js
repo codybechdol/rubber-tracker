@@ -38,7 +38,7 @@ function requestWithRedirects(targetUrl, method, postData, redirectCount = 0) {
       path: parsed.pathname + parsed.search,
       method: method,
       headers: headers,
-      timeout: 60000
+      timeout: 120000
     }, (res) => {
       // Follow HTTP 301, 302, 303, 307 redirects
       if ([301, 302, 303, 307].includes(res.statusCode) && res.headers.location) {
