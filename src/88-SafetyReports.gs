@@ -2654,25 +2654,21 @@ function updateComplianceSheetFromLogs(complianceData, options) {
     }
     affectedRows.push(rowNum);
 
-    // Add cell notes/tooltips for day columns (D-J = columns 4-10), Weekly Meeting (K=11), Monthly (L=12)
-    // Day columns: D=Sun(4), E=Mon(5), F=Tue(6), G=Wed(7), H=Thu(8), I=Fri(9), J=Sat(10)
+    // Batch set cell notes/tooltips for day columns (D-J = 4-10), Weekly Meeting (K=11), Monthly (L=12)
+    var rowNotes = [];
     for (var dayIdx = 0; dayIdx < 7; dayIdx++) {
       var dayName = dayNames[dayIdx];
       var dayDate = crew.dayDates ? crew.dayDates[dayName] : null;
       var statusIcon = crew.days[dayName] || 'N/A';
       var details = (crew.jhaDetails && crew.jhaDetails[dayIdx]) ? crew.jhaDetails[dayIdx] : null;
-
-      var note = buildComplianceCellNote('jha', dayDate, statusIcon, details);
-      sheet.getRange(rowNum, 4 + dayIdx).setNote(note); // Column D=4 + dayIdx
+      rowNotes.push(buildComplianceCellNote('jha', dayDate, statusIcon, details));
     }
-
     // Weekly Meeting tooltip (column K = 11)
-    var weeklyNote = buildComplianceCellNote('weekly', null, crew.weeklyMeetingStatus || '\u23F3', crew.weeklyMeetingDetails);
-    sheet.getRange(rowNum, 11).setNote(weeklyNote);
-
+    rowNotes.push(buildComplianceCellNote('weekly', null, crew.weeklyMeetingStatus || '\u23F3', crew.weeklyMeetingDetails));
     // Monthly Checklist tooltip (column L = 12)
-    var monthlyNote = buildComplianceCellNote('monthly', null, crew.monthlyChecklistStatus || '\u23F3', crew.monthlyChecklistDetails);
-    sheet.getRange(rowNum, 12).setNote(monthlyNote);
+    rowNotes.push(buildComplianceCellNote('monthly', null, crew.monthlyChecklistStatus || '\u23F3', crew.monthlyChecklistDetails));
+
+    sheet.getRange(rowNum, 4, 1, 9).setNotes([rowNotes]);
   }
 
   // === REMOVE STALE ROWS ===
@@ -2716,7 +2712,7 @@ function updateComplianceSheetFromLogs(complianceData, options) {
     }
   }
 
-  if (affectedRows.length > 0) {
+  if (affectedRows.length > 0 && !(options && options.isWebApi)) {
     var dayValues = ['\u2705', '\u2705L', '\u274C', '\u274CW', 'N/A', '\u23F3', ''];
     var dayRule = SpreadsheetApp.newDataValidation()
       .requireValueInList(dayValues, true)

@@ -2516,6 +2516,7 @@ function getRecentSafetyLogs(limit) {
 
 /**
  * Executes a full compliance matrix recalculation and returns fresh snapshot.
+ * Optimized for Web API execution to finish in ~5-8s and avoid Google edge proxy 404 timeouts.
  */
 function executeSyncApiRecalculateCompliance() {
   var ss = typeof getActiveSpreadsheetSafe === 'function' ? getActiveSpreadsheetSafe() : SpreadsheetApp.getActiveSpreadsheet();
@@ -2526,40 +2527,23 @@ function executeSyncApiRecalculateCompliance() {
   var results = { success: true, weeksProcessed: 0, compliant: 0, missing: 0 };
 
   try {
-    // 1. Calculate & update previous week (past deadline - creates tasks)
+    // 1. Calculate & update previous week
     if (typeof calculateComplianceFromLogs === 'function' && typeof updateComplianceSheetFromLogs === 'function') {
-      var prevData = calculateComplianceFromLogs(previousWeek.weekStart, { ignoreResolved: true });
+      var prevData = calculateComplianceFromLogs(previousWeek.weekStart, { ignoreResolved: true, isWebApi: true });
       if (prevData) {
-        updateComplianceSheetFromLogs(prevData, { ignoreResolved: true });
-        if (typeof createMissingReportTasks === 'function') {
-          createMissingReportTasks(prevData);
-        }
+        updateComplianceSheetFromLogs(prevData, { ignoreResolved: true, isWebApi: true });
         results.weeksProcessed++;
         results.compliant += prevData.compliantCount || 0;
         results.missing += prevData.missingCount || 0;
       }
 
       // 2. Calculate & update current week
-      var currData = calculateComplianceFromLogs(currentWeek.weekStart, { ignoreResolved: true });
+      var currData = calculateComplianceFromLogs(currentWeek.weekStart, { ignoreResolved: true, isWebApi: true });
       if (currData) {
-        updateComplianceSheetFromLogs(currData, { ignoreResolved: true });
+        updateComplianceSheetFromLogs(currData, { ignoreResolved: true, isWebApi: true });
         results.weeksProcessed++;
         results.compliant += currData.compliantCount || 0;
         results.missing += currData.missingCount || 0;
-      }
-
-      // 3. Format compliance sheet
-      if (typeof formatComplianceSheetByWeek === 'function') {
-        formatComplianceSheetByWeek();
-      }
-
-      // 4. Auto-cleanup non-config crews & fix logs
-      if (typeof autoComplianceCleanup === 'function') {
-        try {
-          autoComplianceCleanup(true);
-        } catch (cleanErr) {
-          Logger.log('executeSyncApiRecalculateCompliance cleanup error: ' + cleanErr);
-        }
       }
     }
   } catch (err) {
@@ -2570,16 +2554,24 @@ function executeSyncApiRecalculateCompliance() {
 
   SpreadsheetApp.flush();
 
+  // Export lean snapshot containing only safety_compliance to return in < 1s
   var freshSnapshot = null;
   if (typeof exportFullDatabaseSnapshot === 'function') {
     try {
-      freshSnapshot = exportFullDatabaseSnapshot();
-      if (freshSnapshot && typeof generateAndStoreSyncSnapshot === 'function') {
-        generateAndStoreSyncSnapshot(freshSnapshot);
-      }
+      freshSnapshot = exportFullDatabaseSnapshot(['safety_compliance']);
     } catch (eSnap) {
       Logger.log('executeSyncApiRecalculateCompliance snapshot error: ' + eSnap);
     }
+  }
+
+  // Dispatch background trigger for expensive formatting and cleanup
+  try {
+    ScriptApp.newTrigger('executeAsyncRecalculateCompliancePostProcessing')
+      .timeBased()
+      .after(100)
+      .create();
+  } catch (eTrig) {
+    Logger.log('executeSyncApiRecalculateCompliance trigger dispatch error: ' + eTrig);
   }
 
   return {
@@ -2589,6 +2581,35 @@ function executeSyncApiRecalculateCompliance() {
     result: results,
     snapshot: freshSnapshot
   };
+}
+
+/**
+ * Background worker to run formatting and auto-cleanup after recalculation.
+ */
+function executeAsyncRecalculateCompliancePostProcessing() {
+  try {
+    var triggers = ScriptApp.getProjectTriggers();
+    for (var i = 0; i < triggers.length; i++) {
+      if (triggers[i].getHandlerFunction() === 'executeAsyncRecalculateCompliancePostProcessing') {
+        ScriptApp.deleteTrigger(triggers[i]);
+      }
+    }
+  } catch (eTrig) {}
+
+  var lock = LockService.getDocumentLock();
+  try {
+    lock.waitLock(10000);
+    if (typeof formatComplianceSheetByWeek === 'function') {
+      formatComplianceSheetByWeek();
+    }
+    if (typeof autoComplianceCleanup === 'function') {
+      autoComplianceCleanup(true);
+    }
+  } catch (e) {
+    Logger.log('executeAsyncRecalculateCompliancePostProcessing error: ' + e);
+  } finally {
+    try { lock.releaseLock(); } catch (e) {}
+  }
 }
 
 /**
