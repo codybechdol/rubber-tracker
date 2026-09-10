@@ -1118,15 +1118,27 @@ class SafetyEmailsEngine {
         batchIndex++;
       }
 
-      // Update local database snapshot if fresh snapshot returned
+      // Update local database snapshot if fresh snapshot returned, or schedule sync
       if (finalSnapshot) {
         await window.localDB.setSnapshot(finalSnapshot);
-        // Only refresh safety compliance view if the user is currently on it
-        // (Prevents interrupting user if they navigated to Trip Planner or Inventory)
         const activeView = document.querySelector('.view-container.active');
         if (activeView && activeView.id === 'safety-compliance-view' && window.sheetNavigator) {
           window.sheetNavigator.renderSafetyCompliance();
         }
+      } else if (window.syncEngine) {
+        // Asynchronous compliance calculation runs in the background on Google Cloud;
+        // schedule a sync in 5 seconds to load the updated compliance table.
+        setTimeout(async () => {
+          try {
+            await window.syncEngine.syncWithGoogleSheets();
+            const activeView = document.querySelector('.view-container.active');
+            if (activeView && activeView.id === 'safety-compliance-view' && window.sheetNavigator) {
+              window.sheetNavigator.renderSafetyCompliance();
+            }
+          } catch (syncErr) {
+            console.warn('Auto-sync after safety email processing warning:', syncErr);
+          }
+        }, 5000);
       }
 
       // Hide header minimize button

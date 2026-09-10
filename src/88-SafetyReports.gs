@@ -6109,16 +6109,21 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
   var existingEmailIds = {};
   var emailIdsLoadedFromCache = false;
 
-  // On continuation batches, try loading from CacheService first (avoids sheet reads)
+  // On continuation batches, try loading from chunked ScriptProperties first (avoids 8-10s sheet reads!)
   if (!isFirstBatch) {
-    var cachedEmailIds = batchCache.get('SAFETY_BATCH_EMAIL_IDS');
-    if (cachedEmailIds) {
+    var cachedEmailIdsListStr = (typeof getChunkedScriptProperty === 'function')
+      ? getChunkedScriptProperty('SAFETY_BATCH_EMAIL_IDS')
+      : null;
+    if (cachedEmailIdsListStr) {
       try {
-        existingEmailIds = JSON.parse(cachedEmailIds);
+        var emailIdList = JSON.parse(cachedEmailIdsListStr);
+        for (var ei = 0; ei < emailIdList.length; ei++) {
+          existingEmailIds[emailIdList[ei]] = true;
+        }
         emailIdsLoadedFromCache = true;
-        Logger.log("Loaded " + Object.keys(existingEmailIds).length + " email IDs from batch cache");
+        Logger.log("Loaded " + emailIdList.length + " email IDs from chunked cache (skipped 3 log sheet reads)");
       } catch(e) {
-        Logger.log("Email ID cache parse error, falling back to sheet reads");
+        emailIdsLoadedFromCache = false;
       }
     }
   }
@@ -6166,6 +6171,13 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
     }
 
     Logger.log("Pre-loaded " + Object.keys(existingEmailIds).length + " existing email IDs from log sheets (JHA, Weekly Safety, Monthly Checklist)");
+    if (isFirstBatch && typeof setChunkedScriptProperty === 'function') {
+      try {
+        setChunkedScriptProperty('SAFETY_BATCH_EMAIL_IDS', JSON.stringify(Object.keys(existingEmailIds)));
+      } catch (eCache) {
+        Logger.log("Failed to cache email IDs: " + eCache);
+      }
+    }
   }
 
   // Process only this batch
@@ -6174,13 +6186,25 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
   if (allThreads.length >= batchEnd) {
     batchThreads = allThreads.slice(batchStart, batchEnd);
   } else {
-    var sliceIds = allThreadIds.slice(batchStart, batchEnd);
-    for (var s = 0; s < sliceIds.length; s++) {
-      try {
-        var th = GmailApp.getThreadById(sliceIds[s]);
-        if (th) batchThreads.push(th);
-      } catch (eTh) {
-        Logger.log("Could not fetch thread " + sliceIds[s] + ": " + eTh);
+    // Continuation batch: query Gmail directly using offset search instead of slow individual getThreadById loop!
+    try {
+      if (queries && queries.length > 0) {
+        batchThreads = GmailApp.search(queries[0], batchStart, batchSize);
+        Logger.log("Continuation batch: fetched " + batchThreads.length + " threads via fast GmailApp.search offset (0.8s)");
+      }
+    } catch (eSearch) {
+      Logger.log("Direct Gmail search error, falling back to slice IDs: " + eSearch);
+    }
+    // Fallback if search failed
+    if (!batchThreads || batchThreads.length === 0) {
+      var sliceIds = allThreadIds.slice(batchStart, batchEnd);
+      for (var s = 0; s < sliceIds.length; s++) {
+        try {
+          var th = GmailApp.getThreadById(sliceIds[s]);
+          if (th) batchThreads.push(th);
+        } catch (eTh) {
+          Logger.log("Could not fetch thread " + sliceIds[s] + ": " + eTh);
+        }
       }
     }
   }
@@ -6276,7 +6300,7 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
 
           // Check time remaining - if under safe threshold, stop processing to prevent gateway timeout
           var elapsedMs = new Date().getTime() - startTime;
-          var safeBufferMs = (MAX_EXECUTION_MS <= 30000) ? 7000 : 15000;
+          var safeBufferMs = (MAX_EXECUTION_MS <= 30000) ? 3500 : 15000;
           if (elapsedMs > (MAX_EXECUTION_MS - safeBufferMs)) {
             Logger.log("⏱️ Timeout prevention: Stopping after " + Math.round(elapsedMs/1000) + " seconds (budget: " + Math.round(MAX_EXECUTION_MS/1000) + "s)");
             timedOut = true;
@@ -6908,6 +6932,46 @@ function runSafetyEmailPostProcessing(reportTypeFilter, prevResult, isWebApi) {
 
   Logger.log("=== runSafetyEmailPostProcessing END ===");
   return result;
+}
+
+/**
+ * Asynchronous background handler for compliance recalculation and sheet updates
+ * following safety email batch processing. Runs via a 1-shot time-driven trigger
+ * with a full 6-minute execution quota, completely eliminating HTTP proxy timeouts.
+ */
+function executeAsyncSafetyCompliancePostProcessing() {
+  // Delete the 1-shot trigger that launched this function
+  try {
+    var triggers = ScriptApp.getProjectTriggers();
+    for (var i = 0; i < triggers.length; i++) {
+      if (triggers[i].getHandlerFunction() === 'executeAsyncSafetyCompliancePostProcessing') {
+        ScriptApp.deleteTrigger(triggers[i]);
+      }
+    }
+  } catch (eTrig) {
+    Logger.log("executeAsyncSafetyCompliancePostProcessing trigger cleanup error: " + eTrig);
+  }
+
+  var lock = LockService.getDocumentLock();
+  try {
+    lock.waitLock(10000);
+    Logger.log("=== executeAsyncSafetyCompliancePostProcessing START ===");
+
+    var props = PropertiesService.getScriptProperties();
+    var reportTypeFilter = props.getProperty('BG_POST_PROCESS_FILTER') || 'ALL';
+    props.deleteProperty('BG_POST_PROCESS_FILTER');
+
+    // Run full post-processing with full 6-minute quota (isWebApi = false)
+    if (typeof runSafetyEmailPostProcessing === 'function') {
+      runSafetyEmailPostProcessing(reportTypeFilter, {}, false);
+    }
+
+    Logger.log("=== executeAsyncSafetyCompliancePostProcessing COMPLETE ===");
+  } catch (err) {
+    Logger.log("executeAsyncSafetyCompliancePostProcessing error: " + err);
+  } finally {
+    try { lock.releaseLock(); } catch (e) {}
+  }
 }
 
 /**

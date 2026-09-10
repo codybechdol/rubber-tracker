@@ -58,6 +58,7 @@ echo ----------------------------------------
 echo.
 
 REM Push and capture output
+set NODE_OPTIONS=--max-old-space-size=4096
 call "%APPDATA%\npm\clasp.cmd" push --force > push_output.txt 2>&1
 set PUSH_RESULT=%ERRORLEVEL%
 type push_output.txt

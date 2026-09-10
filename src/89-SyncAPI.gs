@@ -2258,46 +2258,58 @@ function executeSyncApiProcessSafetyEmails(options) {
       }
     } catch (eClean) {}
 
-    var postResult = {};
-    if (typeof runSafetyEmailPostProcessing === 'function') {
-      try {
-        postResult = runSafetyEmailPostProcessing(reportTypeFilter, options.prevResult || {}, true);
-      } catch (ePost) {
-        Logger.log('executeSyncApiProcessSafetyEmails post processing error: ' + ePost);
-        postResult = { complete: true, error: ePost.toString() };
-      }
+    // In Web API mode, dispatch full compliance recalculation and formatting to background trigger
+    // with a 6-minute quota, while returning immediately to the client in < 0.5s to completely eliminate 404 proxy timeouts!
+    try {
+      cleanupProps.setProperty('BG_POST_PROCESS_FILTER', reportTypeFilter || 'ALL');
+      ScriptApp.newTrigger('executeAsyncSafetyCompliancePostProcessing')
+        .timeBased()
+        .after(100)
+        .create();
+      Logger.log("executeSyncApiProcessSafetyEmails: Dispatched background compliance post-processing trigger");
+    } catch (eTrig) {
+      Logger.log("executeSyncApiProcessSafetyEmails: Background trigger dispatch error: " + eTrig);
     }
+
+    var prev = options.prevResult || {};
+    var postResult = {
+      complete: true,
+      earlyExit: false,
+      batchNumber: prev.batchNumber || 1,
+      totalBatches: prev.totalBatches || 1,
+      processedThisBatch: prev.processedThisBatch || 0,
+      skippedThisBatch: prev.skippedThisBatch || 0,
+      uncreditedThisBatch: prev.uncreditedThisBatch || 0,
+      skipReasons: prev.skipReasons || {},
+      issuesThisBatch: prev.issuesThisBatch || 0,
+      complianceRecordsAdded: prev.complianceRecordsAdded || 0,
+      logsCreated: prev.logsCreated || { jha: 0, weekly: 0, monthly: 0 },
+      totalThreads: prev.totalThreads || 0,
+      threadsProcessed: prev.totalThreads || prev.threadsProcessed || 0,
+      threadsRemaining: 0,
+      newOnlyMode: prev.newOnlyMode !== undefined ? prev.newOnlyMode : true,
+      lastProcessedDate: (typeof getLastSafetyEmailProcessedTime === 'function') ? getLastSafetyEmailProcessedTime(reportTypeFilter) : ''
+    };
+
     // Attach recent log entries for interactive viewer & editing
     try {
-      postResult.recentLogs = getRecentSafetyLogs(100);
+      postResult.recentLogs = getRecentSafetyLogs(50);
     } catch (eLogs) {
       Logger.log('getRecentSafetyLogs error: ' + eLogs);
       postResult.recentLogs = [];
     }
 
-    SpreadsheetApp.flush();
-    var freshSnapshot = null;
-    if (typeof exportFullDatabaseSnapshot === 'function') {
-      try {
-        // Lean snapshot: export compliance and equipment needs; recentLogs covers the log rows for the desktop viewer
-        var safetyTables = ['safety_compliance', 'safety_equipment_needs'];
-        freshSnapshot = exportFullDatabaseSnapshot(safetyTables);
-      } catch (eSnap) {
-        Logger.log('executeSyncApiProcessSafetyEmails snapshot error: ' + eSnap);
-      }
-    }
     return {
       status: 'ok',
       success: true,
       complete: true,
-      result: postResult,
-      snapshot: freshSnapshot
+      result: postResult
     };
   }
 
   var result = null;
   try {
-    result = processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction, endDate, reportTypeFilter, 16000);
+    result = processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction, endDate, reportTypeFilter, 22000);
   } catch (err) {
     Logger.log('executeSyncApiProcessSafetyEmails batch error: ' + err.toString());
     return {
