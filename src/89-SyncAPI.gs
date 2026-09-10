@@ -144,20 +144,7 @@ function exportFullDatabaseSnapshot(tableKeysFilter) {
     var rows = [];
     var rawGrid = [];
 
-    var isLog = cfg.key.indexOf('_log') !== -1;
-    var maxLogRows = 500;
-    var startRowIndex = 0;
-    var endRowIndex = data.length;
-
-    if (isLog && data.length > maxLogRows + 10) {
-      // Log sheets (JHA, Weekly Safety, Monthly Checklist) are sorted newest-first at the top
-      endRowIndex = headerRowIdx + 1 + maxLogRows;
-    }
-
     for (var r = 0; r < data.length; r++) {
-      if (r > headerRowIdx && isLog && r >= endRowIndex) {
-        continue;
-      }
 
       var rowArray = data[r];
       var gridRow = [];
