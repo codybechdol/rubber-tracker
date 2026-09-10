@@ -11,7 +11,7 @@ echo.
 REM ========================================
 REM STEP 1: Pre-push syntax validation
 REM ========================================
-echo [Step 1/3] Running syntax validation...
+echo [Step 1/4] Running syntax validation...
 echo ----------------------------------------
 node validate-syntax.js
 set VALIDATE_RESULT=%ERRORLEVEL%
@@ -31,7 +31,7 @@ if %VALIDATE_RESULT% NEQ 0 (
 REM ========================================
 REM STEP 2: Check for duplicate files
 REM ========================================
-echo [Step 2/3] Checking for duplicate .js/.gs files...
+echo [Step 2/4] Checking for duplicate .js/.gs files...
 set FOUND_DUPLICATES=0
 for %%f in (src\*.js) do (
     if exist "%%~dpnf.gs" (
@@ -53,7 +53,7 @@ echo.
 REM ========================================
 REM STEP 3: Push to Apps Script
 REM ========================================
-echo [Step 3/3] Pushing to Google Apps Script...
+echo [Step 3/4] Pushing to Google Apps Script...
 echo ----------------------------------------
 echo.
 
@@ -73,6 +73,12 @@ if %PUSH_RESULT% EQU 0 (
     echo ========================================
     echo Updating Web App deployment...
     call "%APPDATA%\npm\clasp.cmd" deploy -i AKfycbzsCSiAhGr5aOMoEF6OlSInIgdnkvQbx_9zRcgdtA7usX7nZbPzlfZulyHDVTfStiuA -d "Auto deployed by push.bat"
+    echo.
+    REM ========================================
+    REM STEP 4: Create backup in Google Drive
+    REM ========================================
+    echo [Step 4/4] Creating backup in Google Drive - Sheet and JSON...
+    node scripts\trigger-backup.js
 ) else (
     echo.
     echo ========================================

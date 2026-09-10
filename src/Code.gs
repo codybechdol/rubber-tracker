@@ -13513,11 +13513,13 @@ function createBackupSnapshotFast(forceFullCopy) {
     var lastBackupTime = lastBackupStr ? parseInt(lastBackupStr, 10) : 0;
     var backupThrottleMs = 15 * 60 * 1000; // 15 minutes throttle for heavy DriveApp.makeCopy()
     var backupFile = null;
+    var backupFolder = typeof getOrCreateBackupFolder === 'function' ? getOrCreateBackupFolder() : null;
 
     if (forceFullCopy === true || !lastBackupTime || (nowTime - lastBackupTime) > backupThrottleMs) {
       try { ss.toast('Creating backup snapshot...', '💾 Backup in Progress', -1); } catch (tErr) {}
-      var backupFolder = getOrCreateBackupFolder();
-      backupFile = DriveApp.getFileById(ss.getId()).makeCopy(backupName, backupFolder);
+      if (backupFolder) {
+        backupFile = DriveApp.getFileById(ss.getId()).makeCopy(backupName, backupFolder);
+      }
       scriptProps.setProperty('LAST_FULL_DRIVE_BACKUP_TIME', String(nowTime));
       logEvent('Full Drive Backup created: ' + backupName, 'INFO');
       try { ss.toast('Backup created: ' + backupName, '✅ Backup Complete', 5); } catch (tErr) {}
@@ -13526,15 +13528,36 @@ function createBackupSnapshotFast(forceFullCopy) {
     }
 
     // Generate fresh offline sync snapshot JSON in the same backup folder
+    // AND create a timestamped JSON backup copy!
+    var jsonBackupFile = null;
+    var jsonBackupName = backupName + '.json';
     try {
+      var snapData = null;
+      if (typeof exportFullDatabaseSnapshot === 'function') {
+        snapData = exportFullDatabaseSnapshot();
+      }
+
+      if (snapData && backupFolder) {
+        var jsonStr = JSON.stringify(snapData);
+        jsonBackupFile = backupFolder.createFile(jsonBackupName, jsonStr, MimeType.PLAIN_TEXT);
+        Logger.log('createBackupSnapshotFast: Created timestamped JSON backup: ' + jsonBackupName + ' (' + (jsonStr.length / 1024).toFixed(1) + ' KB)');
+        logEvent('JSON Backup created: ' + jsonBackupName, 'INFO');
+      }
+
       if (typeof generateAndStoreSyncSnapshot === 'function') {
-        generateAndStoreSyncSnapshot();
+        generateAndStoreSyncSnapshot(snapData);
       }
     } catch (syncSnapErr) {
       Logger.log('createBackupSnapshotFast: Error generating sync snapshot: ' + syncSnapErr);
     }
 
-    return backupFile;
+    return {
+      sheetFile: backupFile,
+      jsonFile: jsonBackupFile,
+      backupName: backupName,
+      jsonBackupName: jsonBackupFile ? jsonBackupName : null,
+      getName: function() { return backupName; }
+    };
 
   } catch (e) {
     logEvent('Backup failed: ' + e, 'ERROR');
@@ -33479,6 +33502,30 @@ function doGet(e) {
         : JSON.stringify(exportFullDatabaseSnapshot());
       return ContentService.createTextOutput(snapshotJson)
         .setMimeType(ContentService.MimeType.JSON);
+    } else if (action === 'createBackup' || action === 'finalizePushAndBackup') {
+      var forceFullCopy = e.parameter.forceFullCopy === 'true';
+      var res = null;
+      try {
+        if (typeof createBackupSnapshotFast === 'function') {
+          res = createBackupSnapshotFast(forceFullCopy);
+        }
+      } catch (bkErr) {
+        Logger.log('doGet createBackup error: ' + bkErr);
+      }
+
+      var backupName = res ? (typeof res.getName === 'function' ? res.getName() : res.backupName) : null;
+      var jsonName = res && res.jsonBackupName ? res.jsonBackupName : (backupName ? (backupName + '.json') : null);
+
+      return ContentService.createTextOutput(JSON.stringify({
+        status: 'ok',
+        success: !!res,
+        backupCreated: !!(res && (res.sheetFile || res.backupName)),
+        backupName: backupName,
+        jsonBackupCreated: !!(res && res.jsonFile),
+        jsonBackupName: jsonName,
+        snapshotUpdated: true,
+        timestamp: new Date().toISOString()
+      })).setMimeType(ContentService.MimeType.JSON);
     }
 
     return ContentService.createTextOutput(JSON.stringify({ status: 'ok', message: 'Safety Assistant Web App API active' }))
@@ -33568,30 +33615,26 @@ function doPost(e) {
 
     if (action === 'createBackup' || action === 'finalizePushAndBackup') {
       var forceFullCopy = payload.forceFullCopy === true;
-      var bkFile = null;
+      var res = null;
       try {
         if (typeof createBackupSnapshotFast === 'function') {
-          bkFile = createBackupSnapshotFast(forceFullCopy);
+          res = createBackupSnapshotFast(forceFullCopy);
         }
       } catch (bkErr) {
         Logger.log('doPost createBackup error: ' + bkErr);
       }
 
-      var snapFile = null;
-      try {
-        if (typeof generateAndStoreSyncSnapshot === 'function') {
-          snapFile = generateAndStoreSyncSnapshot();
-        }
-      } catch (snapErr) {
-        Logger.log('doPost generateAndStoreSyncSnapshot error: ' + snapErr);
-      }
+      var backupName = res ? (typeof res.getName === 'function' ? res.getName() : res.backupName) : null;
+      var jsonName = res && res.jsonBackupName ? res.jsonBackupName : (backupName ? (backupName + '.json') : null);
 
       return ContentService.createTextOutput(JSON.stringify({
         status: 'ok',
-        success: true,
-        backupCreated: !!bkFile,
-        backupName: bkFile ? bkFile.getName() : null,
-        snapshotUpdated: !!snapFile,
+        success: !!res,
+        backupCreated: !!(res && (res.sheetFile || res.backupName)),
+        backupName: backupName,
+        jsonBackupCreated: !!(res && res.jsonFile),
+        jsonBackupName: jsonName,
+        snapshotUpdated: true,
         timestamp: new Date().toISOString()
       })).setMimeType(ContentService.MimeType.JSON);
     }

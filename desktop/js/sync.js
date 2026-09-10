@@ -1654,6 +1654,71 @@ class SyncEngine {
     return null;
   }
 
+  async createGoogleDriveBackup() {
+    if (this.isSyncing) return;
+    this.isSyncing = true;
+    const backupStartTime = Date.now();
+    const baseBackupMsg = 'Connecting to Google Apps Script and creating Drive backup (Sheet + JSON)...';
+    this.openSyncModal('Creating Google Drive Backup', '💾');
+    this.renderModalChanges([], `${baseBackupMsg} (${this.formatDuration(0)})`, 'syncing', false);
+    this.updateStatusUI('syncing', 'Creating Drive backup...');
+
+    const timerInterval = setInterval(() => {
+      const elapsedMs = Date.now() - backupStartTime;
+      const subTitleEl = document.getElementById('sync-modal-subtitle');
+      if (subTitleEl) {
+        subTitleEl.textContent = `${baseBackupMsg} (${this.formatDuration(elapsedMs)})`;
+      }
+    }, 200);
+
+    try {
+      const activeUrl = this.syncUrl || DEFAULT_SYNC_URL;
+      const resp = await this.executeNetworkRequest(activeUrl, 'POST', {
+        action: 'createBackup',
+        forceFullCopy: true
+      }, 120000);
+
+      clearInterval(timerInterval);
+      const totalElapsedMs = Date.now() - backupStartTime;
+      const durationFormatted = this.formatDuration(totalElapsedMs);
+
+      if (resp && resp.status === 'ok' && resp.success) {
+        const sheetName = resp.backupName || 'Google Sheet copy';
+        const jsonName = resp.jsonBackupName || (resp.backupName ? `${resp.backupName}.json` : 'JSON snapshot');
+
+        this.openSyncModal('Backup Created Successfully', '✅');
+        this.renderModalChanges([
+          {
+            table: 'Google Sheet Backup',
+            action: 'Copy Created',
+            description: sheetName
+          },
+          {
+            table: 'JSON Database Snapshot',
+            action: 'File Uploaded',
+            description: jsonName
+          },
+          {
+            table: 'Drive Destination',
+            action: 'Folder',
+            description: 'Google Drive > Glove Manager Backups'
+          }
+        ], `Backup finished in ${durationFormatted}! Both the spreadsheet copy and the timestamped JSON database snapshot are saved in Google Drive.`, 'success', false);
+        this.updateStatusUI('synced', `Backup Created (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`);
+      } else {
+        throw new Error((resp && resp.message) || 'Unknown response from backup endpoint');
+      }
+    } catch (err) {
+      clearInterval(timerInterval);
+      console.error('createGoogleDriveBackup error:', err);
+      this.openSyncModal('Backup Failed', '❌');
+      this.renderModalChanges([], `Failed to create backup: ${err.message}`, 'error', false);
+      this.updateStatusUI('offline', 'Backup failed');
+    } finally {
+      this.isSyncing = false;
+    }
+  }
+
   formatDuration(ms) {
     const totalSec = Math.max(0, Math.floor(ms / 1000));
     const mins = Math.floor(totalSec / 60);

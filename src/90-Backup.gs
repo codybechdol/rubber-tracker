@@ -35,10 +35,21 @@ function createBackupSnapshot() {
     // Log the backup
     logEvent('Backup created: ' + backupName, 'INFO');
 
-    // Generate fresh offline sync snapshot for desktop app
+    // Create timestamped JSON snapshot copy and generate fresh offline sync snapshot
+    var jsonBackupName = backupName + '.json';
     try {
+      var snapData = null;
+      if (typeof exportFullDatabaseSnapshot === 'function') {
+        snapData = exportFullDatabaseSnapshot();
+      }
+      if (snapData && backupFolder) {
+        var jsonStr = JSON.stringify(snapData);
+        backupFolder.createFile(jsonBackupName, jsonStr, MimeType.PLAIN_TEXT);
+        Logger.log('createBackupSnapshot: Created timestamped JSON backup: ' + jsonBackupName);
+        logEvent('JSON Backup created: ' + jsonBackupName, 'INFO');
+      }
       if (typeof generateAndStoreSyncSnapshot === 'function') {
-        generateAndStoreSyncSnapshot();
+        generateAndStoreSyncSnapshot(snapData);
       }
     } catch (syncSnapErr) {
       Logger.log('createBackupSnapshot: Error generating sync snapshot: ' + syncSnapErr);
@@ -49,7 +60,8 @@ function createBackupSnapshot() {
       .createHtmlOutput(
         '<div style="font-family: Arial, sans-serif; padding: 20px;">' +
         '<h2 style="color: #2e7d32;">✅ Backup Created Successfully!</h2>' +
-        '<p><strong>Name:</strong> ' + backupName + '</p>' +
+        '<p><strong>Google Sheet:</strong> ' + backupName + '</p>' +
+        '<p><strong>JSON Snapshot:</strong> ' + jsonBackupName + '</p>' +
         '<p><strong>Location:</strong> Google Drive > ' + BACKUP_FOLDER_NAME + '</p>' +
         '<p><strong>Time:</strong> ' + Utilities.formatDate(now, ss.getSpreadsheetTimeZone(), 'MM/dd/yyyy hh:mm:ss a') + '</p>' +
         '<br>' +
@@ -59,7 +71,7 @@ function createBackupSnapshot() {
         '</div>'
       )
       .setWidth(450)
-      .setHeight(250);
+      .setHeight(275);
 
     ui.showModalDialog(htmlOutput, 'Backup Complete');
 

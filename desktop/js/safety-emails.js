@@ -516,6 +516,33 @@ class SafetyEmailsEngine {
             </div>
           </div>
         </div>
+
+        <!-- Step 3: Select Processing Speed / Mode -->
+        <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 14px 16px;">
+          <label style="font-size: 12px; font-weight: 700; color: #f8fafc; display: block; margin-bottom: 8px;">
+            3. Processing Mode
+          </label>
+          <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px;">
+            <label style="display: flex; align-items: flex-start; gap: 8px; font-size: 12px; color: var(--text-primary); cursor: pointer; background: var(--bg-primary); padding: 10px 12px; border-radius: 6px; border: 1px solid var(--border-color);">
+              <input type="radio" name="proc-speed-mode" value="fast" checked style="accent-color: #10b981; margin-top: 2px;">
+              <div>
+                <span style="font-weight: 700; color: #6ee7b7;">⚡ Fast Mode (Recommended)</span>
+                <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px; line-height: 1.35;">
+                  Parses subject lines & email dates. Blazing fast (15-20 emails/batch) and prevents Google proxy timeouts.
+                </div>
+              </div>
+            </label>
+            <label style="display: flex; align-items: flex-start; gap: 8px; font-size: 12px; color: var(--text-primary); cursor: pointer; background: var(--bg-primary); padding: 10px 12px; border-radius: 6px; border: 1px solid var(--border-color);">
+              <input type="radio" name="proc-speed-mode" value="deep" style="accent-color: #10b981; margin-top: 2px;">
+              <div>
+                <span style="font-weight: 700; color: #f8fafc;">🔍 Deep Scan (Extract PDFs)</span>
+                <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px; line-height: 1.35;">
+                  Uses Google Drive OCR to read attached PDFs for internal JHA dates. Scans 1 email per batch to stay under limits.
+                </div>
+              </div>
+            </label>
+          </div>
+        </div>
       </div>
     `;
 
@@ -707,7 +734,8 @@ class SafetyEmailsEngine {
       daysBack = parseInt(scopeVal, 10) || 7;
     }
 
-    const skipPdfExtraction = false;
+    const speedRadio = document.querySelector('input[name="proc-speed-mode"]:checked');
+    let skipPdfExtraction = speedRadio ? (speedRadio.value === 'fast') : true;
 
     this.isProcessing = true;
     this.isMinimized = false;
@@ -796,8 +824,8 @@ class SafetyEmailsEngine {
         const payload = {
           action: 'processSafetyEmails',
           daysBack: daysBack,
-          // Safe batch sizes: 3 threads when extracting PDFs to guarantee executions finish under 18s and never 404/timeout!
-          batchSize: skipPdfExtraction ? 20 : 3,
+          // Safe batch sizes: 15 threads in Fast Mode (no OCR), 1 thread in Deep Scan (OCR) to guarantee execution stays under Web App gateway limits
+          batchSize: skipPdfExtraction ? 15 : 1,
           reportTypeFilter: reportTypeFilter,
           newOnlyMode: newOnlyMode,
           skipPdfExtraction: skipPdfExtraction,
@@ -818,19 +846,33 @@ class SafetyEmailsEngine {
               break;
             }
             if (batchAttempts < 3) {
-              console.warn(`Safety email batch #${batchIndex} attempt ${batchAttempts} returned non-success, retrying in 2.5s:`, response);
+              console.warn(`Safety email batch #${batchIndex} attempt ${batchAttempts} returned non-success, retrying in 3.5s:`, response);
+              // If we were running in Deep Scan mode and timed out, automatically fall back to Fast Mode for this and remaining batches!
+              if (!skipPdfExtraction) {
+                console.warn('Switching to Fast Mode (skipPdfExtraction = true) for subsequent attempt to bypass heavy PDF OCR timeout.');
+                skipPdfExtraction = true;
+                payload.skipPdfExtraction = true;
+                payload.batchSize = 10;
+              }
               const subEl = document.getElementById('proc-live-sub');
               if (subEl) subEl.textContent = `Server busy, retrying batch #${batchIndex} (attempt ${batchAttempts + 1}/3)...`;
               this.updateBackgroundWidget({ sub: `Retrying batch #${batchIndex} (${batchAttempts + 1}/3)...` });
-              await new Promise(r => setTimeout(r, 2500));
+              await new Promise(r => setTimeout(r, 3500));
             }
           } catch (netErr) {
             if (batchAttempts < 3) {
-              console.warn(`Safety email batch #${batchIndex} attempt ${batchAttempts} network error, retrying in 2.5s:`, netErr);
+              console.warn(`Safety email batch #${batchIndex} attempt ${batchAttempts} network error, retrying in 3.5s:`, netErr);
+              // If we were running in Deep Scan mode and encountered a timeout/404, auto-switch to Fast Mode to bypass the bad PDF
+              if (!skipPdfExtraction) {
+                console.warn('Switching to Fast Mode (skipPdfExtraction = true) for subsequent attempt to bypass heavy PDF OCR timeout.');
+                skipPdfExtraction = true;
+                payload.skipPdfExtraction = true;
+                payload.batchSize = 10;
+              }
               const subEl = document.getElementById('proc-live-sub');
-              if (subEl) subEl.textContent = `Network timeout, retrying batch #${batchIndex} (attempt ${batchAttempts + 1}/3)...`;
+              if (subEl) subEl.textContent = `Server busy or proxy timeout, retrying batch #${batchIndex} (attempt ${batchAttempts + 1}/3)...`;
               this.updateBackgroundWidget({ sub: `Retrying batch #${batchIndex} (${batchAttempts + 1}/3)...` });
-              await new Promise(r => setTimeout(r, 2500));
+              await new Promise(r => setTimeout(r, 3500));
             } else {
               throw netErr;
             }
@@ -929,6 +971,8 @@ class SafetyEmailsEngine {
           });
         }
 
+        // Polite pause between batches to prevent Google edge proxy burst rate limiting
+        await new Promise(r => setTimeout(r, 1200));
         batchIndex++;
       }
 

@@ -5790,6 +5790,9 @@ function applyStatusFormatting(sheet, startRow, numRows) {
  * @param {number} [maxExecutionMs] - Optional maximum execution time in ms (e.g. 25000 for Web App calls)
  */
 function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction, endDate, reportTypeFilter, maxExecutionMs) {
+  var startTime = new Date().getTime(); // Track execution time immediately from entry
+  var MAX_EXECUTION_MS = (typeof maxExecutionMs === 'number' && maxExecutionMs > 0) ? maxExecutionMs : (5.5 * 60 * 1000);
+
   if (!daysBack) daysBack = 7;
   if (!batchSize) batchSize = (skipPdfExtraction === true) ? 10 : 2; // Default 2 when extracting PDFs to prevent timeouts
   if (newOnlyMode === undefined) newOnlyMode = true; // Default to new-only mode
@@ -5802,8 +5805,9 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
   var isFirstBatch = (batchStart === 0);
   var batchCache = CacheService.getScriptCache();
 
-  // Store skipPdfExtraction in script properties so parseSafetyEmail can access it
+  // Store skipPdfExtraction and Web API mode in script properties so helper functions can access it
   props.setProperty('SKIP_PDF_EXTRACTION', skipPdfExtraction ? 'true' : 'false');
+  props.setProperty('IS_WEB_API_MODE', (MAX_EXECUTION_MS <= 30000) ? 'true' : 'false');
 
   if (isFirstBatch) {
     // Clear all execution-level caches at the start of this top-level entry point
@@ -5812,17 +5816,19 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
     batchCache.removeAll(['SAFETY_BATCH_CREWS', 'SAFETY_BATCH_EMP_DATA', 'SAFETY_BATCH_EMAIL_IDS']);
 
     // === SYNC CREWS (replaces old auto-populate Config) ===
-    // Ensures any new crews from Employees sheet are added to Job Tracking before processing
-    // This runs silently without alerts
-    var configResult = populateComplianceConfigSilent();
-    if (configResult.added > 0) {
-      Logger.log("processSafetyEmails: syncCrews added " + configResult.added + " new crews to Job Tracking");
+    // Only run if execution budget is generous (> 30s, e.g. from Sheets menu or background trigger).
+    // In Web App API mode (budget <= 30s), skip to preserve critical gateway proxy time.
+    if (MAX_EXECUTION_MS > 30000) {
+      var configResult = populateComplianceConfigSilent();
+      if (configResult.added > 0) {
+        Logger.log("processSafetyEmails: syncCrews added " + configResult.added + " new crews to Job Tracking");
+      }
+    } else {
+      Logger.log("processSafetyEmails: Web App mode (budget " + MAX_EXECUTION_MS + "ms) - skipping syncCrews to preserve gateway budget");
     }
   } else {
     Logger.log('Continuation batch ' + (Math.floor(batchStart / batchSize) + 1) + ' - skipping syncCrews and sheet init');
   }
-
-  var startTime = new Date().getTime(); // Track execution time
 
   var ss = SpreadsheetApp.getActiveSpreadsheet();
   var sheet = getSafetyEquipmentSheet();
@@ -5917,15 +5923,16 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
     if (newOnlyMode) {
       if (!lastProcessedDate) {
         var fallbackDate = new Date();
-        fallbackDate.setDate(fallbackDate.getDate() - 30);
+        fallbackDate.setDate(fallbackDate.getDate() - (MAX_EXECUTION_MS <= 30000 ? 7 : 30));
         lastProcessedDate = Utilities.formatDate(fallbackDate, Session.getScriptTimeZone(), 'yyyy/MM/dd');
-        Logger.log('New-only mode: no prior lastProcessedDate found for ' + reportTypeFilter + ', defaulting to 30 days ago: ' + lastProcessedDate);
+        Logger.log('New-only mode: no prior lastProcessedDate found for ' + reportTypeFilter + ', defaulting to ' + (MAX_EXECUTION_MS <= 30000 ? '7' : '30') + ' days ago: ' + lastProcessedDate);
       }
       var lastDate = new Date(lastProcessedDate.replace(/\//g, '-'));
-      lastDate.setDate(lastDate.getDate() - 14); // 14-day safety window
+      var safetyDays = (MAX_EXECUTION_MS <= 30000) ? 4 : 14;
+      lastDate.setDate(lastDate.getDate() - safetyDays);
       var filterDate = Utilities.formatDate(lastDate, Session.getScriptTimeZone(), 'yyyy/MM/dd');
       dateFilter = ' after:' + filterDate;
-      Logger.log('New-only mode: filtering emails after ' + filterDate + ' (14-day safety window from last processed: ' + lastProcessedDate + ')');
+      Logger.log('New-only mode: filtering emails after ' + filterDate + ' (' + safetyDays + '-day safety window from last processed: ' + lastProcessedDate + ')');
       // Save dateFilter for continuation batches so thread list stays consistent
       props.setProperty('SAFETY_BATCH_DATE_FILTER', dateFilter);
     } else {
@@ -5948,34 +5955,25 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
   }
 
   // Search queries for different report types
-  // Search by subject only (works for both original and forwarded emails)
-  var baseQueries = [];
+  // Combine subjects with OR into a single query to avoid 4 sequential Gmail searches (saves 4-8s)
+  var queries = [];
   if (!reportTypeFilter || reportTypeFilter === 'ALL') {
-    baseQueries = [
-      'subject:"Job Hazard Report"',
-      'subject:"Safety Meeting Report"',
-      'subject:"Safety Checklist Report"',
-      'subject:"Safety Check List Report"'
+    queries = [
+      '(subject:"Job Hazard Report" OR subject:"Safety Meeting Report" OR subject:"Safety Checklist Report" OR subject:"Safety Check List Report")' + dateFilter
     ];
   } else if (reportTypeFilter === 'JHA') {
-    baseQueries = [
-      'subject:"Job Hazard Report"'
+    queries = [
+      'subject:"Job Hazard Report"' + dateFilter
     ];
   } else if (reportTypeFilter === 'WEEKLY') {
-    baseQueries = [
-      'subject:"Safety Meeting Report"'
+    queries = [
+      'subject:"Safety Meeting Report"' + dateFilter
     ];
   } else if (reportTypeFilter === 'MONTHLY') {
-    baseQueries = [
-      'subject:"Safety Checklist Report"',
-      'subject:"Safety Check List Report"'
+    queries = [
+      '(subject:"Safety Checklist Report" OR subject:"Safety Check List Report")' + dateFilter
     ];
   }
-
-  // Build queries with date filters - ALWAYS apply the date filter
-  var queries = baseQueries.map(function(q) {
-    return q + dateFilter;
-  });
 
   // Valid senders for Safety Checklist Reports
   var validChecklistSenders = [
@@ -6187,8 +6185,7 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
     }
   }
 
-  // Time tracking - stop before execution limit (default 5.5 min for triggers, or custom e.g. 25s for Web App HTTP)
-  var MAX_EXECUTION_MS = (typeof maxExecutionMs === 'number' && maxExecutionMs > 0) ? maxExecutionMs : (5.5 * 60 * 1000);
+  // Time tracking - stop before execution limit
   var timedOut = false;
 
   // === OPTION B: Build job resolution context for logging ===
@@ -6277,10 +6274,11 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
           var message = messages[midx];
           var messageId = (thread ? thread.getId() : '') || message.getId();
 
-          // Check time remaining - if under 10 seconds remaining, stop processing
+          // Check time remaining - if under safe threshold, stop processing to prevent gateway timeout
           var elapsedMs = new Date().getTime() - startTime;
-          if (elapsedMs > MAX_EXECUTION_MS) {
-            Logger.log("⏱️ Timeout prevention: Stopping after " + Math.round(elapsedMs/1000) + " seconds");
+          var safeBufferMs = (MAX_EXECUTION_MS <= 30000) ? 7000 : 15000;
+          if (elapsedMs > (MAX_EXECUTION_MS - safeBufferMs)) {
+            Logger.log("⏱️ Timeout prevention: Stopping after " + Math.round(elapsedMs/1000) + " seconds (budget: " + Math.round(MAX_EXECUTION_MS/1000) + "s)");
             timedOut = true;
             lastProcessedIndex = tidx;
             break;
@@ -6306,7 +6304,7 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
             }
           }
 
-          var parsed = parseSafetyEmail(message, skipPdfExtraction);
+          var parsed = parseSafetyEmail(message, skipPdfExtraction, startTime, MAX_EXECUTION_MS);
           lastProcessedIndex = tidx;
           if (parsed) {
             newEmailsParsedThisBatch++;
@@ -6701,8 +6699,8 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
  * @param {Object} [prevResult] - Cumulative results from processSafetyEmails batch
  * @return {Object} Final result object for UI dialog
  */
-function runSafetyEmailPostProcessing(reportTypeFilter, prevResult) {
-  Logger.log("=== runSafetyEmailPostProcessing START (filter=" + (reportTypeFilter || 'ALL') + ") ===");
+function runSafetyEmailPostProcessing(reportTypeFilter, prevResult, isWebApi) {
+  Logger.log("=== runSafetyEmailPostProcessing START (filter=" + (reportTypeFilter || 'ALL') + ", isWebApi=" + (isWebApi === true) + ") ===");
   if (!reportTypeFilter) reportTypeFilter = 'ALL';
   prevResult = prevResult || {};
 
@@ -6872,27 +6870,32 @@ function runSafetyEmailPostProcessing(reportTypeFilter, prevResult) {
   }
 
   // Gmail links and log sheet formatting
-  try {
-    var linkCount = applySafetyEquipmentEmailLinksSilent();
-    Logger.log("Gmail links applied to " + linkCount + " Source Email ID cells");
-  } catch (linkErr) {
-    Logger.log("Gmail link application error: " + linkErr.toString());
-  }
-
-  // Clean up any legacy/pending applyAllEmailLinksScheduled triggers so none run in background
-  try {
-    var existingTriggers = ScriptApp.getProjectTriggers();
-    for (var ti = 0; ti < existingTriggers.length; ti++) {
-      if (existingTriggers[ti].getHandlerFunction() === 'applyAllEmailLinksScheduled') {
-        ScriptApp.deleteTrigger(existingTriggers[ti]);
-      }
+  // Only execute when running inside Google Sheets (not via Web App API) to prevent hitting 25-30s gateway timeout!
+  if (!isWebApi) {
+    try {
+      var linkCount = applySafetyEquipmentEmailLinksSilent();
+      Logger.log("Gmail links applied to " + linkCount + " Source Email ID cells");
+    } catch (linkErr) {
+      Logger.log("Gmail link application error: " + linkErr.toString());
     }
-  } catch (trigErr) {}
 
-  try {
-    sortAndFormatSafetyLogs(true);
-  } catch (fmtErr) {
-    Logger.log("Log sheet formatting error: " + fmtErr.toString());
+    // Clean up any legacy/pending applyAllEmailLinksScheduled triggers so none run in background
+    try {
+      var existingTriggers = ScriptApp.getProjectTriggers();
+      for (var ti = 0; ti < existingTriggers.length; ti++) {
+        if (existingTriggers[ti].getHandlerFunction() === 'applyAllEmailLinksScheduled') {
+          ScriptApp.deleteTrigger(existingTriggers[ti]);
+        }
+      }
+    } catch (trigErr) {}
+
+    try {
+      sortAndFormatSafetyLogs(true);
+    } catch (fmtErr) {
+      Logger.log("Log sheet formatting error: " + fmtErr.toString());
+    }
+  } else {
+    Logger.log("runSafetyEmailPostProcessing: Web App mode — skipping applySafetyEquipmentEmailLinksSilent and sortAndFormatSafetyLogs to preserve gateway budget");
   }
 
   Logger.log("=== runSafetyEmailPostProcessing END ===");
@@ -7527,7 +7530,7 @@ function cancelPendingCorrections() {
  * @param {boolean} skipPdfExtraction - If true, skip slow PDF extraction and use subject date only
  * @returns {Object} - {issues: [[row data]], reportMeta: {...}, jobNormalization: {...}}
  */
-function parseSafetyEmail(message, skipPdfExtraction) {
+function parseSafetyEmail(message, skipPdfExtraction, startTime, maxExecutionMs) {
   // Get skipPdfExtraction from script properties if not passed directly
   if (skipPdfExtraction === undefined) {
     var props = PropertiesService.getScriptProperties();
@@ -7698,6 +7701,22 @@ function parseSafetyEmail(message, skipPdfExtraction) {
         }
 
         pdfCount++;
+
+        // In Web App mode (tight budget), check if time is running low before starting slow Drive OCR
+        if (startTime && maxExecutionMs && maxExecutionMs <= 30000) {
+          var currElapsed = new Date().getTime() - startTime;
+          // Drive OCR takes at least 6-12s. If elapsed time is already > 8s, DO NOT start another OCR!
+          if (currElapsed > 8000) {
+            Logger.log("⏱️ parseSafetyEmail: Stopping attachment processing at " + Math.round(currElapsed/1000) + "s (over 8s budget) to prevent Web App timeout - falling back to subject date");
+            break;
+          }
+          // If we already parsed 1 PDF and got valid dates for JHA, skip extra PDFs in Web App mode to save 10-15s
+          if (pdfCount > 1 && allPdfDates.length > 0) {
+            Logger.log("parseSafetyEmail: JHA date already found from PDF #1; skipping subsequent PDF #" + pdfCount + " in Web App mode to preserve budget");
+            break;
+          }
+        }
+
         if (pdfCount > 3) {
           Logger.log("Reached max 3 PDFs limit per email to prevent timeout. Skipping remaining PDFs.");
           break;
@@ -7705,8 +7724,8 @@ function parseSafetyEmail(message, skipPdfExtraction) {
         Logger.log("Extracting " + reportType + " PDF #" + pdfCount + ": " + attachment.getName() + " (" + Math.round(attachment.getSize()/1024) + "KB)");
 
         try {
-          // Convert PDF to text using Drive API OCR
-          var pdfText = extractTextFromPDF(attachment);
+          // Convert PDF to text using Drive API OCR (cap to 2.5MB in Web API mode to prevent proxy timeout)
+          var pdfText = extractTextFromPDF(attachment, (maxExecutionMs && maxExecutionMs <= 30000) ? 2.5 * 1024 * 1024 : 10 * 1024 * 1024);
           if (pdfText && pdfText.length > 50) {
             fullText += "\n\n[PDF #" + pdfCount + " CONTENT]\n" + pdfText;
             Logger.log("Extracted " + pdfText.length + " chars from PDF #" + pdfCount);
@@ -7862,9 +7881,17 @@ function parseSafetyEmail(message, skipPdfExtraction) {
  * @returns {string} - Extracted text content
  */
 function extractTextFromPDF(attachment, maxSizeBytes) {
-  // Default: 10MB — large enough for all JHA PDFs (field tablets produce 2-18MB)
-  // Original 2MB limit was too restrictive; OCR API handles large files fine (~0.4s/file)
-  if (!maxSizeBytes) maxSizeBytes = 10 * 1024 * 1024;
+  var isWebApi = (typeof MAX_EXECUTION_MS !== 'undefined' && MAX_EXECUTION_MS <= 30000) ||
+                 (PropertiesService.getScriptProperties().getProperty('IS_WEB_API_MODE') === 'true');
+  
+  // In Web App API mode, Google's HTTP proxy has a strict ~25s timeout.
+  // Converting a PDF > 2.5MB via Drive OCR can take 20-40s and triggers a 404 proxy timeout.
+  // When in Web App mode, cap at 2.5MB; for standalone background scripts, allow up to 10MB.
+  if (isWebApi && (!maxSizeBytes || maxSizeBytes > 2.5 * 1024 * 1024)) {
+    maxSizeBytes = 2.5 * 1024 * 1024;
+  } else if (!maxSizeBytes) {
+    maxSizeBytes = 10 * 1024 * 1024;
+  }
 
   var file = null;
   var docFile = null;
@@ -7872,7 +7899,7 @@ function extractTextFromPDF(attachment, maxSizeBytes) {
   try {
     var size = attachment.getSize();
     if (size > maxSizeBytes) {
-      Logger.log("PDF too large to process: " + (size / 1024 / 1024).toFixed(2) + "MB (limit: " + (maxSizeBytes / 1024 / 1024).toFixed(0) + "MB)");
+      Logger.log("PDF too large to process for OCR budget: " + (size / 1024 / 1024).toFixed(2) + "MB (limit: " + (maxSizeBytes / 1024 / 1024).toFixed(1) + "MB) - falling back to subject date to prevent gateway timeout");
       return "";
     }
 

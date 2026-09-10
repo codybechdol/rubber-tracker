@@ -2261,7 +2261,7 @@ function executeSyncApiProcessSafetyEmails(options) {
     var postResult = {};
     if (typeof runSafetyEmailPostProcessing === 'function') {
       try {
-        postResult = runSafetyEmailPostProcessing(reportTypeFilter, options.prevResult || {});
+        postResult = runSafetyEmailPostProcessing(reportTypeFilter, options.prevResult || {}, true);
       } catch (ePost) {
         Logger.log('executeSyncApiProcessSafetyEmails post processing error: ' + ePost);
         postResult = { complete: true, error: ePost.toString() };
@@ -2279,7 +2279,8 @@ function executeSyncApiProcessSafetyEmails(options) {
     var freshSnapshot = null;
     if (typeof exportFullDatabaseSnapshot === 'function') {
       try {
-        var safetyTables = ['safety_compliance', 'jha_log', 'weekly_safety_log', 'monthly_checklist_log', 'safety_equipment_needs'];
+        // Lean snapshot: export compliance and equipment needs; recentLogs covers the log rows for the desktop viewer
+        var safetyTables = ['safety_compliance', 'safety_equipment_needs'];
         freshSnapshot = exportFullDatabaseSnapshot(safetyTables);
       } catch (eSnap) {
         Logger.log('executeSyncApiProcessSafetyEmails snapshot error: ' + eSnap);
@@ -2333,7 +2334,7 @@ function executeSyncApiProcessSafetyEmails(options) {
   // If no new emails were found, processSafetyEmails already updated weeks/compliance; don't repeat full post-processing
   if (result.totalThreads > 0 && typeof runSafetyEmailPostProcessing === 'function') {
     try {
-      postResult = runSafetyEmailPostProcessing(reportTypeFilter, result);
+      postResult = runSafetyEmailPostProcessing(reportTypeFilter, result, true);
     } catch (ePost) {
       Logger.log('executeSyncApiProcessSafetyEmails post processing error: ' + ePost);
     }
@@ -2352,7 +2353,8 @@ function executeSyncApiProcessSafetyEmails(options) {
   var freshSnapshot = null;
   if (typeof exportFullDatabaseSnapshot === 'function') {
     try {
-      var safetyTables = ['safety_compliance', 'jha_log', 'weekly_safety_log', 'monthly_checklist_log', 'safety_equipment_needs'];
+      // Lean snapshot: export compliance and equipment needs; recentLogs covers the log rows for the desktop viewer
+      var safetyTables = ['safety_compliance', 'safety_equipment_needs'];
       freshSnapshot = exportFullDatabaseSnapshot(safetyTables);
     } catch (eSnap) {
       Logger.log('executeSyncApiProcessSafetyEmails snapshot error: ' + eSnap);
