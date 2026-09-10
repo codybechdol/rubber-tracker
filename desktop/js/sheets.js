@@ -3130,7 +3130,8 @@ class SheetNavigator {
               if (empTable && empTable.rows && (!assignedResolved || empLoc === 'Helena')) {
                 const empMatch = empTable.rows.find(e => {
                   const eName = String(e['Name'] || e['Employee Name'] || Object.values(e)[0] || '').trim().toLowerCase();
-                  const eAlt = String(e['Alternate Names'] || '').trim().toLowerCase();
+                  const altKey = Object.keys(e).find(k => /^(alt(ernat(e|ive))?(\s*names?)?|also\s*known\s*as|aka|aliases?)$/i.test(k.trim()));
+                  const eAlt = String((altKey ? e[altKey] : e['Alternate Names']) || '').trim().toLowerCase();
                   return eName === curAssignedLower || eAlt.includes(curAssignedLower);
                 });
                 if (empMatch) {
@@ -3372,8 +3373,13 @@ class SheetNavigator {
             }
           }
 
-          // 5. If Location or Job Number was edited on Employees sheet, auto-sync to Expiring Certs table
+          // 5. If Location, Job Number, or Names was edited on Employees sheet, auto-sync and refresh resolver
           if (this.currentSheetKey === 'employees' && tableRow) {
+            // Immediately rebuild employee index so name and alias changes take effect live
+            if (window.employeeResolver && typeof window.employeeResolver.rebuildIndex === 'function') {
+              window.employeeResolver.rebuildIndex();
+            }
+
             const isLocEdit = hLower === 'location';
             const isJobEdit = hLower === 'job number' || hLower === 'job #' || hLower === 'job';
             if (isLocEdit || isJobEdit) {
@@ -3417,6 +3423,11 @@ class SheetNavigator {
                     }
                   }
                 }
+              }
+
+              // Auto-sync inventory item locations if an employee's location was changed
+              if (isLocEdit && window.inventoryManager && typeof window.inventoryManager.syncInventoryLocations === 'function') {
+                window.inventoryManager.syncInventoryLocations(true).catch(e => console.warn('Auto syncInventoryLocations error:', e));
               }
             }
           }

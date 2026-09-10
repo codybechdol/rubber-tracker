@@ -291,7 +291,7 @@ function getEmployeePhoneMapForTasks(ss) {
     var header = String(headers[h]).toLowerCase().trim();
     // Match various phone column header formats
     if (header === 'phone number' || header === 'phone' || header === 'phone #' || header === 'cell' || header === 'cell phone') phoneCol = h;
-    if (header === 'alternate names' || header === 'alternatenames') altNamesColT = h;
+    if (/^(alt(ernat(e|ive))?(\s*names?)?|also\s*known\s*as|aka|aliases?)$/i.test(header)) altNamesColT = h;
   }
   nameCol = getEmployeeNameColumnIndex(headers);
 
@@ -3379,7 +3379,7 @@ function getEmployeeNamesForMatching() {
       if (header === 'glove size') gloveSizeCol = h;
       if (header === 'sleeve size') sleeveSizeCol = h;
       if (header === 'job classification') jobClassificationCol = h;
-      if (header === 'alternate names' || header === 'also known as' || header === 'aka') alternateNamesCol = h;
+      if (/^(alt(ernat(e|ive))?(\s*names?)?|also\s*known\s*as|aka|aliases?)$/i.test(header)) alternateNamesCol = h;
     }
 
     for (var i = 1; i < data.length; i++) {
@@ -3755,8 +3755,16 @@ function buildAlternateNameMap(employees) {
   var map = {};
   for (var i = 0; i < employees.length; i++) {
     var emp = employees[i];
+    // Auto-register First + Last for 3-part names (e.g. "Jimmy James Bailey" -> "Jimmy Bailey")
+    if (emp.name) {
+      var nParts = String(emp.name).trim().split(/\s+/);
+      if (nParts.length >= 3) {
+        var firstLast = (nParts[0] + ' ' + nParts[nParts.length - 1]).toLowerCase();
+        if (!map[firstLast]) map[firstLast] = emp.name;
+      }
+    }
     if (!emp.alternateNames) continue;
-    var alts = emp.alternateNames.split(';');
+    var alts = String(emp.alternateNames).split(/[;,\/]+/);
     for (var j = 0; j < alts.length; j++) {
       var alt = alts[j].trim().toLowerCase();
       if (alt) map[alt] = emp.name;
@@ -3790,7 +3798,7 @@ function setupAlternateNamesColumn() {
   var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
   for (var h = 0; h < headers.length; h++) {
     var hdr = String(headers[h]).toLowerCase().trim();
-    if (hdr === 'alternate names' || hdr === 'also known as' || hdr === 'aka') {
+    if (/^(alt(ernat(e|ive))?(\s*names?)?|also\s*known\s*as|aka|aliases?)$/i.test(hdr)) {
       SpreadsheetApp.getUi().alert('Alternate Names column already exists (column ' + (h + 1) + ').');
       return;
     }

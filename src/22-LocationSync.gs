@@ -54,23 +54,35 @@ function syncInventoryLocations() {
     nameToLocation['not repairable'] = 'Destroyed';
     nameToLocation['lost'] = 'Lost';
 
-    // Find Alternate Names column
+    // Find Alternate / Alternative Names column dynamically
     var altNamesColIdx = -1;
     for (var h = 0; h < empHeaders.length; h++) {
       var hdr = String(empHeaders[h]).trim().toLowerCase();
-      if (hdr === 'alternate names' || hdr === 'alternatenames') altNamesColIdx = h;
+      if (/^(alt(ernat(e|ive))?(\s*names?)?|also\s*known\s*as|aka|aliases?)$/i.test(hdr)) {
+        altNamesColIdx = h;
+        break;
+      }
     }
 
     // Add current employees
     for (var i = 1; i < empData.length; i++) {
-      var name = (empData[i][nameColIdx] || '').toString().trim().toLowerCase();
+      var rawName = (empData[i][nameColIdx] || '').toString().trim();
+      var name = rawName.toLowerCase();
       var loc = (empData[i][locationColIdx] || '').toString().trim();
       if (name && loc) {
         var physLoc = getPhysicalLocation(loc);
         nameToLocation[name] = physLoc;
+
+        // Auto-register First + Last for 3-part names (e.g. "Jimmy James Bailey" -> "jimmy bailey")
+        var nParts = rawName.split(/\s+/);
+        if (nParts.length >= 3) {
+          var firstLast = (nParts[0] + ' ' + nParts[nParts.length - 1]).toLowerCase();
+          if (!nameToLocation[firstLast]) nameToLocation[firstLast] = physLoc;
+        }
+
         // Also register alternate names (e.g. Josh Roberts -> Joshua Roberts)
         if (altNamesColIdx !== -1 && empData[i][altNamesColIdx]) {
-          var alts = String(empData[i][altNamesColIdx]).split(';');
+          var alts = String(empData[i][altNamesColIdx]).split(/[;,\/]+/);
           for (var a = 0; a < alts.length; a++) {
             var alt = alts[a].trim().toLowerCase();
             if (alt && !nameToLocation[alt]) nameToLocation[alt] = physLoc;

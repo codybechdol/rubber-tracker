@@ -24,6 +24,13 @@ class EmployeeNameResolver {
       { name: 'New', label: 'New Purchase (On Shelf)', icon: '✨', location: 'Helena', status: 'On Shelf' }
     ];
     this.init();
+
+    // Auto-rebuild index whenever the database updates or snapshot syncs
+    if (this.db && typeof this.db.subscribe === 'function') {
+      this.db.subscribe(() => {
+        this.rebuildIndex();
+      });
+    }
   }
 
   init() {
@@ -52,7 +59,18 @@ class EmployeeNameResolver {
       const jobClass = String(r['Job Classification'] || r['Classification'] || '').trim();
       const jobNumber = String(r['Job Number'] || '').trim();
       const phone = String(r['Phone Number'] || '').trim();
-      const altNamesRaw = String(r['Alternate Names'] || r['Also Known As'] || r['AKA'] || '').trim();
+
+      // Dynamically locate Alternate / Alternative Names header across all known naming variations
+      let altNamesRaw = '';
+      for (const [k, v] of Object.entries(r)) {
+        if (/^(alt(ernat(e|ive))?(\s*names?)?|also\s*known\s*as|aka|aliases?)$/i.test(k.trim())) {
+          altNamesRaw = String(v || '').trim();
+          if (altNamesRaw) break;
+        }
+      }
+      if (!altNamesRaw) {
+        altNamesRaw = String(r['Alternate Names'] || r['Alternative names'] || r['Alternative Names'] || r['Alternative Name'] || r['Alternate Name'] || r['Alt Names'] || r['Alt Name'] || r['Also Known As'] || r['AKA'] || '').trim();
+      }
 
       const altNamesList = altNamesRaw
         ? altNamesRaw.split(/[;,\/]+/).map(s => s.trim()).filter(Boolean)
@@ -117,6 +135,14 @@ class EmployeeNameResolver {
         `${last}, ${first}`.toLowerCase(),
         `${last} ${first}`.toLowerCase()
       ];
+
+      // If parts.length >= 3 (e.g. "Jimmy James Bailey"), also automatically register First + Last!
+      if (parts.length >= 3) {
+        const firstLast = `${first} ${last}`.toLowerCase();
+        initForms.push(firstLast);
+        initForms.push(`${last}, ${first}`.toLowerCase());
+        initForms.push(`${last} ${first}`.toLowerCase());
+      }
 
       initForms.forEach(f => {
         if (!this.indexMap.has(f)) {
@@ -297,6 +323,30 @@ class EmployeeNameResolver {
 
     if (!inTokens.length || !tgTokens.length) return false;
 
+    // Direct First + Last matching for compound/middle names:
+    // e.g. input ["jimmy", "bailey"] matches target ["jimmy", "james", "bailey"]
+    if (inTokens.length === 2 && tgTokens.length >= 2) {
+      if (inTokens[0] === tgTokens[0] && inTokens[1] === tgTokens[tgTokens.length - 1]) {
+        return true;
+      }
+    }
+
+    // Subsequence matching: all input tokens appear in target tokens in order
+    if (inTokens.length >= 2 && inTokens.length < tgTokens.length) {
+      let tIdx = 0;
+      let matchedCount = 0;
+      for (let i = 0; i < inTokens.length; i++) {
+        while (tIdx < tgTokens.length && tgTokens[tIdx] !== inTokens[i]) {
+          tIdx++;
+        }
+        if (tIdx < tgTokens.length && tgTokens[tIdx] === inTokens[i]) {
+          matchedCount++;
+          tIdx++;
+        }
+      }
+      if (matchedCount === inTokens.length) return true;
+    }
+
     // Single token initial + last: e.g. "p" + "johnson" vs "payton" + "miller" + "johnson"
     if (inTokens.length === 2 && inTokens[0].length === 1) {
       const initChar = inTokens[0];
@@ -387,6 +437,11 @@ class EmployeeNameResolver {
       } else {
         // Direct substring on canonical name
         if (cLower.includes(q) || cLower.replace(/[^a-z0-9]/g, '').includes(qClean)) {
+          matched = true;
+        }
+
+        // Fuzzy/Token match on canonical name (e.g. "jimmy bailey" matches "Jimmy James Bailey")
+        if (!matched && this._isFuzzyOrTokenMatch(q, cName)) {
           matched = true;
         }
 
