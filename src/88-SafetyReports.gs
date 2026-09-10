@@ -6739,8 +6739,10 @@ function runSafetyEmailPostProcessing(reportTypeFilter, prevResult, isWebApi) {
     var tasksCreated = 0;
     if (previousWeekData) {
       updateComplianceSheetFromLogs(previousWeekData);
-      tasksCreated = createMissingReportTasks(previousWeekData);
-      Logger.log("Previous week tasks created: " + tasksCreated);
+      if (!isWebApi) {
+        tasksCreated = createMissingReportTasks(previousWeekData);
+        Logger.log("Previous week tasks created: " + tasksCreated);
+      }
     }
 
     // Process current week
@@ -6751,22 +6753,28 @@ function runSafetyEmailPostProcessing(reportTypeFilter, prevResult, isWebApi) {
       updateComplianceSheetFromLogs(complianceData);
     }
 
-    // Finalize older past weeks
-    var pastWeekResult = finalizePastWeeksCompliance();
-    tasksCreated += pastWeekResult.tasksCreated;
+    // Only run expensive past week finalization, full-sheet formatting, and auto-cleanup in standalone/menu mode
+    // When running via Web API, skip them to prevent exceeding Google edge proxy gateway timeouts (saves 60-90s!)
+    if (!isWebApi) {
+      // Finalize older past weeks
+      var pastWeekResult = finalizePastWeeksCompliance();
+      tasksCreated += pastWeekResult.tasksCreated;
 
-    // Format compliance sheet
-    formatComplianceSheetByWeek();
-    Logger.log("Compliance sheet formatted - newest week now at top");
+      // Format compliance sheet
+      formatComplianceSheetByWeek();
+      Logger.log("Compliance sheet formatted - newest week now at top");
 
-    // Auto-cleanup
-    try {
-      var cleanupResult = autoComplianceCleanup(true, reportTypeFilter);
-      Logger.log("Auto-cleanup complete - LogFixes: JHA=" + cleanupResult.logsFixes.jha +
-                 ", Weekly=" + cleanupResult.logsFixes.weekly +
-                 ", NonConfigRemoved=" + cleanupResult.nonConfigRemoved);
-    } catch (cleanupErr) {
-      Logger.log("Auto-cleanup error (non-fatal): " + cleanupErr.toString());
+      // Auto-cleanup
+      try {
+        var cleanupResult = autoComplianceCleanup(true, reportTypeFilter);
+        Logger.log("Auto-cleanup complete - LogFixes: JHA=" + cleanupResult.logsFixes.jha +
+                   ", Weekly=" + cleanupResult.logsFixes.weekly +
+                   ", NonConfigRemoved=" + cleanupResult.nonConfigRemoved);
+      } catch (cleanupErr) {
+        Logger.log("Auto-cleanup error (non-fatal): " + cleanupErr.toString());
+      }
+    } else {
+      Logger.log("runSafetyEmailPostProcessing: Web API mode — skipping finalizePastWeeksCompliance, formatComplianceSheetByWeek, and autoComplianceCleanup to preserve gateway budget");
     }
 
     if (complianceData) {

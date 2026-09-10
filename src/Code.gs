@@ -33490,6 +33490,24 @@ function doGet(e) {
         : { success: false, error: 'getSafetyEmailPdf function not found in backend' };
       return ContentService.createTextOutput(JSON.stringify(pdfRes))
         .setMimeType(ContentService.MimeType.JSON);
+    } else if (action === 'getSafetyEmailsStatus') {
+      var statusRes = (typeof getSafetyEmailsStatus === 'function')
+        ? getSafetyEmailsStatus()
+        : { jha: 'IDLE', weekly: 'IDLE', monthly: 'IDLE', all: 'IDLE' };
+      var props = PropertiesService.getScriptProperties();
+      var filterKey = (e.parameter.reportTypeFilter || 'ALL').toUpperCase();
+      var resultJson = props.getProperty('BG_SAFETY_EMAIL_RESULT_' + filterKey) || props.getProperty('BG_SAFETY_EMAIL_RESULT_ALL');
+      var parsedResult = null;
+      if (resultJson) {
+        try { parsedResult = JSON.parse(resultJson); } catch (e) {}
+      }
+      return ContentService.createTextOutput(JSON.stringify({
+        status: 'ok',
+        success: true,
+        statuses: statusRes,
+        currentStatus: statusRes[filterKey.toLowerCase()] || statusRes.all || 'IDLE',
+        result: parsedResult
+      })).setMimeType(ContentService.MimeType.JSON);
     } else if (action === 'reconcileInventoryFromHistory') {
       var recRes = reconcileInventoryFromHistory(true);
       return ContentService.createTextOutput(JSON.stringify(recRes))
@@ -33582,6 +33600,41 @@ function doPost(e) {
       });
       return ContentService.createTextOutput(JSON.stringify(procResult))
         .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    if (action === 'startProcessSafetyEmailsInBackground') {
+      var bgRes = (typeof startProcessSafetyEmailsInBackground === 'function')
+        ? startProcessSafetyEmailsInBackground(
+            payload.reportTypeFilter || 'ALL',
+            payload.daysBack || 7,
+            payload.newOnlyMode !== false,
+            payload.fastMode === true || payload.skipPdfExtraction === true,
+            payload.startDate || '',
+            payload.endDate || ''
+          )
+        : { success: false, error: 'startProcessSafetyEmailsInBackground function not found in backend' };
+      return ContentService.createTextOutput(JSON.stringify(bgRes))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    if (action === 'getSafetyEmailsStatus') {
+      var statusRes = (typeof getSafetyEmailsStatus === 'function')
+        ? getSafetyEmailsStatus()
+        : { jha: 'IDLE', weekly: 'IDLE', monthly: 'IDLE', all: 'IDLE' };
+      var props = PropertiesService.getScriptProperties();
+      var filterKey = (payload.reportTypeFilter || 'ALL').toUpperCase();
+      var resultJson = props.getProperty('BG_SAFETY_EMAIL_RESULT_' + filterKey) || props.getProperty('BG_SAFETY_EMAIL_RESULT_ALL');
+      var parsedResult = null;
+      if (resultJson) {
+        try { parsedResult = JSON.parse(resultJson); } catch (e) {}
+      }
+      return ContentService.createTextOutput(JSON.stringify({
+        status: 'ok',
+        success: true,
+        statuses: statusRes,
+        currentStatus: statusRes[filterKey.toLowerCase()] || statusRes.all || 'IDLE',
+        result: parsedResult
+      })).setMimeType(ContentService.MimeType.JSON);
     }
 
     if (action === 'recalculateCompliance') {

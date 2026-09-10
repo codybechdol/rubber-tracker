@@ -549,6 +549,9 @@ class SafetyEmailsEngine {
     if (footer) {
       footer.innerHTML = `
         <button class="btn btn-secondary" onclick="window.safetyComplianceEngine.closeProcessEmailsModal()">Cancel</button>
+        <button class="btn btn-secondary" id="btn-bg-process-emails" onclick="window.safetyComplianceEngine.startCloudBackgroundProcess()" style="display: flex; align-items: center; gap: 6px;" title="Execute processing directly on Google Cloud servers in the background with a 6-minute quota and zero proxy timeouts">
+          <span>⚡</span> Run in Background
+        </button>
         <button class="btn btn-primary" id="btn-start-process-emails" onclick="window.safetyComplianceEngine.runProcessEmails()" style="font-weight: 700; background: linear-gradient(135deg, #10b981 0%, #059669 100%); border: none; display: flex; align-items: center; gap: 6px; box-shadow: 0 2px 8px rgba(16, 185, 129, 0.4);">
           <span>🚀</span> Process Safety Emails Now
         </button>
@@ -556,6 +559,145 @@ class SafetyEmailsEngine {
     }
 
     modal.style.display = 'flex';
+  }
+
+  /**
+   * Triggers asynchronous background safety email processing on Google Cloud servers.
+   * Executes via a 1-shot time-driven trigger on Google Apps Script with a 6-minute quota,
+   * completely avoiding HTTP proxy gateway limits, while polling status in the desktop app.
+   */
+  async startCloudBackgroundProcess() {
+    const syncUrl = window.syncEngine ? window.syncEngine.getSyncUrl() : '';
+    if (!syncUrl) {
+      alert('Sync URL not configured. Please connect to Google Sheets in the header bar first.');
+      return;
+    }
+
+    const scopeRadio = document.querySelector('input[name="proc-scope"]:checked');
+    const scopeVal = scopeRadio ? scopeRadio.value : '7';
+    let daysBack = 7;
+    let newOnlyMode = true;
+    let startDate = '';
+    let endDate = '';
+
+    if (scopeVal === 'new') {
+      newOnlyMode = true;
+      daysBack = 30;
+    } else if (scopeVal === 'custom') {
+      newOnlyMode = false;
+      startDate = document.getElementById('proc-start-date') ? document.getElementById('proc-start-date').value : '';
+      endDate = document.getElementById('proc-end-date') ? document.getElementById('proc-end-date').value : '';
+      if (startDate) {
+        const startParsed = new Date(startDate);
+        const now = new Date();
+        daysBack = Math.max(1, Math.ceil((now.getTime() - startParsed.getTime()) / (1000 * 60 * 60 * 24)));
+      }
+    } else {
+      newOnlyMode = false;
+      daysBack = parseInt(scopeVal, 10) || 7;
+    }
+
+    const speedRadio = document.querySelector('input[name="proc-speed-mode"]:checked');
+    const skipPdfExtraction = speedRadio ? (speedRadio.value === 'fast') : true;
+
+    const filterRadio = document.querySelector('input[name="proc-filter"]:checked');
+    const reportTypeFilter = filterRadio ? filterRadio.value : 'ALL';
+
+    this.closeProcessEmailsModal();
+    this.showToast('⚡ Initiating background email scan on Google Cloud servers...');
+
+    const widget = document.getElementById('safety-emails-bg-widget');
+    if (widget) widget.style.display = 'flex';
+    this.updateBackgroundWidget({
+      title: 'Google Cloud Background Scan',
+      sub: 'Starting background worker on Google Apps Script...'
+    });
+
+    try {
+      const payload = {
+        action: 'startProcessSafetyEmailsInBackground',
+        reportTypeFilter: reportTypeFilter,
+        daysBack: daysBack,
+        newOnlyMode: newOnlyMode,
+        fastMode: skipPdfExtraction,
+        startDate: startDate,
+        endDate: endDate
+      };
+
+      const startRes = await window.syncEngine.executeNetworkRequest(syncUrl, 'POST', payload, 30000);
+      if (!startRes || !startRes.success) {
+        throw new Error((startRes && startRes.error) || 'Failed to start background trigger on server.');
+      }
+
+      this.updateBackgroundWidget({
+        title: 'Google Cloud Background Scan',
+        sub: 'Worker running in cloud. Polling status...'
+      });
+
+      // Poll status every 4 seconds
+      const startTime = Date.now();
+      const pollInterval = setInterval(async () => {
+        const elapsedSec = Math.round((Date.now() - startTime) / 1000);
+
+        try {
+          const statusRes = await window.syncEngine.executeNetworkRequest(syncUrl, 'POST', {
+            action: 'getSafetyEmailsStatus',
+            reportTypeFilter: reportTypeFilter
+          }, 30000);
+
+          const curStatus = (statusRes && statusRes.currentStatus) || 'IDLE';
+
+          if (curStatus === 'RUNNING') {
+            this.updateBackgroundWidget({
+              title: 'Google Cloud Background Scan',
+              sub: `Worker active in cloud (${elapsedSec}s elapsed)...`
+            });
+          } else if (curStatus === 'COMPLETE') {
+            clearInterval(pollInterval);
+            this.updateBackgroundWidget({
+              title: '✅ Cloud Scan Completed',
+              sub: `Finished in ${elapsedSec}s. Syncing local tables...`
+            });
+
+            // Refresh database from Google Sheets
+            if (window.syncEngine) {
+              await window.syncEngine.syncWithGoogleSheets();
+            }
+            this.renderSafetyComplianceView();
+            this.showToast('✅ Safety emails processed successfully in the cloud! Compliance updated.');
+
+            setTimeout(() => {
+              if (widget) widget.style.display = 'none';
+            }, 6000);
+
+          } else if (curStatus.startsWith('ERROR')) {
+            clearInterval(pollInterval);
+            this.updateBackgroundWidget({
+              title: '❌ Cloud Scan Error',
+              sub: curStatus
+            });
+            this.showToast(curStatus, true);
+          } else if (elapsedSec > 360) {
+            // Safety timeout after 6 minutes
+            clearInterval(pollInterval);
+            this.updateBackgroundWidget({
+              title: '⚠️ Background Scan Timeout',
+              sub: 'Worker took longer than 6 minutes. Try running again.'
+            });
+          }
+        } catch (pollErr) {
+          console.warn('Status poll warning:', pollErr);
+        }
+      }, 4000);
+
+    } catch (err) {
+      console.error('startCloudBackgroundProcess error:', err);
+      this.updateBackgroundWidget({
+        title: '❌ Failed to Start Cloud Scan',
+        sub: err.message
+      });
+      this.showToast(`Error: ${err.message}`, true);
+    }
   }
 
   showToast(msg, isError = false) {
@@ -824,8 +966,8 @@ class SafetyEmailsEngine {
         const payload = {
           action: 'processSafetyEmails',
           daysBack: daysBack,
-          // Safe batch sizes: 15 threads in Fast Mode (no OCR), 1 thread in Deep Scan (OCR) to guarantee execution stays under Web App gateway limits
-          batchSize: skipPdfExtraction ? 15 : 1,
+          // Safe batch sizes: 10 threads in Fast Mode (no OCR), 1 thread in Deep Scan (OCR) to guarantee execution stays under Web App gateway limits
+          batchSize: skipPdfExtraction ? 10 : 1,
           reportTypeFilter: reportTypeFilter,
           newOnlyMode: newOnlyMode,
           skipPdfExtraction: skipPdfExtraction,
