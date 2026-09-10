@@ -1284,7 +1284,7 @@ class SheetNavigator {
       const isPrevEmpHeader = firstCell.includes('Previous Employee');
       const isClassReclaimHeader = firstCell.includes('Class Reclaims');
       const isLostHeader = (firstCell.includes('Lost ') && firstCell.includes('Locate')) || firstCell.includes('Lost Glove') || firstCell.includes('Lost Sleeve') || firstCell.includes('Lost Blanket') || firstCell.includes('Lost MACK');
-      const isRetestHeader = firstCell.includes('Needs Retest') || (firstCell.includes('On Shelf') && firstCell.includes('Retest'));
+      const isRetestHeader = firstCell.includes('Needs Retest') || (firstCell.includes('On Shelf') && (firstCell.includes('Retest') || firstCell.includes('Swaps')));
 
       if (isClassHeader) currentSection = 'class';
       else if (isPrevEmpHeader) currentSection = 'prev_emp';
@@ -1320,8 +1320,8 @@ class SheetNavigator {
 
       const colSpan = visibleColIndices.length;
 
-      // 1. Level 1: Main Section Headers (Primary Banner)
-      if (isClassHeader) {
+      // 1. Level 1: Main Section Headers (Primary Banner - Class Swaps & On Shelf Retest Swaps share identical format)
+      if (isClassHeader || isRetestHeader) {
         html += `<td colspan="${colSpan}" style="font-size: 13.5px; font-weight: 800; color: #93c5fd; background: linear-gradient(90deg, #1e3a8a 0%, #0f172a 100%); padding: 9px 14px; text-align: left; border-top: 2px solid #3b82f6; border-bottom: 2px solid #3b82f6; letter-spacing: 0.5px; text-transform: uppercase;">${this.escapeHtml(firstCell)}</td></tr>`;
         return;
       }
@@ -1338,11 +1338,6 @@ class SheetNavigator {
 
       if (isLostHeader) {
         html += `<td colspan="${colSpan}" style="font-size: 13.5px; font-weight: 800; color: #fde047; background: linear-gradient(90deg, #713f12 0%, #0f172a 100%); padding: 9px 14px; text-align: left; border-top: 2px solid #eab308; border-bottom: 2px solid #eab308; letter-spacing: 0.5px; text-transform: uppercase;">${this.escapeHtml(firstCell)}</td></tr>`;
-        return;
-      }
-
-      if (isRetestHeader) {
-        html += `<td colspan="${colSpan}" style="font-size: 13.5px; font-weight: 800; color: #fed7aa; background: linear-gradient(90deg, #9a3412 0%, #0f172a 100%); padding: 9px 14px; text-align: left; border-top: 2px solid #ea580c; border-bottom: 2px solid #ea580c; letter-spacing: 0.5px; text-transform: uppercase;">${this.escapeHtml(firstCell)}</td></tr>`;
         return;
       }
 

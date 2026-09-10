@@ -500,7 +500,9 @@ class SwapGenerationEngine {
           const testDate = this.parseDate(testDateRaw);
           if (testDate && !isNaN(testDate.getTime()) && testDate <= oneYearAgo) {
             const itemNum = String(item['Item #'] || item['Glove'] || item['Sleeve'] || item['ESL ID'] || '').trim();
-            const size = String(item['Size'] || '').trim();
+            const itemClass = parseInt(item['Class'] || '0', 10);
+            const sizeRaw = String(item['Size'] || '').trim();
+            const sizeWithClass = sizeRaw + (itemClass > 0 ? ` (Class ${itemClass})` : '');
             const dateAssigned = this.formatDate(item['Date Assigned']) || '';
             const expDate = new Date(testDate.getFullYear() + 1, testDate.getMonth(), testDate.getDate());
             const expDateFormatted = this.formatDate(expDate);
@@ -509,7 +511,7 @@ class SwapGenerationEngine {
             const rowData = [
               assignedToRaw || 'On Shelf',
               itemNum,
-              size,
+              sizeWithClass,
               dateAssigned,
               changeOutVal,
               'OVERDUE',
@@ -525,7 +527,8 @@ class SwapGenerationEngine {
 
             shelfRetestItems.push({
               data: rowData,
-              itemNum: itemNum
+              itemNum: itemNum,
+              itemClass: itemClass
             });
           }
         }
@@ -943,18 +946,35 @@ class SwapGenerationEngine {
       });
     }
 
-    // Write ON SHELF ITEMS NEEDING RETEST section
+    // Write ON SHELF ITEMS NEEDING RETEST section - Grouped by Class
     if (shelfRetestItems.length > 0) {
-      rawGrid.push([`🔬 ON SHELF ${itemLabel.toUpperCase()} ITEMS - NEEDS RETEST (TEST DATE > 1 YEAR)`, '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '']);
-
+      const shelfByClass = {};
       shelfRetestItems.forEach(r => {
-        rawGrid.push(r.data);
-        const obj = this.gridRowToObj(allHeaders, r.data);
-        obj._location = 'On Shelf';
-        obj._foreman = 'On Shelf';
-        obj._daysLeftColor = '#ef4444';
-        obj._statusBg = '#fff9c4';
-        swapRows.push(obj);
+        const clsKey = r.itemClass || 0;
+        if (!shelfByClass[clsKey]) shelfByClass[clsKey] = [];
+        shelfByClass[clsKey].push(r);
+      });
+
+      const sortedClasses = Object.keys(shelfByClass).sort((a, b) => Number(a) - Number(b));
+
+      sortedClasses.forEach(clsKey => {
+        const classItems = shelfByClass[clsKey];
+        classItems.sort((a, b) => a.itemNum.localeCompare(b.itemNum, undefined, { numeric: true }));
+
+        const classTitle = Number(clsKey) > 0 ? `Class ${clsKey} ` : '';
+        const sectionTitle = `${classTitle}On Shelf ${itemLabel} Swaps - Needs Retest`;
+
+        rawGrid.push([sectionTitle, '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '']);
+
+        classItems.forEach(r => {
+          rawGrid.push(r.data);
+          const obj = this.gridRowToObj(allHeaders, r.data);
+          obj._location = 'On Shelf';
+          obj._foreman = 'On Shelf';
+          obj._daysLeftColor = '#ef4444';
+          obj._statusBg = '#fff9c4';
+          swapRows.push(obj);
+        });
       });
     }
 

@@ -22557,10 +22557,14 @@ function generateSwaps(itemType) {
               var oneYearFromTest = new Date(testDate.getFullYear(), testDate.getMonth() + 12, testDate.getDate());
               if (today >= oneYearFromTest) {
                 var changeOutVal = row[C_CHANGE_OUT] || oneYearFromTest;
+                var itemClassNum = parseInt(row[C_CLASS], 10) || 0;
+                var sizeDisplay = (row[C_SIZE] !== undefined && row[C_SIZE] !== null) ? String(row[C_SIZE]).trim() : '';
+                var sizeWithClass = sizeDisplay + (itemClassNum > 0 ? (' (Class ' + itemClassNum + ')') : '');
+
                 var rowData = [
                   assignedTo || 'On Shelf', // Employee (A)
                   itemNum,                  // Current Item (B)
-                  row[C_SIZE],              // Size (C)
+                  sizeWithClass,            // Size (C) - includes Class
                   row[C_DATE_ASSIGNED],     // Date Assigned (D)
                   changeOutVal,             // Change Out Date (E)
                   'OVERDUE',                // Days Left (F)
@@ -22577,7 +22581,11 @@ function generateSwaps(itemType) {
                   // Stage 3 (U-W)
                   '', '', ''
                 ];
-                shelfRetestItems.push(rowData);
+                shelfRetestItems.push({
+                  data: rowData,
+                  itemNum: itemNum,
+                  itemClass: itemClassNum
+                });
                 return;
               }
             }
@@ -22847,33 +22855,52 @@ function generateSwaps(itemType) {
         currentRow += 2;
       }
 
-      // Write On Shelf Items Needing Retest
+      // Write On Shelf Items Needing Retest - Grouped by Class with exact same formatting as Class 2/3 sections
       if (shelfRetestItems.length > 0) {
-        shelfRetestItems.sort(function(a, b) {
-          return String(a[1]).localeCompare(String(b[1]), undefined, { numeric: true });
+        var shelfByClass = {};
+        shelfRetestItems.forEach(function(item) {
+          var clsKey = item.itemClass || 0;
+          if (!shelfByClass[clsKey]) shelfByClass[clsKey] = [];
+          shelfByClass[clsKey].push(item);
         });
 
-        swapSheet.getRange(currentRow, 1, 1, 23).merge().setValue('🔬 On Shelf ' + itemLabel + ' Items - Needs Retest (Test Date > 1 Year)');
-        swapSheet.getRange(currentRow, 1, 1, 23)
-          .setFontWeight('bold').setFontSize(12).setBackground('#fff3e0').setFontColor('#e65100').setHorizontalAlignment('center');
-        currentRow++;
+        var sortedClasses = Object.keys(shelfByClass).sort(function(a, b) {
+          return Number(a) - Number(b);
+        });
 
-        swapSheet.getRange(currentRow, 1, 1, headers.length).setValues([headers]);
-        swapSheet.getRange(currentRow, 1, 1, 10).setFontWeight('bold').setFontColor('#ffffff').setHorizontalAlignment('center').setBackground('#f57c00');
-        swapSheet.getRange(currentRow, 11, 1, 13).setFontWeight('bold').setBackground('#9e9e9e').setFontColor('#ffffff').setHorizontalAlignment('center').setFontSize(9);
-        currentRow++;
+        sortedClasses.forEach(function(clsKey) {
+          var classItems = shelfByClass[clsKey];
+          classItems.sort(function(a, b) {
+            return String(a.itemNum).localeCompare(String(b.itemNum), undefined, { numeric: true });
+          });
 
-        swapSheet.getRange(currentRow, 1, shelfRetestItems.length, 23).setValues(shelfRetestItems);
-        swapSheet.getRange(currentRow, 1, shelfRetestItems.length, 23).setHorizontalAlignment('center');
-        // Explicitly DO NOT insert checkboxes for column 9 (Picked) since we are not picking a new item
+          var classHeaderTitle = (Number(clsKey) > 0 ? ('Class ' + clsKey + ' ') : '') + 'On Shelf ' + itemLabel + ' Swaps - Needs Retest';
 
-        for (var nri = 0; nri < shelfRetestItems.length; nri++) {
-          swapSheet.getRange(currentRow + nri, 6).setFontWeight('bold').setFontColor('#ff5252');
-          swapSheet.getRange(currentRow + nri, 8).setBackground('#fff9c4');
-        }
+          // Class title row - exact same formatting as Class 2 and Class 3 sections
+          swapSheet.getRange(currentRow, 1, 1, 23).merge().setValue(classHeaderTitle);
+          swapSheet.getRange(currentRow, 1, 1, 23)
+            .setFontWeight('bold').setFontSize(12).setBackground('#e3eafc').setFontColor('#0d47a1').setHorizontalAlignment('center');
+          currentRow++;
 
-        currentRow += shelfRetestItems.length;
-        currentRow += 2;
+          // Column headers row - exact same styling as Class 2 and Class 3 sections
+          swapSheet.getRange(currentRow, 1, 1, headers.length).setValues([headers]);
+          swapSheet.getRange(currentRow, 1, 1, 10).setFontWeight('bold').setFontColor('#ffffff').setHorizontalAlignment('center').setBackground(HEADER_BG_COLOR);
+          swapSheet.getRange(currentRow, 11, 1, 13).setFontWeight('bold').setBackground('#9e9e9e').setFontColor('#ffffff').setHorizontalAlignment('center').setFontSize(9);
+          currentRow++;
+
+          var rowDataArray = classItems.map(function(r) { return r.data; });
+          swapSheet.getRange(currentRow, 1, rowDataArray.length, 23).setValues(rowDataArray);
+          swapSheet.getRange(currentRow, 1, rowDataArray.length, 23).setHorizontalAlignment('center');
+          // Explicitly DO NOT insert checkboxes for column 9 (Picked) since we are not picking a new item
+
+          for (var nri = 0; nri < classItems.length; nri++) {
+            swapSheet.getRange(currentRow + nri, 6).setFontWeight('bold').setFontColor('#ff5252');
+            swapSheet.getRange(currentRow + nri, 8).setBackground('#fff9c4');
+          }
+
+          currentRow += classItems.length;
+          currentRow += 2;
+        });
       }
 
     } catch (reclaimErr) {
