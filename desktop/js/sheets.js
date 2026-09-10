@@ -1284,11 +1284,13 @@ class SheetNavigator {
       const isPrevEmpHeader = firstCell.includes('Previous Employee');
       const isClassReclaimHeader = firstCell.includes('Class Reclaims');
       const isLostHeader = (firstCell.includes('Lost ') && firstCell.includes('Locate')) || firstCell.includes('Lost Glove') || firstCell.includes('Lost Sleeve') || firstCell.includes('Lost Blanket') || firstCell.includes('Lost MACK');
+      const isRetestHeader = firstCell.includes('Needs Retest') || (firstCell.includes('On Shelf') && firstCell.includes('Retest'));
 
       if (isClassHeader) currentSection = 'class';
       else if (isPrevEmpHeader) currentSection = 'prev_emp';
       else if (isClassReclaimHeader) currentSection = 'class_reclaim';
       else if (isLostHeader) currentSection = 'lost';
+      else if (isRetestHeader) currentSection = 'retest';
 
       // Level 3: Foreman / Crew Lead Header
       const isForemanHeader = !isSubHeader && (
@@ -1303,14 +1305,14 @@ class SheetNavigator {
         firstCell.includes('📍') ||
         firstCell.includes('🔍') ||
         firstCell.toLowerCase().includes('location') ||
-        (!hasItemData && !isClassHeader && !isPrevEmpHeader && !isClassReclaimHeader && !isLostHeader)
+        (!hasItemData && !isClassHeader && !isPrevEmpHeader && !isClassReclaimHeader && !isLostHeader && !isRetestHeader)
       );
 
       if (this.searchTerm) {
         const rowMatches = visibleColIndices.some(c => 
           String(rowArr[c] || '').toLowerCase().includes(this.searchTerm)
         );
-        if (!rowMatches && !isClassHeader && !isPrevEmpHeader && !isClassReclaimHeader && !isLostHeader && !isCityHeader && !isForemanHeader) return;
+        if (!rowMatches && !isClassHeader && !isPrevEmpHeader && !isClassReclaimHeader && !isLostHeader && !isRetestHeader && !isCityHeader && !isForemanHeader) return;
       }
 
       visibleRowCount++;
@@ -1336,6 +1338,11 @@ class SheetNavigator {
 
       if (isLostHeader) {
         html += `<td colspan="${colSpan}" style="font-size: 13.5px; font-weight: 800; color: #fde047; background: linear-gradient(90deg, #713f12 0%, #0f172a 100%); padding: 9px 14px; text-align: left; border-top: 2px solid #eab308; border-bottom: 2px solid #eab308; letter-spacing: 0.5px; text-transform: uppercase;">${this.escapeHtml(firstCell)}</td></tr>`;
+        return;
+      }
+
+      if (isRetestHeader) {
+        html += `<td colspan="${colSpan}" style="font-size: 13.5px; font-weight: 800; color: #fed7aa; background: linear-gradient(90deg, #9a3412 0%, #0f172a 100%); padding: 9px 14px; text-align: left; border-top: 2px solid #ea580c; border-bottom: 2px solid #ea580c; letter-spacing: 0.5px; text-transform: uppercase;">${this.escapeHtml(firstCell)}</td></tr>`;
         return;
       }
 
@@ -1420,8 +1427,12 @@ class SheetNavigator {
           const isStatusCol = colLower === 'status';
 
           if (isPickedCol) {
-            const isChecked = (val === 'TRUE' || val === 'true' || val === true);
-            customContent = `<span style="cursor: pointer; font-size: 14px;" data-toggle-checkbox="${rowIdx + 1}" data-col="${c + 1}" data-sheet="${this.escapeHtml(tableData.name)}" data-header="${this.escapeHtml(colLabel)}">${isChecked ? '☑️' : '⬜'}</span>`;
+            if (currentSection === 'retest' || val === '' || val === undefined) {
+              customContent = ''; // No checkbox for shelf retest items
+            } else {
+              const isChecked = (val === 'TRUE' || val === 'true' || val === true);
+              customContent = `<span style="cursor: pointer; font-size: 14px;" data-toggle-checkbox="${rowIdx + 1}" data-col="${c + 1}" data-sheet="${this.escapeHtml(tableData.name)}" data-header="${this.escapeHtml(colLabel)}">${isChecked ? '☑️' : '⬜'}</span>`;
+            }
           } else if (isStatusCol) {
             let vLower = val.toLowerCase().trim();
 
@@ -1463,6 +1474,8 @@ class SheetNavigator {
               customContent = `<span class="badge" style="background-color: #4f46e5; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">🔬 Packed For Testing</span>`;
             } else if (vLower === 'ready for test' || vLower.includes('ready for test')) {
               customContent = `<span class="badge" style="background-color: #6366f1; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">🔬 Ready For Test</span>`;
+            } else if (vLower === 'needs retest' || vLower.includes('retest')) {
+              customContent = `<span class="badge" style="background-color: #ea580c; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700;">🔬 Needs Retest</span>`;
             } else if (vLower === 'ready for delivery' || vLower.includes('ready for delivery') || vLower.includes('delivery') || val.includes('🚚')) {
               customContent = `<span class="badge" style="background-color: #15803d; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">🚚 ${this.escapeHtml(val)}</span>`;
             } else if (vLower === 'assigned' || vLower.includes('assigned') || vLower.includes('delivered') || vLower.includes('complete') || val.includes('✅')) {

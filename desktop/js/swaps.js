@@ -467,6 +467,73 @@ class SwapGenerationEngine {
       }
     });
 
+    const shelfRetestItems = [];
+    const now = new Date();
+    const oneYearAgo = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
+
+    inventoryData.forEach(item => {
+      const assignedToRaw = String(item['Assigned To'] || '').trim();
+      const assignedToLower = assignedToRaw.toLowerCase();
+      const statusRaw = String(item['Status'] || '').trim();
+      const statusLower = statusRaw.toLowerCase();
+      const locationRaw = String(item['Location'] || '').trim();
+      const locationLower = locationRaw.toLowerCase();
+
+      const isOnShelfOrNew = (assignedToLower === 'on shelf' || assignedToLower === 'new' || assignedToLower === 'new purchase' ||
+                              statusLower === 'on shelf' || statusLower === 'new');
+      const notOtherLifecycleState = statusLower !== 'in testing' &&
+                                     statusLower !== 'packed for testing' &&
+                                     statusLower !== 'ready for test' &&
+                                     statusLower !== 'ready for delivery' &&
+                                     statusLower !== 'packed for delivery' &&
+                                     statusLower !== 'lost' &&
+                                     statusLower !== 'destroyed' &&
+                                     statusLower !== 'failed rubber' &&
+                                     statusLower !== 'not repairable' &&
+                                     statusLower !== 'retired' &&
+                                     locationLower !== 'previous employee' &&
+                                     !previousEmployeeNames.has(assignedToLower);
+
+      if (isOnShelfOrNew && notOtherLifecycleState) {
+        const testDateRaw = item['Test Date'] || item['Calibration Date'] || item['Date Tested'];
+        if (testDateRaw) {
+          const testDate = this.parseDate(testDateRaw);
+          if (testDate && !isNaN(testDate.getTime()) && testDate <= oneYearAgo) {
+            const itemNum = String(item['Item #'] || item['Glove'] || item['Sleeve'] || item['ESL ID'] || '').trim();
+            const size = String(item['Size'] || '').trim();
+            const dateAssigned = this.formatDate(item['Date Assigned']) || '';
+            const expDate = new Date(testDate.getFullYear() + 1, testDate.getMonth(), testDate.getDate());
+            const expDateFormatted = this.formatDate(expDate);
+            const changeOutVal = this.formatDate(item['Change Out Date']) || expDateFormatted;
+
+            const rowData = [
+              assignedToRaw || 'On Shelf',
+              itemNum,
+              size,
+              dateAssigned,
+              changeOutVal,
+              'OVERDUE',
+              '—',
+              'Needs Retest',
+              '', // No checkbox
+              '',
+              '', '', '',
+              statusRaw || 'On Shelf', assignedToRaw || 'On Shelf', dateAssigned || '',
+              '', '', '', '',
+              '', '', ''
+            ];
+
+            shelfRetestItems.push({
+              data: rowData,
+              itemNum: itemNum
+            });
+          }
+        }
+      }
+    });
+
+    shelfRetestItems.sort((a, b) => a.itemNum.localeCompare(b.itemNum, undefined, { numeric: true }));
+
     classes.forEach(itemClass => {
       // Collect qualifying swap candidates for this class
       const swapMeta = [];
@@ -873,6 +940,21 @@ class SwapGenerationEngine {
           obj._daysLeftColor = '#ef4444';
           swapRows.push(obj);
         });
+      });
+    }
+
+    // Write ON SHELF ITEMS NEEDING RETEST section
+    if (shelfRetestItems.length > 0) {
+      rawGrid.push([`🔬 ON SHELF ${itemLabel.toUpperCase()} ITEMS - NEEDS RETEST (TEST DATE > 1 YEAR)`, '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '']);
+
+      shelfRetestItems.forEach(r => {
+        rawGrid.push(r.data);
+        const obj = this.gridRowToObj(allHeaders, r.data);
+        obj._location = 'On Shelf';
+        obj._foreman = 'On Shelf';
+        obj._daysLeftColor = '#ef4444';
+        obj._statusBg = '#fff9c4';
+        swapRows.push(obj);
       });
     }
 

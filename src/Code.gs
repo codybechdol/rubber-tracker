@@ -22318,6 +22318,7 @@ function generateSwaps(itemType) {
       var C_ITEM_NUM = COLS.INVENTORY.ITEM_NUM - 1;
       var C_SIZE = COLS.INVENTORY.SIZE - 1;
       var C_CLASS = COLS.INVENTORY.CLASS - 1;
+      var C_TEST_DATE = COLS.INVENTORY.TEST_DATE - 1;
       var C_DATE_ASSIGNED = COLS.INVENTORY.DATE_ASSIGNED - 1;
       var C_LOCATION = COLS.INVENTORY.LOCATION - 1;
       var C_STATUS = COLS.INVENTORY.STATUS - 1;
@@ -22430,6 +22431,7 @@ function generateSwaps(itemType) {
       var prevEmpItems = [];
       var classReclaims = [];
       var lostItems = [];
+      var shelfRetestItems = [];
 
       var ignoreLocations = [
         "cody's truck", "destroyed", "kalispell gas dock", "lost",
@@ -22528,6 +22530,58 @@ function generateSwaps(itemType) {
           ];
           lostItems.push(rowData);
           return;
+        }
+
+        // --- ON SHELF / NEW ITEMS NEEDING RETEST (Test Date > 1 year) ---
+        var statusLower = status.toLowerCase();
+        var isOnShelfOrNew = (assignedToLower === 'on shelf' || assignedToLower === 'new' || assignedToLower === 'new purchase' ||
+                              statusLower === 'on shelf' || statusLower === 'new');
+        var notOtherLifecycleState = statusLower !== 'in testing' &&
+                                     statusLower !== 'packed for testing' &&
+                                     statusLower !== 'ready for test' &&
+                                     statusLower !== 'ready for delivery' &&
+                                     statusLower !== 'packed for delivery' &&
+                                     statusLower !== 'lost' &&
+                                     statusLower !== 'destroyed' &&
+                                     statusLower !== 'failed rubber' &&
+                                     statusLower !== 'not repairable' &&
+                                     statusLower !== 'retired' &&
+                                     locationLower !== 'previous employee' &&
+                                     !previousEmployeeNames.has(assignedToLower);
+
+        if (isOnShelfOrNew && notOtherLifecycleState) {
+          var testDateRaw = row[C_TEST_DATE];
+          if (testDateRaw) {
+            var testDate = (testDateRaw instanceof Date) ? testDateRaw : new Date(testDateRaw);
+            if (!isNaN(testDate.getTime())) {
+              var oneYearFromTest = new Date(testDate.getFullYear(), testDate.getMonth() + 12, testDate.getDate());
+              if (today >= oneYearFromTest) {
+                var changeOutVal = row[C_CHANGE_OUT] || oneYearFromTest;
+                var rowData = [
+                  assignedTo || 'On Shelf', // Employee (A)
+                  itemNum,                  // Current Item (B)
+                  row[C_SIZE],              // Size (C)
+                  row[C_DATE_ASSIGNED],     // Date Assigned (D)
+                  changeOutVal,             // Change Out Date (E)
+                  'OVERDUE',                // Days Left (F)
+                  '—',                      // Pick List Item # (G)
+                  'Needs Retest',           // Status (H)
+                  '',                       // Picked checkbox (I) - left empty, NO checkbox
+                  '',                       // Date Changed (J)
+                  // Stage 1 (K-M)
+                  '', '', '',
+                  // Stage 1 Old Item (N-P)
+                  status || 'On Shelf', assignedTo || 'On Shelf', row[C_DATE_ASSIGNED] || '',
+                  // Stage 2 (Q-T)
+                  '', '', '', '',
+                  // Stage 3 (U-W)
+                  '', '', ''
+                ];
+                shelfRetestItems.push(rowData);
+                return;
+              }
+            }
+          }
         }
 
         // --- CLASS RECLAIM SCAN ---
@@ -22790,6 +22844,35 @@ function generateSwaps(itemType) {
         swapSheet.getRange(currentRow, 1, lostItems.length, 23).setValues(lostItems);
         swapSheet.getRange(currentRow, 1, lostItems.length, 23).setHorizontalAlignment('center');
         currentRow += lostItems.length;
+        currentRow += 2;
+      }
+
+      // Write On Shelf Items Needing Retest
+      if (shelfRetestItems.length > 0) {
+        shelfRetestItems.sort(function(a, b) {
+          return String(a[1]).localeCompare(String(b[1]), undefined, { numeric: true });
+        });
+
+        swapSheet.getRange(currentRow, 1, 1, 23).merge().setValue('🔬 On Shelf ' + itemLabel + ' Items - Needs Retest (Test Date > 1 Year)');
+        swapSheet.getRange(currentRow, 1, 1, 23)
+          .setFontWeight('bold').setFontSize(12).setBackground('#fff3e0').setFontColor('#e65100').setHorizontalAlignment('center');
+        currentRow++;
+
+        swapSheet.getRange(currentRow, 1, 1, headers.length).setValues([headers]);
+        swapSheet.getRange(currentRow, 1, 1, 10).setFontWeight('bold').setFontColor('#ffffff').setHorizontalAlignment('center').setBackground('#f57c00');
+        swapSheet.getRange(currentRow, 11, 1, 13).setFontWeight('bold').setBackground('#9e9e9e').setFontColor('#ffffff').setHorizontalAlignment('center').setFontSize(9);
+        currentRow++;
+
+        swapSheet.getRange(currentRow, 1, shelfRetestItems.length, 23).setValues(shelfRetestItems);
+        swapSheet.getRange(currentRow, 1, shelfRetestItems.length, 23).setHorizontalAlignment('center');
+        // Explicitly DO NOT insert checkboxes for column 9 (Picked) since we are not picking a new item
+
+        for (var nri = 0; nri < shelfRetestItems.length; nri++) {
+          swapSheet.getRange(currentRow + nri, 6).setFontWeight('bold').setFontColor('#ff5252');
+          swapSheet.getRange(currentRow + nri, 8).setBackground('#fff9c4');
+        }
+
+        currentRow += shelfRetestItems.length;
         currentRow += 2;
       }
 
