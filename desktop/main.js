@@ -182,6 +182,9 @@ function makeGoogleAppsScriptRequest(targetUrl, method = 'GET', data = null) {
             redirectUrl = new URL(redirectUrl, currentUrl).href;
           }
 
+          // Consume redirect body stream so underlying socket is cleanly handled
+          res.resume();
+
           // If a request redirects back to the script exec URL (rather than the usercontent echo URL),
           // it indicates that Google Apps Script failed to complete the POST execution (gateway timeout).
           if (redirectCount > 0 && redirectUrl.includes('script.google.com') && redirectUrl.includes('/exec')) {
@@ -199,6 +202,15 @@ function makeGoogleAppsScriptRequest(targetUrl, method = 'GET', data = null) {
         res.setEncoding('utf8');
         res.on('data', (chunk) => { responseBody += chunk; });
         res.on('end', () => {
+          // If Google's usercontent echo server returned transient 404, retry after a short delay
+          if (res.statusCode === 404 && currentUrl.includes('googleusercontent.com') && redirectCount < 4) {
+            console.warn(`[DesktopBridge] Google echo server returned transient 404 on ${currentUrl.substring(0, 60)}..., retrying in 1.2s (attempt ${redirectCount + 1})...`);
+            setTimeout(() => {
+              requestWithRedirect(currentUrl, 'GET', null, redirectCount + 1);
+            }, 1200);
+            return;
+          }
+
           try {
             const json = JSON.parse(responseBody);
             resolve({ success: true, statusCode: res.statusCode, data: json });
