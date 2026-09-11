@@ -500,9 +500,12 @@ class SwapGenerationEngine {
           const testDate = this.parseDate(testDateRaw);
           if (testDate && !isNaN(testDate.getTime()) && testDate <= oneYearAgo) {
             const itemNum = String(item['Item #'] || item['Glove'] || item['Sleeve'] || item['ESL ID'] || '').trim();
-            const itemClass = parseInt(item['Class'] || '0', 10);
+            const rawClass = item['Class'];
+            const itemClass = (rawClass !== '' && rawClass !== null && rawClass !== undefined && !isNaN(parseInt(rawClass, 10)))
+              ? parseInt(rawClass, 10)
+              : null;
             const sizeRaw = String(item['Size'] || '').trim();
-            const sizeWithClass = sizeRaw + (itemClass > 0 ? ` (Class ${itemClass})` : '');
+            const sizeWithClass = sizeRaw + (itemClass !== null ? ` (Class ${itemClass})` : '');
             const dateAssigned = this.formatDate(item['Date Assigned']) || '';
             const expDate = new Date(testDate.getFullYear() + 1, testDate.getMonth(), testDate.getDate());
             const expDateFormatted = this.formatDate(expDate);
@@ -528,7 +531,7 @@ class SwapGenerationEngine {
             shelfRetestItems.push({
               data: rowData,
               itemNum: itemNum,
-              itemClass: itemClass
+              itemClass: itemClass !== null ? itemClass : 'Unassigned'
             });
           }
         }
@@ -950,18 +953,22 @@ class SwapGenerationEngine {
     if (shelfRetestItems.length > 0) {
       const shelfByClass = {};
       shelfRetestItems.forEach(r => {
-        const clsKey = r.itemClass || 0;
+        const clsKey = r.itemClass !== undefined && r.itemClass !== null ? r.itemClass : 'Unassigned';
         if (!shelfByClass[clsKey]) shelfByClass[clsKey] = [];
         shelfByClass[clsKey].push(r);
       });
 
-      const sortedClasses = Object.keys(shelfByClass).sort((a, b) => Number(a) - Number(b));
+      const sortedClasses = Object.keys(shelfByClass).sort((a, b) => {
+        if (a === 'Unassigned') return 1;
+        if (b === 'Unassigned') return -1;
+        return Number(a) - Number(b);
+      });
 
       sortedClasses.forEach(clsKey => {
         const classItems = shelfByClass[clsKey];
         classItems.sort((a, b) => a.itemNum.localeCompare(b.itemNum, undefined, { numeric: true }));
 
-        const classTitle = Number(clsKey) > 0 ? `Class ${clsKey} ` : '';
+        const classTitle = clsKey !== 'Unassigned' ? `Class ${clsKey} ` : '';
         const sectionTitle = `${classTitle}On Shelf ${itemLabel} Swaps - Needs Retest`;
 
         rawGrid.push([sectionTitle, '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '']);

@@ -22557,9 +22557,10 @@ function generateSwaps(itemType) {
               var oneYearFromTest = new Date(testDate.getFullYear(), testDate.getMonth() + 12, testDate.getDate());
               if (today >= oneYearFromTest) {
                 var changeOutVal = row[C_CHANGE_OUT] || oneYearFromTest;
-                var itemClassNum = parseInt(row[C_CLASS], 10) || 0;
+                var rawClass = row[C_CLASS];
+                var itemClassNum = (rawClass !== '' && rawClass !== null && rawClass !== undefined && !isNaN(parseInt(rawClass, 10))) ? parseInt(rawClass, 10) : null;
                 var sizeDisplay = (row[C_SIZE] !== undefined && row[C_SIZE] !== null) ? String(row[C_SIZE]).trim() : '';
-                var sizeWithClass = sizeDisplay + (itemClassNum > 0 ? (' (Class ' + itemClassNum + ')') : '');
+                var sizeWithClass = sizeDisplay + (itemClassNum !== null ? (' (Class ' + itemClassNum + ')') : '');
 
                 var rowData = [
                   assignedTo || 'On Shelf', // Employee (A)
@@ -22584,7 +22585,7 @@ function generateSwaps(itemType) {
                 shelfRetestItems.push({
                   data: rowData,
                   itemNum: itemNum,
-                  itemClass: itemClassNum
+                  itemClass: itemClassNum !== null ? itemClassNum : 'Unassigned'
                 });
                 return;
               }
@@ -22859,12 +22860,14 @@ function generateSwaps(itemType) {
       if (shelfRetestItems.length > 0) {
         var shelfByClass = {};
         shelfRetestItems.forEach(function(item) {
-          var clsKey = item.itemClass || 0;
+          var clsKey = item.itemClass !== undefined && item.itemClass !== null ? item.itemClass : 'Unassigned';
           if (!shelfByClass[clsKey]) shelfByClass[clsKey] = [];
           shelfByClass[clsKey].push(item);
         });
 
         var sortedClasses = Object.keys(shelfByClass).sort(function(a, b) {
+          if (a === 'Unassigned') return 1;
+          if (b === 'Unassigned') return -1;
           return Number(a) - Number(b);
         });
 
@@ -22874,7 +22877,7 @@ function generateSwaps(itemType) {
             return String(a.itemNum).localeCompare(String(b.itemNum), undefined, { numeric: true });
           });
 
-          var classHeaderTitle = (Number(clsKey) > 0 ? ('Class ' + clsKey + ' ') : '') + 'On Shelf ' + itemLabel + ' Swaps - Needs Retest';
+          var classHeaderTitle = (clsKey !== 'Unassigned' ? ('Class ' + clsKey + ' ') : '') + 'On Shelf ' + itemLabel + ' Swaps - Needs Retest';
 
           // Class title row - exact same formatting as Class 2 and Class 3 sections
           swapSheet.getRange(currentRow, 1, 1, 23).merge().setValue(classHeaderTitle);
