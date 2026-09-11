@@ -966,8 +966,8 @@ class SafetyEmailsEngine {
         const payload = {
           action: 'processSafetyEmails',
           daysBack: daysBack,
-          // Safe batch sizes: 10 threads in Fast Mode (no OCR), 1 thread in Deep Scan (OCR) to guarantee execution stays under Web App gateway limits
-          batchSize: skipPdfExtraction ? 10 : 1,
+          // Safe batch sizes: 5 threads on batch 1 (since batch 1 performs initial search, crew loading, and sheet dedup), 10 threads on subsequent batches in Fast Mode (no OCR), 1 thread in Deep Scan (OCR) to guarantee execution stays under Web App gateway limits
+          batchSize: skipPdfExtraction ? (batchIndex === 1 ? 5 : 10) : 1,
           reportTypeFilter: reportTypeFilter,
           newOnlyMode: newOnlyMode,
           skipPdfExtraction: skipPdfExtraction,

@@ -297,15 +297,23 @@ function saveExcludedJobPrefixes(prefixes) {
  *
  * @return {Array} Array of unique crew numbers sorted
  */
-function getActiveCrews() {
+function getActiveCrews(optData) {
   var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var employeesSheet = ss.getSheetByName(SHEET_EMPLOYEES);
+  var data = optData;
+  if (!data) {
+    if (!ss) return [];
+    var employeesSheet = ss.getSheetByName(typeof SHEET_EMPLOYEES !== 'undefined' ? SHEET_EMPLOYEES : 'Employees');
 
-  if (!employeesSheet || employeesSheet.getLastRow() < 2) {
-    return [];
+    if (!employeesSheet || employeesSheet.getLastRow() < 2) {
+      return [];
+    }
+
+    data = employeesSheet.getDataRange().getValues();
   }
 
-  var data = employeesSheet.getDataRange().getValues();
+  if (!data || data.length < 2) {
+    return [];
+  }
   var headers = data[0];
   var jobNumCol = -1;
   var secondaryJobCol = -1;

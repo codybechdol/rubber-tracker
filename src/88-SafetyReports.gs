@@ -5609,8 +5609,22 @@ function addResolvedRowFormatting(sheet) {
 }
 
 /**
- * Gets the timestamp of when safety emails were last processed.
- * Called by ProcessSafetyEmailsDialog.html to display last run time.
+ * Deletes all ScriptProperties keys starting with 'SAFETY_BATCH_' to avoid bloating ScriptProperties.
+ */
+function clearSafetyBatchProperties() {
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var allKeys = props.getKeys();
+    for (var i = 0; i < allKeys.length; i++) {
+      if (allKeys[i].indexOf('SAFETY_BATCH_') === 0) {
+        props.deleteProperty(allKeys[i]);
+      }
+    }
+  } catch (e) {
+    Logger.log("Error clearing SAFETY_BATCH_ properties: " + e);
+  }
+}
+
 /**
  * Helper to get property keys for last processed date/timestamp by report type filter
  * @param {string} [reportTypeFilter] - 'JHA', 'WEEKLY', 'MONTHLY', or 'ALL'
@@ -6048,14 +6062,23 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
   Logger.log("Total threads available: " + totalThreadsCount);
 
   if (totalThreadsCount === 0) {
-    props.deleteProperty('SAFETY_BATCH_START');
-    props.deleteProperty('SAFETY_BATCH_DATE_FILTER');
-    props.deleteProperty('SAFETY_BATCH_REPORT_TYPE_FILTER');
-    props.deleteProperty('SAFETY_BATCH_TOTAL_THREADS');
-    if (typeof setChunkedScriptProperty === 'function') {
-      setChunkedScriptProperty('SAFETY_BATCH_THREAD_IDS', '');
-    }
+    clearSafetyBatchProperties();
     batchCache.removeAll(['SAFETY_BATCH_CREWS', 'SAFETY_BATCH_EMP_DATA', 'SAFETY_BATCH_EMAIL_IDS']);
+
+    if (MAX_EXECUTION_MS <= 30000) {
+      Logger.log("No threads found in Web App mode, dispatching background post-processing trigger...");
+      try {
+        var cleanupProps = PropertiesService.getScriptProperties();
+        cleanupProps.setProperty('BG_POST_PROCESS_FILTER', reportTypeFilter || 'ALL');
+        ScriptApp.newTrigger('executeAsyncSafetyCompliancePostProcessing')
+          .timeBased()
+          .after(100)
+          .create();
+      } catch (eTrig) {
+        Logger.log("Background trigger dispatch error: " + eTrig);
+      }
+      return { complete: true, totalThreads: 0, message: "No new emails found - all already processed" };
+    }
 
     // Still run compliance calculation to ensure current/previous weeks are created
     // This is important when no new emails exist but we need to show the week
@@ -6105,11 +6128,9 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
   var existingEmailIds = {};
   var emailIdsLoadedFromCache = false;
 
-  // On continuation batches, try loading from chunked ScriptProperties first (avoids 8-10s sheet reads!)
+  // On continuation batches, try loading from fast CacheService first (<10ms)
   if (!isFirstBatch) {
-    var cachedEmailIdsListStr = (typeof getChunkedScriptProperty === 'function')
-      ? getChunkedScriptProperty('SAFETY_BATCH_EMAIL_IDS')
-      : null;
+    var cachedEmailIdsListStr = batchCache.get('SAFETY_BATCH_EMAIL_IDS');
     if (cachedEmailIdsListStr) {
       try {
         var emailIdList = JSON.parse(cachedEmailIdsListStr);
@@ -6117,7 +6138,7 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
           existingEmailIds[emailIdList[ei]] = true;
         }
         emailIdsLoadedFromCache = true;
-        Logger.log("Loaded " + emailIdList.length + " email IDs from chunked cache (skipped 3 log sheet reads)");
+        Logger.log("Loaded " + emailIdList.length + " email IDs from fast batchCache");
       } catch(e) {
         emailIdsLoadedFromCache = false;
       }
@@ -6167,12 +6188,10 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
     }
 
     Logger.log("Pre-loaded " + Object.keys(existingEmailIds).length + " existing email IDs from log sheets (JHA, Weekly Safety, Monthly Checklist)");
-    if (isFirstBatch && typeof setChunkedScriptProperty === 'function') {
-      try {
-        setChunkedScriptProperty('SAFETY_BATCH_EMAIL_IDS', JSON.stringify(Object.keys(existingEmailIds)));
-      } catch (eCache) {
-        Logger.log("Failed to cache email IDs: " + eCache);
-      }
+    try {
+      batchCache.put('SAFETY_BATCH_EMAIL_IDS', JSON.stringify(Object.keys(existingEmailIds)), 600);
+    } catch (eCache) {
+      Logger.log("Could not cache email IDs in batchCache: " + eCache);
     }
   }
 
@@ -6229,9 +6248,10 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
   }
 
   if (!crews) {
-    crews = getActiveCrews();
-    var empSheet = ss.getSheetByName('Employees');
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var empSheet = ss ? ss.getSheetByName(typeof SHEET_EMPLOYEES !== 'undefined' ? SHEET_EMPLOYEES : 'Employees') : null;
     employeeData = empSheet ? empSheet.getDataRange().getValues() : [];
+    crews = getActiveCrews(employeeData);
     // Cache for continuation batches (10 min TTL)
     try {
       batchCache.put('SAFETY_BATCH_CREWS', JSON.stringify(crews), 600);
@@ -6286,6 +6306,13 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
       var newEmailsParsedThisBatch = 0;
       var maxNewEmailsPerBatch = skipPdfExtraction ? 15 : 1;
 
+      // Check time remaining before entering loop to prevent gateway timeout
+      var safeBufferMs = (MAX_EXECUTION_MS <= 30000) ? 3500 : 15000;
+      if (new Date().getTime() - startTime > (MAX_EXECUTION_MS - safeBufferMs)) {
+        Logger.log("⏱️ Timeout prevention: Setup took " + Math.round((new Date().getTime() - startTime)/1000) + "s, stopping before thread loop");
+        timedOut = true;
+      }
+
       for (var tidx = 0; tidx < batchThreads.length && !timedOut; tidx++) {
         var thread = batchThreads[tidx];
         var messages = thread.getMessages();
@@ -6296,7 +6323,6 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
 
           // Check time remaining - if under safe threshold, stop processing to prevent gateway timeout
           var elapsedMs = new Date().getTime() - startTime;
-          var safeBufferMs = (MAX_EXECUTION_MS <= 30000) ? 3500 : 15000;
           if (elapsedMs > (MAX_EXECUTION_MS - safeBufferMs)) {
             Logger.log("⏱️ Timeout prevention: Stopping after " + Math.round(elapsedMs/1000) + " seconds (budget: " + Math.round(MAX_EXECUTION_MS/1000) + "s)");
             timedOut = true;
@@ -6633,21 +6659,15 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
 
       Logger.log('Batch processed ' + processedCount + ' new email(s), skipped ' + skippedCount + '. Progress: ' + batchEnd + ' / ' + totalThreadsCount);
 
-      // Cache email IDs for next batch
+      // Cache email IDs for next batch in fast CacheService
       try {
-        batchCache.put('SAFETY_BATCH_EMAIL_IDS', JSON.stringify(existingEmailIds), 600);
+        batchCache.put('SAFETY_BATCH_EMAIL_IDS', JSON.stringify(Object.keys(existingEmailIds)), 600);
       } catch(e) {}
 
       var lastProcessedTimestamp = getLastSafetyEmailProcessedTime(reportTypeFilter);
 
       if (isComplete) {
-        props.deleteProperty('SAFETY_BATCH_START');
-        props.deleteProperty('SAFETY_BATCH_DATE_FILTER');
-        props.deleteProperty('SAFETY_BATCH_REPORT_TYPE_FILTER');
-        props.deleteProperty('SAFETY_BATCH_TOTAL_THREADS');
-        if (typeof setChunkedScriptProperty === 'function') {
-          setChunkedScriptProperty('SAFETY_BATCH_THREAD_IDS', '');
-        }
+        clearSafetyBatchProperties();
         batchCache.removeAll(['SAFETY_BATCH_CREWS', 'SAFETY_BATCH_EMP_DATA', 'SAFETY_BATCH_EMAIL_IDS']);
 
         var today = new Date();
@@ -7584,9 +7604,7 @@ function cancelPendingCorrections() {
   props.deleteProperty('PENDING_JOB_CORRECTIONS');
   props.deleteProperty('PENDING_BATCH_END');
   props.deleteProperty('PENDING_TOTAL_THREADS');
-  props.deleteProperty('SAFETY_BATCH_START');
-  props.deleteProperty('SAFETY_BATCH_DATE_FILTER');
-  props.deleteProperty('SAFETY_BATCH_DATE_FILTER');
+  clearSafetyBatchProperties();
 
   Logger.log("Pending corrections cancelled and batch data cleared");
 }
@@ -15960,11 +15978,7 @@ function clearAndReprocessSafetyEmails() {
     // Clear the last processed date
     var props = PropertiesService.getScriptProperties();
     props.deleteProperty('LAST_SAFETY_EMAIL_DATE');
-    props.deleteProperty('SAFETY_BATCH_START');
-    props.deleteProperty('SAFETY_BATCH_DATE_FILTER');
-    props.deleteProperty('SAFETY_BATCH_DATE_FILTER');
-    props.deleteProperty('SAFETY_BATCH_DATE_FILTER');
-    props.deleteProperty('SAFETY_BATCH_DATE_FILTER');
+    clearSafetyBatchProperties();
     props.deleteProperty('TEMP_JOB_FOREMAN_MAPPINGS');
     props.deleteProperty('SKIPPED_UNKNOWN_JOBS');
     props.deleteProperty('PENDING_UNKNOWN_JOBS');

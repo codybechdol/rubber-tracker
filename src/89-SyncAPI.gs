@@ -195,46 +195,49 @@ function exportFullDatabaseSnapshot(tableKeysFilter) {
     };
   }
 
-  // Configurations and reference data
+  // Configurations and reference data (only loaded for full snapshots)
   var holidays = [];
-  try {
-    holidays = typeof getHolidays === 'function' ? getHolidays() : [];
-  } catch (e) {
-    Logger.log('exportFullDatabaseSnapshot: Error reading holidays: ' + e);
-  }
-
   var workSchedule = 'Mon-Thu';
-  try {
-    workSchedule = typeof getWorkSchedule === 'function' ? getWorkSchedule() : 'Mon-Thu';
-  } catch (e) {
-    Logger.log('exportFullDatabaseSnapshot: Error reading workSchedule: ' + e);
-  }
-
   var driveTimeMap = {};
-  try {
-    driveTimeMap = typeof getDriveTimeMap === 'function' ? getDriveTimeMap() : {};
-  } catch (e) {
-    Logger.log('exportFullDatabaseSnapshot: Error reading driveTimeMap: ' + e);
-  }
-
   var plannedTrips = {};
-  try {
-    var rawTrips = (typeof getChunkedScriptProperty === 'function') ? getChunkedScriptProperty('PLANNED_TRIPS') : PropertiesService.getScriptProperties().getProperty('PLANNED_TRIPS');
-    if (rawTrips) {
-      plannedTrips = typeof rawTrips === 'string' ? JSON.parse(rawTrips) : rawTrips;
-    }
-  } catch (e) {
-    Logger.log('exportFullDatabaseSnapshot: Error reading plannedTrips: ' + e);
-  }
-
   var manualTasks = [];
-  try {
-    var rawTasks = (typeof getChunkedScriptProperty === 'function') ? getChunkedScriptProperty('MANUAL_TASKS') : PropertiesService.getScriptProperties().getProperty('MANUAL_TASKS');
-    if (rawTasks) {
-      manualTasks = typeof rawTasks === 'string' ? JSON.parse(rawTasks) : rawTasks;
+
+  if (!filterSet) {
+    try {
+      holidays = typeof getHolidays === 'function' ? getHolidays() : [];
+    } catch (e) {
+      Logger.log('exportFullDatabaseSnapshot: Error reading holidays: ' + e);
     }
-  } catch (e) {
-    Logger.log('exportFullDatabaseSnapshot: Error reading manualTasks: ' + e);
+
+    try {
+      workSchedule = typeof getWorkSchedule === 'function' ? getWorkSchedule() : 'Mon-Thu';
+    } catch (e) {
+      Logger.log('exportFullDatabaseSnapshot: Error reading workSchedule: ' + e);
+    }
+
+    try {
+      driveTimeMap = typeof getDriveTimeMap === 'function' ? getDriveTimeMap() : {};
+    } catch (e) {
+      Logger.log('exportFullDatabaseSnapshot: Error reading driveTimeMap: ' + e);
+    }
+
+    try {
+      var rawTrips = (typeof getChunkedScriptProperty === 'function') ? getChunkedScriptProperty('PLANNED_TRIPS') : PropertiesService.getScriptProperties().getProperty('PLANNED_TRIPS');
+      if (rawTrips) {
+        plannedTrips = typeof rawTrips === 'string' ? JSON.parse(rawTrips) : rawTrips;
+      }
+    } catch (e) {
+      Logger.log('exportFullDatabaseSnapshot: Error reading plannedTrips: ' + e);
+    }
+
+    try {
+      var rawTasks = (typeof getChunkedScriptProperty === 'function') ? getChunkedScriptProperty('MANUAL_TASKS') : PropertiesService.getScriptProperties().getProperty('MANUAL_TASKS');
+      if (rawTasks) {
+        manualTasks = typeof rawTasks === 'string' ? JSON.parse(rawTasks) : rawTasks;
+      }
+    } catch (e) {
+      Logger.log('exportFullDatabaseSnapshot: Error reading manualTasks: ' + e);
+    }
   }
 
   return {
@@ -2218,13 +2221,16 @@ function executeSyncApiProcessSafetyEmails(options) {
   // Clear batch state if starting fresh from UI
   if (options.resetBatch === true) {
     try {
-      var scriptProps = PropertiesService.getScriptProperties();
-      scriptProps.deleteProperty('SAFETY_BATCH_START');
-      scriptProps.deleteProperty('SAFETY_BATCH_DATE_FILTER');
-      scriptProps.deleteProperty('SAFETY_BATCH_REPORT_TYPE_FILTER');
-      scriptProps.deleteProperty('SAFETY_BATCH_TOTAL_THREADS');
-      if (typeof setChunkedScriptProperty === 'function') {
-        setChunkedScriptProperty('SAFETY_BATCH_THREAD_IDS', '');
+      if (typeof clearSafetyBatchProperties === 'function') {
+        clearSafetyBatchProperties();
+      } else {
+        var scriptProps = PropertiesService.getScriptProperties();
+        var allKeys = scriptProps.getKeys();
+        for (var pki = 0; pki < allKeys.length; pki++) {
+          if (allKeys[pki].indexOf('SAFETY_BATCH_') === 0) {
+            scriptProps.deleteProperty(allKeys[pki]);
+          }
+        }
       }
       CacheService.getScriptCache().removeAll(['SAFETY_BATCH_CREWS', 'SAFETY_BATCH_EMP_DATA', 'SAFETY_BATCH_EMAIL_IDS']);
     } catch (eReset) {
@@ -2235,13 +2241,16 @@ function executeSyncApiProcessSafetyEmails(options) {
   // If client explicitly requests the final post-processing step
   if (isPostProcessingStep) {
     try {
-      var cleanupProps = PropertiesService.getScriptProperties();
-      cleanupProps.deleteProperty('SAFETY_BATCH_START');
-      cleanupProps.deleteProperty('SAFETY_BATCH_DATE_FILTER');
-      cleanupProps.deleteProperty('SAFETY_BATCH_REPORT_TYPE_FILTER');
-      cleanupProps.deleteProperty('SAFETY_BATCH_TOTAL_THREADS');
-      if (typeof setChunkedScriptProperty === 'function') {
-        setChunkedScriptProperty('SAFETY_BATCH_THREAD_IDS', '');
+      if (typeof clearSafetyBatchProperties === 'function') {
+        clearSafetyBatchProperties();
+      } else {
+        var cleanupProps = PropertiesService.getScriptProperties();
+        var cKeys = cleanupProps.getKeys();
+        for (var cki = 0; cki < cKeys.length; cki++) {
+          if (cKeys[cki].indexOf('SAFETY_BATCH_') === 0) {
+            cleanupProps.deleteProperty(cKeys[cki]);
+          }
+        }
       }
     } catch (eClean) {}
 
@@ -2296,13 +2305,13 @@ function executeSyncApiProcessSafetyEmails(options) {
 
   var result = null;
   try {
-    result = processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction, endDate, reportTypeFilter, 22000);
+    result = processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction, endDate, reportTypeFilter, 20000);
   } catch (err) {
     Logger.log('executeSyncApiProcessSafetyEmails batch error: ' + err.toString());
     return {
       status: 'error',
       success: false,
-      error: 'Gmail processing error: ' + err.toString()
+      error: 'Gmail processing error: ' + err.toString() + (err.stack ? ' STACK: ' + err.stack : '')
     };
   }
 
@@ -2328,14 +2337,19 @@ function executeSyncApiProcessSafetyEmails(options) {
     };
   }
 
-  // If completed directly in single step (e.g. 0 new emails found):
+  // If completed directly in single step:
   var postResult = result;
-  // If no new emails were found, processSafetyEmails already updated weeks/compliance; don't repeat full post-processing
-  if (result.totalThreads > 0 && typeof runSafetyEmailPostProcessing === 'function') {
+  if (result.totalThreads > 0) {
     try {
-      postResult = runSafetyEmailPostProcessing(reportTypeFilter, result, true);
-    } catch (ePost) {
-      Logger.log('executeSyncApiProcessSafetyEmails post processing error: ' + ePost);
+      var cleanupProps = PropertiesService.getScriptProperties();
+      cleanupProps.setProperty('BG_POST_PROCESS_FILTER', reportTypeFilter || 'ALL');
+      ScriptApp.newTrigger('executeAsyncSafetyCompliancePostProcessing')
+        .timeBased()
+        .after(100)
+        .create();
+      Logger.log("executeSyncApiProcessSafetyEmails: Dispatched background compliance post-processing trigger");
+    } catch (eTrig) {
+      Logger.log("executeSyncApiProcessSafetyEmails: Background trigger dispatch error: " + eTrig);
     }
   }
 
