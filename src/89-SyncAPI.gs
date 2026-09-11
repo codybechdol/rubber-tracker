@@ -2208,7 +2208,12 @@ function executeSyncApiProcessSafetyEmails(options) {
   options = options || {};
   var daysBack = options.daysBack || 7;
   var skipPdfExtraction = options.skipPdfExtraction === true;
-  var batchSize = options.batchSize || (skipPdfExtraction ? 10 : 2);
+  var batchSize = options.batchSize ? parseInt(options.batchSize, 10) : 5;
+  if (skipPdfExtraction) {
+    batchSize = Math.min(Math.max(1, batchSize), 5);
+  } else {
+    batchSize = 1;
+  }
   var newOnlyMode = options.newOnlyMode !== false;
   var endDate = options.endDate || null;
   var reportTypeFilter = options.reportTypeFilter || 'ALL';

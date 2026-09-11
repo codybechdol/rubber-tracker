@@ -6307,13 +6307,21 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
       var maxNewEmailsPerBatch = skipPdfExtraction ? 15 : 1;
 
       // Check time remaining before entering loop to prevent gateway timeout
-      var safeBufferMs = (MAX_EXECUTION_MS <= 30000) ? 3500 : 15000;
+      var safeBufferMs = (MAX_EXECUTION_MS <= 30000) ? 5000 : 15000;
       if (new Date().getTime() - startTime > (MAX_EXECUTION_MS - safeBufferMs)) {
         Logger.log("⏱️ Timeout prevention: Setup took " + Math.round((new Date().getTime() - startTime)/1000) + "s, stopping before thread loop");
         timedOut = true;
       }
 
       for (var tidx = 0; tidx < batchThreads.length && !timedOut; tidx++) {
+        var elapsedMs = new Date().getTime() - startTime;
+        if (elapsedMs > (MAX_EXECUTION_MS - safeBufferMs)) {
+          Logger.log("⏱️ Timeout prevention: Stopping before thread " + tidx + " after " + Math.round(elapsedMs/1000) + " seconds (budget: " + Math.round(MAX_EXECUTION_MS/1000) + "s)");
+          timedOut = true;
+          lastProcessedIndex = tidx;
+          break;
+        }
+
         var thread = batchThreads[tidx];
         var messages = thread.getMessages();
 
