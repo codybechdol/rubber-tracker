@@ -33578,7 +33578,7 @@ function doGet(e) {
         .setMimeType(ContentService.MimeType.JSON);
     } else if (action === 'recalculateCompliance') {
       var recResult = (typeof executeSyncApiRecalculateCompliance === 'function')
-        ? executeSyncApiRecalculateCompliance()
+        ? executeSyncApiRecalculateCompliance(e.parameter)
         : { status: 'error', message: 'executeSyncApiRecalculateCompliance not found' };
       return ContentService.createTextOutput(JSON.stringify(recResult))
         .setMimeType(ContentService.MimeType.JSON);
@@ -33760,7 +33760,7 @@ function doPost(e) {
 
     if (action === 'recalculateCompliance') {
       var recResult = (typeof executeSyncApiRecalculateCompliance === 'function')
-        ? executeSyncApiRecalculateCompliance()
+        ? executeSyncApiRecalculateCompliance(payload)
         : { status: 'error', message: 'executeSyncApiRecalculateCompliance not found' };
       return ContentService.createTextOutput(JSON.stringify(recResult))
         .setMimeType(ContentService.MimeType.JSON);

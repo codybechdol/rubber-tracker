@@ -1886,7 +1886,7 @@ function calculateComplianceFromLogs(weekStartDate, options) {
   } else {
     // PAST WEEKS: Load all crews (active + completed) and filter by dates active during that historical week
     var existingCrewsForWeek = getExistingCrewsForWeek(ss, weekBounds.weekStart, tz);
-    var crewsWithLogData = getCrewsWithLogDataForWeek(ss, weekBounds, configCrews);
+    var crewsWithLogData = getCrewsWithLogDataForWeek(ss, weekBounds, configCrews, options);
 
     var crewSet = {};
     for (var ec = 0; ec < existingCrewsForWeek.length; ec++) {
@@ -2029,8 +2029,8 @@ function calculateComplianceFromLogs(weekStartDate, options) {
   Logger.log("calculateComplianceFromLogs: Week bounds - Start: " + weekBounds.weekStart + ", End: " + weekBounds.weekEnd);
   Logger.log("calculateComplianceFromLogs: Tracked crews: " + crews.join(', '));
 
-  if (jhaSheet && jhaSheet.getLastRow() > 1) {
-    var jhaData = jhaSheet.getDataRange().getValues();
+  var jhaData = (options && options.cachedJhaData) ? options.cachedJhaData : (jhaSheet && jhaSheet.getLastRow() > 1 ? jhaSheet.getDataRange().getValues() : null);
+  if (jhaData && jhaData.length > 1) {
     Logger.log("calculateComplianceFromLogs: JHA Log has " + (jhaData.length - 1) + " rows");
 
     for (var j = 1; j < jhaData.length; j++) {
@@ -2203,9 +2203,8 @@ function calculateComplianceFromLogs(weekStartDate, options) {
 
   // === READ WEEKLY SAFETY LOG ===
   var weeklySheet = getWeeklySafetyLogSheet();
-  if (weeklySheet && weeklySheet.getLastRow() > 1) {
-    var weeklyData = weeklySheet.getDataRange().getValues();
-
+  var weeklyData = (options && options.cachedWeeklyData) ? options.cachedWeeklyData : (weeklySheet && weeklySheet.getLastRow() > 1 ? weeklySheet.getDataRange().getValues() : null);
+  if (weeklyData && weeklyData.length > 1) {
     for (var w = 1; w < weeklyData.length; w++) {
       var weeklyRow = weeklyData[w];
       var weeklyDateReceived = weeklyRow[0]; // Column A - Date Received
@@ -2363,9 +2362,8 @@ function calculateComplianceFromLogs(weekStartDate, options) {
   var monthStart = new Date(mondayOfWeek.getFullYear(), mondayOfWeek.getMonth(), 1);
   var monthEnd = new Date(mondayOfWeek.getFullYear(), mondayOfWeek.getMonth() + 1, 0, 23, 59, 59);
 
-  if (monthlySheet && monthlySheet.getLastRow() > 1) {
-    var monthlyData = monthlySheet.getDataRange().getValues();
-
+  var monthlyData = (options && options.cachedMonthlyData) ? options.cachedMonthlyData : (monthlySheet && monthlySheet.getLastRow() > 1 ? monthlySheet.getDataRange().getValues() : null);
+  if (monthlyData && monthlyData.length > 1) {
     for (var m = 1; m < monthlyData.length; m++) {
       var monthlyRow = monthlyData[m];
       var monthlyDateReceived = monthlyRow[0]; // Column A - Date Received
@@ -2610,6 +2608,113 @@ function updateComplianceSheetFromLogs(complianceData, options) {
         };
       }
     }
+  }
+
+  // FAST IN-MEMORY BATCH MODE FOR WEB API REQUESTS:
+  // When called via Web API / Desktop App, perform all updates in-memory and write back in a single setValues() call.
+  // This eliminates 100+ slow row-by-row and cell note RPCs, preventing edge proxy timeouts (~28s).
+  if (options && options.isWebApi) {
+    var headerRow = (data && data.length > 0 && data[0]) ? data[0] : [
+      "Week Start", "Job Number", "Foreman",
+      "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat",
+      "Weekly Meeting", "Monthly Checklist", "Status", "Updated"
+    ];
+
+    // Map existing row index (0-based) by crewJob for target week
+    var existingRowIdxMap = {};
+    for (var i = 1; i < data.length; i++) {
+      var rWeek = data[i][0];
+      var rJob = String(data[i][1] || '').trim();
+      if (rWeek && rJob) {
+        var rWeekStr = '';
+        try {
+          rWeekStr = (rWeek instanceof Date) ? Utilities.formatDate(rWeek, tz, 'MM/dd/yyyy') : Utilities.formatDate(new Date(rWeek), tz, 'MM/dd/yyyy');
+        } catch (eDate) {
+          rWeekStr = String(rWeek).trim();
+        }
+        if (rWeekStr === weekStartStr) {
+          existingRowIdxMap[rJob] = i;
+        }
+      }
+    }
+
+    // Process all crews from complianceData
+    for (var crewJob in complianceData.crews) {
+      var crew = complianceData.crews[crewJob];
+      var existingIdx = existingRowIdxMap[crewJob];
+
+      // Skip if already resolved (unless ignoreResolved=true)
+      if (!ignoreResolved && existingIdx !== undefined && String(data[existingIdx][12] || '').trim() === 'Resolved') {
+        Logger.log("updateComplianceSheetFromLogs (fast mode): Skipping resolved crew " + crewJob);
+        continue;
+      }
+
+      var rowData = [
+        weekStartStr,
+        crewJob,
+        crew.foreman || '',
+        crew.days['Sun'] || 'N/A',
+        crew.days['Mon'] || '\u23F3',
+        crew.days['Tue'] || '\u23F3',
+        crew.days['Wed'] || '\u23F3',
+        crew.days['Thu'] || '\u23F3',
+        crew.days['Fri'] || '\u23F3',
+        crew.days['Sat'] || 'N/A',
+        crew.weeklyMeetingStatus || '\u23F3',
+        crew.monthlyChecklistStatus || '\u23F3',
+        crew.status || 'Pending',
+        nowStr
+      ];
+
+      if (existingIdx !== undefined) {
+        data[existingIdx] = rowData;
+      } else {
+        data.push(rowData);
+      }
+    }
+
+    // Filter out stale rows for this week (in sheet but not in complianceData.crews and not Resolved)
+    var cleanedData = [headerRow];
+    for (var r = 1; r < data.length; r++) {
+      var rowW = data[r][0];
+      var rowJ = String(data[r][1] || '').trim();
+      var rowStat = String(data[r][12] || '').trim();
+      var isThisWeek = false;
+      if (rowW) {
+        var rowWStr = '';
+        try {
+          rowWStr = (rowW instanceof Date) ? Utilities.formatDate(rowW, tz, 'MM/dd/yyyy') : Utilities.formatDate(new Date(rowW), tz, 'MM/dd/yyyy');
+        } catch (eD) {
+          rowWStr = String(rowW).trim();
+        }
+        if (rowWStr === weekStartStr) isThisWeek = true;
+      }
+
+      if (isThisWeek) {
+        if (!complianceData.crews[rowJ] && rowStat !== 'Resolved') {
+          continue; // Drop stale row
+        }
+      }
+      cleanedData.push(data[r]);
+    }
+
+    // Ensure all rows have exactly 14 columns
+    var normalizedData = cleanedData.map(function(row) {
+      var rCopy = row.slice(0, 14);
+      while (rCopy.length < 14) rCopy.push('');
+      return rCopy;
+    });
+
+    var oldRowCount = sheet.getLastRow();
+    if (normalizedData.length > 0) {
+      sheet.getRange(1, 1, normalizedData.length, 14).setValues(normalizedData);
+      if (oldRowCount > normalizedData.length) {
+        sheet.getRange(normalizedData.length + 1, 1, oldRowCount - normalizedData.length, 14).clearContent();
+      }
+    }
+
+    Logger.log("updateComplianceSheetFromLogs (isWebApi fast mode): Batch updated " + normalizedData.length + " rows for week " + weekStartStr);
+    return;
   }
 
   var updated = 0;
@@ -10451,7 +10556,7 @@ function getExistingCrewsForWeek(ss, weekStart, tz) {
  * @param {Array<string>} configCrews - List of crews in Safety Compliance Config
  * @returns {Array<string>} - List of crew job numbers found in logs for this week
  */
-function getCrewsWithLogDataForWeek(ss, weekBounds, configCrews) {
+function getCrewsWithLogDataForWeek(ss, weekBounds, configCrews, options) {
   var crewsFound = {};
 
   // Create a set of config crews for fast lookup
@@ -10460,10 +10565,10 @@ function getCrewsWithLogDataForWeek(ss, weekBounds, configCrews) {
 
   // Check JHA Log
   var jhaLog = ss.getSheetByName('JHA Log');
-  if (jhaLog && jhaLog.getLastRow() > 1) {
-    var jhaData = jhaLog.getRange(2, 1, jhaLog.getLastRow() - 1, 10).getValues();
-    var jhaHeaders = jhaLog.getRange(1, 1, 1, 10).getValues()[0];
+  var jhaData = (options && options.cachedJhaData) ? options.cachedJhaData.slice(1) : (jhaLog && jhaLog.getLastRow() > 1 ? jhaLog.getRange(2, 1, jhaLog.getLastRow() - 1, 10).getValues() : null);
+  var jhaHeaders = (options && options.cachedJhaData) ? options.cachedJhaData[0] : (jhaLog && jhaLog.getLastRow() > 1 ? jhaLog.getRange(1, 1, 1, 10).getValues()[0] : null);
 
+  if (jhaHeaders && jhaData && jhaData.length > 0) {
     var dateCreatedCol = -1, creditedToCol = -1;
     for (var h = 0; h < jhaHeaders.length; h++) {
       var header = String(jhaHeaders[h]).toLowerCase().trim();
@@ -10496,32 +10601,31 @@ function getCrewsWithLogDataForWeek(ss, weekBounds, configCrews) {
 
   // Check Weekly Safety Log
   var weeklyLog = ss.getSheetByName('Weekly Safety Log');
-  if (weeklyLog && weeklyLog.getLastRow() > 1) {
-    var weeklyData = weeklyLog.getRange(2, 1, weeklyLog.getLastRow() - 1, 10).getValues();
-    var weeklyHeaders = weeklyLog.getRange(1, 1, 1, 10).getValues()[0];
+  var weeklyData = (options && options.cachedWeeklyData) ? options.cachedWeeklyData.slice(1) : (weeklyLog && weeklyLog.getLastRow() > 1 ? weeklyLog.getRange(2, 1, weeklyLog.getLastRow() - 1, 10).getValues() : null);
+  var weeklyHeaders = (options && options.cachedWeeklyData) ? options.cachedWeeklyData[0] : (weeklyLog && weeklyLog.getLastRow() > 1 ? weeklyLog.getRange(1, 1, 1, 10).getValues()[0] : null);
 
+  if (weeklyHeaders && weeklyData && weeklyData.length > 0) {
     var weekOfCol = -1, creditedToCol2 = -1;
-    for (var h = 0; h < weeklyHeaders.length; h++) {
-      var header = String(weeklyHeaders[h]).toLowerCase().trim();
-      if (header === 'week of' || header === 'date created') weekOfCol = h;
-      if (header === 'credited to') creditedToCol2 = h;
+    for (var wh = 0; wh < weeklyHeaders.length; wh++) {
+      var wHeader = String(weeklyHeaders[wh]).toLowerCase().trim();
+      if (wHeader === 'week of' || wHeader === 'date created') weekOfCol = wh;
+      if (wHeader === 'credited to') creditedToCol2 = wh;
     }
 
     if (weekOfCol >= 0 && creditedToCol2 >= 0) {
-      for (var i = 0; i < weeklyData.length; i++) {
-        var weekOf = weeklyData[i][weekOfCol];
-        var creditedTo = String(weeklyData[i][creditedToCol2] || '').trim();
+      for (var wi = 0; wi < weeklyData.length; wi++) {
+        var weekOf = weeklyData[wi][weekOfCol];
+        var wCreditedTo = String(weeklyData[wi][creditedToCol2] || '').trim();
 
-        if (!weekOf || !creditedTo) continue;
+        if (!weekOf || !wCreditedTo) continue;
 
-        var d = new Date(weekOf);
-        if (isNaN(d.getTime())) continue;
+        var wd = new Date(weekOf);
+        if (isNaN(wd.getTime())) continue;
 
         // Check if date falls within the week
-        if (d >= weekBounds.weekStart && d <= weekBounds.weekEnd) {
-          // Only include if it's in the config
-          if (configCrewSet[creditedTo]) {
-            crewsFound[creditedTo] = true;
+        if (wd >= weekBounds.weekStart && wd <= weekBounds.weekEnd) {
+          if (configCrewSet[wCreditedTo]) {
+            crewsFound[wCreditedTo] = true;
           }
         }
       }

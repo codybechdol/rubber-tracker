@@ -173,35 +173,63 @@ class SafetyEmailsEngine {
 
         <!-- Interactive Summary Breakdown Cards -->
         <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;">
-          <div class="stat-card-clickable ${this.activeCategoryFilter === 'all' ? 'active' : ''}" onclick="window.safetyComplianceEngine.setCategoryFilter('all')" style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px 14px;">
-            <span class="view-hint">🔍 View</span>
-            <div style="font-size: 10.5px; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">✨ All Logs</div>
-            <div style="font-size: 18px; font-weight: 800; color: #34d399; margin-top: 2px;">${stats.totalLogs}</div>
-          </div>
-          <div class="stat-card-clickable ${this.activeCategoryFilter === 'jha' ? 'active' : ''}" onclick="window.safetyComplianceEngine.setCategoryFilter('jha')" style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px 14px;">
-            <span class="view-hint">🔍 View</span>
-            <div style="font-size: 10.5px; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">📋 Daily JHAs</div>
-            <div style="font-size: 18px; font-weight: 700; color: #60a5fa; margin-top: 2px;">${stats.cumulativeLogs.jha || 0}</div>
-          </div>
-          <div class="stat-card-clickable ${this.activeCategoryFilter === 'weekly' ? 'active' : ''}" onclick="window.safetyComplianceEngine.setCategoryFilter('weekly')" style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px 14px;">
-            <span class="view-hint">🔍 View</span>
-            <div style="font-size: 10.5px; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">🗣️ Weekly Meetings</div>
-            <div style="font-size: 18px; font-weight: 700; color: #a78bfa; margin-top: 2px;">${stats.cumulativeLogs.weekly || 0}</div>
-          </div>
-          <div class="stat-card-clickable ${this.activeCategoryFilter === 'monthly' ? 'active' : ''}" onclick="window.safetyComplianceEngine.setCategoryFilter('monthly')" style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px 14px;">
-            <span class="view-hint">🔍 View</span>
-            <div style="font-size: 10.5px; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">🚛 Monthly Checklists</div>
-            <div style="font-size: 18px; font-weight: 700; color: #34d399; margin-top: 2px;">${stats.cumulativeLogs.monthly || 0}</div>
-          </div>
-          <div class="stat-card-clickable ${this.activeCategoryFilter === 'equipment' ? 'active' : ''}" onclick="window.safetyComplianceEngine.setCategoryFilter('equipment')" style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px 14px;">
-            <span class="view-hint">🔍 View</span>
-            <div style="font-size: 10.5px; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">⚠️ Equipment Needs</div>
-            <div style="font-size: 18px; font-weight: 700; color: #f59e0b; margin-top: 2px;">${stats.totalIssues}</div>
-          </div>
-          <div class="stat-card-clickable" onclick="window.safetyComplianceEngine.setCategoryFilter('all')" style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px 14px;">
-            <div style="font-size: 10.5px; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">📬 Total Emails</div>
-            <div style="font-size: 18px; font-weight: 800; color: #f8fafc; margin-top: 2px;">${stats.totalThreads}</div>
-          </div>
+          ${(() => {
+            const logs = this.currentLogs || [];
+            const totalInDb = logs.length;
+            const jhaInDb = logs.filter(l => l.type === 'JHA' || l.sheetName === 'JHA Log').length;
+            const weeklyInDb = logs.filter(l => l.type === 'Weekly Safety Meeting' || l.sheetName === 'Weekly Safety Log').length;
+            const monthlyInDb = logs.filter(l => l.type === 'Monthly Checklist' || l.sheetName === 'Monthly Checklist Log').length;
+            const issuesInDb = logs.filter(l => l.hasEquipmentIssues === 'Yes' || l.type === 'Equipment').length;
+
+            const newJha = (stats.cumulativeLogs && stats.cumulativeLogs.jha) || 0;
+            const newWeekly = (stats.cumulativeLogs && stats.cumulativeLogs.weekly) || 0;
+            const newMonthly = (stats.cumulativeLogs && stats.cumulativeLogs.monthly) || 0;
+            const totalNew = (stats.totalLogs !== undefined && stats.totalLogs > 0) ? stats.totalLogs : (newJha + newWeekly + newMonthly);
+
+            const allDisplay = totalInDb > 0 ? totalInDb : (stats.totalLogs || 0);
+            const jhaDisplay = jhaInDb > 0 ? jhaInDb : newJha;
+            const weeklyDisplay = weeklyInDb > 0 ? weeklyInDb : newWeekly;
+            const monthlyDisplay = monthlyInDb > 0 ? monthlyInDb : newMonthly;
+            const issuesDisplay = issuesInDb > 0 ? issuesInDb : (stats.totalIssues || 0);
+
+            return `
+              <div class="stat-card-clickable ${this.activeCategoryFilter === 'all' ? 'active' : ''}" onclick="window.safetyComplianceEngine.setCategoryFilter('all')" style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px 14px;">
+                <span class="view-hint">🔍 View</span>
+                <div style="font-size: 10.5px; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">✨ All Logs</div>
+                <div style="font-size: 18px; font-weight: 800; color: #34d399; margin-top: 2px;">${allDisplay}</div>
+                <div style="font-size: 10px; color: ${totalNew > 0 ? '#6ee7b7' : '#94a3b8'}; margin-top: 2px; font-weight: ${totalNew > 0 ? '700' : '500'};">${totalNew > 0 ? `+${totalNew} new` : 'All up to date'}</div>
+              </div>
+              <div class="stat-card-clickable ${this.activeCategoryFilter === 'jha' ? 'active' : ''}" onclick="window.safetyComplianceEngine.setCategoryFilter('jha')" style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px 14px;">
+                <span class="view-hint">🔍 View</span>
+                <div style="font-size: 10.5px; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">📋 Daily JHAs</div>
+                <div style="font-size: 18px; font-weight: 700; color: #60a5fa; margin-top: 2px;">${jhaDisplay}</div>
+                <div style="font-size: 10px; color: ${newJha > 0 ? '#60a5fa' : '#94a3b8'}; margin-top: 2px; font-weight: ${newJha > 0 ? '700' : '500'};">${newJha > 0 ? `+${newJha} new` : 'Up to date'}</div>
+              </div>
+              <div class="stat-card-clickable ${this.activeCategoryFilter === 'weekly' ? 'active' : ''}" onclick="window.safetyComplianceEngine.setCategoryFilter('weekly')" style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px 14px;">
+                <span class="view-hint">🔍 View</span>
+                <div style="font-size: 10.5px; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">🗣️ Weekly Meetings</div>
+                <div style="font-size: 18px; font-weight: 700; color: #a78bfa; margin-top: 2px;">${weeklyDisplay}</div>
+                <div style="font-size: 10px; color: ${newWeekly > 0 ? '#a78bfa' : '#94a3b8'}; margin-top: 2px; font-weight: ${newWeekly > 0 ? '700' : '500'};">${newWeekly > 0 ? `+${newWeekly} new` : 'Up to date'}</div>
+              </div>
+              <div class="stat-card-clickable ${this.activeCategoryFilter === 'monthly' ? 'active' : ''}" onclick="window.safetyComplianceEngine.setCategoryFilter('monthly')" style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px 14px;">
+                <span class="view-hint">🔍 View</span>
+                <div style="font-size: 10.5px; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">🚛 Monthly Checklists</div>
+                <div style="font-size: 18px; font-weight: 700; color: #34d399; margin-top: 2px;">${monthlyDisplay}</div>
+                <div style="font-size: 10px; color: ${newMonthly > 0 ? '#34d399' : '#94a3b8'}; margin-top: 2px; font-weight: ${newMonthly > 0 ? '700' : '500'};">${newMonthly > 0 ? `+${newMonthly} new` : 'Up to date'}</div>
+              </div>
+              <div class="stat-card-clickable ${this.activeCategoryFilter === 'equipment' ? 'active' : ''}" onclick="window.safetyComplianceEngine.setCategoryFilter('equipment')" style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px 14px;">
+                <span class="view-hint">🔍 View</span>
+                <div style="font-size: 10.5px; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">⚠️ Equipment Needs</div>
+                <div style="font-size: 18px; font-weight: 700; color: #f59e0b; margin-top: 2px;">${issuesDisplay}</div>
+                <div style="font-size: 10px; color: ${(stats.totalIssues || 0) > 0 ? '#f59e0b' : '#94a3b8'}; margin-top: 2px;">${(stats.totalIssues || 0) > 0 ? `${stats.totalIssues} new` : 'None detected'}</div>
+              </div>
+              <div class="stat-card-clickable" onclick="window.safetyComplianceEngine.setCategoryFilter('all')" style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px 14px;">
+                <div style="font-size: 10.5px; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">📬 Total Emails</div>
+                <div style="font-size: 18px; font-weight: 800; color: #f8fafc; margin-top: 2px;">${stats.totalThreads || allDisplay}</div>
+                <div style="font-size: 10px; color: #94a3b8; margin-top: 2px;">Scanned in Gmail</div>
+              </div>
+            `;
+          })()}
         </div>
 
         <!-- Filter bar, Month selector & Sort Controls -->
@@ -952,6 +980,7 @@ class SafetyEmailsEngine {
       let isPostProcessing = false;
       let lastResult = null;
       let finalSnapshot = null;
+      let finalUpdatedRows = null;
       let finalResult = null;
       let batchIndex = 1;
 
@@ -1092,7 +1121,8 @@ class SafetyEmailsEngine {
         if (response.complete === true) {
           isComplete = true;
           finalResult = res;
-          finalSnapshot = response.snapshot || null;
+          finalSnapshot = response.snapshot || response.dataSnapshot || (response.result && (response.result.snapshot || response.result.dataSnapshot)) || null;
+          finalUpdatedRows = response.updatedRows || (response.result && response.result.updatedRows) || null;
           break;
         }
 
@@ -1118,8 +1148,14 @@ class SafetyEmailsEngine {
         batchIndex++;
       }
 
-      // Update local database snapshot if fresh snapshot returned, or schedule sync
-      if (finalSnapshot) {
+      // Update local database snapshot if fresh snapshot returned, or merge updatedRows
+      if (finalUpdatedRows && finalUpdatedRows.length > 0) {
+        this.mergeComplianceUpdates(finalUpdatedRows);
+        const activeView = document.querySelector('.view-container.active');
+        if (activeView && activeView.id === 'safety-compliance-view' && window.sheetNavigator) {
+          window.sheetNavigator.renderSafetyCompliance();
+        }
+      } else if (finalSnapshot) {
         await window.localDB.setSnapshot(finalSnapshot);
         const activeView = document.querySelector('.view-container.active');
         if (activeView && activeView.id === 'safety-compliance-view' && window.sheetNavigator) {
@@ -1240,6 +1276,65 @@ class SafetyEmailsEngine {
   }
 
   /**
+   * Directly merges updated compliance rows into the local IndexedDB snapshot
+   * without requiring a full database download.
+   */
+  mergeComplianceUpdates(updatedRows) {
+    if (!Array.isArray(updatedRows) || updatedRows.length === 0) return false;
+    if (!window.localDB || !window.localDB.snapshot || !window.localDB.snapshot.tables) return false;
+
+    let scTable = window.localDB.snapshot.tables.safety_compliance;
+    if (!scTable) {
+      scTable = {
+        name: 'Safety Compliance',
+        headers: ["Week Start", "Job Number", "Foreman", "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Weekly Meeting", "Monthly Checklist", "Status", "Updated"],
+        rows: [],
+        rawGrid: []
+      };
+      window.localDB.snapshot.tables.safety_compliance = scTable;
+    }
+
+    if (!scTable.rows) scTable.rows = [];
+    if (!scTable.headers || scTable.headers.length === 0) {
+      scTable.headers = ["Week Start", "Job Number", "Foreman", "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Weekly Meeting", "Monthly Checklist", "Status", "Updated"];
+    }
+
+    updatedRows.forEach(newRow => {
+      const nwStr = String(newRow['Week Start'] || '').trim();
+      const njStr = String(newRow['Job Number'] || '').trim();
+      let matched = false;
+      for (let r = 0; r < scTable.rows.length; r++) {
+        const row = scTable.rows[r];
+        const rwStr = String(row['Week Start'] || '').trim();
+        const rjStr = String(row['Job Number'] || '').trim();
+        if (rwStr === nwStr && rjStr === njStr) {
+          Object.assign(row, newRow);
+          matched = true;
+          break;
+        }
+      }
+      if (!matched) {
+        newRow._rowIdx = scTable.rows.length + 2;
+        scTable.rows.push(newRow);
+      }
+    });
+
+    // Rebuild rawGrid so grid renderers have matching data
+    scTable.rawGrid = [
+      scTable.headers,
+      ...scTable.rows.map(r => scTable.headers.map(h => r[h] !== undefined && r[h] !== null ? String(r[h]) : ''))
+    ];
+    scTable.rowCount = scTable.rows.length;
+    scTable.maxRows = scTable.rows.length + 1;
+    scTable.maxCols = scTable.headers.length;
+
+    if (typeof window.localDB.persistSnapshot === 'function') {
+      window.localDB.persistSnapshot(window.localDB.snapshot);
+    }
+    return true;
+  }
+
+  /**
    * Recalculates Safety Compliance matrix without re-scanning Gmail.
    */
   async runRecalculateCompliance() {
@@ -1259,7 +1354,8 @@ class SafetyEmailsEngine {
 
     try {
       const payload = {
-        action: 'recalculateCompliance'
+        action: 'recalculateCompliance',
+        targetWeek: 'current'
       };
 
       const response = await window.syncEngine.executeNetworkRequest(syncUrl, 'POST', payload, 180000);
@@ -1272,8 +1368,14 @@ class SafetyEmailsEngine {
         throw new Error(errMsg);
       }
 
-      if (response.snapshot) {
-        await window.localDB.setSnapshot(response.snapshot);
+      const updatedRows = response.updatedRows || (response.result && response.result.updatedRows);
+      if (updatedRows && updatedRows.length > 0) {
+        this.mergeComplianceUpdates(updatedRows);
+      } else {
+        const freshSnap = response.snapshot || response.dataSnapshot || (response.result && (response.result.snapshot || response.result.dataSnapshot));
+        if (freshSnap) {
+          await window.localDB.setSnapshot(freshSnap);
+        }
       }
 
       if (window.sheetNavigator) {
