@@ -159,6 +159,9 @@ function _buildGloveManagerMenu() {
           .addItem('🚑 Red Cross CPR CSV Roster', 'showRedCrossCprDialog'))
 
         .addSubMenu(ui.createMenu('🔍 Diagnostics & Utilities')
+          .addItem('🔒 Protect Sheets (App-Only Repository)', 'lockAllSheetsAsRepositoryOnly')
+          .addItem('🔓 Maintenance Mode (Allow Sheets Editing)', 'unlockAllSheetsForMaintenance')
+          .addItem('🗑️ Remove Spreadsheet Edit Triggers', 'removeEditTriggers')
           .addItem('🔍 Diagnose Auth Issues', 'diagnoseAuthIssues')
           .addItem('🔍 Diagnose Employee Pick List', 'runDiagnostic')
           .addItem('📊 Show All Glove Swaps', 'runGloveSwapDiagnostic')

@@ -9,6 +9,14 @@ Google Apps Script-based inventory management system for tracking rubber gloves/
 - Validates: duplicate `*/` closers, unmatched braces, syntax errors
 - Auto-removes duplicate `.js` files (only `.gs` files should exist in `src/`)
 
+## Critical Architecture Rule: Single Source of Truth — Desktop App Only
+**Google Sheets is strictly a cloud data repository (database backend).**
+- **ALL edits, creations, deletions, and status updates MUST originate from the Safety Assistant Desktop App.**
+- **NEVER manually edit data directly in Google Sheets.**
+- Direct manual edits in Google Sheets are blocked and reverted by `onEdit(e)` triggers to prevent data desynchronization with the offline database and outbox queue.
+- Google Sheets serves solely as the cloud repository to pull current information from (`fetchSnapshot` / `exportSheetsData`) and update with current information via `89-SyncAPI.gs` mutations (`UPDATE_CELL`, `UPDATE_ROW`, `ADD_ROW`, `DELETE_ROW`, `REPLACE_TABLE_DATA`).
+- Use menu item: `Review & Schedule → 🔧 Utilities → 🔒 Protect Sheets (App-Only Repository)` to enforce sheet protections across all tabs. Use `🔓 Maintenance Mode` only for emergency administrative access.
+
 ## Architecture: File Load Order & Function Ownership
 Google Apps Script loads files **alphabetically**. Numbered prefixes control load order:
 ```

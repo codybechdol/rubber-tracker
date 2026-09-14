@@ -107,44 +107,103 @@ function diagnoseAuthIssues() {
 }
 
 /**
- * Creates installable triggers for edit detection. Run this once from the Apps Script editor.
- * Go to Run > createEditTrigger
- *
- * IMPORTANT: This will delete all existing edit triggers and create new ones.
+/**
+ * Deletes all installable spreadsheet edit/change triggers.
+ * Direct editing in Google Sheets is no longer processed by spreadsheet triggers.
+ * Menu: Glove Manager → 🔧 Utilities → 🗑️ Remove Spreadsheet Edit Triggers
  */
-function createEditTrigger() {
-  var ss = SpreadsheetApp.getActive();
+function removeEditTriggers() {
   var triggers = ScriptApp.getProjectTriggers();
-
-  // Delete all existing onEdit/onChange triggers first
   var deleted = 0;
   for (var i = 0; i < triggers.length; i++) {
     var handlerName = triggers[i].getHandlerFunction();
-    if (handlerName === 'onEditHandler' || handlerName === 'onChangeHandler' || handlerName === 'onEdit') {
+    if (handlerName === 'onEditHandler' || handlerName === 'onChangeHandler' || handlerName === 'createEditTrigger') {
       ScriptApp.deleteTrigger(triggers[i]);
       deleted++;
     }
   }
-  Logger.log('Deleted ' + deleted + ' existing triggers');
 
-  // Create new onEdit trigger (installable)
-  ScriptApp.newTrigger('onEditHandler')
-    .forSpreadsheet(ss)
-    .onEdit()
-    .create();
-  Logger.log('Created onEditHandler trigger');
+  SpreadsheetApp.getUi().alert('✅ Spreadsheet Edit Triggers Removed!\n\n' +
+    'Deleted ' + deleted + ' edit/change trigger(s).\n\n' +
+    'Google Sheets is now configured strictly as a data repository.\n' +
+    'All edits must originate from the Safety Assistant Desktop App.');
+}
 
-  // Create onChange trigger as backup (catches more changes)
-  ScriptApp.newTrigger('onChangeHandler')
-    .forSpreadsheet(ss)
-    .onChange()
-    .create();
-  Logger.log('Created onChangeHandler trigger');
+/**
+ * Locks all sheets in Google Sheets with Sheet Protection.
+ * Shows native warning dialogs to any user attempting to edit in Google Sheets.
+ * Menu: Glove Manager → 🔧 Utilities → 🔒 Protect Sheets (App-Only Repository)
+ */
+function lockAllSheetsAsRepositoryOnly() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheets = ss.getSheets();
+  var protectedCount = 0;
 
-  SpreadsheetApp.getUi().alert('✅ Triggers created successfully!\n\n' +
-    '• onEditHandler (for cell edits)\n' +
-    '• onChangeHandler (backup for other changes)\n\n' +
-    'The Change Out Date will now auto-update when you edit Date Assigned.');
+  for (var i = 0; i < sheets.length; i++) {
+    var sheet = sheets[i];
+    var sheetName = sheet.getName();
+
+    // Skip temp/scratch sheets if any
+    if (sheetName.toLowerCase().startsWith('temp') || sheetName.toLowerCase().startsWith('test')) {
+      continue;
+    }
+
+    // Remove existing protections created by this script
+    var existingProtections = sheet.getProtections(SpreadsheetApp.ProtectionType.SHEET);
+    for (var p = 0; p < existingProtections.length; p++) {
+      existingProtections[p].remove();
+    }
+
+    var protection = sheet.protect();
+    protection.setDescription('🔒 Safety Assistant Repository - Managed exclusively by Desktop App');
+    protection.setWarningOnly(true);
+    protectedCount++;
+  }
+
+  try {
+    PropertiesService.getScriptProperties().setProperty('ALLOW_DIRECT_SHEETS_EDIT', 'false');
+  } catch (e) {
+    Logger.log('Could not set ALLOW_DIRECT_SHEETS_EDIT: ' + e);
+  }
+
+  SpreadsheetApp.getUi().alert(
+    '🔒 Repository Protection Enabled!\n\n' +
+    'Protected ' + protectedCount + ' sheet(s).\n\n' +
+    'Direct edits in Google Sheets will display a warning and be reverted.\n' +
+    'All edits must be performed in the Safety Assistant Desktop App.'
+  );
+}
+
+/**
+ * Temporarily allows direct sheets editing for emergency maintenance.
+ * Menu: Glove Manager → 🔧 Utilities → 🔓 Maintenance Mode (Allow Sheets Editing)
+ */
+function unlockAllSheetsForMaintenance() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheets = ss.getSheets();
+  var unlockedCount = 0;
+
+  for (var i = 0; i < sheets.length; i++) {
+    var sheet = sheets[i];
+    var existingProtections = sheet.getProtections(SpreadsheetApp.ProtectionType.SHEET);
+    for (var p = 0; p < existingProtections.length; p++) {
+      existingProtections[p].remove();
+      unlockedCount++;
+    }
+  }
+
+  try {
+    PropertiesService.getScriptProperties().setProperty('ALLOW_DIRECT_SHEETS_EDIT', 'true');
+  } catch (e) {
+    Logger.log('Could not set ALLOW_DIRECT_SHEETS_EDIT: ' + e);
+  }
+
+  SpreadsheetApp.getUi().alert(
+    '🔓 Maintenance Mode Enabled\n\n' +
+    'Removed ' + unlockedCount + ' sheet protection(s).\n' +
+    'Direct editing in Google Sheets is temporarily enabled for maintenance.\n\n' +
+    'Be sure to run "Protect Sheets (App-Only Repository)" when finished!'
+  );
 }
 
 
@@ -202,16 +261,45 @@ function onEdit(e) {
   try {
     if (!e || !e.range) return;
 
+    var bypass = '';
+    try {
+      bypass = PropertiesService.getScriptProperties().getProperty('ALLOW_DIRECT_SHEETS_EDIT');
+    } catch (_) {}
+
+    if (bypass === 'true') {
+      // Maintenance mode enabled: allow manual edit and continue to handlers below
+    } else {
+      var sheet = e.range.getSheet();
+      var sheetName = sheet.getName();
+      var editedCol = e.range.getColumn();
+      var editedRow = e.range.getRow();
+
+      // Allow action buttons like Archive checkbox in cell O2 (row 2, col 15)
+      if ((sheetName === 'Safety Equipment Needs' || sheetName === 'Safety Reports') && editedRow === 2 && editedCol === 15) {
+        return;
+      }
+
+      // Revert the manual edit immediately
+      var ss = SpreadsheetApp.getActiveSpreadsheet();
+      if (e.oldValue !== undefined) {
+        e.range.setValue(e.oldValue);
+      } else {
+        e.range.clearContent();
+      }
+
+      ss.toast(
+        '⛔ Direct edits in Google Sheets are disabled. Google Sheets is a data repository only. Please make all changes in the Safety Assistant Desktop App.',
+        'Edits Disabled (Desktop App Only)',
+        8
+      );
+      Logger.log('Blocked manual edit on ' + sheetName + ' row ' + editedRow + ', col ' + editedCol);
+      return;
+    }
+
     var sheet = e.range.getSheet();
     var sheetName = sheet.getName();
     var editedCol = e.range.getColumn();
     var editedRow = e.range.getRow();
-
-    // Ignore edits to the Archive checkbox in cell O2 (row 2, col 15) in simple onEdit -
-    // the installable onEditHandler will handle it because it requires full auth.
-    if ((sheetName === 'Safety Equipment Needs' || sheetName === 'Safety Reports') && editedRow === 2 && editedCol === 15) {
-      return;
-    }
 
     // =========================================================================
     // DUPLICATE ITEM NUMBER VALIDATION (Column A edits on inventory sheets)
@@ -393,12 +481,15 @@ function onEditHandler(e) {
       return;
     }
 
+    var bypass = '';
+    try {
+      bypass = PropertiesService.getScriptProperties().getProperty('ALLOW_DIRECT_SHEETS_EDIT');
+    } catch (_) {}
+
     var sheet = e.range.getSheet();
     var sheetName = sheet.getName();
     var editedCol = e.range.getColumn();
     var editedRow = e.range.getRow();
-
-    Logger.log('onEditHandler fired: sheet=' + sheetName + ', row=' + editedRow + ', col=' + editedCol);
 
     // =========================================================================
     // ARCHIVE CHECKBOX BUTTON (Cell O2 = row 2, col 15 on Safety Equipment Needs)
@@ -417,6 +508,26 @@ function onEditHandler(e) {
       }
       return; // Handled
     }
+
+    if (bypass === 'true') {
+      // Maintenance mode enabled: allow edit
+    } else {
+      var ss = SpreadsheetApp.getActiveSpreadsheet();
+      if (e.oldValue !== undefined) {
+        e.range.setValue(e.oldValue);
+      } else {
+        e.range.clearContent();
+      }
+      ss.toast(
+        '⛔ Direct edits in Google Sheets are disabled. All edits must come from the Desktop App.',
+        'Edits Disabled (Desktop App Only)',
+        8
+      );
+      Logger.log('onEditHandler blocked manual edit on ' + sheetName + ' row ' + editedRow + ', col ' + editedCol);
+      return;
+    }
+
+    Logger.log('onEditHandler fired (maintenance mode): sheet=' + sheetName + ', row=' + editedRow + ', col=' + editedCol);
 
     // =========================================================================
     // SAFETY EQUIPMENT NEEDS STATUS EDIT (Column H / Col 8 = Status)
