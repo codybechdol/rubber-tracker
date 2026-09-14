@@ -691,7 +691,9 @@ class SafetyEmailsEngine {
             if (window.syncEngine) {
               await window.syncEngine.syncWithGoogleSheets();
             }
-            this.renderSafetyComplianceView();
+            if (window.sheetNavigator) {
+              window.sheetNavigator.renderSafetyCompliance();
+            }
             this.showToast('✅ Safety emails processed successfully in the cloud! Compliance updated.');
 
             setTimeout(() => {
@@ -1148,47 +1150,72 @@ class SafetyEmailsEngine {
         batchIndex++;
       }
 
-      // Update local database snapshot if fresh snapshot returned, or merge updatedRows
+      // Merge initial batch results if returned
       if (finalUpdatedRows && finalUpdatedRows.length > 0) {
         this.mergeComplianceUpdates(finalUpdatedRows);
-        const activeView = document.querySelector('.view-container.active');
-        if (activeView && activeView.id === 'safety-compliance-view' && window.sheetNavigator) {
-          window.sheetNavigator.renderSafetyCompliance();
-        }
       } else if (finalSnapshot) {
         await window.localDB.setSnapshot(finalSnapshot);
-        const activeView = document.querySelector('.view-container.active');
-        if (activeView && activeView.id === 'safety-compliance-view' && window.sheetNavigator) {
-          window.sheetNavigator.renderSafetyCompliance();
-        }
       }
 
       const recentLogs = (finalResult && finalResult.recentLogs) || (lastResult && lastResult.recentLogs);
       if (recentLogs && recentLogs.length > 0) {
         this.mergeSafetyLogs(recentLogs);
-      } else if (window.syncEngine) {
-        // Asynchronous compliance calculation runs in the background on Google Cloud;
-        // schedule a sync in 5 seconds to load the updated compliance table.
-        setTimeout(async () => {
-          try {
-            await window.syncEngine.syncWithGoogleSheets();
-            const activeView = document.querySelector('.view-container.active');
-            if (activeView && activeView.id === 'safety-compliance-view' && window.sheetNavigator) {
-              window.sheetNavigator.renderSafetyCompliance();
+      }
+
+      // Automatically recalculate Safety Compliance matrix for current and previous weeks
+      const titleEl = document.getElementById('proc-live-title');
+      const subEl = document.getElementById('proc-live-sub');
+      const barEl = document.getElementById('proc-live-bar');
+      if (titleEl) titleEl.textContent = "🛡️ Recalculating Safety Compliance...";
+      if (subEl) subEl.textContent = "Evaluating logged reports and updating compliance scores...";
+      if (barEl) {
+        barEl.style.width = "98%";
+        barEl.textContent = "Recalculating...";
+        barEl.style.background = "linear-gradient(90deg, #3b82f6 0%, #10b981 100%)";
+      }
+      this.updateBackgroundWidget({
+        title: '🛡️ Recalculating Compliance',
+        sub: 'Updating compliance matrix from logged data...',
+        pct: 98
+      });
+
+      try {
+        console.log('Automatically recalculating safety compliance after email scanning...');
+        const recalcResponse = await window.syncEngine.executeNetworkRequest(syncUrl, 'POST', {
+          action: 'recalculateCompliance',
+          targetWeek: 'both'
+        }, 180000);
+        console.log('Auto-recalculate compliance response:', recalcResponse);
+
+        if (recalcResponse && recalcResponse.success) {
+          const autoUpdatedRows = recalcResponse.updatedRows || (recalcResponse.result && recalcResponse.result.updatedRows);
+          if (autoUpdatedRows && autoUpdatedRows.length > 0) {
+            this.mergeComplianceUpdates(autoUpdatedRows);
+          } else {
+            const freshSnap = recalcResponse.snapshot || recalcResponse.dataSnapshot || (recalcResponse.result && (recalcResponse.result.snapshot || recalcResponse.result.dataSnapshot));
+            if (freshSnap) {
+              await window.localDB.setSnapshot(freshSnap);
             }
-          } catch (syncErr) {
-            console.warn('Auto-sync after safety email processing warning:', syncErr);
           }
-        }, 5000);
+          const recLogs = recalcResponse.recentLogs || (recalcResponse.result && recalcResponse.result.recentLogs);
+          if (recLogs && recLogs.length > 0) {
+            this.mergeSafetyLogs(recLogs);
+          }
+        }
+      } catch (autoRecalcErr) {
+        console.warn('Auto-recalculate compliance after email scanning warning:', autoRecalcErr);
+      }
+
+      // Re-render Safety Compliance view immediately so user sees the new week and updated checks
+      if (window.sheetNavigator) {
+        window.sheetNavigator.renderSafetyCompliance();
       }
 
       // Hide header minimize button
       if (minBtn) minBtn.style.display = 'none';
 
-      // Save logs in memory
-      this.currentLogs = (finalResult && finalResult.recentLogs && finalResult.recentLogs.length > 0)
-        ? finalResult.recentLogs
-        : this.extractLogsFromLocalDB();
+      // Save logs in memory from localDB
+      this.currentLogs = this.extractLogsFromLocalDB();
 
       this.activeCategoryFilter = 'all';
       this.searchQuery = '';
