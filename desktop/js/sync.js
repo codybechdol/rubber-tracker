@@ -332,12 +332,24 @@ class SyncEngine {
       let desc = '';
       const isHistorySheet = sheet.toLowerCase().includes('history') || sheet.toLowerCase().includes('_history');
 
-      if (isHistorySheet && itemNumber) {
-        title = `📜 History Milestone: #${itemNumber}`;
-        const holder = rowData['Assigned To'] || rowData['Holder'] || rowData['Status'] || '';
-        const loc = rowData['Location'] || '';
-        const dateVal = rowData['Date Assigned'] || rowData['Date'] || rowData['Test Date'] || '';
-        desc = `${holder ? `Assigned: <strong>${holder}</strong>` : ''}${loc ? ` • Loc: ${loc}` : ''}${dateVal ? ` • Date: ${dateVal}` : ''}`;
+      if (isHistorySheet) {
+        if (itemNumber) {
+          title = `📜 History Milestone: #${itemNumber}`;
+          const holder = rowData['Assigned To'] || rowData['Holder'] || rowData['Status'] || '';
+          const loc = rowData['Location'] || '';
+          const dateVal = rowData['Date Assigned'] || rowData['Date'] || rowData['Test Date'] || '';
+          desc = `${holder ? `Assigned: <strong>${holder}</strong>` : ''}${loc ? ` • Loc: ${loc}` : ''}${dateVal ? ` • Date: ${dateVal}` : ''}`;
+        } else if (employeeName) {
+          const eventType = rowData['Event Type'] || rowData['Event'] || rowData['Type'] || 'Milestone';
+          title = `📜 Employee History: 👤 ${employeeName} — ${eventType}`;
+          const loc = rowData['Location'] || '';
+          const job = rowData['Job Number'] || '';
+          const notes = rowData['Notes'] || '';
+          desc = `${job ? `Job: <strong>${job}</strong>` : ''}${loc ? ` • Loc: ${loc}` : ''}${notes ? ` • ${notes}` : ''}`;
+        } else {
+          title = `📜 Added Row to ${sheet}`;
+          desc = Object.entries(rowData).slice(0, 3).map(([k, v]) => `${k}: <strong>${v}</strong>`).join(' • ');
+        }
       } else if (employeeName && certName) {
         const expDate = rowData['Expiration Date'] || rowData['Date Acquired'] || mut.value || '';
         title = `✨ New Cert: 👤 ${employeeName} — 📜 ${certName}`;
@@ -345,7 +357,7 @@ class SyncEngine {
       } else if (itemNumber) {
         title = `✨ New Item: #${itemNumber}`;
         desc = `Status: ${rowData['Status'] || 'In Stock'} • Loc: ${rowData['Location'] || 'Helena'}`;
-      } else if (employeeName) {
+      } else if (employeeName && (sheet.toLowerCase() === 'employees' || tableKey === 'employees')) {
         title = `✨ New Employee: 👤 ${employeeName}`;
         desc = `Job: ${rowData['Job Number'] || 'N/A'} • Loc: ${rowData['Location'] || 'Helena'}`;
       } else {
