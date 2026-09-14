@@ -379,7 +379,7 @@ class CrewImportEngine {
     if (clean.match(/\b(Safety\s*Committ?ee|MSLCAT|Subcommittee|Committee|Safety\s*Meeting|Interviews|St\s*Regis|Facility|Shop|Yard|Office\s*Notes)\b/i)) return false;
 
     // Ignore note continuations, appointments, and delegates
-    if (clean.match(/^(&|and\b|off\b|back\b|wks?\b|as\b|next\b|appointment|due\b|baby\b|resume\b|on hold\b|starting\b|tentative\b|shop\s*note)/i)) return false;
+    if (clean.match(/^(&|and\b|off\b|back\b|wks?\b|as\b|next\b|appointment|due\b|baby\b|resume\b|on hold\b|starting\b|tentative\b|shop\s*note|starts?\b|possible\b|digging\b)/i)) return false;
     if (clean.match(/\b(Appointment|Delegate|Convention|shoulder\s*recovery)\b/i)) return false;
 
     // Ignore date announcements & notes (e.g. "February 2027, possibly sooner", "Starts 8-31 Mon", "TBD")
@@ -391,25 +391,25 @@ class CrewImportEngine {
 
     // Ignore known headers and non-employee announcements
     if (clean.match(/^(NWE|Aprox|Tentative|Completed|On Hold|Schedule|Released|Layoff|Dock|Sub|Trans)\b/i)) return false;
-    if (clean.match(/^(Set Basements|Starts?\s+|Approved\s+|Waiting\s+|Fly\s+poles|Week\s+of|Total\s+Crews)/i)) return false;
-    if (clean.match(/^(Light\s*Duty|Time\s*off|Quits?|Other|Layoffs?|Resigns?|Leave|Vacations?|MT\s*Misc|Weeds)/i)) return false;
+    if (clean.match(/^(Set Basements|Starts?\s+|Approved\s+|Waiting\s+|Fly\s+poles|Week\s+of|Total\s+Crews|Possible\s+start)/i)) return false;
+    if (clean.match(/^(Light\s*Duty|Time\s*off|Quits?|Other|Layoffs?|Resigns?|Leave|Vacations?|MT\s*Misc|Weeds|Crane\s*Class)/i)) return false;
     if (clean.match(/^(Time\s*off\s*upcoming|Time\s*off\/Quit\/Other|Upcoming\s*Time\s*off)/i)) return false;
 
-    // Ignore notes with 'thru' date ranges or schedule week annotations
-    if (clean.match(/\bthru\b/i) || clean.match(/\bwk\s+\d/i)) return false;
+    // Ignore pure schedule / date range lines that start with 'thru' or 'wk'
+    if (clean.match(/^(thru\b|wks?\s+\d)/i)) return false;
     if (clean.match(/\b(Poles|Dock|Sub|Trans|Distro|Foundation)\b/i) && clean.match(/,/)) return false;
 
     // Recognize if it contains recognized roles, apprentices, operators, or annotations
     if (clean.match(/\b(SUP|GF|F|GTO\s*F|GTO|JL|JRY|WT|EO\s*[12]|EO[12]|\d+\s*ap|\d+\s*st|Op|Operator|Apprentice|Trainee|NEW\s*HIRE|NEWHIRE)\b/i)) {
       const firstWord = clean.split(/\s+/)[0];
-      if (firstWord.match(/^(off|back|next|wks?|as|due|baby|starts?|on|resume|set|fly|approved|to|from|open|need|call|tbd|vacant|unassigned|placeholder|tbh|coming|work)$/i)) return false;
+      if (firstWord.match(/^(off|back|next|wks?|as|due|baby|starts?|on|resume|set|fly|approved|to|from|open|need|call|tbd|vacant|unassigned|placeholder|tbh|coming|work|possible|possibly|tentative|digging|another)$/i)) return false;
       return true;
     }
 
     // Name pattern: At least two words (First Last)
     const words = clean.split(/\s+/).filter(w => /^[A-Za-z]/.test(w));
     if (words.length < 2) return false;
-    if (words[0].match(/^(off|back|next|wks?|as|due|baby|starts?|on|resume|set|fly|approved|meeting|shop|to|from|open|need|call|tbd|vacant|unassigned|placeholder|tbh|coming|work)$/i)) return false;
+    if (words[0].match(/^(off|back|next|wks?|as|due|baby|starts?|on|resume|set|fly|approved|meeting|shop|to|from|open|need|call|tbd|vacant|unassigned|placeholder|tbh|coming|work|possible|possibly|tentative|digging|another)$/i)) return false;
     return true;
   }
 
@@ -467,10 +467,23 @@ class CrewImportEngine {
       }
     }
 
+    // Fallback: If no role token matched, check if there is a note separator (e.g. "Brian Dixon off wk 9-14")
+    if (!role) {
+      const noteSep = clean.match(/\b(off\b|last day\b|Quit\b|Quitting\b|Resign\b|Crane\s*Class\b|Light\s*Duty\b|Baby\s*due\b|injury\b|recovery\b|starts?\b|resume\b)/i);
+      if (noteSep && noteSep.index !== undefined) {
+        const potentialName = clean.substring(0, noteSep.index).trim();
+        if (potentialName.length >= 2) {
+          namePart = potentialName;
+          notesPart = clean.substring(noteSep.index).trim();
+        }
+      }
+    }
+
     // 3. Clean Name
     let name = namePart
-      .replace(/\b(TEMP|TEMPORARY|CONTRACTOR)\b/gi, '')
+      .replace(/\b(TEMP|TEMPORARY|CONTRACTOR|MT\s*Misc)\b/gi, '')
       .replace(/[\*#\(\)]/g, ' ')
+      .replace(/^[,\s]+|[,\s]+$/g, '')
       .replace(/\s+/g, ' ')
       .trim();
 
@@ -539,16 +552,17 @@ class CrewImportEngine {
 
     const crewHeaders = [];
     const specialHeaders = [];
+    const otherSectionHeaders = [];
 
-    // 1. Scan for Crew Headers (pattern XXX-XX) & Special Section Headers
+    // 1. Scan for Crew Headers (pattern XXX-XX), Special Section Headers, & Other Section Boundaries
     for (let r = 0; r < data.length; r++) {
       for (let c = 0; c < (data[r] || []).length; c++) {
         const cell = String(data[r][c] || '').trim();
         if (!cell) continue;
 
-        // Special sections (Light Duty, Weeds, Vacation, Leave, Time Off, Quit, Safety Committee)
-        const isSpecialHeader = (cell.match(/^(Time\s*off|Quits?|Other|Layoffs?|Resigns?|Leave|Vacations?|MT\s*Misc|Weeds|Safety\s*Committ?ee|Committee|St\s*Regis|February\s*\d{4})/i) ||
-                                 cell.match(/\b(Light\s*Duty|Time\s*off|Quits?|Other|Layoffs?|Resigns?|Leave|Vacations?|MT\s*Misc|Weeds|Safety\s*Committ?ee|Committee)\b/i)) &&
+        // Special sections (Time Off, Quits, Layoffs, Resigns, Leave, Vacations, MT Misc, Weeds, Light Duty)
+        const isSpecialHeader = (cell.match(/^(Time\s*off|Quits?|Other|Layoffs?|Resigns?|Leave|Vacations?|MT\s*Misc|Weeds)/i) ||
+                                 cell.match(/\b(Light\s*Duty|Time\s*off|Quits?|Other|Layoffs?|Resigns?|Leave|Vacations?|MT\s*Misc|Weeds)\b/i)) &&
                                 !this.isEmployeeName(cell);
 
         if (isSpecialHeader && !cell.match(/\d{3}-\d{2}/)) {
@@ -556,9 +570,13 @@ class CrewImportEngine {
           continue;
         }
 
-        // Unnumbered dock headers (e.g. "Willow Crk Sub Dock")
-        if (cell.match(/\b(Dock|Sub\s*Dock|Tran\s*Dock|Bid)\b/i) && !cell.match(/\d{3}-\d{2}/) && !this.isEmployeeName(cell)) {
-          specialHeaders.push({ row: r, col: c, headerText: cell });
+        // Informational, training, committee, or unnumbered dock/bid section headers
+        // (e.g. "Willow Crk Sub Dock", "Deer Lodge City Sub Dock", "Florence Trans Bid", "Crane Class Apes...", "Safety Committee", "MSLCAT")
+        // These act as boundaries stopping previous crew scans, but are NEVER processed as Time Off / Quits!
+        if (cell.match(/\b(Dock|Sub\s*Dock|Tran\s*Dock|Bid|Crane\s*Class|Safety\s*Committ?ee|Committee|MSLCAT|Subcommittee|Interviews)\b/i) &&
+            !cell.match(/\d{3}-\d{2}/) &&
+            !this.isEmployeeName(cell)) {
+          otherSectionHeaders.push({ row: r, col: c, headerText: cell });
           continue;
         }
 
@@ -585,7 +603,7 @@ class CrewImportEngine {
     for (const header of crewHeaders) {
       const employees = [];
 
-      // Find the next header row in the same column
+      // Find the next header row in the same column (checking all crew, special, and other section headers)
       let nextHeaderRow = data.length;
       for (const other of crewHeaders) {
         if (other.col === header.col && other.row > header.row && other.row < nextHeaderRow) {
@@ -597,15 +615,20 @@ class CrewImportEngine {
           nextHeaderRow = spec.row;
         }
       }
+      for (const otherSec of otherSectionHeaders) {
+        if (otherSec.col === header.col && otherSec.row > header.row && otherSec.row < nextHeaderRow) {
+          nextHeaderRow = otherSec.row;
+        }
+      }
 
       let crewNote = '';
       for (let r = header.row + 1; r < nextHeaderRow; r++) {
-        const cell = String(data[r][header.col] || '').trim();
+        const cell = String((data[r] && data[r][header.col]) || '').trim();
         if (!cell) continue;
 
         // Stop if hitting another job header, dock, committee, or section break
         if (cell.match(/\d{3}-\d{2}/)) break;
-        if (cell.match(/\b(Dock|Sub\s*Dock|Tran\s*Dock|Bid|Safety\s*Committ?ee|Committee)\b/i)) break;
+        if (cell.match(/\b(Dock|Sub\s*Dock|Tran\s*Dock|Bid|Safety\s*Committ?ee|Committee|Crane\s*Class|MSLCAT)\b/i)) break;
         // Skip placeholders (Open Call, Need JL, Coming soon, TBD, etc.) - they are neither employees nor crew notes
         if (this.isPlaceholder(cell)) {
           continue;
@@ -711,7 +734,7 @@ class CrewImportEngine {
     this.detectMultiCrewAssignments();
 
     // 6. Parse bottom special sections (Quits, Time Off, Light Duty)
-    this.specialCircumstances = this.parseSpecialSections(data, specialHeaders, crewHeaders);
+    this.specialCircumstances = this.parseSpecialSections(data, specialHeaders, [...crewHeaders, ...otherSectionHeaders]);
 
     return this.parsedCrews;
   }
@@ -732,13 +755,14 @@ class CrewImportEngine {
       let lastParsedItem = null;
 
       for (let r = header.row + 1; r < nextRow; r++) {
-        const cell = String(data[r][header.col] || '').trim();
+        const cell = String((data[r] && data[r][header.col]) || '').trim();
         if (!cell) continue;
         if (cell.match(/\d{3}-\d{2}/)) break;
+        if (cell.match(/\b(Dock|Sub\s*Dock|Tran\s*Dock|Bid|Safety\s*Committ?ee|Committee|Crane\s*Class|MSLCAT)\b/i)) break;
 
-        // Skip category / committee header rows
-        if (cell.match(/^(MSLCAT|Subcommittee|Committee|Interviews|Safety\s*Meeting)/i) ||
-            cell.match(/\b(MSLCAT\s*Subcommittee\/Interviews)\b/i)) {
+        // Skip category / committee header rows or training announcements
+        if (cell.match(/^(MSLCAT|Subcommittee|Committee|Interviews|Safety\s*Meeting|Crane\s*Class)/i) ||
+            cell.match(/\b(MSLCAT\s*Subcommittee\/Interviews|Crane\s*Class)\b/i)) {
           lastParsedItem = null;
           continue;
         }
@@ -761,13 +785,13 @@ class CrewImportEngine {
           name = name.replace(/\b(Quit.*|Last day.*|Quitting.*|Resign.*)\b/i, '').trim();
         }
 
-        // Check if Light Duty, Medical Recovery, or MSLCAT Committee (NOT personal time off)
+        // Check if Light Duty, Medical Recovery, or MSLCAT Committee / Training Class (NOT personal time off)
         const isLightDutyOrRecovery = /\b(Light\s*Duty|shoulder\s*recovery|recovery|medical|appointment)\b/i.test(cell);
-        const isCommittee = header.headerText.match(/MSLCAT|Subcommittee|Committee/i) ||
-                            cell.match(/MSLCAT|Subcommittee/i) ||
-                            (name && name.toLowerCase().includes('syd'));
+        const isCommitteeOrClass = header.headerText.match(/MSLCAT|Subcommittee|Committee|Crane\s*Class/i) ||
+                                  cell.match(/MSLCAT|Subcommittee|Crane\s*Class/i) ||
+                                  (name && name.toLowerCase().includes('syd'));
 
-        if (name && !isCommittee && !isLightDutyOrRecovery) {
+        if (name && !isCommitteeOrClass && !isLightDutyOrRecovery) {
           const item = {
             name: name,
             rawText: cell,
@@ -1658,6 +1682,17 @@ class CrewImportEngine {
       const isAlsoOnActiveCrew = crewOccurrences.length > 0;
       const primaryCrew = isAlsoOnActiveCrew ? crewOccurrences[0].crew : null;
 
+      // If the employee is currently active on a crew, and this is a partial absence / class / training
+      // (like "Crane Class Fri", "Fri Only", "Doctor appt", or notes that are not full week departures),
+      // DO NOT put them in timeOff deltas! They are working with their crew this week!
+      if (isAlsoOnActiveCrew) {
+        const toNote = String(to.note || to.rawText || '').toLowerCase();
+        const isTrueFullWeekOff = toNote.includes('off wk') || toNote.includes('off wks') || toNote.includes('vacation') || toNote.includes('wedding');
+        if (!isTrueFullWeekOff) {
+          continue;
+        }
+      }
+
       timeOff.push({
         changeId: 'to_' + cleanTOName,
         name: dbName,
@@ -2193,13 +2228,26 @@ class CrewImportEngine {
           if (row) {
             const oldLoc = this.getEmpRowLocation(row);
             const rawCity = oldLoc ? oldLoc.replace(/\s*\([^)]*\)/g, '').trim() : 'Helena';
-            const vacationLoc = `${rawCity || 'Helena'} (Vacation)`;
+
+            // Categorize absence location suffix
+            let statusSuffix = 'Vacation';
+            const noteText = String(to.note || to.rawText || '').toLowerCase();
+            if (noteText.includes('light duty')) {
+              statusSuffix = 'Light Duty';
+            } else if (noteText.match(/\b(medical|shoulder|injury|doctor|surgery|physician|recovery)\b/i)) {
+              statusSuffix = 'Medical';
+            } else if (noteText.match(/\b(work\s*comp|worker's\s*comp)\b/i)) {
+              statusSuffix = "Worker's Comp";
+            } else if (noteText.match(/\b(leave|fmla|maternity|paternity|military)\b/i)) {
+              statusSuffix = 'Leave';
+            }
+            const absenceLoc = `${rawCity || 'Helena'} (${statusSuffix})`;
 
             const updatedFields = {};
-            if (locKey) { row[locKey] = vacationLoc; updatedFields[locKey] = vacationLoc; }
+            if (locKey) { row[locKey] = absenceLoc; updatedFields[locKey] = absenceLoc; }
             if (jobKey) { row[jobKey] = ''; updatedFields[jobKey] = ''; }
             if (notesKey) {
-              row[notesKey] = to.note || ('Time Off ' + (this.rosterDateFormatted || todayFormatted));
+              row[notesKey] = to.note || (`${statusSuffix} ` + (this.rosterDateFormatted || todayFormatted));
               updatedFields[notesKey] = row[notesKey];
             }
             this.syncRowToRawGrid(empTable, row);
@@ -2209,10 +2257,10 @@ class CrewImportEngine {
               const histRow = {
                 'Date': todayFormatted,
                 'Employee Name': this.getEmpRowName(row) || to.name,
-                'Event Type': 'Time Off',
-                'Location': vacationLoc,
+                'Event Type': statusSuffix === 'Vacation' ? 'Time Off' : statusSuffix,
+                'Location': absenceLoc,
                 'Job Number': '',
-                'Notes': `Time Off: ${to.note}`
+                'Notes': `${statusSuffix}: ${to.note}`
               };
               histTable.rows.unshift(histRow);
               histTable.rowCount = histTable.rows.length;
@@ -3384,7 +3432,19 @@ class CrewImportEngine {
                   </button>
                 ` : ''}
 
-                ${e.notes ? `<span style="color: #f59e0b; font-size: 10px; font-weight: 600; background: rgba(245, 158, 11, 0.12); padding: 1px 5px; border-radius: 3px; border: 1px solid rgba(245, 158, 11, 0.25);">📝 ${this.escapeHtml(e.notes)}</span>` : ''}
+                ${(() => {
+                  if (!e.notes) return '';
+                  if (/Crane\s*Class/i.test(e.notes)) {
+                    return `<span class="badge" style="background: rgba(99, 102, 241, 0.2); color: #a5b4fc; border: 1px solid rgba(99, 102, 241, 0.4); font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 3px;" title="Mandatory Training / Class">🎓 ${this.escapeHtml(e.notes)}</span>`;
+                  }
+                  if (/Under\s*21/i.test(e.notes)) {
+                    return `<span class="badge" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 3px;" title="Under 21 Driver Restriction">⚠️ ${this.escapeHtml(e.notes)}</span>`;
+                  }
+                  if (/Fri\s*Only|Mon\s*Only|Tue\s*Only|Wed\s*Only|Thu\s*Only|Partial|Schedule/i.test(e.notes)) {
+                    return `<span class="badge" style="background: rgba(6, 182, 212, 0.2); color: #67e8f9; border: 1px solid rgba(6, 182, 212, 0.4); font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 3px;" title="Partial Week Schedule">📅 ${this.escapeHtml(e.notes)}</span>`;
+                  }
+                  return `<span style="color: #f59e0b; font-size: 10px; font-weight: 600; background: rgba(245, 158, 11, 0.12); padding: 1px 5px; border-radius: 3px; border: 1px solid rgba(245, 158, 11, 0.25);">📝 ${this.escapeHtml(e.notes)}</span>`;
+                })()}
               </div>
               <div style="display: flex; align-items: center; gap: 6px;">
                 <span class="badge" style="background: var(--bg-tertiary); color: var(--text-muted); font-size: 10px; padding: 1px 5px; border-radius: 3px; font-weight: 700;">
