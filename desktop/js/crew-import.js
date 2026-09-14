@@ -19,6 +19,7 @@ class CrewImportEngine {
     this.savedLeadSelections = {};
     this.manualLeadOverrides = {};
     this.deselectedChangeIds = new Set();
+    this.missingRosterConfigs = new Map();
     this.activeStep = 1; // 1: Upload, 2: Review Crews, 3: Configure New Hires, 4: Review Changes & Apply
   }
 
@@ -1485,6 +1486,7 @@ class CrewImportEngine {
     (d.newHires || []).forEach(x => x.changeId && ids.push(x.changeId));
     (d.rehires || []).forEach(x => x.changeId && ids.push(x.changeId));
     (d.quits || []).forEach(x => x.changeId && ids.push(x.changeId));
+    (d.missingFromRoster || []).forEach(x => x.changeId && ids.push(x.changeId));
     (d.timeOff || []).forEach(x => x.changeId && ids.push(x.changeId));
     (d.transfers || []).forEach(x => x.changeId && ids.push(x.changeId));
     (d.roleChanges || []).forEach(x => x.changeId && ids.push(x.changeId));
@@ -1492,6 +1494,43 @@ class CrewImportEngine {
     (d.positionUpdates || []).forEach(x => x.changeId && ids.push(x.changeId));
     (d.newJobsDetected || []).forEach(x => x.changeId && ids.push(x.changeId));
     return ids;
+  }
+
+  setMissingRosterAction(changeId, action) {
+    if (!this.missingRosterConfigs) this.missingRosterConfigs = new Map();
+    const cur = this.missingRosterConfigs.get(changeId) || {};
+    cur.action = action;
+    cur.reason = action === 'time_off' ? 'Time Off / Vacation' : 'Missing from Roster / Departed';
+    this.missingRosterConfigs.set(changeId, cur);
+
+    if (this.computedDeltas && this.computedDeltas.missingFromRoster) {
+      const m = this.computedDeltas.missingFromRoster.find(x => x.changeId === changeId);
+      if (m) {
+        m.action = action;
+        m.reason = cur.reason;
+      }
+    }
+  }
+
+  setMissingRosterDate(changeId, dateStr) {
+    if (!this.missingRosterConfigs) this.missingRosterConfigs = new Map();
+    const cur = this.missingRosterConfigs.get(changeId) || {};
+    if (dateStr) {
+      const parts = dateStr.split('-');
+      if (parts.length === 3) {
+        cur.departureDate = `${parts[1]}/${parts[2]}/${parts[0]}`;
+        cur.departureDateIso = dateStr;
+      }
+    }
+    this.missingRosterConfigs.set(changeId, cur);
+
+    if (this.computedDeltas && this.computedDeltas.missingFromRoster) {
+      const m = this.computedDeltas.missingFromRoster.find(x => x.changeId === changeId);
+      if (m && cur.departureDate) {
+        m.departureDate = cur.departureDate;
+        m.departureDateIso = cur.departureDateIso;
+      }
+    }
   }
 
   getSelectedChangesCount() {
@@ -1846,6 +1885,86 @@ class CrewImportEngine {
       }
     }
 
+    // 6. Reverse Audit: Detect active field employees in DB who do not appear anywhere in this week's Excel roster
+    const missingFromRoster = [];
+    const todayFormatted = new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+    const todayIso = new Date().toISOString().split('T')[0];
+
+    for (const empRow of activeEmps) {
+      const empName = this.getEmpRowName(empRow);
+      if (!empName) continue;
+      const cleanEmpName = this.cleanNameForMatch(empName);
+      if (!cleanEmpName || cleanEmpName.length < 2) continue;
+
+      const loc = (this.getEmpRowLocation(empRow) || '').trim();
+      const locLower = loc.toLowerCase();
+      const stat = String(empRow['Status'] || empRow['Employee Status'] || '').toLowerCase().trim();
+      const job = (this.getEmpRowJobNumber(empRow) || '').trim();
+      const jobPrefix = job.substring(0, 3);
+
+      // Exclude office/management (005-), equipment/lost (002-), or records without a job number
+      if (jobPrefix === '005' || jobPrefix === '002' || !job) {
+        continue;
+      }
+
+      // Exclude departed / previous employees
+      const isAlreadyDeparted = locLower === 'previous employee' || locLower.includes('previous') ||
+                                stat === 'previous employee' || stat.includes('inactive') || stat.includes('terminated') || stat.includes('departed');
+      if (isAlreadyDeparted) {
+        continue;
+      }
+
+      // Exclude employees on special non-crew status locations (Light Duty, Weeds, Leave, Medical, etc.)
+      if (['light duty', 'weeds', 'leave', 'medical', "worker's comp"].some(s => locLower.includes(s))) {
+        continue;
+      }
+
+      // Check if employee appeared on any crew in this week's Excel sheet
+      let foundInRoster = uniqueEmployees.has(cleanEmpName);
+      if (!foundInRoster) {
+        for (const [k, occs] of uniqueEmployees.entries()) {
+          if (occs.length > 0 && this.findMatchingEmployee(empName, [{ 'Employee Name': occs[0].emp.name }])) {
+            foundInRoster = true;
+            break;
+          }
+        }
+      }
+
+      // Check if employee appeared in Quits notes
+      if (!foundInRoster && quits.some(q => this.findMatchingEmployee(empName, [{ 'Employee Name': q.name }, { 'Employee Name': q.rosterName }]))) {
+        foundInRoster = true;
+      }
+
+      // Check if employee appeared in Time Off notes
+      if (!foundInRoster && timeOff.some(to => this.findMatchingEmployee(empName, [{ 'Employee Name': to.name }, { 'Employee Name': to.rosterName }]))) {
+        foundInRoster = true;
+      }
+
+      // Check raw specialCircumstances just in case
+      if (!foundInRoster && (this.specialCircumstances?.quits || []).some(q => this.findMatchingEmployee(empName, [{ 'Employee Name': q.name }]))) {
+        foundInRoster = true;
+      }
+      if (!foundInRoster && (this.specialCircumstances?.timeOffCurrentWeek || []).some(to => this.findMatchingEmployee(empName, [{ 'Employee Name': to.name }]))) {
+        foundInRoster = true;
+      }
+
+      if (!foundInRoster) {
+        const savedCfg = (this.missingRosterConfigs && this.missingRosterConfigs.get('missing_' + cleanEmpName)) || {};
+        missingFromRoster.push({
+          changeId: 'missing_' + cleanEmpName,
+          name: empName,
+          targetRow: empRow,
+          currentJob: job,
+          currentLocation: loc || 'Unknown',
+          classification: this.getEmpRowClassification(empRow) || 'Lineman',
+          action: savedCfg.action || 'depart',
+          departureDate: savedCfg.departureDate || this.rosterDateFormatted || todayFormatted,
+          departureDateIso: savedCfg.departureDateIso || this.rosterDate || todayIso,
+          reason: savedCfg.reason || (savedCfg.action === 'time_off' ? 'Time Off / Vacation' : 'Missing from Roster / Departed')
+        });
+      }
+    }
+
     this.computedDeltas = {
       newHires: newHires,
       rehires: rehires,
@@ -1856,8 +1975,9 @@ class CrewImportEngine {
       newJobsDetected: newJobsDetected,
       quits: quits,
       timeOff: timeOff,
+      missingFromRoster: missingFromRoster,
       matchedEmployeeChanges: matchedEmployeeChanges,
-      totalChanges: newHires.length + rehires.length + matchedEmployeeChanges.length + newJobsDetected.length + quits.length + timeOff.length
+      totalChanges: newHires.length + rehires.length + matchedEmployeeChanges.length + newJobsDetected.length + quits.length + timeOff.length + missingFromRoster.length
     };
 
     return this.computedDeltas;
@@ -1869,10 +1989,10 @@ class CrewImportEngine {
 
   async applyCrewChanges(options = {}) {
     if (!this.computedDeltas) {
-      this.computeChangeDeltas();
+      this.computedDeltas = this.computeChangeDeltas();
     }
 
-    const { newHires, rehires, matchedEmployeeChanges, newJobsDetected, quits, timeOff } = this.computedDeltas;
+    const { newHires, rehires, matchedEmployeeChanges, newJobsDetected, quits, timeOff, missingFromRoster } = this.computedDeltas;
     const empTable = this.db.getTable('employees');
     const jtTable = this.db.getTable('job_tracking');
     const histTable = this.db.getTable('employee_history');
@@ -2215,6 +2335,108 @@ class CrewImportEngine {
               updatedFields: updatedFields
             });
           }
+        }
+      }
+
+      // Process Missing from Roster (Unaccounted for active field employees)
+      for (const m of (missingFromRoster || [])) {
+        if (!this.isChangeSelected(m.changeId)) {
+          continue;
+        }
+        const row = m.targetRow || this.findMatchingEmployee(m.name, empTable.rows);
+        if (!row) continue;
+
+        if (m.action === 'time_off') {
+          // Process as Vacation / Time Off
+          const oldLoc = this.getEmpRowLocation(row);
+          const rawCity = oldLoc ? oldLoc.replace(/\s*\([^)]*\)/g, '').trim() : 'Helena';
+          const absenceLoc = `${rawCity || 'Helena'} (Vacation)`;
+
+          const updatedFields = {};
+          if (locKey) { row[locKey] = absenceLoc; updatedFields[locKey] = absenceLoc; }
+          if (jobKey) { row[jobKey] = ''; updatedFields[jobKey] = ''; }
+          if (notesKey) {
+            row[notesKey] = `Vacation / Unscheduled (${this.rosterDateFormatted || todayFormatted})`;
+            updatedFields[notesKey] = row[notesKey];
+          }
+          this.syncRowToRawGrid(empTable, row);
+          appliedCount++;
+
+          if (histTable) {
+            const histRow = {
+              'Date': todayFormatted,
+              'Employee Name': this.getEmpRowName(row) || m.name,
+              'Event Type': 'Time Off',
+              'Location': rawCity || 'Helena',
+              'Job Number': m.currentJob || '',
+              'Notes': `Time Off / Not on Roster (${this.rosterDateFormatted || todayFormatted})`
+            };
+            histTable.rows.unshift(histRow);
+            histTable.rowCount = histTable.rows.length;
+            this.syncRowToRawGrid(histTable, histRow, true);
+
+            await this.db.addMutation({
+              action: 'ADD_ROW',
+              sheetName: histTable.name,
+              tableKey: 'employee_history',
+              rowData: histRow
+            });
+          }
+
+          const empRowIdx = row._rowIdx || (empTable.rows ? empTable.rows.indexOf(row) + 2 : null);
+          await this.db.addMutation({
+            action: 'UPDATE_ROW',
+            sheetName: empTable.name,
+            tableKey: 'employees',
+            employeeName: this.getEmpRowName(row) || m.name,
+            row: empRowIdx,
+            itemIdentifier: this.getEmpRowName(row) || m.name,
+            updatedFields: updatedFields
+          });
+        } else {
+          // Default action: 'depart' -> Previous Employee Termination
+          const departureDate = m.departureDate || this.rosterDateFormatted || todayFormatted;
+          const reasonVal = m.reason || 'Missing from Roster / Departed';
+
+          const updatedFields = {};
+          if (statusKey) { row[statusKey] = 'Previous Employee'; updatedFields[statusKey] = 'Previous Employee'; }
+          else if (locKey) { row[locKey] = 'Previous Employee'; updatedFields[locKey] = 'Previous Employee'; }
+          if (lastDayKey) { row[lastDayKey] = departureDate; updatedFields[lastDayKey] = departureDate; }
+          if (lastDayReasonKey) { row[lastDayReasonKey] = reasonVal; updatedFields[lastDayReasonKey] = reasonVal; }
+          this.syncRowToRawGrid(empTable, row);
+          appliedCount++;
+
+          if (histTable) {
+            const histRow = {
+              'Date': departureDate,
+              'Employee Name': this.getEmpRowName(row) || m.name,
+              'Event Type': 'Termination',
+              'Location': this.getEmpRowLocation(row) || '',
+              'Job Number': this.getEmpRowJobNumber(row) || '',
+              'Notes': `Omitted from weekly crew roster (Missing from Roster)`
+            };
+            histTable.rows.unshift(histRow);
+            histTable.rowCount = histTable.rows.length;
+            this.syncRowToRawGrid(histTable, histRow, true);
+
+            await this.db.addMutation({
+              action: 'ADD_ROW',
+              sheetName: histTable.name,
+              tableKey: 'employee_history',
+              rowData: histRow
+            });
+          }
+
+          const empRowIdx = row._rowIdx || (empTable.rows ? empTable.rows.indexOf(row) + 2 : null);
+          await this.db.addMutation({
+            action: 'UPDATE_ROW',
+            sheetName: empTable.name,
+            tableKey: 'employees',
+            employeeName: this.getEmpRowName(row) || m.name,
+            row: empRowIdx,
+            itemIdentifier: this.getEmpRowName(row) || m.name,
+            updatedFields: updatedFields
+          });
         }
       }
 
@@ -3024,6 +3246,12 @@ class CrewImportEngine {
               <div style="font-size: 10px; color: var(--text-muted); font-weight: 700;">NEW JOBS</div>
               <div style="font-size: 20px; font-weight: 800; color: #06b6d4;">${deltas ? deltas.newJobsDetected.length : 0}</div>
             </div>
+            ${deltas && deltas.missingFromRoster && deltas.missingFromRoster.length > 0 ? `
+              <div style="background: var(--bg-secondary); border-left: 4px solid #f59e0b; border-radius: 8px; padding: 10px 12px;">
+                <div style="font-size: 10px; color: #f59e0b; font-weight: 700;">MISSING FROM ROSTER</div>
+                <div style="font-size: 20px; font-weight: 800; color: #f59e0b;">${deltas.missingFromRoster.length}</div>
+              </div>
+            ` : ''}
           </div>
 
           <!-- Changes Table View -->
@@ -3104,6 +3332,41 @@ class CrewImportEngine {
                             ? `🔄 Update Existing Record: Last Day → <strong style="color: #60a5fa;">${q.departureDate || '09/03/2026'}</strong> (${this.escapeHtml(q.note)})`
                             : `${this.escapeHtml(q.note)} ${isSched && q.activeCrewJob ? `<span style="color: #60a5fa; margin-left: 8px; font-weight: 700;">(Active ${q.activeCrewRole ? this.escapeHtml(q.activeCrewRole) + ' ' : ''}on ${this.escapeHtml(q.activeCrewJob)} until ${q.departureDate || 'last day'})</span>` : ''}`
                           }
+                        </td>
+                      </tr>
+                    `;
+                  }).join('') : ''}
+
+                  ${deltas ? (deltas.missingFromRoster || []).map(m => {
+                    const isSelected = this.isChangeSelected(m.changeId);
+                    const badgeBg = 'rgba(245, 158, 11, 0.2)';
+                    const badgeColor = '#f59e0b';
+                    return `
+                      <tr style="border-bottom: 1px solid var(--border-color); background: rgba(245, 158, 11, 0.05); ${isSelected ? '' : 'opacity: 0.45; filter: grayscale(0.6);'}">
+                        <td style="padding: 8px 10px; text-align: center;">
+                          <input type="checkbox" class="ci-change-checkbox" data-change-id="${m.changeId}" onchange="window.crewImportEngine.toggleChange('${m.changeId}', this.checked)" ${isSelected ? 'checked' : ''} style="cursor: pointer;">
+                        </td>
+                        <td style="padding: 8px 12px; font-weight: 700; color: #f59e0b;">
+                          ⚠️ ${this.escapeHtml(m.name)}
+                        </td>
+                        <td style="padding: 8px 12px;">
+                          <span class="badge" style="background: ${badgeBg}; color: ${badgeColor}; padding: 2px 6px; border-radius: 4px; font-weight: 700;">
+                            ⚠️ Missing from Roster
+                          </span>
+                        </td>
+                        <td style="padding: 8px 12px; color: var(--text-primary); font-size: 12px;">
+                          <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+                            <div>
+                              Last active on <strong style="color: #60a5fa;">${this.escapeHtml(m.currentJob)}</strong> (<span style="color: #a78bfa;">📍 ${this.escapeHtml(m.currentLocation)}</span>) • Not found on any crew or notes
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 6px;">
+                              <select style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); font-size: 11px; padding: 2px 6px;" onchange="window.crewImportEngine.setMissingRosterAction('${m.changeId}', this.value)">
+                                <option value="depart" ${m.action === 'depart' ? 'selected' : ''}>🚪 Mark as Departed / Previous Employee</option>
+                                <option value="time_off" ${m.action === 'time_off' ? 'selected' : ''}>🏖️ Mark as Vacation / Time Off</option>
+                              </select>
+                              <input type="date" value="${m.departureDateIso || new Date().toISOString().split('T')[0]}" style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); font-size: 11px; padding: 2px 5px;" onchange="window.crewImportEngine.setMissingRosterDate('${m.changeId}', this.value)" title="Last Working Day">
+                            </div>
+                          </div>
                         </td>
                       </tr>
                     `;
