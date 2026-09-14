@@ -1161,6 +1161,11 @@ class SafetyEmailsEngine {
         if (activeView && activeView.id === 'safety-compliance-view' && window.sheetNavigator) {
           window.sheetNavigator.renderSafetyCompliance();
         }
+      }
+
+      const recentLogs = (finalResult && finalResult.recentLogs) || (lastResult && lastResult.recentLogs);
+      if (recentLogs && recentLogs.length > 0) {
+        this.mergeSafetyLogs(recentLogs);
       } else if (window.syncEngine) {
         // Asynchronous compliance calculation runs in the background on Google Cloud;
         // schedule a sync in 5 seconds to load the updated compliance table.
@@ -1307,10 +1312,26 @@ class SafetyEmailsEngine {
         const row = scTable.rows[r];
         const rwStr = String(row['Week Start'] || '').trim();
         const rjStr = String(row['Job Number'] || '').trim();
-        if (rwStr === nwStr && rjStr === njStr) {
-          Object.assign(row, newRow);
-          matched = true;
-          break;
+        
+        // Match job number
+        if (rjStr === njStr) {
+          // Check week start match (exact string or within 2 calendar days to handle timezone offset)
+          let isSameWeek = (rwStr === nwStr);
+          if (!isSameWeek && rwStr && nwStr) {
+            const t1 = new Date(rwStr).getTime();
+            const t2 = new Date(nwStr).getTime();
+            if (!isNaN(t1) && !isNaN(t2) && Math.abs(t1 - t2) <= 86400000 * 2) {
+              isSameWeek = true;
+            }
+          }
+
+          if (isSameWeek) {
+            // Keep the grid's canonical Week Start so UI filters and tabs match 100%
+            newRow['Week Start'] = rwStr;
+            Object.assign(row, newRow);
+            matched = true;
+            break;
+          }
         }
       }
       if (!matched) {
@@ -1332,6 +1353,105 @@ class SafetyEmailsEngine {
       window.localDB.persistSnapshot(window.localDB.snapshot);
     }
     return true;
+  }
+
+  /**
+   * Merges recent safety log entries into the local IndexedDB snapshot tables
+   * (jha_log, weekly_safety_log, monthly_checklist_log).
+   */
+  mergeSafetyLogs(recentLogs) {
+    if (!Array.isArray(recentLogs) || recentLogs.length === 0) return false;
+    if (!window.localDB || !window.localDB.snapshot || !window.localDB.snapshot.tables) return false;
+
+    const snap = window.localDB.snapshot;
+    let modified = false;
+
+    function ensureLogTable(key, name, headers) {
+      if (!snap.tables[key]) {
+        snap.tables[key] = {
+          name: name,
+          headers: headers,
+          rows: [],
+          rawGrid: []
+        };
+      }
+      if (!snap.tables[key].rows) snap.tables[key].rows = [];
+      return snap.tables[key];
+    }
+
+    const jhaTbl = ensureLogTable('jha_log', 'JHA Log', [
+      'Date Received', 'Date Created', 'Job Number', 'Foreman', 'Email Subject', 'Email ID', 'Source', 'Status', 'Credited To', 'Notes'
+    ]);
+    const weeklyTbl = ensureLogTable('weekly_safety_log', 'Weekly Safety Log', [
+      'Date Received', 'Week Of', 'Job Number', 'Foreman', 'Email Subject', 'Email ID', 'Status', 'Credited To', 'Notes'
+    ]);
+    const monthlyTbl = ensureLogTable('monthly_checklist_log', 'Monthly Checklist Log', [
+      'Date Received', 'Date Created', 'Job Number', 'Foreman', 'Equipment Number', 'Email Subject', 'Email ID', 'Status', 'Credited To', 'Notes'
+    ]);
+
+    recentLogs.forEach(log => {
+      const emailId = String(log.emailId || '').trim();
+      const sheetName = log.sheetName;
+
+      if (sheetName === 'JHA Log' || log.type === 'JHA') {
+        const exists = jhaTbl.rows.some(r => String(r['Email ID'] || r.email_id || '').trim() === emailId);
+        if (!exists) {
+          jhaTbl.rows.push({
+            'Date Received': log.dateReceived || '',
+            'Date Created': log.date || '',
+            'Job Number': log.jobNumber || '',
+            'Foreman': log.foreman || '',
+            'Email Subject': log.subject || '',
+            'Email ID': emailId,
+            'Source': log.source || '',
+            'Status': log.status || 'Credited',
+            'Credited To': log.creditedTo || '',
+            'Notes': log.notes || ''
+          });
+          modified = true;
+        }
+      } else if (sheetName === 'Weekly Safety Log' || log.type === 'Weekly Safety Meeting') {
+        const exists = weeklyTbl.rows.some(r => String(r['Email ID'] || r.email_id || '').trim() === emailId);
+        if (!exists) {
+          weeklyTbl.rows.push({
+            'Date Received': log.dateReceived || '',
+            'Week Of': log.date || '',
+            'Job Number': log.jobNumber || '',
+            'Foreman': log.foreman || '',
+            'Email Subject': log.subject || '',
+            'Email ID': emailId,
+            'Status': log.status || 'Credited',
+            'Credited To': log.creditedTo || '',
+            'Notes': log.notes || ''
+          });
+          modified = true;
+        }
+      } else if (sheetName === 'Monthly Checklist Log' || log.type === 'Monthly Checklist') {
+        const exists = monthlyTbl.rows.some(r => String(r['Email ID'] || r.email_id || '').trim() === emailId);
+        if (!exists) {
+          monthlyTbl.rows.push({
+            'Date Received': log.dateReceived || '',
+            'Date Created': log.date || '',
+            'Job Number': log.jobNumber || '',
+            'Foreman': log.foreman || '',
+            'Equipment Number': log.equipmentNumber || '',
+            'Email Subject': log.subject || '',
+            'Email ID': emailId,
+            'Status': log.status || 'Credited',
+            'Credited To': log.creditedTo || '',
+            'Notes': log.notes || ''
+          });
+          modified = true;
+        }
+      }
+    });
+
+    if (modified) {
+      if (typeof window.localDB.persistSnapshot === 'function') {
+        window.localDB.persistSnapshot(window.localDB.snapshot);
+      }
+    }
+    return modified;
   }
 
   /**
@@ -1376,6 +1496,11 @@ class SafetyEmailsEngine {
         if (freshSnap) {
           await window.localDB.setSnapshot(freshSnap);
         }
+      }
+
+      const recentLogs = response.recentLogs || (response.result && response.result.recentLogs);
+      if (recentLogs && recentLogs.length > 0) {
+        this.mergeSafetyLogs(recentLogs);
       }
 
       if (window.sheetNavigator) {
@@ -1855,8 +1980,55 @@ class SafetyEmailsEngine {
 
     if (footer) {
       footer.innerHTML = `
-        <button class="btn btn-secondary" onclick="window.safetyComplianceEngine.closeProcessEmailsModal()">Close</button>
+        <div style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+          <button class="btn btn-primary" id="btn-refresh-audit-logs" onclick="window.safetyComplianceEngine.fetchLatestLogsFromSheets()" style="font-size: 12px; padding: 6px 14px; background: #3b82f6; color: white;">🔄 Fetch Latest from Sheets</button>
+          <button class="btn btn-secondary" onclick="window.safetyComplianceEngine.closeProcessEmailsModal()">Close</button>
+        </div>
       `;
+    }
+
+    // Auto-fetch newest logs in background if connected to Web App
+    this.fetchLatestLogsFromSheets(true);
+  }
+
+  async fetchLatestLogsFromSheets(silent = false) {
+    const syncUrl = window.syncEngine ? window.syncEngine.getSyncUrl() : '';
+    if (!syncUrl) return;
+
+    const btn = document.getElementById('btn-refresh-audit-logs');
+    if (btn && !silent) {
+      btn.disabled = true;
+      btn.innerHTML = '⏳ Fetching latest...';
+    }
+
+    try {
+      const response = await window.syncEngine.executeNetworkRequest(syncUrl, 'POST', { action: 'getRecentSafetyLogs', limit: 200 }, 60000);
+      const logs = (response && response.logs) || [];
+      if (logs.length > 0) {
+        this.mergeSafetyLogs(logs);
+        this.currentLogs = this.extractLogsFromLocalDB();
+        const body = document.getElementById('process-safety-emails-modal-body');
+        const modal = document.getElementById('process-safety-emails-modal');
+        if (body && modal && modal.style.display !== 'none') {
+          const jhaCount = this.currentLogs.filter(l => l.type === 'JHA').length;
+          const weeklyCount = this.currentLogs.filter(l => l.type === 'Weekly Safety Meeting').length;
+          const monthlyCount = this.currentLogs.filter(l => l.type === 'Monthly Checklist').length;
+
+          this.renderCompletionModalContent(body, {
+            totalThreads: this.currentLogs.length,
+            totalLogs: this.currentLogs.length,
+            cumulativeLogs: { jha: jhaCount, weekly: weeklyCount, monthly: monthlyCount },
+            totalIssues: this.currentLogs.filter(l => l.hasEquipmentIssues === 'Yes').length
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('fetchLatestLogsFromSheets warning:', e);
+    } finally {
+      if (btn && !silent) {
+        btn.disabled = false;
+        btn.innerHTML = '🔄 Fetch Latest from Sheets';
+      }
     }
   }
 

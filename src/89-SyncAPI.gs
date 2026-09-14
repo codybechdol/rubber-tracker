@@ -2332,7 +2332,9 @@ function executeSyncApiProcessSafetyEmails(options) {
       function addWeekToPostUpdatedRows(complianceData) {
         if (!complianceData || !complianceData.crews) return;
         var wStart = complianceData.weekStart;
-        var wStartStr = (wStart instanceof Date) ? Utilities.formatDate(wStart, tz, 'MM/dd/yyyy') : String(wStart);
+        var wStartSafe = new Date(wStart);
+        wStartSafe.setHours(12, 0, 0, 0);
+        var wStartStr = Utilities.formatDate(wStartSafe, tz, 'MM/dd/yyyy');
         var nowStr = Utilities.formatDate(new Date(), tz, 'MM/dd/yyyy HH:mm');
 
         for (var crewJob in complianceData.crews) {
@@ -2687,7 +2689,9 @@ function executeSyncApiRecalculateCompliance(options) {
     if (!complianceData || !complianceData.crews) return;
     try {
       var wStart = complianceData.weekStart;
-      var wStartStr = (wStart instanceof Date) ? Utilities.formatDate(wStart, tz, 'MM/dd/yyyy') : String(wStart);
+      var wStartSafe = new Date(wStart);
+      wStartSafe.setHours(12, 0, 0, 0);
+      var wStartStr = Utilities.formatDate(wStartSafe, tz, 'MM/dd/yyyy');
       var nowStr = Utilities.formatDate(new Date(), tz, 'MM/dd/yyyy HH:mm');
 
       for (var crewJob in complianceData.crews) {
@@ -2724,6 +2728,7 @@ function executeSyncApiRecalculateCompliance(options) {
     error: results.error || null,
     result: results,
     updatedRows: updatedRows,
+    recentLogs: (typeof getRecentSafetyLogs === 'function') ? getRecentSafetyLogs(100) : [],
     snapshot: null
   };
 }

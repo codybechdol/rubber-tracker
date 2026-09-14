@@ -33557,6 +33557,14 @@ function doGet(e) {
         status: 'ok',
         serverTime: new Date().toISOString()
       })).setMimeType(ContentService.MimeType.JSON);
+    } else if (action === 'getRecentSafetyLogs') {
+      var limit = parseInt(e.parameter.limit || '150', 10);
+      var logs = (typeof getRecentSafetyLogs === 'function') ? getRecentSafetyLogs(limit) : [];
+      return ContentService.createTextOutput(JSON.stringify({
+        status: 'ok',
+        success: true,
+        logs: logs
+      })).setMimeType(ContentService.MimeType.JSON);
     } else if (action === 'processSafetyEmails') {
       var daysBack = parseInt(e.parameter.daysBack || '7', 10);
       var reportTypeFilter = e.parameter.reportTypeFilter || 'ALL';
@@ -33814,6 +33822,16 @@ function doPost(e) {
         jsonBackupName: jsonName,
         snapshotUpdated: true,
         timestamp: new Date().toISOString()
+      })).setMimeType(ContentService.MimeType.JSON);
+    }
+
+    if (action === 'getRecentSafetyLogs') {
+      var limit = parseInt(payload.limit || '150', 10);
+      var logs = (typeof getRecentSafetyLogs === 'function') ? getRecentSafetyLogs(limit) : [];
+      return ContentService.createTextOutput(JSON.stringify({
+        status: 'ok',
+        success: true,
+        logs: logs
       })).setMimeType(ContentService.MimeType.JSON);
     }
 

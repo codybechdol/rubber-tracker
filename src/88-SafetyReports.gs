@@ -10231,13 +10231,16 @@ function isReportLate(reportDate, receivedDate) {
  * @returns {Object} - {weekStart: Date (Sunday), weekEnd: Date (Saturday)}
  */
 function getWeekBoundaries(date) {
-  var d = new Date(date);
+  var d = (typeof parseDateNoon === 'function' && typeof date === 'string')
+    ? parseDateNoon(date)
+    : new Date(date);
+  if (isNaN(d.getTime())) d = new Date();
   var day = d.getDay(); // 0 = Sunday
 
-  // Get Sunday (start of week)
+  // Get Sunday (start of week) at noon to prevent timezone shifts (e.g. UTC to Mountain Time) from rolling back to Saturday
   var weekStart = new Date(d);
   weekStart.setDate(d.getDate() - day);
-  weekStart.setHours(0, 0, 0, 0);
+  weekStart.setHours(12, 0, 0, 0);
 
   // Get Saturday (end of week)
   var weekEnd = new Date(weekStart);
