@@ -601,7 +601,7 @@ class SafetyEmailsEngine {
       return;
     }
 
-    const scopeRadio = document.querySelector('input[name="proc-scope"]:checked');
+    const scopeRadio = document.querySelector('input[name="proc-date-scope"]:checked');
     const scopeVal = scopeRadio ? scopeRadio.value : '7';
     let daysBack = 7;
     let newOnlyMode = true;
@@ -610,7 +610,7 @@ class SafetyEmailsEngine {
 
     if (scopeVal === 'new') {
       newOnlyMode = true;
-      daysBack = 30;
+      daysBack = 7;
     } else if (scopeVal === 'custom') {
       newOnlyMode = false;
       startDate = document.getElementById('proc-start-date') ? document.getElementById('proc-start-date').value : '';
@@ -628,7 +628,7 @@ class SafetyEmailsEngine {
     const speedRadio = document.querySelector('input[name="proc-speed-mode"]:checked');
     const skipPdfExtraction = speedRadio ? (speedRadio.value === 'fast') : true;
 
-    const filterRadio = document.querySelector('input[name="proc-filter"]:checked');
+    const filterRadio = document.querySelector('input[name="proc-report-type"]:checked');
     const reportTypeFilter = filterRadio ? filterRadio.value : 'ALL';
 
     this.closeProcessEmailsModal();
@@ -997,8 +997,8 @@ class SafetyEmailsEngine {
         const payload = {
           action: 'processSafetyEmails',
           daysBack: daysBack,
-          // Safe batch sizes: 5 threads per batch in Fast Mode (~10-15s per cycle), 1 thread in Deep Scan (OCR)
-          batchSize: skipPdfExtraction ? 5 : 1,
+          // Safe batch sizes: 20 threads per batch in Fast Mode (~2-3s per cycle), 1 thread in Deep Scan (OCR)
+          batchSize: skipPdfExtraction ? 20 : 1,
           reportTypeFilter: reportTypeFilter,
           newOnlyMode: newOnlyMode,
           skipPdfExtraction: skipPdfExtraction,
@@ -1025,7 +1025,7 @@ class SafetyEmailsEngine {
                 console.warn('Switching to Fast Mode (skipPdfExtraction = true) for subsequent attempt to bypass heavy PDF OCR timeout.');
                 skipPdfExtraction = true;
                 payload.skipPdfExtraction = true;
-                payload.batchSize = 5;
+                payload.batchSize = 20;
               }
               const subEl = document.getElementById('proc-live-sub');
               if (subEl) subEl.textContent = `Server busy, retrying batch #${batchIndex} (attempt ${batchAttempts + 1}/3)...`;
@@ -1040,7 +1040,7 @@ class SafetyEmailsEngine {
                 console.warn('Switching to Fast Mode (skipPdfExtraction = true) for subsequent attempt to bypass heavy PDF OCR timeout.');
                 skipPdfExtraction = true;
                 payload.skipPdfExtraction = true;
-                payload.batchSize = 5;
+                payload.batchSize = 20;
               }
               const subEl = document.getElementById('proc-live-sub');
               if (subEl) subEl.textContent = `Server busy or proxy timeout, retrying batch #${batchIndex} (attempt ${batchAttempts + 1}/3)...`;
@@ -1191,6 +1191,13 @@ class SafetyEmailsEngine {
           const autoUpdatedRows = recalcResponse.updatedRows || (recalcResponse.result && recalcResponse.result.updatedRows);
           if (autoUpdatedRows && autoUpdatedRows.length > 0) {
             this.mergeComplianceUpdates(autoUpdatedRows);
+            if (window.sheetNavigator) {
+              const weeks = autoUpdatedRows.map(r => r['Week Start']).filter(Boolean);
+              weeks.sort((a, b) => (new Date(b).getTime() || 0) - (new Date(a).getTime() || 0));
+              if (weeks.length > 0) {
+                window.sheetNavigator.selectedComplianceWeek = weeks[0];
+              }
+            }
           } else {
             const freshSnap = recalcResponse.snapshot || recalcResponse.dataSnapshot || (recalcResponse.result && (recalcResponse.result.snapshot || recalcResponse.result.dataSnapshot));
             if (freshSnap) {
@@ -1502,7 +1509,7 @@ class SafetyEmailsEngine {
     try {
       const payload = {
         action: 'recalculateCompliance',
-        targetWeek: 'current'
+        targetWeek: 'both'
       };
 
       const response = await window.syncEngine.executeNetworkRequest(syncUrl, 'POST', payload, 180000);
@@ -1518,6 +1525,13 @@ class SafetyEmailsEngine {
       const updatedRows = response.updatedRows || (response.result && response.result.updatedRows);
       if (updatedRows && updatedRows.length > 0) {
         this.mergeComplianceUpdates(updatedRows);
+        if (window.sheetNavigator) {
+          const weeks = updatedRows.map(r => r['Week Start']).filter(Boolean);
+          weeks.sort((a, b) => (new Date(b).getTime() || 0) - (new Date(a).getTime() || 0));
+          if (weeks.length > 0) {
+            window.sheetNavigator.selectedComplianceWeek = weeks[0];
+          }
+        }
       } else {
         const freshSnap = response.snapshot || response.dataSnapshot || (response.result && (response.result.snapshot || response.result.dataSnapshot));
         if (freshSnap) {

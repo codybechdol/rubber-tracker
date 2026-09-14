@@ -2712,6 +2712,7 @@ function updateComplianceSheetFromLogs(complianceData, options) {
         sheet.getRange(normalizedData.length + 1, 1, oldRowCount - normalizedData.length, 14).clearContent();
       }
     }
+    SpreadsheetApp.flush();
 
     Logger.log("updateComplianceSheetFromLogs (isWebApi fast mode): Batch updated " + normalizedData.length + " rows for week " + weekStartStr);
     return;
@@ -5909,7 +5910,7 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
   var MAX_EXECUTION_MS = (typeof maxExecutionMs === 'number' && maxExecutionMs > 0) ? maxExecutionMs : (5.5 * 60 * 1000);
 
   if (!daysBack) daysBack = 7;
-  if (!batchSize) batchSize = (skipPdfExtraction === true) ? 10 : 2; // Default 2 when extracting PDFs to prevent timeouts
+  if (!batchSize) batchSize = (skipPdfExtraction === true) ? 20 : 2; // Default 20 in fast mode, 2 when extracting PDFs to prevent timeouts
   if (newOnlyMode === undefined) newOnlyMode = true; // Default to new-only mode
   if (skipPdfExtraction === undefined) skipPdfExtraction = false; // Default to extracting PDFs
   if (!reportTypeFilter) reportTypeFilter = 'ALL';
@@ -6169,6 +6170,10 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
   if (totalThreadsCount === 0) {
     clearSafetyBatchProperties();
     batchCache.removeAll(['SAFETY_BATCH_CREWS', 'SAFETY_BATCH_EMP_DATA', 'SAFETY_BATCH_EMAIL_IDS']);
+    if (typeof deleteChunkedScriptProperty === 'function') {
+      deleteChunkedScriptProperty('SAFETY_BATCH_EMAIL_IDS');
+      deleteChunkedScriptProperty('SAFETY_BATCH_THREAD_IDS');
+    }
 
     if (MAX_EXECUTION_MS <= 30000) {
       Logger.log("No threads found in Web App mode, dispatching background post-processing trigger...");
@@ -6233,9 +6238,14 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
   var existingEmailIds = {};
   var emailIdsLoadedFromCache = false;
 
-  // On continuation batches, try loading from fast CacheService first (<10ms)
+  // On continuation batches, try loading from chunked ScriptProperties or fast CacheService first (<20ms)
   if (!isFirstBatch) {
-    var cachedEmailIdsListStr = batchCache.get('SAFETY_BATCH_EMAIL_IDS');
+    var cachedEmailIdsListStr = (typeof getChunkedScriptProperty === 'function')
+      ? getChunkedScriptProperty('SAFETY_BATCH_EMAIL_IDS')
+      : null;
+    if (!cachedEmailIdsListStr) {
+      cachedEmailIdsListStr = batchCache.get('SAFETY_BATCH_EMAIL_IDS');
+    }
     if (cachedEmailIdsListStr) {
       try {
         var emailIdList = JSON.parse(cachedEmailIdsListStr);
@@ -6243,7 +6253,7 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
           existingEmailIds[emailIdList[ei]] = true;
         }
         emailIdsLoadedFromCache = true;
-        Logger.log("Loaded " + emailIdList.length + " email IDs from fast batchCache");
+        Logger.log("Loaded " + emailIdList.length + " email IDs from cache (chunked ScriptProperties/batchCache)");
       } catch(e) {
         emailIdsLoadedFromCache = false;
       }
@@ -6294,9 +6304,14 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
 
     Logger.log("Pre-loaded " + Object.keys(existingEmailIds).length + " existing email IDs from log sheets (JHA, Weekly Safety, Monthly Checklist)");
     try {
-      batchCache.put('SAFETY_BATCH_EMAIL_IDS', JSON.stringify(Object.keys(existingEmailIds)), 600);
+      var idListJson = JSON.stringify(Object.keys(existingEmailIds));
+      if (typeof setChunkedScriptProperty === 'function') {
+        setChunkedScriptProperty('SAFETY_BATCH_EMAIL_IDS', idListJson);
+      } else {
+        batchCache.put('SAFETY_BATCH_EMAIL_IDS', idListJson, 600);
+      }
     } catch (eCache) {
-      Logger.log("Could not cache email IDs in batchCache: " + eCache);
+      Logger.log("Could not cache email IDs in storage: " + eCache);
     }
   }
 
@@ -6409,7 +6424,7 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
       };
 
       var newEmailsParsedThisBatch = 0;
-      var maxNewEmailsPerBatch = skipPdfExtraction ? 15 : 1;
+      var maxNewEmailsPerBatch = skipPdfExtraction ? Math.max(batchSize, 25) : 1;
 
       // Check time remaining before entering loop to prevent gateway timeout
       var safeBufferMs = (MAX_EXECUTION_MS <= 30000) ? 5000 : 15000;
@@ -6772,9 +6787,14 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
 
       Logger.log('Batch processed ' + processedCount + ' new email(s), skipped ' + skippedCount + '. Progress: ' + batchEnd + ' / ' + totalThreadsCount);
 
-      // Cache email IDs for next batch in fast CacheService
+      // Cache email IDs for next batch in fast storage
       try {
-        batchCache.put('SAFETY_BATCH_EMAIL_IDS', JSON.stringify(Object.keys(existingEmailIds)), 600);
+        var idListJson = JSON.stringify(Object.keys(existingEmailIds));
+        if (typeof setChunkedScriptProperty === 'function') {
+          setChunkedScriptProperty('SAFETY_BATCH_EMAIL_IDS', idListJson);
+        } else {
+          batchCache.put('SAFETY_BATCH_EMAIL_IDS', idListJson, 600);
+        }
       } catch(e) {}
 
       var lastProcessedTimestamp = getLastSafetyEmailProcessedTime(reportTypeFilter);
@@ -6782,6 +6802,10 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
       if (isComplete) {
         clearSafetyBatchProperties();
         batchCache.removeAll(['SAFETY_BATCH_CREWS', 'SAFETY_BATCH_EMP_DATA', 'SAFETY_BATCH_EMAIL_IDS']);
+        if (typeof deleteChunkedScriptProperty === 'function') {
+          deleteChunkedScriptProperty('SAFETY_BATCH_EMAIL_IDS');
+          deleteChunkedScriptProperty('SAFETY_BATCH_THREAD_IDS');
+        }
 
         var today = new Date();
         var dateStr = Utilities.formatDate(today, Session.getScriptTimeZone(), 'yyyy/MM/dd');

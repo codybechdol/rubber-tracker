@@ -2206,11 +2206,10 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
  */
 function executeSyncApiProcessSafetyEmails(options) {
   options = options || {};
-  var daysBack = options.daysBack || 7;
-  var skipPdfExtraction = options.skipPdfExtraction === true;
-  var batchSize = options.batchSize ? parseInt(options.batchSize, 10) : 5;
+  var skipPdfExtraction = options.skipPdfExtraction !== false;
+  var batchSize = options.batchSize ? parseInt(options.batchSize, 10) : (skipPdfExtraction ? 20 : 1);
   if (skipPdfExtraction) {
-    batchSize = Math.min(Math.max(1, batchSize), 5);
+    batchSize = Math.min(Math.max(1, batchSize), 25);
   } else {
     batchSize = 1;
   }
@@ -2236,6 +2235,10 @@ function executeSyncApiProcessSafetyEmails(options) {
             scriptProps.deleteProperty(allKeys[pki]);
           }
         }
+      }
+      if (typeof deleteChunkedScriptProperty === 'function') {
+        deleteChunkedScriptProperty('SAFETY_BATCH_THREAD_IDS');
+        deleteChunkedScriptProperty('SAFETY_BATCH_EMAIL_IDS');
       }
       CacheService.getScriptCache().removeAll(['SAFETY_BATCH_CREWS', 'SAFETY_BATCH_EMP_DATA', 'SAFETY_BATCH_EMAIL_IDS']);
     } catch (eReset) {
@@ -2583,7 +2586,7 @@ function getRecentSafetyLogs(limit) {
  */
 function executeSyncApiRecalculateCompliance(options) {
   options = options || {};
-  var targetWeek = options.targetWeek || 'current';
+  var targetWeek = options.targetWeek || 'both';
   var ss = typeof getActiveSpreadsheetSafe === 'function' ? getActiveSpreadsheetSafe() : SpreadsheetApp.getActiveSpreadsheet();
   var tz = (ss && ss.getSpreadsheetTimeZone()) || Session.getScriptTimeZone() || 'America/Denver';
   var today = new Date();
@@ -2619,6 +2622,7 @@ function executeSyncApiRecalculateCompliance(options) {
         prevData = calculateComplianceFromLogs(previousWeek.weekStart, commonOptions);
         if (prevData) {
           updateComplianceSheetFromLogs(prevData, commonOptions);
+          SpreadsheetApp.flush();
           results.weeksProcessed++;
           results.compliant += prevData.compliantCount || 0;
           results.missing += prevData.missingCount || 0;
@@ -2630,6 +2634,7 @@ function executeSyncApiRecalculateCompliance(options) {
         currData = calculateComplianceFromLogs(currentWeek.weekStart, commonOptions);
         if (currData) {
           updateComplianceSheetFromLogs(currData, commonOptions);
+          SpreadsheetApp.flush();
           results.weeksProcessed++;
           results.compliant += currData.compliantCount || 0;
           results.missing += currData.missingCount || 0;
