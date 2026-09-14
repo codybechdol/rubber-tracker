@@ -122,6 +122,21 @@ class CrewImportEngine {
     cfg[field] = value;
   }
 
+  updateCrewJobNumber(oldJobNumber, newJobNumber) {
+    const cleanNew = String(newJobNumber || '').trim();
+    if (!cleanNew || cleanNew === oldJobNumber) return;
+    const crew = this.parsedCrews.find(c => c.jobNumber === oldJobNumber);
+    if (crew) {
+      crew.jobNumber = cleanNew;
+      crew.employees.forEach((emp, idx) => {
+        emp.fullJobNumber = `${cleanNew}.${idx + 1}`;
+      });
+      // Invalidate deltas cache and re-render workspace
+      this.computedDeltas = null;
+      this.render();
+    }
+  }
+
   // ==========================================================================
   // 1. CLASSIFICATION HIERARCHY & FOREMAN RANKING
   // SUP(1) > GF(2) > F(3) > GTO F(4) > JRY(5) > JRY OP(6) > WT(7) > GTO(8) > EO 1(9) > EO 2(10) > AP 7-1(11-17)
@@ -453,11 +468,14 @@ class CrewImportEngine {
     }
 
     // 3. Clean Name
-    const name = namePart
+    let name = namePart
       .replace(/\b(TEMP|TEMPORARY|CONTRACTOR)\b/gi, '')
       .replace(/[\*#\(\)]/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
+
+    // Strip trailing qualification or departmental suffixes like "UG" (Underground)
+    name = name.replace(/\s+\bUG\b\s*$/i, '').trim();
 
     if (!name || name.length < 2 || this.isPlaceholder(name)) {
       return null;
@@ -781,11 +799,45 @@ class CrewImportEngine {
     const timeOffCurrentWeek = [];
     const timeOffUpcoming = [];
 
+    // Dynamically build current week date tokens from this.rosterDate (e.g. 2026-09-14)
+    const curWeekDates = [];
+    if (this.rosterDate) {
+      const parts = String(this.rosterDate).trim().split('-');
+      if (parts.length === 3) {
+        const y = parseInt(parts[0], 10);
+        const m = parseInt(parts[1], 10);
+        const d = parseInt(parts[2], 10);
+        const base = new Date(y, m - 1, d);
+        for (let offset = 0; offset < 7; offset++) {
+          const dt = new Date(base);
+          dt.setDate(base.getDate() + offset);
+          const mon = dt.getMonth() + 1;
+          const day = dt.getDate();
+          const monPad = String(mon).padStart(2, '0');
+          const dayPad = String(day).padStart(2, '0');
+          curWeekDates.push(`${mon}-${day}`, `${monPad}-${dayPad}`, `${mon}/${day}`, `${monPad}/${dayPad}`, `${mon}.${day}`);
+        }
+      }
+    }
+
+    const curWeekPattern = curWeekDates.length > 0 
+      ? new RegExp(`\\b(wks?\\s*)?(${curWeekDates.map(p => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})\\b`, 'i')
+      : null;
+
     for (const item of allTimeOffItems) {
       const fullNote = (item.note || item.rawText || '').trim();
-      // Current week 8-24 (Aug 24-28, 2026):
-      // Matches 8-24, 8-25, 8-26, 8-27, 8-28 or "wk 8-24"
-      const isCurrentWeek = /\b(8-24|8-25|8-26|8-27|8-28|wk\s*8-24)\b/i.test(fullNote);
+      let isCurrentWeek = false;
+
+      if (curWeekPattern && curWeekPattern.test(fullNote)) {
+        isCurrentWeek = true;
+      } else {
+        // If note has NO date mentioned at all (e.g. "off", "vacation", "wedding"),
+        // default to current week!
+        const hasAnyDate = /\b\d{1,2}[-.\/]\d{1,2}\b|\bwks?\s*\d/i.test(fullNote);
+        if (!hasAnyDate) {
+          isCurrentWeek = true;
+        }
+      }
 
       if (isCurrentWeek) {
         timeOffCurrentWeek.push(item);
@@ -941,36 +993,99 @@ class CrewImportEngine {
       grouped[crew.jobNumber].push(crew);
     }
 
-    const merged = [];
+    const result = [];
     for (const jn in grouped) {
       const list = grouped[jn];
       if (list.length === 1) {
-        merged.push(list[0]);
+        result.push(list[0]);
       } else {
-        const base = { ...list[0], employees: [] };
-        const seenNames = new Set();
-
-        for (const c of list) {
-          for (const emp of c.employees) {
-            const key = emp.name.toLowerCase();
-            if (!seenNames.has(key)) {
-              seenNames.add(key);
-              base.employees.push(emp);
-            }
-          }
-        }
-
-        // Re-sort and renumber
-        base.employees.sort((a, b) => this.getRolePriority(this.getEffectiveRole(a)) - this.getRolePriority(this.getEffectiveRole(b)));
-        base.employees.forEach((emp, idx) => {
-          emp.position = idx + 1;
-          emp.fullJobNumber = `${base.jobNumber}.${idx + 1}`;
+        // Check if the multiple cards represent distinct crews vs a continuation of the same crew across columns.
+        // They are distinct crews if:
+        // 1. They have different work schedules (e.g. Fri & Sat vs Mon-Thu)
+        // 2. They have different foremen (multiple cards have an explicit foreman / lead)
+        // 3. Or their headers describe distinct sub-crews / rotations (e.g. "Poles ... Fri & Sat" vs "2man crew ... M-Th")
+        const hasDifferentSchedules = list.some(c => c.scheduleLabel !== list[0].scheduleLabel);
+        const hasMultipleForemen = list.filter(c => c.employees.some(e => e.isForeman || this.getRolePriority(this.getEffectiveRole(e)) <= 4)).length > 1;
+        const hasDistinctHeaders = list.some(c => {
+          const cleanH0 = (list[0].fullHeaderText || '').replace(/\d{3}-\d{2}/g, '').trim().toLowerCase();
+          const cleanH = (c.fullHeaderText || '').replace(/\d{3}-\d{2}/g, '').trim().toLowerCase();
+          return cleanH0 !== cleanH;
         });
 
-        merged.push(base);
+        if (hasDifferentSchedules || hasMultipleForemen || (hasDistinctHeaders && list.length <= 3)) {
+          // Keep as distinct separate crews!
+          // Sort list so Primary (Mon-Thu / Mon-Fri) comes first, Secondary (Weekend / Fri & Sat) comes after
+          list.sort((a, b) => {
+            const isAWeekend = /weekend|fri\s*&\s*sat|sat\s*&\s*sun|mon\s*only/i.test(a.scheduleLabel || '');
+            const isBWeekend = /weekend|fri\s*&\s*sat|sat\s*&\s*sun|mon\s*only/i.test(b.scheduleLabel || '');
+            if (!isAWeekend && isBWeekend) return -1;
+            if (isAWeekend && !isBWeekend) return 1;
+            return 0;
+          });
+
+          list.forEach((c, idx) => {
+            if (idx > 0) {
+              // Assign distinct suffix based on schedule or sub-crew
+              let suffix = '';
+              const sched = String(c.scheduleLabel || '').toLowerCase();
+              if (sched.includes('fri') && sched.includes('sat')) {
+                suffix = 'Fri-Sat';
+              } else if (sched.includes('sat') && sched.includes('sun')) {
+                suffix = 'Sat-Sun';
+              } else if (sched.includes('mon only')) {
+                suffix = 'Mon-Only';
+              } else if (sched.includes('mon-wed')) {
+                suffix = 'Mon-Wed';
+              } else if (sched.includes('thu-fri')) {
+                suffix = 'Thu-Fri';
+              } else {
+                suffix = `Crew ${idx + 1}`;
+              }
+              c.jobNumber = `${jn} (${suffix})`;
+              c.isSubCrew = true;
+              c.baseJobNumber = jn;
+
+              // Renumber employees on this sub-crew
+              c.employees.forEach((emp, eIdx) => {
+                emp.position = eIdx + 1;
+                emp.fullJobNumber = `${c.jobNumber}.${eIdx + 1}`;
+              });
+            } else {
+              c.baseJobNumber = jn;
+              c.employees.forEach((emp, eIdx) => {
+                emp.position = eIdx + 1;
+                emp.fullJobNumber = `${c.jobNumber}.${eIdx + 1}`;
+              });
+            }
+            result.push(c);
+          });
+        } else {
+          // Standard continuation across columns: Merge as single crew
+          const base = { ...list[0], employees: [] };
+          const seenNames = new Set();
+
+          for (const c of list) {
+            for (const emp of c.employees) {
+              const key = emp.name.toLowerCase();
+              if (!seenNames.has(key)) {
+                seenNames.add(key);
+                base.employees.push(emp);
+              }
+            }
+          }
+
+          // Re-sort and renumber
+          base.employees.sort((a, b) => this.getRolePriority(this.getEffectiveRole(a)) - this.getRolePriority(this.getEffectiveRole(b)));
+          base.employees.forEach((emp, idx) => {
+            emp.position = idx + 1;
+            emp.fullJobNumber = `${base.jobNumber}.${idx + 1}`;
+          });
+
+          result.push(base);
+        }
       }
     }
-    this.parsedCrews = merged;
+    this.parsedCrews = result;
   }
 
   normalizeLocation(rawLoc) {
@@ -2084,7 +2199,7 @@ class CrewImportEngine {
             if (locKey) { row[locKey] = vacationLoc; updatedFields[locKey] = vacationLoc; }
             if (jobKey) { row[jobKey] = ''; updatedFields[jobKey] = ''; }
             if (notesKey) {
-              row[notesKey] = to.note || 'Time Off wk 8-24';
+              row[notesKey] = to.note || ('Time Off ' + (this.rosterDateFormatted || todayFormatted));
               updatedFields[notesKey] = row[notesKey];
             }
             this.syncRowToRawGrid(empTable, row);
@@ -2146,6 +2261,7 @@ class CrewImportEngine {
           continue;
         }
         const cfg = this.getNewHireConfig(nh.name, nh);
+        const finalEmpName = (cfg.name && cfg.name.trim()) ? cfg.name.trim() : nh.name;
         const hireDateFormatted = cfg.hireDate ? this.formatDateForSheet(cfg.hireDate) : (this.rosterDateFormatted || todayFormatted);
         const gloveVal = cfg.gloveSize || (nh.historyRecord ? (nh.historyRecord['Glove Size'] || 'N/A') : 'N/A');
         const sleeveVal = cfg.sleeveSize || (nh.historyRecord ? (nh.historyRecord['Sleeve Size'] || 'N/A') : 'N/A');
@@ -2167,7 +2283,7 @@ class CrewImportEngine {
         if (targetEmpRow) {
           // Employee row already exists in Employees sheet -> update assignments & ensure name and active status
           const updatedFields = {};
-          if (nameKey) { targetEmpRow[nameKey] = nh.name; updatedFields[nameKey] = nh.name; }
+          if (nameKey) { targetEmpRow[nameKey] = finalEmpName; updatedFields[nameKey] = finalEmpName; }
           if (locKey) { targetEmpRow[locKey] = nh.location || 'Helena'; updatedFields[locKey] = nh.location || 'Helena'; }
           if (jobKey) { targetEmpRow[jobKey] = nh.jobNumber; updatedFields[jobKey] = nh.jobNumber; }
           if (secKey && nh.secondaryJobNumber) { targetEmpRow[secKey] = nh.secondaryJobNumber; updatedFields[secKey] = nh.secondaryJobNumber; }
@@ -2190,9 +2306,9 @@ class CrewImportEngine {
             action: 'UPDATE_ROW',
             sheetName: empTable.name,
             tableKey: 'employees',
-            employeeName: nh.name,
+            employeeName: finalEmpName,
             row: empRowIdx,
-            itemIdentifier: nh.name,
+            itemIdentifier: finalEmpName,
             updatedFields: updatedFields
           });
         } else {
@@ -2201,7 +2317,7 @@ class CrewImportEngine {
           for (const h of (empTable.headers || [])) {
             newEmpRow[h] = '';
           }
-          if (nameKey) newEmpRow[nameKey] = nh.name;
+          if (nameKey) newEmpRow[nameKey] = finalEmpName;
           if (locKey) newEmpRow[locKey] = nh.location || 'Helena';
           if (jobKey) newEmpRow[jobKey] = nh.jobNumber;
           if (secKey && nh.secondaryJobNumber) newEmpRow[secKey] = nh.secondaryJobNumber;
@@ -2230,7 +2346,7 @@ class CrewImportEngine {
         if (histTable) {
           const histRow = {
             'Date': hireDateFormatted,
-            'Employee Name': nh.name,
+            'Employee Name': finalEmpName,
             'Event Type': nh.isRehire ? 'Rehire' : 'New Hire',
             'Location': locKey ? (targetEmpRow ? targetEmpRow[locKey] : (nh.location || 'Helena')) : (nh.location || 'Helena'),
             'Job Number': jobKey ? (targetEmpRow ? targetEmpRow[jobKey] : nh.jobNumber) : nh.jobNumber,
@@ -2733,7 +2849,7 @@ class CrewImportEngine {
                   <!-- Top Row: Name, Location, Job, Badges & Remove Button -->
                   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.06); padding-bottom: 8px; flex-wrap: wrap; gap: 8px;">
                     <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-                      <span style="font-size: 15px; font-weight: 800; color: #f8fafc;">👤 ${this.escapeHtml(nh.name)}</span>
+                      <span id="nh-title-${this.escapeJsString(nh.name)}" style="font-size: 15px; font-weight: 800; color: #f8fafc;">👤 ${this.escapeHtml(cfg.name || nh.name)}</span>
                       <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 10.5px; font-weight: 700; padding: 2px 6px; border-radius: 4px;">NEW HIRE</span>
                       <span class="badge" style="background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4); font-size: 11px; font-weight: 700; padding: 2px 6px; border-radius: 4px;">📍 ${this.escapeHtml(nh.location)} — Job ${this.escapeHtml(nh.jobNumber)}</span>
                     </div>
@@ -2753,6 +2869,12 @@ class CrewImportEngine {
                   <!-- Inputs Form Grid -->
                   <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px;">
                     
+                    <!-- Employee Name -->
+                    <div style="grid-column: span 2; min-width: 220px;">
+                      <label style="font-size: 11px; font-weight: 700; color: #94a3b8; display: block; margin-bottom: 4px;">👤 Employee Name</label>
+                      <input type="text" value="${this.escapeHtml(cfg.name || nh.name)}" style="width: 100%; box-sizing: border-box; padding: 6px 8px; font-size: 13px; font-weight: 800; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;" onchange="window.crewImportEngine.updateNewHireConfig('${this.escapeJsString(nh.name)}', 'name', this.value)">
+                    </div>
+
                     <!-- Hire Date / Start Date -->
                     <div>
                       <label style="font-size: 11px; font-weight: 700; color: #94a3b8; display: block; margin-bottom: 4px;">📅 Start / Hire Date</label>
@@ -3139,12 +3261,20 @@ class CrewImportEngine {
         
         <!-- Card Header -->
         <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; border-bottom: 1px solid var(--border-color); padding-bottom: 8px;">
-          <div>
-            <div style="font-weight: 800; font-size: 15px; color: var(--text-primary); display: flex; align-items: center; gap: 6px;">
-              <span>${crew.location} ${crew.jobNumber}</span>
+          <div style="flex: 1; margin-right: 12px;">
+            <div style="font-weight: 800; font-size: 14px; color: var(--text-primary); display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+              <span>📍 ${this.escapeHtml(crew.location)}</span>
+              <div style="display: inline-flex; align-items: center; gap: 4px;">
+                <label style="font-size: 11px; font-weight: 700; color: #94a3b8;">Job #:</label>
+                <input type="text" value="${this.escapeHtml(crew.jobNumber)}"
+                  style="font-family: monospace; font-weight: 800; font-size: 13px; color: #60a5fa; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; padding: 2px 6px; width: 140px;"
+                  title="Edit Crew Job Number / Suffix"
+                  onchange="window.crewImportEngine.updateCrewJobNumber('${this.escapeJsString(crew.jobNumber)}', this.value)">
+              </div>
+              ${crew.isSubCrew ? `<span class="badge" style="background: rgba(139, 92, 246, 0.2); color: #a78bfa; border: 1px solid rgba(139, 92, 246, 0.4); font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 4px;" title="Secondary crew sharing base job ${this.escapeHtml(crew.baseJobNumber || '')}">Sub-Crew</span>` : ''}
             </div>
-            <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">
-              ${crew.fullHeaderText}
+            <div style="font-size: 11px; color: var(--text-muted); margin-top: 3px;">
+              ${this.escapeHtml(crew.fullHeaderText)}
             </div>
           </div>
           

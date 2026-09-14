@@ -2137,9 +2137,27 @@ function calculateComplianceFromLogs(weekStartDate, options) {
         }
       }
 
-      if (originalJobNumber && crewCompliance[originalJobNumber]) {
-        // Original job is tracked - credit it directly
-        crewToCredit = originalJobNumber;
+      if (creditedTo && crewCompliance[creditedTo] && creditedTo.indexOf('(') !== -1) {
+        // CreditedTo is an explicit sub-crew (e.g. 040-26 (Fri-Sat))
+        crewToCredit = creditedTo;
+      } else if (originalJobNumber && crewCompliance[originalJobNumber]) {
+        // Check if originalJobNumber has sub-crews sharing this base job
+        var subCrewKey = null;
+        for (var ck in crewCompliance) {
+          if (ck !== originalJobNumber && (ck.indexOf(originalJobNumber + ' (') === 0 || ck.indexOf(originalJobNumber + ' -') === 0)) {
+            var subCrew = crewCompliance[ck];
+            var origCrew = crewCompliance[originalJobNumber];
+            var foremanMatch = (jhaForeman && subCrew.foreman && jhaForeman.toLowerCase().trim() === subCrew.foreman.toLowerCase().trim());
+            var subWorksDay = subCrew.skipDays && !subCrew.skipDays[dayOfWeek];
+            var origWorksDay = origCrew.skipDays && !origCrew.skipDays[dayOfWeek];
+
+            if (foremanMatch || (subWorksDay && !origWorksDay)) {
+              subCrewKey = ck;
+              break;
+            }
+          }
+        }
+        crewToCredit = subCrewKey || originalJobNumber;
       } else if (creditedTo && crewCompliance[creditedTo]) {
         // Original job not tracked, but creditedTo is - use that (for typo/reassignment cases)
         crewToCredit = creditedTo;
@@ -2241,8 +2259,20 @@ function calculateComplianceFromLogs(weekStartDate, options) {
         // Priority 2: CreditedTo job number if original is NOT tracked
         var crewToCredit = null;
 
-        if (originalJobNumber && crewCompliance[originalJobNumber]) {
-          crewToCredit = originalJobNumber;
+        if (creditedTo && crewCompliance[creditedTo] && creditedTo.indexOf('(') !== -1) {
+          crewToCredit = creditedTo;
+        } else if (originalJobNumber && crewCompliance[originalJobNumber]) {
+          var subCrewKey = null;
+          for (var ck in crewCompliance) {
+            if (ck !== originalJobNumber && (ck.indexOf(originalJobNumber + ' (') === 0 || ck.indexOf(originalJobNumber + ' -') === 0)) {
+              var subCrew = crewCompliance[ck];
+              if (weeklyForeman && subCrew.foreman && weeklyForeman.toLowerCase().trim() === subCrew.foreman.toLowerCase().trim()) {
+                subCrewKey = ck;
+                break;
+              }
+            }
+          }
+          crewToCredit = subCrewKey || originalJobNumber;
         } else if (creditedTo && crewCompliance[creditedTo]) {
           crewToCredit = creditedTo;
         }
@@ -2380,26 +2410,43 @@ function calculateComplianceFromLogs(weekStartDate, options) {
         continue;
       }
 
-      if ((status === 'Credited' || status === 'Unknown Job' || status === 'Skipped') && creditedTo && crewCompliance[creditedTo]) {
+      if ((status === 'Credited' || status === 'Unknown Job' || status === 'Skipped') && creditedTo) {
         var monthlyForeman = String(monthlyRow[3] || '').trim();
-        if (monthlyForeman && monthlyForeman !== 'UNKNOWN') {
-          historicalForemanMap[creditedTo] = monthlyForeman;
+        var targetCrew = creditedTo;
+
+        // If creditedTo has sub-crews in crewCompliance, check if monthlyForeman matches a sub-crew
+        if (crewCompliance[targetCrew]) {
+          for (var ck in crewCompliance) {
+            if (ck !== targetCrew && (ck.indexOf(targetCrew + ' (') === 0 || ck.indexOf(targetCrew + ' -') === 0)) {
+              var subCrew = crewCompliance[ck];
+              if (monthlyForeman && subCrew.foreman && monthlyForeman.toLowerCase().trim() === subCrew.foreman.toLowerCase().trim()) {
+                targetCrew = ck;
+                break;
+              }
+            }
+          }
         }
 
-        // Keep track of the newest checklist received in the month
-        var existingDetails = crewCompliance[creditedTo].monthlyChecklistDetails;
-        var receivedTime = monthlyDateReceived ? new Date(monthlyDateReceived).getTime() : 0;
+        if (crewCompliance[targetCrew]) {
+          if (monthlyForeman && monthlyForeman !== 'UNKNOWN') {
+            historicalForemanMap[targetCrew] = monthlyForeman;
+          }
 
-        if (!existingDetails || !existingDetails.dateReceived ||
-            receivedTime > new Date(existingDetails.dateReceived).getTime()) {
-          // This is the newest checklist - store it
-          crewCompliance[creditedTo].monthlyChecklist = true;
-          crewCompliance[creditedTo].monthlyChecklistDetails = {
-            dateReceived: monthlyDateReceived,
-            reportDate: reportDate
-          };
-          Logger.log("calculateComplianceFromLogs: Credited Monthly Checklist to " + creditedTo +
-            " (received: " + monthlyDateReceived + ")");
+          // Keep track of the newest checklist received in the month
+          var existingDetails = crewCompliance[targetCrew].monthlyChecklistDetails;
+          var receivedTime = monthlyDateReceived ? new Date(monthlyDateReceived).getTime() : 0;
+
+          if (!existingDetails || !existingDetails.dateReceived ||
+              receivedTime > new Date(existingDetails.dateReceived).getTime()) {
+            // This is the newest checklist - store it
+            crewCompliance[targetCrew].monthlyChecklist = true;
+            crewCompliance[targetCrew].monthlyChecklistDetails = {
+              dateReceived: monthlyDateReceived,
+              reportDate: reportDate
+            };
+            Logger.log("calculateComplianceFromLogs: Credited Monthly Checklist to " + targetCrew +
+              " (received: " + monthlyDateReceived + ")");
+          }
         }
       }
     }
@@ -3083,8 +3130,12 @@ function logParsedSafetyEmail(parsed, message, context, existingEmailIds, rowsCo
   var receivedDate = message.getDate();
   var subject = message.getSubject();
 
-  // Resolve job to tracked crew
-  var resolution = resolveJobToCrew(jobNumber, context);
+  // Resolve job to tracked crew with foreman and date context for multi-crew disambiguation
+  var resolveContext = Object.assign({}, context || {}, {
+    foreman: meta.foreman || '',
+    date: meta.date || receivedDate
+  });
+  var resolution = resolveJobToCrew(jobNumber, resolveContext);
 
   var status = resolution.found ? 'Credited' : 'Unknown Job';
   var creditedTo = resolution.found ? resolution.crew : '';
@@ -4225,6 +4276,87 @@ function resolveJobToCrew(jobNumber, context) {
     return { found: false, crew: null, foreman: null, source: 'excluded', reason: 'Placeholder or excluded job number' };
   }
 
+  // Check for multi-crews sharing this base contract number (e.g., '040-26' and '040-26 (Fri-Sat)')
+  var cleanBase = baseJob.replace(/\s*\([^)]*\)/g, '').trim();
+  var matchingTrackedCrews = [];
+  for (var tk in trackedCrews) {
+    var tkClean = tk.replace(/\s*\([^)]*\)/g, '').trim();
+    if (tkClean === cleanBase) {
+      matchingTrackedCrews.push(tk);
+    }
+  }
+
+  // If baseJob is ALREADY an exact, specific sub-crew (e.g., '040-26 (Fri-Sat)') and it is tracked
+  if (baseJob.indexOf('(') !== -1 && trackedCrews[baseJob]) {
+    var subForeman = lookupForemanByJobNumber(baseJob);
+    return {
+      found: true,
+      crew: baseJob,
+      foreman: subForeman.name || '',
+      source: 'direct_subcrew',
+      reason: 'Job is directly a tracked sub-crew'
+    };
+  }
+
+  // If multiple tracked crews share this base contract (e.g., '040-26' and '040-26 (Fri-Sat)')
+  if (matchingTrackedCrews.length > 1) {
+    // 1. Try matching by foreman name from context
+    if (context.foreman) {
+      var targetForemanLower = String(context.foreman).toLowerCase().trim();
+      for (var m = 0; m < matchingTrackedCrews.length; m++) {
+        var cand = matchingTrackedCrews[m];
+        var candForeman = lookupForemanByJobNumber(cand);
+        if (candForeman.name) {
+          var candForemanLower = candForeman.name.toLowerCase().trim();
+          if (targetForemanLower === candForemanLower ||
+              targetForemanLower.indexOf(candForemanLower) !== -1 ||
+              candForemanLower.indexOf(targetForemanLower) !== -1) {
+            return {
+              found: true,
+              crew: cand,
+              foreman: candForeman.name,
+              source: 'multi_crew_foreman',
+              reason: 'Matched multi-crew ' + cand + ' via foreman ' + candForeman.name
+            };
+          }
+        }
+      }
+    }
+
+    // 2. Try matching by report / email date (day-of-week)
+    if (context.date) {
+      var repDate = (context.date instanceof Date) ? context.date : new Date(context.date);
+      if (!isNaN(repDate.getTime())) {
+        var dow = repDate.getDay(); // 0=Sun, 1=Mon, ..., 5=Fri, 6=Sat
+        var isWeekend = (dow === 5 || dow === 6 || dow === 0);
+        for (var m = 0; m < matchingTrackedCrews.length; m++) {
+          var cand = matchingTrackedCrews[m];
+          var candLower = cand.toLowerCase();
+          var candIsWeekend = (candLower.indexOf('fri') !== -1 || candLower.indexOf('sat') !== -1 || candLower.indexOf('weekend') !== -1);
+          if (isWeekend && candIsWeekend) {
+            var candF = lookupForemanByJobNumber(cand);
+            return {
+              found: true,
+              crew: cand,
+              foreman: candF.name || '',
+              source: 'multi_crew_schedule',
+              reason: 'Matched multi-crew ' + cand + ' via weekend schedule (day ' + dow + ')'
+            };
+          } else if (!isWeekend && !candIsWeekend) {
+            var candF = lookupForemanByJobNumber(cand);
+            return {
+              found: true,
+              crew: cand,
+              foreman: candF.name || '',
+              source: 'multi_crew_schedule',
+              reason: 'Matched multi-crew ' + cand + ' via weekday schedule (day ' + dow + ')'
+            };
+          }
+        }
+      }
+    }
+  }
+
   // 1. Check if job is directly a tracked crew
   if (trackedCrews[baseJob]) {
     var directForeman = lookupForemanByJobNumber(baseJob);
@@ -4234,6 +4366,18 @@ function resolveJobToCrew(jobNumber, context) {
       foreman: directForeman.name || '',
       source: 'direct',
       reason: 'Job is a tracked crew'
+    };
+  }
+
+  if (matchingTrackedCrews.length === 1) {
+    var singleCrew = matchingTrackedCrews[0];
+    var singleForeman = lookupForemanByJobNumber(singleCrew);
+    return {
+      found: true,
+      crew: singleCrew,
+      foreman: singleForeman.name || '',
+      source: 'direct_base_match',
+      reason: 'Matched single tracked crew for base job: ' + singleCrew
     };
   }
 
@@ -10035,9 +10179,18 @@ function lookupForemanByJobNumber(jobNumber) {
     var classification = classCol !== -1 ? String(data[i][classCol]).trim() : "";
 
     // Match job number prefix in primary job (e.g., "013-26" matches "013-26.1", "013-26.2")
-    var matchesPrimary = empJobNumber && empJobNumber.indexOf(jobNumber) === 0;
+    var hasParen = jobNumber.indexOf('(') !== -1;
+    var matchesPrimary = empJobNumber && (
+      empJobNumber === jobNumber ||
+      empJobNumber.indexOf(jobNumber + '.') === 0 ||
+      (hasParen && empJobNumber.indexOf(jobNumber) === 0)
+    );
     // Also check secondary job number
-    var matchesSecondary = empSecondaryJob && empSecondaryJob.indexOf(jobNumber) === 0;
+    var matchesSecondary = empSecondaryJob && (
+      empSecondaryJob === jobNumber ||
+      empSecondaryJob.indexOf(jobNumber + '.') === 0 ||
+      (hasParen && empSecondaryJob.indexOf(jobNumber) === 0)
+    );
 
     if (matchesPrimary || matchesSecondary) {
       jobExists = true;
@@ -10052,6 +10205,27 @@ function lookupForemanByJobNumber(jobNumber) {
   }
 
   if (crewMembers.length === 0) {
+    // Check Job Tracking sheet as authoritative fallback
+    var jtData = getCachedJobTrackingData();
+    if (jtData && jtData.length > 1) {
+      var jtHeaders = jtData[0].map(function(h) { return String(h).toLowerCase().trim(); });
+      var jtJobCol = jtHeaders.indexOf('job number');
+      var jtForemanCol = jtHeaders.indexOf('foreman');
+      if (jtJobCol !== -1 && jtForemanCol !== -1) {
+        for (var j = 1; j < jtData.length; j++) {
+          var jtJob = String(jtData[j][jtJobCol] || '').trim();
+          if (jtJob === jobNumber) {
+            var jtForeman = String(jtData[j][jtForemanCol] || '').trim();
+            if (jtForeman) {
+              var result = { name: jtForeman, jobExists: true };
+              _foremanByJobCache[jobNumber] = result;
+              return result;
+            }
+          }
+        }
+      }
+    }
+
     var result = { name: "", jobExists: jobExists };
     _foremanByJobCache[jobNumber] = result;
     return result;
