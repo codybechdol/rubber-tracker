@@ -628,7 +628,7 @@ class CrewImportEngine {
 
         // Stop if hitting another job header, dock, committee, or section break
         if (cell.match(/\d{3}-\d{2}/)) break;
-        if (cell.match(/\b(Dock|Sub\s*Dock|Tran\s*Dock|Bid|Safety\s*Committ?ee|Committee|Crane\s*Class|MSLCAT)\b/i)) break;
+        if (!this.isEmployeeName(cell) && cell.match(/\b(Dock|Sub\s*Dock|Tran\s*Dock|Bid|Safety\s*Committ?ee|Committee|Crane\s*Class|MSLCAT)\b/i)) break;
         // Skip placeholders (Open Call, Need JL, Coming soon, TBD, etc.) - they are neither employees nor crew notes
         if (this.isPlaceholder(cell)) {
           continue;
@@ -758,7 +758,7 @@ class CrewImportEngine {
         const cell = String((data[r] && data[r][header.col]) || '').trim();
         if (!cell) continue;
         if (cell.match(/\d{3}-\d{2}/)) break;
-        if (cell.match(/\b(Dock|Sub\s*Dock|Tran\s*Dock|Bid|Safety\s*Committ?ee|Committee|Crane\s*Class|MSLCAT)\b/i)) break;
+        if (!this.isEmployeeName(cell) && cell.match(/\b(Dock|Sub\s*Dock|Tran\s*Dock|Bid|Safety\s*Committ?ee|Committee|Crane\s*Class|MSLCAT)\b/i)) break;
 
         // Skip category / committee header rows or training announcements
         if (cell.match(/^(MSLCAT|Subcommittee|Committee|Interviews|Safety\s*Meeting|Crane\s*Class)/i) ||
