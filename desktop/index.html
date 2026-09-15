@@ -2,9 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Safety Assistant (Offline Field App)</title>
   <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/1067/1067555.png">
   <meta name="theme-color" content="#0f172a">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
@@ -54,6 +55,10 @@
       <button class="btn btn-primary" id="push-changes-btn" onclick="window.syncEngine.pushChangesToGoogleSheets()" title="Push pending offline changes to Google Sheets">
         ⬆️ Push Changes to Sheets
       </button>
+
+      <button class="btn btn-secondary" id="backup-drive-btn" style="border-color: #3b82f6; color: #60a5fa;" onclick="window.syncEngine.createGoogleDriveBackup()" title="Create an immediate full backup copy of the Google Sheet and a timestamped JSON database snapshot in Google Drive">
+        💾 Backup to Drive
+      </button>
     </div>
   </header>
 
@@ -79,6 +84,9 @@
             🔄 Fast Sync
           </button>
         </div>
+        <button class="btn btn-secondary" onclick="window.syncEngine.createGoogleDriveBackup(); window.toggleMobileSidebar();" style="width: 100%; justify-content: center; font-size: 11px; padding: 5px 2px; color: #60a5fa; border-color: rgba(59, 130, 246, 0.4);" title="Create Google Drive backup">
+          💾 Backup to Drive
+        </button>
       </div>
 
       <div class="nav-group">
@@ -191,16 +199,16 @@
         <!-- Dynamic Filter Bar for Inventory Drilldown & Multi-Criteria Filtering -->
         <div class="filter-bar" id="inventory-filter-bar" style="display: none;">
           <div class="filter-group" id="filter-group-size">
-            <label style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Size:</label>
-            <select id="filter-size-select" class="filter-select" onchange="window.sheetNavigator.setSizeFilter(this.value)"></select>
+            <label for="filter-size-select" style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Size:</label>
+            <select id="filter-size-select" class="filter-select" title="Filter by size" aria-label="Filter by size" onchange="window.sheetNavigator.setSizeFilter(this.value)"></select>
           </div>
           <div class="filter-group" id="filter-group-class">
-            <label id="filter-class-label" style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Class:</label>
-            <select id="filter-class-select" class="filter-select" onchange="window.sheetNavigator.setClassFilter(this.value)"></select>
+            <label for="filter-class-select" id="filter-class-label" style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Class:</label>
+            <select id="filter-class-select" class="filter-select" title="Filter by class" aria-label="Filter by class" onchange="window.sheetNavigator.setClassFilter(this.value)"></select>
           </div>
           <div class="filter-group" id="filter-group-location">
-            <label style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Location:</label>
-            <select id="filter-location-select" class="filter-select" onchange="window.sheetNavigator.setLocationFilter(this.value)"></select>
+            <label for="filter-location-select" style="font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase;">Location:</label>
+            <select id="filter-location-select" class="filter-select" title="Filter by location" aria-label="Filter by location" onchange="window.sheetNavigator.setLocationFilter(this.value)"></select>
           </div>
           <div class="filter-pills" id="filter-status-pills">
             <button class="filter-pill active" data-status="all" onclick="window.sheetNavigator.setStatusFilter('all')">All</button>
@@ -341,7 +349,7 @@
               </div>
 
               <!-- Quick Week Jumper Select -->
-              <select id="trip-planner-week-select" style="padding: 4px 8px; font-size: 11px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #93c5fd; font-weight: 700;" onchange="window.tripPlanner.onWeekSelectChange(this.value)">
+              <select id="trip-planner-week-select" title="Select schedule week" aria-label="Select schedule week" style="padding: 4px 8px; font-size: 11px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #93c5fd; font-weight: 700;" onchange="window.tripPlanner.onWeekSelectChange(this.value)">
                 <!-- Populated dynamically -->
               </select>
 
@@ -450,7 +458,7 @@
             </span>
           </div>
           <div style="display: flex; align-items: center; gap: 8px;">
-            <button class="btn btn-secondary" style="font-size: 11px; padding: 4px 12px;" onclick="const f=document.getElementById('jm-test-iframe');if(f)f.src=f.src;" title="Reload Portal">
+            <button class="btn btn-secondary" style="font-size: 11px; padding: 4px 12px;" onclick="const jmIframe=document.getElementById('jm-test-iframe');if(jmIframe)jmIframe.src=jmIframe.src;" title="Reload Portal">
               🔄 Reload Portal
             </button>
             <button class="btn btn-secondary" style="font-size: 11px; padding: 4px 12px; color: #93c5fd;" onclick="if(window.desktopAPI && window.desktopAPI.openExternal){window.desktopAPI.openExternal('https://portal.jmtest.com/');}else{window.open('https://portal.jmtest.com/','_blank');}" title="Open in External Browser">
@@ -459,7 +467,7 @@
           </div>
         </div>
         <div style="flex: 1; width: 100%; height: 100%; position: relative; background: #0f172a; overflow: hidden;">
-          <iframe id="jm-test-iframe" src="https://portal.jmtest.com/" style="width: 100%; height: 100%; border: none;" allow="geolocation; camera; microphone; clipboard-read; clipboard-write;" loading="lazy"></iframe>
+          <iframe id="jm-test-iframe" title="JM Test Systems Customer Portal" src="https://portal.jmtest.com/" style="width: 100%; height: 100%; border: none;" allow="geolocation; camera; microphone; clipboard-read; clipboard-write;" loading="lazy"></iframe>
         </div>
       </section>
 
@@ -474,7 +482,7 @@
             </span>
           </div>
           <div style="display: flex; align-items: center; gap: 8px;">
-            <button class="btn btn-secondary" style="font-size: 11px; padding: 4px 12px;" onclick="const f=document.getElementById('nwe-fire-iframe');if(f)f.src=f.src;" title="Reload Live Map">
+            <button class="btn btn-secondary" style="font-size: 11px; padding: 4px 12px;" onclick="const fireIframe=document.getElementById('nwe-fire-iframe');if(fireIframe)fireIframe.src=fireIframe.src;" title="Reload Live Map">
               🔄 Reload Map
             </button>
             <button class="btn btn-secondary" style="font-size: 11px; padding: 4px 12px; color: #93c5fd;" onclick="if(window.desktopAPI && window.desktopAPI.openExternal){window.desktopAPI.openExternal('https://experience.arcgis.com/experience/a84d07ac5ab848989d9d7950d6a34864');}else{window.open('https://experience.arcgis.com/experience/a84d07ac5ab848989d9d7950d6a34864','_blank');}" title="Open in External Browser">
@@ -483,7 +491,7 @@
           </div>
         </div>
         <div style="flex: 1; width: 100%; height: 100%; position: relative; background: #0f172a; overflow: hidden;">
-          <iframe id="nwe-fire-iframe" src="https://experience.arcgis.com/experience/a84d07ac5ab848989d9d7950d6a34864" style="width: 100%; height: 100%; border: none;" allow="geolocation; camera; microphone; clipboard-read; clipboard-write;" loading="lazy"></iframe>
+          <iframe id="nwe-fire-iframe" title="NWE Fire Info Live ArcGIS Dashboard" src="https://experience.arcgis.com/experience/a84d07ac5ab848989d9d7950d6a34864" style="width: 100%; height: 100%; border: none;" allow="geolocation; camera; microphone; clipboard-read; clipboard-write;" loading="lazy"></iframe>
         </div>
       </section>
 
@@ -498,7 +506,7 @@
             </span>
           </div>
           <div style="display: flex; align-items: center; gap: 10px;">
-            <select id="procurement-vendor-select" style="padding: 6px 12px; font-size: 12px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; min-width: 200px;">
+            <select id="procurement-vendor-select" title="Select vendor" aria-label="Select vendor" style="padding: 6px 12px; font-size: 12px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; min-width: 200px;">
               <option value="">Select a vendor...</option>
             </select>
             <button class="btn btn-secondary" id="btn-procurement-manage-vendors" style="display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 6px 12px;" onclick="window.procurementEngine.openManageVendorsModal()">
@@ -551,8 +559,8 @@
               <button class="btn btn-secondary" style="display: inline-flex; align-items: center; gap: 6px; font-size: 12px; padding: 6px 12px; border-color: #3b82f6; color: #93c5fd;" onclick="window.inventoryAging.openConfigModal()">
                 <span>⚙️</span> Configure Aging & Recert Rules
               </button>
-              <input type="text" id="aging-search-input" placeholder="🔍 Search item #, worker, city, notes..." style="width: 240px; padding: 6px 12px; font-size: 12px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
-              <select id="aging-sort-select" style="padding: 6px 12px; font-size: 12px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
+              <input type="text" id="aging-search-input" title="Search inventory aging" aria-label="Search inventory aging" placeholder="🔍 Search item #, worker, city, notes..." style="width: 240px; padding: 6px 12px; font-size: 12px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
+              <select id="aging-sort-select" title="Sort inventory aging" aria-label="Sort inventory aging" style="padding: 6px 12px; font-size: 12px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
                 <option value="age_desc">⏳ Oldest Fleet Age First</option>
                 <option value="age_asc">🌱 Newest Items First</option>
                 <option value="due_asc">🚨 Soonest Recertification Due</option>
@@ -706,9 +714,12 @@
       <div class="modal-body" id="sync-modal-body" style="max-height: 60vh; overflow-y: auto; padding: 16px;">
         <!-- Injected dynamically by sync.js -->
       </div>
-      <div class="modal-footer" id="sync-modal-footer">
-        <button class="btn btn-secondary" id="sync-modal-clear-btn" style="display: none;" onclick="window.syncEngine.clearPendingOutbox()">🗑️ Clear Outbox</button>
-        <button class="btn btn-primary" id="sync-modal-close-btn" onclick="window.syncEngine.closeSyncModal()">Close</button>
+      <div class="modal-footer" id="sync-modal-footer" style="display: flex; justify-content: space-between; align-items: center;">
+        <button class="btn btn-secondary" id="sync-modal-backup-btn" style="border-color: #3b82f6; color: #60a5fa;" onclick="window.syncEngine.createGoogleDriveBackup()" title="Create an immediate full backup copy of the Google Sheet and a timestamped JSON database snapshot in Google Drive">💾 Backup to Drive</button>
+        <div style="display: flex; gap: 8px;">
+          <button class="btn btn-secondary" id="sync-modal-clear-btn" style="display: none;" onclick="window.syncEngine.clearPendingOutbox()">🗑️ Clear Outbox</button>
+          <button class="btn btn-primary" id="sync-modal-close-btn" onclick="window.syncEngine.closeSyncModal()">Close</button>
+        </div>
       </div>
     </div>
   </div>
@@ -812,24 +823,24 @@
         <div id="edit-milestone-stage-badge"></div>
         
         <div>
-          <label style="display: block; font-size: 11.5px; font-weight: 700; color: var(--text-secondary); margin-bottom: 4px;">DATE ASSIGNED / EVENT DATE</label>
-          <input type="date" id="edit-milestone-date" class="form-control" style="width: 100%; font-size: 13px;">
+          <label for="edit-milestone-date" style="display: block; font-size: 11.5px; font-weight: 700; color: var(--text-secondary); margin-bottom: 4px;">DATE ASSIGNED / EVENT DATE</label>
+          <input type="date" id="edit-milestone-date" class="form-control" title="Date Assigned / Event Date" aria-label="Date Assigned / Event Date" style="width: 100%; font-size: 13px;">
           <span style="font-size: 10.5px; color: var(--text-muted); margin-top: 3px; display: block;">Adjust the start date for this historical lifecycle period.</span>
         </div>
 
         <div>
-          <label style="display: block; font-size: 11.5px; font-weight: 700; color: var(--text-secondary); margin-bottom: 4px;">HOLDER / ASSIGNED TO</label>
-          <input type="text" id="edit-milestone-assigned" list="new-item-employees-datalist" class="form-control" style="width: 100%; font-size: 13px;" placeholder="e.g. On Shelf, In Testing, or Lineman Name">
+          <label for="edit-milestone-assigned" style="display: block; font-size: 11.5px; font-weight: 700; color: var(--text-secondary); margin-bottom: 4px;">HOLDER / ASSIGNED TO</label>
+          <input type="text" id="edit-milestone-assigned" list="new-item-employees-datalist" class="form-control" style="width: 100%; font-size: 13px;" title="Holder / Assigned To" aria-label="Holder / Assigned To" placeholder="e.g. On Shelf, In Testing, or Lineman Name">
         </div>
 
         <div>
-          <label style="display: block; font-size: 11.5px; font-weight: 700; color: var(--text-secondary); margin-bottom: 4px;">LOCATION</label>
-          <input type="text" id="edit-milestone-location" class="form-control" style="width: 100%; font-size: 13px;" placeholder="e.g. Helena, Bozeman, Arnett / JM Test">
+          <label for="edit-milestone-location" style="display: block; font-size: 11.5px; font-weight: 700; color: var(--text-secondary); margin-bottom: 4px;">LOCATION</label>
+          <input type="text" id="edit-milestone-location" class="form-control" style="width: 100%; font-size: 13px;" title="Location" aria-label="Location" placeholder="e.g. Helena, Bozeman, Arnett / JM Test">
         </div>
 
         <div>
-          <label style="display: block; font-size: 11.5px; font-weight: 700; color: var(--text-secondary); margin-bottom: 4px;">NOTES / REASON</label>
-          <input type="text" id="edit-milestone-notes" class="form-control" style="width: 100%; font-size: 13px;" placeholder="e.g. Sent to lab, Reclaimed, Returned to shelf">
+          <label for="edit-milestone-notes" style="display: block; font-size: 11.5px; font-weight: 700; color: var(--text-secondary); margin-bottom: 4px;">NOTES / REASON</label>
+          <input type="text" id="edit-milestone-notes" class="form-control" style="width: 100%; font-size: 13px;" title="Notes / Reason" aria-label="Notes / Reason" placeholder="e.g. Sent to lab, Reclaimed, Returned to shelf">
         </div>
 
         <div id="edit-milestone-sync-active-container" style="background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.25); border-radius: 6px; padding: 10px 12px; display: none;">
@@ -859,8 +870,8 @@
       <div class="modal-body" style="padding: 16px;">
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
           <div class="form-group">
-            <label style="font-size: 11px; font-weight: 600; color: var(--text-secondary); margin-bottom: 4px; display: block;">Equipment Category</label>
-            <select id="dt-history-eq-type" style="width: 100%; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 8px; font-size: 12px;">
+            <label for="dt-history-eq-type" style="font-size: 11px; font-weight: 600; color: var(--text-secondary); margin-bottom: 4px; display: block;">Equipment Category</label>
+            <select id="dt-history-eq-type" title="Equipment Category" aria-label="Equipment Category" style="width: 100%; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 8px; font-size: 12px;">
               <option value="gloves_history">🧤 Gloves</option>
               <option value="sleeves_history">🧥 Sleeves</option>
               <option value="blankets_history">🟨 Blankets</option>
@@ -873,8 +884,8 @@
             </select>
           </div>
           <div class="form-group">
-            <label style="font-size: 11px; font-weight: 600; color: var(--text-secondary); margin-bottom: 4px; display: block;">Item # / Serial #</label>
-            <input type="text" id="dt-history-item-num" placeholder="e.g. 96, 414, 1006" style="width: 100%; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 8px; font-size: 12px;">
+            <label for="dt-history-item-num" style="font-size: 11px; font-weight: 600; color: var(--text-secondary); margin-bottom: 4px; display: block;">Item # / Serial #</label>
+            <input type="text" id="dt-history-item-num" title="Item # / Serial #" aria-label="Item # / Serial #" placeholder="e.g. 96, 414, 1006" style="width: 100%; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 8px; font-size: 12px;">
           </div>
         </div>
         <div class="form-group" style="margin-bottom: 12px;">
@@ -961,26 +972,26 @@
             </div>
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
               <div>
-                <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px; color: var(--text-main);">
+                <label for="new-emp-name" style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px; color: var(--text-main);">
                   Full Name <span style="color: #ef4444;">*</span>
                 </label>
-                <input type="text" id="new-emp-name" class="form-control" placeholder="e.g., Jane Doe" required oninput="window.sheetNavigator.onNewEmployeeNameInput(this.value)" style="width: 100%; padding: 8px 10px; border-radius: 6px; background: var(--bg-primary); color: var(--text-main); border: 1px solid var(--border-color); font-size: 13px;">
+                <input type="text" id="new-emp-name" class="form-control" title="Full Name" aria-label="Full Name" placeholder="e.g., Jane Doe" required oninput="window.sheetNavigator.onNewEmployeeNameInput(this.value)" style="width: 100%; padding: 8px 10px; border-radius: 6px; background: var(--bg-primary); color: var(--text-main); border: 1px solid var(--border-color); font-size: 13px;">
               </div>
               <div>
-                <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px; color: var(--text-main);">
+                <label for="new-emp-hire-date" style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px; color: var(--text-main);">
                   Hire Date <span style="color: #ef4444;">*</span>
                 </label>
-                <input type="date" id="new-emp-hire-date" class="form-control" required onchange="window.sheetNavigator.checkNewEmployeePendingStatus()" style="width: 100%; padding: 8px 10px; border-radius: 6px; background: var(--bg-primary); color: var(--text-main); border: 1px solid var(--border-color); font-size: 13px;">
+                <input type="date" id="new-emp-hire-date" class="form-control" title="Hire Date" aria-label="Hire Date" required onchange="window.sheetNavigator.checkNewEmployeePendingStatus()" style="width: 100%; padding: 8px 10px; border-radius: 6px; background: var(--bg-primary); color: var(--text-main); border: 1px solid var(--border-color); font-size: 13px;">
                 <div style="font-size: 10.5px; color: var(--text-muted); margin-top: 2px;">Future date = Pending New Hire</div>
               </div>
             </div>
 
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
               <div>
-                <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px; color: var(--text-main);">
+                <label for="new-emp-location" style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px; color: var(--text-main);">
                   Location <span style="color: #ef4444;">*</span>
                 </label>
-                <select id="new-emp-location" class="form-control" required onchange="window.sheetNavigator.onNewEmpLocationChange()" style="width: 100%; padding: 8px 10px; border-radius: 6px; background: var(--bg-primary); color: var(--text-main); border: 1px solid var(--border-color); font-size: 13px;">
+                <select id="new-emp-location" class="form-control" title="Location" aria-label="Location" required onchange="window.sheetNavigator.onNewEmpLocationChange()" style="width: 100%; padding: 8px 10px; border-radius: 6px; background: var(--bg-primary); color: var(--text-main); border: 1px solid var(--border-color); font-size: 13px;">
                   <option value="">Select location...</option>
                 </select>
                 <div id="new-emp-location-hint" style="font-size: 10.5px; color: var(--text-muted); margin-top: 2px;">"Unknown" is only for Pending Hires</div>
@@ -1007,10 +1018,10 @@
             </div>
 
             <div>
-              <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px; color: var(--text-main);">
+              <label for="new-emp-classification" style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px; color: var(--text-main);">
                 Job Classification / Trade Rank <span style="color: #ef4444;">*</span>
               </label>
-              <select id="new-emp-classification" class="form-control" required style="width: 100%; padding: 8px 10px; border-radius: 6px; background: var(--bg-primary); color: var(--text-main); border: 1px solid var(--border-color); font-size: 13px;">
+              <select id="new-emp-classification" class="form-control" title="Job Classification / Trade Rank" aria-label="Job Classification / Trade Rank" required style="width: 100%; padding: 8px 10px; border-radius: 6px; background: var(--bg-primary); color: var(--text-main); border: 1px solid var(--border-color); font-size: 13px;">
                 <option value="">Select classification...</option>
                 <option value="AP 1">AP 1 - Apprentice 1st Year</option>
                 <option value="AP 2">AP 2 - Apprentice 2nd Year</option>
@@ -1084,10 +1095,10 @@
             </div>
             <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
               <div>
-                <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px; color: var(--text-main);">
+                <label for="new-emp-glove-size" style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px; color: var(--text-main);">
                   Glove Size
                 </label>
-                <select id="new-emp-glove-size" class="form-control" style="width: 100%; padding: 8px 10px; border-radius: 6px; background: var(--bg-primary); color: var(--text-main); border: 1px solid var(--border-color); font-size: 13px;">
+                <select id="new-emp-glove-size" class="form-control" title="Glove Size" aria-label="Glove Size" style="width: 100%; padding: 8px 10px; border-radius: 6px; background: var(--bg-primary); color: var(--text-main); border: 1px solid var(--border-color); font-size: 13px;">
                   <option value="N/A" selected>N/A</option>
                   <option value="8">8</option>
                   <option value="8.5">8.5</option>
@@ -1101,10 +1112,10 @@
                 </select>
               </div>
               <div>
-                <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px; color: var(--text-main);">
+                <label for="new-emp-sleeve-size" style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 4px; color: var(--text-main);">
                   Sleeve Size
                 </label>
-                <select id="new-emp-sleeve-size" class="form-control" style="width: 100%; padding: 8px 10px; border-radius: 6px; background: var(--bg-primary); color: var(--text-main); border: 1px solid var(--border-color); font-size: 13px;">
+                <select id="new-emp-sleeve-size" class="form-control" title="Sleeve Size" aria-label="Sleeve Size" style="width: 100%; padding: 8px 10px; border-radius: 6px; background: var(--bg-primary); color: var(--text-main); border: 1px solid var(--border-color); font-size: 13px;">
                   <option value="N/A" selected>N/A</option>
                   <option value="Regular">Regular</option>
                   <option value="Large">Large</option>
@@ -1318,19 +1329,19 @@
 
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
             <div>
-              <label style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; letter-spacing: 0.5px;">DATE OF CLASS *</label>
-              <input type="date" id="manual-task-cert-date-input" class="form-control" style="width: 100%; box-sizing: border-box; font-size: 13px; padding: 7px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
+              <label for="manual-task-cert-date-input" style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; letter-spacing: 0.5px;">DATE OF CLASS *</label>
+              <input type="date" id="manual-task-cert-date-input" class="form-control" title="Date of Class" aria-label="Date of Class" style="width: 100%; box-sizing: border-box; font-size: 13px; padding: 7px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
             </div>
             <div>
-              <label style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; letter-spacing: 0.5px;">LOCATION / FACILITY *</label>
-              <input type="text" id="manual-task-cert-loc-input" list="trip-locations-datalist" class="form-control" placeholder="e.g. Helena HQ, Shop, Bozeman Yard..." style="width: 100%; box-sizing: border-box; font-size: 13px; padding: 7px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
+              <label for="manual-task-cert-loc-input" style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; letter-spacing: 0.5px;">LOCATION / FACILITY *</label>
+              <input type="text" id="manual-task-cert-loc-input" list="trip-locations-datalist" class="form-control" title="Location / Facility" aria-label="Location / Facility" placeholder="e.g. Helena HQ, Shop, Bozeman Yard..." style="width: 100%; box-sizing: border-box; font-size: 13px; padding: 7px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
             </div>
           </div>
 
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
             <div>
-              <label style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; letter-spacing: 0.5px;">TIME / WINDOW (OPTIONAL)</label>
-              <input type="text" id="manual-task-cert-time-input" class="form-control" placeholder="e.g. 09:00 AM, 8:00 AM - 12:00 PM" style="width: 100%; box-sizing: border-box; font-size: 13px; padding: 7px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
+              <label for="manual-task-cert-time-input" style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; letter-spacing: 0.5px;">TIME / WINDOW (OPTIONAL)</label>
+              <input type="text" id="manual-task-cert-time-input" class="form-control" title="Time / Window" aria-label="Time / Window" placeholder="e.g. 09:00 AM, 8:00 AM - 12:00 PM" style="width: 100%; box-sizing: border-box; font-size: 13px; padding: 7px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
               <div style="display: flex; gap: 4px; margin-top: 5px; flex-wrap: wrap;">
                 <span class="badge" style="cursor: pointer; background: rgba(16, 185, 129, 0.12); color: #6ee7b7; border: 1px solid rgba(16, 185, 129, 0.25); font-size: 9px; padding: 1px 5px;" onclick="document.getElementById('manual-task-cert-time-input').value='8:00 AM - 10:30 AM'">8:00 AM - 10:30 AM</span>
                 <span class="badge" style="cursor: pointer; background: rgba(16, 185, 129, 0.12); color: #6ee7b7; border: 1px solid rgba(16, 185, 129, 0.25); font-size: 9px; padding: 1px 5px;" onclick="document.getElementById('manual-task-cert-time-input').value='8:00 AM - 12:00 PM'">8:00 AM - 12:00 PM</span>
@@ -1339,8 +1350,8 @@
               </div>
             </div>
             <div>
-              <label style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; letter-spacing: 0.5px;">INSTRUCTOR / TRAINER</label>
-              <input type="text" id="manual-task-cert-trainer-input" class="form-control" value="Cody Bechdol (Self)" style="width: 100%; box-sizing: border-box; font-size: 13px; padding: 7px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
+              <label for="manual-task-cert-trainer-input" style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; letter-spacing: 0.5px;">INSTRUCTOR / TRAINER</label>
+              <input type="text" id="manual-task-cert-trainer-input" class="form-control" title="Instructor / Trainer" aria-label="Instructor / Trainer" placeholder="e.g. Cody Bechdol (Self)" value="Cody Bechdol (Self)" style="width: 100%; box-sizing: border-box; font-size: 13px; padding: 7px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
             </div>
           </div>
 
@@ -1369,26 +1380,26 @@
 
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
             <div>
-              <label style="display: flex; justify-content: space-between; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; letter-spacing: 0.5px;">
+              <label for="manual-task-assigned-to-input" style="display: flex; justify-content: space-between; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; letter-spacing: 0.5px;">
                 <span>ASSIGNED TO</span>
                 <span style="font-weight: 400; color: #a7f3d0; cursor: pointer;" onclick="document.getElementById('manual-task-assigned-to-input').value='Myself'">[Set to Myself]</span>
               </label>
-              <input type="text" id="manual-task-assigned-to-input" class="form-control" value="Myself" style="width: 100%; box-sizing: border-box; font-size: 13px; padding: 7px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
+              <input type="text" id="manual-task-assigned-to-input" class="form-control" value="Myself" title="Assigned To" aria-label="Assigned To" placeholder="e.g. Myself, Lineman Name" style="width: 100%; box-sizing: border-box; font-size: 13px; padding: 7px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
             </div>
             <div>
-              <label style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; letter-spacing: 0.5px;">SCHEDULED DATE *</label>
-              <input type="date" id="manual-task-personal-date-input" class="form-control" style="width: 100%; box-sizing: border-box; font-size: 13px; padding: 7px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
+              <label for="manual-task-personal-date-input" style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; letter-spacing: 0.5px;">SCHEDULED DATE *</label>
+              <input type="date" id="manual-task-personal-date-input" class="form-control" title="Scheduled Date" aria-label="Scheduled Date" style="width: 100%; box-sizing: border-box; font-size: 13px; padding: 7px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
             </div>
           </div>
 
           <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
             <div>
-              <label style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; letter-spacing: 0.5px;">LOCATION / HUB</label>
-              <input type="text" id="manual-task-personal-loc-input" list="trip-locations-datalist" class="form-control" placeholder="e.g. Helena Office, Shop, Warehouse..." style="width: 100%; box-sizing: border-box; font-size: 13px; padding: 7px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
+              <label for="manual-task-personal-loc-input" style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; letter-spacing: 0.5px;">LOCATION / HUB</label>
+              <input type="text" id="manual-task-personal-loc-input" list="trip-locations-datalist" class="form-control" title="Location / Hub" aria-label="Location / Hub" placeholder="e.g. Helena Office, Shop, Warehouse..." style="width: 100%; box-sizing: border-box; font-size: 13px; padding: 7px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
             </div>
             <div>
-              <label style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; letter-spacing: 0.5px;">PRIORITY</label>
-              <select id="manual-task-personal-priority-input" class="form-control" style="width: 100%; box-sizing: border-box; font-size: 13px; padding: 7px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
+              <label for="manual-task-personal-priority-input" style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; letter-spacing: 0.5px;">PRIORITY</label>
+              <select id="manual-task-personal-priority-input" class="form-control" title="Priority" aria-label="Priority" style="width: 100%; box-sizing: border-box; font-size: 13px; padding: 7px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
                 <option value="Normal">Normal Priority</option>
                 <option value="High">🔴 High Priority</option>
                 <option value="Low">Low / Flexible</option>
@@ -1470,7 +1481,7 @@
         <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 10px;">
           Copy and paste this formatted text directly into an email to your vendor:
         </div>
-        <textarea id="procurement-po-textarea" rows="16" style="width: 100%; font-family: monospace; font-size: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 12px; line-height: 1.5; resize: vertical;"></textarea>
+        <textarea id="procurement-po-textarea" title="Generated Purchase Order Text" aria-label="Generated Purchase Order Text" placeholder="Purchase order details will appear here..." rows="16" style="width: 100%; font-family: monospace; font-size: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 12px; line-height: 1.5; resize: vertical;"></textarea>
       </div>
       <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center;">
         <button class="btn btn-secondary" onclick="document.getElementById('procurement-po-modal').style.display='none'">Close</button>
@@ -1772,20 +1783,20 @@
       </div>
       <div class="modal-body" style="padding: 18px; display: flex; flex-direction: column; gap: 14px;">
         <div class="form-group">
-          <label style="font-size: 12px; font-weight: 700; color: #f8fafc; margin-bottom: 4px; display: block;">Certification Name (Sheet Key)</label>
-          <input type="text" id="new-cert-name" placeholder="e.g. Confined Space Entry, Traffic Control" style="width: 100%; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 8px 12px; font-size: 13px;" />
+          <label for="new-cert-name" style="font-size: 12px; font-weight: 700; color: #f8fafc; margin-bottom: 4px; display: block;">Certification Name (Sheet Key)</label>
+          <input type="text" id="new-cert-name" title="Certification Name (Sheet Key)" aria-label="Certification Name (Sheet Key)" placeholder="e.g. Confined Space Entry, Traffic Control" style="width: 100%; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 8px 12px; font-size: 13px;" />
           <div style="font-size: 11px; color: var(--text-muted); margin-top: 3px;">This will match Excel column headers and populate the Expiring Certs table.</div>
         </div>
 
         <div class="form-group">
-          <label style="font-size: 12px; font-weight: 700; color: #f8fafc; margin-bottom: 4px; display: block;">Display Label (Optional)</label>
-          <input type="text" id="new-cert-label" placeholder="e.g. Confined Space Entry (OSHA)" style="width: 100%; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 8px 12px; font-size: 13px;" />
+          <label for="new-cert-label" style="font-size: 12px; font-weight: 700; color: #f8fafc; margin-bottom: 4px; display: block;">Display Label (Optional)</label>
+          <input type="text" id="new-cert-label" title="Display Label" aria-label="Display Label" placeholder="e.g. Confined Space Entry (OSHA)" style="width: 100%; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 8px 12px; font-size: 13px;" />
         </div>
 
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
           <div class="form-group">
-            <label style="font-size: 12px; font-weight: 700; color: #f8fafc; margin-bottom: 4px; display: block;">Validity Term</label>
-            <select id="new-cert-term" style="width: 100%; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 8px 12px; font-size: 12.5px;">
+            <label for="new-cert-term" style="font-size: 12px; font-weight: 700; color: #f8fafc; margin-bottom: 4px; display: block;">Validity Term</label>
+            <select id="new-cert-term" title="Validity Term" aria-label="Validity Term" style="width: 100%; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 8px 12px; font-size: 12.5px;">
               <option value="12">1 Year (12 months)</option>
               <option value="24">2 Years (24 months)</option>
               <option value="36" selected>3 Years (36 months)</option>
@@ -1795,8 +1806,8 @@
           </div>
 
           <div class="form-group">
-            <label style="font-size: 12px; font-weight: 700; color: #f8fafc; margin-bottom: 4px; display: block;">Requirement Scope</label>
-            <select id="new-cert-scope" style="width: 100%; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 8px 12px; font-size: 12.5px;">
+            <label for="new-cert-scope" style="font-size: 12px; font-weight: 700; color: #f8fafc; margin-bottom: 4px; display: block;">Requirement Scope</label>
+            <select id="new-cert-scope" title="Requirement Scope" aria-label="Requirement Scope" style="width: 100%; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 8px 12px; font-size: 12.5px;">
               <option value="all">👥 All Active Employees</option>
               <option value="job_class" selected>👷 Specific Job Roles</option>
               <option value="optional">⭐ Optional / As-Acquired</option>
@@ -1824,20 +1835,20 @@
       <div class="modal-body" style="padding: 18px; display: flex; flex-direction: column; gap: 14px; overflow-y: auto;">
         <input type="hidden" id="edit-cert-index" value="" />
         <div class="form-group">
-          <label style="font-size: 12px; font-weight: 700; color: #f8fafc; margin-bottom: 4px; display: block;">Certification Name (Sheet Key)</label>
-          <input type="text" id="edit-cert-name" style="width: 100%; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 8px 12px; font-size: 13px;" />
+          <label for="edit-cert-name" style="font-size: 12px; font-weight: 700; color: #f8fafc; margin-bottom: 4px; display: block;">Certification Name (Sheet Key)</label>
+          <input type="text" id="edit-cert-name" title="Certification Name (Sheet Key)" aria-label="Certification Name (Sheet Key)" placeholder="e.g. CPR / First Aid" style="width: 100%; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 8px 12px; font-size: 13px;" />
           <div style="font-size: 11px; color: #93c5fd; margin-top: 3px;">⚠️ Changing this will automatically rename all matching rows in the Expiring Certs table.</div>
         </div>
 
         <div class="form-group">
-          <label style="font-size: 12px; font-weight: 700; color: #f8fafc; margin-bottom: 4px; display: block;">Display Label</label>
-          <input type="text" id="edit-cert-label" style="width: 100%; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 8px 12px; font-size: 13px;" />
+          <label for="edit-cert-label" style="font-size: 12px; font-weight: 700; color: #f8fafc; margin-bottom: 4px; display: block;">Display Label</label>
+          <input type="text" id="edit-cert-label" title="Display Label" aria-label="Display Label" placeholder="e.g. CPR / First Aid (ARC)" style="width: 100%; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 8px 12px; font-size: 13px;" />
         </div>
 
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
           <div class="form-group">
-            <label style="font-size: 12px; font-weight: 700; color: #f8fafc; margin-bottom: 4px; display: block;">Validity Term</label>
-            <select id="edit-cert-term" style="width: 100%; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 8px 12px; font-size: 12.5px;">
+            <label for="edit-cert-term" style="font-size: 12px; font-weight: 700; color: #f8fafc; margin-bottom: 4px; display: block;">Validity Term</label>
+            <select id="edit-cert-term" title="Validity Term" aria-label="Validity Term" style="width: 100%; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 8px 12px; font-size: 12.5px;">
               <option value="12">1 Year (12 months)</option>
               <option value="24">2 Years (24 months)</option>
               <option value="36">3 Years (36 months)</option>
@@ -1847,8 +1858,8 @@
           </div>
 
           <div class="form-group">
-            <label style="font-size: 12px; font-weight: 700; color: #f8fafc; margin-bottom: 4px; display: block;">Requirement Scope</label>
-            <select id="edit-cert-scope" style="width: 100%; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 8px 12px; font-size: 12.5px;" onchange="window.certsConfigEngine.onEditScopeChange(this.value)">
+            <label for="edit-cert-scope" style="font-size: 12px; font-weight: 700; color: #f8fafc; margin-bottom: 4px; display: block;">Requirement Scope</label>
+            <select id="edit-cert-scope" title="Requirement Scope" aria-label="Requirement Scope" style="width: 100%; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 8px 12px; font-size: 12.5px;" onchange="window.certsConfigEngine.onEditScopeChange(this.value)">
               <option value="all">👥 All Active Employees</option>
               <option value="job_class">👷 Specific Job Roles</option>
               <option value="optional">⭐ Optional / As-Acquired</option>
@@ -2115,11 +2126,11 @@
           </div>
 
           <div>
-            <label style="font-size: 12px; font-weight: 700; color: #fca5a5; margin-bottom: 5px; display: flex; align-items: center; justify-content: space-between;">
+            <label for="emp-depart-reason" style="font-size: 12px; font-weight: 700; color: #fca5a5; margin-bottom: 5px; display: flex; align-items: center; justify-content: space-between;">
               <span>📋 Departure Reason <span style="color: #ef4444;">*</span></span>
               <span style="font-size: 11px; font-weight: normal; color: var(--text-muted);">Required for HR/History</span>
             </label>
-            <select id="emp-depart-reason" style="width: 100%; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 8px 12px; font-size: 13px; font-weight: 600;">
+            <select id="emp-depart-reason" title="Departure Reason" aria-label="Departure Reason" style="width: 100%; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 8px 12px; font-size: 13px; font-weight: 600;">
               <option value="Quit">Quit (Voluntary)</option>
               <option value="Resigned">Resigned (Voluntary)</option>
               <option value="Layoff">Layoff (Reduction in Force)</option>

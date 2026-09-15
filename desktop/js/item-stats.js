@@ -1727,12 +1727,17 @@ class ItemStatsEngine {
           if (!hasDisc) return '';
           return `
             <div style="background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.4); border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;">
-              <div style="font-size: 12px; color: #fbbf24;">
+              <div style="font-size: 12px; color: #fbbf24; max-width: 600px;">
                 <strong>⚠️ Active Record Discrepancy:</strong> History records show this item is currently assigned to <strong>${this.escapeHtml(latestM.assignedTo)}</strong> (${this.escapeHtml(latestM.location || 'Unknown')}), but Active Sheet has <strong>${this.escapeHtml(curAssignedTo)}</strong> (${this.escapeHtml(curStatus)}).
               </div>
-              <button class="btn btn-sm" style="font-size: 11px; font-weight: 700; background: #f59e0b; color: #1e293b; border: none; border-radius: 6px; padding: 6px 14px; cursor: pointer; display: inline-flex; align-items: center; gap: 5px;" onclick="window.itemStatsEngine.syncActiveFromHistory('${this.escapeHtml(sheetKey)}', '${this.escapeHtml(cleanItemKey)}')">
-                ⚡ Sync Active Record with History
-              </button>
+              <div style="display: inline-flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                <button class="btn btn-sm" style="font-size: 11px; font-weight: 700; background: #10b981; color: #ffffff; border: none; border-radius: 6px; padding: 6px 14px; cursor: pointer; display: inline-flex; align-items: center; gap: 5px;" onclick="window.itemStatsEngine.recordActiveToHistory('${this.escapeHtml(sheetKey)}', '${this.escapeHtml(cleanItemKey)}')">
+                  ⚡ Record Active Status to History
+                </button>
+                <button class="btn btn-sm" style="font-size: 11px; font-weight: 700; background: #f59e0b; color: #1e293b; border: none; border-radius: 6px; padding: 6px 14px; cursor: pointer; display: inline-flex; align-items: center; gap: 5px;" onclick="window.itemStatsEngine.syncActiveFromHistory('${this.escapeHtml(sheetKey)}', '${this.escapeHtml(cleanItemKey)}')">
+                  ⚡ Sync Active From History
+                </button>
+              </div>
             </div>
           `;
         })()}
@@ -2818,6 +2823,52 @@ class ItemStatsEngine {
     if (window.inventoryManager && typeof window.inventoryManager.reconcileInventoryWithHistory === 'function') {
       await window.inventoryManager.reconcileInventoryWithHistory(activeKey, false);
       this.openDossierModal(cleanItemKey, sheetKey);
+    }
+  }
+
+  async recordActiveToHistory(sheetKey, cleanItemKey) {
+    const activeKey = sheetKey.replace('_history', '');
+    const activeTable = this.db.getTable(activeKey);
+    if (!activeTable || !activeTable.rows) {
+      alert(`Could not find active table for ${activeKey}`);
+      return;
+    }
+
+    const itemRow = activeTable.rows.find(r => {
+      const num = String(r['Item #'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['MACK'] || r['HVT #'] || r['Phasing Set #'] || r['AED #'] || r['Serial #'] || r['ESL ID'] || '').trim();
+      return num.toLowerCase() === String(cleanItemKey).trim().toLowerCase();
+    });
+
+    if (!itemRow) {
+      alert(`Could not find item #${cleanItemKey} in active sheet ${activeKey}`);
+      return;
+    }
+
+    const assignedTo = String(itemRow['Assigned To'] || itemRow['Assigned to'] || itemRow['Status'] || '').trim();
+    const location = String(itemRow['Location'] || 'Helena').trim();
+    const dateAssigned = itemRow['Date Assigned'] || itemRow['Test Date'] || new Date();
+    const notes = String(itemRow['Notes'] || '').trim();
+    const status = String(itemRow['Status'] || '').trim();
+
+    await this.db.recordItemHistoryEvent(
+      activeKey,
+      cleanItemKey,
+      assignedTo,
+      location,
+      dateAssigned,
+      notes || `Active status recorded to history (${status})`
+    );
+
+    // Refresh active table views and dossier
+    if (window.sheetNavigator) {
+      window.sheetNavigator.renderActiveView();
+    }
+    this.openDossierModal(cleanItemKey, sheetKey);
+
+    if (window.inventoryManager && typeof window.inventoryManager.showToast === 'function') {
+      window.inventoryManager.showToast(`✅ Successfully recorded active status to history for #${cleanItemKey}!`);
+    } else {
+      alert(`✅ Successfully recorded active status to history for #${cleanItemKey}!`);
     }
   }
 }

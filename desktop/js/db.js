@@ -873,46 +873,69 @@ class LocalDatabase {
     const location = String(cleanLoc || itemRow['Location'] || 'Helena').trim();
     const notes = reasonNote || itemRow['Notes'] || '';
 
-    // Check if the latest history entry for this item already has the identical assignedTo and location
+    // Check if the chronologically latest history entry for this item already has the identical assignedTo and location
     if (histTable.rows && histTable.rows.length > 0) {
       const isNum = /^\d+$/.test(itemNum);
       const parsedNum = isNum ? parseInt(itemNum, 10) : null;
-      const latest = histTable.rows.find(r => {
+      const itemHistRows = histTable.rows.filter(r => {
         const rNum = String(r['Item #'] || r['Model'] || r['Serial #'] || Object.values(r)[1] || Object.values(r)[0] || '').trim();
         if (rNum.toLowerCase() === itemNum.toLowerCase()) return true;
         if (isNum && /^\d+$/.test(rNum) && parseInt(rNum, 10) === parsedNum) return true;
         return false;
       });
-      if (latest) {
-        const lAssigned = String(latest['Assigned To'] || latest['Status'] || '').trim().toLowerCase();
-        const lLoc = String(latest['Location'] || '').trim().toLowerCase();
-        if (lAssigned === assignedTo.toLowerCase() && lLoc === location.toLowerCase()) {
-          const newDate = String(itemRow['Date Assigned'] || itemRow['Date'] || '').trim();
-          const curDate = String(latest['Date Assigned'] || latest['Date'] || '').trim();
-          if (newDate && newDate !== curDate) {
-            latest['Date Assigned'] = newDate;
-            if (itemRow['Notes'] !== undefined) latest['Notes'] = itemRow['Notes'];
-            if (histTable.rawGrid && histTable.headers) {
-              const dateColIdx = histTable.headers.findIndex(h => /date\s*assigned|^date$/i.test(h));
-              const rIdx = latest._rowIdx || (histTable.rows.indexOf(latest) !== -1 ? histTable.rows.indexOf(latest) + 2 : null);
-              if (rIdx && histTable.rawGrid[rIdx - 1] && dateColIdx !== -1) {
-                histTable.rawGrid[rIdx - 1][dateColIdx] = newDate;
-              }
-              if (rIdx && dateColIdx !== -1) {
-                await this.addMutation({
-                  action: 'UPDATE_CELL',
-                  sheetName: histTable.name,
-                  row: rIdx,
-                  col: dateColIdx + 1,
-                  header: histTable.headers[dateColIdx],
-                  itemIdentifier: itemNum,
-                  value: newDate
-                });
-              }
-            }
-            this.schedulePersistSnapshot(this.snapshot, 600);
+
+      if (itemHistRows.length > 0) {
+        // Find the chronologically latest record for this item
+        let latest = null;
+        let latestTime = -Infinity;
+        for (const r of itemHistRows) {
+          const dStr = String(r['Date Assigned'] || r['Date'] || Object.values(r)[0] || '').trim();
+          let t = 0;
+          if (window.itemStatsEngine && typeof window.itemStatsEngine.parseDate === 'function') {
+            const pd = window.itemStatsEngine.parseDate(dStr);
+            t = pd ? pd.getTime() : 0;
+          } else {
+            const pd = new Date(dStr);
+            t = !isNaN(pd.getTime()) ? pd.getTime() : 0;
           }
-          return; // Already recorded & date synced
+          if (!latest || t > latestTime) {
+            latestTime = t;
+            latest = r;
+          }
+        }
+
+        if (latest) {
+          const lAssigned = String(latest['Assigned To'] || latest['Status'] || '').trim().toLowerCase();
+          const lLoc = String(latest['Location'] || '').trim().toLowerCase();
+          if (lAssigned === assignedTo.toLowerCase() && lLoc === location.toLowerCase()) {
+            const newDate = String(itemRow['Date Assigned'] || itemRow['Date'] || '').trim();
+            const curDate = String(latest['Date Assigned'] || latest['Date'] || '').trim();
+            if (newDate && newDate !== curDate) {
+              latest['Date Assigned'] = newDate;
+              if (itemRow['Notes'] !== undefined) latest['Notes'] = itemRow['Notes'];
+              if (histTable.rawGrid && histTable.headers) {
+                const dateColIdx = histTable.headers.findIndex(h => /date\s*assigned|^date$/i.test(h));
+                const rIdx = latest._rowIdx || (histTable.rows.indexOf(latest) !== -1 ? histTable.rows.indexOf(latest) + 2 : null);
+                if (rIdx && histTable.rawGrid[rIdx - 1] && dateColIdx !== -1) {
+                  histTable.rawGrid[rIdx - 1][dateColIdx] = newDate;
+                }
+                if (rIdx && dateColIdx !== -1) {
+                  await this.addMutation({
+                    action: 'UPDATE_CELL',
+                    sheetName: histTable.name,
+                    row: rIdx,
+                    col: dateColIdx + 1,
+                    header: histTable.headers[dateColIdx],
+                    itemIdentifier: itemNum,
+                    value: newDate
+                  });
+                }
+              }
+              this.schedulePersistSnapshot(this.snapshot, 600);
+              this.notify();
+            }
+            return; // Already recorded & date synced
+          }
         }
       }
     }
@@ -951,6 +974,9 @@ class LocalDatabase {
       itemIdentifier: itemNum,
       rowData: histRow
     });
+
+    this.schedulePersistSnapshot(this.snapshot, 600);
+    this.notify();
   }
 
   /**
@@ -1203,6 +1229,84 @@ class LocalDatabase {
     this.schedulePersistSnapshot(this.snapshot, 600);
     this.notify();
     return true;
+  }
+
+  /**
+   * Save a manual pick override for an employee on a swap sheet
+   */
+  saveManualPick(swapTableKey, empName, currentItemNum, pickListNum, status = 'In Stock ✅') {
+    if (!swapTableKey || !empName) return;
+    const cleanSheet = String(swapTableKey).toLowerCase().trim();
+    const cleanEmp = String(empName).toLowerCase().trim();
+    const cleanItem = String(currentItemNum || '').toLowerCase().trim();
+    const cleanPick = String(pickListNum || '').trim();
+
+    if (!this.snapshot) this.snapshot = { tables: {}, configs: {} };
+    if (!this.snapshot.manualPicks) this.snapshot.manualPicks = {};
+    if (!this.snapshot.manualPicks[cleanSheet]) this.snapshot.manualPicks[cleanSheet] = {};
+
+    let localRegistry = {};
+    try {
+      const stored = localStorage.getItem('sa_manual_picks');
+      if (stored) localRegistry = JSON.parse(stored);
+    } catch (e) {}
+    if (!localRegistry[cleanSheet]) localRegistry[cleanSheet] = {};
+
+    if (!cleanPick || cleanPick === '—' || cleanPick === '-') {
+      delete this.snapshot.manualPicks[cleanSheet][`${cleanEmp}|${cleanItem}`];
+      delete this.snapshot.manualPicks[cleanSheet][cleanEmp];
+      delete localRegistry[cleanSheet][`${cleanEmp}|${cleanItem}`];
+      delete localRegistry[cleanSheet][cleanEmp];
+    } else {
+      const entry = {
+        pickListNum: cleanPick,
+        status: status,
+        currentItemNum: currentItemNum,
+        empName: empName,
+        timestamp: new Date().toISOString()
+      };
+      this.snapshot.manualPicks[cleanSheet][`${cleanEmp}|${cleanItem}`] = entry;
+      this.snapshot.manualPicks[cleanSheet][cleanEmp] = entry;
+      localRegistry[cleanSheet][`${cleanEmp}|${cleanItem}`] = entry;
+      localRegistry[cleanSheet][cleanEmp] = entry;
+    }
+
+    try {
+      localStorage.setItem('sa_manual_picks', JSON.stringify(localRegistry));
+    } catch (e) {}
+    this.schedulePersistSnapshot(this.snapshot, 1000);
+  }
+
+  /**
+   * Get all manual pick overrides for a given swap sheet
+   */
+  getManualPicks(swapTableKey) {
+    const cleanSheet = String(swapTableKey || '').toLowerCase().trim();
+    const res = {};
+    
+    // Read from localStorage first as primary persistent fallback
+    try {
+      const stored = localStorage.getItem('sa_manual_picks');
+      if (stored) {
+        const localRegistry = JSON.parse(stored);
+        if (localRegistry && localRegistry[cleanSheet]) {
+          Object.assign(res, localRegistry[cleanSheet]);
+        }
+      }
+    } catch (e) {}
+
+    // Merge in snapshot manualPicks
+    if (this.snapshot && this.snapshot.manualPicks && this.snapshot.manualPicks[cleanSheet]) {
+      Object.assign(res, this.snapshot.manualPicks[cleanSheet]);
+    }
+    return res;
+  }
+
+  /**
+   * Clear a manual pick override
+   */
+  clearManualPick(swapTableKey, empName, currentItemNum) {
+    this.saveManualPick(swapTableKey, empName, currentItemNum, '—');
   }
 
   async replaceSwapTable(tableKey, rawGrid, headers, rows) {
@@ -1982,14 +2086,30 @@ class LocalDatabase {
         if (!table.rows) table.rows = [];
         if (!table.rawGrid) table.rawGrid = [table.headers || Object.keys(mut.rowData)];
         
-        // Find item identifier
-        const firstKey = Object.keys(mut.rowData)[0] || 'Item #';
-        const itemIdentifier = String(mut.rowData['Item #'] || mut.rowData['Glove'] || mut.rowData['Sleeve'] || mut.rowData['Blanket'] || mut.rowData['Serial #'] || mut.rowData['ESL ID'] || mut.rowData[firstKey] || '').trim();
-        
-        const exists = table.rows.some(r => {
-          const rKey = String(r['Item #'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['Serial #'] || r['ESL ID'] || Object.values(r)[0] || '').trim();
-          return rKey === itemIdentifier;
-        });
+        const isHistoryTable = (mut.tableKey && mut.tableKey.endsWith('_history')) ||
+                               (mut.sheetName && mut.sheetName.toLowerCase().includes('history'));
+
+        let exists = false;
+        if (isHistoryTable) {
+          const mDate = String(mut.rowData['Date Assigned'] || mut.rowData['Date'] || Object.values(mut.rowData)[0] || '').trim();
+          const mAssigned = String(mut.rowData['Assigned To'] || '').trim().toLowerCase();
+          const mItem = String(mut.rowData['Item #'] || mut.rowData['Serial #'] || Object.values(mut.rowData)[1] || '').trim().toLowerCase();
+          exists = table.rows.some(r => {
+            const rDate = String(r['Date Assigned'] || r['Date'] || Object.values(r)[0] || '').trim();
+            const rAssigned = String(r['Assigned To'] || '').trim().toLowerCase();
+            const rItem = String(r['Item #'] || r['Serial #'] || Object.values(r)[1] || '').trim().toLowerCase();
+            return rItem === mItem && rDate === mDate && rAssigned === mAssigned;
+          });
+        } else {
+          // Find item identifier for primary key tables
+          const firstKey = Object.keys(mut.rowData)[0] || 'Item #';
+          const itemIdentifier = String(mut.rowData['Item #'] || mut.rowData['Glove'] || mut.rowData['Sleeve'] || mut.rowData['Blanket'] || mut.rowData['Serial #'] || mut.rowData['ESL ID'] || mut.rowData[firstKey] || '').trim();
+          
+          exists = table.rows.some(r => {
+            const rKey = String(r['Item #'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['Serial #'] || r['ESL ID'] || Object.values(r)[0] || '').trim();
+            return rKey === itemIdentifier;
+          });
+        }
 
         if (!exists) {
           table.rows.unshift({ ...mut.rowData });

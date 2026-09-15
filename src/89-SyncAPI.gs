@@ -1381,6 +1381,21 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
                       }
                     }
                   }
+                } else if (hLower.includes('pick list') || mut.isManualPick || (mut.col === 7 && !isMack && !sheetLower.includes('ground') && !sheetLower.includes('aed')) || (mut.col === 9 && isMack) || (mut.col === 10 && sheetLower.includes('ground')) || (mut.col === 6 && sheetLower.includes('aed')) || (mut.col === 8 && sheetLower.includes('hot stick'))) {
+                  var pVal = String(mut.value || '').trim();
+                  var isManual = (pVal !== '' && pVal !== '—' && pVal !== '-');
+                  try {
+                    sheet.getRange(mut.row, mut.col).setBackground(isManual ? '#e3f2fd' : null);
+                    var statCol = (isMack || sheetLower.includes('hv') || sheetLower.includes('phasing')) ? 10 : (sheetLower.includes('ground') ? 11 : (sheetLower.includes('hot stick') ? 9 : (sheetLower.includes('aed') ? 7 : 8)));
+                    if (isManual) {
+                      var curStatCell = sheet.getRange(mut.row, statCol).getValue();
+                      if (String(curStatCell).includes('Need to Purchase')) {
+                        sheet.getRange(mut.row, statCol).setValue('In Stock ✅');
+                      }
+                    }
+                  } catch (bgErr) {
+                    Logger.log('Error updating manual pick styling in Google Sheets: ' + bgErr);
+                  }
                 }
               }
               
@@ -2045,6 +2060,30 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
                   sheet.getRange(targetRows + 1, 1, currentLastRow - targetRows, targetCols).clearContent();
                 } catch (clearErr) {
                   Logger.log('REPLACE_TABLE_DATA clearContent warning: ' + clearErr);
+                }
+              }
+
+              // If replacing a swap sheet, apply manual pick styling to pick list cells
+              var isSwapSh = sheetName.toLowerCase().includes('swap');
+              if (isSwapSh && mut.rows && Array.isArray(mut.rows)) {
+                try {
+                  var pColIdx = -1;
+                  for (var sc = 0; sc < sheetHeaders.length; sc++) {
+                    if (String(sheetHeaders[sc] || '').toLowerCase().includes('pick list')) {
+                      pColIdx = sc + 1;
+                      break;
+                    }
+                  }
+                  if (pColIdx !== -1) {
+                    for (var pr = 0; pr < mut.rows.length; pr++) {
+                      var rObj = mut.rows[pr];
+                      if (rObj && (rObj._manualPick || rObj.isManualPick)) {
+                        sheet.getRange(pr + 2, pColIdx).setBackground('#e3f2fd');
+                      }
+                    }
+                  }
+                } catch (styleErr) {
+                  Logger.log('Error applying manual pick background in REPLACE_SWAP_TABLE: ' + styleErr);
                 }
               }
 

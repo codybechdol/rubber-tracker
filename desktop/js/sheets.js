@@ -1579,6 +1579,20 @@ class SheetNavigator {
                 tableData.rawGrid[rowIdx][c] = '';
               }
             }
+            const isPickListCol = colLower.includes('pick list');
+            if (isPickListCol) {
+              const rowObj = (tableData.rows || [])[rowIdx - 1];
+              const empName = String(rowArr[0] || '').trim().toLowerCase();
+              const currentItem = String(rowArr[1] || '').trim().toLowerCase();
+              const manualPicks = (this.db && typeof this.db.getManualPicks === 'function') ? this.db.getManualPicks(this.currentSheetKey) : {};
+              const isManual = (rowObj && (rowObj._manualPick || rowObj.isManualPick)) ||
+                               (manualPicks[`${empName}|${currentItem}`] && manualPicks[`${empName}|${currentItem}`].pickListNum === displayVal) ||
+                               (manualPicks[empName] && manualPicks[empName].pickListNum === displayVal);
+              if (isManual && displayVal && displayVal !== '—' && displayVal !== '-') {
+                cellStyle += ' background-color: rgba(59, 130, 246, 0.18); border: 1px solid #60a5fa; font-weight: 700; color: #93c5fd; border-radius: 4px;';
+              }
+            }
+
             const isReadOnly = colLower.includes('change out') || colLower.includes('days');
             isCellEditable = !isReadOnly;
             
@@ -1621,11 +1635,83 @@ class SheetNavigator {
         const sheetName = e.target.dataset.sheet;
         const row = parseInt(e.target.dataset.row, 10);
         const col = parseInt(e.target.dataset.col, 10);
-        const header = e.target.dataset.header;
+        const header = e.target.dataset.header || '';
+        const hLower = header.toLowerCase();
 
         // Update in-memory grid
         if (tableData.rawGrid && tableData.rawGrid[row - 1]) {
           tableData.rawGrid[row - 1][col - 1] = newVal;
+        }
+
+        const isSwapSheet = String(this.currentSheetKey || '').includes('_swaps') || String(sheetName || '').toLowerCase().includes('swaps');
+        const isPickListCol = hLower.includes('pick list');
+        let isManualPick = false;
+
+        if (isSwapSheet && isPickListCol) {
+          const rowIdx = row - 1;
+          const gridRow = tableData.rawGrid ? tableData.rawGrid[rowIdx] : null;
+          const empName = gridRow ? String(gridRow[0] || '').trim() : '';
+          const currentItemNum = gridRow ? String(gridRow[1] || '').trim() : '';
+          const isCleared = (!newVal || newVal === '—' || newVal === '-');
+          isManualPick = !isCleared;
+
+          // Find row object in tableData.rows
+          const rowObj = (tableData.rows || []).find(r => r._rowIdx === row || (r['Employee'] && r['Employee'] === empName));
+          if (rowObj) {
+            rowObj._manualPick = isManualPick;
+            rowObj.isManualPick = isManualPick;
+            rowObj['Pick List Item #'] = newVal;
+          }
+
+          // Save to persistent manual picks registry
+          if (this.db && typeof this.db.saveManualPick === 'function') {
+            if (isCleared) {
+              this.db.clearManualPick(this.currentSheetKey, empName, currentItemNum);
+            } else {
+              this.db.saveManualPick(this.currentSheetKey, empName, currentItemNum, newVal, 'In Stock ✅');
+            }
+          }
+
+          // Dynamic status detection for the manual pick
+          if (!isCleared) {
+            let invKey = this.currentSheetKey.replace('_swaps', '').replace('swaps', '');
+            if (!invKey.endsWith('s') && ['glove', 'sleeve', 'blanket', 'mack', 'ground'].includes(invKey)) {
+              invKey += 's';
+            }
+            if (invKey === 'hot_stick' || invKey === 'stick') invKey = 'hot_sticks';
+            if (invKey === 'hv_tester' || invKey === 'phasing_set') invKey = 'calibrations';
+
+            const invTable = this.db.getTable(invKey);
+            let newStatus = 'In Stock ✅';
+            if (invTable && invTable.rows) {
+              const matchedItem = invTable.rows.find(it => {
+                const itNum = String(it['Item #'] || it['Glove'] || it['Sleeve'] || it['Blanket'] || it['MACK'] || it['Serial #'] || it['ESL ID'] || Object.values(it)[0] || '').trim();
+                return itNum.toLowerCase() === newVal.toLowerCase();
+              });
+              if (matchedItem) {
+                const iStat = String(matchedItem['Status'] || '').trim().toLowerCase();
+                if (iStat === 'ready for delivery') newStatus = 'Ready For Delivery 🚚';
+                else if (iStat === 'in testing') newStatus = 'In Testing 🔬';
+                else newStatus = 'In Stock ✅';
+
+                if (invKey === 'gloves' && rowObj && rowObj['Size'] && matchedItem['Size']) {
+                  const empSize = parseFloat(rowObj['Size']);
+                  const itSize = parseFloat(matchedItem['Size']);
+                  if (!isNaN(empSize) && !isNaN(itSize) && itSize > empSize) {
+                    newStatus = newStatus.replace('✅', '(Size Up) ⚠️').replace('🚚', '(Size Up) ⚠️').replace('🔬', '(Size Up) ⚠️');
+                  }
+                }
+              }
+            }
+
+            const statCol = this.currentSheetKey.includes('mack') ? 9 : 7;
+            if (gridRow && gridRow.length > statCol) {
+              gridRow[statCol] = newStatus;
+            }
+            if (rowObj) {
+              rowObj['Status'] = newStatus;
+            }
+          }
         }
 
         await this.db.addMutation({
@@ -1635,16 +1721,17 @@ class SheetNavigator {
           col: col,
           header: header,
           oldValue: initialVal,
-          value: newVal
+          value: newVal,
+          isManualPick: isManualPick
         });
 
         // If this is a Swap sheet and Date Changed was edited, trigger Stage 3
-        if (window.swapEngine && this.currentSheetKey.includes('_swaps') && header && header.toLowerCase().includes('changed')) {
+        if (window.swapEngine && this.currentSheetKey.includes('_swaps') && hLower.includes('changed')) {
           await window.swapEngine.handleDateChangedEdit(this.currentSheetKey, row - 1, newVal);
         }
 
-        // Re-render swap grid if Date Changed was edited to update status pill immediately
-        if (header && (header.toLowerCase().includes('changed') || header.toLowerCase().includes('date'))) {
+        // Re-render swap grid if Date Changed or Pick List was edited to update status pill immediately
+        if (isSwapSheet && (hLower.includes('changed') || hLower.includes('date') || isPickListCol)) {
           this.renderCurrentSheet();
         }
       });
