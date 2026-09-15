@@ -2223,6 +2223,9 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
  */
 function executeSyncApiProcessSafetyEmails(options) {
   options = options || {};
+  var daysBack = (options.daysBack !== undefined && options.daysBack !== null && !isNaN(parseInt(options.daysBack, 10)))
+    ? parseInt(options.daysBack, 10)
+    : 7;
   var skipPdfExtraction = options.skipPdfExtraction !== false;
   var batchSize = options.batchSize ? parseInt(options.batchSize, 10) : (skipPdfExtraction ? 20 : 1);
   if (skipPdfExtraction) {
@@ -2265,11 +2268,11 @@ function executeSyncApiProcessSafetyEmails(options) {
 
   // If client explicitly requests the final post-processing step
   if (isPostProcessingStep) {
+    var cleanupProps = PropertiesService.getScriptProperties();
     try {
       if (typeof clearSafetyBatchProperties === 'function') {
         clearSafetyBatchProperties();
       } else {
-        var cleanupProps = PropertiesService.getScriptProperties();
         var cKeys = cleanupProps.getKeys();
         for (var cki = 0; cki < cKeys.length; cki++) {
           if (cKeys[cki].indexOf('SAFETY_BATCH_') === 0) {
