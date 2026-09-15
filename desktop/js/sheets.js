@@ -2753,6 +2753,8 @@ class SheetNavigator {
       let initialVal = '';
       const header = (td.dataset.header || '').toLowerCase();
       const isAssignedCol = (header.includes('assigned') || header === 'holder') && !header.includes('date');
+      const isEmpDepartureCol = this.currentSheetKey === 'employees' && (header === 'location' || header === 'last day reason');
+      const hasAutocomplete = isAssignedCol || isEmpDepartureCol;
 
       td.addEventListener('focus', (e) => {
         const targetCell = td;
@@ -2762,13 +2764,13 @@ class SheetNavigator {
         } else {
           initialVal = targetCell.textContent.trim().replace(/^👤\s*/, '').trim();
         }
-        if (isAssignedCol) {
+        if (hasAutocomplete) {
           const currentText = (cellTextSpan ? cellTextSpan.textContent : td.textContent).trim().replace(/^👤\s*/, '').trim();
           this.showCellAutocomplete(td, currentText);
         }
       });
 
-      if (isAssignedCol) {
+      if (hasAutocomplete) {
         td.addEventListener('input', (e) => {
           const cellTextSpan = td.querySelector('.cell-text');
           const currentText = (cellTextSpan ? cellTextSpan.textContent : td.textContent).trim().replace(/^👤\s*/, '').trim();
@@ -2820,7 +2822,7 @@ class SheetNavigator {
         const dropdown = document.getElementById('cell-autocomplete-dropdown');
         const isDropdownOpen = dropdown && dropdown.style.display === 'block';
 
-        if (isAssignedCol && isDropdownOpen) {
+        if (isDropdownOpen) {
           if (e.key === 'ArrowDown') {
             e.preventDefault();
             this.navigateAutocomplete(1);
@@ -2913,6 +2915,25 @@ class SheetNavigator {
           const isOnShelf = valLower === 'on shelf' || valLower === 'onshelf' || valLower === 'shelf';
 
           const isUnreconciledShelf = (isAssignedCol || isStatusCol) && isOnShelf && isInventorySheet && tableRow && (tableRow['Status'] !== 'On Shelf' || tableRow['Location'] !== 'Helena');
+
+          // Check for Employee Departure / Archive triggers on Employees sheet
+          if (this.currentSheetKey === 'employees' && tableRow) {
+            const isLocCol = hLower === 'location';
+            const isReasonCol = hLower === 'last day reason';
+            const isLastDayCol = hLower === 'last day';
+
+            const isLocationPrevious = isLocCol && (valLower === 'previous employee' || valLower.includes('previous'));
+            const isReasonEntered = isReasonCol && newVal && newVal.trim() !== '';
+            const isIncompleteDeparture = (isLocCol || isReasonCol || isLastDayCol) && 
+              (valLower.includes('previous') || (tableRow['Location'] && String(tableRow['Location']).toLowerCase().includes('previous'))) &&
+              (!tableRow['Last Day Reason'] || !tableRow['Last Day']);
+
+            if (isLocationPrevious || isReasonEntered || isIncompleteDeparture) {
+              const triggeredReason = isReasonEntered ? newVal : (tableRow['Last Day Reason'] || '');
+              await this.openEmployeeDepartureModal(tableRow, targetCell, initialVal, triggeredReason);
+              return;
+            }
+          }
 
           if (newVal === initialVal && !isUnreconciledShelf) return; // No change made!
 
@@ -3927,9 +3948,498 @@ class SheetNavigator {
     });
   }
 
+  /**
+   * Interactive modal to depart / archive an employee.
+   * Prompts for Last Working Day, Reason, Notes, and reviews unreturned equipment.
+   */
+  openEmployeeDepartureModal(empOrRow, targetCell = null, initialVal = '', triggeredReason = '') {
+    return new Promise(async (resolve) => {
+      const empTable = this.db.getTable('employees');
+      if (!empTable) return resolve(null);
+
+      let tableRow = null;
+      let actualRowIdx = -1;
+      let empName = '';
+
+      if (typeof empOrRow === 'string') {
+        empName = empOrRow.trim();
+        if (empTable.rows) {
+          const rIdx = empTable.rows.findIndex(r => {
+            const n = String(r['Name'] || r['Employee Name'] || Object.values(r)[0] || '').trim();
+            return n.toLowerCase() === empName.toLowerCase() || (window.employeeProfileEngine && window.employeeProfileEngine.isNameMatch(n, empName));
+          });
+          if (rIdx !== -1) {
+            tableRow = empTable.rows[rIdx];
+            actualRowIdx = rIdx + 2;
+          }
+        }
+      } else if (typeof empOrRow === 'object' && empOrRow) {
+        tableRow = empOrRow;
+        empName = String(tableRow['Employee Name'] || tableRow['Name'] || Object.values(tableRow)[0] || '').trim();
+        if (empTable.rows) {
+          const rIdx = empTable.rows.indexOf(tableRow);
+          if (rIdx !== -1) {
+            actualRowIdx = rIdx + 2;
+          } else {
+            const rIdx2 = empTable.rows.findIndex(r => {
+              const n = String(r['Name'] || r['Employee Name'] || Object.values(r)[0] || '').trim();
+              return n.toLowerCase() === empName.toLowerCase();
+            });
+            if (rIdx2 !== -1) actualRowIdx = rIdx2 + 2;
+          }
+        }
+      }
+
+      if (!tableRow || !empName) {
+        if (window.showToast) window.showToast('Could not find employee record to archive.', 'warning');
+        else alert('Could not find employee record to archive.');
+        if (targetCell && initialVal !== undefined) targetCell.textContent = initialVal;
+        return resolve(null);
+      }
+
+      const modal = document.getElementById('employee-departure-modal');
+      const today = new Date();
+      const todayFormatted = `${String(today.getMonth() + 1).padStart(2, '0')}/${String(today.getDate()).padStart(2, '0')}/${today.getFullYear()}`;
+      const todayIso = today.toISOString().split('T')[0];
+
+      const yesterday = new Date(today);
+      yesterday.setDate(yesterday.getDate() - 1);
+      const yesterdayFormatted = `${String(yesterday.getMonth() + 1).padStart(2, '0')}/${String(yesterday.getDate()).padStart(2, '0')}/${yesterday.getFullYear()}`;
+      const yesterdayIso = yesterday.toISOString().split('T')[0];
+
+      // Scan all active equipment sheets for items currently assigned to this worker
+      const eqTypes = [
+        { key: 'gloves', title: 'Gloves', icon: '🧤' },
+        { key: 'sleeves', title: 'Sleeves', icon: '🦾' },
+        { key: 'blankets', title: 'Blankets', icon: '🔲' },
+        { key: 'macks', title: 'MACKs', icon: '🧱' },
+        { key: 'hv_testers', title: 'HV Testers', icon: '⚡' },
+        { key: 'phasing_sets', title: 'Phasing Sets', icon: '⚡' },
+        { key: 'aed', title: 'AED', icon: '🏥' },
+        { key: 'grounds', title: 'Grounds', icon: '⚡' },
+        { key: 'hot_sticks', title: 'Hot Sticks', icon: '🔴' }
+      ];
+
+      const assignedGear = [];
+      eqTypes.forEach(eq => {
+        const t = this.db.getTable(eq.key);
+        if (t && t.rows) {
+          t.rows.forEach(item => {
+            const holder = String(item['Assigned To'] || item['Assigned'] || item['Holder'] || '').trim();
+            if (holder) {
+              const matches = holder.toLowerCase() === empName.toLowerCase() || 
+                (window.employeeProfileEngine && window.employeeProfileEngine.isNameMatch(holder, empName));
+              if (matches) {
+                const id = item['Item #'] || item['Serial #'] || item['HVT #'] || item['Phasing Set #'] || item['AED #'] || item['Glove'] || item['Sleeve'] || item['Blanket'] || item['MACK'] || Object.values(item)[0] || '';
+                assignedGear.push({
+                  type: eq.title,
+                  icon: eq.icon,
+                  id: String(id).trim()
+                });
+              }
+            }
+          });
+        }
+      });
+
+      if (!modal) {
+        // Resilient fallback prompt if modal markup is not present
+        const reasonInput = prompt(`🚪 Depart Employee: ${empName}\n\nEnter Departure Reason (Quit, Resigned, Layoff, Terminated, Fired, Medical):`, triggeredReason || 'Quit');
+        if (!reasonInput) {
+          if (targetCell && initialVal !== undefined) targetCell.textContent = initialVal;
+          return resolve(null);
+        }
+        const lastDayInput = prompt(`Enter Last Working Day for ${empName} (MM/DD/YYYY):`, todayFormatted);
+        if (!lastDayInput) {
+          if (targetCell && initialVal !== undefined) targetCell.textContent = initialVal;
+          return resolve(null);
+        }
+        await this._commitEmployeeDeparture(tableRow, actualRowIdx, empName, lastDayInput.trim(), reasonInput.trim(), '', targetCell, initialVal);
+        return resolve({ confirmed: true, lastDay: lastDayInput.trim(), reason: reasonInput.trim() });
+      }
+
+      // Populate Modal Fields
+      const titleEl = document.getElementById('emp-depart-modal-title');
+      const nameEl = document.getElementById('emp-depart-name');
+      const crewEl = document.getElementById('emp-depart-crew');
+      const locEl = document.getElementById('emp-depart-location');
+      const roleEl = document.getElementById('emp-depart-role');
+      const equipAlert = document.getElementById('emp-depart-equip-alert');
+      const equipCount = document.getElementById('emp-depart-equip-count');
+      const equipList = document.getElementById('emp-depart-equip-list');
+      const noEquip = document.getElementById('emp-depart-no-equip');
+      const dateInput = document.getElementById('emp-depart-date');
+      const datePicker = document.getElementById('emp-depart-date-picker');
+      const quickToday = document.getElementById('emp-depart-quick-today');
+      const quickYesterday = document.getElementById('emp-depart-quick-yesterday');
+      const reasonSelect = document.getElementById('emp-depart-reason');
+      const notesInput = document.getElementById('emp-depart-notes');
+      const closeBtn = document.getElementById('emp-depart-modal-close');
+      const cancelBtn = document.getElementById('emp-depart-modal-cancel');
+      const confirmBtn = document.getElementById('emp-depart-modal-confirm');
+
+      if (titleEl) titleEl.textContent = `Depart & Archive: ${empName}`;
+      if (nameEl) nameEl.textContent = empName;
+      if (crewEl) crewEl.textContent = tableRow['Job Number'] || tableRow['Job #'] || 'N/A';
+      
+      const priorLocation = (initialVal && !initialVal.toLowerCase().includes('previous')) 
+        ? initialVal 
+        : (tableRow['Location'] && !tableRow['Location'].toLowerCase().includes('previous') ? tableRow['Location'] : 'Unknown');
+      if (locEl) locEl.textContent = priorLocation;
+      if (roleEl) roleEl.textContent = tableRow['Job Classification'] || tableRow['Classification'] || 'Lineman';
+
+      // Equipment alert display
+      if (assignedGear.length > 0) {
+        if (equipAlert) equipAlert.style.display = 'block';
+        if (equipCount) equipCount.textContent = assignedGear.length;
+        if (equipList) {
+          equipList.innerHTML = assignedGear.map(g => `
+            <span class="badge" style="background: rgba(239, 68, 68, 0.25); border: 1px solid rgba(239, 68, 68, 0.45); color: #fca5a5; font-size: 11px; padding: 3px 7px; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px;">
+              <span>${g.icon}</span> <strong>${this.escapeHtml(g.type)} #${this.escapeHtml(g.id)}</strong>
+            </span>
+          `).join('');
+        }
+        if (noEquip) noEquip.style.display = 'none';
+      } else {
+        if (equipAlert) equipAlert.style.display = 'none';
+        if (noEquip) noEquip.style.display = 'flex';
+      }
+
+      // Pre-fill Date
+      let initialDate = tableRow['Last Day'] || todayFormatted;
+      if (initialDate.includes('-')) {
+        const p = initialDate.split('-');
+        if (p.length === 3) initialDate = `${p[1]}/${p[2]}/${p[0]}`;
+      }
+      if (dateInput) dateInput.value = initialDate;
+      if (datePicker) {
+        if (/^\d{2}\/\d{2}\/\d{4}$/.test(initialDate)) {
+          const p = initialDate.split('/');
+          datePicker.value = `${p[2]}-${p[0]}-${p[1]}`;
+        } else {
+          datePicker.value = todayIso;
+        }
+      }
+
+      // Pre-select Reason
+      if (reasonSelect) {
+        let matchedReason = 'Quit';
+        const rLower = (triggeredReason || tableRow['Last Day Reason'] || '').toLowerCase();
+        if (rLower.includes('resign')) matchedReason = 'Resigned';
+        else if (rLower.includes('layoff') || rLower.includes('laid')) matchedReason = 'Layoff';
+        else if (rLower.includes('term')) matchedReason = 'Terminated';
+        else if (rLower.includes('fire')) matchedReason = 'Fired';
+        else if (rLower.includes('med')) matchedReason = 'Medical';
+        else if (rLower.includes('other')) matchedReason = 'Other';
+        else if (rLower.includes('quit')) matchedReason = 'Quit';
+        reasonSelect.value = matchedReason;
+      }
+
+      if (notesInput) notesInput.value = '';
+
+      // Bind Date pickers & quick buttons
+      if (datePicker && dateInput) {
+        datePicker.onchange = () => {
+          if (datePicker.value) {
+            const p = datePicker.value.split('-');
+            dateInput.value = `${p[1]}/${p[2]}/${p[0]}`;
+          }
+        };
+      }
+
+      if (dateInput && datePicker) {
+        dateInput.oninput = () => {
+          const val = dateInput.value.trim();
+          if (/^\d{2}\/\d{2}\/\d{4}$/.test(val)) {
+            const p = val.split('/');
+            datePicker.value = `${p[2]}-${p[0]}-${p[1]}`;
+          }
+        };
+      }
+
+      if (quickToday && dateInput && datePicker) {
+        quickToday.onclick = (e) => {
+          e.preventDefault();
+          dateInput.value = todayFormatted;
+          datePicker.value = todayIso;
+        };
+      }
+
+      if (quickYesterday && dateInput && datePicker) {
+        quickYesterday.onclick = (e) => {
+          e.preventDefault();
+          dateInput.value = yesterdayFormatted;
+          datePicker.value = yesterdayIso;
+        };
+      }
+
+      const cleanup = () => {
+        modal.classList.remove('active');
+        modal.style.display = 'none';
+        modal.onclick = null;
+        if (closeBtn) closeBtn.onclick = null;
+        if (cancelBtn) cancelBtn.onclick = null;
+        if (confirmBtn) confirmBtn.onclick = null;
+        if (datePicker) datePicker.onchange = null;
+        if (dateInput) dateInput.oninput = null;
+        if (quickToday) quickToday.onclick = null;
+        if (quickYesterday) quickYesterday.onclick = null;
+        document.removeEventListener('keydown', handleEsc);
+      };
+
+      const handleEsc = (e) => {
+        if (e.key === 'Escape') {
+          handleCancel();
+        }
+      };
+
+      const handleCancel = () => {
+        cleanup();
+        if (targetCell) {
+          targetCell.textContent = initialVal;
+        }
+        if (window.showToast) {
+          window.showToast(`Departure cancelled. Location reverted to "${initialVal}".`, 'info');
+        }
+        resolve(null);
+      };
+
+      const handleConfirm = async () => {
+        let dVal = dateInput ? dateInput.value.trim() : '';
+        if (!dVal) dVal = todayFormatted;
+        if (dVal.includes('-')) {
+          const p = dVal.split('-');
+          if (p.length === 3) dVal = `${p[1]}/${p[2]}/${p[0]}`;
+        }
+
+        const reasonVal = reasonSelect ? reasonSelect.value : 'Quit';
+        const notesVal = notesInput ? notesInput.value.trim() : '';
+
+        if (confirmBtn) {
+          confirmBtn.disabled = true;
+          confirmBtn.innerHTML = '<span>⏳</span> Archiving...';
+        }
+
+        try {
+          await this._commitEmployeeDeparture(
+            tableRow,
+            actualRowIdx,
+            empName,
+            dVal,
+            reasonVal,
+            notesVal,
+            targetCell,
+            priorLocation
+          );
+          cleanup();
+          resolve({ confirmed: true, lastDay: dVal, reason: reasonVal, notes: notesVal });
+        } catch (err) {
+          console.error('Error in handleConfirm departure:', err);
+          alert(`Error archiving employee: ${err.message}`);
+          if (confirmBtn) {
+            confirmBtn.disabled = false;
+            confirmBtn.innerHTML = '🚪 Confirm Departure & Archive';
+          }
+        }
+      };
+
+      modal.onclick = (e) => {
+        if (e.target === modal) handleCancel();
+      };
+      if (closeBtn) closeBtn.onclick = handleCancel;
+      if (cancelBtn) cancelBtn.onclick = handleCancel;
+      if (confirmBtn) confirmBtn.onclick = handleConfirm;
+
+      document.addEventListener('keydown', handleEsc);
+
+      modal.style.display = 'flex';
+      modal.classList.add('active');
+      setTimeout(() => {
+        if (dateInput) {
+          dateInput.focus();
+          dateInput.select();
+        }
+      }, 50);
+    });
+  }
+
+  async _commitEmployeeDeparture(tableRow, actualRowIdx, empName, lastDay, reason, notes, targetCell = null, priorLocation = 'Helena') {
+    const empTable = this.db.getTable('employees');
+    const histTable = this.db.getTable('employee_history');
+    const priorJob = tableRow['Job Number'] || tableRow['Job #'] || 'N/A';
+    const hireDate = tableRow['Hire Date'] || '';
+
+    // 1. Update In-Memory Row for Employees
+    tableRow['Location'] = 'Previous Employee';
+    tableRow['Last Day'] = lastDay;
+    tableRow['Last Day Reason'] = reason;
+    if (tableRow['Status'] !== undefined) {
+      tableRow['Status'] = 'Previous Employee';
+    }
+
+    // 2. Sync to Employees rawGrid
+    if (empTable && empTable.rawGrid && actualRowIdx > 0 && empTable.rawGrid[actualRowIdx - 1]) {
+      const gRow = empTable.rawGrid[actualRowIdx - 1];
+      const headers = empTable.headers || [];
+      const locIdx = headers.findIndex(h => h.toLowerCase() === 'location');
+      const ldIdx = headers.findIndex(h => h.toLowerCase() === 'last day');
+      const ldrIdx = headers.findIndex(h => h.toLowerCase() === 'last day reason');
+      const statIdx = headers.findIndex(h => h.toLowerCase() === 'status');
+
+      if (locIdx !== -1) gRow[locIdx] = 'Previous Employee';
+      if (ldIdx !== -1) gRow[ldIdx] = lastDay;
+      if (ldrIdx !== -1) gRow[ldrIdx] = reason;
+      if (statIdx !== -1) gRow[statIdx] = 'Previous Employee';
+    }
+
+    // 3. Append to Employee History
+    const eventType = (reason === 'Quit' || reason === 'Resigned') ? 'Quit' : 'Terminated';
+    const historyNotes = `Departed (${reason}) · Prior Location: ${priorLocation}, Prior Crew: ${priorJob}.${notes ? ' ' + notes : ''}`.trim();
+
+    const histRow = {
+      'Date': lastDay,
+      'Employee Name': empName,
+      'Name': empName,
+      'Event Type': eventType,
+      'Location': 'Previous Employee',
+      'Job Number': '',
+      'Hire Date': hireDate,
+      'Last Day': lastDay,
+      'Last Day Reason': reason,
+      'Rehire Date': '',
+      'Notes': historyNotes,
+      'Phone Number': tableRow['Phone Number'] || '',
+      'Email Address': tableRow['Email Address'] || '',
+      'Glove Size': tableRow['Glove Size'] || '',
+      'Sleeve Size': tableRow['Sleeve Size'] || ''
+    };
+
+    if (histTable) {
+      if (!histTable.rows) histTable.rows = [];
+      histTable.rows.push(histRow);
+      if (histTable.rawGrid) {
+        const hHeaders = histTable.headers || Object.keys(histRow);
+        histTable.rawGrid.push(hHeaders.map(h => histRow[h] !== undefined ? histRow[h] : ''));
+      }
+    }
+
+    // 4. Update Expiring Certs Location to 'Previous Employee'
+    const certsTable = this.db.getTable('expiring_certs');
+    if (certsTable && certsTable.rows) {
+      const empNameLower = empName.toLowerCase();
+      certsTable.rows.forEach((cr, rIdx) => {
+        const cName = String(cr['Employee Name'] || cr['Name'] || Object.values(cr)[0] || '').trim().toLowerCase();
+        if (cName === empNameLower) {
+          cr['Location'] = 'Previous Employee';
+          if (certsTable.rawGrid && certsTable.headers && certsTable.rawGrid[rIdx + 1]) {
+            const cLocIdx = certsTable.headers.indexOf('Location');
+            if (cLocIdx !== -1) certsTable.rawGrid[rIdx + 1][cLocIdx] = 'Previous Employee';
+          }
+        }
+      });
+    }
+
+    // 5. Queue Outbox Mutations
+    await this.db.addMutation({
+      action: 'UPDATE_ROW',
+      sheetName: 'Employees',
+      tableKey: 'employees',
+      itemIdentifier: empName,
+      row: actualRowIdx,
+      updatedFields: {
+        'Location': 'Previous Employee',
+        'Last Day': lastDay,
+        'Last Day Reason': reason,
+        'Status': 'Previous Employee'
+      }
+    });
+
+    await this.db.addMutation({
+      action: 'ADD_ROW',
+      sheetName: 'Employee History',
+      tableKey: 'employee_history',
+      rowData: histRow
+    });
+
+    // 6. Persist Local Snapshot
+    if (typeof this.db.saveLocalSnapshot === 'function') {
+      await this.db.saveLocalSnapshot();
+    } else if (typeof this.db.persistSnapshot === 'function') {
+      await this.db.persistSnapshot(this.db.snapshot);
+    }
+
+    // 7. Rebuild Employee Resolver Index
+    if (window.employeeResolver && typeof window.employeeResolver.rebuildIndex === 'function') {
+      window.employeeResolver.rebuildIndex();
+    }
+
+    // 8. Close Employee Profile modal if open
+    if (window.employeeProfileEngine && typeof window.employeeProfileEngine.closeProfileModal === 'function') {
+      window.employeeProfileEngine.closeProfileModal();
+    }
+
+    // 9. Re-render Current Sheet
+    this.renderCurrentSheet();
+
+    // 10. Re-render Previous Employees Workspace if active
+    if (window.previousEmployeesWorkspace && typeof window.previousEmployeesWorkspace.renderWorkspace === 'function') {
+      window.previousEmployeesWorkspace.renderWorkspace();
+    }
+
+    // 11. Success Notification
+    if (window.showToast) {
+      window.showToast(`🚪 ${empName} archived as Previous Employee (${reason}, Last Day: ${lastDay}).`, 'success');
+    } else {
+      alert(`🚪 ${empName} has been archived as a Previous Employee.\n\nReason: ${reason}\nLast Day: ${lastDay}`);
+    }
+  }
+
   showCellAutocomplete(td, query) {
-    if (!window.employeeResolver || !td) return;
-    const results = window.employeeResolver.search(query, 10);
+    if (!td) return;
+    const h = (td.dataset.header || '').toLowerCase();
+    let results = [];
+
+    if (this.currentSheetKey === 'employees' && h === 'last day reason') {
+      const allReasons = [
+        { name: 'Quit', subText: 'Voluntary separation', icon: '🚪' },
+        { name: 'Resigned', subText: 'Voluntary resignation', icon: '👋' },
+        { name: 'Layoff', subText: 'Reduction in force / seasonal end', icon: '📦' },
+        { name: 'Terminated', subText: 'Involuntary termination', icon: '🛑' },
+        { name: 'Fired', subText: 'Involuntary discharge', icon: '⚠️' },
+        { name: 'Medical', subText: 'Medical leave / disability', icon: '🏥' },
+        { name: 'Other', subText: 'Other departure reason', icon: '📝' }
+      ];
+      const qLower = String(query || '').toLowerCase().trim();
+      results = qLower ? allReasons.filter(r => r.name.toLowerCase().includes(qLower) || r.subText.toLowerCase().includes(qLower)) : allReasons;
+    } else if (this.currentSheetKey === 'employees' && h === 'location') {
+      const qLower = String(query || '').toLowerCase().trim();
+      const standardLocs = [
+        { name: 'Helena', subText: 'Shop / Central Yard', icon: '📍' },
+        { name: 'Bozeman', subText: 'Montana Operations', icon: '📍' },
+        { name: 'Great Falls', subText: 'Montana Operations', icon: '📍' },
+        { name: 'Butte', subText: 'Montana Operations', icon: '📍' },
+        { name: 'Billings', subText: 'Montana Operations', icon: '📍' },
+        { name: 'Missoula', subText: 'Montana Operations', icon: '📍' },
+        { name: 'Three Rivers', subText: 'Montana Operations', icon: '📍' },
+        { name: 'Previous Employee', subText: '🚪 Depart & Archive to History', icon: '🚪' }
+      ];
+      const empTable = this.db.getTable('employees');
+      if (empTable && empTable.rows) {
+        const seen = new Set(standardLocs.map(l => l.name.toLowerCase()));
+        empTable.rows.forEach(r => {
+          const l = String(r['Location'] || '').trim();
+          if (l && !seen.has(l.toLowerCase()) && !l.toLowerCase().includes('previous')) {
+            seen.add(l.toLowerCase());
+            standardLocs.splice(standardLocs.length - 1, 0, { name: l, subText: 'Field Location', icon: '📍' });
+          }
+        });
+      }
+      results = qLower ? standardLocs.filter(l => l.name.toLowerCase().includes(qLower) || l.subText.toLowerCase().includes(qLower)) : standardLocs;
+    } else {
+      if (!window.employeeResolver) return;
+      results = window.employeeResolver.search(query, 10);
+    }
+
     if (!results || results.length === 0) {
       this.closeCellAutocomplete();
       return;

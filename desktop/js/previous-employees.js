@@ -32,9 +32,19 @@ class PreviousEmployeesEngine {
       .replace(/[\n\r]/g, ' ');
   }
 
+  cleanEmployeeName(name) {
+    if (!name) return '';
+    let str = String(name).trim();
+    str = str.replace(/^active\s*\|\s*/i, '').trim();
+    str = str.replace(/\s+(?:st|step)\s*\d+\s*(?:new\s*hire)?.*$/i, '').trim();
+    str = str.replace(/\s+new\s*hire.*$/i, '').trim();
+    return str;
+  }
+
   normalizeName(name) {
     if (!name) return '';
-    return String(name).toLowerCase()
+    const cleaned = this.cleanEmployeeName(name);
+    return cleaned.toLowerCase()
       .replace(/\(.*?\)/g, '')
       .replace(/[^a-z0-9]/g, ' ')
       .replace(/\s+/g, ' ')
@@ -53,6 +63,10 @@ class PreviousEmployeesEngine {
     if (!nameA || !nameB) return false;
     if (window.employeeProfileEngine && typeof window.employeeProfileEngine.isNameMatch === 'function') {
       return window.employeeProfileEngine.isNameMatch(nameA, nameB);
+    }
+    if (typeof EmployeeProfileEngine !== 'undefined' && typeof EmployeeProfileEngine.prototype.isNameMatch === 'function') {
+      if (!this._profileEngine) this._profileEngine = new EmployeeProfileEngine(this.db);
+      return this._profileEngine.isNameMatch(nameA, nameB);
     }
     const normA = this.normalizeName(nameA);
     const normB = this.normalizeName(nameB);
@@ -161,14 +175,18 @@ class PreviousEmployeesEngine {
     const letters = clean.match(/[a-zA-Z]/g);
     if (!letters || letters.length < 2) return false;
 
-    // Reject obvious header names or system keywords
+    // Reject obvious header names, status locations, or system keywords
     const lower = clean.toLowerCase();
+    if (lower === 'active' || lower.startsWith('active |') || lower === 'inactive') return false;
+
     const blacklist = [
       'employee name', 'employee', 'worker', 'full name', 'first name', 'last name',
       'date', 'date changed', 'event', 'event type', 'action', 'type',
       'location', 'job number', 'job #', 'hire date', 'last day', 'last day reason',
       'rehire date', 'notes', 'status', 'classification', 'total', 'count',
-      'unknown', 'n/a', 'none', 'null', 'undefined', 'previous employee', 'previous employees', 'past employees'
+      'unknown', 'n/a', 'none', 'null', 'undefined', 'previous employee', 'previous employees', 'past employees',
+      'active', 'inactive', 'pending', 'on hold', 'lost', 'packed for delivery', 'packed for testing', 'in testing', 'destroyed',
+      'shop', 'yard', 'warehouse'
     ];
     if (blacklist.includes(lower)) return false;
 
@@ -217,7 +235,7 @@ class PreviousEmployeesEngine {
     const aliases = ['Employee Name', 'Name', 'Worker', 'Employee', 'Full Name'];
     const candidate = this.extractRowValue(row, headers, aliases);
     if (candidate && this.isValidEmployeeName(candidate)) {
-      return candidate;
+      return this.cleanEmployeeName(candidate);
     }
 
     if (typeof row === 'object') {
@@ -227,7 +245,7 @@ class PreviousEmployeesEngine {
         if (kl.includes('name') || kl.includes('worker') || kl.includes('employee') || kl.includes('person') || kl.includes('staff')) {
           const val = String(row[k] || '').trim();
           if (val && this.isValidEmployeeName(val)) {
-            return val;
+            return this.cleanEmployeeName(val);
           }
         }
       }
@@ -389,9 +407,24 @@ class PreviousEmployeesEngine {
             if (lastReason && (!entry.lastReason || entry.lastReason === 'Departed')) entry.lastReason = lastReason;
           }
         } else {
-          // If an active employee exists with this exact name, mark as currently active
+          // Mark any history entry matching this active employee (exact name, fuzzy match, or aliases) as active
           if (prevMap.has(norm)) {
             prevMap.get(norm).isActive = true;
+          }
+          for (const [pNorm, prevEmp] of prevMap.entries()) {
+            if (this.isNameMatch(name, prevEmp.name)) {
+              prevEmp.isActive = true;
+            }
+          }
+          const altNames = this.extractRowValue(r, headers, ['Alternate Names', 'Aliases', 'Alt Names']);
+          if (altNames) {
+            altNames.split(/[,;/|]+/).map(a => a.trim()).filter(Boolean).forEach(alt => {
+              for (const [pNorm, prevEmp] of prevMap.entries()) {
+                if (this.isNameMatch(alt, prevEmp.name)) {
+                  prevEmp.isActive = true;
+                }
+              }
+            });
           }
         }
       });
@@ -411,6 +444,7 @@ class PreviousEmployeesEngine {
         const itemStat = String(item['Status'] || '').toLowerCase();
 
         for (const [norm, prevEmp] of prevMap.entries()) {
+          if (prevEmp.isActive) continue;
           if (this.isNameMatch(assignedTo, prevEmp.name)) {
             const itemNum = String(item['Item #'] || item['Glove'] || item['Sleeve'] || item['Serial #'] || Object.values(item)[0] || '').trim();
             const eslId = String(item['ESL ID'] || '').trim();
@@ -443,6 +477,7 @@ class PreviousEmployeesEngine {
         const cEmp = String(c['Employee Name'] || c['Employee'] || c['Name'] || Object.values(c)[0] || '').trim();
         if (!cEmp) return;
         for (const [norm, prevEmp] of prevMap.entries()) {
+          if (prevEmp.isActive) continue;
           if (this.isNameMatch(cEmp, prevEmp.name)) {
             if (!prevEmp.certRecords) prevEmp.certRecords = [];
             prevEmp.certRecords.push({

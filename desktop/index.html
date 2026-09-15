@@ -2040,6 +2040,111 @@
     </div>
   </div>
 
+  <!-- Employee Departure & Archive Modal (Last Day, Reason, Notes & PPE Audit) -->
+  <div id="employee-departure-modal" class="modal-overlay" style="z-index: 1100; display: none;">
+    <div class="modal-box" style="max-width: 520px; width: 92%; box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5); border: 1px solid rgba(239, 68, 68, 0.35);">
+      <div class="modal-header" style="background: linear-gradient(135deg, #7f1d1d 0%, #991b1b 100%); color: white; border-bottom: 1px solid rgba(239, 68, 68, 0.4); padding: 12px 18px; display: flex; align-items: center; justify-content: space-between;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 20px;">🚪</span>
+          <span id="emp-depart-modal-title" style="font-weight: 800; font-size: 15px;">Employee Departure & Archive</span>
+        </div>
+        <button id="emp-depart-modal-close" class="btn btn-secondary" style="padding: 2px 8px; font-size: 12px; background: rgba(0,0,0,0.25); border: none; color: white; cursor: pointer;">✕</button>
+      </div>
+      <div class="modal-body" style="padding: 20px 22px; display: flex; flex-direction: column; gap: 15px;">
+        <div>
+          <div id="emp-depart-subtitle" style="font-size: 12.5px; color: var(--text-muted); line-height: 1.4;">
+            Record separation details, log termination history, and review assigned PPE:
+          </div>
+        </div>
+
+        <!-- Employee Info Card -->
+        <div style="background: rgba(30, 41, 59, 0.7); border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 8px; padding: 12px 14px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+            <div>
+              <div style="font-size: 11px; font-weight: 700; color: #f87171; text-transform: uppercase; letter-spacing: 0.5px;">Employee Departing</div>
+              <div id="emp-depart-name" style="font-size: 16px; font-weight: 800; color: #ffffff;">—</div>
+            </div>
+            <span class="badge" style="font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 4px; background: rgba(239, 68, 68, 0.2); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.3);">Marking Departed</span>
+          </div>
+          <div id="emp-depart-meta" style="font-size: 12px; color: #94a3b8; margin-top: 6px; display: flex; flex-wrap: wrap; gap: 12px;">
+            <span>Crew: <strong id="emp-depart-crew" style="color: #cbd5e1;">—</strong></span>
+            <span>Location: <strong id="emp-depart-location" style="color: #cbd5e1;">—</strong></span>
+            <span>Role: <strong id="emp-depart-role" style="color: #cbd5e1;">—</strong></span>
+          </div>
+        </div>
+
+        <!-- Assigned Equipment Audit -->
+        <div id="emp-depart-equip-container">
+          <div id="emp-depart-equip-alert" style="background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 8px; padding: 10px 14px; font-size: 12px; color: #fca5a5; display: none;">
+            <div style="font-weight: 700; color: #f87171; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
+              <span>⚠️</span> Unreturned Equipment Alert (<span id="emp-depart-equip-count">0</span> items)
+            </div>
+            <div id="emp-depart-equip-list" style="display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0;"></div>
+            <div style="font-size: 11px; color: #cbd5e1; line-height: 1.4;">
+              These items will automatically appear in the <strong>PREVIOUS EMPLOYEE</strong> reclaim section on upcoming swap sheets for retrieval and shelf restocking.
+            </div>
+          </div>
+          <div id="emp-depart-no-equip" style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 8px; padding: 10px 14px; font-size: 12px; color: #86efac; display: none;">
+            <span>✅</span> No active PPE or safety equipment currently assigned to this worker.
+          </div>
+        </div>
+
+        <!-- Form Inputs -->
+        <div style="display: flex; flex-direction: column; gap: 13px;">
+          <div>
+            <label style="font-size: 12px; font-weight: 700; color: #fca5a5; margin-bottom: 5px; display: flex; align-items: center; justify-content: space-between;">
+              <span>📅 Last Working Day <span style="color: #ef4444;">*</span></span>
+              <span style="font-size: 11px; font-weight: normal; color: var(--text-muted);">(MM/DD/YYYY)</span>
+            </label>
+            <div style="display: flex; gap: 8px; margin-bottom: 6px;">
+              <input type="text" id="emp-depart-date" placeholder="MM/DD/YYYY" style="flex: 1; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 8px 12px; font-size: 13px; font-weight: 600;" />
+              <input type="date" id="emp-depart-date-picker" style="background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 7px 10px; cursor: pointer;" title="Pick from calendar" />
+            </div>
+            <div style="display: flex; gap: 6px;">
+              <button type="button" id="emp-depart-quick-today" class="btn btn-secondary" style="font-size: 11px; padding: 2px 8px; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.3); color: #fca5a5;">📅 Today</button>
+              <button type="button" id="emp-depart-quick-yesterday" class="btn btn-secondary" style="font-size: 11px; padding: 2px 8px; background: rgba(148, 163, 184, 0.12); border: 1px solid rgba(148, 163, 184, 0.25); color: #cbd5e1;">Yesterday</button>
+            </div>
+          </div>
+
+          <div>
+            <label style="font-size: 12px; font-weight: 700; color: #fca5a5; margin-bottom: 5px; display: flex; align-items: center; justify-content: space-between;">
+              <span>📋 Departure Reason <span style="color: #ef4444;">*</span></span>
+              <span style="font-size: 11px; font-weight: normal; color: var(--text-muted);">Required for HR/History</span>
+            </label>
+            <select id="emp-depart-reason" style="width: 100%; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 8px 12px; font-size: 13px; font-weight: 600;">
+              <option value="Quit">Quit (Voluntary)</option>
+              <option value="Resigned">Resigned (Voluntary)</option>
+              <option value="Layoff">Layoff (Reduction in Force)</option>
+              <option value="Terminated">Terminated (Involuntary)</option>
+              <option value="Fired">Fired (Involuntary)</option>
+              <option value="Medical">Medical / Disability Leave</option>
+              <option value="Other">Other (See notes)</option>
+            </select>
+          </div>
+
+          <div>
+            <label style="font-size: 12px; font-weight: 700; color: #cbd5e1; margin-bottom: 5px; display: block;">
+              <span>📝 Departure Notes / Details</span>
+            </label>
+            <input type="text" id="emp-depart-notes" placeholder="e.g. Relocating, found other job, seasonal end..." style="width: 100%; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 8px 12px; font-size: 13px;" />
+          </div>
+
+          <!-- Automated Updates Notice -->
+          <div style="background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.2); border-radius: 8px; padding: 10px 14px; font-size: 12px; color: #cbd5e1; line-height: 1.5;">
+            <div style="font-weight: 700; color: #60a5fa; margin-bottom: 3px;">📋 Automatic Updates on Confirm:</div>
+            <div style="font-size: 11.5px;">• <strong>Employees Table:</strong> Location ➔ 'Previous Employee' | Last Day & Reason recorded</div>
+            <div style="font-size: 11.5px;">• <strong>Employee History:</strong> Separation milestone permanently recorded</div>
+            <div style="font-size: 11.5px;">• <strong>Roster View:</strong> Archived from active crew views to Previous Employees workspace</div>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center; background: var(--bg-secondary); border-top: 1px solid var(--border-color); padding: 12px 18px;">
+        <button id="emp-depart-modal-cancel" class="btn btn-secondary" style="font-size: 12.5px;">Cancel</button>
+        <button id="emp-depart-modal-confirm" class="btn btn-primary" style="font-size: 12.5px; font-weight: 700; background: #dc2626; border-color: #b91c1c; padding: 8px 16px;">🚪 Confirm Departure & Archive</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Mobile Bottom Navigation Bar (Visible on tablets & mobile screens) -->
   <nav class="mobile-bottom-nav" id="mobile-bottom-nav">
     <div class="mobile-nav-btn active" data-view="sheets-view">
@@ -2085,7 +2190,7 @@
   <script src="js/time-breakdown.js?v=20260901_25"></script>
   <script src="js/sheets.js?v=20260909_52"></script>
   <script src="js/history.js?v=20260901_25"></script>
-  <script src="js/previous-employees.js?v=20260901_25"></script>
+  <script src="js/previous-employees.js?v=20260914_2"></script>
   <script src="js/tasks.js?v=20260901_25"></script>
   <script src="js/trip-planner.js?v=20260903_34"></script>
   <script src="js/lookup.js?v=20260901_25"></script>

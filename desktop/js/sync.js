@@ -850,16 +850,25 @@ class SyncEngine {
 
       while (i < totalCount) {
         batchNum++;
-        // Push full-table swaps 1 at a time; standard edits 4 per batch to avoid Google gateway limits
+        // Push heavy operations (full-table swaps, history log imports, row deletions) 1 at a time;
+        // Standard lightweight edits up to 4 per batch to avoid Google gateway limits
         const currentMut = currentOutbox[i];
-        const isLargePayload = currentMut && (
-          currentMut.action === 'REPLACE_SWAP_TABLE' || 
-          currentMut.action === 'REPLACE_TABLE_DATA' || 
-          currentMut.action === 'SYNC_FULL_TABLE' || 
-          currentMut.action === 'IMPORT_HISTORY_LOG' || 
-          (currentMut.rawGrid && currentMut.rawGrid.length > 5)
+        const isHeavyMutation = (m) => m && (
+          m.action === 'REPLACE_SWAP_TABLE' || 
+          m.action === 'REPLACE_TABLE_DATA' || 
+          m.action === 'SYNC_FULL_TABLE' || 
+          m.action === 'IMPORT_HISTORY_LOG' || 
+          m.action === 'DELETE_ROW' ||
+          (m.rawGrid && m.rawGrid.length > 5)
         );
-        const chunkSize = isLargePayload ? 1 : 4;
+
+        let chunkSize = 1;
+        if (!isHeavyMutation(currentMut)) {
+          chunkSize = 1;
+          while (chunkSize < 4 && (i + chunkSize) < totalCount && !isHeavyMutation(currentOutbox[i + chunkSize])) {
+            chunkSize++;
+          }
+        }
         const chunk = currentOutbox.slice(i, i + chunkSize);
 
         // Sanitize: never allow a header-only rawGrid to wipe out valid row objects
@@ -890,7 +899,7 @@ class SyncEngine {
               force: true,
               skipPostProcessing: true,
               returnSnapshot: false
-            }, 45000);
+            }, 75000);
             if (pushResult && (pushResult.success || pushResult.status === 'ok')) {
               break;
             }

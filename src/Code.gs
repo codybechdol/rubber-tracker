@@ -12610,7 +12610,8 @@ function showImportItemHistoryDialog() {
  * - Single-pass targeted range reads
  * - Single setValues batch write
  */
-function parseAndImportItemHistoryLog(equipmentType, itemNum, logText) {
+function parseAndImportItemHistoryLog(equipmentType, itemNum, logText, options) {
+  options = options || {};
   var t0 = new Date().getTime();
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -13074,22 +13075,24 @@ function parseAndImportItemHistoryLog(equipmentType, itemNum, logText) {
       }
 
       // Sort the history sheet by Item# and Date so new rows are organized with their item block
-      try {
-        if (histSheet.getLastRow() > 2) {
-          var dataRange = histSheet.getRange(2, 1, histSheet.getLastRow() - 1, histHeaders.length);
-          var sortItemCol = histHeaders.indexOf('item #');
-          if (sortItemCol === -1) sortItemCol = histHeaders.indexOf('serial #');
-          if (sortItemCol === -1) sortItemCol = 1;
-          var sortDateCol = histHeaders.indexOf('date assigned');
-          if (sortDateCol === -1) sortDateCol = 0;
+      if (options.skipSort !== true) {
+        try {
+          if (histSheet.getLastRow() > 2) {
+            var dataRange = histSheet.getRange(2, 1, histSheet.getLastRow() - 1, histHeaders.length);
+            var sortItemCol = histHeaders.indexOf('item #');
+            if (sortItemCol === -1) sortItemCol = histHeaders.indexOf('serial #');
+            if (sortItemCol === -1) sortItemCol = 1;
+            var sortDateCol = histHeaders.indexOf('date assigned');
+            if (sortDateCol === -1) sortDateCol = 0;
 
-          dataRange.sort([
-            { column: sortItemCol + 1, ascending: true },
-            { column: sortDateCol + 1, ascending: false }
-          ]);
+            dataRange.sort([
+              { column: sortItemCol + 1, ascending: true },
+              { column: sortDateCol + 1, ascending: false }
+            ]);
+          }
+        } catch (sortErr) {
+          Logger.log('History sheet sort note: ' + sortErr);
         }
-      } catch (sortErr) {
-        Logger.log('History sheet sort note: ' + sortErr);
       }
     }
 

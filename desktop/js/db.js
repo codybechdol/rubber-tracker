@@ -460,6 +460,20 @@ class LocalDatabase {
       }
     }
 
+    // 1b. Employee History healing & cleaning: remove ghost 'Active' rows and non-employee artifacts
+    if (table.rows && tableKey === 'employee_history') {
+      const nameKey = (table.headers || []).find(h => /^(employee\s*name|name)$/i.test(h.trim())) || (table.headers ? table.headers[1] : 'Employee Name');
+      const badStatusNames = ['active', 'packed for delivery', 'packed for testing'];
+      table.rows = table.rows.filter(r => {
+        const name = String(r[nameKey] || '').trim().toLowerCase();
+        if (badStatusNames.includes(name) || name.startsWith('active |')) {
+          return false;
+        }
+        return true;
+      });
+      table.rowCount = table.rows.length;
+    }
+
     // 2. Normalize equipment status, location, notes, and auto-heal missing fields
     if (table.rows) {
       const locKey = (table.headers || []).find(h => /^location$/i.test(String(h || '').trim())) || 'Location';

@@ -1450,13 +1450,18 @@ class EmployeeProfileEngine {
             </div>
           </div>
 
-          ${totalEquipment > 0 ? `
-            <div style="display: flex; align-items: center; gap: 8px;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            ${totalEquipment > 0 ? `
               <button class="btn btn-secondary" style="font-size: 11.5px; padding: 6px 12px; border-color: #0284c7; color: #38bdf8; display: inline-flex; align-items: center; gap: 5px;" onclick="if(window.inventoryManager){window.inventoryManager.openTransferEquipmentModal('${this.escapeHtml(data.displayName)}');}">
                 <span>⚡</span> Transfer Equipment
               </button>
-            </div>
-          ` : ''}
+            ` : ''}
+            ${(!data.location || !data.location.toLowerCase().includes('previous')) ? `
+              <button class="btn btn-secondary" style="font-size: 11.5px; padding: 6px 12px; border-color: #ef4444; color: #f87171; display: inline-flex; align-items: center; gap: 5px;" onclick="if(window.sheetNavigator){window.sheetNavigator.openEmployeeDepartureModal('${this.escapeJs(data.displayName)}');}" title="Mark employee as departed / previous employee">
+                <span>🚪</span> Mark as Departed
+              </button>
+            ` : ''}
+          </div>
 
         </div>
 
@@ -2859,6 +2864,14 @@ class EmployeeProfileEngine {
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#039;');
+  }
+
+  escapeJs(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+      .replace(/\\/g, '\\\\')
+      .replace(/'/g, "\\'")
+      .replace(/"/g, '\\"');
   }
 }
 
