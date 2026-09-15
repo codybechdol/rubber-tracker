@@ -58,6 +58,12 @@ class TripPlannerApp {
     this.selectedClassCrew = '';
     this.selectedClassAttendees = [];
     this._rosterExpanded = {};
+
+    // Sidebars collapse & swaps filter state
+    this.citiesCollapsed = localStorage.getItem('sa_trip_cities_collapsed') === 'true';
+    this.swapsCollapsed = localStorage.getItem('sa_trip_swaps_collapsed') === 'true';
+    this.swapsFilter = 'all'; // 'all', 'gloves', 'sleeves'
+    this.swapsSearchTerm = '';
   }
 
   loadCollapsedSections() {
@@ -112,6 +118,8 @@ class TripPlannerApp {
 
     this.loadSavedTrips();
     this.setupSearchListeners();
+    this.setupSwapsSearchListeners();
+    this.updateSidebarsCollapseUI();
     this.populateWeekDropdown();
     this.setWeeksToShow(this.weeksToShow || 8);
 
@@ -132,6 +140,72 @@ class TripPlannerApp {
         this.renderAvailableLocations();
       });
     }
+  }
+
+  setupSwapsSearchListeners() {
+    const searchInput = document.getElementById('trip-swaps-search');
+    if (searchInput && !searchInput.dataset.bound) {
+      searchInput.dataset.bound = 'true';
+      searchInput.addEventListener('input', (e) => {
+        this.swapsSearchTerm = (e.target.value || '').toLowerCase().trim();
+        this.renderPickedSwapsList();
+      });
+    }
+  }
+
+  toggleCitiesSidebar() {
+    this.citiesCollapsed = !this.citiesCollapsed;
+    try {
+      localStorage.setItem('sa_trip_cities_collapsed', String(this.citiesCollapsed));
+    } catch (_) {}
+    this.updateSidebarsCollapseUI();
+  }
+
+  toggleSwapsSidebar() {
+    this.swapsCollapsed = !this.swapsCollapsed;
+    try {
+      localStorage.setItem('sa_trip_swaps_collapsed', String(this.swapsCollapsed));
+    } catch (_) {}
+    this.updateSidebarsCollapseUI();
+  }
+
+  updateSidebarsCollapseUI() {
+    const citiesEl = document.getElementById('trip-cities-sidebar');
+    const citiesCollapsedBar = document.getElementById('trip-cities-collapsed-bar');
+    const swapsEl = document.getElementById('trip-swaps-sidebar');
+    const swapsCollapsedBar = document.getElementById('trip-swaps-collapsed-bar');
+
+    if (citiesEl && citiesCollapsedBar) {
+      if (this.citiesCollapsed) {
+        citiesEl.style.display = 'none';
+        citiesCollapsedBar.style.display = 'flex';
+      } else {
+        citiesEl.style.display = 'flex';
+        citiesCollapsedBar.style.display = 'none';
+      }
+    }
+
+    if (swapsEl && swapsCollapsedBar) {
+      if (this.swapsCollapsed) {
+        swapsEl.style.display = 'none';
+        swapsCollapsedBar.style.display = 'flex';
+      } else {
+        swapsEl.style.display = 'flex';
+        swapsCollapsedBar.style.display = 'none';
+      }
+    }
+  }
+
+  setSwapsFilter(filter) {
+    this.swapsFilter = filter;
+    ['all', 'gloves', 'sleeves'].forEach(f => {
+      const btn = document.getElementById(`btn-filter-swaps-${f}`);
+      if (btn) {
+        if (f === filter) btn.classList.add('active');
+        else btn.classList.remove('active');
+      }
+    });
+    this.renderPickedSwapsList();
   }
 
   loadSavedTrips() {
@@ -5295,11 +5369,14 @@ class TripPlannerApp {
     }
 
     this.renderAvailableLocations();
+    this.renderPickedSwapsList();
+    this.updateSidebarsCollapseUI();
   }
 
   renderAvailableLocations() {
     const list = document.getElementById('available-locations-list');
     const countBadge = document.getElementById('active-cities-count-badge');
+    const collapsedCountBadge = document.getElementById('collapsed-cities-count-badge');
     if (!list) return;
     list.innerHTML = '';
 
@@ -5307,6 +5384,9 @@ class TripPlannerApp {
 
     if (countBadge) {
       countBadge.textContent = `${activeCount} Active`;
+    }
+    if (collapsedCountBadge) {
+      collapsedCountBadge.textContent = `${activeCount}`;
     }
 
     let filtered = locations;
@@ -5409,6 +5489,398 @@ class TripPlannerApp {
       });
 
       list.appendChild(card);
+    });
+  }
+
+  /**
+   * Scans Glove Swaps and Sleeve Swaps for all items with Picked checkbox checked.
+   * Associates each swap with the employee's physical location and Job Number from Employees and Job Tracking.
+   */
+  getPickedSwapsData() {
+    const gloveSwapsTable = this.db.getTable('glove_swaps') || this.db.getTable('Glove Swaps');
+    const sleeveSwapsTable = this.db.getTable('sleeve_swaps') || this.db.getTable('Sleeve Swaps');
+    const empTable = this.db.getTable('employees') || this.db.getTable('Employees');
+    const jobTable = this.db.getTable('job_tracking') || this.db.getTable('Job Tracking');
+
+    // 1. Build employee info map: lowerName -> { name, location, jobNum, classification }
+    const empMap = {};
+    if (empTable && empTable.rows) {
+      empTable.rows.forEach(r => {
+        const name = String(r['Employee Name'] || r['Name'] || r['Employee'] || Object.values(r)[0] || '').trim();
+        if (!name) return;
+        const loc = String(r['Location'] || '').trim();
+        const jobNum = String(r['Job Number'] || r['Job #'] || '').trim();
+        const classification = String(r['Job Classification'] || r['Classification'] || '').trim();
+        empMap[name.toLowerCase()] = {
+          name: name,
+          location: loc,
+          jobNum: jobNum,
+          classification: classification
+        };
+      });
+    }
+
+    // 2. Build crew details map: significantCrewId -> { foreman, jobName, location, status }
+    const crewMap = {};
+    if (jobTable && jobTable.rows) {
+      jobTable.rows.forEach(r => {
+        const rawCrewId = String(r['Job Number'] || r['Crew'] || r['Job #'] || '').trim();
+        const crewId = this.getSignificantJobNumber(rawCrewId);
+        if (crewId && !crewMap[crewId]) {
+          crewMap[crewId] = {
+            crewId: crewId,
+            foreman: String(r['Foreman'] || r['Crew Lead'] || r['Lead'] || '').trim(),
+            jobName: String(r['Job Name'] || '').trim(),
+            location: this.cleanPhysicalLocation(String(r['Location'] || '').trim()),
+            status: String(r['Status'] || r['Job Status'] || '').trim()
+          };
+        }
+      });
+    }
+
+    const pickedItems = [];
+
+    // Helper to check if a row is picked
+    const isRowPicked = (row, tableKey) => {
+      if (!row) return false;
+      if (row['Picked'] === true || String(row['Picked']).toLowerCase() === 'true') return true;
+      const status = String(row['Status'] || '').toLowerCase();
+      if (status.includes('ready for delivery')) return true;
+      const emp = String(row['Employee'] || row['Employee Name'] || row['Name'] || '').toLowerCase();
+      const item = String(row['Current Glove #'] || row['Current Sleeve #'] || row['Current Item #'] || '').toLowerCase();
+      if (this.db && this.db.snapshot && this.db.snapshot.manualPicks) {
+        const mp = this.db.snapshot.manualPicks[tableKey];
+        if (mp) {
+          const entry = mp[`${emp}|${item}`] || mp[emp];
+          if (entry && (entry.isPicked || String(entry.status || '').toLowerCase().includes('ready for delivery'))) {
+            return true;
+          }
+        }
+      }
+      return false;
+    };
+
+    // 3. Scan Glove Swaps
+    if (gloveSwapsTable && gloveSwapsTable.rows) {
+      gloveSwapsTable.rows.forEach((r, idx) => {
+        if (!isRowPicked(r, 'glove_swaps')) return;
+        const empName = String(r['Employee'] || r['Employee Name'] || r['Name'] || '').trim();
+        if (!empName) return;
+
+        const currentItem = String(r['Current Glove #'] || r['Current Item #'] || r['Current Item'] || '').trim();
+        const pickItem = String(r['Pick List Glove #'] || r['Pick List Item #'] || r['Pick List Item'] || '').trim();
+        const size = String(r['Size'] || '').trim();
+        const itemClass = String(r['Class'] || '').trim();
+        const status = String(r['Status'] || 'Ready For Delivery 🚚').trim();
+        const changeOutDate = r['Change Out Date'] || '';
+        const daysLeft = r['Days Left'] !== undefined ? r['Days Left'] : '';
+
+        const empInfo = empMap[empName.toLowerCase()] || {};
+        let rawLoc = r._location || empInfo.location || '';
+        let rawJob = empInfo.jobNum || '';
+        const classification = empInfo.classification || '';
+        const crewId = this.getSignificantJobNumber(rawJob) || rawJob || 'Unassigned';
+        const crewInfo = crewMap[crewId] || {};
+
+        let location = 'Helena';
+        if (rawLoc && !this.isStatusLocation(rawLoc)) {
+          location = this.cleanPhysicalLocation(rawLoc);
+        } else if (crewInfo.location && !this.isStatusLocation(crewInfo.location)) {
+          location = crewInfo.location;
+        } else if (rawLoc) {
+          location = this.cleanPhysicalLocation(rawLoc);
+        }
+
+        pickedItems.push({
+          type: 'Glove',
+          employeeName: empName,
+          currentItem: currentItem,
+          pickItem: pickItem,
+          size: size,
+          itemClass: itemClass,
+          status: status,
+          changeOutDate: changeOutDate,
+          daysLeft: daysLeft,
+          tableKey: 'glove_swaps',
+          rowIdx: idx,
+          location: location,
+          crewId: crewId,
+          foreman: crewInfo.foreman || r._foreman || '',
+          jobName: crewInfo.jobName || '',
+          classification: classification,
+          jobNum: rawJob
+        });
+      });
+    }
+
+    // 4. Scan Sleeve Swaps
+    if (sleeveSwapsTable && sleeveSwapsTable.rows) {
+      sleeveSwapsTable.rows.forEach((r, idx) => {
+        if (!isRowPicked(r, 'sleeve_swaps')) return;
+        const empName = String(r['Employee'] || r['Employee Name'] || r['Name'] || '').trim();
+        if (!empName) return;
+
+        const currentItem = String(r['Current Sleeve #'] || r['Current Item #'] || r['Current Item'] || '').trim();
+        const pickItem = String(r['Pick List Sleeve #'] || r['Pick List Item #'] || r['Pick List Item'] || '').trim();
+        const size = String(r['Size'] || '').trim();
+        const itemClass = String(r['Class'] || '').trim();
+        const status = String(r['Status'] || 'Ready For Delivery 🚚').trim();
+        const changeOutDate = r['Change Out Date'] || '';
+        const daysLeft = r['Days Left'] !== undefined ? r['Days Left'] : '';
+
+        const empInfo = empMap[empName.toLowerCase()] || {};
+        let rawLoc = r._location || empInfo.location || '';
+        let rawJob = empInfo.jobNum || '';
+        const classification = empInfo.classification || '';
+        const crewId = this.getSignificantJobNumber(rawJob) || rawJob || 'Unassigned';
+        const crewInfo = crewMap[crewId] || {};
+
+        let location = 'Helena';
+        if (rawLoc && !this.isStatusLocation(rawLoc)) {
+          location = this.cleanPhysicalLocation(rawLoc);
+        } else if (crewInfo.location && !this.isStatusLocation(crewInfo.location)) {
+          location = crewInfo.location;
+        } else if (rawLoc) {
+          location = this.cleanPhysicalLocation(rawLoc);
+        }
+
+        pickedItems.push({
+          type: 'Sleeve',
+          employeeName: empName,
+          currentItem: currentItem,
+          pickItem: pickItem,
+          size: size,
+          itemClass: itemClass,
+          status: status,
+          changeOutDate: changeOutDate,
+          daysLeft: daysLeft,
+          tableKey: 'sleeve_swaps',
+          rowIdx: idx,
+          location: location,
+          crewId: crewId,
+          foreman: crewInfo.foreman || r._foreman || '',
+          jobName: crewInfo.jobName || '',
+          classification: classification,
+          jobNum: rawJob
+        });
+      });
+    }
+
+    let totalGloves = 0;
+    let totalSleeves = 0;
+    pickedItems.forEach(i => {
+      if (i.type === 'Glove') totalGloves++;
+      if (i.type === 'Sleeve') totalSleeves++;
+    });
+
+    return {
+      items: pickedItems,
+      totalPicked: pickedItems.length,
+      totalGloves: totalGloves,
+      totalSleeves: totalSleeves
+    };
+  }
+
+  /**
+   * Renders the Glove & Sleeve changes column in Trip Planner.
+   * Groups picked swaps by Location, then by Job Number / Crew, showing detailed employee swap info.
+   */
+  renderPickedSwapsList() {
+    const list = document.getElementById('picked-swaps-list');
+    const countBadge = document.getElementById('picked-swaps-count-badge');
+    const collapsedCountBadge = document.getElementById('collapsed-swaps-count-badge');
+    if (!list) return;
+    list.innerHTML = '';
+
+    const data = this.getPickedSwapsData();
+
+    if (countBadge) {
+      countBadge.textContent = `${data.totalPicked} Picked`;
+    }
+    if (collapsedCountBadge) {
+      collapsedCountBadge.textContent = `${data.totalPicked}`;
+    }
+
+    let items = data.items;
+
+    // Apply category filter (all, gloves, sleeves)
+    if (this.swapsFilter === 'gloves') {
+      items = items.filter(i => i.type === 'Glove');
+    } else if (this.swapsFilter === 'sleeves') {
+      items = items.filter(i => i.type === 'Sleeve');
+    }
+
+    // Apply search filter
+    if (this.swapsSearchTerm) {
+      const q = this.swapsSearchTerm;
+      items = items.filter(i => {
+        const empMatch = (i.employeeName || '').toLowerCase().includes(q);
+        const curMatch = (i.currentItem || '').toLowerCase().includes(q);
+        const pickMatch = (i.pickItem || '').toLowerCase().includes(q);
+        const locMatch = (i.location || '').toLowerCase().includes(q);
+        const crewMatch = (i.crewId || '').toLowerCase().includes(q);
+        const foremanMatch = (i.foreman || '').toLowerCase().includes(q);
+        return empMatch || curMatch || pickMatch || locMatch || crewMatch || foremanMatch;
+      });
+    }
+
+    if (items.length === 0) {
+      if (data.totalPicked === 0) {
+        list.innerHTML = `
+          <div style="padding: 30px 16px; text-align: center; color: var(--text-muted); font-size: 11.5px; background: rgba(0,0,0,0.15); border-radius: 8px; border: 1px dashed var(--border-color); margin-top: 10px;">
+            <div style="font-size: 24px; margin-bottom: 8px;">🧤</div>
+            <div style="font-weight: 700; color: #f1f5f9; margin-bottom: 4px; font-size: 12.5px;">No Picked Swaps Yet</div>
+            <div style="color: var(--text-secondary); line-height: 1.4;">Check the <strong>Picked</strong> box on Glove Swaps or Sleeve Swaps to stage items for delivery here.</div>
+          </div>
+        `;
+      } else {
+        list.innerHTML = `
+          <div style="padding: 24px 14px; text-align: center; color: var(--text-muted); font-size: 11.5px; background: rgba(0,0,0,0.1); border-radius: 6px; border: 1px dashed var(--border-color);">
+            No matching picked swaps found.
+          </div>
+        `;
+      }
+      return;
+    }
+
+    // Regroup filtered items by Location -> Job Number -> Employee
+    const locMap = {};
+    items.forEach(item => {
+      const loc = item.location || 'Helena';
+      const crew = item.crewId || 'Unassigned';
+      if (!locMap[loc]) locMap[loc] = {};
+      if (!locMap[loc][crew]) {
+        locMap[loc][crew] = {
+          crewId: crew,
+          foreman: item.foreman || '',
+          jobName: item.jobName || '',
+          employees: {}
+        };
+      }
+      if (!locMap[loc][crew].employees[item.employeeName]) {
+        locMap[loc][crew].employees[item.employeeName] = {
+          name: item.employeeName,
+          classification: item.classification || '',
+          jobNum: item.jobNum || crew,
+          swaps: []
+        };
+      }
+      locMap[loc][crew].employees[item.employeeName].swaps.push(item);
+    });
+
+    const sortedLocations = Object.keys(locMap).sort();
+
+    sortedLocations.forEach(locName => {
+      const crewGroups = locMap[locName];
+      const crewKeys = Object.keys(crewGroups).sort();
+      let locTotalSwaps = 0;
+      crewKeys.forEach(ck => {
+        Object.values(crewGroups[ck].employees).forEach(emp => {
+          locTotalSwaps += emp.swaps.length;
+        });
+      });
+
+      const locSection = document.createElement('div');
+      locSection.style.marginBottom = '14px';
+
+      // Location Header (Draggable to schedule visit to this city)
+      const locHeader = document.createElement('div');
+      locHeader.draggable = true;
+      locHeader.style.cssText = 'background: rgba(15, 23, 42, 0.75); border: 1px solid rgba(59, 130, 246, 0.3); border-left: 4px solid #3b82f6; border-radius: 6px; padding: 6px 10px; margin-bottom: 8px; display: flex; justify-content: space-between; align-items: center; cursor: grab; user-select: none; transition: border-color 0.15s ease;';
+      locHeader.title = `Drag to schedule a trip to ${locName}`;
+      locHeader.onmouseover = () => { locHeader.style.borderColor = '#60a5fa'; };
+      locHeader.onmouseout = () => { locHeader.style.borderColor = 'rgba(59, 130, 246, 0.3)'; };
+      locHeader.innerHTML = `
+        <span style="font-weight: 800; font-size: 12px; color: #f8fafc; display: flex; align-items: center; gap: 5px;">
+          📍 ${this.escapeHtml(locName)}
+        </span>
+        <span class="badge" style="background: rgba(59, 130, 246, 0.2); color: #93c5fd; font-size: 9.5px; font-weight: 700; padding: 1px 6px; border-radius: 10px;">
+          ${locTotalSwaps} swap${locTotalSwaps > 1 ? 's' : ''}
+        </span>
+      `;
+      locHeader.addEventListener('dragstart', (e) => {
+        e.dataTransfer.setData('text/plain', locName);
+      });
+      locSection.appendChild(locHeader);
+
+      // Crews under this Location
+      crewKeys.forEach(crewKey => {
+        const crewGroup = crewGroups[crewKey];
+        const empList = Object.values(crewGroup.employees).sort((a, b) => a.name.localeCompare(b.name));
+
+        const crewBox = document.createElement('div');
+        crewBox.style.cssText = 'margin-left: 4px; margin-bottom: 8px; border-left: 2px solid rgba(255, 255, 255, 0.12); padding-left: 8px;';
+
+        // Crew Subheader
+        const crewHeader = document.createElement('div');
+        crewHeader.style.cssText = 'display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; cursor: pointer;';
+        crewHeader.title = `Click to view crew tasks`;
+        crewHeader.onclick = () => {
+          this.openCrewTasksModal(crewGroup.crewId, locName, 'PPE');
+        };
+        crewHeader.innerHTML = `
+          <div style="font-size: 11px; font-weight: 700; color: #cbd5e1; display: flex; align-items: center; gap: 4px;">
+            <span style="color: #60a5fa;">👷 Crew ${this.escapeHtml(crewGroup.crewId)}</span>
+            ${crewGroup.foreman ? `<span style="color: #94a3b8; font-weight: normal; font-size: 10.5px;">(${this.escapeHtml(crewGroup.foreman)})</span>` : ''}
+          </div>
+          ${crewGroup.jobName ? `<span style="font-size: 9.5px; color: #64748b; font-style: italic; max-width: 110px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${this.escapeHtml(crewGroup.jobName)}">${this.escapeHtml(crewGroup.jobName)}</span>` : ''}
+        `;
+        crewBox.appendChild(crewHeader);
+
+        // Employees under this Crew
+        empList.forEach(emp => {
+          const empCard = document.createElement('div');
+          empCard.draggable = true;
+          empCard.style.cssText = 'background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; padding: 7px 9px; margin-bottom: 6px; cursor: grab; user-select: none; transition: border-color 0.15s ease, transform 0.15s ease; box-shadow: 0 1px 3px rgba(0,0,0,0.2);';
+          empCard.title = `Drag to schedule a visit to ${locName}`;
+          empCard.onmouseover = () => { empCard.style.borderColor = 'rgba(59, 130, 246, 0.5)'; };
+          empCard.onmouseout = () => { empCard.style.borderColor = 'var(--border-color)'; };
+          empCard.addEventListener('dragstart', (e) => {
+            e.dataTransfer.setData('text/plain', locName);
+          });
+
+          let swapsHtml = emp.swaps.map(s => {
+            const isGlove = s.type === 'Glove';
+            const typeColor = isGlove ? '#93c5fd' : '#d8b4fe';
+            const typeBg = isGlove ? 'rgba(59, 130, 246, 0.15)' : 'rgba(168, 85, 247, 0.15)';
+            const typeBorder = isGlove ? 'rgba(59, 130, 246, 0.3)' : 'rgba(168, 85, 247, 0.3)';
+
+            return `
+              <div style="background: rgba(0, 0, 0, 0.25); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 4px; padding: 5px 7px; margin-top: 4px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px;">
+                  <span class="badge" style="background: ${typeBg}; color: ${typeColor}; border: 1px solid ${typeBorder}; font-size: 9.5px; font-weight: 700; padding: 1px 5px; border-radius: 3px;">
+                    ${isGlove ? '🧤 Glove' : '🧤 Sleeve'}${s.itemClass ? ` (CL ${this.escapeHtml(s.itemClass)})` : ''}
+                  </span>
+                  <span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; font-size: 9px; font-weight: 700; padding: 1px 5px; border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 3px;">
+                    Ready 🚚
+                  </span>
+                </div>
+                <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: #e2e8f0;">
+                  <span>
+                    Current: <strong style="color: #f87171;">${this.escapeHtml(s.currentItem || '—')}</strong>
+                    &nbsp;➔&nbsp;
+                    Pick: <strong style="color: #4ade80;">${this.escapeHtml(s.pickItem || '—')}</strong>
+                  </span>
+                  ${s.size ? `<span style="font-size: 10px; color: #94a3b8;">Sz: ${this.escapeHtml(s.size)}</span>` : ''}
+                </div>
+              </div>
+            `;
+          }).join('');
+
+          empCard.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span style="font-weight: 700; font-size: 12px; color: #f8fafc;">${this.escapeHtml(emp.name)}</span>
+              ${emp.classification ? `<span class="badge" style="background: rgba(148, 163, 184, 0.15); color: #94a3b8; font-size: 9.5px; padding: 1px 5px; border-radius: 3px;">${this.escapeHtml(emp.classification)}</span>` : ''}
+            </div>
+            ${swapsHtml}
+          `;
+          crewBox.appendChild(empCard);
+        });
+
+        locSection.appendChild(crewBox);
+      });
+
+      list.appendChild(locSection);
     });
   }
 

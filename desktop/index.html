@@ -378,12 +378,23 @@
             </div>
           </div>
         </div>
-        <div style="display: flex; flex: 1; overflow: hidden;">
-          <div style="width: 280px; min-width: 280px; background-color: var(--bg-secondary); border-right: 1px solid var(--border-color); display: flex; flex-direction: column; overflow: hidden;">
+        <div style="display: flex; flex: 1; overflow: hidden; position: relative;">
+          <!-- 1. Collapsed Bar for Cities (Visible when cities sidebar is collapsed) -->
+          <div id="trip-cities-collapsed-bar" onclick="window.tripPlanner.toggleCitiesSidebar()" style="display: none; width: 34px; min-width: 34px; background: var(--bg-secondary); border-right: 1px solid var(--border-color); cursor: pointer; flex-direction: column; align-items: center; padding: 14px 0; gap: 12px; user-select: none; transition: background 0.15s ease;" onmouseover="this.style.background='rgba(59, 130, 246, 0.08)'" onmouseout="this.style.background='var(--bg-secondary)'" title="Click to expand Available Cities">
+            <span style="font-size: 11px; color: #93c5fd;">▶</span>
+            <span style="writing-mode: vertical-rl; transform: rotate(180deg); font-size: 11px; font-weight: 800; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1.5px;">Cities</span>
+            <span class="badge" id="collapsed-cities-count-badge" style="background: rgba(34, 197, 94, 0.2); color: #4ade80; font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 8px;">0</span>
+          </div>
+
+          <!-- 2. Available Cities Sidebar -->
+          <div id="trip-cities-sidebar" style="width: 280px; min-width: 280px; background-color: var(--bg-secondary); border-right: 1px solid var(--border-color); display: flex; flex-direction: column; overflow: hidden;">
             <div style="padding: 12px 14px; border-bottom: 1px solid var(--border-color); background: rgba(0,0,0,0.1);">
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                 <span style="font-weight: 800; font-size: 12px; color: var(--text-muted); text-transform: uppercase;">Available Cities</span>
-                <span class="badge" id="active-cities-count-badge" style="background: rgba(34, 197, 94, 0.2); color: #4ade80; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 10px;">0 Active</span>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <span class="badge" id="active-cities-count-badge" style="background: rgba(34, 197, 94, 0.2); color: #4ade80; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 10px;">0 Active</span>
+                  <button type="button" class="btn-icon" onclick="window.tripPlanner.toggleCitiesSidebar()" title="Collapse Available Cities column" style="background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); color: var(--text-muted); border-radius: 4px; padding: 1px 6px; font-size: 11px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.15s ease;" onmouseover="this.style.color='#93c5fd'; this.style.borderColor='rgba(59, 130, 246, 0.4)'" onmouseout="this.style.color='var(--text-muted)'; this.style.borderColor='var(--border-color)'">◀</button>
+                </div>
               </div>
               <input type="text" id="trip-location-search" placeholder="🔍 Search city or crew #..." style="width: 100%; box-sizing: border-box; padding: 6px 10px; font-size: 11.5px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
               <div style="display: flex; gap: 4px; margin-top: 8px;">
@@ -393,6 +404,37 @@
             </div>
             <div id="available-locations-list" style="flex: 1; padding: 12px; overflow-y: auto;"></div>
           </div>
+
+          <!-- 3. Collapsed Bar for Glove & Sleeve Changes (Visible when swaps sidebar is collapsed) -->
+          <div id="trip-swaps-collapsed-bar" onclick="window.tripPlanner.toggleSwapsSidebar()" style="display: none; width: 34px; min-width: 34px; background: var(--bg-secondary); border-right: 1px solid var(--border-color); cursor: pointer; flex-direction: column; align-items: center; padding: 14px 0; gap: 12px; user-select: none; transition: background 0.15s ease;" onmouseover="this.style.background='rgba(59, 130, 246, 0.08)'" onmouseout="this.style.background='var(--bg-secondary)'" title="Click to expand Glove & Sleeve Changes">
+            <span style="font-size: 11px; color: #93c5fd;">▶</span>
+            <span style="writing-mode: vertical-rl; transform: rotate(180deg); font-size: 11px; font-weight: 800; color: #93c5fd; text-transform: uppercase; letter-spacing: 1.5px;">Swaps</span>
+            <span class="badge" id="collapsed-swaps-count-badge" style="background: rgba(59, 130, 246, 0.2); color: #93c5fd; font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 8px;">0</span>
+          </div>
+
+          <!-- 4. Glove & Sleeve Changes Sidebar Column -->
+          <div id="trip-swaps-sidebar" style="width: 290px; min-width: 290px; background-color: var(--bg-secondary); border-right: 1px solid var(--border-color); display: flex; flex-direction: column; overflow: hidden;">
+            <div style="padding: 12px 14px; border-bottom: 1px solid var(--border-color); background: rgba(0,0,0,0.1);">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <span style="font-weight: 800; font-size: 12px; color: #93c5fd; text-transform: uppercase; display: flex; align-items: center; gap: 5px;">
+                  🧤 Picked Swaps
+                </span>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <span class="badge" id="picked-swaps-count-badge" style="background: rgba(59, 130, 246, 0.2); color: #93c5fd; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 10px;">0 Picked</span>
+                  <button type="button" class="btn-icon" onclick="window.tripPlanner.toggleSwapsSidebar()" title="Collapse Glove & Sleeve Changes column" style="background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); color: var(--text-muted); border-radius: 4px; padding: 1px 6px; font-size: 11px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.15s ease;" onmouseover="this.style.color='#93c5fd'; this.style.borderColor='rgba(59, 130, 246, 0.4)'" onmouseout="this.style.color='var(--text-muted)'; this.style.borderColor='var(--border-color)'">◀</button>
+                </div>
+              </div>
+              <input type="text" id="trip-swaps-search" placeholder="🔍 Search worker, crew, or item..." style="width: 100%; box-sizing: border-box; padding: 6px 10px; font-size: 11.5px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
+              <div style="display: flex; gap: 4px; margin-top: 8px;">
+                <button class="btn btn-secondary active" id="btn-filter-swaps-all" style="flex: 1; padding: 3px 6px; font-size: 10.5px; font-weight: 700;" onclick="window.tripPlanner.setSwapsFilter('all')">All</button>
+                <button class="btn btn-secondary" id="btn-filter-swaps-gloves" style="flex: 1; padding: 3px 6px; font-size: 10.5px;" onclick="window.tripPlanner.setSwapsFilter('gloves')">🧤 Gloves</button>
+                <button class="btn btn-secondary" id="btn-filter-swaps-sleeves" style="flex: 1; padding: 3px 6px; font-size: 10.5px;" onclick="window.tripPlanner.setSwapsFilter('sleeves')">🧤 Sleeves</button>
+              </div>
+            </div>
+            <div id="picked-swaps-list" style="flex: 1; padding: 12px; overflow-y: auto;"></div>
+          </div>
+
+          <!-- 5. Main Calendar Board -->
           <div class="trip-planner-board" id="trip-planner-board"></div>
         </div>
       </section>

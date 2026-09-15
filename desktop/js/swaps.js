@@ -325,6 +325,9 @@ class SwapGenerationEngine {
     if (window.sheetNavigator) {
       window.sheetNavigator.renderActiveView();
     }
+    if (window.tripPlanner && typeof window.tripPlanner.renderPickedSwapsList === 'function') {
+      window.tripPlanner.renderPickedSwapsList();
+    }
 
     this.showSwapSummaryModal(stats, elapsed);
     return stats;
@@ -2216,6 +2219,9 @@ class SwapGenerationEngine {
     }
 
     if (window.sheetNavigator) window.sheetNavigator.renderActiveView();
+    if (window.tripPlanner && typeof window.tripPlanner.renderPickedSwapsList === 'function') {
+      window.tripPlanner.renderPickedSwapsList();
+    }
   }
 
   /**
