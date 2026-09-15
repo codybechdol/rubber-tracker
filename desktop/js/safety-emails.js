@@ -565,7 +565,7 @@ class SafetyEmailsEngine {
               <div>
                 <span style="font-weight: 700; color: #f8fafc;">🔍 Deep Scan (Extract PDFs)</span>
                 <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px; line-height: 1.35;">
-                  Uses Google Drive OCR to read attached PDFs for internal JHA dates. Scans 1 email per batch to stay under limits.
+                  Uses Google Drive OCR to read attached PDFs for internal JHA dates. Automatically runs in the background (6-min cloud quota) to prevent browser proxy timeouts.
                 </div>
               </div>
             </label>
@@ -908,6 +908,13 @@ class SafetyEmailsEngine {
 
     const speedRadio = document.querySelector('input[name="proc-speed-mode"]:checked');
     let skipPdfExtraction = speedRadio ? (speedRadio.value === 'fast') : true;
+
+    // Deep Scan uses Google Drive OCR (~15-30s per PDF) which exceeds Google's synchronous 25s Web App HTTP proxy timeout.
+    // Automatically route Deep Scan to the Cloud Background Worker where it executes with a full 6-minute quota and zero proxy timeouts!
+    if (!skipPdfExtraction) {
+      console.log('Deep Scan selected: routing to Cloud Background Process to prevent HTTP proxy timeout.');
+      return this.startCloudBackgroundProcess();
+    }
 
     this.isProcessing = true;
     this.isMinimized = false;
