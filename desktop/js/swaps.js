@@ -339,6 +339,13 @@ class SwapGenerationEngine {
       empJobNumMap[nameLower] = String(row['Job Number'] || row['Job #'] || '').trim();
       empClassificationMap[nameLower] = String(row['Job Classification'] || row['Classification'] || '').trim();
       empSizeMap[nameLower] = String(isGloves ? (row['Glove Size'] || row['Size'] || '10') : (row['Sleeve Size'] || row['Size'] || '20')).trim();
+      // Active employee must never be in previousEmployeeNames
+      previousEmployeeNames.delete(nameLower);
+    });
+
+    // Explicitly purge all active employees from previousEmployeeNames
+    Object.keys(empMap).forEach(activeName => {
+      previousEmployeeNames.delete(activeName);
     });
 
     const getForemanForEmployee = (employeeName) => {
@@ -418,7 +425,9 @@ class SwapGenerationEngine {
       let isAlreadyPicked = false;
       let employeeName = '';
 
-      if (locationLower === 'previous employee' || previousEmployeeNames.has(assignedToLower)) {
+      const isAssignedActiveEmp = Boolean(empMap[assignedToLower]);
+
+      if (!isAssignedActiveEmp && (locationLower === 'previous employee' || previousEmployeeNames.has(assignedToLower))) {
         if (assignedTo && !ignoreNames.includes(assignedToLower)) {
           isPrevEmpItem = true;
           employeeName = assignedTo;
@@ -427,7 +436,8 @@ class SwapGenerationEngine {
         const suffixIdx = pickedForLower.indexOf(' reclaim');
         if (suffixIdx !== -1) {
           const empNameStr = pickedFor.substring(0, suffixIdx).trim();
-          if (previousEmployeeNames.has(empNameStr.toLowerCase())) {
+          const empNameStrLower = empNameStr.toLowerCase();
+          if (!empMap[empNameStrLower] && previousEmployeeNames.has(empNameStrLower)) {
             isPrevEmpItem = true;
             isAlreadyPicked = true;
             employeeName = empNameStr;
@@ -571,7 +581,8 @@ class SwapGenerationEngine {
         if (!assignedTo || ignoreNames.includes(assignedTo)) return;
 
         // Skip Previous Employee items from active swap generation (handled in prevEmpItems)
-        if (assignedTo === 'previous employee' || previousEmployeeNames.has(assignedTo) || locationLower === 'previous employee') {
+        const isAssignedActiveEmp = Boolean(empMap[assignedTo]);
+        if (!isAssignedActiveEmp && (assignedTo === 'previous employee' || previousEmployeeNames.has(assignedTo) || locationLower === 'previous employee')) {
           return;
         }
 
@@ -597,11 +608,13 @@ class SwapGenerationEngine {
 
         let daysLeft = '';
         let daysLeftColor = '#388e3c';
+        let daysDiff = 9999;
 
         if (changeOutDate) {
           const chgDt = this.parseDate(changeOutDate);
           if (chgDt) {
             const days = this.getDaysDifference(chgDt, today);
+            daysDiff = days;
             if (days < 0) {
               daysLeft = 'OVERDUE';
               daysLeftColor = '#ff5252';
@@ -626,6 +639,7 @@ class SwapGenerationEngine {
             dateAssigned: this.formatDate(dateAssigned),
             changeOutDate: this.formatDate(changeOutDate),
             daysLeft: daysLeft,
+            daysDiff: daysDiff,
             daysLeftColor: daysLeftColor,
             status: status,
             itemClass: itemClass,
@@ -639,15 +653,18 @@ class SwapGenerationEngine {
         }
       });
 
-      // Sort by Location (alphabetically), then by Foreman, then by Change Out Date (urgent first)
+      // Prioritize candidates for Pick List allocation: smallest number in Days Left gets highest priority!
+      // (OVERDUE is negative daysDiff, so it naturally comes first; then 0, 1, 2, ... up to 31)
       swapMeta.sort((a, b) => {
+        if (a.daysDiff !== b.daysDiff) return a.daysDiff - b.daysDiff;
+        const dtA = new Date(a.changeOutDate).getTime() || 0;
+        const dtB = new Date(b.changeOutDate).getTime() || 0;
+        if (dtA !== dtB) return dtA - dtB;
         const locComp = (a.employeeLocation || 'ZZZ').localeCompare(b.employeeLocation || 'ZZZ');
         if (locComp !== 0) return locComp;
         const formComp = (a.foreman || 'ZZZ').localeCompare(b.foreman || 'ZZZ');
         if (formComp !== 0) return formComp;
-        const dtA = new Date(a.changeOutDate).getTime() || 0;
-        const dtB = new Date(b.changeOutDate).getTime() || 0;
-        return dtA - dtB;
+        return (a.empName || '').localeCompare(b.empName || '');
       });
 
       const isLostLocate = (it) => String(it['Notes'] || '').toUpperCase().includes('LOST-LOCATE');
@@ -874,6 +891,7 @@ class SwapGenerationEngine {
           location: meta.employeeLocation,
           foreman: meta.foreman,
           daysLeftColor: meta.daysLeftColor,
+          daysDiff: meta.daysDiff,
           itemClass: itemClass
         });
       });
@@ -905,6 +923,9 @@ class SwapGenerationEngine {
             if (sortedForemen.length > 1 || foreman !== 'Unknown') {
               rawGrid.push([`    👷 ${foreman}`, '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '']);
             }
+
+            // Within each foreman, sort employees by Days Left (smallest / most urgent first)
+            foremanGroups[foreman].sort((a, b) => a.daysDiff - b.daysDiff);
 
             foremanGroups[foreman].forEach(r => {
               rawGrid.push(r.data);
@@ -1038,6 +1059,7 @@ class SwapGenerationEngine {
             dateAssigned: this.formatDate(r['Date Assigned']),
             changeOutDate: this.formatDate(chgOut),
             daysLeft: daysLeft < 0 ? 'OVERDUE' : daysLeft,
+            daysDiff: daysLeft,
             assignedTo: assignedTo,
             location: r['Location'] || 'Helena',
             status: r['Status'] || 'In Service'
@@ -1046,15 +1068,28 @@ class SwapGenerationEngine {
       }
     });
 
+    // Prioritize blankets with smallest Days Left first
+    blanketsNeedingSwap.sort((a, b) => a.daysDiff - b.daysDiff);
+
     rawGrid.push(['Blanket Swaps', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '']);
     rawGrid.push(headers);
 
+    const assignedBlanketNums = new Set();
+
     blanketsNeedingSwap.forEach(b => {
-      // Find matching shelf blanket
-      const match = shelfBlankets.find(sb => String(sb['Class']) === String(b.itemClass) && String(sb['Type']) === String(b.type));
-      const pickNum = match ? String(match['Item #'] || match['Blanket'] || '').trim() : '—';
+      // Find matching shelf blanket not already picked
+      const match = shelfBlankets.find(sb => {
+        const bNum = String(sb['Item #'] || sb['Blanket'] || sb['Blanket #'] || '').trim();
+        return !assignedBlanketNums.has(bNum) &&
+               String(sb['Class']) === String(b.itemClass) &&
+               String(sb['Type']) === String(b.type);
+      });
+      const pickNum = match ? String(match['Item #'] || match['Blanket'] || match['Blanket #'] || '').trim() : '—';
       const pickStatus = match ? 'In Stock ✅' : 'Need to Purchase ❌';
-      if (match) pickedCount++;
+      if (match) {
+        pickedCount++;
+        assignedBlanketNums.add(pickNum);
+      }
 
       const rowData = [
         b.assignedTo, b.itemNum, b.type, b.dateAssigned, b.changeOutDate, b.daysLeft,
@@ -1112,6 +1147,7 @@ class SwapGenerationEngine {
             dateAssigned: this.formatDate(r['Date Assigned']),
             changeOutDate: this.formatDate(chgOut),
             daysLeft: daysLeft < 0 ? 'OVERDUE' : daysLeft,
+            daysDiff: daysLeft,
             assignedTo: assignedTo,
             location: r['Location'] || 'Helena',
             status: r['Status'] || 'In Service'
@@ -1120,14 +1156,27 @@ class SwapGenerationEngine {
       }
     });
 
+    // Prioritize MACKs with smallest Days Left first
+    macksNeedingSwap.sort((a, b) => a.daysDiff - b.daysDiff);
+
     rawGrid.push(['MACK Swaps', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '', '']);
     rawGrid.push(headers);
 
+    const assignedMackNums = new Set();
+
     macksNeedingSwap.forEach(m => {
-      const match = shelfMacks.find(sm => String(sm['KV']) === String(m.kv) && String(sm['Size']) === String(m.size));
-      const pickNum = match ? String(match['Item #'] || match['ESL ID'] || '').trim() : '—';
+      const match = shelfMacks.find(sm => {
+        const mNum = String(sm['Item #'] || sm['ESL ID'] || sm['MACK'] || sm['MACK #'] || '').trim();
+        return !assignedMackNums.has(mNum) &&
+               String(sm['KV']) === String(m.kv) &&
+               String(sm['Size']) === String(m.size);
+      });
+      const pickNum = match ? String(match['Item #'] || match['ESL ID'] || match['MACK'] || match['MACK #'] || '').trim() : '—';
       const pickStatus = match ? 'In Stock ✅' : 'Need to Purchase ❌';
-      if (match) pickedCount++;
+      if (match) {
+        pickedCount++;
+        assignedMackNums.add(pickNum);
+      }
 
       const rowData = [
         m.assignedTo, m.itemNum, m.kv, m.size, m.length, m.dateAssigned, m.changeOutDate, m.daysLeft,
@@ -1180,6 +1229,7 @@ class SwapGenerationEngine {
             dateAssigned: this.formatDate(r['Date Assigned']),
             changeOutDate: this.formatDate(chgOut),
             daysLeft: daysLeft < 0 ? 'OVERDUE' : daysLeft,
+            daysDiff: daysLeft,
             assignedTo: assignedTo,
             status: r['Status'] || 'In Service'
           });
@@ -1187,14 +1237,25 @@ class SwapGenerationEngine {
       }
     });
 
+    // Prioritize items with smallest Days Left first
+    needingSwap.sort((a, b) => a.daysDiff - b.daysDiff);
+
     rawGrid.push([`${equipmentLabel} Swaps`, '', '', '', '', '', '', '', '', '', '', '']);
     rawGrid.push(headers);
 
+    const assignedCalibrationNums = new Set();
+
     needingSwap.forEach(it => {
-      const match = shelfItems.find(si => String(si['Model']) === String(it.model));
+      const match = shelfItems.find(si => {
+        const num = String(si['HVT #'] || si['Phasing Set #'] || si['Item #'] || si['Item'] || si['Serial #'] || Object.entries(si).find(([k]) => k !== '_rowIdx')?.[1] || '').trim();
+        return !assignedCalibrationNums.has(num) && String(si['Model']) === String(it.model);
+      });
       const pickNum = match ? String(match['HVT #'] || match['Phasing Set #'] || match['Item #'] || match['Item'] || match['Serial #'] || Object.entries(match).find(([k]) => k !== '_rowIdx')?.[1] || '').trim() : '—';
       const pickStatus = match ? 'In Stock ✅' : 'Need to Purchase ❌';
-      if (match) pickedCount++;
+      if (match) {
+        pickedCount++;
+        assignedCalibrationNums.add(pickNum);
+      }
 
       const rowData = [
         it.assignedTo, it.itemNum, it.model, it.kv, it.serialNum, it.dateAssigned, it.changeOutDate, it.daysLeft,

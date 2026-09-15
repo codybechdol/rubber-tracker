@@ -582,6 +582,542 @@ class ItemStatsEngine {
     `;
   }
 
+  /**
+   * computeFleetVisualMetrics - Aggregates fleet-wide lifecycle, failure, purchase, and assignment metrics
+   * for Gloves or Sleeves.
+   * @param {string} sheetKey - 'gloves' or 'sleeves'
+   * @returns {Object} Calculated metrics
+   */
+  computeFleetVisualMetrics(sheetKey = 'gloves') {
+    sheetKey = (sheetKey || 'gloves').toLowerCase();
+    const isGloves = sheetKey.includes('glove');
+    const cleanKey = isGloves ? 'gloves' : 'sleeves';
+    const histKey = cleanKey + '_history';
+
+    const mainTable = this.db.getTable(cleanKey);
+    const histTable = this.db.getTable(histKey);
+    const mainRows = (mainTable && mainTable.rows) ? mainTable.rows : [];
+    const histRows = (histTable && histTable.rows) ? histTable.rows : [];
+
+    // 1. Group history by item #
+    const histByItem = {};
+    histRows.forEach(r => {
+      const num = String(r['Item #'] || r['Item Number'] || r['Item'] || '').trim();
+      if (!num) return;
+      if (!histByItem[num]) histByItem[num] = [];
+      histByItem[num].push(r);
+    });
+
+    // 2. Failed rubber analysis
+    const failedActive = [];
+    const failureReasons = {
+      'Visual': { count: 0, label: 'Visual (Cuts / Tears / Punctures)', color: '#f59e0b', icon: '👁️', shortLabel: 'Visual' },
+      'Electrical': { count: 0, label: 'Electrical Test Failure (Dielectric)', color: '#ef4444', icon: '⚡', shortLabel: 'Electrical' },
+      'Field Damage': { count: 0, label: 'Damaged in Field', color: '#a855f7', icon: '💥', shortLabel: 'Field Damage' },
+      'Failed Test': { count: 0, label: 'Lab Retest Failed', color: '#ec4899', icon: '🔬', shortLabel: 'Lab Test' },
+      'Unspecified': { count: 0, label: 'Unspecified / No Note', color: '#64748b', icon: '❓', shortLabel: 'Unspecified' }
+    };
+    const failuresByClass = {};
+    const failuresBySize = {};
+
+    mainRows.forEach(r => {
+      const status = String(r['Status'] || '').toLowerCase().trim();
+      const assigned = String(r['Assigned To'] || '').toLowerCase().trim();
+      const notes = String(r['Notes'] || '').trim();
+      const size = String(r['Size'] || 'Unknown').trim();
+      const cls = String(r['Class'] || 'Unknown').trim();
+
+      const isFailed = status === 'failed rubber' || assigned === 'failed rubber' || status === 'failed' || assigned === 'failed';
+      if (isFailed) {
+        failedActive.push(r);
+        if (cls) failuresByClass[cls] = (failuresByClass[cls] || 0) + 1;
+        if (size) failuresBySize[size] = (failuresBySize[size] || 0) + 1;
+
+        const nLower = notes.toLowerCase();
+        if (nLower.includes('visual') || nLower.includes('cut') || nLower.includes('tear') || nLower.includes('hole') || nLower.includes('puncture') || nLower.includes('ozone')) {
+          failureReasons['Visual'].count++;
+        } else if (nLower.includes('electr') || nLower.includes('dielectric') || nLower.includes('burn')) {
+          failureReasons['Electrical'].count++;
+        } else if (nLower.includes('damag') || nLower.includes('field')) {
+          failureReasons['Field Damage'].count++;
+        } else if (nLower.includes('test fail') || nLower.includes('failed test')) {
+          failureReasons['Failed Test'].count++;
+        } else {
+          failureReasons['Unspecified'].count++;
+        }
+      }
+    });
+
+    // Also count all-time retired/failed items from history
+    const historicalFailedItems = new Set();
+    histRows.forEach(r => {
+      const assigned = String(r['Assigned To'] || '').toLowerCase().trim();
+      const status = String(r['Status'] || '').toLowerCase().trim();
+      const notes = String(r['Notes'] || '').toLowerCase().trim();
+      const num = String(r['Item #'] || '').trim();
+      if (assigned === 'failed rubber' || assigned === 'failed' || status === 'failed rubber' || status === 'failed' || notes.includes('failed rubber') || notes.includes('failed test')) {
+        if (num) historicalFailedItems.add(num);
+      }
+    });
+
+    // 3. New Purchases tracking
+    const newPurchaseItems = new Set();
+    histRows.forEach(r => {
+      const assigned = String(r['Assigned To'] || '').toLowerCase().trim();
+      const notes = String(r['Notes'] || '').toLowerCase().trim();
+      const num = String(r['Item #'] || '').trim();
+      if (
+        assigned === 'new' || assigned === 'newly purchased' || assigned === 'brand new' || assigned === 'new purchase' ||
+        assigned.startsWith('new (') ||
+        notes.includes('new purchase') || notes.includes('initial purchase') || notes.includes('newly purchased') ||
+        notes === 'new'
+      ) {
+        if (num) newPurchaseItems.add(num);
+      }
+    });
+    mainRows.forEach(r => {
+      const assigned = String(r['Assigned To'] || '').toLowerCase().trim();
+      const notes = String(r['Notes'] || '').toLowerCase().trim();
+      const num = String(r['Glove'] || r['Sleeve'] || r['Item #'] || '').trim();
+      if (assigned === 'new' || assigned === 'new purchase' || notes.includes('new purchase') || notes.includes('initial purchase')) {
+        if (num) newPurchaseItems.add(num);
+      }
+    });
+    const newPurchasesCount = newPurchaseItems.size;
+
+    // 4. Lifespan vs. Assignment Duration Analysis
+    let totalLifespanDays = 0;
+    let totalFieldDays = 0;
+    let totalShelfDays = 0;
+    let totalTestingDays = 0;
+    let totalLostDays = 0;
+    let countWithHistory = 0;
+    let totalLinemenAssignments = 0;
+    let totalLinemenDays = 0;
+
+    mainRows.forEach(r => {
+      const num = String(r['Glove'] || r['Sleeve'] || r['Item #'] || '').trim();
+      const gRows = histByItem[num];
+      if (gRows && gRows.length > 0) {
+        const stats = this.analyzeLifecycle(num, gRows, r);
+        if (stats) {
+          totalLifespanDays += stats.totalDays;
+          totalFieldDays += stats.fieldDays;
+          totalShelfDays += stats.shelfDays;
+          totalTestingDays += stats.testingDays;
+          totalLostDays += stats.lostDays;
+          countWithHistory++;
+          (stats.linemenList || []).forEach(l => {
+            totalLinemenAssignments++;
+            totalLinemenDays += l.days;
+          });
+        }
+      }
+    });
+
+    const avgLifespanDays = countWithHistory > 0 ? Math.round(totalLifespanDays / countWithHistory) : 0;
+    const avgAssignmentDays = totalLinemenAssignments > 0 ? Math.round(totalLinemenDays / totalLinemenAssignments) : 0;
+    const avgFieldDays = countWithHistory > 0 ? Math.round(totalFieldDays / countWithHistory) : 0;
+    const avgShelfDays = countWithHistory > 0 ? Math.round(totalShelfDays / countWithHistory) : 0;
+
+    const aggregateTotalDays = Math.max(1, totalFieldDays + totalShelfDays + totalTestingDays + totalLostDays);
+    const lifeAllocation = {
+      fieldPct: Math.round((totalFieldDays / aggregateTotalDays) * 100),
+      shelfPct: Math.round((totalShelfDays / aggregateTotalDays) * 100),
+      testingPct: Math.round((totalTestingDays / aggregateTotalDays) * 100),
+      lostPct: Math.max(0, 100 - Math.round((totalFieldDays / aggregateTotalDays) * 100) - Math.round((totalShelfDays / aggregateTotalDays) * 100) - Math.round((totalTestingDays / aggregateTotalDays) * 100))
+    };
+
+    // 5. Fleet Operational Readiness
+    const now = Date.now();
+    let statusField = 0;
+    let statusShelf = 0;
+    let statusTesting = 0;
+    let statusReadyDelivery = 0;
+    let statusExpiringSoon = 0;
+    let statusOverdue = 0;
+
+    mainRows.forEach(r => {
+      const status = String(r['Status'] || '').toLowerCase().trim();
+      const assigned = String(r['Assigned To'] || '').toLowerCase().trim();
+      const chgDate = r['Change Out Date'];
+
+      const isFailed = status === 'failed rubber' || assigned === 'failed rubber';
+      if (!isFailed) {
+        if (status === 'on shelf' || assigned === 'on shelf' || status === 'in stock') {
+          statusShelf++;
+        } else if (status === 'in testing' || assigned === 'in testing' || status === 'ready for test') {
+          statusTesting++;
+        } else if (status === 'ready for delivery' || assigned === 'packed for delivery') {
+          statusReadyDelivery++;
+        } else {
+          statusField++;
+        }
+
+        if (chgDate && chgDate !== 'N/A' && chgDate !== '—') {
+          const dt = this.parseDate(chgDate);
+          if (dt) {
+            const daysLeft = (dt.getTime() - now) / 86400000;
+            if (daysLeft < 0) statusOverdue++;
+            else if (daysLeft <= 30) statusExpiringSoon++;
+          }
+        }
+      }
+    });
+
+    const netReplacementBalance = newPurchasesCount - failedActive.length;
+
+    return {
+      sheetKey: cleanKey,
+      sheetLabel: isGloves ? 'Gloves' : 'Sleeves',
+      singularLabel: isGloves ? 'Glove' : 'Sleeve',
+      totalFleet: mainRows.length,
+      failedCount: failedActive.length,
+      failedRatePct: mainRows.length > 0 ? ((failedActive.length / mainRows.length) * 100).toFixed(1) : '0.0',
+      historicalFailedCount: historicalFailedItems.size,
+      failureReasons: failureReasons,
+      failuresByClass: failuresByClass,
+      failuresBySize: failuresBySize,
+      newPurchasesCount: newPurchasesCount,
+      netReplacementBalance: netReplacementBalance,
+      avgLifespanDays: avgLifespanDays,
+      avgLifespanFormatted: this.formatDuration(avgLifespanDays),
+      avgAssignmentDays: avgAssignmentDays,
+      avgAssignmentFormatted: this.formatDuration(avgAssignmentDays),
+      avgFieldDays: avgFieldDays,
+      avgFieldFormatted: this.formatDuration(avgFieldDays),
+      avgShelfDays: avgShelfDays,
+      avgShelfFormatted: this.formatDuration(avgShelfDays),
+      totalLinemenAssignments: totalLinemenAssignments,
+      itemsAnalyzed: countWithHistory,
+      lifeAllocation: lifeAllocation,
+      readiness: {
+        field: statusField,
+        shelf: statusShelf,
+        testing: statusTesting,
+        readyDelivery: statusReadyDelivery,
+        expiringSoon: statusExpiringSoon,
+        overdue: statusOverdue
+      }
+    };
+  }
+
+  /**
+   * renderFleetVisualsHtml - Generates the complete interactive visual analytics dashboard HTML
+   * for Gloves or Sleeves.
+   */
+  renderFleetVisualsHtml(sheetKey, metrics, isExpanded = true, activeFailureReasonFilter = null) {
+    if (!metrics) return '';
+
+    const icon = metrics.sheetKey === 'gloves' ? '🧤' : '🦺';
+    const totalFailed = Math.max(1, metrics.failedCount);
+
+    // Build failure reason breakdown segmented bar & chips
+    const reasonKeys = ['Visual', 'Electrical', 'Field Damage', 'Failed Test', 'Unspecified'];
+    const barSegmentsHtml = reasonKeys.map(k => {
+      const r = metrics.failureReasons[k];
+      if (!r || r.count === 0) return '';
+      const pct = Math.round((r.count / totalFailed) * 100);
+      return `<div style="width: ${pct}%; background-color: ${r.color};" title="${r.label}: ${r.count} (${pct}%)"></div>`;
+    }).filter(Boolean).join('');
+
+    const reasonChipsHtml = reasonKeys.map(k => {
+      const r = metrics.failureReasons[k];
+      if (!r) return '';
+      const isFilterActive = activeFailureReasonFilter && activeFailureReasonFilter.toLowerCase() === k.toLowerCase();
+      const pct = metrics.failedCount > 0 ? Math.round((r.count / metrics.failedCount) * 100) : 0;
+      return `
+        <button class="failure-reason-chip ${isFilterActive ? 'active' : ''}"
+                style="background: ${isFilterActive ? r.color : 'rgba(255, 255, 255, 0.04)'};
+                       color: ${isFilterActive ? '#ffffff' : 'var(--text-primary)'};
+                       border: 1px solid ${isFilterActive ? r.color : 'rgba(255, 255, 255, 0.12)'};
+                       border-left: 3px solid ${r.color};"
+                onclick="window.sheetNavigator.filterByFailureReason('${this.escapeHtml(k)}')"
+                title="Click to filter table by ${r.label}">
+          <span>${r.icon}</span>
+          <span style="font-weight: 600;">${r.shortLabel}</span>
+          <span class="reason-count-badge" style="background: rgba(0, 0, 0, 0.25);">${r.count}</span>
+          <span style="font-size: 10px; color: ${isFilterActive ? 'rgba(255,255,255,0.85)' : 'var(--text-muted)'};">(${pct}%)</span>
+        </button>
+      `;
+    }).join('');
+
+    // Purchases vs Failures ratio bar
+    const totalPF = Math.max(1, metrics.newPurchasesCount + metrics.failedCount);
+    const purchasePct = Math.round((metrics.newPurchasesCount / totalPF) * 100);
+    const failurePct = Math.max(0, 100 - purchasePct);
+
+    // Class attrition chips
+    const classChipsHtml = Object.entries(metrics.failuresByClass).sort((a, b) => b[1] - a[1]).map(([cls, count]) => {
+      return `
+        <span class="attrition-pill" onclick="window.sheetNavigator.setClassFilter('${this.escapeHtml(cls)}')" title="Filter by Class ${this.escapeHtml(cls)}">
+          <strong>Class ${this.escapeHtml(cls)}:</strong> ${count} failed
+        </span>
+      `;
+    }).join('') || '<span style="font-size: 11px; color: var(--text-muted);">None</span>';
+
+    // Size attrition chips
+    const sizeChipsHtml = Object.entries(metrics.failuresBySize).sort((a, b) => b[1] - a[1]).map(([sz, count]) => {
+      return `
+        <span class="attrition-pill" onclick="window.sheetNavigator.setSizeFilter('${this.escapeHtml(sz)}')" title="Filter by Size ${this.escapeHtml(sz)}">
+          <strong>Size ${this.escapeHtml(sz)}:</strong> ${count}
+        </span>
+      `;
+    }).join('') || '<span style="font-size: 11px; color: var(--text-muted);">None</span>';
+
+    if (!isExpanded) {
+      // Collapsed Bar View
+      return `
+        <div class="inventory-visuals-collapsed" onclick="window.sheetNavigator.toggleVisualsDashboard()">
+          <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+            <span style="font-size: 16px;">${icon}</span>
+            <span style="font-weight: 700; font-size: 13px; color: var(--text-primary);">${metrics.sheetLabel} Fleet Visuals</span>
+            <span class="brand-badge" style="font-size: 10.5px; background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.35);">
+              ❌ ${metrics.failedCount} Failed (${metrics.failedRatePct}%)
+            </span>
+            <span class="brand-badge" style="font-size: 10.5px; background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.35);">
+              ✨ ${metrics.newPurchasesCount} New Purchases
+            </span>
+            <span class="brand-badge" style="font-size: 10.5px; background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.35);">
+              ⏱️ ${metrics.avgLifespanFormatted} Avg Life (Lineman: ${metrics.avgAssignmentFormatted})
+            </span>
+          </div>
+          <div style="margin-left: auto; display: flex; align-items: center; gap: 6px; font-size: 11.5px; font-weight: 600; color: #60a5fa;">
+            <span>Show Analytics Dashboard</span>
+            <span style="font-size: 12px;">▼</span>
+          </div>
+        </div>
+      `;
+    }
+
+    // Expanded Full Dashboard
+    return `
+      <div class="inventory-visuals-wrapper">
+        <!-- Dashboard Header -->
+        <div class="inventory-visuals-header">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 18px;">${icon}</span>
+            <div>
+              <div style="font-size: 14px; font-weight: 700; color: #ffffff; display: flex; align-items: center; gap: 8px;">
+                <span>${metrics.sheetLabel} Fleet Visual Analytics & Lifecycle Intelligence</span>
+                <span class="brand-badge" style="font-size: 10px; padding: 1px 6px; background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4);">
+                  ${metrics.totalFleet} Total Fleet
+                </span>
+              </div>
+              <div style="font-size: 11px; color: var(--text-muted); margin-top: 1px;">
+                Live metrics from active inventory & historical audit logs • Analyzed ${metrics.itemsAnalyzed} items across ${metrics.totalLinemenAssignments} lineman deployments
+              </div>
+            </div>
+          </div>
+          <div style="display: flex; align-items: center; gap: 6px;">
+            ${activeFailureReasonFilter ? `
+              <button class="btn btn-secondary" style="padding: 3px 8px; font-size: 11px; color: #f87171; border-color: rgba(239, 68, 68, 0.4);" onclick="window.sheetNavigator.clearFailureReasonFilter()">
+                ✕ Clear "${this.escapeHtml(activeFailureReasonFilter)}" Filter
+              </button>
+            ` : ''}
+            <button class="btn btn-secondary" style="padding: 3px 8px; font-size: 11px; display: inline-flex; align-items: center; gap: 4px;" onclick="window.sheetNavigator.toggleVisualsDashboard()" title="Collapse Visuals to maximize table view">
+              <span>▲ Collapse</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Row 1: Top 4 KPI Cards -->
+        <div class="fleet-kpi-grid">
+          
+          <!-- Card 1: Failed Rubber Totals & Reasons -->
+          <div class="fleet-kpi-card" style="border-top: 3px solid #ef4444;">
+            <div class="kpi-header">
+              <span class="kpi-title"><span>❌</span> Failed Rubber Totals</span>
+              <span class="kpi-tag" style="background: rgba(239, 68, 68, 0.15); color: #f87171;">${metrics.failedRatePct}% Attrition</span>
+            </div>
+            <div class="kpi-main-val" style="color: #ef4444;">
+              ${metrics.failedCount} <span style="font-size: 13px; font-weight: 500; color: var(--text-muted);">/ ${metrics.totalFleet} pairs</span>
+            </div>
+            <div class="kpi-subtext">
+              All-time retired: <strong>${metrics.historicalFailedCount}</strong> items in history
+            </div>
+            <div style="margin-top: 8px;">
+              <button class="btn btn-sm btn-secondary" style="width: 100%; font-size: 11px; padding: 3px 6px; justify-content: center; gap: 4px;" onclick="window.sheetNavigator.setStatusFilter('failed_rubber')">
+                🔍 Filter All Failed Rubber
+              </button>
+            </div>
+          </div>
+
+          <!-- Card 2: Failures vs. New Purchases -->
+          <div class="fleet-kpi-card" style="border-top: 3px solid #10b981;">
+            <div class="kpi-header">
+              <span class="kpi-title"><span>⚖️</span> Failures vs. Purchases</span>
+              <span class="kpi-tag" style="background: ${metrics.netReplacementBalance >= 0 ? 'rgba(16, 185, 129, 0.15)' : 'rgba(245, 158, 11, 0.15)'}; color: ${metrics.netReplacementBalance >= 0 ? '#34d399' : '#fbbf24'};">
+                ${metrics.netReplacementBalance >= 0 ? '+' + metrics.netReplacementBalance + ' Net Growth' : metrics.netReplacementBalance + ' Deficit'}
+              </span>
+            </div>
+            <div class="kpi-main-val">
+              <span style="color: #10b981;">${metrics.newPurchasesCount}</span>
+              <span style="font-size: 13px; font-weight: 500; color: var(--text-muted);">New vs</span>
+              <span style="color: #ef4444;">${metrics.failedCount}</span>
+              <span style="font-size: 13px; font-weight: 500; color: var(--text-muted);">Failed</span>
+            </div>
+            <!-- Mini Progress Bar comparing New vs Failed -->
+            <div style="height: 6px; border-radius: 3px; overflow: hidden; background: var(--bg-tertiary); display: flex; margin-top: 6px;">
+              <div style="width: ${purchasePct}%; background: #10b981;" title="New Purchases: ${metrics.newPurchasesCount} (${purchasePct}%)"></div>
+              <div style="width: ${failurePct}%; background: #ef4444;" title="Failures: ${metrics.failedCount} (${failurePct}%)"></div>
+            </div>
+            <div class="kpi-subtext" style="margin-top: 6px;">
+              Replacement Ratio: <strong>${(metrics.newPurchasesCount / Math.max(1, metrics.failedCount)).toFixed(2)}x</strong>
+            </div>
+          </div>
+
+          <!-- Card 3: Avg Lifespan vs. Lineman Time -->
+          <div class="fleet-kpi-card" style="border-top: 3px solid #3b82f6;">
+            <div class="kpi-header">
+              <span class="kpi-title"><span>⏱️</span> Lifespan vs. Field Time</span>
+              <span class="kpi-tag" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd;">Cycle Metric</span>
+            </div>
+            <div class="kpi-main-val" style="color: #60a5fa;">
+              ${metrics.avgLifespanFormatted}
+            </div>
+            <div class="kpi-subtext">
+              Avg Lineman Deployment: <strong style="color: #93c5fd;">${metrics.avgAssignmentFormatted}</strong> (~${(metrics.avgAssignmentDays / 30.4).toFixed(1)} mos)
+            </div>
+            <div class="kpi-subtext" style="color: var(--text-muted); font-size: 10.5px; margin-top: 4px;">
+              ${metrics.totalLinemenAssignments} employee assignments analyzed
+            </div>
+          </div>
+
+          <!-- Card 4: Fleet Operational Readiness -->
+          <div class="fleet-kpi-card" style="border-top: 3px solid #f59e0b;">
+            <div class="kpi-header">
+              <span class="kpi-title"><span>🛡️</span> Fleet Readiness</span>
+              <span class="kpi-tag" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24;">Operational</span>
+            </div>
+            <div class="kpi-main-val" style="font-size: 18px;">
+              <span style="color: #3b82f6;" title="Active with Linemen">👷 ${metrics.readiness.field}</span>
+              <span style="font-size: 13px; color: var(--text-muted); font-weight: normal;">•</span>
+              <span style="color: #f59e0b;" title="Warehouse Spares">📦 ${metrics.readiness.shelf}</span>
+              <span style="font-size: 13px; color: var(--text-muted); font-weight: normal;">•</span>
+              <span style="color: #c084fc;" title="In Testing Lab">🔬 ${metrics.readiness.testing}</span>
+            </div>
+            <div class="kpi-subtext" style="display: flex; gap: 8px; margin-top: 6px; flex-wrap: wrap;">
+              <span style="color: ${metrics.readiness.expiringSoon > 0 ? '#fbbf24' : 'var(--text-muted)'};">
+                ⚠️ ${metrics.readiness.expiringSoon} Expiring (<30d)
+              </span>
+              <span style="color: ${metrics.readiness.overdue > 0 ? '#f87171' : 'var(--text-muted)'}; font-weight: ${metrics.readiness.overdue > 0 ? '700' : 'normal'};">
+                ❌ ${metrics.readiness.overdue} Overdue
+              </span>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Row 2: 3 Detailed Breakdown Panels -->
+        <div class="fleet-detail-grid">
+          
+          <!-- Detail Panel 1: Failure Reasons from Notes -->
+          <div class="fleet-detail-card">
+            <div class="detail-card-title">
+              <span>👁️ Failure Reasons from Notes</span>
+              <span style="font-size: 11px; font-weight: 500; color: var(--text-muted);">(${metrics.failedCount} failed items)</span>
+            </div>
+            <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 8px;">
+              Extracted from inspector change-out & test notes. Click any reason below to filter the grid:
+            </div>
+            
+            <!-- Segmented Distribution Bar -->
+            <div style="height: 10px; border-radius: 5px; overflow: hidden; background: var(--bg-tertiary); display: flex; margin-bottom: 10px; box-shadow: inset 0 1px 2px rgba(0,0,0,0.3);">
+              ${barSegmentsHtml || '<div style="width: 100%; background: var(--bg-tertiary);"></div>'}
+            </div>
+
+            <!-- Reason Filter Chips -->
+            <div class="failure-reasons-chips-grid">
+              ${reasonChipsHtml}
+            </div>
+          </div>
+
+          <!-- Detail Panel 2: Lifespan vs Time Assigned to Employee -->
+          <div class="fleet-detail-card">
+            <div class="detail-card-title">
+              <span>⏱️ Lifespan vs. Lineman Deployment</span>
+              <span style="font-size: 11px; font-weight: 500; color: var(--text-muted);">${metrics.sheetLabel} Lifecycle</span>
+            </div>
+            
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 10px;">
+              <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 8px;">
+                <div style="font-size: 10.5px; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Total Lifespan</div>
+                <div style="font-size: 15px; font-weight: 700; color: #60a5fa; margin-top: 2px;">${metrics.avgLifespanFormatted}</div>
+                <div style="font-size: 10px; color: var(--text-muted);">Tracking origin to EOL</div>
+              </div>
+              <div style="background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 8px;">
+                <div style="font-size: 10.5px; color: var(--text-muted); text-transform: uppercase; font-weight: 600;">Time Per Lineman</div>
+                <div style="font-size: 15px; font-weight: 700; color: #34d399; margin-top: 2px;">${metrics.avgAssignmentFormatted}</div>
+                <div style="font-size: 10px; color: var(--text-muted);">Avg continuous deployment</div>
+              </div>
+            </div>
+
+            <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 6px; display: flex; justify-content: space-between;">
+              <span>Lifetime Stage Allocation:</span>
+              <span style="color: var(--text-secondary); font-weight: 600;">${metrics.avgFieldFormatted} Total Field Time</span>
+            </div>
+
+            <!-- Segmented Lifetime Allocation Bar -->
+            <div style="height: 10px; border-radius: 5px; overflow: hidden; background: var(--bg-tertiary); display: flex; margin-bottom: 8px; box-shadow: inset 0 1px 2px rgba(0,0,0,0.3);">
+              ${metrics.lifeAllocation.fieldPct > 0 ? `<div style="width: ${metrics.lifeAllocation.fieldPct}%; background: #3b82f6;" title="Field Service: ${metrics.lifeAllocation.fieldPct}%"></div>` : ''}
+              ${metrics.lifeAllocation.shelfPct > 0 ? `<div style="width: ${metrics.lifeAllocation.shelfPct}%; background: #f59e0b;" title="Warehouse Shelf: ${metrics.lifeAllocation.shelfPct}%"></div>` : ''}
+              ${metrics.lifeAllocation.testingPct > 0 ? `<div style="width: ${metrics.lifeAllocation.testingPct}%; background: #c084fc;" title="Testing Lab: ${metrics.lifeAllocation.testingPct}%"></div>` : ''}
+              ${metrics.lifeAllocation.lostPct > 0 ? `<div style="width: ${metrics.lifeAllocation.lostPct}%; background: #64748b;" title="Lost/Other: ${metrics.lifeAllocation.lostPct}%"></div>` : ''}
+            </div>
+
+            <div style="display: flex; gap: 10px; font-size: 10.5px; color: var(--text-muted); flex-wrap: wrap;">
+              <span style="display: flex; align-items: center; gap: 4px;"><span style="width: 8px; height: 8px; border-radius: 50%; background: #3b82f6;"></span> Field (${metrics.lifeAllocation.fieldPct}%)</span>
+              <span style="display: flex; align-items: center; gap: 4px;"><span style="width: 8px; height: 8px; border-radius: 50%; background: #f59e0b;"></span> Shelf (${metrics.lifeAllocation.shelfPct}%)</span>
+              <span style="display: flex; align-items: center; gap: 4px;"><span style="width: 8px; height: 8px; border-radius: 50%; background: #c084fc;"></span> Testing (${metrics.lifeAllocation.testingPct}%)</span>
+            </div>
+            
+            <div style="font-size: 10px; color: var(--text-muted); margin-top: 8px; border-top: 1px dashed rgba(255,255,255,0.08); padding-top: 6px;">
+              ℹ️ Recertification Interval: <strong>${metrics.sheetKey === 'gloves' ? '3 Months (OSHA / Utility Spec)' : '6–12 Months'}</strong>. Linemen rotations align closely with required test cycles.
+            </div>
+          </div>
+
+          <!-- Detail Panel 3: High-Attrition / Procurement Alert -->
+          <div class="fleet-detail-card">
+            <div class="detail-card-title">
+              <span>📊 Attrition by Class & Size</span>
+              <span style="font-size: 11px; font-weight: 500; color: var(--text-muted);">Procurement Guide</span>
+            </div>
+            
+            <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 6px;">
+              Failure breakdown to guide re-ordering & safety stock:
+            </div>
+
+            <!-- By Class -->
+            <div style="margin-bottom: 8px;">
+              <div style="font-size: 10.5px; font-weight: 700; color: var(--text-secondary); margin-bottom: 4px; text-transform: uppercase;">
+                Failures by Voltage Class:
+              </div>
+              <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                ${classChipsHtml}
+              </div>
+            </div>
+
+            <!-- By Size -->
+            <div>
+              <div style="font-size: 10.5px; font-weight: 700; color: var(--text-secondary); margin-bottom: 4px; text-transform: uppercase;">
+                Failures by Size (High-Attrition):
+              </div>
+              <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                ${sizeChipsHtml}
+              </div>
+            </div>
+
+            <div style="margin-top: 10px; background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.2); border-radius: 6px; padding: 6px 8px; font-size: 10.5px; color: #93c5fd;">
+              💡 <strong>Safety Stock Tip:</strong> Order replacement stock ahead of quarterly swap cycles to prevent size stockouts during field swaps.
+            </div>
+          </div>
+
+        </div>
+      </div>
+    `;
+  }
+
   initBookPagingListeners() {
     if (this._bookListenersInitialized) return;
     this._bookListenersInitialized = true;

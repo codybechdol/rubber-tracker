@@ -21984,6 +21984,7 @@ function generateSwaps(itemType) {
             dateAssigned: dateAssigned,
             changeOutDate: changeOutDate,
             daysLeft: daysLeft,
+            daysDiff: diffDays,
             daysLeftCell: daysLeftCell,
             status: status,
             itemClass: itemClass,
@@ -21998,16 +21999,18 @@ function generateSwaps(itemType) {
 
       Logger.log('generateSwaps(' + itemType + '): Class ' + itemClass + ' — found ' + swapMeta.length + ' items for swap sheet');
 
-      // Sort by Location (alphabetically), then by Foreman, then by Change Out Date (most urgent first)
+      // Prioritize candidates for Pick List allocation: smallest number in Days Left gets highest priority!
+      // (OVERDUE is negative daysDiff, so it naturally comes first; then 0, 1, 2, ... up to 31)
       swapMeta.sort(function(a, b) {
-        // First sort by location
+        if (a.daysDiff !== b.daysDiff) return a.daysDiff - b.daysDiff;
+        var dtA = new Date(a.changeOutDate).getTime() || 0;
+        var dtB = new Date(b.changeOutDate).getTime() || 0;
+        if (dtA !== dtB) return dtA - dtB;
         var locCompare = (a.employeeLocation || 'ZZZ').localeCompare(b.employeeLocation || 'ZZZ');
         if (locCompare !== 0) return locCompare;
-        // Then by foreman (groups crew members together)
         var foremanCompare = (a.foreman || 'ZZZ').localeCompare(b.foreman || 'ZZZ');
         if (foremanCompare !== 0) return foremanCompare;
-        // Finally by change out date (most urgent first)
-        return new Date(a.changeOutDate) - new Date(b.changeOutDate);
+        return (a.emp[0] || '').localeCompare(b.emp[0] || '');
       });
 
       // assignedItemNums is defined at the function level
@@ -22227,7 +22230,8 @@ function generateSwaps(itemType) {
           data: rowData,
           location: meta.employeeLocation,
           foreman: meta.foreman,
-          daysLeftCell: meta.daysLeftCell
+          daysLeftCell: meta.daysLeftCell,
+          daysDiff: meta.daysDiff
         });
       });
 
@@ -22266,6 +22270,9 @@ function generateSwaps(itemType) {
           // Write foreman sub-groups within this location
           sortedForemen.forEach(function(foreman) {
             var foremanRows = foremanGroups[foreman];
+
+            // Within each foreman, sort employees by Days Left (smallest / most urgent first)
+            foremanRows.sort(function(a, b) { return (a.daysDiff || 0) - (b.daysDiff || 0); });
 
             // Write foreman sub-header (only if multiple foremen in location)
             if (sortedForemen.length > 1 || foreman !== 'Unknown') {
@@ -22428,6 +22435,11 @@ function generateSwaps(itemType) {
             previousEmployeeLastDay[empNameKey] = info.lastDay || '';
           }
         }
+
+        // Ensure no active employees are kept in previousEmployeeNames
+        currentActiveEmployees.forEach(function(activeName) {
+          previousEmployeeNames.delete(activeName);
+        });
       }
 
       // 3. Scan Inventory for Previous Employee items and Reclaims
@@ -22458,8 +22470,9 @@ function generateSwaps(itemType) {
         var isPrevEmpItem = false;
         var isAlreadyPicked = false;
         var employeeName = '';
+        var isAssignedActiveEmp = currentActiveEmployees.has(assignedToLower);
 
-        if (locationLower === 'previous employee' || previousEmployeeNames.has(assignedToLower)) {
+        if (!isAssignedActiveEmp && (locationLower === 'previous employee' || previousEmployeeNames.has(assignedToLower))) {
           if (assignedTo && ignoreNames.indexOf(assignedToLower) === -1) {
             isPrevEmpItem = true;
             employeeName = assignedTo;
@@ -22468,7 +22481,8 @@ function generateSwaps(itemType) {
           var suffixIdx = pickedForLower.indexOf(' reclaim');
           if (suffixIdx !== -1) {
             var empNameStr = pickedFor.substring(0, suffixIdx).trim();
-            if (previousEmployeeNames.has(empNameStr.toLowerCase())) {
+            var empNameStrLower = empNameStr.toLowerCase();
+            if (!currentActiveEmployees.has(empNameStrLower) && previousEmployeeNames.has(empNameStrLower)) {
               isPrevEmpItem = true;
               isAlreadyPicked = true;
               employeeName = empNameStr;
@@ -27655,12 +27669,8 @@ function generateBlanketSwaps(silent) {
     return;
   }
 
-  // Sort by location (alphabetically), then by foreman, then by days left
+  // Prioritize blankets with smallest Days Left first
   blanketsNeedingSwap.sort(function(a, b) {
-    var locCompare = (a.location || 'ZZZ').localeCompare(b.location || 'ZZZ');
-    if (locCompare !== 0) return locCompare;
-    var foremanCompare = (a.foreman || 'ZZZ').localeCompare(b.foreman || 'ZZZ');
-    if (foremanCompare !== 0) return foremanCompare;
     return a.daysLeft - b.daysLeft;
   });
 
@@ -27686,6 +27696,38 @@ function generateBlanketSwaps(silent) {
 
   // Track "Picked For" updates to write back to Blankets sheet
   var pickedForUpdates = [];
+
+  // Allocate pick list items in priority order (smallest Days Left first)
+  blanketsNeedingSwap.forEach(function(swap) {
+    var pickListValue = '—';
+    var pickListStatus = 'Need to Purchase ❌';
+    var pickListItemData = null;
+    var employeeName = swap.assignedTo || '';
+
+    // Find matching available blanket
+    var match = availableBlankets.find(function(b) {
+      return !assignedItemNums.has(b.itemNum) &&
+             String(b.blanketClass) === String(swap.blanketClass) &&
+             String(b.type) === String(swap.type);
+    });
+
+    if (match) {
+      pickListValue = match.itemNum;
+      pickListStatus = 'In Stock ✅';
+      pickListItemData = match;
+      assignedItemNums.add(match.itemNum);
+
+      // Record this for "Picked For" update on Blankets sheet
+      pickedForUpdates.push({
+        rowIndex: match.rowIndex,
+        pickedFor: employeeName
+      });
+    }
+
+    swap.pickListValue = pickListValue;
+    swap.pickListStatus = pickListStatus;
+    swap.pickListItemData = pickListItemData;
+  });
 
   // Start building the sheet
   var currentRow = 1;
@@ -27757,6 +27799,9 @@ function generateBlanketSwaps(silent) {
     sortedForemen.forEach(function(foreman) {
       var foremanSwaps = foremanGroups[foreman];
 
+      // Within each foreman, sort by Days Left (smallest first)
+      foremanSwaps.sort(function(a, b) { return a.daysLeft - b.daysLeft; });
+
       // Write foreman sub-header
       if (sortedForemen.length > 1 || foreman !== 'Unknown') {
         swapsSheet.getRange(currentRow, 1, 1, 10).merge().setValue('    👷 ' + foreman);
@@ -27773,30 +27818,11 @@ function generateBlanketSwaps(silent) {
       var rowDataArray = [];
 
       foremanSwaps.forEach(function(swap) {
-        // Find available blanket for pick list
-        var pickListValue = '—';
-        var pickListStatus = 'Need to Purchase ❌';
-        var pickListItemData = null;
+        var pickListValue = swap.pickListValue || '—';
+        var pickListStatus = swap.pickListStatus || 'Need to Purchase ❌';
+        var pickListItemData = swap.pickListItemData;
         var isAlreadyPicked = false;
         var employeeName = swap.assignedTo || '';
-
-        // Find matching available blanket
-        var match = availableBlankets.find(function(b) {
-          return !assignedItemNums.has(b.itemNum);
-        });
-
-        if (match) {
-          pickListValue = match.itemNum;
-          pickListStatus = 'In Stock ✅';
-          pickListItemData = match;
-          assignedItemNums.add(match.itemNum);
-
-          // Record this for "Picked For" update on Blankets sheet
-          pickedForUpdates.push({
-            rowIndex: match.rowIndex,
-            pickedFor: employeeName
-          });
-        }
 
         // Format date assigned
         var dateAssignedFormatted = '';
@@ -28097,14 +28123,8 @@ function generateMackSwaps(silent) {
     return;
   }
 
-  // Sort by location, then by foreman, then by days left
+  // Prioritize MACKs with smallest Days Left first
   macksNeedingSwap.sort(function(a, b) {
-    var locCompare = (a.location || 'ZZZ').localeCompare(b.location || 'ZZZ');
-    if (locCompare !== 0) return locCompare;
-    var foremanCompare = (a.foreman || 'ZZZ').localeCompare(b.foreman || 'ZZZ');
-    if (foremanCompare !== 0) return foremanCompare;
-    var specCompare = String(a.kv).localeCompare(String(b.kv));
-    if (specCompare !== 0) return specCompare;
     return a.daysLeft - b.daysLeft;
   });
 
@@ -28128,6 +28148,38 @@ function generateMackSwaps(silent) {
 
   var assignedItemNums = new Set();
   var pickedForUpdates = [];
+
+  // Allocate pick list items in priority order (smallest Days Left first)
+  macksNeedingSwap.forEach(function(swap) {
+    var pickListValue = '—';
+    var pickListStatus = 'Need to Purchase ❌';
+    var pickListItemData = null;
+    var employeeName = swap.assignedTo || '';
+
+    // Find matching available MACK (matching KV, Size, and Length)
+    var match = availableMacks.find(function(b) {
+      return !assignedItemNums.has(b.itemNum) &&
+             String(b.kv).trim().toLowerCase() === String(swap.kv).trim().toLowerCase() &&
+             String(b.size).trim().toLowerCase() === String(swap.size).trim().toLowerCase() &&
+             String(b.length).trim().toLowerCase() === String(swap.length).trim().toLowerCase();
+    });
+
+    if (match) {
+      pickListValue = match.itemNum;
+      pickListStatus = 'In Stock ✅';
+      pickListItemData = match;
+      assignedItemNums.add(match.itemNum);
+
+      pickedForUpdates.push({
+        rowIndex: match.rowIndex,
+        pickedFor: employeeName
+      });
+    }
+
+    swap.pickListValue = pickListValue;
+    swap.pickListStatus = pickListStatus;
+    swap.pickListItemData = pickListItemData;
+  });
 
   var currentRow = 1;
 
@@ -28195,6 +28247,9 @@ function generateMackSwaps(silent) {
     sortedForemen.forEach(function(foreman) {
       var foremanSwaps = foremanGroups[foreman];
 
+      // Within each foreman, sort by Days Left (smallest first)
+      foremanSwaps.sort(function(a, b) { return a.daysLeft - b.daysLeft; });
+
       if (sortedForemen.length > 1 || foreman !== 'Unknown') {
         swapsSheet.getRange(currentRow, 1, 1, 12).merge().setValue('    👷 ' + foreman);
         swapsSheet.getRange(currentRow, 1, 1, 12)
@@ -28205,31 +28260,11 @@ function generateMackSwaps(silent) {
       var rowDataArray = [];
 
       foremanSwaps.forEach(function(swap) {
-        var pickListValue = '—';
-        var pickListStatus = 'Need to Purchase ❌';
-        var pickListItemData = null;
+        var pickListValue = swap.pickListValue || '—';
+        var pickListStatus = swap.pickListStatus || 'Need to Purchase ❌';
+        var pickListItemData = swap.pickListItemData;
         var isAlreadyPicked = false;
         var employeeName = swap.assignedTo || '';
-
-        // Find matching available MACK (matching KV, Size, and Length)
-        var match = availableMacks.find(function(b) {
-          return !assignedItemNums.has(b.itemNum) &&
-                 String(b.kv).trim().toLowerCase() === String(swap.kv).trim().toLowerCase() &&
-                 String(b.size).trim().toLowerCase() === String(swap.size).trim().toLowerCase() &&
-                 String(b.length).trim().toLowerCase() === String(swap.length).trim().toLowerCase();
-        });
-
-        if (match) {
-          pickListValue = match.itemNum;
-          pickListStatus = 'In Stock ✅';
-          pickListItemData = match;
-          assignedItemNums.add(match.itemNum);
-
-          pickedForUpdates.push({
-            rowIndex: match.rowIndex,
-            pickedFor: employeeName
-          });
-        }
 
         var dateAssignedFormatted = '';
         if (swap.dateAssigned instanceof Date) {

@@ -17,6 +17,13 @@ class SheetNavigator {
     this.filterCertEmployee = 'all';
     this.filterCertStatus = 'all';
     this.filterCertLocation = 'all';
+    this.activeFailureReasonFilter = null;
+    let savedVisualsExp = true;
+    try {
+      const stored = localStorage.getItem('sa_gloves_sleeves_visuals_expanded');
+      if (stored !== null) savedVisualsExp = (stored !== 'false');
+    } catch (e) {}
+    this.isVisualsExpanded = savedVisualsExp;
     this.sheetList = [
       { key: 'employees', label: '👥 Employees', icon: '👤', isSwap: false },
       { key: 'job_tracking', label: '📋 Job Tracking', icon: '📋', isSwap: false },
@@ -152,11 +159,78 @@ class SheetNavigator {
     this.filterClass = 'all';
     this.filterLocation = 'all';
     this.filterStatus = 'all';
+    this.activeFailureReasonFilter = null;
     this.searchTerm = '';
     const sInput = document.getElementById('sheet-search-input');
     if (sInput) sInput.value = '';
     this.updateStatusPillUI();
     this.renderCurrentSheet();
+  }
+
+  toggleVisualsDashboard() {
+    this.isVisualsExpanded = !this.isVisualsExpanded;
+    try {
+      localStorage.setItem('sa_gloves_sleeves_visuals_expanded', this.isVisualsExpanded);
+    } catch (e) {}
+    this.renderInventoryVisuals();
+    this.updateVisualsToggleButton();
+  }
+
+  filterByFailureReason(reason) {
+    if (this.activeFailureReasonFilter && this.activeFailureReasonFilter.toLowerCase() === String(reason).toLowerCase()) {
+      this.activeFailureReasonFilter = null;
+    } else {
+      this.activeFailureReasonFilter = reason;
+      if (this.filterStatus !== 'all' && this.filterStatus !== 'failed_rubber') {
+        this.filterStatus = 'all';
+        this.updateStatusPillUI();
+      }
+    }
+    this.renderCurrentSheet();
+  }
+
+  clearFailureReasonFilter() {
+    this.activeFailureReasonFilter = null;
+    this.renderCurrentSheet();
+  }
+
+  updateVisualsToggleButton() {
+    const btn = document.getElementById('btn-toggle-sheet-visuals');
+    if (!btn) return;
+    const isGlovesOrSleeves = this.currentSheetKey === 'gloves' || this.currentSheetKey === 'sleeves';
+    if (!isGlovesOrSleeves) {
+      btn.style.display = 'none';
+      return;
+    }
+    btn.style.display = 'inline-flex';
+    btn.innerHTML = `<span>📊</span> Visual Analytics ${this.isVisualsExpanded ? '▾' : '▸'}`;
+    btn.classList.toggle('active', this.isVisualsExpanded);
+  }
+
+  renderInventoryVisuals() {
+    const panel = document.getElementById('inventory-visuals-panel');
+    if (!panel) return;
+
+    const isGlovesOrSleeves = this.currentSheetKey === 'gloves' || this.currentSheetKey === 'sleeves';
+    if (!isGlovesOrSleeves) {
+      panel.style.display = 'none';
+      panel.innerHTML = '';
+      return;
+    }
+
+    if (!window.itemStatsEngine) {
+      panel.style.display = 'none';
+      return;
+    }
+
+    const metrics = window.itemStatsEngine.computeFleetVisualMetrics(this.currentSheetKey);
+    panel.style.display = 'block';
+    panel.innerHTML = window.itemStatsEngine.renderFleetVisualsHtml(
+      this.currentSheetKey,
+      metrics,
+      this.isVisualsExpanded,
+      this.activeFailureReasonFilter
+    );
   }
 
   renderTabsBar() {
@@ -706,17 +780,21 @@ class SheetNavigator {
    */
   getPreviousEmployeeNamesSet() {
     const prevEmpNames = new Set();
+    const activeNames = new Set();
     const empTable = this.db ? this.db.getTable('employees') : null;
     if (empTable && empTable.rows) {
       empTable.rows.forEach(e => {
         const eName = String(e['Employee Name'] || e['Name'] || Object.values(e)[0] || '').toLowerCase().trim();
+        if (!eName) return;
         const eLoc = String(e['Location'] || '').toLowerCase().trim();
         const eStat = String(e['Status'] || '').toLowerCase().trim();
         const eJob = String(e['Job Number'] || e['Job #'] || '').toLowerCase().trim();
         if (eLoc === 'previous employee' || eLoc.includes('previous') ||
             eStat === 'previous employee' || eStat.includes('inactive') || eStat.includes('terminated') ||
             eJob.includes('previous') || eJob.startsWith('002-') || eName.includes('former')) {
-          if (eName) prevEmpNames.add(eName);
+          prevEmpNames.add(eName);
+        } else {
+          activeNames.add(eName);
         }
       });
     }
@@ -724,9 +802,11 @@ class SheetNavigator {
     if (prevTable && prevTable.rows) {
       prevTable.rows.forEach(p => {
         const pName = String(p['Employee Name'] || p['Name'] || Object.values(p)[0] || '').toLowerCase().trim();
-        if (pName) prevEmpNames.add(pName);
+        if (pName && !activeNames.has(pName)) prevEmpNames.add(pName);
       });
     }
+    // Ensure no currently active employees are treated as previous employees
+    activeNames.forEach(n => prevEmpNames.delete(n));
     return prevEmpNames;
   }
 
@@ -1055,6 +1135,10 @@ class SheetNavigator {
       btnManageDrug.style.display = isDrugTestSheet ? 'inline-flex' : 'none';
     }
 
+    // Toggle and render Visual Analytics for Gloves & Sleeves
+    this.updateVisualsToggleButton();
+    this.renderInventoryVisuals();
+
     // Update dynamic multi-filter bar for inventory sheets
     this.updateFilterBar(tableData, isInventorySheet);
 
@@ -1201,7 +1285,7 @@ class SheetNavigator {
 
     // 5. Clear button visibility
     const btnClear = document.getElementById('btn-clear-filters');
-    const isFiltered = (this.filterSize !== 'all' || this.filterClass !== 'all' || this.filterLocation !== 'all' || this.filterStatus !== 'all' || Boolean(this.searchTerm));
+    const isFiltered = (this.filterSize !== 'all' || this.filterClass !== 'all' || this.filterLocation !== 'all' || this.filterStatus !== 'all' || Boolean(this.activeFailureReasonFilter) || Boolean(this.searchTerm));
     if (btnClear) {
       btnClear.style.display = isFiltered ? 'inline-flex' : 'none';
     }
@@ -1714,6 +1798,9 @@ class SheetNavigator {
           if (this.filterStatus === 'ready_delivery') {
             return stat === 'ready for delivery' || assigned === 'packed for delivery';
           }
+          if (this.filterStatus === 'failed_rubber') {
+            return stat === 'failed rubber' || assigned === 'failed rubber' || stat === 'failed' || assigned === 'failed';
+          }
           if (this.filterStatus === 'expiring_soon' || this.filterStatus === 'overdue') {
             if (!chgOutStr || chgOutStr === 'N/A') return false;
             let dTime = NaN;
@@ -1728,6 +1815,39 @@ class SheetNavigator {
             const daysLeft = (dTime - now) / (1000 * 60 * 60 * 24);
             if (this.filterStatus === 'expiring_soon') return daysLeft >= 0 && daysLeft <= 30;
             if (this.filterStatus === 'overdue') return daysLeft < 0;
+          }
+          return true;
+        });
+      }
+
+      // 5. Failure Reason Filter (from visual analytics chip clicks)
+      if (this.activeFailureReasonFilter && (this.currentSheetKey === 'gloves' || this.currentSheetKey === 'sleeves')) {
+        const reason = this.activeFailureReasonFilter.toLowerCase();
+        rows = rows.filter(r => {
+          const stat = String(r['Status'] || '').trim().toLowerCase();
+          const assigned = String(r['Assigned To'] || '').trim().toLowerCase();
+          const isFailed = stat === 'failed rubber' || assigned === 'failed rubber' || stat === 'failed' || assigned === 'failed';
+          if (!isFailed) return false;
+
+          const nLower = String(r['Notes'] || '').toLowerCase();
+          if (reason === 'visual') {
+            return nLower.includes('visual') || nLower.includes('cut') || nLower.includes('tear') || nLower.includes('hole') || nLower.includes('puncture') || nLower.includes('ozone');
+          }
+          if (reason === 'electrical') {
+            return nLower.includes('electr') || nLower.includes('dielectric') || nLower.includes('burn');
+          }
+          if (reason.includes('damage') || reason.includes('field')) {
+            return nLower.includes('damag') || nLower.includes('field');
+          }
+          if (reason.includes('test')) {
+            return nLower.includes('test fail') || nLower.includes('failed test');
+          }
+          if (reason.includes('unspecified')) {
+            const isKnown = nLower.includes('visual') || nLower.includes('cut') || nLower.includes('tear') || nLower.includes('hole') || nLower.includes('puncture') || nLower.includes('ozone') ||
+                            nLower.includes('electr') || nLower.includes('dielectric') || nLower.includes('burn') ||
+                            nLower.includes('damag') || nLower.includes('field') ||
+                            nLower.includes('test fail') || nLower.includes('failed test');
+            return !isKnown;
           }
           return true;
         });
