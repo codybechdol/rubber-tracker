@@ -21444,6 +21444,7 @@ function preserveManualPickLists(swapSheet) {
     var pickListIdx = isMack ? 8 : 6;  // Column I (index 8) for MACKs, Column G (index 6) for others
     var statusIdx = isMack ? 9 : 7;    // Column J (index 9) for MACKs, Column H (index 7) for others
     var daysLeftIdx = isMack ? 7 : 5;  // Column H (index 7) for MACKs, Column F (index 5) for others
+    var pickedIdx = isMack ? 10 : 8;   // Column K (index 10) for MACKs, Column I (index 8) for others
 
     for (var i = 0; i < values.length; i++) {
       var row = values[i];
@@ -21456,6 +21457,8 @@ function preserveManualPickLists(swapSheet) {
       var pickListNum = (row[pickListIdx] || '').toString().trim();
       var status = (row[statusIdx] || '').toString().trim();
       var pickListBg = (bgRow[pickListIdx] || '').toString().toLowerCase();
+      var pickedVal = row[pickedIdx];
+      var isPicked = (pickedVal === true || pickedVal === 'TRUE' || status.toLowerCase().indexOf('ready for delivery') !== -1);
 
       // Skip header rows, system placeholder names, and lost items/employees
       var employeeNameLower = employeeName.toLowerCase();
@@ -21474,19 +21477,18 @@ function preserveManualPickLists(swapSheet) {
         continue;
       }
 
-      // Check if Pick List cell has light blue background (manual edit indicator)
-      if (pickListBg === manualEditColor && pickListNum && pickListNum !== '—') {
+      // Check if Pick List cell has light blue background or is picked / ready for delivery
+      if ((pickListBg === manualEditColor || isPicked) && pickListNum && pickListNum !== '—') {
         var empKey = employeeName.toLowerCase() + '|' + currentItemNum;
-        manualPicks[empKey] = {
+        var entry = {
           pickListNum: pickListNum,
-          status: status
+          status: isPicked ? 'Ready For Delivery 🚚' : status,
+          isPicked: isPicked
         };
+        manualPicks[empKey] = entry;
         // Also save simple employeeName key as fallback
-        manualPicks[employeeName.toLowerCase()] = {
-          pickListNum: pickListNum,
-          status: status
-        };
-        Logger.log('Preserved manual pick for ' + employeeName + ' (item ' + currentItemNum + '): ' + pickListNum);
+        manualPicks[employeeName.toLowerCase()] = entry;
+        Logger.log('Preserved manual pick for ' + employeeName + ' (item ' + currentItemNum + '): ' + pickListNum + ', isPicked: ' + isPicked);
       }
     }
   } catch (e) {
@@ -21520,6 +21522,7 @@ function restoreManualPickLists(swapSheet, manualPicks, startRow, endRow, invent
     var pickListCol = isMack ? 9 : 7; // Column I (9) for MACKs, Column G (7) for others
     var statusCol = isMack ? 10 : 8;  // Column J (10) for MACKs, Column H (8) for others
     var daysLeftIdx = isMack ? 7 : 5; // Column H (index 7) for MACKs, Column F (index 5) for others
+    var pickedCol = isMack ? 11 : 9;  // Column K (11) for MACKs, Column I (9) for others
 
     // Get data for the range we're checking
     var dataRange = swapSheet.getRange(startRow, 1, numRows, colsToRead);
@@ -21557,12 +21560,17 @@ function restoreManualPickLists(swapSheet, manualPicks, startRow, endRow, invent
 
       // Check if this employee/item has a preserved manual pick
       if (preserved && preserved.pickListNum && preserved.pickListNum !== '—') {
+        var isReadyForDelivery = Boolean(preserved.isPicked || (preserved.status && preserved.status.toLowerCase().indexOf('ready for delivery') !== -1));
+
         // Skip validation check for MACKs since they do not have a Class column
         if (isMack) {
           var actualRow = startRow + i;
           swapSheet.getRange(actualRow, pickListCol).setValue(preserved.pickListNum);
-          swapSheet.getRange(actualRow, statusCol).setValue(preserved.status);
+          swapSheet.getRange(actualRow, statusCol).setValue(isReadyForDelivery ? 'Ready For Delivery 🚚' : preserved.status);
           swapSheet.getRange(actualRow, pickListCol).setBackground(manualEditColor);
+          if (isReadyForDelivery) {
+            swapSheet.getRange(actualRow, pickedCol).setValue(true);
+          }
           Logger.log('Restored manual pick for MACK ' + employeeName + ' (item ' + currentItemNum + '): ' + preserved.pickListNum);
           restoredCount++;
           continue;
@@ -21602,10 +21610,15 @@ function restoreManualPickLists(swapSheet, manualPicks, startRow, endRow, invent
 
         // Restore the Pick List item number and status
         swapSheet.getRange(actualRow, pickListCol).setValue(preserved.pickListNum);
-        swapSheet.getRange(actualRow, statusCol).setValue(preserved.status);
+        swapSheet.getRange(actualRow, statusCol).setValue(isReadyForDelivery ? 'Ready For Delivery 🚚' : preserved.status);
 
         // Reapply the light blue background
         swapSheet.getRange(actualRow, pickListCol).setBackground(manualEditColor);
+
+        // Restore Picked checkbox if picked
+        if (isReadyForDelivery) {
+          swapSheet.getRange(actualRow, pickedCol).setValue(true);
+        }
 
         Logger.log('Restored manual pick for ' + employeeName + ' (item ' + currentItemNum + '): ' + preserved.pickListNum);
         restoredCount++;
@@ -21678,6 +21691,12 @@ function generateSwaps(itemType) {
     var empData = employees.slice(1);
     var inventoryData = inventory.slice(1);
     var assignedItemNums = new Set();
+    Object.keys(manualPicks).forEach(function(k) {
+      var mp = manualPicks[k];
+      if (mp && mp.pickListNum && mp.pickListNum !== '—' && mp.pickListNum !== '-') {
+        assignedItemNums.add(String(mp.pickListNum).trim());
+      }
+    });
 
     // Find Location and Job Number columns in Employees sheet dynamically
     var empHeaders = employees[0];
@@ -22042,35 +22061,67 @@ function generateSwaps(itemType) {
         var isAlreadyPicked = false;  // Track if item was already picked for this employee
         var employeeName = meta.emp[0];  // Employee name for Picked For matching
 
+        // Check manual / preserved picks first (including already picked items)
+        var empKey = (employeeName || '').toLowerCase() + '|' + String(meta.itemNum || '').toLowerCase();
+        var manual = manualPicks[empKey] || manualPicks[(employeeName || '').toLowerCase()];
+        var isManualSelected = false;
+
+        if (manual && manual.pickListNum && manual.pickListNum !== '—' && manual.pickListNum !== '-') {
+          pickListValue = manual.pickListNum;
+          var manualStat = String(manual.status || '').toLowerCase();
+          var isPickedState = Boolean(manual.isPicked || manualStat.indexOf('ready for delivery') !== -1);
+          if (isPickedState) {
+            isAlreadyPicked = true;
+            pickListStatus = 'Ready For Delivery 🚚';
+          } else {
+            pickListStatus = manual.status || 'In Stock ✅';
+          }
+          isManualSelected = true;
+          assignedItemNums.add(pickListValue);
+
+          // Find pickListItemData in inventoryData if available
+          pickListItemData = inventoryData.find(function(item) {
+            return String(item[0]).trim() === String(pickListValue).trim();
+          });
+          if (pickListItemData) {
+            var pickedSize = isGloves ? parseFloat(pickListItemData[C_SIZE]) : pickListItemData[C_SIZE];
+            if (isGloves && !isNaN(pickedSize) && !isNaN(useSize) && pickedSize > useSize) {
+              pickListSizeUp = true;
+            }
+          }
+        }
+
         // FIRST: Check if there's already an item "Picked For" this employee in the inventory
         // Uses C_* local vars defined above (based on COLS.INVENTORY for 12-col layout with ESL ID at B)
-        var pickedForMatch = inventoryData.find(function(item) {
-          var pickedFor = (item[C_PICKED_FOR] || '').toString().trim();
-          var classMatch = parseInt(item[C_CLASS], 10) === meta.itemClass;
-          // Check if Picked For contains this employee's name (case-insensitive)
-          var pickedForEmployee = pickedFor.toLowerCase().indexOf(employeeName.toLowerCase()) !== -1;
-          var notAlreadyUsed = !assignedItemNums.has(item[0]);
-          var notLost = !isLostLocate(item);
-          return classMatch && pickedForEmployee && notAlreadyUsed && notLost;
-        });
+        if (!pickListItemData) {
+          var pickedForMatch = inventoryData.find(function(item) {
+            var pickedFor = (item[C_PICKED_FOR] || '').toString().trim();
+            var classMatch = parseInt(item[C_CLASS], 10) === meta.itemClass;
+            // Check if Picked For contains this employee's name (case-insensitive)
+            var pickedForEmployee = pickedFor.toLowerCase().indexOf(employeeName.toLowerCase()) !== -1;
+            var notAlreadyUsed = !assignedItemNums.has(item[0]);
+            var notLost = !isLostLocate(item);
+            return classMatch && pickedForEmployee && notAlreadyUsed && notLost;
+          });
 
-        // Use the picked-for match if found
-        // NOTE: Upgrades from "In Testing" to "On Shelf" are handled by upgradePickListItems() post-generation
-        if (pickedForMatch) {
-          // Found an item already picked for this employee!
-          pickListValue = pickedForMatch[0];
-          pickListStatusRaw = (pickedForMatch[C_STATUS] || '').toString().trim().toLowerCase();
-          pickListItemData = pickedForMatch;
-          isAlreadyPicked = true;
-          assignedItemNums.add(pickedForMatch[0]);
+          // Use the picked-for match if found
+          // NOTE: Upgrades from "In Testing" to "On Shelf" are handled by upgradePickListItems() post-generation
+          if (pickedForMatch) {
+            // Found an item already picked for this employee!
+            pickListValue = pickedForMatch[0];
+            pickListStatusRaw = (pickedForMatch[C_STATUS] || '').toString().trim().toLowerCase();
+            pickListItemData = pickedForMatch;
+            isAlreadyPicked = true;
+            assignedItemNums.add(pickedForMatch[0]);
 
-          // Check if it's a size up
-          var pickedSize = isGloves ? parseFloat(pickedForMatch[C_SIZE]) : pickedForMatch[C_SIZE];
-          if (isGloves && !isNaN(pickedSize) && !isNaN(useSize) && pickedSize > useSize) {
-            pickListSizeUp = true;
+            // Check if it's a size up
+            var pickedSize = isGloves ? parseFloat(pickedForMatch[C_SIZE]) : pickedForMatch[C_SIZE];
+            if (isGloves && !isNaN(pickedSize) && !isNaN(useSize) && pickedSize > useSize) {
+              pickListSizeUp = true;
+            }
+
+            Logger.log('Found Picked For match: ' + pickListValue + ' for ' + employeeName + ' (Status: ' + pickListStatusRaw + ')');
           }
-
-          Logger.log('Found Picked For match: ' + pickListValue + ' for ' + employeeName + ' (Status: ' + pickListStatusRaw + ')');
         }
 
         // If no Picked For match, search for available items as usual
@@ -22167,27 +22218,33 @@ function generateSwaps(itemType) {
           }
         }
 
-        // Determine display status
-        if (pickListValue === '—') {
-          pickListStatus = 'Need to Purchase ❌';
-        } else if (pickListStatusRaw === 'on shelf') {
-          pickListStatus = pickListSizeUp ? 'In Stock (Size Up) ⚠️' : 'In Stock ✅';
-        } else if (pickListStatusRaw === 'ready for delivery') {
-          pickListStatus = pickListSizeUp ? 'Ready For Delivery (Size Up) ⚠️' : 'Ready For Delivery 🚚';
-        } else if (pickListStatusRaw === 'in testing') {
-          pickListStatus = pickListSizeUp ? 'In Testing (Size Up) ⚠️' : 'In Testing 🔬';
-        } else {
-          pickListStatus = meta.status; // Default to original status if no match
-        }
-
-        // Determine final values - prioritize items already picked (from Picked For column)
         var finalPickListValue = pickListValue;
         var finalPickListStatus = pickListStatus;
 
-        // Keep the actual status for already-picked items
-        // Don't override "In Testing" with "Ready For Delivery"
-        if (isAlreadyPicked && pickListStatusRaw !== 'in testing') {
-          finalPickListStatus = pickListSizeUp ? 'Ready For Delivery (Size Up) ⚠️' : 'Ready For Delivery 🚚';
+        if (isManualSelected) {
+          finalPickListValue = pickListValue;
+          finalPickListStatus = pickListStatus;
+        } else {
+          // Determine display status
+          if (pickListValue === '—') {
+            pickListStatus = 'Need to Purchase ❌';
+          } else if (pickListStatusRaw === 'on shelf') {
+            pickListStatus = pickListSizeUp ? 'In Stock (Size Up) ⚠️' : 'In Stock ✅';
+          } else if (pickListStatusRaw === 'ready for delivery') {
+            pickListStatus = pickListSizeUp ? 'Ready For Delivery (Size Up) ⚠️' : 'Ready For Delivery 🚚';
+          } else if (pickListStatusRaw === 'in testing') {
+            pickListStatus = pickListSizeUp ? 'In Testing (Size Up) ⚠️' : 'In Testing 🔬';
+          } else {
+            pickListStatus = meta.status; // Default to original status if no match
+          }
+
+          finalPickListValue = pickListValue;
+          finalPickListStatus = pickListStatus;
+
+          // Keep the actual status for already-picked items
+          if (isAlreadyPicked && pickListStatusRaw !== 'in testing') {
+            finalPickListStatus = pickListSizeUp ? 'Ready For Delivery (Size Up) ⚠️' : 'Ready For Delivery 🚚';
+          }
         }
 
         // Stage 2 data - populate if already picked
@@ -22491,6 +22548,10 @@ function generateSwaps(itemType) {
         }
 
         if (isPrevEmpItem) {
+          var manualEntry = manualPicks[employeeName.toLowerCase() + '|' + itemNum] || manualPicks[employeeName.toLowerCase()];
+          if (manualEntry && (manualEntry.isPicked || String(manualEntry.status || '').toLowerCase().indexOf('ready for delivery') !== -1)) {
+            isAlreadyPicked = true;
+          }
           var lastDayValue = previousEmployeeLastDay[employeeName.toLowerCase()] || '';
           var rowData = [
             employeeName,       // Employee (A)
@@ -28147,6 +28208,12 @@ function generateMackSwaps(silent) {
   }
 
   var assignedItemNums = new Set();
+  Object.keys(manualPicks).forEach(function(k) {
+    var mp = manualPicks[k];
+    if (mp && mp.pickListNum && mp.pickListNum !== '—' && mp.pickListNum !== '-') {
+      assignedItemNums.add(String(mp.pickListNum).trim());
+    }
+  });
   var pickedForUpdates = [];
 
   // Allocate pick list items in priority order (smallest Days Left first)
@@ -28155,30 +28222,44 @@ function generateMackSwaps(silent) {
     var pickListStatus = 'Need to Purchase ❌';
     var pickListItemData = null;
     var employeeName = swap.assignedTo || '';
+    var isAlreadyPicked = false;
 
-    // Find matching available MACK (matching KV, Size, and Length)
-    var match = availableMacks.find(function(b) {
-      return !assignedItemNums.has(b.itemNum) &&
-             String(b.kv).trim().toLowerCase() === String(swap.kv).trim().toLowerCase() &&
-             String(b.size).trim().toLowerCase() === String(swap.size).trim().toLowerCase() &&
-             String(b.length).trim().toLowerCase() === String(swap.length).trim().toLowerCase();
-    });
+    var manualKey = (employeeName || '').toLowerCase() + '|' + String(swap.itemNum || '').toLowerCase();
+    var manual = manualPicks[manualKey] || manualPicks[(employeeName || '').toLowerCase()];
 
-    if (match) {
-      pickListValue = match.itemNum;
-      pickListStatus = 'In Stock ✅';
-      pickListItemData = match;
-      assignedItemNums.add(match.itemNum);
-
-      pickedForUpdates.push({
-        rowIndex: match.rowIndex,
-        pickedFor: employeeName
+    if (manual && manual.pickListNum && manual.pickListNum !== '—' && manual.pickListNum !== '-') {
+      pickListValue = manual.pickListNum;
+      var isPickedState = Boolean(manual.isPicked || String(manual.status || '').toLowerCase().indexOf('ready for delivery') !== -1);
+      pickListStatus = isPickedState ? 'Ready For Delivery 🚚' : (manual.status || 'In Stock ✅');
+      isAlreadyPicked = isPickedState;
+      assignedItemNums.add(pickListValue);
+      pickListItemData = availableMacks.find(function(b) { return String(b.itemNum).trim() === String(pickListValue).trim(); });
+    } else {
+      // Find matching available MACK (matching KV, Size, and Length)
+      var match = availableMacks.find(function(b) {
+        return !assignedItemNums.has(b.itemNum) &&
+               String(b.kv).trim().toLowerCase() === String(swap.kv).trim().toLowerCase() &&
+               String(b.size).trim().toLowerCase() === String(swap.size).trim().toLowerCase() &&
+               String(b.length).trim().toLowerCase() === String(swap.length).trim().toLowerCase();
       });
+
+      if (match) {
+        pickListValue = match.itemNum;
+        pickListStatus = 'In Stock ✅';
+        pickListItemData = match;
+        assignedItemNums.add(match.itemNum);
+
+        pickedForUpdates.push({
+          rowIndex: match.rowIndex,
+          pickedFor: employeeName
+        });
+      }
     }
 
     swap.pickListValue = pickListValue;
     swap.pickListStatus = pickListStatus;
     swap.pickListItemData = pickListItemData;
+    swap.isAlreadyPicked = isAlreadyPicked;
   });
 
   var currentRow = 1;
@@ -28263,7 +28344,7 @@ function generateMackSwaps(silent) {
         var pickListValue = swap.pickListValue || '—';
         var pickListStatus = swap.pickListStatus || 'Need to Purchase ❌';
         var pickListItemData = swap.pickListItemData;
-        var isAlreadyPicked = false;
+        var isAlreadyPicked = Boolean(swap.isAlreadyPicked);
         var employeeName = swap.assignedTo || '';
 
         var dateAssignedFormatted = '';

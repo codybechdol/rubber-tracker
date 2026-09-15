@@ -106,7 +106,7 @@ class SwapGenerationEngine {
       'ready for delivery', 'assigned', 'destroyed'
     ];
 
-    // 2. Scan table.rows if present (only for items not already in persistentPicks)
+    // 2. Scan table.rows if present
     if (table.rows && table.rows.length > 0) {
       table.rows.forEach(row => {
         const empName = String(row['Employee'] || row['Crew Lead / Employee'] || Object.entries(row).find(([k]) => k !== '_rowIdx')?.[1] || '').trim();
@@ -118,52 +118,92 @@ class SwapGenerationEngine {
         if (!empName || empName.includes('Class') || empName.includes('STAGE') || empName.includes('🔍') || empName.includes('👷')) return;
         if (skipNames.includes(empName.toLowerCase()) || daysLeft === 'LOST-LOCATE' || daysLeft === 'PREV EMP') return;
 
+        const isPicked = Boolean(
+          row['Picked'] === true ||
+          String(row['Picked'] || '').trim().toUpperCase() === 'TRUE' ||
+          status.toLowerCase().includes('ready for delivery') ||
+          row['_isPicked']
+        );
+        const isManual = Boolean(row['_manualPick'] || row['isManualPick']);
+
         const compositeKey = `${empName.toLowerCase()}|${currentItemNum.toLowerCase()}`;
         const simpleKey = empName.toLowerCase();
 
-        // Do not overwrite explicit user saved picks from persistent registry!
-        if (persistentPicks[compositeKey] || persistentPicks[simpleKey]) return;
+        // If existing persistent pick is already explicitly picked and current is not, keep persistent
+        const existingPersist = persistentPicks[compositeKey] || persistentPicks[simpleKey];
+        if (existingPersist && existingPersist.isPicked && !isPicked) return;
 
-        if ((row['_manualPick'] || row['isManualPick']) && pickListNum && pickListNum !== '—' && pickListNum !== '-') {
+        if ((isManual || isPicked) && pickListNum && pickListNum !== '—' && pickListNum !== '-') {
           const entry = {
             pickListNum: pickListNum,
-            status: status || 'In Stock ✅',
+            status: status || (isPicked ? 'Ready For Delivery 🚚' : 'In Stock ✅'),
             currentItemNum: currentItemNum,
-            empName: empName
+            empName: empName,
+            isPicked: isPicked,
+            isManualPick: isManual
           };
           manualPicks[compositeKey] = entry;
           manualPicks[simpleKey] = entry;
+
+          if (isPicked && this.db && typeof this.db.saveManualPick === 'function') {
+            this.db.saveManualPick(swapTableKey, empName, currentItemNum, pickListNum, entry.status, true);
+          }
         }
       });
     }
 
     // 3. Scan rawGrid for any cells marked or edited
     if (table.rawGrid && table.rawGrid.length > 1) {
-      const pickIdx = isMack ? 8 : 6;
-      const statIdx = isMack ? 9 : 7;
+      let headers = table.headers || [];
+      if ((!headers || headers.length === 0) && Array.isArray(table.rawGrid[1])) {
+        headers = table.rawGrid[1];
+      }
+
+      let pickIdx = headers.findIndex(h => /pick\s*list/i.test(h));
+      let statIdx = headers.findIndex(h => /^status$/i.test(h));
+      let pickedCheckIdx = headers.findIndex(h => /^picked$/i.test(h));
+      let curItIdx = headers.findIndex(h => /current|^serial\s*#/i.test(h));
+
+      if (pickIdx === -1) pickIdx = isMack ? 8 : 6;
+      if (statIdx === -1) statIdx = isMack ? 9 : 7;
+      if (pickedCheckIdx === -1) pickedCheckIdx = isMack ? 10 : 8;
+      if (curItIdx === -1) curItIdx = 1;
+
       table.rawGrid.forEach((gr, idx) => {
         if (idx === 0 || !Array.isArray(gr)) return;
         const emp = String(gr[0] || '').trim();
-        const curIt = String(gr[1] || '').trim();
+        const curIt = String(gr[curItIdx] || gr[1] || '').trim();
         const pNum = String(gr[pickIdx] || '').trim();
         const stat = String(gr[statIdx] || '').trim();
-        if (!emp || skipNames.includes(emp.toLowerCase()) || emp.includes('Class') || emp.includes('STAGE')) return;
+        const pCheck = String(gr[pickedCheckIdx] !== undefined ? gr[pickedCheckIdx] : '').trim().toUpperCase();
+        const isPicked = (pCheck === 'TRUE' || gr[pickedCheckIdx] === true || stat.toLowerCase().includes('ready for delivery'));
+        const isManual = Boolean(gr._manualPick);
+
+        if (!emp || skipNames.includes(emp.toLowerCase()) || emp.includes('Class') || emp.includes('STAGE') || emp.includes('👷') || emp.includes('🔍')) return;
 
         const compositeKey = `${emp.toLowerCase()}|${curIt.toLowerCase()}`;
         const simpleKey = emp.toLowerCase();
 
-        // Do not overwrite explicit user saved picks from persistent registry!
-        if (persistentPicks[compositeKey] || persistentPicks[simpleKey]) return;
+        const existing = manualPicks[compositeKey] || manualPicks[simpleKey];
+        if (existing && existing.isPicked && !isPicked) return;
 
-        if (pNum && pNum !== '—' && pNum !== '-' && gr._manualPick) {
-          const entry = {
-            pickListNum: pNum,
-            status: stat || 'In Stock ✅',
-            currentItemNum: curIt,
-            empName: emp
-          };
-          manualPicks[compositeKey] = entry;
-          manualPicks[simpleKey] = entry;
+        if (pNum && pNum !== '—' && pNum !== '-') {
+          if (isManual || isPicked) {
+            const entry = {
+              pickListNum: pNum,
+              status: stat || (isPicked ? 'Ready For Delivery 🚚' : 'In Stock ✅'),
+              currentItemNum: curIt,
+              empName: emp,
+              isPicked: isPicked,
+              isManualPick: isManual
+            };
+            manualPicks[compositeKey] = entry;
+            manualPicks[simpleKey] = entry;
+
+            if (isPicked && this.db && typeof this.db.saveManualPick === 'function') {
+              this.db.saveManualPick(swapTableKey, emp, curIt, pNum, entry.status, true);
+            }
+          }
         }
       });
     }
@@ -501,6 +541,12 @@ class SwapGenerationEngine {
       }
 
       if (isPrevEmpItem) {
+        const manualKey = `${employeeName.toLowerCase()}|${String(itemNum).toLowerCase()}`;
+        const manual = manualPicks[manualKey] || manualPicks[employeeName.toLowerCase()];
+        if (manual && manual.isPicked) {
+          isAlreadyPicked = true;
+        }
+
         const rowData = [
           employeeName,
           itemNum,
@@ -732,6 +778,20 @@ class SwapGenerationEngine {
         }
       });
 
+      // Helper function to robustly parse class number (e.g. 2, "2", "Class 2", "CL 2")
+      const parseClassNum = (c) => {
+        if (c === undefined || c === null) return 0;
+        const m = String(c).match(/\d+/);
+        return m ? parseInt(m[0], 10) : 0;
+      };
+
+      // Pre-reserve all picked or manual items in assignedItemNums so auto-matching never steals them
+      Object.values(manualPicks).forEach(entry => {
+        if (entry && entry.pickListNum && entry.pickListNum !== '—' && entry.pickListNum !== '-') {
+          assignedItemNums.add(entry.pickListNum);
+        }
+      });
+
       // Process Pick List matching for each candidate
       const classRows = [];
 
@@ -769,7 +829,19 @@ class SwapGenerationEngine {
               pickListSizeUp = true;
             }
 
-            if (pickListStatusRaw === 'ready for delivery') {
+            const manualStat = String(manual.status || '').toLowerCase();
+            const itPickedFor = String(matchManual['Picked For'] || '').toLowerCase();
+            const itAssignedTo = String(matchManual['Assigned To'] || '').toLowerCase();
+            const isPickedState = Boolean(
+              manual.isPicked ||
+              manualStat.includes('ready for delivery') ||
+              pickListStatusRaw === 'ready for delivery' ||
+              itAssignedTo.includes('packed for delivery') ||
+              (itPickedFor && itPickedFor.includes(employeeName.toLowerCase()))
+            );
+
+            if (isPickedState) {
+              isAlreadyPicked = true;
               pickListStatus = pickListSizeUp ? 'Ready For Delivery (Size Up) ⚠️' : 'Ready For Delivery 🚚';
             } else if (pickListStatusRaw === 'in testing') {
               pickListStatus = pickListSizeUp ? 'In Testing (Size Up) ⚠️' : 'In Testing 🔬';
@@ -779,8 +851,14 @@ class SwapGenerationEngine {
             assignedItemNums.add(pickListValue);
           } else {
             pickListValue = manual.pickListNum;
-            pickListStatus = manual.status || 'In Stock ✅';
             isManualSelected = true;
+            const isPickedState = Boolean(manual.isPicked || String(manual.status || '').toLowerCase().includes('ready for delivery'));
+            if (isPickedState) {
+              isAlreadyPicked = true;
+              pickListStatus = 'Ready For Delivery 🚚';
+            } else {
+              pickListStatus = manual.status || 'In Stock ✅';
+            }
             assignedItemNums.add(pickListValue);
           }
         }
@@ -790,11 +868,10 @@ class SwapGenerationEngine {
           const pickedForMatch = inventoryData.find(it => {
             const itNum = String(it['Item #'] || it['Glove'] || it['Sleeve'] || it['ESL ID'] || '').trim();
             const pickedFor = String(it['Picked For'] || '').trim().toLowerCase();
-            const classMatch = parseInt(it['Class'] || '0', 10) === meta.itemClass;
+            const classMatch = parseClassNum(it['Class']) === meta.itemClass;
             const forEmp = pickedFor.includes(employeeName.toLowerCase());
-            const notUsed = !assignedItemNums.has(itNum);
             const notLost = !isLostLocate(it);
-            return classMatch && forEmp && notUsed && notLost;
+            return classMatch && forEmp && notLost;
           });
 
           if (pickedForMatch) {
@@ -816,7 +893,7 @@ class SwapGenerationEngine {
           const match = inventoryData.find(it => {
             const itNum = String(it['Item #'] || it['Glove'] || it['Sleeve'] || it['ESL ID'] || '').trim();
             const stat = String(it['Status'] || '').trim().toLowerCase();
-            const classMatch = parseInt(it['Class'] || '0', 10) === meta.itemClass;
+            const classMatch = parseClassNum(it['Class']) === meta.itemClass;
             const sizeMatch = isGloves ?
               parseFloat(it['Size']) === useSize :
               (String(it['Size'] || '').trim().toLowerCase() === String(useSize).trim().toLowerCase());
@@ -844,7 +921,7 @@ class SwapGenerationEngine {
             const isReservedForOther = (stat === 'ready for delivery') && pickedFor !== '' && !pickedFor.toLowerCase().includes(employeeName.toLowerCase());
             const notLost = !isLostLocate(it);
             return stat === 'on shelf' &&
-                   parseInt(it['Class'] || '0', 10) === meta.itemClass &&
+                   parseClassNum(it['Class']) === meta.itemClass &&
                    parseFloat(it['Size']) === useSize + 0.5 &&
                    !assignedItemNums.has(itNum) &&
                    !isReservedForOther &&
@@ -866,7 +943,7 @@ class SwapGenerationEngine {
             const itNum = String(it['Item #'] || it['Glove'] || it['Sleeve'] || it['ESL ID'] || '').trim();
             const stat = String(it['Status'] || '').trim().toLowerCase();
             const statusMatch = (stat === 'ready for delivery' || stat === 'in testing');
-            const classMatch = parseInt(it['Class'] || '0', 10) === meta.itemClass;
+            const classMatch = parseClassNum(it['Class']) === meta.itemClass;
             const sizeMatch = isGloves ?
               parseFloat(it['Size']) === useSize :
               (String(it['Size'] || '').trim().toLowerCase() === String(useSize).trim().toLowerCase());
@@ -894,7 +971,7 @@ class SwapGenerationEngine {
             const isReservedForOther = (stat === 'ready for delivery') && pickedFor !== '' && !pickedFor.toLowerCase().includes(employeeName.toLowerCase());
             const notLost = !isLostLocate(it);
             return (stat === 'ready for delivery' || stat === 'in testing') &&
-                   parseInt(it['Class'] || '0', 10) === meta.itemClass &&
+                   parseClassNum(it['Class']) === meta.itemClass &&
                    parseFloat(it['Size']) === useSize + 0.5 &&
                    !assignedItemNums.has(itNum) &&
                    !isReservedForOther &&
@@ -971,7 +1048,7 @@ class SwapGenerationEngine {
           daysLeftColor: meta.daysLeftColor,
           daysDiff: meta.daysDiff,
           itemClass: itemClass,
-          isManualPick: isManualSelected
+          isManualPick: isManualSelected || isAlreadyPicked
         });
       });
 
@@ -1007,6 +1084,7 @@ class SwapGenerationEngine {
             foremanGroups[foreman].sort((a, b) => a.daysDiff - b.daysDiff);
 
             foremanGroups[foreman].forEach(r => {
+              r.data._manualPick = r.isManualPick;
               rawGrid.push(r.data);
               const obj = this.gridRowToObj(allHeaders, r.data);
               obj._location = location;
@@ -1041,11 +1119,18 @@ class SwapGenerationEngine {
         }
 
         prevForemanGroups[foreman].forEach(r => {
+          if (r.data[8] === true || r.data[8] === 'TRUE') {
+            r.data._manualPick = true;
+          }
           rawGrid.push(r.data);
           const obj = this.gridRowToObj(allHeaders, r.data);
           obj._location = 'PREVIOUS EMPLOYEE';
           obj._foreman = foreman;
           obj._daysLeftColor = '#ef4444';
+          if (r.data[8] === true || r.data[8] === 'TRUE') {
+            obj._manualPick = true;
+            obj.isManualPick = true;
+          }
           swapRows.push(obj);
         });
       });
@@ -1158,6 +1243,11 @@ class SwapGenerationEngine {
     rawGrid.push(headers);
 
     const assignedBlanketNums = new Set();
+    Object.values(manualPicks).forEach(mp => {
+      if (mp && mp.pickListNum && mp.pickListNum !== '—' && mp.pickListNum !== '-') {
+        assignedBlanketNums.add(String(mp.pickListNum).trim());
+      }
+    });
 
     blanketsNeedingSwap.forEach(b => {
       const manualPickKey = `${b.assignedTo.toLowerCase()}|${b.itemNum.toLowerCase()}`;
@@ -1165,37 +1255,54 @@ class SwapGenerationEngine {
       let pickNum = '—';
       let pickStatus = 'Need to Purchase ❌';
       let isManualSelected = false;
+      let isAlreadyPicked = false;
 
       if (manualEntry && manualEntry.pickListNum && manualEntry.pickListNum !== '—' && manualEntry.pickListNum !== '-') {
         pickNum = manualEntry.pickListNum;
-        pickStatus = manualEntry.status || 'In Stock ✅';
         isManualSelected = true;
+        isAlreadyPicked = Boolean(manualEntry.isPicked || String(manualEntry.status || '').toLowerCase().includes('ready for delivery'));
+        pickStatus = isAlreadyPicked ? 'Ready For Delivery 🚚' : (manualEntry.status || 'In Stock ✅');
         pickedCount++;
         assignedBlanketNums.add(pickNum);
       } else {
-        // Find matching shelf blanket not already picked
-        const match = shelfBlankets.find(sb => {
+        // Tier 1: check if an item on shelf is already marked "Picked For" this employee
+        const pickedForMatch = shelfBlankets.find(sb => {
           const bNum = String(sb['Item #'] || sb['Blanket'] || sb['Blanket #'] || '').trim();
-          return !assignedBlanketNums.has(bNum) &&
-                 String(sb['Class']) === String(b.itemClass) &&
-                 String(sb['Type']) === String(b.type);
+          const pf = String(sb['Picked For'] || '').trim().toLowerCase();
+          return !assignedBlanketNums.has(bNum) && pf && pf.includes(b.assignedTo.toLowerCase());
         });
-        if (match) {
-          pickNum = String(match['Item #'] || match['Blanket'] || match['Blanket #'] || '').trim();
-          pickStatus = 'In Stock ✅';
+        if (pickedForMatch) {
+          pickNum = String(pickedForMatch['Item #'] || pickedForMatch['Blanket'] || pickedForMatch['Blanket #'] || '').trim();
+          pickStatus = 'Ready For Delivery 🚚';
+          isAlreadyPicked = true;
+          isManualSelected = true;
           pickedCount++;
           assignedBlanketNums.add(pickNum);
+        } else {
+          // Find matching shelf blanket not already picked
+          const match = shelfBlankets.find(sb => {
+            const bNum = String(sb['Item #'] || sb['Blanket'] || sb['Blanket #'] || '').trim();
+            return !assignedBlanketNums.has(bNum) &&
+                   String(sb['Class']) === String(b.itemClass) &&
+                   String(sb['Type']) === String(b.type);
+          });
+          if (match) {
+            pickNum = String(match['Item #'] || match['Blanket'] || match['Blanket #'] || '').trim();
+            pickStatus = 'In Stock ✅';
+            pickedCount++;
+            assignedBlanketNums.add(pickNum);
+          }
         }
       }
 
       const rowData = [
         b.assignedTo, b.itemNum, b.type, b.dateAssigned, b.changeOutDate, b.daysLeft,
-        pickNum, pickStatus, false, '',
+        pickNum, pickStatus, isAlreadyPicked, '',
         '', '', '', '', '', '', '', '', '', '', '', '', ''
       ];
       rawGrid.push(rowData);
       const rowObj = this.gridRowToObj(headers, rowData);
-      if (isManualSelected) {
+      if (isManualSelected || isAlreadyPicked) {
         rowObj._manualPick = true;
         rowObj.isManualPick = true;
       }
@@ -1267,6 +1374,11 @@ class SwapGenerationEngine {
     rawGrid.push(headers);
 
     const assignedMackNums = new Set();
+    Object.values(manualPicks).forEach(mp => {
+      if (mp && mp.pickListNum && mp.pickListNum !== '—' && mp.pickListNum !== '-') {
+        assignedMackNums.add(String(mp.pickListNum).trim());
+      }
+    });
 
     macksNeedingSwap.forEach(m => {
       const manualPickKey = `${m.assignedTo.toLowerCase()}|${m.itemNum.toLowerCase()}`;
@@ -1274,36 +1386,53 @@ class SwapGenerationEngine {
       let pickNum = '—';
       let pickStatus = 'Need to Purchase ❌';
       let isManualSelected = false;
+      let isAlreadyPicked = false;
 
       if (manualEntry && manualEntry.pickListNum && manualEntry.pickListNum !== '—' && manualEntry.pickListNum !== '-') {
         pickNum = manualEntry.pickListNum;
-        pickStatus = manualEntry.status || 'In Stock ✅';
         isManualSelected = true;
+        isAlreadyPicked = Boolean(manualEntry.isPicked || String(manualEntry.status || '').toLowerCase().includes('ready for delivery'));
+        pickStatus = isAlreadyPicked ? 'Ready For Delivery 🚚' : (manualEntry.status || 'In Stock ✅');
         pickedCount++;
         assignedMackNums.add(pickNum);
       } else {
-        const match = shelfMacks.find(sm => {
+        // Tier 1: check if an item on shelf is already marked "Picked For" this employee
+        const pickedForMatch = shelfMacks.find(sm => {
           const mNum = String(sm['Item #'] || sm['ESL ID'] || sm['MACK'] || sm['MACK #'] || '').trim();
-          return !assignedMackNums.has(mNum) &&
-                 String(sm['KV']) === String(m.kv) &&
-                 String(sm['Size']) === String(m.size);
+          const pf = String(sm['Picked For'] || '').trim().toLowerCase();
+          return !assignedMackNums.has(mNum) && pf && pf.includes(m.assignedTo.toLowerCase());
         });
-        if (match) {
-          pickNum = String(match['Item #'] || match['ESL ID'] || match['MACK'] || match['MACK #'] || '').trim();
-          pickStatus = 'In Stock ✅';
+        if (pickedForMatch) {
+          pickNum = String(pickedForMatch['Item #'] || pickedForMatch['ESL ID'] || pickedForMatch['MACK'] || pickedForMatch['MACK #'] || '').trim();
+          pickStatus = 'Ready For Delivery 🚚';
+          isAlreadyPicked = true;
+          isManualSelected = true;
           pickedCount++;
           assignedMackNums.add(pickNum);
+        } else {
+          const match = shelfMacks.find(sm => {
+            const mNum = String(sm['Item #'] || sm['ESL ID'] || sm['MACK'] || sm['MACK #'] || '').trim();
+            return !assignedMackNums.has(mNum) &&
+                   String(sm['KV']) === String(m.kv) &&
+                   String(sm['Size']) === String(m.size);
+          });
+          if (match) {
+            pickNum = String(match['Item #'] || match['ESL ID'] || match['MACK'] || match['MACK #'] || '').trim();
+            pickStatus = 'In Stock ✅';
+            pickedCount++;
+            assignedMackNums.add(pickNum);
+          }
         }
       }
 
       const rowData = [
         m.assignedTo, m.itemNum, m.kv, m.size, m.length, m.dateAssigned, m.changeOutDate, m.daysLeft,
-        pickNum, pickStatus, false, '',
+        pickNum, pickStatus, isAlreadyPicked, '',
         '', '', '', '', '', '', '', '', '', '', '', '', ''
       ];
       rawGrid.push(rowData);
       const rowObj = this.gridRowToObj(headers, rowData);
-      if (isManualSelected) {
+      if (isManualSelected || isAlreadyPicked) {
         rowObj._manualPick = true;
         rowObj.isManualPick = true;
       }
@@ -1369,6 +1498,11 @@ class SwapGenerationEngine {
     rawGrid.push(headers);
 
     const assignedCalibrationNums = new Set();
+    Object.values(manualPicks).forEach(mp => {
+      if (mp && mp.pickListNum && mp.pickListNum !== '—' && mp.pickListNum !== '-') {
+        assignedCalibrationNums.add(String(mp.pickListNum).trim());
+      }
+    });
 
     needingSwap.forEach(it => {
       const manualPickKey = `${it.assignedTo.toLowerCase()}|${it.itemNum.toLowerCase()}`;
@@ -1376,33 +1510,50 @@ class SwapGenerationEngine {
       let pickNum = '—';
       let pickStatus = 'Need to Purchase ❌';
       let isManualSelected = false;
+      let isAlreadyPicked = false;
 
       if (manualEntry && manualEntry.pickListNum && manualEntry.pickListNum !== '—' && manualEntry.pickListNum !== '-') {
         pickNum = manualEntry.pickListNum;
-        pickStatus = manualEntry.status || 'In Stock ✅';
         isManualSelected = true;
+        isAlreadyPicked = Boolean(manualEntry.isPicked || String(manualEntry.status || '').toLowerCase().includes('ready for delivery'));
+        pickStatus = isAlreadyPicked ? 'Ready For Delivery 🚚' : (manualEntry.status || 'In Stock ✅');
         pickedCount++;
         assignedCalibrationNums.add(pickNum);
       } else {
-        const match = shelfItems.find(si => {
+        // Tier 1: check if an item on shelf is already marked "Picked For" this employee
+        const pickedForMatch = shelfItems.find(si => {
           const num = String(si['HVT #'] || si['Phasing Set #'] || si['Item #'] || si['Item'] || si['Serial #'] || Object.entries(si).find(([k]) => k !== '_rowIdx')?.[1] || '').trim();
-          return !assignedCalibrationNums.has(num) && String(si['Model']) === String(it.model);
+          const pf = String(si['Picked For'] || '').trim().toLowerCase();
+          return !assignedCalibrationNums.has(num) && pf && pf.includes(it.assignedTo.toLowerCase());
         });
-        if (match) {
-          pickNum = String(match['HVT #'] || match['Phasing Set #'] || match['Item #'] || match['Item'] || match['Serial #'] || Object.entries(match).find(([k]) => k !== '_rowIdx')?.[1] || '').trim();
-          pickStatus = 'In Stock ✅';
+        if (pickedForMatch) {
+          pickNum = String(pickedForMatch['HVT #'] || pickedForMatch['Phasing Set #'] || pickedForMatch['Item #'] || pickedForMatch['Item'] || pickedForMatch['Serial #'] || Object.entries(pickedForMatch).find(([k]) => k !== '_rowIdx')?.[1] || '').trim();
+          pickStatus = 'Ready For Delivery 🚚';
+          isAlreadyPicked = true;
+          isManualSelected = true;
           pickedCount++;
           assignedCalibrationNums.add(pickNum);
+        } else {
+          const match = shelfItems.find(si => {
+            const num = String(si['HVT #'] || si['Phasing Set #'] || si['Item #'] || si['Item'] || si['Serial #'] || Object.entries(si).find(([k]) => k !== '_rowIdx')?.[1] || '').trim();
+            return !assignedCalibrationNums.has(num) && String(si['Model']) === String(it.model);
+          });
+          if (match) {
+            pickNum = String(match['HVT #'] || match['Phasing Set #'] || match['Item #'] || match['Item'] || match['Serial #'] || Object.entries(match).find(([k]) => k !== '_rowIdx')?.[1] || '').trim();
+            pickStatus = 'In Stock ✅';
+            pickedCount++;
+            assignedCalibrationNums.add(pickNum);
+          }
         }
       }
 
       const rowData = [
         it.assignedTo, it.itemNum, it.model, it.kv, it.serialNum, it.dateAssigned, it.changeOutDate, it.daysLeft,
-        pickNum, pickStatus, false, ''
+        pickNum, pickStatus, isAlreadyPicked, ''
       ];
       rawGrid.push(rowData);
       const rowObj = this.gridRowToObj(headers, rowData);
-      if (isManualSelected) {
+      if (isManualSelected || isAlreadyPicked) {
         rowObj._manualPick = true;
         rowObj.isManualPick = true;
       }
@@ -1458,6 +1609,11 @@ class SwapGenerationEngine {
 
     const manualPicks = this.preserveManualPickLists(swapKey);
     const assignedAedNums = new Set();
+    Object.values(manualPicks).forEach(mp => {
+      if (mp && mp.pickListNum && mp.pickListNum !== '—' && mp.pickListNum !== '-') {
+        assignedAedNums.add(String(mp.pickListNum).trim());
+      }
+    });
 
     rawGrid.push(['AED Swaps', '', '', '', '', '', '', '', '']);
     rawGrid.push(headers);
@@ -1468,33 +1624,50 @@ class SwapGenerationEngine {
       let pickNum = '—';
       let pickStatus = 'Need to Purchase ❌';
       let isManualSelected = false;
+      let isAlreadyPicked = false;
 
       if (manualEntry && manualEntry.pickListNum && manualEntry.pickListNum !== '—' && manualEntry.pickListNum !== '-') {
         pickNum = manualEntry.pickListNum;
-        pickStatus = manualEntry.status || 'In Stock ✅';
         isManualSelected = true;
+        isAlreadyPicked = Boolean(manualEntry.isPicked || String(manualEntry.status || '').toLowerCase().includes('ready for delivery'));
+        pickStatus = isAlreadyPicked ? 'Ready For Delivery 🚚' : (manualEntry.status || 'In Stock ✅');
         pickedCount++;
         assignedAedNums.add(pickNum);
       } else {
-        const match = shelfItems.find(si => {
+        // Tier 1: check if an item on shelf is already marked "Picked For" this employee
+        const pickedForMatch = shelfItems.find(si => {
           const num = String(si['AED #'] || si['AED'] || si['Item #'] || si['Item'] || Object.entries(si).find(([k]) => k !== '_rowIdx')?.[1] || '').trim();
-          return !assignedAedNums.has(num) && String(si['Model']) === String(it.model);
+          const pf = String(si['Picked For'] || '').trim().toLowerCase();
+          return !assignedAedNums.has(num) && pf && pf.includes(it.assignedTo.toLowerCase());
         });
-        if (match) {
-          pickNum = String(match['AED #'] || match['AED'] || match['Item #'] || match['Item'] || Object.entries(match).find(([k]) => k !== '_rowIdx')?.[1] || '').trim();
-          pickStatus = 'In Stock ✅';
+        if (pickedForMatch) {
+          pickNum = String(pickedForMatch['AED #'] || pickedForMatch['AED'] || pickedForMatch['Item #'] || pickedForMatch['Item'] || Object.entries(pickedForMatch).find(([k]) => k !== '_rowIdx')?.[1] || '').trim();
+          pickStatus = 'Ready For Delivery 🚚';
+          isAlreadyPicked = true;
+          isManualSelected = true;
           pickedCount++;
           assignedAedNums.add(pickNum);
+        } else {
+          const match = shelfItems.find(si => {
+            const num = String(si['AED #'] || si['AED'] || si['Item #'] || si['Item'] || Object.entries(si).find(([k]) => k !== '_rowIdx')?.[1] || '').trim();
+            return !assignedAedNums.has(num) && String(si['Model']) === String(it.model);
+          });
+          if (match) {
+            pickNum = String(match['AED #'] || match['AED'] || match['Item #'] || match['Item'] || Object.entries(match).find(([k]) => k !== '_rowIdx')?.[1] || '').trim();
+            pickStatus = 'In Stock ✅';
+            pickedCount++;
+            assignedAedNums.add(pickNum);
+          }
         }
       }
 
       const rowData = [
         it.assignedTo, it.itemNum, it.model, it.padExp, it.daysLeft,
-        pickNum, pickStatus, false, ''
+        pickNum, pickStatus, isAlreadyPicked, ''
       ];
       rawGrid.push(rowData);
       const rowObj = this.gridRowToObj(headers, rowData);
-      if (isManualSelected) {
+      if (isManualSelected || isAlreadyPicked) {
         rowObj._manualPick = true;
         rowObj.isManualPick = true;
       }
@@ -1554,6 +1727,11 @@ class SwapGenerationEngine {
 
     const manualPicks = this.preserveManualPickLists(swapKey);
     const assignedGroundNums = new Set();
+    Object.values(manualPicks).forEach(mp => {
+      if (mp && mp.pickListNum && mp.pickListNum !== '—' && mp.pickListNum !== '-') {
+        assignedGroundNums.add(String(mp.pickListNum).trim());
+      }
+    });
 
     rawGrid.push(['Ground Swaps', '', '', '', '', '', '', '', '', '', '', '', '']);
     rawGrid.push(headers);
@@ -1564,33 +1742,50 @@ class SwapGenerationEngine {
       let pickNum = '—';
       let pickStatus = 'Need to Purchase ❌';
       let isManualSelected = false;
+      let isAlreadyPicked = false;
 
       if (manualEntry && manualEntry.pickListNum && manualEntry.pickListNum !== '—' && manualEntry.pickListNum !== '-') {
         pickNum = manualEntry.pickListNum;
-        pickStatus = manualEntry.status || 'In Stock ✅';
         isManualSelected = true;
+        isAlreadyPicked = Boolean(manualEntry.isPicked || String(manualEntry.status || '').toLowerCase().includes('ready for delivery'));
+        pickStatus = isAlreadyPicked ? 'Ready For Delivery 🚚' : (manualEntry.status || 'In Stock ✅');
         pickedCount++;
         assignedGroundNums.add(pickNum);
       } else {
-        const match = shelfItems.find(si => {
+        // Tier 1: check if an item on shelf is already marked "Picked For" this employee
+        const pickedForMatch = shelfItems.find(si => {
           const num = String(si['Serial #'] || si['Ground #'] || si['Item #'] || Object.entries(si).find(([k]) => k !== '_rowIdx')?.[1] || '').trim();
-          return !assignedGroundNums.has(num) && String(si['Type']) === String(it.type) && String(si['Size']) === String(it.size);
+          const pf = String(si['Picked For'] || '').trim().toLowerCase();
+          return !assignedGroundNums.has(num) && pf && pf.includes(it.assignedTo.toLowerCase());
         });
-        if (match) {
-          pickNum = String(match['Serial #'] || match['Ground #'] || match['Item #'] || Object.entries(match).find(([k]) => k !== '_rowIdx')?.[1] || '').trim();
-          pickStatus = 'In Stock ✅';
+        if (pickedForMatch) {
+          pickNum = String(pickedForMatch['Serial #'] || pickedForMatch['Ground #'] || pickedForMatch['Item #'] || Object.entries(pickedForMatch).find(([k]) => k !== '_rowIdx')?.[1] || '').trim();
+          pickStatus = 'Ready For Delivery 🚚';
+          isAlreadyPicked = true;
+          isManualSelected = true;
           pickedCount++;
           assignedGroundNums.add(pickNum);
+        } else {
+          const match = shelfItems.find(si => {
+            const num = String(si['Serial #'] || si['Ground #'] || si['Item #'] || Object.entries(si).find(([k]) => k !== '_rowIdx')?.[1] || '').trim();
+            return !assignedGroundNums.has(num) && String(si['Type']) === String(it.type) && String(si['Size']) === String(it.size);
+          });
+          if (match) {
+            pickNum = String(match['Serial #'] || match['Ground #'] || match['Item #'] || Object.entries(match).find(([k]) => k !== '_rowIdx')?.[1] || '').trim();
+            pickStatus = 'In Stock ✅';
+            pickedCount++;
+            assignedGroundNums.add(pickNum);
+          }
         }
       }
 
       const rowData = [
         it.assignedTo, it.itemNum, it.type, it.size, it.kv, it.length, it.dateAssigned, it.changeOutDate, it.daysLeft,
-        pickNum, pickStatus, false, ''
+        pickNum, pickStatus, isAlreadyPicked, ''
       ];
       rawGrid.push(rowData);
       const rowObj = this.gridRowToObj(headers, rowData);
-      if (isManualSelected) {
+      if (isManualSelected || isAlreadyPicked) {
         rowObj._manualPick = true;
         rowObj.isManualPick = true;
       }
@@ -1648,6 +1843,11 @@ class SwapGenerationEngine {
 
     const manualPicks = this.preserveManualPickLists(swapKey);
     const assignedHotStickNums = new Set();
+    Object.values(manualPicks).forEach(mp => {
+      if (mp && mp.pickListNum && mp.pickListNum !== '—' && mp.pickListNum !== '-') {
+        assignedHotStickNums.add(String(mp.pickListNum).trim());
+      }
+    });
 
     rawGrid.push(['Hot Stick Swaps', '', '', '', '', '', '', '', '', '', '']);
     rawGrid.push(headers);
@@ -1658,33 +1858,50 @@ class SwapGenerationEngine {
       let pickNum = '—';
       let pickStatus = 'Need to Purchase ❌';
       let isManualSelected = false;
+      let isAlreadyPicked = false;
 
       if (manualEntry && manualEntry.pickListNum && manualEntry.pickListNum !== '—' && manualEntry.pickListNum !== '-') {
         pickNum = manualEntry.pickListNum;
-        pickStatus = manualEntry.status || 'In Stock ✅';
         isManualSelected = true;
+        isAlreadyPicked = Boolean(manualEntry.isPicked || String(manualEntry.status || '').toLowerCase().includes('ready for delivery'));
+        pickStatus = isAlreadyPicked ? 'Ready For Delivery 🚚' : (manualEntry.status || 'In Stock ✅');
         pickedCount++;
         assignedHotStickNums.add(pickNum);
       } else {
-        const match = shelfItems.find(si => {
+        // Tier 1: check if an item on shelf is already marked "Picked For" this employee
+        const pickedForMatch = shelfItems.find(si => {
           const num = String(si['Item #'] || si['Hot Stick #'] || si['Item'] || Object.entries(si).find(([k]) => k !== '_rowIdx')?.[1] || '').trim();
-          return !assignedHotStickNums.has(num) && String(si['Type']) === String(it.type) && String(si['Length']) === String(it.length);
+          const pf = String(si['Picked For'] || '').trim().toLowerCase();
+          return !assignedHotStickNums.has(num) && pf && pf.includes(it.assignedTo.toLowerCase());
         });
-        if (match) {
-          pickNum = String(match['Item #'] || match['Hot Stick #'] || match['Item'] || Object.entries(match).find(([k]) => k !== '_rowIdx')?.[1] || '').trim();
-          pickStatus = 'In Stock ✅';
+        if (pickedForMatch) {
+          pickNum = String(pickedForMatch['Item #'] || pickedForMatch['Hot Stick #'] || pickedForMatch['Item'] || Object.entries(pickedForMatch).find(([k]) => k !== '_rowIdx')?.[1] || '').trim();
+          pickStatus = 'Ready For Delivery 🚚';
+          isAlreadyPicked = true;
+          isManualSelected = true;
           pickedCount++;
           assignedHotStickNums.add(pickNum);
+        } else {
+          const match = shelfItems.find(si => {
+            const num = String(si['Item #'] || si['Hot Stick #'] || si['Item'] || Object.entries(si).find(([k]) => k !== '_rowIdx')?.[1] || '').trim();
+            return !assignedHotStickNums.has(num) && String(si['Type']) === String(it.type) && String(si['Length']) === String(it.length);
+          });
+          if (match) {
+            pickNum = String(match['Item #'] || match['Hot Stick #'] || match['Item'] || Object.entries(match).find(([k]) => k !== '_rowIdx')?.[1] || '').trim();
+            pickStatus = 'In Stock ✅';
+            pickedCount++;
+            assignedHotStickNums.add(pickNum);
+          }
         }
       }
 
       const rowData = [
         it.assignedTo, it.itemNum, it.type, it.length, it.dateAssigned, it.changeOutDate, it.daysLeft,
-        pickNum, pickStatus, false, ''
+        pickNum, pickStatus, isAlreadyPicked, ''
       ];
       rawGrid.push(rowData);
       const rowObj = this.gridRowToObj(headers, rowData);
-      if (isManualSelected) {
+      if (isManualSelected || isAlreadyPicked) {
         rowObj._manualPick = true;
         rowObj.isManualPick = true;
       }
@@ -1813,6 +2030,11 @@ class SwapGenerationEngine {
       (gridRow && gridRow[0]) || ''
     ).trim();
 
+    const oldItemNum = String(
+      (row && (row['Current Glove #'] || row['Current Sleeve #'] || row['Current Blanket #'] || row['Current MACK #'] || row['Current HV Tester #'] || row['Current Phasing Set #'] || row['Current AED #'] || row['Current Item #'] || row['Serial #'])) ||
+      (gridRow && gridRow[1]) || ''
+    ).trim();
+
     const isReclaimOnly = !pickNum || pickNum === '—' || pickNum === '-';
 
     const invMap = {
@@ -1832,11 +2054,6 @@ class SwapGenerationEngine {
 
     if (isReclaimOnly) {
       // Previous Employee / Reclaim-only row (no pick replacement item)
-      const oldItemNum = String(
-        (row && (row['Current Glove #'] || row['Current Sleeve #'] || row['Current Blanket #'] || row['Current MACK #'] || row['Current HV Tester #'] || row['Current Phasing Set #'] || row['Current AED #'] || row['Current Item #'] || row['Serial #'])) ||
-        (gridRow && gridRow[1]) || ''
-      ).trim();
-
       const oldRow = oldItemNum && oldItemNum !== '—' ? invTable.rows.find(it => {
         const itNum = String(it['Item #'] || it['Glove'] || it['Sleeve'] || it['Blanket'] || it['MACK'] || it['Serial #'] || it['ESL ID'] || Object.values(it)[0] || '').trim();
         return itNum === oldItemNum;
@@ -1854,6 +2071,7 @@ class SwapGenerationEngine {
           gridRow[7] = 'Ready For Delivery 🚚';
           gridRow[8] = 'TRUE';
         }
+        this.db.saveManualPick(swapSheetKey, empName, oldItemNum, '—', 'Ready For Delivery 🚚', true);
         oldRow['Location'] = "Cody's Truck";
         oldRow['Status'] = 'Ready For Test';
         oldRow['Assigned To'] = 'Packed For Testing';
@@ -1872,6 +2090,7 @@ class SwapGenerationEngine {
           gridRow[7] = 'Return to Shelf';
           gridRow[8] = 'FALSE';
         }
+        this.db.saveManualPick(swapSheetKey, empName, oldItemNum, '—', 'Return to Shelf', false);
         oldRow['Location'] = 'Previous Employee';
         oldRow['Status'] = 'Assigned';
         oldRow['Assigned To'] = empName;
@@ -1902,6 +2121,7 @@ class SwapGenerationEngine {
         gridRow[7] = 'Ready For Delivery 🚚';
         gridRow[8] = 'TRUE';
       }
+      this.db.saveManualPick(swapSheetKey, empName, oldItemNum, pickNum, 'Ready For Delivery 🚚', true);
 
       if (invRow) {
         invRow['Location'] = "Cody's Truck";
@@ -1925,6 +2145,7 @@ class SwapGenerationEngine {
         gridRow[7] = 'In Stock ✅';
         gridRow[8] = 'FALSE';
       }
+      this.db.saveManualPick(swapSheetKey, empName, oldItemNum, pickNum, 'In Stock ✅', false);
 
       if (invRow) {
         invRow['Location'] = 'Helena';

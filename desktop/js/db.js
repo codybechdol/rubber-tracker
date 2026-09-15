@@ -1234,12 +1234,13 @@ class LocalDatabase {
   /**
    * Save a manual pick override for an employee on a swap sheet
    */
-  saveManualPick(swapTableKey, empName, currentItemNum, pickListNum, status = 'In Stock ✅') {
+  saveManualPick(swapTableKey, empName, currentItemNum, pickListNum, status = 'In Stock ✅', isPicked = false) {
     if (!swapTableKey || !empName) return;
     const cleanSheet = String(swapTableKey).toLowerCase().trim();
     const cleanEmp = String(empName).toLowerCase().trim();
     const cleanItem = String(currentItemNum || '').toLowerCase().trim();
     const cleanPick = String(pickListNum || '').trim();
+    const isPickedBool = Boolean(isPicked || String(status || '').toLowerCase().includes('ready for delivery'));
 
     if (!this.snapshot) this.snapshot = { tables: {}, configs: {} };
     if (!this.snapshot.manualPicks) this.snapshot.manualPicks = {};
@@ -1263,6 +1264,7 @@ class LocalDatabase {
         status: status,
         currentItemNum: currentItemNum,
         empName: empName,
+        isPicked: isPickedBool,
         timestamp: new Date().toISOString()
       };
       this.snapshot.manualPicks[cleanSheet][`${cleanEmp}|${cleanItem}`] = entry;
