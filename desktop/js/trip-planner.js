@@ -4673,6 +4673,9 @@ class TripPlannerApp {
     const locMap = {};
     locations.forEach(l => { locMap[l.name] = l; });
 
+    const pickedData = this.getPickedSwapsData();
+    const allPickedItems = (pickedData && pickedData.items) ? pickedData.items : [];
+
     const baseMonday = this.getMondayForDate(this.currentDate);
 
     // Render multi-week sections based on weeksToShow
@@ -4858,6 +4861,18 @@ class TripPlannerApp {
             const attendees = String(r['Attendees'] || r['Crew Members'] || '').trim();
             const dateDone = String(r['Date Completed'] || r['Completed Date'] || r['Date'] || '').trim();
             const isDone = sLower === 'completed' || sLower === 'complete' || sLower === 'done' || !!dateDone;
+
+            // Exclude completed past trainings (unless completed on THIS specific trip date)
+            if (isDone) {
+              if (!dateDone) return;
+              const doneDate = this.parseDate(dateDone);
+              const thisDayDate = this.parseDate(dateKey);
+              const isSameDay = doneDate && thisDayDate &&
+                doneDate.getFullYear() === thisDayDate.getFullYear() &&
+                doneDate.getMonth() === thisDayDate.getMonth() &&
+                doneDate.getDate() === thisDayDate.getDate();
+              if (!isSameDay) return;
+            }
 
             // Check if already captured in trainingClasses
             const hasManualMatch = trainingClasses.some(mt => {
@@ -5185,7 +5200,10 @@ class TripPlannerApp {
         // 4. Render Tasks (Sidebar Locations, Crews, & Equipment Swaps)
         let tasksHtml = '';
         let totalCrewTasksCount = 0;
+        let dayPickedCount = 0;
         trips.forEach(trip => {
+          const locPicked = (allPickedItems || []).filter(item => (item.location || '').toLowerCase() === trip.location.toLowerCase());
+          dayPickedCount += locPicked.length;
           const locInfo = locMap[trip.location] || null;
           if (locInfo && locInfo.activeCrews) {
             locInfo.activeCrews.forEach(c => {
@@ -5234,6 +5252,13 @@ class TripPlannerApp {
                               const crewTasks = window.taskManager ? window.taskManager.getTasksByCrew(c.crewId, weekMonday) : [];
                               const summary = this.getCrewTaskSummary(crewTasks);
 
+                              const sig = this.getSignificantJobNumber(c.crewId).toLowerCase();
+                              const crewPickedSwaps = (allPickedItems || []).filter(item => {
+                                const itemSig = this.getSignificantJobNumber(item.crewId).toLowerCase();
+                                return (sig && itemSig && sig === itemSig) ||
+                                  (item.crewId || '').toLowerCase() === String(c.crewId).toLowerCase();
+                              });
+
                               return `
                                 <div class="crew-task-box" onclick="window.tripPlanner.openCrewTasksModal('${this.escapeHtml(c.crewId)}', '${this.escapeHtml(trip.location)}', 'All', '${dateKey}')" title="Click to view all tasks for Crew ${this.escapeHtml(c.crewId)}">
                                   <div style="font-size: 11px; color: #cbd5e1; display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
@@ -5262,6 +5287,20 @@ class TripPlannerApp {
                                     ${summary.drugTests > 0 ? `<span class="badge" style="background: rgba(139, 92, 246, 0.15); color: #c084fc; font-size: 9px; padding: 1px 4px; border: 1px solid rgba(139, 92, 246, 0.3);">🧪 ${summary.drugTests}</span>` : ''}
                                     ${summary.total === 0 ? `<span style="font-size: 9px; color: #94a3b8; font-style: italic;">✓ No pending tasks</span>` : ''}
                                   </div>
+
+                                  ${crewPickedSwaps.length > 0 ? `
+                                    <div style="margin-top: 5px; padding: 4px 6px; background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 4px;">
+                                      <div style="font-size: 9.5px; font-weight: 800; color: #34d399; display: flex; align-items: center; justify-content: space-between; margin-bottom: 2px;">
+                                        <span>🚚 Picked Swaps Ready (${crewPickedSwaps.length})</span>
+                                      </div>
+                                      ${crewPickedSwaps.map(ps => `
+                                        <div style="font-size: 9.5px; color: #e2e8f0; display: flex; justify-content: space-between; align-items: center; margin-top: 2px;">
+                                          <span><strong>${this.escapeHtml(ps.employeeName)}</strong>: ${ps.type === 'Glove' ? '🧤 Glove' : '🧤 Sleeve'} <span style="color: #fca5a5;">${this.escapeHtml(ps.currentItem || '—')}</span> ➔ <strong style="color: #4ade80;">${this.escapeHtml(ps.pickItem || '—')}</strong></span>
+                                          ${ps.size ? `<span style="color: #94a3b8; font-size: 9px;">Sz ${this.escapeHtml(ps.size)}</span>` : ''}
+                                        </div>
+                                      `).join('')}
+                                    </div>
+                                  ` : ''}
                                 </div>
                               `;
                             }).join('')}
@@ -5316,6 +5355,11 @@ class TripPlannerApp {
               ${personalTasks.length > 0 ? `
                 <span class="badge" style="background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.35); font-size: 9px; padding: 1px 4px; border-radius: 3px;" title="${personalTasks.length} Office Task(s)">
                   💼 ${personalTasks.filter(t => t.status !== 'Complete').length}
+                </span>
+              ` : ''}
+              ${dayPickedCount > 0 ? `
+                <span class="badge" style="background: rgba(16, 185, 129, 0.25); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 9px; padding: 1px 4px; border-radius: 3px;" title="${dayPickedCount} Picked Swap(s) Ready for Delivery">
+                  🚚 ${dayPickedCount} Picked
                 </span>
               ` : ''}
               ${totalCrewTasksCount > 0 ? `
@@ -6472,6 +6516,11 @@ class TripPlannerApp {
 
   addTrip(dateKey, location) {
     if (!location) return;
+    if (this.isDayHoliday(dateKey)) {
+      const hName = this.getHolidayName(dateKey);
+      alert(`🏖️ ${dateKey} is marked as a holiday (${hName}). Field crew visits cannot be scheduled on holiday days.`);
+      return;
+    }
     const currentList = [...this.getTripsForDate(dateKey)];
     // Prevent duplicate of same city on the exact same day
     if (!currentList.some(t => t.location.toLowerCase() === location.toLowerCase())) {
