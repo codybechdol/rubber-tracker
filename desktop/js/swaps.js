@@ -2399,6 +2399,11 @@ class SwapGenerationEngine {
         await this.db.recordItemHistoryEvent(invSheetName, newRow, `Assigned to ${empName}`);
         await this.queueRowMutations(invKey, newRow);
       }
+
+      if (row) {
+        this.syncRowToRawGrid(swapTable, row);
+        await this.queueRowMutations(swapSheetKey, row);
+      }
     } else {
       // STAGE 4: Date Changed removed -> Revert to Stage 2 (Ready For Delivery)
       if (row) {
@@ -2410,15 +2415,14 @@ class SwapGenerationEngine {
         gridRow[9] = '';
       }
 
-      const todayIso = this.formatDateIso(new Date());
-
       // 1. Revert Replacement Item -> Cody's Truck / Ready For Delivery
       if (newRow) {
         newRow['Location'] = "Cody's Truck";
         newRow['Status'] = 'Ready For Delivery';
         newRow['Assigned To'] = 'Packed For Delivery';
         newRow['Date Assigned'] = this.formatDate(new Date());
-        newRow['Picked For'] = `${empName} Picked On ${todayIso}`;
+        newRow['Picked For'] = empName; // Restore Picked For!
+        newRow['Change Out Date'] = 'N/A';
 
         this.syncRowToRawGrid(invTable, newRow);
 
@@ -2454,6 +2458,11 @@ class SwapGenerationEngine {
         });
 
         await this.queueRowMutations(invKey, oldRow);
+      }
+
+      if (row) {
+        this.syncRowToRawGrid(swapTable, row);
+        await this.queueRowMutations(swapSheetKey, row);
       }
     }
 

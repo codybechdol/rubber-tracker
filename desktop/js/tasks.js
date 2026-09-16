@@ -1195,7 +1195,7 @@ class TaskManagerApp {
     `;
   }
 
-  completeTask(taskId, forceDirect = false) {
+  async completeTask(taskId, forceDirect = false) {
     const allTasks = this.collectAllTasks();
     const task = allTasks.find(x => x.id === taskId);
 
@@ -1221,7 +1221,7 @@ class TaskManagerApp {
       }
     }
 
-    // If it's an equipment swap, mark it delivered on the corresponding swap sheet
+    // If it's an equipment swap, mark it delivered on the corresponding swap sheet and update inventory
     if (task && task.sourceSheet && task.sourceSheet.toLowerCase().includes('swap')) {
       const invMap = {
         'glove swap': 'glove_swaps',
@@ -1252,10 +1252,14 @@ class TaskManagerApp {
           return (emp && emp === String(task.employee || '').trim().toLowerCase()) || (itm && itm === String(task.currentItem || '').trim().toLowerCase());
         });
         if (swRow) {
-          swRow['Status'] = 'Delivered ✅';
-          swRow['Date Changed'] = todayStr;
-          if (window.swapsManager && typeof window.swapsManager.syncRowToRawGrid === 'function') {
-            window.swapsManager.syncRowToRawGrid(swTable, swRow);
+          if (window.swapsManager && typeof window.swapsManager.handleDateChangedEdit === 'function') {
+            await window.swapsManager.handleDateChangedEdit(swKey, swRow, todayStr);
+          } else {
+            swRow['Status'] = 'Delivered ✅';
+            swRow['Date Changed'] = todayStr;
+            if (window.swapsManager && typeof window.swapsManager.syncRowToRawGrid === 'function') {
+              window.swapsManager.syncRowToRawGrid(swTable, swRow);
+            }
           }
         }
       }
