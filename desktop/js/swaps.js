@@ -324,52 +324,52 @@ class SwapGenerationEngine {
     };
 
     // 1. Generate Gloves & Sleeves Swaps
-    const gloveRes = this.generateSwaps('Gloves');
+    const gloveRes = await this.generateSwaps('Gloves');
     stats.gloves = gloveRes.swapCount;
     stats.totalPicked += gloveRes.pickedCount;
     stats.needToOrder += gloveRes.needToOrderCount;
 
-    const sleeveRes = this.generateSwaps('Sleeves');
+    const sleeveRes = await this.generateSwaps('Sleeves');
     stats.sleeves = sleeveRes.swapCount;
     stats.totalPicked += sleeveRes.pickedCount;
     stats.needToOrder += sleeveRes.needToOrderCount;
 
     // 2. Generate Blanket Swaps
-    const blanketRes = this.generateBlanketSwaps();
+    const blanketRes = await this.generateBlanketSwaps();
     stats.blankets = blanketRes.swapCount;
     stats.totalPicked += blanketRes.pickedCount;
 
     // 3. Generate MACK Swaps
-    const mackRes = this.generateMackSwaps();
+    const mackRes = await this.generateMackSwaps();
     stats.macks = mackRes.swapCount;
     stats.totalPicked += mackRes.pickedCount;
 
     // 4. Generate HV Testers & Phasing Sets
-    const hvRes = this.generateCalibrationSwaps('hv_testers', 'hv_tester_swaps', 'HV Tester');
+    const hvRes = await this.generateCalibrationSwaps('hv_testers', 'hv_tester_swaps', 'HV Tester');
     stats.hv_testers = hvRes.swapCount;
     stats.totalPicked += hvRes.pickedCount;
 
-    const phasingRes = this.generateCalibrationSwaps('phasing_sets', 'phasing_set_swaps', 'Phasing Set');
+    const phasingRes = await this.generateCalibrationSwaps('phasing_sets', 'phasing_set_swaps', 'Phasing Set');
     stats.phasing_sets = phasingRes.swapCount;
     stats.totalPicked += phasingRes.pickedCount;
 
     // 5. Generate AED Swaps
-    const aedRes = this.generateAEDSwaps();
+    const aedRes = await this.generateAEDSwaps();
     stats.aed = aedRes.swapCount;
     stats.totalPicked += aedRes.pickedCount;
 
     // 6. Generate Grounds Swaps
-    const groundRes = this.generateGroundSwaps();
+    const groundRes = await this.generateGroundSwaps();
     stats.grounds = groundRes.swapCount;
     stats.totalPicked += groundRes.pickedCount;
 
     // 7. Generate Hot Sticks Swaps
-    const hotStickRes = this.generateHotStickSwaps();
+    const hotStickRes = await this.generateHotStickSwaps();
     stats.hot_sticks = hotStickRes.swapCount;
     stats.totalPicked += hotStickRes.pickedCount;
 
     // 8. Run Upgrade Pick List pass
-    this.upgradePickListItems();
+    await this.upgradePickListItems();
 
     const elapsed = Math.round(performance.now() - startTime);
 
@@ -388,7 +388,7 @@ class SwapGenerationEngine {
   /**
    * Generates Glove or Sleeve Swaps matching Code.gs line-for-line
    */
-  generateSwaps(itemType) {
+  async generateSwaps(itemType) {
     const isGloves = (itemType === 'Gloves' || itemType === 'gloves');
     const swapKey = isGloves ? 'glove_swaps' : 'sleeve_swaps';
     const invKey = isGloves ? 'gloves' : 'sleeves';
@@ -1223,7 +1223,7 @@ class SwapGenerationEngine {
     }
 
     // Save to local database
-    this.db.replaceSwapTable(swapKey, rawGrid, allHeaders, swapRows);
+    await this.db.replaceSwapTable(swapKey, rawGrid, allHeaders, swapRows);
 
     return {
       swapCount: swapRows.length,
@@ -1235,7 +1235,7 @@ class SwapGenerationEngine {
   /**
    * Generates Blanket Swaps (Class 2 & Class 4, 1-year test interval)
    */
-  generateBlanketSwaps() {
+  async generateBlanketSwaps() {
     const swapKey = 'blanket_swaps';
     const invTable = this.db.getTable('blankets');
     if (!invTable || !invTable.rows) return { swapCount: 0, pickedCount: 0 };
@@ -1359,14 +1359,14 @@ class SwapGenerationEngine {
       swapRows.push(rowObj);
     });
 
-    this.db.replaceSwapTable(swapKey, rawGrid, headers, swapRows);
+    await this.db.replaceSwapTable(swapKey, rawGrid, headers, swapRows);
     return { swapCount: swapRows.length, pickedCount: pickedCount };
   }
 
   /**
    * Generates MACK Swaps (1-year interval, grouped by Crew Lead)
    */
-  generateMackSwaps() {
+  async generateMackSwaps() {
     const swapKey = 'mack_swaps';
     const invTable = this.db.getTable('macks');
     if (!invTable || !invTable.rows) return { swapCount: 0, pickedCount: 0 };
@@ -1490,14 +1490,14 @@ class SwapGenerationEngine {
       swapRows.push(rowObj);
     });
 
-    this.db.replaceSwapTable(swapKey, rawGrid, headers, swapRows);
+    await this.db.replaceSwapTable(swapKey, rawGrid, headers, swapRows);
     return { swapCount: swapRows.length, pickedCount: pickedCount };
   }
 
   /**
    * Generates Calibration Swaps (HV Testers & Phasing Sets - 10-year calibration cycle)
    */
-  generateCalibrationSwaps(invKey, swapKey, equipmentLabel) {
+  async generateCalibrationSwaps(invKey, swapKey, equipmentLabel) {
     const invTable = this.db.getTable(invKey);
     if (!invTable || !invTable.rows) return { swapCount: 0, pickedCount: 0 };
 
@@ -1612,14 +1612,14 @@ class SwapGenerationEngine {
       swapRows.push(rowObj);
     });
 
-    this.db.replaceSwapTable(swapKey, rawGrid, headers, swapRows);
+    await this.db.replaceSwapTable(swapKey, rawGrid, headers, swapRows);
     return { swapCount: swapRows.length, pickedCount: pickedCount };
   }
 
   /**
    * Generates AED Swaps (Pad Expiration tracking)
    */
-  generateAEDSwaps() {
+  async generateAEDSwaps() {
     const swapKey = 'aed_swaps';
     const invTable = this.db.getTable('aed');
     if (!invTable || !invTable.rows) return { swapCount: 0, pickedCount: 0 };
@@ -1727,14 +1727,14 @@ class SwapGenerationEngine {
       swapRows.push(rowObj);
     });
 
-    this.db.replaceSwapTable(swapKey, rawGrid, headers, swapRows);
+    await this.db.replaceSwapTable(swapKey, rawGrid, headers, swapRows);
     return { swapCount: swapRows.length, pickedCount: pickedCount };
   }
 
   /**
    * Generates Ground Swaps (1-year test cycle)
    */
-  generateGroundSwaps() {
+  async generateGroundSwaps() {
     const swapKey = 'ground_swaps';
     const invTable = this.db.getTable('grounds');
     if (!invTable || !invTable.rows) return { swapCount: 0, pickedCount: 0 };
@@ -1846,14 +1846,14 @@ class SwapGenerationEngine {
       swapRows.push(rowObj);
     });
 
-    this.db.replaceSwapTable(swapKey, rawGrid, headers, swapRows);
+    await this.db.replaceSwapTable(swapKey, rawGrid, headers, swapRows);
     return { swapCount: swapRows.length, pickedCount: pickedCount };
   }
 
   /**
    * Generates Hot Stick Swaps (2-year test cycle)
    */
-  generateHotStickSwaps() {
+  async generateHotStickSwaps() {
     const swapKey = 'hot_stick_swaps';
     const invTable = this.db.getTable('hot_sticks');
     if (!invTable || !invTable.rows) return { swapCount: 0, pickedCount: 0 };
@@ -1963,25 +1963,32 @@ class SwapGenerationEngine {
       swapRows.push(rowObj);
     });
 
-    this.db.replaceSwapTable(swapKey, rawGrid, headers, swapRows);
+    await this.db.replaceSwapTable(swapKey, rawGrid, headers, swapRows);
     return { swapCount: swapRows.length, pickedCount: pickedCount };
   }
 
   /**
    * Upgrades pick list items from "In Testing" / "Need to Purchase" to "On Shelf"
    */
-  upgradePickListItems() {
+  async upgradePickListItems() {
     let upgradesCount = 0;
     const swapConfigs = [
       { swapKey: 'glove_swaps', invKey: 'gloves', isGloves: true },
       { swapKey: 'sleeve_swaps', invKey: 'sleeves', isGloves: false }
     ];
 
-    swapConfigs.forEach(cfg => {
+    const parseClassNum = (c) => {
+      if (c === undefined || c === null) return 0;
+      const m = String(c).match(/\d+/);
+      return m ? parseInt(m[0], 10) : 0;
+    };
+
+    for (const cfg of swapConfigs) {
       const swapTable = this.db.getTable(cfg.swapKey);
       const invTable = this.db.getTable(cfg.invKey);
-      if (!swapTable || !invTable || !swapTable.rows || !invTable.rows) return;
+      if (!swapTable || !invTable || !swapTable.rows || !invTable.rows) continue;
 
+      let tableModified = false;
       const assignedPicks = new Set(swapTable.rows.map(r => String(r['Pick List Item #'] || '').trim()).filter(p => p && p !== '—'));
 
       swapTable.rows.forEach(r => {
@@ -1994,19 +2001,33 @@ class SwapGenerationEngine {
         const daysLeftVal = String(r['Days Left'] || '').toUpperCase();
         const isPrevEmp = status.includes('return to shelf') || status.includes('packed for testing') || status.includes('ready for test') || daysLeftVal.includes('PREV EMP') || r._location === 'PREVIOUS EMPLOYEE';
         if (isPrevEmp || status.includes('locate') || daysLeftVal.includes('LOST')) {
-          r['Pick List Item #'] = '—';
+          if (r['Pick List Item #'] !== '—') {
+            r['Pick List Item #'] = '—';
+            this.syncRowToRawGrid(swapTable, r);
+            tableModified = true;
+          }
           return;
         }
 
         if (status.includes('in testing') || status.includes('need to purchase') || pickNum === '—') {
           const empSize = r['Size'];
-          // Find unused On Shelf item
+          const currentItemNum = String(r[cfg.isGloves ? 'Current Glove #' : 'Current Sleeve #'] || r['Current Item #'] || '').trim();
+          const currentInvItem = invTable.rows.find(it => {
+            const itNum = String(it['Item #'] || it['Glove'] || it['Sleeve'] || it['ESL ID'] || '').trim();
+            return itNum && itNum === currentItemNum;
+          });
+          const targetClassNum = currentInvItem ? parseClassNum(currentInvItem['Class'] || currentInvItem['Rubber Class']) : 0;
+
+          // Find unused On Shelf item matching size and class
           const match = invTable.rows.find(it => {
             const itNum = String(it['Item #'] || it['Glove'] || it['Sleeve'] || it['ESL ID'] || '').trim();
             const itStat = String(it['Status'] || '').trim().toLowerCase();
             const itSize = String(it['Size'] || '').trim();
+            const itClassNum = parseClassNum(it['Class'] || it['Rubber Class']);
             const pickedFor = String(it['Picked For'] || '').trim();
-            return itStat === 'on shelf' && itSize === String(empSize) && !assignedPicks.has(itNum) && !pickedFor;
+
+            const classMatch = targetClassNum === itClassNum;
+            return itStat === 'on shelf' && itSize === String(empSize) && classMatch && !assignedPicks.has(itNum) && !pickedFor;
           });
 
           if (match) {
@@ -2014,11 +2035,17 @@ class SwapGenerationEngine {
             r['Pick List Item #'] = newPickNum;
             r['Status'] = 'In Stock ✅';
             assignedPicks.add(newPickNum);
+            this.syncRowToRawGrid(swapTable, r);
+            tableModified = true;
             upgradesCount++;
           }
         }
       });
-    });
+
+      if (tableModified) {
+        await this.db.replaceSwapTable(cfg.swapKey, swapTable.rawGrid, swapTable.headers, swapTable.rows);
+      }
+    }
 
     return upgradesCount;
   }
@@ -2567,6 +2594,7 @@ class SwapGenerationEngine {
   }
 
   showSwapSummaryModal(stats, elapsed) {
+    if (typeof document === 'undefined') return;
     let modal = document.getElementById('swap-summary-modal');
     if (!modal) {
       modal = document.createElement('div');

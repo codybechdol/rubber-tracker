@@ -655,7 +655,11 @@ class LocalDatabase {
     }
 
     // 3. Header finding logic (guarded so it only runs if headers need re-indexing)
-    if (!table._headersNormalized) {
+    const isSwapTable = tableKey && (tableKey.endsWith('_swaps') || tableKey.includes('swap'));
+    if (isSwapTable) {
+      table._headersNormalized = true;
+    }
+    if (!table._headersNormalized && !isSwapTable) {
       const validHeaders = (table.headers || []).filter(h => String(h || '').trim() !== '');
       const isTraining = tableKey === 'training_tracking';
 
@@ -1478,7 +1482,8 @@ class LocalDatabase {
       rowCount: rows.length,
       maxRows: rawGrid.length,
       maxCols: headers.length,
-      _normalized: true
+      _normalized: true,
+      _headersNormalized: true
     };
 
     // Only queue REPLACE_SWAP_TABLE mutation if table content actually changed
@@ -1491,6 +1496,7 @@ class LocalDatabase {
       });
     }
 
+    await this.persistSnapshot(this.snapshot);
     this.notify();
     return this.snapshot.tables[tableKey];
   }
