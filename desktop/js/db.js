@@ -348,7 +348,124 @@ class LocalDatabase {
     Object.keys(snapshot.tables).forEach(key => {
       this.normalizeTableData(snapshot.tables[key], key);
     });
+    this.healCrossClassSwaps(snapshot);
     return snapshot;
+  }
+
+  healCrossClassSwaps(snapshot) {
+    if (!snapshot || !snapshot.tables) return;
+
+    const parseClass = (c) => {
+      if (c === undefined || c === null) return 0;
+      const m = String(c).match(/\d+/);
+      return m ? parseInt(m[0], 10) : 0;
+    };
+
+    const targetPairs = [
+      { swapKey: 'glove_swaps', invKey: 'gloves', label: 'Glove' },
+      { swapKey: 'sleeve_swaps', invKey: 'sleeves', label: 'Sleeve' }
+    ];
+
+    targetPairs.forEach(({ swapKey, invKey }) => {
+      const invTable = snapshot.tables[invKey];
+      const swapTable = snapshot.tables[swapKey];
+      if (!invTable || !invTable.rows) return;
+
+      // Index inventory by item number
+      const invMap = {};
+      invTable.rows.forEach(it => {
+        const num = String(it['Item #'] || it['Glove'] || it['Sleeve'] || it['ESL ID'] || '').trim().toLowerCase();
+        if (num) invMap[num] = it;
+      });
+
+      // 1. Clean manualPicks in snapshot & local storage
+      let localRegistry = {};
+      try {
+        const stored = localStorage.getItem('sa_manual_picks');
+        if (stored) localRegistry = JSON.parse(stored);
+      } catch { /* ignore */ }
+
+      if (snapshot.manualPicks && snapshot.manualPicks[swapKey]) {
+        for (const [k, v] of Object.entries(snapshot.manualPicks[swapKey])) {
+          if (!v || !v.pickListNum || v.pickListNum === '—' || v.pickListNum === '-') continue;
+          const curItem = invMap[String(v.currentItemNum || '').trim().toLowerCase()];
+          const pickItem = invMap[String(v.pickListNum || '').trim().toLowerCase()];
+          if (curItem && pickItem) {
+            const curClass = parseClass(curItem['Class']);
+            const pickClass = parseClass(pickItem['Class']);
+            if (curClass !== pickClass) {
+              console.warn(`[healCrossClassSwaps] Purging cross-class manual pick in ${swapKey}: ${k} (Current Class ${curClass} vs Picked Class ${pickClass})`);
+              delete snapshot.manualPicks[swapKey][k];
+              if (localRegistry[swapKey]) delete localRegistry[swapKey][k];
+            }
+          }
+        }
+      }
+      try {
+        localStorage.setItem('sa_manual_picks', JSON.stringify(localRegistry));
+      } catch { /* ignore */ }
+
+      // 2. Clean swapTable rawGrid
+      if (swapTable && swapTable.rawGrid && Array.isArray(swapTable.rawGrid)) {
+        let headers = swapTable.headers || [];
+        if ((!headers || headers.length === 0) && Array.isArray(swapTable.rawGrid[1])) {
+          headers = swapTable.rawGrid[1];
+        }
+        let curCol = headers.findIndex(h => /current|^serial\s*#/i.test(h));
+        let pickCol = headers.findIndex(h => /pick\s*list/i.test(h));
+        let statCol = headers.findIndex(h => /^status$/i.test(h));
+        let pickedCol = headers.findIndex(h => /^picked$/i.test(h));
+
+        if (curCol === -1) curCol = 1;
+        if (pickCol === -1) pickCol = 6;
+        if (statCol === -1) statCol = 7;
+        if (pickedCol === -1) pickedCol = 8;
+
+        swapTable.rawGrid.forEach((row, idx) => {
+          if (idx === 0 || !Array.isArray(row)) return;
+          const curNum = String(row[curCol] || '').trim().toLowerCase();
+          const pickNum = String(row[pickCol] || '').trim().toLowerCase();
+          if (!curNum || !pickNum || pickNum === '—' || pickNum === '-') return;
+
+          const curItem = invMap[curNum];
+          const pickItem = invMap[pickNum];
+          if (curItem && pickItem) {
+            const curClass = parseClass(curItem['Class']);
+            const pickClass = parseClass(pickItem['Class']);
+            if (curClass !== pickClass) {
+              console.warn(`[healCrossClassSwaps] Purging cross-class rawGrid assignment in ${swapKey} row ${idx}: ${row[0]} Current ${row[curCol]} (Class ${curClass}) vs Pick ${row[pickCol]} (Class ${pickClass})`);
+              row[pickCol] = '—';
+              row[statCol] = 'Need to Purchase ❌';
+              row[pickedCol] = false;
+            }
+          }
+        });
+      }
+
+      // 3. Clean swapTable rows
+      if (swapTable && swapTable.rows && Array.isArray(swapTable.rows)) {
+        swapTable.rows.forEach(r => {
+          const curNum = String(r['Current Glove #'] || r['Current Sleeve #'] || r['Current Item #'] || '').trim().toLowerCase();
+          const pickNum = String(r['Pick List Item #'] || '').trim().toLowerCase();
+          if (!curNum || !pickNum || pickNum === '—' || pickNum === '-') return;
+
+          const curItem = invMap[curNum];
+          const pickItem = invMap[pickNum];
+          if (curItem && pickItem) {
+            const curClass = parseClass(curItem['Class']);
+            const pickClass = parseClass(pickItem['Class']);
+            if (curClass !== pickClass) {
+              console.warn(`[healCrossClassSwaps] Purging cross-class row assignment in ${swapKey}: ${r['Employee']} Current ${curNum} (Class ${curClass}) vs Pick ${pickNum} (Class ${pickClass})`);
+              r['Pick List Item #'] = '—';
+              r['Status'] = 'Need to Purchase ❌';
+              r['Picked'] = false;
+              r._manualPick = false;
+              r.isManualPick = false;
+            }
+          }
+        });
+      }
+    });
   }
 
   normalizeTableData(table, tableKey) {
@@ -1254,10 +1371,18 @@ class LocalDatabase {
     if (!localRegistry[cleanSheet]) localRegistry[cleanSheet] = {};
 
     if (!cleanPick || cleanPick === '—' || cleanPick === '-') {
-      delete this.snapshot.manualPicks[cleanSheet][`${cleanEmp}|${cleanItem}`];
-      delete this.snapshot.manualPicks[cleanSheet][cleanEmp];
-      delete localRegistry[cleanSheet][`${cleanEmp}|${cleanItem}`];
-      delete localRegistry[cleanSheet][cleanEmp];
+      if (cleanItem) {
+        delete this.snapshot.manualPicks[cleanSheet][`${cleanEmp}|${cleanItem}`];
+        delete localRegistry[cleanSheet][`${cleanEmp}|${cleanItem}`];
+        const existingSimple = this.snapshot.manualPicks[cleanSheet][cleanEmp];
+        if (existingSimple && existingSimple.currentItemNum && String(existingSimple.currentItemNum).toLowerCase().trim() === cleanItem) {
+          delete this.snapshot.manualPicks[cleanSheet][cleanEmp];
+          delete localRegistry[cleanSheet][cleanEmp];
+        }
+      } else {
+        delete this.snapshot.manualPicks[cleanSheet][cleanEmp];
+        delete localRegistry[cleanSheet][cleanEmp];
+      }
     } else {
       const entry = {
         pickListNum: cleanPick,
@@ -1267,10 +1392,21 @@ class LocalDatabase {
         isPicked: isPickedBool,
         timestamp: new Date().toISOString()
       };
-      this.snapshot.manualPicks[cleanSheet][`${cleanEmp}|${cleanItem}`] = entry;
-      this.snapshot.manualPicks[cleanSheet][cleanEmp] = entry;
-      localRegistry[cleanSheet][`${cleanEmp}|${cleanItem}`] = entry;
-      localRegistry[cleanSheet][cleanEmp] = entry;
+      if (cleanItem) {
+        this.snapshot.manualPicks[cleanSheet][`${cleanEmp}|${cleanItem}`] = entry;
+        localRegistry[cleanSheet][`${cleanEmp}|${cleanItem}`] = entry;
+        const existingSimple = this.snapshot.manualPicks[cleanSheet][cleanEmp];
+        if (!existingSimple || !existingSimple.currentItemNum || String(existingSimple.currentItemNum).toLowerCase().trim() === cleanItem) {
+          this.snapshot.manualPicks[cleanSheet][cleanEmp] = entry;
+          localRegistry[cleanSheet][cleanEmp] = entry;
+        } else {
+          delete this.snapshot.manualPicks[cleanSheet][cleanEmp];
+          delete localRegistry[cleanSheet][cleanEmp];
+        }
+      } else {
+        this.snapshot.manualPicks[cleanSheet][cleanEmp] = entry;
+        localRegistry[cleanSheet][cleanEmp] = entry;
+      }
     }
 
     try {
@@ -1353,6 +1489,36 @@ class LocalDatabase {
         tableKey: tableKey,
         rawGrid: rawGrid
       });
+    }
+
+    this.notify();
+    return this.snapshot.tables[tableKey];
+  }
+
+  async saveTable(tableKey, table) {
+    if (!this.snapshot) this.snapshot = { tables: {}, configs: {} };
+    if (!this.snapshot.tables) this.snapshot.tables = {};
+
+    if (table) {
+      this.normalizeTableData(table, tableKey);
+      this.snapshot.tables[tableKey] = table;
+    }
+    await this.persistSnapshot(this.snapshot);
+
+    const sheetName = (table && table.name) || this.getSheetNameForTableKey(tableKey) || tableKey;
+    if (typeof this.addMutation === 'function') {
+      await this.addMutation({
+        action: 'REPLACE_TABLE_DATA',
+        sheetName: sheetName,
+        tableKey: tableKey,
+        headers: (table && table.headers) || [],
+        rows: (table && table.rows) || [],
+        rawGrid: (table && table.rawGrid) || []
+      });
+    }
+
+    if (window.syncEngine && typeof window.syncEngine.renderOutboxBadge === 'function') {
+      window.syncEngine.renderOutboxBadge();
     }
 
     this.notify();
@@ -2144,6 +2310,23 @@ class LocalDatabase {
           });
           table.maxRows = table.rawGrid.length;
         }
+      }
+    }
+
+    // Replace Table Data / Swap Table mutation replay
+    if ((mut.action === 'REPLACE_TABLE_DATA' || mut.action === 'REPLACE_SWAP_TABLE') && this.snapshot && this.snapshot.tables) {
+      const tableKey = mut.tableKey || this.getTableKeyForSheet(mut.sheetName);
+      if (tableKey) {
+        this.snapshot.tables[tableKey] = {
+          name: mut.sheetName || this.getSheetNameForTableKey(tableKey) || tableKey,
+          headers: mut.headers || [],
+          rows: mut.rows || [],
+          rawGrid: mut.rawGrid || [],
+          rowCount: (mut.rows && mut.rows.length) || 0,
+          maxRows: (mut.rawGrid && mut.rawGrid.length) || 0,
+          maxCols: (mut.headers && mut.headers.length) || 0,
+          _normalized: true
+        };
       }
     }
   }

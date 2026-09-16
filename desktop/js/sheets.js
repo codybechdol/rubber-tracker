@@ -1657,6 +1657,50 @@ class SheetNavigator {
 
           // Find row object in tableData.rows
           const rowObj = (tableData.rows || []).find(r => r._rowIdx === row || (r['Employee'] && r['Employee'] === empName));
+
+          let invKey = this.currentSheetKey.replace('_swaps', '').replace('swaps', '');
+          if (!invKey.endsWith('s') && ['glove', 'sleeve', 'blanket', 'mack', 'ground'].includes(invKey)) {
+            invKey += 's';
+          }
+          if (invKey === 'hot_stick' || invKey === 'stick') invKey = 'hot_sticks';
+          if (invKey === 'hv_tester' || invKey === 'phasing_set') invKey = 'calibrations';
+
+          const invTable = (this.db && typeof this.db.getTable === 'function') ? this.db.getTable(invKey) : null;
+          let matchedItem = null;
+          let newStatus = 'In Stock ✅';
+
+          // Rubber Class safety validation for Gloves and Sleeves
+          if (!isCleared && (invKey === 'gloves' || invKey === 'sleeves') && invTable && invTable.rows) {
+            const parseClass = (c) => {
+              if (c === undefined || c === null) return 0;
+              const m = String(c).match(/\d+/);
+              return m ? parseInt(m[0], 10) : 0;
+            };
+
+            const curItem = invTable.rows.find(it => {
+              const itNum = String(it['Item #'] || it['Glove'] || it['Sleeve'] || it['ESL ID'] || Object.values(it)[0] || '').trim().toLowerCase();
+              return itNum === currentItemNum.toLowerCase();
+            });
+
+            matchedItem = invTable.rows.find(it => {
+              const itNum = String(it['Item #'] || it['Glove'] || it['Sleeve'] || it['ESL ID'] || Object.values(it)[0] || '').trim().toLowerCase();
+              return itNum === newVal.toLowerCase();
+            });
+
+            if (curItem && matchedItem) {
+              const curClass = parseClass(curItem['Class']);
+              const pickClass = parseClass(matchedItem['Class']);
+              if (curClass !== pickClass) {
+                alert(`⚠️ Safety Violation: Rubber Class Mismatch!\n\nCannot assign Class ${pickClass} item #${newVal} to a Class ${curClass} swap.\nRubber class must match exactly.`);
+                if (tableData.rawGrid && tableData.rawGrid[row - 1]) {
+                  tableData.rawGrid[row - 1][col - 1] = initialVal;
+                }
+                e.target.textContent = initialVal;
+                return;
+              }
+            }
+          }
+
           if (rowObj) {
             rowObj._manualPick = isManualPick;
             rowObj.isManualPick = isManualPick;
@@ -1674,20 +1718,13 @@ class SheetNavigator {
 
           // Dynamic status detection for the manual pick
           if (!isCleared) {
-            let invKey = this.currentSheetKey.replace('_swaps', '').replace('swaps', '');
-            if (!invKey.endsWith('s') && ['glove', 'sleeve', 'blanket', 'mack', 'ground'].includes(invKey)) {
-              invKey += 's';
-            }
-            if (invKey === 'hot_stick' || invKey === 'stick') invKey = 'hot_sticks';
-            if (invKey === 'hv_tester' || invKey === 'phasing_set') invKey = 'calibrations';
-
-            const invTable = this.db.getTable(invKey);
-            let newStatus = 'In Stock ✅';
             if (invTable && invTable.rows) {
-              const matchedItem = invTable.rows.find(it => {
-                const itNum = String(it['Item #'] || it['Glove'] || it['Sleeve'] || it['Blanket'] || it['MACK'] || it['Serial #'] || it['ESL ID'] || Object.values(it)[0] || '').trim();
-                return itNum.toLowerCase() === newVal.toLowerCase();
-              });
+              if (!matchedItem) {
+                matchedItem = invTable.rows.find(it => {
+                  const itNum = String(it['Item #'] || it['Glove'] || it['Sleeve'] || it['Blanket'] || it['MACK'] || it['Serial #'] || it['ESL ID'] || Object.values(it)[0] || '').trim().toLowerCase();
+                  return itNum === newVal.toLowerCase();
+                });
+              }
               if (matchedItem) {
                 const iStat = String(matchedItem['Status'] || '').trim().toLowerCase();
                 if (iStat === 'ready for delivery') newStatus = 'Ready For Delivery 🚚';

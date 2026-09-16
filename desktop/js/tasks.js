@@ -273,6 +273,36 @@ class TaskManagerApp {
           if (this.isEquipmentSwapCompleted(sourceSheet || rawType, currentItem, employee)) {
             return; // Skip completed/reclaimed swap task!
           }
+          if (!isOverdue && !isComplete) {
+            const sLower = String(sourceSheet || rawType || '').toLowerCase();
+            const swKey = sLower.includes('glove') ? 'glove_swaps' :
+                          sLower.includes('sleeve') ? 'sleeve_swaps' :
+                          sLower.includes('blanket') ? 'blanket_swaps' :
+                          sLower.includes('mack') ? 'mack_swaps' :
+                          sLower.includes('tester') ? 'hv_tester_swaps' :
+                          sLower.includes('phasing') ? 'phasing_set_swaps' :
+                          sLower.includes('aed') ? 'aed_swaps' :
+                          sLower.includes('ground') ? 'ground_swaps' :
+                          sLower.includes('hot_stick') ? 'hot_stick_swaps' : null;
+            if (swKey) {
+              const swTable = this.db.getTable(swKey);
+              if (swTable && swTable.rows) {
+                const empC = String(employee || '').trim().toLowerCase();
+                const itmC = String(currentItem || '').trim().toLowerCase();
+                const swRow = swTable.rows.find(rSw => {
+                  const rEmp = String(rSw['Employee'] || rSw['Assigned To'] || '').trim().toLowerCase();
+                  const rOld = String(rSw['Current Glove #'] || rSw['Current Sleeve #'] || rSw['Current Item #'] || rSw['Item #'] || '').trim().toLowerCase();
+                  return (empC && itmC && rEmp === empC && rOld === itmC) || (empC && rEmp === empC);
+                });
+                if (swRow) {
+                  const swStage = String(swRow['Status'] || swRow['Stage'] || '').toLowerCase();
+                  if (swStage.includes('ready') || swStage.includes('picked') || String(swRow['Picked']).toLowerCase() === 'true') {
+                    taskObj.status = 'Ready For Delivery';
+                  }
+                }
+              }
+            }
+          }
         }
 
         // Reconcile with live safety_compliance table: if missing safety reports have been turned in (even late, '✅ L'), excused with a note, marked N/A, or week is Complete/Resolved, skip it!
@@ -330,8 +360,8 @@ class TaskManagerApp {
 
           const empInfo = empLookup[emp.toLowerCase()] || {};
           const crewId = empInfo.crewId || 'Unassigned Crew';
-          const loc = empInfo.location || String(r['Location'] || 'Helena').trim();
-          const foreman = empInfo.foreman || 'Lead';
+          const loc = empInfo.location || (jobLookup[crewId]?.location) || (jobLookup[this.getSignificantJobNumber(crewId)]?.location) || String(r['Location'] || 'Helena').trim();
+          const foreman = empInfo.foreman || (jobLookup[crewId]?.foreman) || (jobLookup[this.getSignificantJobNumber(crewId)]?.foreman) || 'Lead';
 
           const taskKey = `${sw.name}_${emp}_${specs}_${changeOut}`.toLowerCase();
           const swapId = `${sw.key}_${idx + 1}`;
@@ -341,6 +371,17 @@ class TaskManagerApp {
             seenTaskKeys.add(taskKey);
             seenTaskKeys.add(swapId.toLowerCase());
             const isOverdue = this.checkIfOverdue(changeOut);
+            let isPickedOrReady = stageLower.includes('ready') || stageLower.includes('picked') || String(r['Picked']).toLowerCase() === 'true';
+            if (!isPickedOrReady && this.db && this.db.snapshot && this.db.snapshot.manualPicks) {
+              const mp = this.db.snapshot.manualPicks[sw.key];
+              if (mp) {
+                const fallback = mp[emp.toLowerCase()];
+                const entry = mp[`${emp.toLowerCase()}|${itemNum.toLowerCase()}`] || (fallback && (!fallback.currentItemNum || String(fallback.currentItemNum).toLowerCase() === itemNum.toLowerCase()) ? fallback : null);
+                if (entry && (entry.isPicked || String(entry.status || '').toLowerCase().includes('ready for delivery'))) {
+                  isPickedOrReady = true;
+                }
+              }
+            }
             allTasks.push({
               id: swapId,
               sourceSheet: sw.name,
@@ -354,7 +395,7 @@ class TaskManagerApp {
               location: this.cleanLocation(loc),
               dueDate: changeOut,
               scheduledDate: '',
-              status: isOverdue ? 'Overdue' : (stage.includes('Picked') ? 'Picked & Ready' : 'Unassigned'),
+              status: isOverdue ? 'Overdue' : (isPickedOrReady ? 'Ready For Delivery' : 'Unassigned'),
               isOverdue: isOverdue,
               notes: pickedFor ? `Picked For: ${pickedFor}` : ''
             });
@@ -623,6 +664,7 @@ class TaskManagerApp {
           if (dateChanged || stage.includes('delivered') || stage.includes('complete') || stage.includes('resolved')) {
             return true; // Marked Delivered on swap sheet!
           }
+          return false; // Active staged/picked swap row exists on the swap sheet, NOT completed!
         }
       }
     }
@@ -664,10 +706,8 @@ class TaskManagerApp {
           const activeItemNum = String(workerActiveItem['Glove'] || workerActiveItem['Sleeve'] || workerActiveItem['Blanket'] || workerActiveItem['MACK'] || workerActiveItem['Serial #'] || workerActiveItem['Item #'] || '').trim().toLowerCase();
           const curChgOut = String(workerActiveItem['Change Out Date'] || '').trim();
 
+          // If worker has a DIFFERENT active item assigned that is not overdue, swap already took place
           if (activeItemNum && activeItemNum !== itmClean && curChgOut && !this.checkIfOverdue(curChgOut)) {
-            return true;
-          }
-          if (activeItemNum === itmClean && curChgOut && !this.checkIfOverdue(curChgOut)) {
             return true;
           }
         }

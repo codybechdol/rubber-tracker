@@ -5748,7 +5748,8 @@ class TripPlannerApp {
       if (this.db && this.db.snapshot && this.db.snapshot.manualPicks) {
         const mp = this.db.snapshot.manualPicks[tableKey];
         if (mp) {
-          const entry = mp[`${emp}|${item}`] || mp[emp];
+          const fallback = mp[emp];
+          const entry = mp[`${emp}|${item}`] || (fallback && (!fallback.currentItemNum || String(fallback.currentItemNum).toLowerCase() === item) ? fallback : null);
           if (entry && (entry.isPicked || String(entry.status || '').toLowerCase().includes('ready for delivery'))) {
             return true;
           }
@@ -6283,7 +6284,8 @@ class TripPlannerApp {
         ` : filtered.map(t => {
           const isComplete = String(t.status || '').toLowerCase() === 'complete';
           const isOverdue = t.isOverdue || String(t.status || '').toLowerCase() === 'overdue';
-          const badgeColor = isComplete ? '#10b981' : (isOverdue ? '#ef4444' : '#f59e0b');
+          const isReady = !isComplete && !isOverdue && (String(t.status || '').toLowerCase().includes('ready') || String(t.status || '').toLowerCase().includes('picked'));
+          const badgeColor = isComplete ? '#10b981' : (isOverdue ? '#ef4444' : (isReady ? '#10b981' : '#f59e0b'));
 
           return `
             <div style="background-color: var(--bg-primary); border: 1px solid var(--border-color); border-left: 4px solid ${badgeColor}; border-radius: 6px; padding: 12px 14px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
@@ -6344,8 +6346,8 @@ class TripPlannerApp {
               </div>
 
               <div style="display: flex; align-items: center; gap: 8px;">
-                <span class="badge" style="background: ${isComplete ? '#15803d' : (isOverdue ? '#b91c1c' : '#d97706')}; color: #fff; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 4px;">
-                  ${isComplete ? '✅ Complete' : (isOverdue ? '🔴 Overdue' : '⏳ Pending')}
+                <span class="badge" style="background: ${isComplete ? '#15803d' : (isOverdue ? '#b91c1c' : (isReady ? '#059669' : '#d97706'))}; color: #fff; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 4px;">
+                  ${isComplete ? '✅ Complete' : (isOverdue ? '🔴 Overdue' : (isReady ? '🚚 Ready For Delivery' : '⏳ Pending'))}
                 </span>
                 ${!isComplete ? `
                   <button class="btn" style="background-color: #10b981; color: #fff; padding: 4px 10px; font-size: 11px; font-weight: 700; border-radius: 4px; cursor: pointer;" onclick="window.tripPlanner.completeTaskInModal('${this.escapeHtml(t.id)}', '${this.escapeHtml(crewId)}', '${this.escapeHtml(loc)}')">

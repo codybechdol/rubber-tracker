@@ -130,10 +130,32 @@ class SwapGenerationEngine {
         const simpleKey = empName.toLowerCase();
 
         // If existing persistent pick is already explicitly picked and current is not, keep persistent
-        const existingPersist = persistentPicks[compositeKey] || persistentPicks[simpleKey];
+        const existingPersist = persistentPicks[compositeKey] || (persistentPicks[simpleKey] && (!persistentPicks[simpleKey].currentItemNum || persistentPicks[simpleKey].currentItemNum.toLowerCase() === currentItemNum.toLowerCase()) ? persistentPicks[simpleKey] : null);
         if (existingPersist && existingPersist.isPicked && !isPicked) return;
 
         if ((isManual || isPicked) && pickListNum && pickListNum !== '—' && pickListNum !== '-') {
+          // Class verification for rubber equipment (gloves/sleeves)
+          if ((swapTableKey === 'glove_swaps' || swapTableKey === 'sleeve_swaps') && this.db) {
+            const invKey = swapTableKey.replace('_swaps', 's');
+            const invTable = this.db.getTable(invKey);
+            if (invTable && invTable.rows) {
+              const parseClass = (c) => {
+                if (c === undefined || c === null) return 0;
+                const m = String(c).match(/\d+/);
+                return m ? parseInt(m[0], 10) : 0;
+              };
+              const curItObj = invTable.rows.find(it => String(it['Item #'] || it['Glove'] || it['Sleeve'] || it['ESL ID'] || '').trim().toLowerCase() === currentItemNum.toLowerCase());
+              const pickItObj = invTable.rows.find(it => String(it['Item #'] || it['Glove'] || it['Sleeve'] || it['ESL ID'] || '').trim().toLowerCase() === pickListNum.toLowerCase());
+              if (curItObj && pickItObj && parseClass(curItObj['Class']) !== parseClass(pickItObj['Class'])) {
+                // Cross-class mismatch! Refuse to preserve and purge
+                if (typeof this.db.clearManualPick === 'function') {
+                  this.db.clearManualPick(swapTableKey, empName, currentItemNum);
+                }
+                return;
+              }
+            }
+          }
+
           const entry = {
             pickListNum: pickListNum,
             status: status || (isPicked ? 'Ready For Delivery 🚚' : 'In Stock ✅'),
@@ -143,7 +165,11 @@ class SwapGenerationEngine {
             isManualPick: isManual
           };
           manualPicks[compositeKey] = entry;
-          manualPicks[simpleKey] = entry;
+          if (!manualPicks[simpleKey]) {
+            manualPicks[simpleKey] = entry;
+          } else if (manualPicks[simpleKey].currentItemNum && manualPicks[simpleKey].currentItemNum.toLowerCase() !== currentItemNum.toLowerCase()) {
+            delete manualPicks[simpleKey];
+          }
 
           if (isPicked && this.db && typeof this.db.saveManualPick === 'function') {
             this.db.saveManualPick(swapTableKey, empName, currentItemNum, pickListNum, entry.status, true);
@@ -184,11 +210,33 @@ class SwapGenerationEngine {
         const compositeKey = `${emp.toLowerCase()}|${curIt.toLowerCase()}`;
         const simpleKey = emp.toLowerCase();
 
-        const existing = manualPicks[compositeKey] || manualPicks[simpleKey];
+        const existing = manualPicks[compositeKey] || (manualPicks[simpleKey] && (!manualPicks[simpleKey].currentItemNum || manualPicks[simpleKey].currentItemNum.toLowerCase() === curIt.toLowerCase()) ? manualPicks[simpleKey] : null);
         if (existing && existing.isPicked && !isPicked) return;
 
         if (pNum && pNum !== '—' && pNum !== '-') {
           if (isManual || isPicked) {
+            // Class verification for rubber equipment (gloves/sleeves)
+            if ((swapTableKey === 'glove_swaps' || swapTableKey === 'sleeve_swaps') && this.db) {
+              const invKey = swapTableKey.replace('_swaps', 's');
+              const invTable = this.db.getTable(invKey);
+              if (invTable && invTable.rows) {
+                const parseClass = (c) => {
+                  if (c === undefined || c === null) return 0;
+                  const m = String(c).match(/\d+/);
+                  return m ? parseInt(m[0], 10) : 0;
+                };
+                const curItObj = invTable.rows.find(it => String(it['Item #'] || it['Glove'] || it['Sleeve'] || it['ESL ID'] || '').trim().toLowerCase() === curIt.toLowerCase());
+                const pickItObj = invTable.rows.find(it => String(it['Item #'] || it['Glove'] || it['Sleeve'] || it['ESL ID'] || '').trim().toLowerCase() === pNum.toLowerCase());
+                if (curItObj && pickItObj && parseClass(curItObj['Class']) !== parseClass(pickItObj['Class'])) {
+                  // Cross-class mismatch! Refuse to preserve and purge
+                  if (typeof this.db.clearManualPick === 'function') {
+                    this.db.clearManualPick(swapTableKey, emp, curIt);
+                  }
+                  return;
+                }
+              }
+            }
+
             const entry = {
               pickListNum: pNum,
               status: stat || (isPicked ? 'Ready For Delivery 🚚' : 'In Stock ✅'),
@@ -198,7 +246,11 @@ class SwapGenerationEngine {
               isManualPick: isManual
             };
             manualPicks[compositeKey] = entry;
-            manualPicks[simpleKey] = entry;
+            if (!manualPicks[simpleKey]) {
+              manualPicks[simpleKey] = entry;
+            } else if (manualPicks[simpleKey].currentItemNum && manualPicks[simpleKey].currentItemNum.toLowerCase() !== curIt.toLowerCase()) {
+              delete manualPicks[simpleKey];
+            }
 
             if (isPicked && this.db && typeof this.db.saveManualPick === 'function') {
               this.db.saveManualPick(swapTableKey, emp, curIt, pNum, entry.status, true);
@@ -808,13 +860,15 @@ class SwapGenerationEngine {
 
         // Check if there is a manual pick override preserved
         const manualKey = `${employeeName.toLowerCase()}|${String(meta.itemNum).toLowerCase()}`;
-        const manual = manualPicks[manualKey] || manualPicks[employeeName.toLowerCase()];
+        const fallback = manualPicks[employeeName.toLowerCase()];
+        const manual = manualPicks[manualKey] || (fallback && (!fallback.currentItemNum || String(fallback.currentItemNum).toLowerCase() === String(meta.itemNum).toLowerCase()) ? fallback : null);
         let isManualSelected = false;
 
         if (manual && manual.pickListNum && manual.pickListNum !== '—' && manual.pickListNum !== '-') {
           const matchManual = inventoryData.find(it => {
             const itm = String(it['Item #'] || it['Glove'] || it['Sleeve'] || it['ESL ID'] || '').trim();
-            return itm.toLowerCase() === manual.pickListNum.toLowerCase();
+            const classMatch = parseClassNum(it['Class']) === meta.itemClass;
+            return itm.toLowerCase() === manual.pickListNum.toLowerCase() && classMatch;
           });
           if (matchManual) {
             pickListValue = manual.pickListNum;
@@ -848,16 +902,15 @@ class SwapGenerationEngine {
             }
             assignedItemNums.add(pickListValue);
           } else {
-            pickListValue = manual.pickListNum;
-            isManualSelected = true;
-            const isPickedState = Boolean(manual.isPicked || String(manual.status || '').toLowerCase().includes('ready for delivery'));
-            if (isPickedState) {
-              isAlreadyPicked = true;
-              pickListStatus = 'Ready For Delivery 🚚';
-            } else {
-              pickListStatus = manual.status || 'In Stock ✅';
+            // Invalid manual pick or Rubber Class mismatch!
+            // Reject and purge to protect life-safety
+            if (this.db && typeof this.db.clearManualPick === 'function') {
+              this.db.clearManualPick(swapKey, employeeName, meta.itemNum);
             }
-            assignedItemNums.add(pickListValue);
+            delete manualPicks[manualKey];
+            if (manualPicks[employeeName.toLowerCase()] && manualPicks[employeeName.toLowerCase()].currentItemNum === meta.itemNum) {
+              delete manualPicks[employeeName.toLowerCase()];
+            }
           }
         }
 
@@ -1247,7 +1300,8 @@ class SwapGenerationEngine {
 
     blanketsNeedingSwap.forEach(b => {
       const manualPickKey = `${b.assignedTo.toLowerCase()}|${b.itemNum.toLowerCase()}`;
-      const manualEntry = manualPicks[manualPickKey] || manualPicks[b.assignedTo.toLowerCase()];
+      const fallbackEntry = manualPicks[b.assignedTo.toLowerCase()];
+      const manualEntry = manualPicks[manualPickKey] || (fallbackEntry && (!fallbackEntry.currentItemNum || String(fallbackEntry.currentItemNum).toLowerCase() === b.itemNum.toLowerCase()) ? fallbackEntry : null);
       let pickNum = '—';
       let pickStatus = 'Need to Purchase ❌';
       let isManualSelected = false;
@@ -1378,7 +1432,8 @@ class SwapGenerationEngine {
 
     macksNeedingSwap.forEach(m => {
       const manualPickKey = `${m.assignedTo.toLowerCase()}|${m.itemNum.toLowerCase()}`;
-      const manualEntry = manualPicks[manualPickKey] || manualPicks[m.assignedTo.toLowerCase()];
+      const fallbackEntry = manualPicks[m.assignedTo.toLowerCase()];
+      const manualEntry = manualPicks[manualPickKey] || (fallbackEntry && (!fallbackEntry.currentItemNum || String(fallbackEntry.currentItemNum).toLowerCase() === m.itemNum.toLowerCase()) ? fallbackEntry : null);
       let pickNum = '—';
       let pickStatus = 'Need to Purchase ❌';
       let isManualSelected = false;
@@ -1502,7 +1557,8 @@ class SwapGenerationEngine {
 
     needingSwap.forEach(it => {
       const manualPickKey = `${it.assignedTo.toLowerCase()}|${it.itemNum.toLowerCase()}`;
-      const manualEntry = manualPicks[manualPickKey] || manualPicks[it.assignedTo.toLowerCase()];
+      const fallbackEntry = manualPicks[it.assignedTo.toLowerCase()];
+      const manualEntry = manualPicks[manualPickKey] || (fallbackEntry && (!fallbackEntry.currentItemNum || String(fallbackEntry.currentItemNum).toLowerCase() === it.itemNum.toLowerCase()) ? fallbackEntry : null);
       let pickNum = '—';
       let pickStatus = 'Need to Purchase ❌';
       let isManualSelected = false;
@@ -1616,7 +1672,8 @@ class SwapGenerationEngine {
 
     needingSwap.forEach(it => {
       const manualPickKey = `${it.assignedTo.toLowerCase()}|${it.itemNum.toLowerCase()}`;
-      const manualEntry = manualPicks[manualPickKey] || manualPicks[it.assignedTo.toLowerCase()];
+      const fallbackEntry = manualPicks[it.assignedTo.toLowerCase()];
+      const manualEntry = manualPicks[manualPickKey] || (fallbackEntry && (!fallbackEntry.currentItemNum || String(fallbackEntry.currentItemNum).toLowerCase() === it.itemNum.toLowerCase()) ? fallbackEntry : null);
       let pickNum = '—';
       let pickStatus = 'Need to Purchase ❌';
       let isManualSelected = false;
@@ -1734,7 +1791,8 @@ class SwapGenerationEngine {
 
     needingSwap.forEach(it => {
       const manualPickKey = `${it.assignedTo.toLowerCase()}|${it.itemNum.toLowerCase()}`;
-      const manualEntry = manualPicks[manualPickKey] || manualPicks[it.assignedTo.toLowerCase()];
+      const fallbackEntry = manualPicks[it.assignedTo.toLowerCase()];
+      const manualEntry = manualPicks[manualPickKey] || (fallbackEntry && (!fallbackEntry.currentItemNum || String(fallbackEntry.currentItemNum).toLowerCase() === it.itemNum.toLowerCase()) ? fallbackEntry : null);
       let pickNum = '—';
       let pickStatus = 'Need to Purchase ❌';
       let isManualSelected = false;
@@ -1850,7 +1908,8 @@ class SwapGenerationEngine {
 
     needingSwap.forEach(it => {
       const manualPickKey = `${it.assignedTo.toLowerCase()}|${it.itemNum.toLowerCase()}`;
-      const manualEntry = manualPicks[manualPickKey] || manualPicks[it.assignedTo.toLowerCase()];
+      const fallbackEntry = manualPicks[it.assignedTo.toLowerCase()];
+      const manualEntry = manualPicks[manualPickKey] || (fallbackEntry && (!fallbackEntry.currentItemNum || String(fallbackEntry.currentItemNum).toLowerCase() === it.itemNum.toLowerCase()) ? fallbackEntry : null);
       let pickNum = '—';
       let pickStatus = 'Need to Purchase ❌';
       let isManualSelected = false;

@@ -704,60 +704,66 @@ class ProcurementEngine {
     const saveBtn = document.getElementById('btn-save-vendors');
     if (saveBtn) saveBtn.textContent = '⏳ Saving...';
 
-    const headers = ['Vendor Name', 'Contact Name', 'Email', 'Phone', 'Notes', 'Item', 'Item Number', 'Price'];
-    const rows = [];
-    const rawGrid = [headers];
+    try {
+      const headers = ['Vendor Name', 'Contact Name', 'Email', 'Phone', 'Notes', 'Item', 'Item Number', 'Price'];
+      const rows = [];
+      const rawGrid = [headers];
 
-    this.vendors.forEach(v => {
-      if (v.items && v.items.length > 0) {
-        v.items.forEach(it => {
+      this.vendors.forEach(v => {
+        if (v.items && v.items.length > 0) {
+          v.items.forEach(it => {
+            const rowObj = {
+              'Vendor Name': v.name,
+              'Contact Name': v.contact,
+              'Email': v.email,
+              'Phone': v.phone,
+              'Notes': v.notes,
+              'Item': it.item,
+              'Item Number': it.itemNumber,
+              'Price': it.price
+            };
+            rows.push(rowObj);
+            rawGrid.push([v.name, v.contact, v.email, v.phone, v.notes, it.item, it.itemNumber, it.price]);
+          });
+        } else {
           const rowObj = {
             'Vendor Name': v.name,
             'Contact Name': v.contact,
             'Email': v.email,
             'Phone': v.phone,
             'Notes': v.notes,
-            'Item': it.item,
-            'Item Number': it.itemNumber,
-            'Price': it.price
+            'Item': '',
+            'Item Number': '',
+            'Price': 0
           };
           rows.push(rowObj);
-          rawGrid.push([v.name, v.contact, v.email, v.phone, v.notes, it.item, it.itemNumber, it.price]);
-        });
-      } else {
-        const rowObj = {
-          'Vendor Name': v.name,
-          'Contact Name': v.contact,
-          'Email': v.email,
-          'Phone': v.phone,
-          'Notes': v.notes,
-          'Item': '',
-          'Item Number': '',
-          'Price': 0
-        };
-        rows.push(rowObj);
-        rawGrid.push([v.name, v.contact, v.email, v.phone, v.notes, '', '', 0]);
-      }
-    });
+          rawGrid.push([v.name, v.contact, v.email, v.phone, v.notes, '', '', 0]);
+        }
+      });
 
-    const vTable = {
-      name: 'Vendors',
-      headers: headers,
-      rows: rows,
-      rawGrid: rawGrid,
-      rowCount: rows.length,
-      maxRows: rows.length + 1,
-      maxCols: 8
-    };
+      const vTable = {
+        name: 'Vendors',
+        headers: headers,
+        rows: rows,
+        rawGrid: rawGrid,
+        rowCount: rows.length,
+        maxRows: rows.length + 1,
+        maxCols: 8
+      };
 
-    await this.db.saveTable('vendors', vTable);
+      await this.db.saveTable('vendors', vTable);
 
-    this.updatePricing();
-    this.render();
-    this.closeManageVendorsModal();
+      this.updatePricing();
+      this.render();
+      this.closeManageVendorsModal();
 
-    if (saveBtn) saveBtn.innerHTML = '<span>💾</span> Save Vendor Changes';
-    alert('✅ Vendor catalog saved successfully! Click "Push Changes to Sheets" at the top whenever you wish to sync changes back to Google Sheets.');
+      alert('✅ Vendor catalog saved successfully! Click "Push Changes to Sheets" at the top whenever you wish to sync changes back to Google Sheets.');
+    } catch (err) {
+      console.error('Error saving vendor catalog:', err);
+      alert('❌ Failed to save vendor changes: ' + (err.message || err));
+    } finally {
+      if (saveBtn) saveBtn.innerHTML = '<span>💾</span> Save Vendor Changes';
+    }
   }
 
   /**
