@@ -69,11 +69,11 @@ class EmployeeNameResolver {
         }
       }
       if (!altNamesRaw) {
-        altNamesRaw = String(r['Alternate Names'] || r['Alternative names'] || r['Alternative Names'] || r['Alternative Name'] || r['Alternate Name'] || r['Alt Names'] || r['Alt Name'] || r['Also Known As'] || r['AKA'] || '').trim();
+        altNamesRaw = String(r['Alternate Names'] || r['Alternative names'] || r['Alternative Names'] || r['Alternative Name'] || r['Alternative Name'] || r['Alt Names'] || r['Alt Name'] || r['Also Known As'] || r['AKA'] || '').trim();
       }
 
       const altNamesList = altNamesRaw
-        ? altNamesRaw.split(/[;,\/]+/).map(s => s.trim()).filter(Boolean)
+        ? altNamesRaw.split(/[;,/]+/).map(s => s.trim()).filter(Boolean)
         : [];
 
       const empObj = {
@@ -82,15 +82,15 @@ class EmployeeNameResolver {
         location: location,
         classification: jobClass,
         jobNumber: jobNumber,
-        phone: phone,
-        rawRow: r
+        phone: phone
       };
 
       this.employees.push(empObj);
 
-      // Register all variations for this employee
+      // Register canonical name
       this._registerNameVariations(canonical, empObj, canonical);
 
+      // Register all alternate names
       altNamesList.forEach(alt => {
         this._registerNameVariations(alt, empObj, alt);
       });
@@ -106,16 +106,17 @@ class EmployeeNameResolver {
     if (!nameStr) return;
     const clean = nameStr.trim();
     const norm = clean.toLowerCase();
+    const prefName = preferredName || clean;
 
     // 1. Exact normalized name
     if (!this.indexMap.has(norm)) {
-      this.indexMap.set(norm, { employee: empObj, preferredName: clean });
+      this.indexMap.set(norm, { employee: empObj, preferredName: prefName });
     }
 
     // Normalized without punctuation (e.g. "Payton Miller Johnson" vs "Payton Miller-Johnson")
     const noHyphen = norm.replace(/[-_]+/g, ' ').replace(/\s+/g, ' ').trim();
     if (!this.indexMap.has(noHyphen)) {
-      this.indexMap.set(noHyphen, { employee: empObj, preferredName: clean });
+      this.indexMap.set(noHyphen, { employee: empObj, preferredName: prefName });
     }
 
     // 2. Part-based variations (First Last, First M. Last, etc.)
@@ -351,7 +352,6 @@ class EmployeeNameResolver {
     if (inTokens.length === 2 && inTokens[0].length === 1) {
       const initChar = inTokens[0];
       const inLast = inTokens[1];
-      const tgLast = tgTokens[tgTokens.length - 1];
       const tgFirst = tgTokens[0];
 
       if (tgFirst.startsWith(initChar) && tgTokens.includes(inLast)) {

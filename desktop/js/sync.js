@@ -139,7 +139,7 @@ class SyncEngine {
             this.setSyncUrl(DEFAULT_SYNC_URL);
             return { success: true, data: fallbackData };
           }
-        } catch (fErr) { /* ignore */ }
+        } catch { /* ignore */ }
       }
       return { 
         success: false, 
@@ -532,7 +532,7 @@ class SyncEngine {
     if (!body) return;
 
     if (clearBtn) {
-      clearBtn.style.display = outbox.length > 0 ? 'inline-block' : 'none';
+      clearBtn.style.display = (outbox.length > 0 && allowClear) ? 'inline-block' : 'none';
     }
 
     let statusBg = 'rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3);';
@@ -597,7 +597,7 @@ class SyncEngine {
 
     // Update count badge with a lively pulse effect
     if (countBadge) {
-      countBadge.textContent = `${remainingCount} change${remainingCount === 1 ? '' : 's'}`;
+      countBadge.textContent = totalCount ? `${remainingCount} of ${totalCount} remaining` : `${remainingCount} change${remainingCount === 1 ? '' : 's'}`;
       countBadge.style.transform = 'scale(1.22)';
       countBadge.style.backgroundColor = 'rgba(34, 197, 94, 0.35)';
       countBadge.style.color = '#4ade80';
@@ -844,7 +844,6 @@ class SyncEngine {
     try {
       const totalCount = currentOutbox.length;
       let totalPushed = 0;
-      let lastPushResult = null;
       let i = 0;
       let batchNum = 0;
 
@@ -929,8 +928,6 @@ class SyncEngine {
         if (!pushResult && lastBatchErr) {
           throw lastBatchErr;
         }
-
-        lastPushResult = pushResult;
 
         // 1. Handle Edit Conflicts (fallback)
         if (pushResult && pushResult.conflict && Array.isArray(pushResult.conflicts) && pushResult.conflicts.length > 0) {
@@ -1073,7 +1070,7 @@ class SyncEngine {
       list.unshift(record);
       if (list.length > 30) list.length = 30;
       localStorage.setItem('SAFETY_ASSISTANT_SYNC_TELEMETRY', JSON.stringify(list));
-    } catch (e) { /* ignore */ }
+    } catch { /* ignore */ }
   }
 
   /**
@@ -1083,7 +1080,7 @@ class SyncEngine {
     try {
       const raw = localStorage.getItem('SAFETY_ASSISTANT_SYNC_TELEMETRY');
       return raw ? JSON.parse(raw) : [];
-    } catch (e) {
+    } catch {
       return [];
     }
   }
@@ -1476,7 +1473,7 @@ class SyncEngine {
             this.setSyncUrl(DEFAULT_SYNC_URL);
             try {
               freshSnapshot = await this.executeNetworkRequest(`${DEFAULT_SYNC_URL}?action=getSnapshot`, 'GET', null, 120000);
-            } catch (defGetErr) {
+            } catch {
               freshSnapshot = await this.executeNetworkRequest(DEFAULT_SYNC_URL, 'POST', { action: 'getSnapshot' }, 120000);
             }
           } else {

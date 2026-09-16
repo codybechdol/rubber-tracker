@@ -163,8 +163,8 @@ class PreviousEmployeesEngine {
     if (clean.length < 2 || clean.length > 60) return false;
 
     // Reject standard date formats (e.g. MM/DD/YYYY, YYYY-MM-DD, M/D/YY, 08.23.2026)
-    if (/^\d{1,4}[.\/-]\d{1,2}[.\/-]\d{1,4}$/.test(clean)) return false;
-    if (/^\d{1,2}[.\/-]\d{1,2}[.\/-]\d{2,4}$/.test(clean)) return false;
+    if (/^\d{1,4}[./-]\d{1,2}[./-]\d{1,4}$/.test(clean)) return false;
+    if (/^\d{1,2}[./-]\d{1,2}[./-]\d{2,4}$/.test(clean)) return false;
     if (/^[A-Za-z]{3,9}\s+\d{1,2},?\s+\d{4}$/.test(clean)) return false; // August 23, 2026
     if (/^\d{1,2}-[A-Za-z]{3,9}-\d{2,4}$/.test(clean)) return false; // 23-Aug-2026
 
@@ -411,7 +411,7 @@ class PreviousEmployeesEngine {
           if (prevMap.has(norm)) {
             prevMap.get(norm).isActive = true;
           }
-          for (const [pNorm, prevEmp] of prevMap.entries()) {
+          for (const prevEmp of prevMap.values()) {
             if (this.isNameMatch(name, prevEmp.name)) {
               prevEmp.isActive = true;
             }
@@ -419,7 +419,7 @@ class PreviousEmployeesEngine {
           const altNames = this.extractRowValue(r, headers, ['Alternate Names', 'Aliases', 'Alt Names']);
           if (altNames) {
             altNames.split(/[,;/|]+/).map(a => a.trim()).filter(Boolean).forEach(alt => {
-              for (const [pNorm, prevEmp] of prevMap.entries()) {
+              for (const prevEmp of prevMap.values()) {
                 if (this.isNameMatch(alt, prevEmp.name)) {
                   prevEmp.isActive = true;
                 }
@@ -440,10 +440,9 @@ class PreviousEmployeesEngine {
         const nonHolders = ['on shelf', 'in testing', 'packed for testing', 'packed for delivery', 'failed rubber', 'lost', 'destroyed', 'unassigned'];
         if (nonHolders.includes(holderLower)) return;
 
-        const itemLoc = String(item['Location'] || '').toLowerCase();
         const itemStat = String(item['Status'] || '').toLowerCase();
 
-        for (const [norm, prevEmp] of prevMap.entries()) {
+        for (const prevEmp of prevMap.values()) {
           if (prevEmp.isActive) continue;
           if (this.isNameMatch(assignedTo, prevEmp.name)) {
             const itemNum = String(item['Item #'] || item['Glove'] || item['Sleeve'] || item['Serial #'] || Object.values(item)[0] || '').trim();
@@ -476,7 +475,7 @@ class PreviousEmployeesEngine {
       certsTable.rows.forEach(c => {
         const cEmp = String(c['Employee Name'] || c['Employee'] || c['Name'] || Object.values(c)[0] || '').trim();
         if (!cEmp) return;
-        for (const [norm, prevEmp] of prevMap.entries()) {
+        for (const prevEmp of prevMap.values()) {
           if (prevEmp.isActive) continue;
           if (this.isNameMatch(cEmp, prevEmp.name)) {
             if (!prevEmp.certRecords) prevEmp.certRecords = [];
@@ -925,7 +924,7 @@ class PreviousEmployeesEngine {
     }
   }
 
-  onRehireJobChange(jobNum) {
+  onRehireJobChange() {
     const jobSelect = document.getElementById('rehire-job-num');
     const locSelect = document.getElementById('rehire-location');
     if (!jobSelect || !locSelect) return;

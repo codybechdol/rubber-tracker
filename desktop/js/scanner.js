@@ -172,7 +172,7 @@ class CameraScannerEngine {
               this.handleScannedCode(rawVal);
             }
           }
-        } catch (e) {
+        } catch {
           // Fallback or frame error
         }
       }
@@ -266,7 +266,9 @@ class CameraScannerEngine {
       gain.connect(audioCtx.destination);
       osc.start();
       osc.stop(audioCtx.currentTime + 0.12);
-    } catch (e) {}
+    } catch {
+      // AudioContext playback failed or not allowed
+    }
   }
 
   /**

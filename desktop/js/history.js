@@ -566,7 +566,7 @@ class HistoryNavigator {
     });
     html += `<th style="width: 50px; text-align: center;">Actions</th></tr></thead><tbody>`;
 
-    rows.forEach((row, idx) => {
+    rows.forEach((row) => {
       html += `<tr>`;
       headers.forEach(h => {
         const val = row[h] !== undefined && row[h] !== null ? row[h] : '';

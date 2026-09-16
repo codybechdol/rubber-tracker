@@ -4,7 +4,7 @@ import { defineConfig } from "eslint/config";
 
 export default defineConfig([
 	{
-		ignores: ["Old Versions/**", "node_modules/**", "*.config.js"],
+		ignores: ["Old Versions/**", "node_modules/**", "*.config.js", "scratch/**"],
 	},
 	{
 		files: ["**/*.{js,mjs,cjs,gs}"],
@@ -23,13 +23,29 @@ export default defineConfig([
 				HtmlService: "readonly",
 				LockService: "readonly",
 				ContentService: "readonly",
-				// Add more as needed
+				// Desktop Application Vendor & Cross-Script globals
+				XLSX: "readonly",
+				EmployeeNameResolver: "readonly",
+				EmployeeProfileEngine: "readonly",
+				DrugTestingEngine: "readonly",
+				CertsImportEngine: "readonly",
+				CertsConfigEngine: "readonly",
+				CprRosterEngine: "readonly",
+				SafetyEmailsEngine: "readonly",
+				ProcurementEngine: "readonly",
+				InventoryAgingEngine: "readonly",
+				CameraScannerEngine: "readonly",
+				GpsEngine: "readonly",
+				TimeBreakdownEngine: "readonly",
 			},
 		},
 	},
 	{
 		files: ["**/*.js"],
 		languageOptions: { sourceType: "script" },
+		rules: {
+			"no-redeclare": ["error", { builtinGlobals: false }],
+		},
 	},
 	{
 		files: ["*.config.js"],

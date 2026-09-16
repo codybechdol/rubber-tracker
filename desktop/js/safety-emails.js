@@ -391,7 +391,7 @@ class SafetyEmailsEngine {
           </tr>
         </thead>
         <tbody>
-          ${logs.map((log, index) => {
+          ${logs.map((log) => {
             const typeClass = log.type === 'JHA' ? 'jha' : (log.type === 'Weekly Safety Meeting' ? 'weekly' : (log.type === 'Monthly Checklist' ? 'monthly' : 'equipment'));
             const typeLabel = log.type === 'JHA' ? '📋 JHA' : (log.type === 'Weekly Safety Meeting' ? '🗣️ Meeting' : (log.type === 'Monthly Checklist' ? '🚛 Checklist' : '⚠️ Issue'));
             const statusColor = log.status === 'Credited' ? '#34d399' : (log.status === 'Unknown Job' ? '#f59e0b' : '#94a3b8');
@@ -408,18 +408,16 @@ class SafetyEmailsEngine {
                 <td><span style="font-family: monospace; color: #cbd5e1;">${this.escapeHtml(log.creditedTo || '—')}</span></td>
                 <td>
                   <span style="color: ${statusColor}; font-weight: 700; font-size: 11px;">
-                    ${this.escapeHtml(log.status || 'Logged')}
+                    ${this.escapeHtml(log.status || 'Pending')}
                   </span>
                 </td>
                 <td style="text-align: center;">
-                  <div style="display: inline-flex; align-items: center; gap: 6px;">
-                    <button class="btn-pdf-link" onclick="window.safetyComplianceEngine.openPdfViewer('${this.escapeHtml(log.id || (log.sheetName + '_' + log.rowIndex))}')" title="Preview original attached PDF document directly in the app">
-                      📄 View PDF
-                    </button>
-                    <button class="btn-edit-log-row" onclick="window.safetyComplianceEngine.openEditLogModal('${this.escapeHtml(log.id || (log.sheetName + '_' + log.rowIndex))}')" title="Edit log info (fix typos)">
-                      ✏️ Edit
-                    </button>
-                  </div>
+                  <button class="btn btn-secondary" style="font-size: 10.5px; padding: 3px 7px; margin-right: 4px;" onclick="window.safetyEmailsEngine.openEditLogModal('${log.type}', '${this.escapeHtml(log.rowId || '')}')">
+                    ✏️ Edit
+                  </button>
+                  <button class="btn btn-secondary" style="font-size: 10.5px; padding: 3px 7px; color: #f87171;" onclick="window.safetyEmailsEngine.deleteLogEntry('${log.type}', '${this.escapeHtml(log.rowId || '')}')">
+                    🗑️
+                  </button>
                 </td>
               </tr>
             `;
@@ -442,7 +440,6 @@ class SafetyEmailsEngine {
     if (titleEl) titleEl.textContent = 'Process Safety Emails (Gmail Scanner)';
     if (iconEl) iconEl.textContent = '📬';
 
-    const complianceTable = this.db.getTable('safety_compliance');
     const jhaTable = this.db.getTable('jha_log');
     const weeklyTable = this.db.getTable('weekly_safety_log');
     const monthlyTable = this.db.getTable('monthly_checklist_log');

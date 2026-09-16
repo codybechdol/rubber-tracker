@@ -129,9 +129,8 @@ class ProcurementEngine {
       else if (s.type === 'Blankets') currentClass = 'Class 4';
       else if (s.type === 'MACKs') currentClass = 'Class 4';
 
-      rawRows.forEach((row, rowIdx) => {
+      rawRows.forEach((row) => {
         let emp = '';
-        let itemNum = '';
         let size = '—';
         let pickItem = '';
         let status = '';
@@ -151,7 +150,6 @@ class ProcurementEngine {
           }
 
           emp = firstCell;
-          itemNum = String(row[1] || '').trim();
           size = String(row[2] || '—').trim();
           const daysVal = parseInt(row[5], 10);
           if (!isNaN(daysVal)) daysLeft = daysVal;
@@ -159,7 +157,6 @@ class ProcurementEngine {
           status = String(row[7] || '').trim();
         } else if (typeof row === 'object' && row !== null) {
           emp = String(row['Employee'] || row['Employee Name'] || row['Assigned To'] || '').trim();
-          itemNum = String(row['Current Item #'] || row['Item #'] || '').trim();
           size = String(row['Size'] || '—').trim();
           const daysVal = parseInt(row['Days Left'] || row['Days Remaining'], 10);
           if (!isNaN(daysVal)) daysLeft = daysVal;

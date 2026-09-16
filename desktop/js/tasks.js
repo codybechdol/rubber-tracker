@@ -238,7 +238,7 @@ class TaskManagerApp {
             truckNumber = `Unit ${unitM[1]}`;
           }
           if (!truckNumber) {
-            const subjM = textForTruck.match(/\b([0-9]{3,5})[\­\-\s]+[0-9]{3}[\­\-\s]+[0-9]{2}\b/);
+            const subjM = textForTruck.match(/\b([0-9]{3,5})[-\s\u00ad]+[0-9]{3}[-\s\u00ad]+[0-9]{2}\b/);
             if (subjM && subjM[1]) {
               truckNumber = `Unit ${subjM[1]}`;
             }
@@ -698,14 +698,14 @@ class TaskManagerApp {
     let weekDateStr = '';
     let targetWeekDate = null;
     if (task.id) {
-      const m = task.id.match(/SafetyCompliance_[0-9]{3}-[0-9]{2}_([0-9]{1,2}[-\/][0-9]{1,2}[-\/][0-9]{2,4})/i);
+      const m = task.id.match(/SafetyCompliance_[0-9]{3}-[0-9]{2}_([0-9]{1,2}[/-][0-9]{1,2}[/-][0-9]{2,4})/i);
       if (m) {
         weekDateStr = m[1].replace(/-/g, '/');
         targetWeekDate = this.parseDate(weekDateStr);
       }
     }
     if (!targetWeekDate && task.notes) {
-      const m = String(task.notes).match(/week of (\d{1,2}[-\/]\d{1,2}[-\/]\d{2,4})/i);
+      const m = String(task.notes).match(/week of (\d{1,2}[/-]\d{1,2}[/-]\d{2,4})/i);
       if (m) {
         weekDateStr = m[1].replace(/-/g, '/');
         targetWeekDate = this.parseDate(weekDateStr);

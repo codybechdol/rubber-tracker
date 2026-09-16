@@ -22,7 +22,7 @@ class SheetNavigator {
     try {
       const stored = localStorage.getItem('sa_gloves_sleeves_visuals_expanded');
       if (stored !== null) savedVisualsExp = (stored !== 'false');
-    } catch (e) {}
+    } catch { /* ignore */ }
     this.isVisualsExpanded = savedVisualsExp;
     this.sheetList = [
       { key: 'employees', label: '👥 Employees', icon: '👤', isSwap: false },
@@ -171,7 +171,7 @@ class SheetNavigator {
     this.isVisualsExpanded = !this.isVisualsExpanded;
     try {
       localStorage.setItem('sa_gloves_sleeves_visuals_expanded', this.isVisualsExpanded);
-    } catch (e) {}
+    } catch { /* ignore */ }
     this.renderInventoryVisuals();
     this.updateVisualsToggleButton();
   }
@@ -697,16 +697,16 @@ class SheetNavigator {
       }
 
       if (!silent) {
-        if (typeof showToast === 'function') {
-          showToast(`🧹 Removed ${removedCount} duplicate certification records!`, 'success');
+        if (typeof window.showToast === 'function') {
+          window.showToast(`🧹 Removed ${removedCount} duplicate certification records!`, 'success');
         } else {
           alert(`🧹 Cleaned up ${removedCount} duplicate certification records!`);
         }
         this.renderExpiringCerts();
       }
     } else if (!silent) {
-      if (typeof showToast === 'function') {
-        showToast('All certification records are unique. No duplicates found.', 'info');
+      if (typeof window.showToast === 'function') {
+        window.showToast('All certification records are unique. No duplicates found.', 'info');
       } else {
         alert('All certification records are unique. No duplicates found.');
       }
@@ -1427,7 +1427,7 @@ class SheetNavigator {
 
       // 2. Level 2: Location Header (Clear & Distinct, Subordinate to Main Class Header)
       if (isCityHeader) {
-        let cleanCity = firstCell.replace(/^[📍🔍\s]+/, '').trim();
+        let cleanCity = firstCell.replace(/^[📍🔍\s]+/u, '').trim();
         html += `<td colspan="${colSpan}" style="font-size: 12.5px; font-weight: 700; color: #c7d2fe; background: linear-gradient(90deg, rgba(99, 102, 241, 0.16) 0%, rgba(15, 23, 42, 0.6) 100%); padding: 7px 14px; text-align: left; border-left: 4px solid #6366f1; border-top: 1px solid rgba(99, 102, 241, 0.2); border-bottom: 1px solid rgba(99, 102, 241, 0.2);">
           <span style="font-size: 13px; margin-right: 6px;">📍</span>
           <span style="letter-spacing: 0.3px;">${this.escapeHtml(cleanCity || firstCell)}</span>
@@ -1437,7 +1437,7 @@ class SheetNavigator {
 
       // 3. Level 3: Foreman / Crew Lead Header (Subtle & Indented, Subordinate to Location)
       if (isForemanHeader) {
-        let cleanForeman = firstCell.replace(/^[👤👷\s]+/, '').trim();
+        let cleanForeman = firstCell.replace(/^[👤👷\s]+/u, '').trim();
         html += `<td colspan="${colSpan}" style="font-size: 11.5px; font-weight: 600; color: #f472b6; background-color: rgba(255, 255, 255, 0.02); padding: 5px 12px 5px 32px; text-align: left; border-left: 2px solid rgba(244, 114, 182, 0.4); border-bottom: 1px solid rgba(255, 255, 255, 0.04);">
           <span style="font-size: 12px; margin-right: 5px; opacity: 0.9;">👤</span>
           <span style="color: var(--text-secondary); font-size: 11px; margin-right: 4px;">Foreman:</span>
@@ -1448,7 +1448,7 @@ class SheetNavigator {
 
       // 4. Subheader (Table column names)
       if (isSubHeader) {
-        visibleColIndices.forEach((c, idx) => {
+        visibleColIndices.forEach((c) => {
           let val = rowArr[c] !== undefined ? String(rowArr[c]).trim() : '';
           html += `<td style="font-weight: 700; color: #93c5fd; background-color: #1e293b; font-size: 12px; text-align: center; border-bottom: 1px solid var(--border-color);">${this.escapeHtml(val)}</td>`;
         });
@@ -2719,8 +2719,6 @@ class SheetNavigator {
         `;
       }
 
-      const isEquipmentSheet = ['gloves', 'sleeves', 'blankets', 'macks', 'hv_testers', 'phasing_sets', 'aed', 'grounds', 'hot_sticks'].includes(this.currentSheetKey);
-
       html += `<tr>`;
 
       headers.forEach((h, colIdx) => {
@@ -2963,7 +2961,7 @@ class SheetNavigator {
       const isEmpDepartureCol = this.currentSheetKey === 'employees' && (header === 'location' || header === 'last day reason');
       const hasAutocomplete = isAssignedCol || isEmpDepartureCol;
 
-      td.addEventListener('focus', (e) => {
+      td.addEventListener('focus', () => {
         const targetCell = td;
         const cellTextSpan = targetCell.querySelector('.cell-text');
         if (cellTextSpan) {
@@ -2978,7 +2976,7 @@ class SheetNavigator {
       });
 
       if (hasAutocomplete) {
-        td.addEventListener('input', (e) => {
+        td.addEventListener('input', () => {
           const cellTextSpan = td.querySelector('.cell-text');
           const currentText = (cellTextSpan ? cellTextSpan.textContent : td.textContent).trim().replace(/^👤\s*/, '').trim();
           this.showCellAutocomplete(td, currentText);
@@ -2986,7 +2984,7 @@ class SheetNavigator {
       }
 
       // Quick calendar picker on double-click for date cells
-      td.addEventListener('dblclick', (e) => {
+      td.addEventListener('dblclick', () => {
         if (header.includes('date') || header.includes('expiration') || header.includes('calibration')) {
           const targetCell = td;
           const currentText = targetCell.textContent.trim();
@@ -3020,7 +3018,7 @@ class SheetNavigator {
             picker.remove();
           });
           if (typeof picker.showPicker === 'function') {
-            try { picker.showPicker(); } catch (_) { picker.click(); }
+            try { picker.showPicker(); } catch { picker.click(); }
           }
         }
       });
@@ -3059,7 +3057,7 @@ class SheetNavigator {
         }
       });
 
-      td.addEventListener('blur', async (e) => {
+      td.addEventListener('blur', async () => {
         setTimeout(() => this.closeCellAutocomplete(), 200);
 
         try {
@@ -3361,6 +3359,8 @@ class SheetNavigator {
 
             // When Assigned To is changed to an employee, prompt for Date Assigned and update atomically
             if (isAssignedCol && isAssignedToEmp) {
+              const today = new Date();
+              const todayFormatted = `${String(today.getMonth() + 1).padStart(2, '0')}/${String(today.getDate()).padStart(2, '0')}/${today.getFullYear()}`;
               const empTable = this.db.getTable('employees');
               let empLoc = (assignedResolved && assignedResolved.location) ? assignedResolved.location : 'Helena';
               if (empTable && empTable.rows && (!assignedResolved || empLoc === 'Helena')) {
@@ -3489,13 +3489,13 @@ class SheetNavigator {
               let calculatedChgOut = '';
               if (window.inventoryManager && typeof window.inventoryManager.calculateChangeOutDate === 'function') {
                 calculatedChgOut = window.inventoryManager.calculateChangeOutDate(
-                  curDateAssigned || curTestDate,
+                  dateAssignedVal || testDateVal,
                   curLoc,
                   curAssignedTo,
                   this.currentSheetKey,
                   {
-                    testDate: curTestDate,
-                    calibrationDate: curTestDate
+                    testDate: testDateVal,
+                    calibrationDate: testDateVal
                   }
                 );
               }
@@ -4160,7 +4160,7 @@ class SheetNavigator {
    * Prompts for Last Working Day, Reason, Notes, and reviews unreturned equipment.
    */
   openEmployeeDepartureModal(empOrRow, targetCell = null, initialVal = '', triggeredReason = '') {
-    return new Promise(async (resolve) => {
+    return new Promise((resolve) => {
       const empTable = this.db.getTable('employees');
       if (!empTable) return resolve(null);
 
@@ -4261,8 +4261,13 @@ class SheetNavigator {
           if (targetCell && initialVal !== undefined) targetCell.textContent = initialVal;
           return resolve(null);
         }
-        await this._commitEmployeeDeparture(tableRow, actualRowIdx, empName, lastDayInput.trim(), reasonInput.trim(), '', targetCell, initialVal);
-        return resolve({ confirmed: true, lastDay: lastDayInput.trim(), reason: reasonInput.trim() });
+        this._commitEmployeeDeparture(tableRow, actualRowIdx, empName, lastDayInput.trim(), reasonInput.trim(), '', initialVal)
+          .then(() => resolve({ confirmed: true, lastDay: lastDayInput.trim(), reason: reasonInput.trim() }))
+          .catch((err) => {
+            console.error('Error archiving employee fallback:', err);
+            resolve(null);
+          });
+        return;
       }
 
       // Populate Modal Fields
@@ -4435,7 +4440,6 @@ class SheetNavigator {
             dVal,
             reasonVal,
             notesVal,
-            targetCell,
             priorLocation
           );
           cleanup();
@@ -4470,7 +4474,7 @@ class SheetNavigator {
     });
   }
 
-  async _commitEmployeeDeparture(tableRow, actualRowIdx, empName, lastDay, reason, notes, targetCell = null, priorLocation = 'Helena') {
+  async _commitEmployeeDeparture(tableRow, actualRowIdx, empName, lastDay, reason, notes, priorLocation = 'Helena') {
     const empTable = this.db.getTable('employees');
     const histTable = this.db.getTable('employee_history');
     const priorJob = tableRow['Job Number'] || tableRow['Job #'] || 'N/A';
@@ -4772,7 +4776,6 @@ class SheetNavigator {
     }
 
     const today = new Date().toISOString().split('T')[0];
-    const todayFormatted = new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
     const currentStatus = String(row['Status'] || 'Active').trim();
     const loc = row['Location'] || '';
     const foreman = row['Foreman'] || '';
@@ -4957,7 +4960,6 @@ class SheetNavigator {
 
     // Sync raw grid
     if (jtTable.rawGrid && jtTable.headers) {
-      const idKey = jtTable.headers[0];
       const gridIdx = jtTable.rawGrid.findIndex((gr, idx) => {
         if (idx === 0) return false;
         return String(gr[0] || '').trim() === String(jobNum).trim();

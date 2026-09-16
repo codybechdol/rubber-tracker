@@ -87,13 +87,9 @@ class TimeBreakdownEngine {
    * Collects all completed tasks, trips, and trainings in the date range.
    */
   collectAccomplishments() {
-    const startKey = this.formatDateKey(this.startDate);
-    const endKey = this.formatDateKey(this.endDate);
-
     const tasksTable = this.db.getTable('tasks');
     const trips = this.db.getPlannedTrips() || {};
     const trainTable = this.db.getTable('training_tracking');
-    const empTable = this.db.getTable('employees');
 
     // Town drive time lookup
     const townTimes = (window.tripPlanner && window.tripPlanner.masterLocations) ? window.tripPlanner.masterLocations : {};

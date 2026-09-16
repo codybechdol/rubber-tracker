@@ -306,7 +306,7 @@ class EmployeeProfileEngine {
       });
 
       // Process each item chronologically
-      itemMap.forEach((rows, itemKey) => {
+      itemMap.forEach((rows) => {
         // Sort oldest to newest
         const sorted = [...rows].sort((a, b) => {
           const dateA = this.parseDate(a['Date Assigned'] || a['Date'] || Object.values(a)[0]);

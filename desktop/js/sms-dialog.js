@@ -434,7 +434,7 @@ class SMSDialogEngine {
       navigator.clipboard.writeText(fullPayload).then(() => {
         alert('📋 Message & phone copied to clipboard!\n\nYou can now paste it directly into your messaging app.');
         this.recordSmsNotification();
-      }).catch(err => {
+      }).catch(() => {
         alert('Could not copy automatically. Please copy the text from the preview box.');
       });
     }

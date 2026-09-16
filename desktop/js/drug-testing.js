@@ -542,7 +542,6 @@ class DrugTestingEngine {
               const type = String(r['Collection Type'] || (hasNewCols ? r[7] : r[5]) || 'Clinic Visit');
               const isMobile = type.toLowerCase().includes('mobile');
               const clinicName = String(r['Clinic Name'] || (hasNewCols ? r[8] : r[6]) || '');
-              const apptReq = String(r['Appt Required'] || (hasNewCols ? r[10] : r[8]) || 'No');
               const schedDate = String(r['Scheduled Date'] || (hasNewCols ? r[11] : r[9]) || '');
               const schedTime = String(r['Scheduled Time'] || (hasNewCols ? r[12] : r[10]) || '');
               const meetingAddr = String(r['Meeting / Collection Address'] || (hasNewCols ? r[13] : r[11]) || '');
@@ -1356,7 +1355,7 @@ class DrugTestingEngine {
       else if (lineLower.includes('fmcsa')) classification = 'FMCSA';
 
       // Clean up punctuation or leading numbers
-      const cleanName = line.split('\t')[0].replace(/^\d+[\.\-\)]\s*/, '').trim();
+      const cleanName = line.split('\t')[0].replace(/^\d+[.)-]\s*/, '').trim();
       if (!cleanName) return;
 
       // Find match
@@ -1772,3 +1771,5 @@ class DrugTestingEngine {
     return d.toISOString().split('T')[0];
   }
 }
+
+window.DrugTestingEngine = DrugTestingEngine;

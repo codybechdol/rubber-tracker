@@ -633,7 +633,7 @@ class CertsImportEngine {
     if (str.toLowerCase().includes('need copy')) return 'Need Copy';
 
     // Handle MM/DD/YYYY, MM/DD/YY, MM.DD.YYYY, MM-DD-YYYY
-    const slashMatch = str.match(/^(\d{1,2})[\/\.-](\d{1,2})[\/\.-](\d{2,4})$/);
+    const slashMatch = str.match(/^(\d{1,2})[/.-](\d{1,2})[/.-](\d{2,4})$/);
     if (slashMatch) {
       let m = parseInt(slashMatch[1], 10);
       let d = parseInt(slashMatch[2], 10);

@@ -64,12 +64,65 @@ class TripPlannerApp {
     this.swapsCollapsed = localStorage.getItem('sa_trip_swaps_collapsed') === 'true';
     this.swapsFilter = 'all'; // 'all', 'gloves', 'sleeves'
     this.swapsSearchTerm = '';
+    this.dismissedMonthlyTrainings = this.loadDismissedMonthlyTrainings();
+  }
+
+  loadDismissedMonthlyTrainings() {
+    try {
+      return JSON.parse(localStorage.getItem('TRIP_PLANNER_DISMISSED_TRAININGS') || '{}');
+    } catch {
+      return {};
+    }
+  }
+
+  saveDismissedMonthlyTrainings() {
+    try {
+      localStorage.setItem('TRIP_PLANNER_DISMISSED_TRAININGS', JSON.stringify(this.dismissedMonthlyTrainings || {}));
+    } catch { /* ignore */ }
+  }
+
+  getDismissedMonthlyTrainingKey(crewId, topic, month) {
+    const sig = this.getSignificantJobNumber(crewId).toLowerCase() || String(crewId || '').trim().toLowerCase();
+    const t = String(topic || '').trim().toLowerCase();
+    const m = String(month || '').trim().toLowerCase();
+    return `${sig}_${t}_${m}`;
+  }
+
+  isMonthlyTrainingDismissed(dateKey, crewId, topic, month) {
+    if (!this.dismissedMonthlyTrainings || !this.dismissedMonthlyTrainings[dateKey]) return false;
+    const key = this.getDismissedMonthlyTrainingKey(crewId, topic, month);
+    return this.dismissedMonthlyTrainings[dateKey].includes(key);
+  }
+
+  hasDismissedMonthlyTrainings(dateKey) {
+    return !!(this.dismissedMonthlyTrainings && this.dismissedMonthlyTrainings[dateKey] && this.dismissedMonthlyTrainings[dateKey].length > 0);
+  }
+
+  dismissMonthlyTraining(crewId, topic, month, dateKey) {
+    if (!this.dismissedMonthlyTrainings) this.dismissedMonthlyTrainings = {};
+    if (!this.dismissedMonthlyTrainings[dateKey]) this.dismissedMonthlyTrainings[dateKey] = [];
+    const key = this.getDismissedMonthlyTrainingKey(crewId, topic, month);
+    if (!this.dismissedMonthlyTrainings[dateKey].includes(key)) {
+      this.dismissedMonthlyTrainings[dateKey].push(key);
+      this.saveDismissedMonthlyTrainings();
+    }
+    this.showToast(`Removed Monthly Training for Crew ${crewId} from this visit.`);
+    this.renderPlanner();
+  }
+
+  restoreDismissedMonthlyTrainings(dateKey) {
+    if (this.dismissedMonthlyTrainings && this.dismissedMonthlyTrainings[dateKey]) {
+      delete this.dismissedMonthlyTrainings[dateKey];
+      this.saveDismissedMonthlyTrainings();
+      this.showToast(`Restored Monthly Trainings for ${dateKey}.`);
+      this.renderPlanner();
+    }
   }
 
   loadCollapsedSections() {
     try {
       return JSON.parse(localStorage.getItem('TRIP_PLANNER_COLLAPSED_SECTIONS') || '{}');
-    } catch (e) {
+    } catch {
       return {};
     }
   }
@@ -77,7 +130,7 @@ class TripPlannerApp {
   saveCollapsedSections() {
     try {
       localStorage.setItem('TRIP_PLANNER_COLLAPSED_SECTIONS', JSON.stringify(this.collapsedSections || {}));
-    } catch (e) {}
+    } catch { /* ignore */ }
   }
 
   isSectionCollapsed(dateKey, sectionKey) {
@@ -114,7 +167,7 @@ class TripPlannerApp {
       if (savedWeeks && [1, 2, 4, 6, 8, 12].includes(savedWeeks)) {
         this.weeksToShow = savedWeeks;
       }
-    } catch (_) {}
+    } catch { /* ignore */ }
 
     this.loadSavedTrips();
     this.setupSearchListeners();
@@ -157,7 +210,7 @@ class TripPlannerApp {
     this.citiesCollapsed = !this.citiesCollapsed;
     try {
       localStorage.setItem('sa_trip_cities_collapsed', String(this.citiesCollapsed));
-    } catch (_) {}
+    } catch { /* ignore */ }
     this.updateSidebarsCollapseUI();
   }
 
@@ -165,7 +218,7 @@ class TripPlannerApp {
     this.swapsCollapsed = !this.swapsCollapsed;
     try {
       localStorage.setItem('sa_trip_swaps_collapsed', String(this.swapsCollapsed));
-    } catch (_) {}
+    } catch { /* ignore */ }
     this.updateSidebarsCollapseUI();
   }
 
@@ -220,7 +273,7 @@ class TripPlannerApp {
         const snap = this.db.getSnapshot();
         this.activeSchedule = (snap && snap.configs && snap.configs.workSchedule) || 'Mon-Thu';
       }
-    } catch (e) {
+    } catch {
       this.activeSchedule = 'Mon-Thu';
     }
   }
@@ -258,14 +311,14 @@ class TripPlannerApp {
           return parsed;
         }
       }
-    } catch (e) {}
+    } catch { /* ignore */ }
 
     // Default US / Company holidays (auto-seeded when missing or cleared)
     const defaults = this.getDefaultHolidays();
     try {
       localStorage.setItem('sa_holidays', JSON.stringify(defaults));
       this.saveHolidays(defaults);
-    } catch (_) {}
+    } catch { /* ignore */ }
     return defaults;
   }
 
@@ -299,7 +352,7 @@ class TripPlannerApp {
           holidays: cleanArray
         });
       }
-    } catch (e) {}
+    } catch { /* ignore */ }
   }
 
   restoreDefaultHolidays() {
@@ -350,7 +403,7 @@ class TripPlannerApp {
         action: 'SET_TRIP_SCHEDULE',
         schedule: this.activeSchedule
       });
-    } catch (e) {}
+    } catch { /* ignore */ }
     this.renderPlanner();
   }
 
@@ -378,7 +431,7 @@ class TripPlannerApp {
       }
       if (t.time) {
         // Auto-fix start AM typo if end is PM and start hour is 1..6 (e.g. "2:00 am / 4:30 pm" -> "2:00 pm / 4:30 pm")
-        const typoFix = t.time.replace(/^([0-9]{1,2}(?::[0-9]{2})?)\s*am(\s*[\/\-–—]\s*[0-9]{1,2}(?::[0-9]{2})?\s*pm)/i, (match, p1, p2) => {
+        const typoFix = t.time.replace(/^([0-9]{1,2}(?::[0-9]{2})?)\s*am(\s*[/\-–—]\s*[0-9]{1,2}(?::[0-9]{2})?\s*pm)/i, (match, p1, p2) => {
           const h = parseInt(p1.split(':')[0], 10);
           if (h >= 1 && h <= 6) {
             return `${p1} pm${p2}`;
@@ -416,7 +469,7 @@ class TripPlannerApp {
     if (clean === 'afternoon') return 13 * 60;
     if (clean === 'evening') return 17 * 60;
 
-    const rangeMatch = clean.match(/^([0-9]{1,2}(?::[0-9]{2})?\s*(?:am|pm|a|p)?)\s*(?:[\/\-–—]|to)\s*([0-9]{1,2}(?::[0-9]{2})?\s*(?:am|pm|a|p)?)/i);
+    const rangeMatch = clean.match(/^([0-9]{1,2}(?::[0-9]{2})?\s*(?:am|pm|a|p)?)\s*(?:[/\-–—]|to)\s*([0-9]{1,2}(?::[0-9]{2})?\s*(?:am|pm|a|p)?)/i);
     let startPart = clean;
     let endPart = null;
 
@@ -646,7 +699,7 @@ class TripPlannerApp {
             });
           }
         }
-      } catch (e) {}
+      } catch { /* ignore */ }
     }
 
     // 2. Fallback canonical list strictly matching Certification Requirements & Job Role Matrix
@@ -709,18 +762,23 @@ class TripPlannerApp {
   }
 
   escapeHtml(str) {
-    if (!str) return '';
+    if (str === null || str === undefined) return '';
     return String(str)
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
+      .replace(/'/g, '&#039;');
   }
 
   escapeJs(str) {
-    if (!str) return '';
-    return String(str).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/"/g, '\\"');
+    if (str === null || str === undefined) return '';
+    return String(str)
+      .replace(/\\/g, '\\\\')
+      .replace(/'/g, "\\'")
+      .replace(/"/g, '\\"')
+      .replace(/\n/g, '\\n')
+      .replace(/\r/g, '\\r');
   }
 
   setupManualTaskAutocomplete() {
@@ -1951,7 +2009,7 @@ class TripPlannerApp {
       }
 
       const labels = targetCertDefs.map(c => c.label).join(' & ');
-      this.showToast(`🎓 Class Completed! Updated ${labels} cert dates for ${attendeeNames.length} attendee(s) on Expiring Certs.`);
+      this.showToast(`🎓 Class Completed! Updated ${labels} cert dates (${updatedCount} record(s)) for ${attendeeNames.length} attendee(s) on Expiring Certs.`);
     } catch (err) {
       console.error('Error syncing class completion to Expiring Certs:', err);
       this.showToast('Class marked Complete, but error updating Expiring Certs: ' + (err.message || err), true);
@@ -2602,11 +2660,6 @@ class TripPlannerApp {
     modal.classList.add('active');
   }
 
-  closeManualTaskModal() {
-    const modal = document.getElementById('manual-task-modal');
-    if (modal) modal.classList.remove('active');
-  }
-
   saveManualTaskFromModal() {
     const editIdInput = document.getElementById('manual-task-edit-id');
     const activeCategoryInput = document.getElementById('manual-task-active-category');
@@ -2628,7 +2681,7 @@ class TripPlannerApp {
       const location = certLocInput ? certLocInput.value.trim() : 'Helena HQ';
       let time = certTimeInput ? certTimeInput.value.trim() : '';
       if (time) {
-        time = time.replace(/^([0-9]{1,2}(?::[0-9]{2})?)\s*am(\s*[\/\-–—]\s*[0-9]{1,2}(?::[0-9]{2})?\s*pm)/i, (match, p1, p2) => {
+        time = time.replace(/^([0-9]{1,2}(?::[0-9]{2})?)\s*am(\s*[/\-–—]\s*[0-9]{1,2}(?::[0-9]{2})?\s*pm)/i, (match, p1, p2) => {
           const h = parseInt(p1.split(':')[0], 10);
           if (h >= 1 && h <= 6) {
             return `${p1} pm${p2}`;
@@ -2711,7 +2764,7 @@ class TripPlannerApp {
       const priority = pPrioInput ? pPrioInput.value : 'Normal';
       let time = pTimeInput ? pTimeInput.value.trim() : '';
       if (time) {
-        time = time.replace(/^([0-9]{1,2}(?::[0-9]{2})?)\s*am(\s*[\/\-–—]\s*[0-9]{1,2}(?::[0-9]{2})?\s*pm)/i, (match, p1, p2) => {
+        time = time.replace(/^([0-9]{1,2}(?::[0-9]{2})?)\s*am(\s*[/\-–—]\s*[0-9]{1,2}(?::[0-9]{2})?\s*pm)/i, (match, p1, p2) => {
           const h = parseInt(p1.split(':')[0], 10);
           if (h >= 1 && h <= 6) {
             return `${p1} pm${p2}`;
@@ -2760,40 +2813,61 @@ class TripPlannerApp {
     return [];
   }
 
-  setTrip(dateKey, location) {
-    if (!dateKey || !location) return;
-
+  addTrip(dateKey, location) {
+    if (!location) return;
     if (this.isDayHoliday(dateKey)) {
       const hName = this.getHolidayName(dateKey);
       alert(`🏖️ ${dateKey} is marked as a holiday (${hName}). Field crew visits cannot be scheduled on holiday days.`);
       return;
     }
+    const currentList = [...this.getTripsForDate(dateKey)];
+    // Prevent duplicate of same city on the exact same day
+    if (!currentList.some(t => t.location.toLowerCase() === location.toLowerCase())) {
+      currentList.push({ location, crew: '' });
+    }
+    this.plannedTrips[dateKey] = currentList;
+    this.saveTrips();
 
-    if (!this.plannedTrips[dateKey]) {
-      this.plannedTrips[dateKey] = [];
-    } else if (!Array.isArray(this.plannedTrips[dateKey])) {
-      this.plannedTrips[dateKey] = [this.plannedTrips[dateKey]];
+    // Record mutation for sync
+    if (this.db && typeof this.db.addMutation === 'function') {
+      this.db.addMutation({
+        action: 'SET_TRIP_SCHEDULE',
+        date: dateKey,
+        location: location,
+        trips: this.plannedTrips
+      });
     }
 
-    const exists = this.plannedTrips[dateKey].some(t => t && t.location === location);
-    if (!exists) {
-      this.plannedTrips[dateKey].push({ location: location });
-      this.saveTrips();
-      this.renderPlanner();
-    }
+    this.renderPlanner();
   }
 
-  removeTrip(dateKey, location) {
-    if (!this.plannedTrips[dateKey]) return;
-    if (Array.isArray(this.plannedTrips[dateKey])) {
-      this.plannedTrips[dateKey] = this.plannedTrips[dateKey].filter(t => t && t.location !== location);
-      if (this.plannedTrips[dateKey].length === 0) {
-        delete this.plannedTrips[dateKey];
-      }
-    } else {
+  setTrip(dateKey, location) {
+    this.addTrip(dateKey, location);
+  }
+
+  removeTrip(dateKey, locationToRemove = null) {
+    if (!locationToRemove) {
       delete this.plannedTrips[dateKey];
+    } else {
+      const currentList = this.getTripsForDate(dateKey);
+      const updated = currentList.filter(t => t.location.toLowerCase() !== locationToRemove.toLowerCase());
+      if (updated.length === 0) {
+        delete this.plannedTrips[dateKey];
+      } else {
+        this.plannedTrips[dateKey] = updated;
+      }
     }
     this.saveTrips();
+
+    if (this.db && typeof this.db.addMutation === 'function') {
+      this.db.addMutation({
+        action: 'SET_TRIP_SCHEDULE',
+        date: dateKey,
+        location: locationToRemove || '',
+        trips: this.plannedTrips
+      });
+    }
+
     this.renderPlanner();
   }
 
@@ -2981,7 +3055,7 @@ class TripPlannerApp {
       const [y, m, d] = dKey.split('-').map(Number);
       const dt = new Date(y, m - 1, d, 12, 0, 0);
       return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][dt.getDay()];
-    } catch (_) {
+    } catch {
       return '';
     }
   }
@@ -3095,8 +3169,8 @@ class TripPlannerApp {
     let dKey = '';
     if (/^\d{4}-\d{2}-\d{2}$/.test(rawDate)) {
       dKey = rawDate;
-    } else if (/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/.test(rawDate)) {
-      const match = rawDate.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+    } else if (/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/.test(rawDate)) {
+      const match = rawDate.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/);
       const mm = match[1].padStart(2, '0');
       const dd = match[2].padStart(2, '0');
       const yyyy = match[3];
@@ -3829,6 +3903,11 @@ class TripPlannerApp {
               </tr>
               <tr style="border-bottom: 1px solid #f1f5f9;">
                 <td colspan="2" style="padding: 7px 14px; color: #334155;">
+                  👨‍🏫 <strong>Instructor:</strong> ${this.escapeHtml(instructorStr)}
+                </td>
+              </tr>
+              <tr style="border-bottom: 1px solid #f1f5f9;">
+                <td colspan="2" style="padding: 7px 14px; color: #334155;">
                   🚚 <strong>Assigned:</strong> ${resolved.crews.length > 0 ? resolved.crews.map(c => `<strong>Crew ${this.escapeHtml(c.crewId)}</strong>${c.foreman ? ` (Foreman: <strong>${this.escapeHtml(c.foreman)}</strong>)` : ''}`).join('; ') : '<em>Individual Attendees Only</em>'}
                 </td>
               </tr>
@@ -4235,7 +4314,7 @@ class TripPlannerApp {
     this.weeksToShow = parseInt(weeks, 10) || 8;
     try {
       localStorage.setItem('sa_trip_planner_weeks', this.weeksToShow);
-    } catch (e) {}
+    } catch { /* ignore */ }
     [1, 2, 4, 6, 8, 12].forEach(w => {
       const btn = document.getElementById(`btn-span-${w}w`);
       if (btn) {
@@ -4398,20 +4477,6 @@ class TripPlannerApp {
       }
     }
     this.renderAvailableLocations();
-  }
-
-  clearWeekTrips(startMondayKey) {
-    const monday = startMondayKey ? this.parseDate(startMondayKey) : this.getMondayForDate(this.currentDate);
-    for (let i = 0; i < 5; i++) {
-      const d = new Date(monday);
-      d.setDate(monday.getDate() + i);
-      const yyyy = d.getFullYear();
-      const mm = String(d.getMonth() + 1).padStart(2, '0');
-      const dd = String(d.getDate()).padStart(2, '0');
-      delete this.plannedTrips[`${yyyy}-${mm}-${dd}`];
-    }
-    this.saveTrips();
-    this.renderPlanner();
   }
 
   /**
@@ -4882,7 +4947,10 @@ class TripPlannerApp {
               return topicMatches && crewMatches;
             });
 
-            if (!hasManualMatch) {
+            // Check if dismissed for this specific trip date
+            const isDismissed = this.isMonthlyTrainingDismissed(dateKey, crewRaw, topic, month);
+
+            if (!hasManualMatch && !isDismissed) {
               monthlyTrainings.push({
                 isMonthlyTraining: true,
                 crewId: crewRaw,
@@ -4901,9 +4969,10 @@ class TripPlannerApp {
 
         const totalTrainings = trainingClasses.length + monthlyTrainings.length;
         const pendingTrainingsCount = trainingClasses.filter(m => m.status !== 'Complete').length + monthlyTrainings.filter(m => m.status !== 'Complete').length;
+        const hasDismissedTrainings = this.hasDismissedMonthlyTrainings(dateKey);
 
         let trainingHtml = '';
-        if (totalTrainings > 0) {
+        if (totalTrainings > 0 || hasDismissedTrainings) {
           const isCollapsed = this.isSectionCollapsed(dateKey, 'training');
           trainingHtml = `
             <div class="day-section-collapsible training-day-section" style="margin-bottom: 8px;">
@@ -4913,6 +4982,9 @@ class TripPlannerApp {
                   <span>🎓 Training (${pendingTrainingsCount}/${totalTrainings})</span>
                 </span>
                 <div style="display: flex; gap: 4px; align-items: center;">
+                  ${hasDismissedTrainings ? `
+                    <button class="btn btn-secondary" style="padding: 1px 6px; font-size: 9.5px; color: #94a3b8; border-color: rgba(255, 255, 255, 0.2); background: rgba(255, 255, 255, 0.05); cursor: pointer;" onclick="event.stopPropagation(); window.tripPlanner.restoreDismissedMonthlyTrainings('${dateKey}')" title="Restore removed monthly trainings for this day">↩ Restore (${(this.dismissedMonthlyTrainings[dateKey] || []).length})</button>
+                  ` : ''}
                   <button class="btn btn-secondary" style="padding: 1px 6px; font-size: 9.5px; color: #34d399; border-color: rgba(16, 185, 129, 0.35); background: rgba(16, 185, 129, 0.08); cursor: pointer;" onclick="event.stopPropagation(); window.tripPlanner.openComposeTrainingEmailModalForDate('${dateKey}')" title="Compose email for scheduled training classes on ${day.dayName}">📧 Email</button>
                   <button class="btn btn-secondary" style="padding: 1px 6px; font-size: 9.5px; color: #34d399; border-color: rgba(16, 185, 129, 0.35); background: rgba(16, 185, 129, 0.08); cursor: pointer;" onclick="event.stopPropagation(); window.tripPlanner.openAddManualTaskModal('${dateKey}', '${this.escapeJs(day.dayName)}, ${this.escapeJs(day.formattedDate)}', 'cert_class')" title="Schedule Training Class on ${day.dayName}">+ Class</button>
                 </div>
@@ -5100,7 +5172,7 @@ class TripPlannerApp {
                           </div>
                         </div>
 
-                        <div>
+                        <div style="display: flex; align-items: center; gap: 4px;">
                           ${!isDone ? `
                             <button class="btn btn-primary" style="padding: 2px 7px; font-size: 10px; background: #10b981; border: none; font-weight: 700; cursor: pointer; border-radius: 3px;" onclick="window.tripPlanner.toggleMonthlyTraining('${this.escapeJs(tr.crewId)}', '${this.escapeJs(tr.topic)}', '${this.escapeJs(tr.month)}', '${dateKey}', ${tr._rowIdx || 0})" title="Mark Monthly Training Complete">
                               ✅ Done
@@ -5110,6 +5182,9 @@ class TripPlannerApp {
                               ↩
                             </button>
                           `}
+                          <button style="background: none; border: none; color: #64748b; cursor: pointer; padding: 1px 4px; font-size: 12px; line-height: 1; border-radius: 3px;" onmouseover="this.style.color='#f87171'" onmouseout="this.style.color='#64748b'" onclick="window.tripPlanner.dismissMonthlyTraining('${this.escapeJs(tr.crewId)}', '${this.escapeJs(tr.topic)}', '${this.escapeJs(tr.month)}', '${dateKey}')" title="Dismiss / Remove from this day's visit">
+                            ✕
+                          </button>
                         </div>
                       </div>
                     </div>
@@ -6179,11 +6254,11 @@ class TripPlannerApp {
     // Extract week date info
     let targetWeekNorm = '';
     if (task.id) {
-      const m = task.id.match(/SafetyCompliance_[0-9]{3}-[0-9]{2}_([0-9]{1,2}[-\/][0-9]{1,2}[-\/][0-9]{2,4})/i);
+      const m = task.id.match(/SafetyCompliance_[0-9]{3}-[0-9]{2}_([0-9]{1,2}[/-][0-9]{1,2}[/-][0-9]{2,4})/i);
       if (m) targetWeekNorm = m[1].replace(/-/g, '/');
     }
     if (!targetWeekNorm && task.notes) {
-      const m = String(task.notes).match(/week of (\d{1,2}[-\/]\d{1,2}[-\/]\d{2,4})/i);
+      const m = String(task.notes).match(/week of (\d{1,2}[/-]\d{1,2}[/-]\d{2,4})/i);
       if (m) targetWeekNorm = m[1].replace(/-/g, '/');
     }
     if (!targetWeekNorm && task.dueDate) {
@@ -6489,7 +6564,15 @@ class TripPlannerApp {
     }
 
     // Complete the task in taskManager with forceDirect = true
-    const fullResolutionNotes = `Resolved: ${resolutionsSummary.join('; ')}${addlNotes ? ` — ${addlNotes}` : ''}`;
+    if (addlNotes) {
+      if (matchingRow) {
+        matchingRow['Notes'] = matchingRow['Notes'] ? `${matchingRow['Notes']}; ${addlNotes}` : addlNotes;
+      }
+      if (task) {
+        task.notes = task.notes ? `${task.notes}; ${addlNotes}` : addlNotes;
+      }
+    }
+
     if (window.taskManager) {
       window.taskManager.completeTask(task.id, true);
     }
@@ -6512,60 +6595,6 @@ class TripPlannerApp {
       this.openCrewTasksModal(crewId, location, this.activeModalCat, this.activeModalDateKey);
       this.renderPlanner();
     }
-  }
-
-  addTrip(dateKey, location) {
-    if (!location) return;
-    if (this.isDayHoliday(dateKey)) {
-      const hName = this.getHolidayName(dateKey);
-      alert(`🏖️ ${dateKey} is marked as a holiday (${hName}). Field crew visits cannot be scheduled on holiday days.`);
-      return;
-    }
-    const currentList = [...this.getTripsForDate(dateKey)];
-    // Prevent duplicate of same city on the exact same day
-    if (!currentList.some(t => t.location.toLowerCase() === location.toLowerCase())) {
-      currentList.push({ location, crew: '' });
-    }
-    this.plannedTrips[dateKey] = currentList;
-    this.saveTrips();
-
-    // Record mutation for sync
-    this.db.addMutation({
-      action: 'SET_TRIP_SCHEDULE',
-      date: dateKey,
-      location: location,
-      trips: this.plannedTrips
-    });
-
-    this.renderPlanner();
-  }
-
-  setTrip(dateKey, location) {
-    this.addTrip(dateKey, location);
-  }
-
-  removeTrip(dateKey, locationToRemove = null) {
-    if (!locationToRemove) {
-      delete this.plannedTrips[dateKey];
-    } else {
-      const currentList = this.getTripsForDate(dateKey);
-      const updated = currentList.filter(t => t.location.toLowerCase() !== locationToRemove.toLowerCase());
-      if (updated.length === 0) {
-        delete this.plannedTrips[dateKey];
-      } else {
-        this.plannedTrips[dateKey] = updated;
-      }
-    }
-    this.saveTrips();
-
-    this.db.addMutation({
-      action: 'SET_TRIP_SCHEDULE',
-      date: dateKey,
-      location: locationToRemove || '',
-      trips: this.plannedTrips
-    });
-
-    this.renderPlanner();
   }
 
   getDaysForWeek(mondayDate, schedule = 'Mon-Thu') {
@@ -6612,26 +6641,6 @@ class TripPlannerApp {
     }
     const d = new Date(str);
     return isNaN(d.getTime()) ? new Date() : d;
-  }
-
-  escapeHtml(str) {
-    if (str === null || str === undefined) return '';
-    return String(str)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#039;');
-  }
-
-  escapeJs(str) {
-    if (str === null || str === undefined) return '';
-    return String(str)
-      .replace(/\\/g, '\\\\')
-      .replace(/'/g, "\\'")
-      .replace(/"/g, '\\"')
-      .replace(/\n/g, '\\n')
-      .replace(/\r/g, '\\r');
   }
 }
 

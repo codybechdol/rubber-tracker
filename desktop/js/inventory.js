@@ -1552,7 +1552,6 @@ class InventoryManager {
 
           const histAssignedLower = latestHist.assignedTo.toLowerCase();
           const histLocLower = latestHist.location.toLowerCase();
-          const histNotesLower = latestHist.notes.toLowerCase();
           const curAssignedLower = curAssignedTo.toLowerCase();
 
           // Check if history shows an active lineman assignment vs a special status (shelf, testing, lost, etc.)
@@ -2163,7 +2162,6 @@ class InventoryManager {
       { key: 'sleeves', label: 'Sleeves', icon: '🧥' }
     ];
 
-    let crewCount = 0;
     const crewSummary = [];
 
     crewDefs.forEach(def => {
@@ -2191,14 +2189,12 @@ class InventoryManager {
       }
     });
 
-    let ppeCount = 0;
     const ppeSummary = [];
     ppeDefs.forEach(def => {
       const table = this.db.getTable(def.key);
       const rows = table ? (table.rows || []) : [];
       const matching = rows.filter(r => String(r['Assigned To'] || r['Assigned'] || '').toLowerCase().trim() === oldLower);
       if (matching.length > 0) {
-        ppeCount += matching.length;
         ppeSummary.push(`
           <div style="display: flex; justify-content: space-between; align-items: center; padding: 5px 0; border-bottom: 1px dashed rgba(255,255,255,0.08); font-size: 12px;">
             <div>

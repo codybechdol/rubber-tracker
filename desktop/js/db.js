@@ -24,7 +24,7 @@ class SnapshotStorage {
         };
         req.onsuccess = (e) => resolve(e.target.result);
         req.onerror = () => resolve(null);
-      } catch (e) {
+      } catch {
         resolve(null);
       }
     });
@@ -40,7 +40,7 @@ class SnapshotStorage {
         const req = store.get(key);
         req.onsuccess = () => resolve(req.result);
         req.onerror = () => resolve(null);
-      } catch (e) {
+      } catch {
         resolve(null);
       }
     });
@@ -56,7 +56,7 @@ class SnapshotStorage {
         const req = store.put(value, key);
         req.onsuccess = () => resolve(true);
         req.onerror = () => resolve(false);
-      } catch (e) {
+      } catch {
         resolve(false);
       }
     });
@@ -72,7 +72,7 @@ class SnapshotStorage {
         const req = store.delete(key);
         req.onsuccess = () => resolve(true);
         req.onerror = () => resolve(false);
-      } catch (e) {
+      } catch {
         resolve(false);
       }
     });
@@ -108,7 +108,7 @@ class LocalDatabase {
             loadedSnapshot = JSON.parse(stored);
             // Migrate to IndexedDB and free localStorage
             await SnapshotStorage.set('sa_snapshot', loadedSnapshot);
-            try { localStorage.removeItem('sa_snapshot'); } catch (e) {}
+            try { localStorage.removeItem('sa_snapshot'); } catch { /* ignore */ }
           }
         } catch (e) {
           console.warn('Could not read/migrate from localStorage:', e);
@@ -120,7 +120,7 @@ class LocalDatabase {
       try {
         const storedOutbox = localStorage.getItem('sa_outbox');
         if (storedOutbox) this.outbox = JSON.parse(storedOutbox);
-      } catch (e) {
+      } catch {
         this.outbox = [];
       }
     }
@@ -202,22 +202,22 @@ class LocalDatabase {
       if (snapshot.configs.plannedTrips) {
         try {
           localStorage.setItem('sa_planned_trips', JSON.stringify(snapshot.configs.plannedTrips));
-        } catch (e) {}
+        } catch { /* ignore */ }
       }
       if (Array.isArray(snapshot.configs.manual_tasks)) {
         try {
           localStorage.setItem('sa_trip_manual_tasks', JSON.stringify(snapshot.configs.manual_tasks));
-        } catch (e) {}
+        } catch { /* ignore */ }
       }
       if (snapshot.configs.workSchedule) {
         try {
           localStorage.setItem('sa_work_schedule', snapshot.configs.workSchedule);
-        } catch (e) {}
+        } catch { /* ignore */ }
       }
       if (snapshot.configs.holidays && (Array.isArray(snapshot.configs.holidays) ? snapshot.configs.holidays.length > 0 : Object.keys(snapshot.configs.holidays).length > 0)) {
         try {
           localStorage.setItem('sa_holidays', JSON.stringify(snapshot.configs.holidays));
-        } catch (e) {}
+        } catch { /* ignore */ }
       }
     }
 
@@ -242,7 +242,7 @@ class LocalDatabase {
       savedToIdb = await SnapshotStorage.set('sa_snapshot', snapshot);
       if (savedToIdb) {
         // Free up localStorage by removing the massive snapshot string
-        try { localStorage.removeItem('sa_snapshot'); } catch (e) {}
+        try { localStorage.removeItem('sa_snapshot'); } catch { /* ignore */ }
       }
     } catch (idbErr) {
       console.warn('IndexedDB persist failed:', idbErr);
@@ -290,7 +290,7 @@ class LocalDatabase {
         if (parsed && typeof parsed === 'object') {
           return parsed;
         }
-      } catch (e) {}
+      } catch { /* ignore */ }
     }
     return {};
   }
@@ -301,7 +301,7 @@ class LocalDatabase {
     this.snapshot.configs.plannedTrips = trips;
     try {
       localStorage.setItem('sa_planned_trips', JSON.stringify(trips));
-    } catch (e) {}
+    } catch { /* ignore */ }
     await this.persistSnapshot(this.snapshot);
     await this.addMutation({
       action: 'SAVE_PLANNED_TRIPS',
@@ -318,7 +318,7 @@ class LocalDatabase {
       try {
         const parsed = JSON.parse(stored);
         if (Array.isArray(parsed)) return parsed;
-      } catch (e) {}
+      } catch { /* ignore */ }
     }
     return [];
   }
@@ -329,7 +329,7 @@ class LocalDatabase {
     this.snapshot.configs.manual_tasks = tasks;
     try {
       localStorage.setItem('sa_trip_manual_tasks', JSON.stringify(tasks));
-    } catch (e) {}
+    } catch { /* ignore */ }
     await this.persistSnapshot(this.snapshot);
     await this.addMutation({
       action: 'SAVE_MANUAL_TASKS',
@@ -1250,7 +1250,7 @@ class LocalDatabase {
     try {
       const stored = localStorage.getItem('sa_manual_picks');
       if (stored) localRegistry = JSON.parse(stored);
-    } catch (e) {}
+    } catch { /* ignore */ }
     if (!localRegistry[cleanSheet]) localRegistry[cleanSheet] = {};
 
     if (!cleanPick || cleanPick === '—' || cleanPick === '-') {
@@ -1275,7 +1275,7 @@ class LocalDatabase {
 
     try {
       localStorage.setItem('sa_manual_picks', JSON.stringify(localRegistry));
-    } catch (e) {}
+    } catch { /* ignore */ }
     this.schedulePersistSnapshot(this.snapshot, 1000);
   }
 
@@ -1295,7 +1295,7 @@ class LocalDatabase {
           Object.assign(res, localRegistry[cleanSheet]);
         }
       }
-    } catch (e) {}
+    } catch { /* ignore */ }
 
     // Merge in snapshot manualPicks
     if (this.snapshot && this.snapshot.manualPicks && this.snapshot.manualPicks[cleanSheet]) {
@@ -1382,7 +1382,7 @@ class LocalDatabase {
         if (window.desktopAPI) {
           await window.desktopAPI.saveLocalOutbox(this.outbox);
         } else {
-          try { localStorage.setItem('sa_outbox', JSON.stringify(this.outbox)); } catch (e) {}
+          try { localStorage.setItem('sa_outbox', JSON.stringify(this.outbox)); } catch { /* ignore */ }
         }
         this.schedulePersistSnapshot(this.snapshot, 600);
         this.notify();
@@ -1406,7 +1406,7 @@ class LocalDatabase {
         if (window.desktopAPI) {
           await window.desktopAPI.saveLocalOutbox(this.outbox);
         } else {
-          try { localStorage.setItem('sa_outbox', JSON.stringify(this.outbox)); } catch (e) {}
+          try { localStorage.setItem('sa_outbox', JSON.stringify(this.outbox)); } catch { /* ignore */ }
         }
         this.schedulePersistSnapshot(this.snapshot, 600);
         this.notify();
@@ -1427,7 +1427,7 @@ class LocalDatabase {
         if (window.desktopAPI) {
           await window.desktopAPI.saveLocalOutbox(this.outbox);
         } else {
-          try { localStorage.setItem('sa_outbox', JSON.stringify(this.outbox)); } catch (e) {}
+          try { localStorage.setItem('sa_outbox', JSON.stringify(this.outbox)); } catch { /* ignore */ }
         }
         this.schedulePersistSnapshot(this.snapshot, 600);
         this.notify();
@@ -1449,7 +1449,7 @@ class LocalDatabase {
     if (window.desktopAPI) {
       await window.desktopAPI.saveLocalOutbox(this.outbox);
     } else {
-      try { localStorage.setItem('sa_outbox', JSON.stringify(this.outbox)); } catch (e) {}
+      try { localStorage.setItem('sa_outbox', JSON.stringify(this.outbox)); } catch { /* ignore */ }
     }
     this.schedulePersistSnapshot(this.snapshot, 600);
 
@@ -2160,7 +2160,7 @@ class LocalDatabase {
             this.dismissedTaskIds.add(s);
             this.dismissedTaskIds.add(s.toLowerCase());
           });
-        } catch (e) {}
+        } catch { /* ignore */ }
       }
     }
     const cleanId = String(taskId).trim();
@@ -2179,7 +2179,7 @@ class LocalDatabase {
             this.dismissedTaskIds.add(s);
             this.dismissedTaskIds.add(s.toLowerCase());
           });
-        } catch (e) {}
+        } catch { /* ignore */ }
       }
     }
     const cleanId = String(taskId).trim();
@@ -2187,7 +2187,7 @@ class LocalDatabase {
     this.dismissedTaskIds.add(cleanId.toLowerCase());
     try {
       localStorage.setItem('sa_dismissed_tasks', JSON.stringify(Array.from(this.dismissedTaskIds)));
-    } catch (e) {}
+    } catch { /* ignore */ }
   }
 
   async clearOutbox() {

@@ -65,7 +65,7 @@ class CrewImportEngine {
       return d.toISOString().split('T')[0];
     }
     const s = String(sheetName).trim();
-    const m = s.match(/(\d{1,2})[.\/-](\d{1,2})[.\/-](\d{2,4})/);
+    const m = s.match(/(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})/);
     if (m) {
       let month = parseInt(m[1], 10);
       let day = parseInt(m[2], 10);
@@ -349,16 +349,16 @@ class CrewImportEngine {
 
     // Direct placeholder keywords & open positions
     if (clean.match(/\bOpen\s*Call\b/i)) return true;
-    if (clean.match(/^Open\s*$/i) || clean.match(/^Open\s*[-\/:]?\s*(Call|Position|Spot|Req|Seat|Line|Job|Hire|Man|Guy|JL|JRY|Journeyman|Foreman|F|GF|SUP|WT|GTO|EO|AP|\d+\s*ap|\d+\s*st|Lineman|Operator|Apprentice|Trainee|Truck|Driver)?\b/i)) return true;
+    if (clean.match(/^Open\s*$/i) || clean.match(/^Open\s*[-/:]?\s*(Call|Position|Spot|Req|Seat|Line|Job|Hire|Man|Guy|JL|JRY|Journeyman|Foreman|F|GF|SUP|WT|GTO|EO|AP|\d+\s*ap|\d+\s*st|Lineman|Operator|Apprentice|Trainee|Truck|Driver)?\b/i)) return true;
     if (clean.match(/^Coming\s+soon\b/i) || clean.match(/^To\s+be\s+(hired|determined|filled)\b/i) || clean.match(/^TB[HD]\b/i)) return true;
     if (clean.match(/^(TBD|TBA|Pending|N\/A|Placeholder|Vacant|Unassigned)\b/i)) return true;
     if (clean.match(/^Need\s/i)) return true;
     if (clean.match(/^NEW\s*HIRE\s*(JL|F|GTO\s*F?|EO\s*\d|WT|Jry\s*Op|\d\s*ap|ST\s*\d|Lineman|Operator|Apprentice)?\s*$/i)) return true;
-    if (clean.match(/^Call\s*[-\/]?\s*(JL|JRY|Journeyman|Foreman|F|GF|SUP|WT|GTO|EO|AP|\d+\s*ap|\d+\s*st|Out)?\b/i)) return true;
+    if (clean.match(/^Call\s*[-/]?\s*(JL|JRY|Journeyman|Foreman|F|GF|SUP|WT|GTO|EO|AP|\d+\s*ap|\d+\s*st|Out)?\b/i)) return true;
 
     // Schedule / rotation phrases that are not employees
     if (clean.match(/\b\d+\s*days\s*straight\b/i) || clean.match(/\bwork\s*\d+\s*days\b/i)) return true;
-    if (clean.match(/\d{1,2}[-\/]\d{1,2}\s*(thru|to|-|–)\s*\d{1,2}[-\/]\d{1,2}/i) && clean.match(/\b(thru|days|wk|week|work|start|straight)\b/i)) return true;
+    if (clean.match(/\d{1,2}[-/]\d{1,2}\s*(thru|to|-|–)\s*\d{1,2}[-/]\d{1,2}/i) && clean.match(/\b(thru|days|wk|week|work|start|straight)\b/i)) return true;
     if (clean.match(/\b(Aprox|Approx|Tentative|Starts?|Completed)\s+(start\s+)?(wk|week)\s+\d/i)) return true;
     if (clean.match(/\b(Poles|Dock|Sub|Trans|Foundation|Distro|Cleanup)\b/i) && clean.match(/\b(Aprox|start|wk|week|thru|straight)\b/i)) return true;
 
@@ -385,7 +385,7 @@ class CrewImportEngine {
 
     // Ignore date announcements & notes (e.g. "February 2027, possibly sooner", "Starts 8-31 Mon", "TBD")
     if (clean.match(/\b(January|February|March|April|May|June|July|August|September|October|November|December)\b.*\b(202\d|sooner|later|possibly|tentative|TBD)\b/i)) return false;
-    if (clean.match(/^(\d{1,2}[-\/]\d{1,2}[-\/]\d{2,4}|TBD|Pending|N\/A)$/i)) return false;
+    if (clean.match(/^(\d{1,2}[-/]\d{1,2}[-/]\d{2,4}|TBD|Pending|N\/A)$/i)) return false;
 
     // Ignore dock / sub dock / bid header titles
     if (clean.match(/\b(Dock|Sub\s*Dock|Tran\s*Dock|Bid)\b/i)) return false;
@@ -483,7 +483,7 @@ class CrewImportEngine {
     // 3. Clean Name
     let name = namePart
       .replace(/\b(TEMP|TEMPORARY|CONTRACTOR|MT\s*Misc)\b/gi, '')
-      .replace(/[\*#\(\)]/g, ' ')
+      .replace(/[*#()]/g, ' ')
       .replace(/^[,\s]+|[,\s]+$/g, '')
       .replace(/\s+/g, ' ')
       .trim();
@@ -496,7 +496,7 @@ class CrewImportEngine {
     }
 
     // 4. Secondary / Split / Bid note detection
-    const hasSecondaryNote = /\b(Crew\s+\d+[-\/]\d+|\bMon\s*Only\b|\bTue\s*Only\b|\bWed\s*Only\b|\bThu\s*Only\b|\bFri\s*Only\b|\bSat\s*Only\b|\bSun\s*Only\b|Mon\s*-\s*Wed|Thurs?\s*&\s*Fri|Fri\s*&\s*Sat|Secondary|Split|Temp|Covering)\b/i.test(notesPart);
+    const hasSecondaryNote = /\b(Crew\s+\d+[-/]\d+|\bMon\s*Only\b|\bTue\s*Only\b|\bWed\s*Only\b|\bThu\s*Only\b|\bFri\s*Only\b|\bSat\s*Only\b|\bSun\s*Only\b|Mon\s*-\s*Wed|Thurs?\s*&\s*Fri|Fri\s*&\s*Sat|Secondary|Split|Temp|Covering)\b/i.test(notesPart);
 
     return {
       originalText: cellText,
@@ -636,7 +636,7 @@ class CrewImportEngine {
         }
 
         // Check if this cell is a crew-level note / description / instruction
-        if (cell.match(/^(NWE|Aprox|Tentative|Completed|On Hold|Approved|Starts?|Set Basements|Waiting|Crew\s+\d+[-\/]\d+|Shop\s*Note|Poles|Work\s+\d+)/i) || !this.isEmployeeName(cell)) {
+        if (cell.match(/^(NWE|Aprox|Tentative|Completed|On Hold|Approved|Starts?|Set Basements|Waiting|Crew\s+\d+[-/]\d+|Shop\s*Note|Poles|Work\s+\d+)/i) || !this.isEmployeeName(cell)) {
           if (!crewNote && !this.isPlaceholder(cell)) {
             crewNote = cell;
           }
@@ -647,7 +647,7 @@ class CrewImportEngine {
           const emp = this.parseEmployeeCell(cell);
           if (emp && emp.name && !this.isPlaceholder(emp.name)) {
             // If employee cell has a crew-wide prefix (e.g. "Crew 8-24 Mon Only"), elevate to crewNote
-            if (emp.notes && emp.notes.match(/^Crew\s+\d+[-\/]\d+/i)) {
+            if (emp.notes && emp.notes.match(/^Crew\s+\d+[-/]\d+/i)) {
               if (!crewNote) {
                 crewNote = emp.notes;
               }
@@ -858,7 +858,7 @@ class CrewImportEngine {
       } else {
         // If note has NO date mentioned at all (e.g. "off", "vacation", "wedding"),
         // default to current week!
-        const hasAnyDate = /\b\d{1,2}[-.\/]\d{1,2}\b|\bwks?\s*\d/i.test(fullNote);
+        const hasAnyDate = /\b\d{1,2}[-./]\d{1,2}\b|\bwks?\s*\d/i.test(fullNote);
         if (!hasAnyDate) {
           isCurrentWeek = true;
         }
@@ -900,7 +900,7 @@ class CrewImportEngine {
 
     this.multiCrewEmployees = [];
 
-    for (const [nameKey, occurrences] of empMap.entries()) {
+    for (const occurrences of empMap.values()) {
       if (occurrences.length > 1) {
         // Find which occurrence is Primary vs Secondary
         let primaryIdx = -1;
@@ -1411,7 +1411,7 @@ class CrewImportEngine {
     if (!noteText) return '';
     const text = String(noteText).trim();
     // Match date formats: 9-3, 9/3, 09-03, 9/3/26, 09/03/2026, etc.
-    const match = text.match(/\b(\d{1,2})[-\/](\d{1,2})(?:[-\/](\d{2,4}))?\b/);
+    const match = text.match(/\b(\d{1,2})[-/](\d{1,2})(?:[-/](\d{2,4}))?\b/);
     if (match) {
       const month = parseInt(match[1], 10);
       const day = parseInt(match[2], 10);
@@ -1653,7 +1653,7 @@ class CrewImportEngine {
       const cleanQName = this.cleanNameForMatch(q.name);
       let crewOccurrences = uniqueEmployees.get(cleanQName) || [];
       if (crewOccurrences.length === 0) {
-        for (const [k, occs] of uniqueEmployees.entries()) {
+        for (const occs of uniqueEmployees.values()) {
           if (occs.length > 0 && this.findMatchingEmployee(q.name, [{ 'Employee Name': occs[0].emp.name }])) {
             crewOccurrences = occs;
             break;
@@ -1711,7 +1711,7 @@ class CrewImportEngine {
       const cleanTOName = this.cleanNameForMatch(to.name);
       let crewOccurrences = uniqueEmployees.get(cleanTOName) || [];
       if (crewOccurrences.length === 0) {
-        for (const [k, occs] of uniqueEmployees.entries()) {
+        for (const occs of uniqueEmployees.values()) {
           if (occs.length > 0 && this.findMatchingEmployee(to.name, [{ 'Employee Name': occs[0].emp.name }])) {
             crewOccurrences = occs;
             break;
@@ -1756,7 +1756,6 @@ class CrewImportEngine {
       const primaryLoc = primaryOcc.crew.location;
       const rosterExplicitClass = (primaryOcc.emp.classification || '').trim();
       const secJobNum = secOccs.map(s => s.emp.fullJobNumber).filter(Boolean).join(', ');
-      const isExplicitNewHire = occurrences.some(o => o.emp.isNewHire);
 
       // Check if this employee has a scheduled departure in quits (e.g. Dillon Doane on 052-26 until 8/27)
       const isScheduledDeparture = quits.some(q => q.isScheduledDeparture && (
@@ -1783,9 +1782,6 @@ class CrewImportEngine {
         const oldJob = this.getEmpRowJobNumber(existing);
         const oldClass = this.getEmpRowClassification(existing);
         const oldSecJob = this.getEmpRowSecJob(existing);
-
-        // Preserve oldClass for existing employees when roster does not specify a role token
-        const primaryClass = rosterExplicitClass || oldClass || 'JRY';
 
         const cleanEmpName = this.cleanNameForMatch(dbName);
         const changeItem = {
@@ -1922,7 +1918,7 @@ class CrewImportEngine {
       // Check if employee appeared on any crew in this week's Excel sheet
       let foundInRoster = uniqueEmployees.has(cleanEmpName);
       if (!foundInRoster) {
-        for (const [k, occs] of uniqueEmployees.entries()) {
+        for (const occs of uniqueEmployees.values()) {
           if (occs.length > 0 && this.findMatchingEmployee(empName, [{ 'Employee Name': occs[0].emp.name }])) {
             foundInRoster = true;
             break;
@@ -1987,12 +1983,12 @@ class CrewImportEngine {
   // 4. ATOMIC DATABASE APPLY & MUTATION SYNCHRONIZATION
   // ==========================================================================
 
-  async applyCrewChanges(options = {}) {
+  async applyCrewChanges() {
     if (!this.computedDeltas) {
       this.computedDeltas = this.computeChangeDeltas();
     }
 
-    const { newHires, rehires, matchedEmployeeChanges, newJobsDetected, quits, timeOff, missingFromRoster } = this.computedDeltas;
+    const { newHires, rehires, matchedEmployeeChanges, quits, timeOff, missingFromRoster } = this.computedDeltas;
     const empTable = this.db.getTable('employees');
     const jtTable = this.db.getTable('job_tracking');
     const histTable = this.db.getTable('employee_history');
@@ -2068,7 +2064,6 @@ class CrewImportEngine {
 
     // 1. Process Existing Employee Updates
     if (empTable && empTable.rows) {
-      const nameKey = getEmpFieldKey(empTable.headers, 'employee name');
       const locKey = getEmpFieldKey(empTable.headers, 'location');
       const jobKey = getEmpFieldKey(empTable.headers, 'job number');
       const classKey = getEmpFieldKey(empTable.headers, 'job classification');

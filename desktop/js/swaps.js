@@ -339,9 +339,7 @@ class SwapGenerationEngine {
   generateSwaps(itemType) {
     const isGloves = (itemType === 'Gloves' || itemType === 'gloves');
     const swapKey = isGloves ? 'glove_swaps' : 'sleeve_swaps';
-    const swapSheetName = isGloves ? 'Glove Swaps' : 'Sleeve Swaps';
     const invKey = isGloves ? 'gloves' : 'sleeves';
-    const invSheetName = isGloves ? 'Gloves' : 'Sleeves';
     const itemLabel = isGloves ? 'Glove' : 'Sleeve';
 
     const invTable = this.db.getTable(invKey);
@@ -354,10 +352,7 @@ class SwapGenerationEngine {
 
     // Preserve manual pick edits
     const manualPicks = this.preserveManualPickLists(swapKey);
-
     const today = new Date();
-    const todayStr = this.formatDateIso(today);
-    const todayFormatted = this.formatDate(today);
 
     const ignoreNames = [
       'on shelf', 'in testing', 'packed for delivery', 'packed for testing',
@@ -381,7 +376,7 @@ class SwapGenerationEngine {
       if (!n || typeof n !== 'string') return false;
       const s = n.trim();
       if (s.length < 2 || s.length > 60) return false;
-      if (/^\d{1,4}[.\/-]\d{1,2}[.\/-]\d{1,4}$/.test(s) || /^\d{1,2}-[A-Za-z]{3,9}-\d{2,4}$/.test(s)) return false;
+      if (/^\d{1,4}[./-]\d{1,2}[./-]\d{1,4}$/.test(s) || /^\d{1,2}-[A-Za-z]{3,9}-\d{2,4}$/.test(s)) return false;
       return (s.match(/[a-zA-Z]/g) || []).length >= 2;
     };
 
@@ -869,7 +864,6 @@ class SwapGenerationEngine {
         // Tier 1: Existing Picked For match (for items already packed/ready for delivery)
         if (!pickListItemData) {
           const pickedForMatch = inventoryData.find(it => {
-            const itNum = String(it['Item #'] || it['Glove'] || it['Sleeve'] || it['ESL ID'] || '').trim();
             const pickedFor = String(it['Picked For'] || '').trim().toLowerCase();
             const classMatch = parseClassNum(it['Class']) === meta.itemClass;
             const forEmp = pickedFor.includes(employeeName.toLowerCase());
@@ -1191,7 +1185,6 @@ class SwapGenerationEngine {
   generateBlanketSwaps() {
     const swapKey = 'blanket_swaps';
     const invTable = this.db.getTable('blankets');
-    const empTable = this.db.getTable('employees');
     if (!invTable || !invTable.rows) return { swapCount: 0, pickedCount: 0 };
 
     const today = new Date();
@@ -1975,7 +1968,16 @@ class SwapGenerationEngine {
    * Helper to sync in-memory row object changes back to rawGrid
    */
   syncRowToRawGrid(table, rowObj) {
-    if (!table || !table.rawGrid || !table.headers) return;
+    if (!table || !table.rawGrid || !table.headers || !rowObj) return;
+    const rowIdx = rowObj._rowIdx || (table.rows ? table.rows.indexOf(rowObj) + 2 : null);
+    if (rowIdx && table.rawGrid[rowIdx - 1]) {
+      const gRow = table.rawGrid[rowIdx - 1];
+      table.headers.forEach((h, cIdx) => {
+        if (rowObj[h] !== undefined) gRow[cIdx] = rowObj[h];
+      });
+      return;
+    }
+
     const keyProp = table.headers[0];
     const keyVal = String(rowObj[keyProp] || Object.values(rowObj)[0] || '').trim();
     if (!keyVal) return;
@@ -2456,17 +2458,6 @@ class SwapGenerationEngine {
     }
 
     if (window.sheetNavigator) window.sheetNavigator.renderActiveView();
-  }
-
-  syncRowToRawGrid(table, rowObj) {
-    if (!table || !table.headers || !rowObj) return;
-    const rowIdx = rowObj._rowIdx || (table.rows ? table.rows.indexOf(rowObj) + 2 : null);
-    if (table.rawGrid && rowIdx && table.rawGrid[rowIdx - 1]) {
-      const gRow = table.rawGrid[rowIdx - 1];
-      table.headers.forEach((h, cIdx) => {
-        if (rowObj[h] !== undefined) gRow[cIdx] = rowObj[h];
-      });
-    }
   }
 
   async queueRowMutations(tableKey, rowObj) {

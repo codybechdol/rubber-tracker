@@ -267,7 +267,7 @@ class ItemStatsEngine {
     };
   }
 
-  analyzeLifecycle(itemKey, groupRows, activeInvItem = null) {
+  analyzeLifecycle(itemKey, groupRows) {
     if (!groupRows || groupRows.length === 0) {
       return null;
     }
@@ -451,6 +451,7 @@ class ItemStatsEngine {
       lastDateFormatted: this.formatDate(isRetired ? retiredDate : now),
       isRetired: isRetired,
       retiredReason: retiredReason,
+      retiredDays: retiredDays,
       totalDays: totalDays,
       lifespanFormatted: this.formatDuration(totalDays),
       fieldDays: fieldDays,
@@ -1484,7 +1485,6 @@ class ItemStatsEngine {
 
     const tableData = this.db.getTable(sheetKey);
     const rows = tableData ? (tableData.rows || []) : [];
-    const headers = tableData ? (tableData.headers || []) : [];
 
     let groupRows = rows.filter(r => {
       for (const k in r) {
@@ -1540,8 +1540,6 @@ class ItemStatsEngine {
 
     if (foundActive) {
       const activeStatus = String(foundActive['Status'] || '').trim().toLowerCase();
-      const activeAssigned = String(foundActive['Assigned To'] || '').trim().toLowerCase();
-      const activeLoc = String(foundActive['Location'] || '').trim().toLowerCase();
       const activeNotes = String(foundActive['Notes'] || '').trim();
       const hasOriginNote = activeNotes.toLowerCase().includes('new purchase') ||
                             activeNotes.toLowerCase().includes('failed pair') ||
@@ -2068,7 +2066,7 @@ class ItemStatsEngine {
       line = line.trim();
       if (!line) return;
 
-      const dateMatch = line.match(/^(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4}|\d{4}[\/\-\.]\d{1,2}[\/\-\.]\d{1,2})\s*[-–—:]\s*(.+)$/);
+      const dateMatch = line.match(/^(\d{1,2}[/.-]\d{1,2}[/.-]\d{2,4}|\d{4}[/.-]\d{1,2}[/.-]\d{1,2})\s*[-–—:]\s*(.+)$/);
       let dateStr = '';
       let rawTarget = '';
 
@@ -2256,6 +2254,10 @@ class ItemStatsEngine {
     }
 
     this.closeImportLogModal();
+
+    if (window.showToast) {
+      window.showToast(`Imported ${addedCount} history entries for Item #${itemNum}.`);
+    }
 
     // Re-render open Dossier modal
     this.openDossierModal(itemNum, sheetKey);
@@ -2474,11 +2476,10 @@ class ItemStatsEngine {
       'Notes': notes
     };
 
-    let updatedHistory = false;
     if (rawRow) {
-      updatedHistory = await this.db.updateHistoryRow(sheetKey, rawRow, updatedFields);
+      await this.db.updateHistoryRow(sheetKey, rawRow, updatedFields);
     } else {
-      updatedHistory = await this.db.updateHistoryRow(sheetKey, r => {
+      await this.db.updateHistoryRow(sheetKey, r => {
         const d = String(r['Date Assigned'] || r['Date'] || Object.values(r)[0] || '').trim();
         const a = String(r['Assigned To'] || r['Employee Name'] || '').trim();
         return d === milestone.startDateFormatted && a === milestone.assignedTo;
@@ -2666,8 +2667,8 @@ class ItemStatsEngine {
       return dStr;
     };
 
-    const newTestDate = testDateInput ? formatToMdY(testDateInput.value.trim()) : '';
-    const newDateAssigned = dateAssignedInput ? formatToMdY(dateAssignedInput.value.trim()) : '';
+    let newTestDate = testDateInput ? formatToMdY(testDateInput.value.trim()) : '';
+    let newDateAssigned = dateAssignedInput ? formatToMdY(dateAssignedInput.value.trim()) : '';
     let newStatus = statusSelect ? statusSelect.value.trim() : (row['Status'] || '');
     let newLocation = locationInput ? locationInput.value.trim() : (row['Location'] || '');
     newLocation = (window.getPhysicalLocation ? window.getPhysicalLocation(newLocation) : newLocation) || newLocation;
