@@ -101,6 +101,12 @@ class TimeBreakdownEngine {
     return isNaN(parsed.getTime()) ? '' : this.formatDateKey(parsed);
   }
 
+  getSignificantJobNumber(jobNum) {
+    if (!jobNum) return '';
+    const match = String(jobNum).trim().match(/^(\d+-\d+)/);
+    return match ? match[1] : String(jobNum).trim();
+  }
+
   cleanSwapSheetName(key) {
     const map = {
       'glove_swaps': 'Glove Swap',
@@ -126,6 +132,35 @@ class TimeBreakdownEngine {
     const trainTable = this.db ? this.db.getTable('training_tracking') : null;
     const drugTestTable = this.db ? this.db.getTable('dot_drug_tests') : null;
 
+    // 1. Build lookup tables for employees and inventory items
+    const empTable = this.db ? this.db.getTable('employees') : null;
+    const empMap = {};
+    if (empTable && empTable.rows) {
+      empTable.rows.forEach(r => {
+        const n = String(r['Employee Name'] || '').trim().toLowerCase();
+        if (n) {
+          empMap[n] = {
+            name: String(r['Employee Name'] || '').trim(),
+            crew: String(r['Job Number'] || r['Job #'] || '').trim(),
+            loc: String(r['Location'] || '').trim()
+          };
+        }
+      });
+    }
+
+    const invLookup = {};
+    const invTables = ['gloves', 'sleeves', 'blankets', 'macks', 'hv_testers', 'phasing_sets', 'aed', 'grounds', 'hot_sticks'];
+    invTables.forEach(tblKey => {
+      invLookup[tblKey] = {};
+      const tbl = this.db ? this.db.getTable(tblKey) : null;
+      if (tbl && tbl.rows) {
+        tbl.rows.forEach(r => {
+          const num = String(r['Glove'] || r['Sleeve'] || r['Blanket'] || r['MACK'] || r['Item #'] || r['Item'] || r['Serial #'] || r['ESL ID'] || '').trim();
+          if (num) invLookup[tblKey][num] = r;
+        });
+      }
+    });
+
     // Group items by dateKey (YYYY-MM-DD)
     const daysMap = {};
 
@@ -146,7 +181,7 @@ class TimeBreakdownEngine {
       cur.setDate(cur.getDate() + 1);
     }
 
-    // 1. Collect Trips Planned (Field Visits) - NO drive times stored or needed
+    // 2. Collect Trips Planned (Field Visits)
     Object.keys(trips).forEach(dKey => {
       if (daysMap[dKey]) {
         const tripEntries = Array.isArray(trips[dKey]) ? trips[dKey] : [trips[dKey]];
@@ -155,7 +190,8 @@ class TimeBreakdownEngine {
           if (!daysMap[dKey].locations[t.location]) {
             daysMap[dKey].locations[t.location] = {
               name: t.location,
-              crews: []
+              crews: [],
+              swaps: []
             };
           }
           if (t.crew && !daysMap[dKey].locations[t.location].crews.includes(t.crew)) {
@@ -165,7 +201,7 @@ class TimeBreakdownEngine {
       }
     });
 
-    // 2. Collect Checked-off Manual Tasks from Trip Planner (Classes & Office Tasks)
+    // 3. Collect Checked-off Manual Tasks from Trip Planner (Classes & Office Tasks)
     manualTasks.forEach(t => {
       const isComplete = String(t.status || '').toLowerCase() === 'complete';
       if (!isComplete) return;
@@ -181,15 +217,91 @@ class TimeBreakdownEngine {
       }
     });
 
-    // 3. Collect Completed Equipment Swaps from Swap Sheets
+    // 4. Collect Completed Equipment Swaps from Manual Picks and Swap Sheets
     const swapSheets = [
-      'glove_swaps', 'sleeve_swaps', 'blanket_swaps', 'mack_swaps',
-      'hv_tester_swaps', 'phasing_set_swaps', 'aed_swaps', 'ground_swaps', 'hot_stick_swaps'
+      { sw: 'glove_swaps', inv: 'gloves', label: 'Glove' },
+      { sw: 'sleeve_swaps', inv: 'sleeves', label: 'Sleeve' },
+      { sw: 'blanket_swaps', inv: 'blankets', label: 'Blanket' },
+      { sw: 'mack_swaps', inv: 'macks', label: 'MACK' },
+      { sw: 'hv_tester_swaps', inv: 'hv_testers', label: 'HV Tester' },
+      { sw: 'phasing_set_swaps', inv: 'phasing_sets', label: 'Phasing Set' },
+      { sw: 'aed_swaps', inv: 'aed', label: 'AED' },
+      { sw: 'ground_swaps', inv: 'grounds', label: 'Ground' },
+      { sw: 'hot_stick_swaps', inv: 'hot_sticks', label: 'Hot Stick' }
     ];
     const seenSwapKeys = new Set();
 
-    swapSheets.forEach(swKey => {
-      const swTable = this.db ? this.db.getTable(swKey) : null;
+    swapSheets.forEach(cfg => {
+      // A. Manual picks registry (contains real-time delivered swaps in desktop app)
+      const mpRegistry = {};
+      if (this.db && typeof this.db.getManualPicks === 'function') {
+        Object.assign(mpRegistry, this.db.getManualPicks(cfg.sw) || {});
+      }
+      if (this.db && this.db.snapshot && this.db.snapshot.manualPicks && this.db.snapshot.manualPicks[cfg.sw]) {
+        Object.assign(mpRegistry, this.db.snapshot.manualPicks[cfg.sw]);
+      }
+
+      Object.keys(mpRegistry).forEach(mpKey => {
+        if (!mpKey.includes('|')) return;
+        const entry = mpRegistry[mpKey];
+        if (entry && String(entry.status || '').includes('Delivered')) {
+          const empClean = String(entry.empName || '').trim();
+          const empInfo = empMap[empClean.toLowerCase()] || {};
+          const invTable = invLookup[cfg.inv] || {};
+          const newInvItem = invTable[entry.pickListNum] || {};
+
+          let rawDate = newInvItem['Date Assigned'] || (entry.timestamp ? entry.timestamp.substring(0, 10) : '');
+          const dKey = this.normalizeDateKey(rawDate);
+          if (daysMap[dKey]) {
+            const dedupe = `${cfg.label}_${empClean}_${entry.pickListNum}_${entry.currentItemNum}`.toLowerCase();
+            if (!seenSwapKeys.has(dedupe)) {
+              seenSwapKeys.add(dedupe);
+              const swapObj = {
+                type: `${cfg.label} Swap`,
+                label: cfg.label,
+                employee: empClean,
+                oldItem: entry.currentItemNum || '',
+                newItem: entry.pickListNum || '',
+                size: newInvItem['Size'] || '',
+                itemClass: newInvItem['Class'] || '',
+                kv: newInvItem['KV'] || '',
+                model: newInvItem['Model'] || '',
+                length: newInvItem['Length'] || '',
+                location: newInvItem['Location'] || empInfo.loc || 'Helena',
+                crew: empInfo.crew || '',
+                status: 'Delivered'
+              };
+
+              // Try to attach to a matching field visit location on that day
+              let attached = false;
+              const dayLocKeys = Object.keys(daysMap[dKey].locations);
+              for (const lKey of dayLocKeys) {
+                const locObj = daysMap[dKey].locations[lKey];
+                const locNameClean = lKey.toLowerCase();
+                const swapLocClean = swapObj.location.toLowerCase();
+                const swapSigCrew = this.getSignificantJobNumber(swapObj.crew);
+                const locCrewsSig = (locObj.crews || []).map(c => this.getSignificantJobNumber(c));
+
+                const matchesLocation = (swapLocClean === locNameClean || swapLocClean.includes(locNameClean) || locNameClean.includes(swapLocClean));
+                const matchesCrew = Boolean(swapSigCrew && locCrewsSig.includes(swapSigCrew));
+
+                if (matchesLocation || matchesCrew) {
+                  locObj.swaps.push(swapObj);
+                  attached = true;
+                  break;
+                }
+              }
+
+              if (!attached) {
+                daysMap[dKey].tasks.push(swapObj);
+              }
+            }
+          }
+        }
+      });
+
+      // B. Swap sheet rows (for swaps tracked directly in table rows)
+      const swTable = this.db ? this.db.getTable(cfg.sw) : null;
       if (swTable && swTable.rows) {
         swTable.rows.forEach(r => {
           const status = String(r['Status'] || r['Stage'] || '').toLowerCase();
@@ -199,18 +311,47 @@ class TimeBreakdownEngine {
             const rawDate = dateChanged || r['Stage 3 Date'] || r['Stage 2 Date'] || r['Date'];
             const dKey = this.normalizeDateKey(rawDate);
             if (daysMap[dKey]) {
-              const emp = r['Employee'] || r['Assigned To'] || 'Worker';
-              const item = r['Item #'] || r['Item#'] || r['Serial #'] || r['Current Glove #'] || r['Current Sleeve #'] || r['Pick List Item #'] || '';
-              const dedupeKey = `${swKey}_${emp}_${item}`.toLowerCase();
-              if (!seenSwapKeys.has(dedupeKey)) {
-                seenSwapKeys.add(dedupeKey);
-                daysMap[dKey].tasks.push({
-                  type: this.cleanSwapSheetName(swKey),
-                  item: item,
-                  employee: emp,
-                  job: r['Job Number'] || r['Job #'] || r['Crew'] || '',
+              const empClean = String(r['Employee'] || r['Assigned To'] || 'Worker').trim();
+              const oldItem = String(r['Current Glove #'] || r['Current Sleeve #'] || r['Current Item #'] || r['Item #'] || '').trim();
+              const newItem = String(r['Pick List Glove #'] || r['Pick List Sleeve #'] || r['Pick List Item #'] || '').trim();
+              const dedupe = `${cfg.label}_${empClean}_${newItem}_${oldItem}`.toLowerCase();
+              if (!seenSwapKeys.has(dedupe)) {
+                seenSwapKeys.add(dedupe);
+                const empInfo = empMap[empClean.toLowerCase()] || {};
+                const swapObj = {
+                  type: `${cfg.label} Swap`,
+                  label: cfg.label,
+                  employee: empClean,
+                  oldItem: oldItem,
+                  newItem: newItem,
+                  size: r['Size'] || '',
+                  itemClass: r['Class'] || '',
+                  kv: r['KV'] || '',
+                  model: r['Model'] || '',
+                  length: r['Length'] || '',
+                  location: r['Location'] || empInfo.loc || 'Helena',
+                  crew: r['Job Number'] || r['Job #'] || empInfo.crew || '',
                   status: 'Delivered'
-                });
+                };
+
+                let attached = false;
+                for (const lKey of Object.keys(daysMap[dKey].locations)) {
+                  const locObj = daysMap[dKey].locations[lKey];
+                  const locNameClean = lKey.toLowerCase();
+                  const swapLocClean = swapObj.location.toLowerCase();
+                  const swapSigCrew = this.getSignificantJobNumber(swapObj.crew);
+                  const locCrewsSig = (locObj.crews || []).map(c => this.getSignificantJobNumber(c));
+
+                  if (swapLocClean === locNameClean || swapLocClean.includes(locNameClean) || locNameClean.includes(swapLocClean) || (swapSigCrew && locCrewsSig.includes(swapSigCrew))) {
+                    locObj.swaps.push(swapObj);
+                    attached = true;
+                    break;
+                  }
+                }
+
+                if (!attached) {
+                  daysMap[dKey].tasks.push(swapObj);
+                }
               }
             }
           }
@@ -218,7 +359,7 @@ class TimeBreakdownEngine {
       }
     });
 
-    // 4. Collect Completed Tasks from task_metadata
+    // 5. Collect Completed Tasks from task_metadata
     if (metaTable && metaTable.rows) {
       metaTable.rows.forEach(r => {
         const status = String(r['Status'] || '').toLowerCase();
@@ -245,7 +386,31 @@ class TimeBreakdownEngine {
       });
     }
 
-    // 5. Collect Completed Monthly Trainings from training_tracking
+    // 6. Enrich planned trip locations with active crews from job_tracking if empty
+    const jobTable = this.db ? this.db.getTable('job_tracking') : null;
+    if (jobTable && jobTable.rows) {
+      Object.keys(daysMap).forEach(dKey => {
+        const locs = daysMap[dKey].locations;
+        Object.keys(locs).forEach(lKey => {
+          if (locs[lKey].crews.length === 0) {
+            const matchedCrews = jobTable.rows
+              .filter(jr => {
+                const jLoc = String(jr['Location'] || '').toLowerCase().trim();
+                const jStat = String(jr['Status'] || jr['Job Status'] || '').toLowerCase().trim();
+                return jLoc === lKey.toLowerCase() && (jStat === 'active' || !jStat);
+              })
+              .map(jr => {
+                const jNum = this.getSignificantJobNumber(jr['Job Number'] || jr['Job #'] || jr['Crew']);
+                const foreman = String(jr['Foreman'] || jr['Crew Lead'] || jr['Lead'] || '').trim();
+                return `Crew ${jNum}${foreman ? ' (' + foreman + ')' : ''}`;
+              });
+            locs[lKey].crews = [...new Set(matchedCrews)];
+          }
+        });
+      });
+    }
+
+    // 7. Collect Completed Monthly Trainings from training_tracking
     if (trainTable && trainTable.rows) {
       trainTable.rows.forEach(tr => {
         const status = String(tr['Status'] || tr['Training Status'] || '').toLowerCase();
@@ -259,7 +424,7 @@ class TimeBreakdownEngine {
       });
     }
 
-    // 6. Collect Completed DOT Drug Tests from dot_drug_tests
+    // 8. Collect Completed DOT Drug Tests from dot_drug_tests
     if (drugTestTable && drugTestTable.rows) {
       drugTestTable.rows.forEach(dt => {
         const status = String(dt['Status'] || dt[14] || '').toLowerCase();
@@ -290,7 +455,7 @@ class TimeBreakdownEngine {
     lines.push(`=======================================================\n`);
 
     let totalTrips = 0;
-    let totalCompletedTasks = 0;
+    let totalSwaps = 0;
     let totalClasses = 0;
     let totalOfficeTasks = 0;
     let totalTrainings = 0;
@@ -307,20 +472,42 @@ class TimeBreakdownEngine {
       const hasDrugTests = day.drugTests && day.drugTests.length > 0;
       const hasLocations = locKeys.length > 0;
 
-      const hasContent = hasLocations || hasClasses || hasOffice || hasTasks || hasTrainings || hasDrugTests;
+      let locSwapsCount = 0;
+      locKeys.forEach(lk => {
+        if (day.locations[lk].swaps) locSwapsCount += day.locations[lk].swaps.length;
+      });
+
+      const hasContent = hasLocations || hasClasses || hasOffice || hasTasks || hasTrainings || hasDrugTests || locSwapsCount > 0;
       if (!hasContent) return;
 
       daysWithContent++;
       lines.push(`📅 ${dayName}`);
       lines.push(`-------------------------------------------------------`);
 
-      // Locations & Travel (Drive times removed per user request)
+      // Locations & Field Visits with associated equipment swaps
       if (hasLocations) {
         locKeys.forEach(locKey => {
           totalTrips++;
           const loc = day.locations[locKey];
-          const crewStr = (loc.crews && loc.crews.filter(Boolean).length > 0) ? ` (Crews: ${loc.crews.filter(Boolean).join(', ')})` : '';
+          const crewStr = (loc.crews && loc.crews.filter(Boolean).length > 0) ? ` [${loc.crews.filter(Boolean).join(', ')}]` : '';
           lines.push(`  🚗 Field Visit: ${loc.name}${crewStr}`);
+
+          if (loc.swaps && loc.swaps.length > 0) {
+            lines.push(`     • Completed Equipment Swaps (${loc.swaps.length}):`);
+            loc.swaps.forEach(sw => {
+              totalSwaps++;
+              const crewTag = sw.crew ? ` (Crew ${this.getSignificantJobNumber(sw.crew)})` : '';
+              const specParts = [];
+              if (sw.size) specParts.push(`Size ${sw.size}`);
+              if (sw.itemClass) specParts.push(`Class ${sw.itemClass}`);
+              if (sw.kv) specParts.push(`${sw.kv} kV`);
+              if (sw.model) specParts.push(`Model ${sw.model}`);
+              if (sw.length) specParts.push(`${sw.length}`);
+              const specs = specParts.join(', ');
+              const swapDetails = sw.oldItem ? `#${sw.oldItem} ➔ #${sw.newItem}` : `#${sw.newItem}`;
+              lines.push(`       - ${sw.employee}${crewTag}: ${sw.label} ${swapDetails}${specs ? ' (' + specs + ')' : ''}`);
+            });
+          }
         });
       }
 
@@ -350,16 +537,31 @@ class TimeBreakdownEngine {
         });
       }
 
-      // Completed Equipment Swaps & Tasks
+      // Other Completed Equipment Swaps & Tasks (not tied to a specific field visit location)
       if (hasTasks) {
-        lines.push(`  🔧 Completed Equipment Swaps & Tasks (${day.tasks.length}):`);
+        lines.push(`  🔧 Other Completed Equipment Swaps & Tasks (${day.tasks.length}):`);
         day.tasks.forEach(t => {
-          totalCompletedTasks++;
+          totalSwaps++;
           const emp = t.employee || t['Assigned To'] || t['Employee'] || 'Unassigned';
-          const type = t.type || t['Task Type'] || t['Type'] || 'Task';
-          const desc = t.item || t['Description'] || t['Item'] || '';
-          const job = t.job || t['Job Number'] || t['Job #'] || '';
-          lines.push(`     • ${type}${desc ? ': ' + desc : ''} (${emp}${job ? ' · Job ' + job : ''})`);
+          const type = t.label ? `${t.label} Swap` : (t.type || t['Task Type'] || t['Type'] || 'Task');
+          const crewTag = t.crew ? ` (Crew ${this.getSignificantJobNumber(t.crew)})` : (t.job ? ` (Job ${t.job})` : '');
+          
+          let swapDetails = '';
+          if (t.oldItem || t.newItem) {
+            swapDetails = t.oldItem ? `#${t.oldItem} ➔ #${t.newItem}` : `#${t.newItem}`;
+          } else {
+            swapDetails = t.item || t['Description'] || t['Item'] || '';
+          }
+
+          const specParts = [];
+          if (t.size) specParts.push(`Size ${t.size}`);
+          if (t.itemClass) specParts.push(`Class ${t.itemClass}`);
+          if (t.kv) specParts.push(`${t.kv} kV`);
+          if (t.model) specParts.push(`Model ${t.model}`);
+          if (t.length) specParts.push(`${t.length}`);
+          const specs = specParts.join(', ');
+
+          lines.push(`     • ${emp}${crewTag}: ${type} ${swapDetails}${specs ? ' (' + specs + ')' : ''}`);
         });
       }
 
@@ -395,10 +597,10 @@ class TimeBreakdownEngine {
     }
 
     const summaryParts = [];
-    if (totalTrips > 0) summaryParts.push(`${totalTrips} Field Location Visits`);
+    if (totalTrips > 0) summaryParts.push(`${totalTrips} Field Visits`);
+    if (totalSwaps > 0) summaryParts.push(`${totalSwaps} Equipment Swaps`);
     if (totalClasses > 0) summaryParts.push(`${totalClasses} Classes Taught`);
     if (totalOfficeTasks > 0) summaryParts.push(`${totalOfficeTasks} Office Tasks`);
-    if (totalCompletedTasks > 0) summaryParts.push(`${totalCompletedTasks} Equipment Swaps`);
     if (totalTrainings > 0) summaryParts.push(`${totalTrainings} Trainings`);
     if (totalDrugTests > 0) summaryParts.push(`${totalDrugTests} Drug Tests`);
 
