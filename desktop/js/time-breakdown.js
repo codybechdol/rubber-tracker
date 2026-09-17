@@ -83,18 +83,50 @@ class TimeBreakdownEngine {
     return `${yyyy}-${mm}-${dd}`;
   }
 
+  normalizeDateKey(rawDate) {
+    if (!rawDate) return '';
+    if (rawDate instanceof Date) return this.formatDateKey(rawDate);
+    const str = String(rawDate).trim();
+    if (!str) return '';
+    if (/^\d{4}-\d{2}-\d{2}/.test(str)) return str.substring(0, 10);
+    const slashParts = str.split('/');
+    if (slashParts.length === 3) {
+      const mm = slashParts[0].padStart(2, '0');
+      const dd = slashParts[1].padStart(2, '0');
+      let yyyy = slashParts[2].split(' ')[0].trim();
+      if (yyyy.length === 2) yyyy = '20' + yyyy;
+      return `${yyyy}-${mm}-${dd}`;
+    }
+    const parsed = new Date(str);
+    return isNaN(parsed.getTime()) ? '' : this.formatDateKey(parsed);
+  }
+
+  cleanSwapSheetName(key) {
+    const map = {
+      'glove_swaps': 'Glove Swap',
+      'sleeve_swaps': 'Sleeve Swap',
+      'blanket_swaps': 'Blanket Swap',
+      'mack_swaps': 'MACK Swap',
+      'hv_tester_swaps': 'HV Tester Swap',
+      'phasing_set_swaps': 'Phasing Set Swap',
+      'aed_swaps': 'AED Swap',
+      'ground_swaps': 'Ground Swap',
+      'hot_stick_swaps': 'Hot Stick Swap'
+    };
+    return map[key] || key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+  }
+
   /**
    * Collects all completed tasks, trips, and trainings in the date range.
    */
   collectAccomplishments() {
-    const tasksTable = this.db.getTable('tasks');
-    const trips = this.db.getPlannedTrips() || {};
-    const trainTable = this.db.getTable('training_tracking');
+    const trips = (this.db && typeof this.db.getPlannedTrips === 'function') ? (this.db.getPlannedTrips() || {}) : {};
+    const manualTasks = (this.db && typeof this.db.getManualTasks === 'function') ? (this.db.getManualTasks() || []) : [];
+    const metaTable = this.db ? this.db.getTable('task_metadata') : null;
+    const trainTable = this.db ? this.db.getTable('training_tracking') : null;
+    const drugTestTable = this.db ? this.db.getTable('dot_drug_tests') : null;
 
-    // Town drive time lookup
-    const townTimes = (window.tripPlanner && window.tripPlanner.masterLocations) ? window.tripPlanner.masterLocations : {};
-
-    // Group items by dateKey
+    // Group items by dateKey (YYYY-MM-DD)
     const daysMap = {};
 
     // Iterate through all days in range
@@ -107,23 +139,22 @@ class TimeBreakdownEngine {
         locations: {},
         tasks: [],
         trainings: [],
-        officeTasks: []
+        classes: [],
+        officeTasks: [],
+        drugTests: []
       };
       cur.setDate(cur.getDate() + 1);
     }
 
-    // Collect trips planned
+    // 1. Collect Trips Planned (Field Visits) - NO drive times stored or needed
     Object.keys(trips).forEach(dKey => {
       if (daysMap[dKey]) {
         const tripEntries = Array.isArray(trips[dKey]) ? trips[dKey] : [trips[dKey]];
         tripEntries.forEach(t => {
           if (!t || !t.location) return;
           if (!daysMap[dKey].locations[t.location]) {
-            const locMeta = townTimes[t.location] || { time: '0m', mins: 0 };
             daysMap[dKey].locations[t.location] = {
               name: t.location,
-              driveTime: locMeta.time,
-              driveMins: locMeta.mins,
               crews: []
             };
           }
@@ -134,34 +165,110 @@ class TimeBreakdownEngine {
       }
     });
 
-    // Collect completed tasks
-    if (tasksTable && tasksTable.rows) {
-      tasksTable.rows.forEach(t => {
-        const status = String(t['Status'] || '').toLowerCase();
-        if (status !== 'completed' && status !== 'complete') return;
+    // 2. Collect Checked-off Manual Tasks from Trip Planner (Classes & Office Tasks)
+    manualTasks.forEach(t => {
+      const isComplete = String(t.status || '').toLowerCase() === 'complete';
+      if (!isComplete) return;
 
-        const dateDone = String(t['Date Completed'] || t['Date Changed'] || t['Completed Date'] || '').trim();
-        if (!dateDone) return;
+      const dKey = t.dateKey || t.date || this.normalizeDateKey(t.completedAt);
+      if (daysMap[dKey]) {
+        const isCert = (t.taskCategory === 'cert_class' || !!t.certType);
+        if (isCert) {
+          daysMap[dKey].classes.push(t);
+        } else {
+          daysMap[dKey].officeTasks.push(t);
+        }
+      }
+    });
 
-        const dKey = dateDone.substring(0, 10);
+    // 3. Collect Completed Equipment Swaps from Swap Sheets
+    const swapSheets = [
+      'glove_swaps', 'sleeve_swaps', 'blanket_swaps', 'mack_swaps',
+      'hv_tester_swaps', 'phasing_set_swaps', 'aed_swaps', 'ground_swaps', 'hot_stick_swaps'
+    ];
+    const seenSwapKeys = new Set();
+
+    swapSheets.forEach(swKey => {
+      const swTable = this.db ? this.db.getTable(swKey) : null;
+      if (swTable && swTable.rows) {
+        swTable.rows.forEach(r => {
+          const status = String(r['Status'] || r['Stage'] || '').toLowerCase();
+          const dateChanged = String(r['Date Changed'] || r['Delivered Date'] || r['Completed Date'] || '').trim();
+
+          if (dateChanged || status.includes('delivered') || status === 'complete' || status === 'resolved') {
+            const rawDate = dateChanged || r['Stage 3 Date'] || r['Stage 2 Date'] || r['Date'];
+            const dKey = this.normalizeDateKey(rawDate);
+            if (daysMap[dKey]) {
+              const emp = r['Employee'] || r['Assigned To'] || 'Worker';
+              const item = r['Item #'] || r['Item#'] || r['Serial #'] || r['Current Glove #'] || r['Current Sleeve #'] || r['Pick List Item #'] || '';
+              const dedupeKey = `${swKey}_${emp}_${item}`.toLowerCase();
+              if (!seenSwapKeys.has(dedupeKey)) {
+                seenSwapKeys.add(dedupeKey);
+                daysMap[dKey].tasks.push({
+                  type: this.cleanSwapSheetName(swKey),
+                  item: item,
+                  employee: emp,
+                  job: r['Job Number'] || r['Job #'] || r['Crew'] || '',
+                  status: 'Delivered'
+                });
+              }
+            }
+          }
+        });
+      }
+    });
+
+    // 4. Collect Completed Tasks from task_metadata
+    if (metaTable && metaTable.rows) {
+      metaTable.rows.forEach(r => {
+        const status = String(r['Status'] || '').toLowerCase();
+        if (status !== 'complete' && status !== 'resolved') return;
+
+        const rawDate = r['CompletedDate'] || r['Completed Date'] || r['LastModified'] || r['DueDate'];
+        const dKey = this.normalizeDateKey(rawDate);
         if (daysMap[dKey]) {
-          daysMap[dKey].tasks.push(t);
+          const emp = r['Employee'] || 'Unassigned';
+          const type = r['TaskType'] || r['Type'] || 'Task';
+          const item = r['CurrentItem'] || r['ItemType'] || '';
+          const dedupeKey = `${type}_${emp}_${item}`.toLowerCase();
+          if (!seenSwapKeys.has(dedupeKey)) {
+            seenSwapKeys.add(dedupeKey);
+            daysMap[dKey].tasks.push({
+              type: type,
+              item: item,
+              employee: emp,
+              job: r['Job Number'] || r['Job #'] || '',
+              status: 'Complete'
+            });
+          }
         }
       });
     }
 
-    // Collect completed trainings
+    // 5. Collect Completed Monthly Trainings from training_tracking
     if (trainTable && trainTable.rows) {
       trainTable.rows.forEach(tr => {
-        const status = String(tr['Status'] || '').toLowerCase();
-        if (status !== 'completed' && status !== 'complete') return;
+        const status = String(tr['Status'] || tr['Training Status'] || '').toLowerCase();
+        if (status !== 'complete') return;
 
-        const dateDone = String(tr['Date Completed'] || tr['Date'] || '').trim();
-        if (!dateDone) return;
-
-        const dKey = dateDone.substring(0, 10);
+        const rawDate = tr['Completion Date'] || tr['Date Completed'] || tr['Date'] || tr['Date Done'];
+        const dKey = this.normalizeDateKey(rawDate);
         if (daysMap[dKey]) {
           daysMap[dKey].trainings.push(tr);
+        }
+      });
+    }
+
+    // 6. Collect Completed DOT Drug Tests from dot_drug_tests
+    if (drugTestTable && drugTestTable.rows) {
+      drugTestTable.rows.forEach(dt => {
+        const status = String(dt['Status'] || dt[14] || '').toLowerCase();
+        if (!status.includes('complete') && !status.includes('done')) return;
+
+        const rawDate = dt['Date Completed'] || dt['Scheduled Date'];
+        const dKey = this.normalizeDateKey(rawDate);
+        if (daysMap[dKey]) {
+          daysMap[dKey].drugTests.push(dt);
         }
       });
     }
@@ -184,59 +291,119 @@ class TimeBreakdownEngine {
 
     let totalTrips = 0;
     let totalCompletedTasks = 0;
+    let totalClasses = 0;
+    let totalOfficeTasks = 0;
+    let totalTrainings = 0;
+    let totalDrugTests = 0;
+    let daysWithContent = 0;
 
     days.forEach(day => {
       const dayName = day.date.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' });
       const locKeys = Object.keys(day.locations);
-      const hasContent = locKeys.length > 0 || day.tasks.length > 0 || day.trainings.length > 0;
+      const hasClasses = day.classes && day.classes.length > 0;
+      const hasOffice = day.officeTasks && day.officeTasks.length > 0;
+      const hasTasks = day.tasks && day.tasks.length > 0;
+      const hasTrainings = day.trainings && day.trainings.length > 0;
+      const hasDrugTests = day.drugTests && day.drugTests.length > 0;
+      const hasLocations = locKeys.length > 0;
 
+      const hasContent = hasLocations || hasClasses || hasOffice || hasTasks || hasTrainings || hasDrugTests;
       if (!hasContent) return;
 
+      daysWithContent++;
       lines.push(`📅 ${dayName}`);
       lines.push(`-------------------------------------------------------`);
 
-      // Locations & Travel
-      if (locKeys.length > 0) {
+      // Locations & Travel (Drive times removed per user request)
+      if (hasLocations) {
         locKeys.forEach(locKey => {
           totalTrips++;
           const loc = day.locations[locKey];
-          const crewStr = loc.crews.length > 0 ? ` (Crews: ${loc.crews.join(', ')})` : '';
+          const crewStr = (loc.crews && loc.crews.filter(Boolean).length > 0) ? ` (Crews: ${loc.crews.filter(Boolean).join(', ')})` : '';
           lines.push(`  🚗 Field Visit: ${loc.name}${crewStr}`);
-          if (loc.driveTime && loc.driveTime !== '0m') {
-            lines.push(`     • Drive Time: ${loc.driveTime} one-way (~${Math.round((loc.driveMins * 2) / 60 * 10) / 10}h round-trip)`);
-          }
         });
       }
 
-      // Completed Tasks / Swaps
-      if (day.tasks.length > 0) {
+      // Completed Classes Taught
+      if (hasClasses) {
+        lines.push(`  🎓 Training Classes Taught (${day.classes.length}):`);
+        day.classes.forEach(c => {
+          totalClasses++;
+          const loc = c.location ? ` [${c.location}]` : '';
+          const time = c.time ? ` (${c.time})` : '';
+          const crew = (c.crewIds && c.crewIds.length > 0) ? ` · Crew: ${c.crewIds.join(', ')}` : (c.crewId ? ` · Crew: ${c.crewId}` : '');
+          const attCount = (c.assignedEmployees && c.assignedEmployees.length) || (c.employee ? 1 : 0);
+          const attStr = attCount > 0 ? ` · Attendees (${attCount}): ${(c.assignedEmployees || [c.employee]).join(', ')}` : '';
+          lines.push(`     • ${c.title}${loc}${time}${crew}${attStr}`);
+        });
+      }
+
+      // Completed Personal / Office / Safety Admin Tasks
+      if (hasOffice) {
+        lines.push(`  💼 Completed Office & Safety Tasks (${day.officeTasks.length}):`);
+        day.officeTasks.forEach(ot => {
+          totalOfficeTasks++;
+          const loc = (ot.location && ot.location !== 'Helena Office') ? ` [${ot.location}]` : '';
+          const time = ot.time ? ` (${ot.time})` : '';
+          const notes = ot.notes ? ` · ${ot.notes}` : '';
+          lines.push(`     • ${ot.title}${loc}${time}${notes}`);
+        });
+      }
+
+      // Completed Equipment Swaps & Tasks
+      if (hasTasks) {
         lines.push(`  🔧 Completed Equipment Swaps & Tasks (${day.tasks.length}):`);
         day.tasks.forEach(t => {
           totalCompletedTasks++;
-          const emp = t['Assigned To'] || t['Employee'] || 'Unassigned';
-          const type = t['Task Type'] || t['Type'] || 'Task';
-          const desc = t['Description'] || t['Item'] || '';
-          const job = t['Job Number'] || t['Job #'] || '';
-          lines.push(`     • ${type}: ${desc} (${emp}${job ? ' - Job ' + job : ''})`);
+          const emp = t.employee || t['Assigned To'] || t['Employee'] || 'Unassigned';
+          const type = t.type || t['Task Type'] || t['Type'] || 'Task';
+          const desc = t.item || t['Description'] || t['Item'] || '';
+          const job = t.job || t['Job Number'] || t['Job #'] || '';
+          lines.push(`     • ${type}${desc ? ': ' + desc : ''} (${emp}${job ? ' · Job ' + job : ''})`);
         });
       }
 
-      // Completed Trainings
-      if (day.trainings.length > 0) {
-        lines.push(`  🎓 Completed Training & Meetings (${day.trainings.length}):`);
+      // Completed Monthly Safety Trainings
+      if (hasTrainings) {
+        lines.push(`  📚 Monthly Safety Training Records (${day.trainings.length}):`);
         day.trainings.forEach(tr => {
-          const topic = tr['Topic'] || tr['Training'] || 'Safety Training';
-          const crew = tr['Crew'] || tr['Job #'] || '';
-          const lead = tr['Lead'] || tr['Foreman'] || '';
-          lines.push(`     • ${topic} - Crew ${crew} (Lead: ${lead})`);
+          totalTrainings++;
+          const topic = tr['Training Topic'] || tr['Topic'] || tr['Training'] || 'Safety Training';
+          const crew = tr['Crew #'] || tr['Crew'] || tr['Job #'] || '';
+          const lead = tr['Crew Lead'] || tr['Lead'] || tr['Foreman'] || '';
+          lines.push(`     • ${topic}${crew ? ' · Crew ' + crew : ''}${lead ? ' (Lead: ' + lead + ')' : ''}`);
+        });
+      }
+
+      // Completed DOT Drug Tests
+      if (hasDrugTests) {
+        lines.push(`  🧪 Completed DOT Drug Tests (${day.drugTests.length}):`);
+        day.drugTests.forEach(dt => {
+          totalDrugTests++;
+          const emp = dt['Employee Name'] || dt['Name'] || 'Worker';
+          const testType = dt['Test Type'] || 'Drug Test';
+          const clinic = dt['Clinic Name'] || dt['Collection Type'] || '';
+          lines.push(`     • ${emp} · ${testType}${clinic ? ' (' + clinic + ')' : ''}`);
         });
       }
 
       lines.push('');
     });
 
+    if (daysWithContent === 0) {
+      return 'No completed tasks, field visits, or trainings recorded for the selected period.';
+    }
+
+    const summaryParts = [];
+    if (totalTrips > 0) summaryParts.push(`${totalTrips} Field Location Visits`);
+    if (totalClasses > 0) summaryParts.push(`${totalClasses} Classes Taught`);
+    if (totalOfficeTasks > 0) summaryParts.push(`${totalOfficeTasks} Office Tasks`);
+    if (totalCompletedTasks > 0) summaryParts.push(`${totalCompletedTasks} Equipment Swaps`);
+    if (totalTrainings > 0) summaryParts.push(`${totalTrainings} Trainings`);
+    if (totalDrugTests > 0) summaryParts.push(`${totalDrugTests} Drug Tests`);
+
     lines.push(`=======================================================`);
-    lines.push(`SUMMARY: ${totalTrips} Field Location Visits | ${totalCompletedTasks} Equipment Swaps Completed`);
+    lines.push(`SUMMARY: ${summaryParts.join(' | ') || '0 Accomplishments'}`);
     lines.push(`=======================================================`);
 
     return lines.join('\n');

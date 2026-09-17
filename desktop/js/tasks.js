@@ -1316,6 +1316,12 @@ class TaskManagerApp {
 
     this.renderTasks();
     if (window.tripPlanner) window.tripPlanner.renderPlanner();
+    if (window.timeBreakdownEngine) {
+      const tbModal = document.getElementById('time-breakdown-modal');
+      if (tbModal && tbModal.style.display !== 'none') {
+        window.timeBreakdownEngine.renderModal();
+      }
+    }
   }
 
   deleteTask(taskId, sourceSheet = '') {

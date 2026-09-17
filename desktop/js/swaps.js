@@ -2553,6 +2553,12 @@ class SwapGenerationEngine {
     }
 
     if (window.sheetNavigator) window.sheetNavigator.renderActiveView();
+    if (window.timeBreakdownEngine) {
+      const tbModal = document.getElementById('time-breakdown-modal');
+      if (tbModal && tbModal.style.display !== 'none') {
+        window.timeBreakdownEngine.renderModal();
+      }
+    }
   }
 
   async queueRowMutations(tableKey, rowObj) {

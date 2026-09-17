@@ -1799,6 +1799,7 @@ class TripPlannerApp {
       task.completedAt = willBeComplete ? new Date().toISOString() : null;
       this.saveManualTasks(this.manualTasks);
       this.renderPlanner();
+      this.notifyAccomplishmentsModal();
 
       if (isCert) {
         if (willBeComplete) {
@@ -1807,6 +1808,15 @@ class TripPlannerApp {
         } else {
           this.showToast('Class status set to Pending. (Existing cert records preserved).');
         }
+      }
+    }
+  }
+
+  notifyAccomplishmentsModal() {
+    if (window.timeBreakdownEngine) {
+      const tbModal = document.getElementById('time-breakdown-modal');
+      if (tbModal && tbModal.style.display !== 'none') {
+        window.timeBreakdownEngine.renderModal();
       }
     }
   }
@@ -2274,6 +2284,7 @@ class TripPlannerApp {
         : `↩ Set "${topic}" for Crew ${crewId} back to Scheduled.`);
 
       this.renderPlanner();
+      this.notifyAccomplishmentsModal();
     } catch (err) {
       console.error('Error updating monthly training:', err);
       this.showToast('Error updating training status: ' + (err.message || err), true);
@@ -2958,6 +2969,7 @@ class TripPlannerApp {
     this.showToast(`✅ Swap marked delivered for ${empName}. Inventory updated.`);
     this.renderPlanner();
     this.renderPickedSwapsList();
+    this.notifyAccomplishmentsModal();
   }
 
   removeTrip(dateKey, locationToRemove = null) {
@@ -3178,6 +3190,7 @@ class TripPlannerApp {
       }
     }
     this.renderPlanner();
+    this.notifyAccomplishmentsModal();
   }
 
   openHolidaysModal() {
