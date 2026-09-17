@@ -1494,8 +1494,12 @@ class InventoryManager {
             // Same-day tie-breaker: Active Lineman assignment takes precedence over shelf/storage entry
             const assignA = String(a['Assigned To'] || a['Employee Name'] || '').toLowerCase().trim();
             const assignB = String(b['Assigned To'] || b['Employee Name'] || '').toLowerCase().trim();
-            const isSpecialA = ['on shelf', 'shelf', 'in stock', 'storage', 'unassigned', ''].includes(assignA);
-            const isSpecialB = ['on shelf', 'shelf', 'in stock', 'storage', 'unassigned', ''].includes(assignB);
+            const noteA = String(a['Notes'] || a['Note'] || '').toLowerCase().trim();
+            const noteB = String(b['Notes'] || b['Note'] || '').toLowerCase().trim();
+            const hasEmpNoteA = noteA.includes('assigned to') && !noteA.includes('on shelf');
+            const hasEmpNoteB = noteB.includes('assigned to') && !noteB.includes('on shelf');
+            const isSpecialA = ['on shelf', 'shelf', 'in stock', 'storage', 'unassigned', ''].includes(assignA) && !hasEmpNoteA;
+            const isSpecialB = ['on shelf', 'shelf', 'in stock', 'storage', 'unassigned', ''].includes(assignB) && !hasEmpNoteB;
             if (!isSpecialA && isSpecialB) return 1;
             if (isSpecialA && !isSpecialB) return -1;
             return 0;
@@ -1514,6 +1518,25 @@ class InventoryManager {
           let assignedTo = String(latest['Assigned To'] || latest['Employee Name'] || latest['Employee'] || '').trim();
           let loc = String(latest['Location'] || '').trim();
           const notes = String(latest['Notes'] || latest['Note'] || '').trim();
+
+          // If assignedTo is empty or 'New' or 'Assigned' but notes explicitly specifies 'Assigned to [Name]', extract it!
+          if ((!assignedTo || assignedTo.toLowerCase() === 'new' || assignedTo.toLowerCase() === 'assigned') && notes) {
+            const assignMatch = notes.match(/assigned\s+to\s+([^(\n]+)/i);
+            if (assignMatch && assignMatch[1]) {
+              const parsedName = assignMatch[1].trim();
+              if (window.employeeResolver) {
+                const r = window.employeeResolver.resolve(parsedName);
+                if (r.match && !r.isStatus) {
+                  assignedTo = r.employeeName;
+                  loc = r.location || loc;
+                } else if (parsedName) {
+                  assignedTo = parsedName;
+                }
+              } else if (parsedName) {
+                assignedTo = parsedName;
+              }
+            }
+          }
 
           // Resolve employee name and location through resolver to prevent raw initials or mismatched cities
           if (window.employeeResolver) {

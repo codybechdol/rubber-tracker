@@ -2852,11 +2852,8 @@ class ItemStatsEngine {
     const status = String(itemRow['Status'] || '').trim();
 
     await this.db.recordItemHistoryEvent(
-      activeKey,
-      cleanItemKey,
-      assignedTo,
-      location,
-      dateAssigned,
+      activeTable.name || activeKey,
+      itemRow,
       notes || `Active status recorded to history (${status})`
     );
 

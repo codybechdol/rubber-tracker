@@ -2938,8 +2938,9 @@ class TripPlannerApp {
       }
     }
 
-    if (swRow && window.swapsManager && typeof window.swapsManager.handleDateChangedEdit === 'function') {
-      await window.swapsManager.handleDateChangedEdit(tableKey, swRow, todayStr);
+    const sm = window.swapEngine || window.swapsManager;
+    if (swRow && sm && typeof sm.handleDateChangedEdit === 'function') {
+      await sm.handleDateChangedEdit(tableKey, swRow, todayStr);
     }
 
     // Clean up from scheduledSwaps

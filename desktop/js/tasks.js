@@ -1292,13 +1292,14 @@ class TaskManagerApp {
           return (emp && emp === String(task.employee || '').trim().toLowerCase()) || (itm && itm === String(task.currentItem || '').trim().toLowerCase());
         });
         if (swRow) {
-          if (window.swapsManager && typeof window.swapsManager.handleDateChangedEdit === 'function') {
-            await window.swapsManager.handleDateChangedEdit(swKey, swRow, todayStr);
+          const sm = window.swapEngine || window.swapsManager;
+          if (sm && typeof sm.handleDateChangedEdit === 'function') {
+            await sm.handleDateChangedEdit(swKey, swRow, todayStr);
           } else {
             swRow['Status'] = 'Delivered ✅';
             swRow['Date Changed'] = todayStr;
-            if (window.swapsManager && typeof window.swapsManager.syncRowToRawGrid === 'function') {
-              window.swapsManager.syncRowToRawGrid(swTable, swRow);
+            if (sm && typeof sm.syncRowToRawGrid === 'function') {
+              sm.syncRowToRawGrid(swTable, swRow);
             }
           }
         }

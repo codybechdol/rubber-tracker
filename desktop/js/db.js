@@ -951,6 +951,37 @@ class LocalDatabase {
   }
 
   /**
+   * Synchronizes an in-memory row object's updated values into the table's rawGrid representation
+   */
+  syncRowToRawGrid(table, rowObj) {
+    if (!table || !table.rawGrid || !table.headers || !rowObj) return;
+    const rowIdx = rowObj._rowIdx || (table.rows ? table.rows.indexOf(rowObj) + 2 : null);
+    if (rowIdx && table.rawGrid[rowIdx - 1]) {
+      const gRow = table.rawGrid[rowIdx - 1];
+      table.headers.forEach((h, cIdx) => {
+        if (rowObj[h] !== undefined) gRow[cIdx] = rowObj[h];
+      });
+      return;
+    }
+
+    const keyProp = table.headers[0];
+    const keyVal = String(rowObj[keyProp] || Object.values(rowObj)[0] || '').trim().toLowerCase();
+    if (!keyVal) return;
+
+    for (let i = 1; i < table.rawGrid.length; i++) {
+      const gRow = table.rawGrid[i];
+      if (String(gRow[0] || '').trim().toLowerCase() === keyVal || String(gRow[1] || '').trim().toLowerCase() === keyVal) {
+        table.headers.forEach((h, colIdx) => {
+          if (rowObj[h] !== undefined) {
+            gRow[colIdx] = rowObj[h];
+          }
+        });
+        break;
+      }
+    }
+  }
+
+  /**
    * Records an item state transition event to the corresponding History table and syncs to Google Sheets
    */
   async recordItemHistoryEvent(sheetName, itemRow, reasonNote = '') {
@@ -1862,6 +1893,8 @@ class LocalDatabase {
                 }
 
                 if (invTable && invTable.rows) {
+                  const invSheetName = (invTable && invTable.name) ? invTable.name : (this.getSheetNameForTableKey(invKey) || invKey);
+
                   // 1. Pick list item -> Assigned
                   if (pickItemNum && pickItemNum !== '—' && pickItemNum !== '-') {
                     const pickRow = invTable.rows.find(r => {
@@ -1883,6 +1916,10 @@ class LocalDatabase {
                         months = empLoc.toLowerCase().includes('northern lights') ? 6 : 3;
                       }
                       pickRow['Change Out Date'] = addMonths(String(mut.value), months);
+                      this.syncRowToRawGrid(invTable, pickRow);
+                      if (!mut.skipHistory) {
+                        await this.recordItemHistoryEvent(invSheetName, pickRow, `Assigned to ${empName}`);
+                      }
                     }
                   }
 
@@ -1905,6 +1942,10 @@ class LocalDatabase {
                       let months = 12;
                       if (sheetNameLower.includes('glove')) months = 3;
                       oldRow['Change Out Date'] = addMonths(String(mut.value), months);
+                      this.syncRowToRawGrid(invTable, oldRow);
+                      if (!mut.skipHistory) {
+                        await this.recordItemHistoryEvent(invSheetName, oldRow, `Returned from ${empName} (Swap Completed)`);
+                      }
                     }
                   }
                 }

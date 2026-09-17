@@ -2655,4 +2655,4 @@ class SwapGenerationEngine {
   }
 }
 
-window.swapEngine = new SwapGenerationEngine(window.localDB);
+window.swapEngine = window.swapsManager = new SwapGenerationEngine(window.localDB);
