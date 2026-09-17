@@ -1759,7 +1759,7 @@ class ItemStatsEngine {
             </div>
             <div>
               <label style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 4px;">STATUS</label>
-              <select id="dossier-edit-status" class="form-control">
+              <select id="dossier-edit-status" class="form-control" onchange="window.itemStatsEngine.handleDossierStatusChange(this.value)">
                 <option value="On Shelf" ${curStatus.toLowerCase() === 'on shelf' ? 'selected' : ''}>On Shelf</option>
                 <option value="Assigned" ${curStatus.toLowerCase() === 'assigned' ? 'selected' : ''}>Assigned</option>
                 <option value="Ready For Delivery" ${curStatus.toLowerCase() === 'ready for delivery' ? 'selected' : ''}>Ready For Delivery</option>
@@ -2584,26 +2584,95 @@ class ItemStatsEngine {
   }
 
   /**
-   * Auto-adjusts status, location, and date assigned when an employee name is entered in the Dossier
+   * Auto-adjusts assigned to, location, and date assigned when a status is selected in the Dossier
+   */
+  handleDossierStatusChange(val) {
+    const trimmed = String(val || '').trim();
+    if (!trimmed) return;
+    const lower = trimmed.toLowerCase();
+    const assignedEl = document.getElementById('dossier-edit-assigned-to');
+    const locEl = document.getElementById('dossier-edit-location');
+    const dateEl = document.getElementById('dossier-edit-date-assigned');
+    const todayIso = new Date().toISOString().split('T')[0];
+
+    if (lower === 'in testing') {
+      if (assignedEl) assignedEl.value = 'In Testing';
+      if (locEl) locEl.value = 'Arnett / JM Test';
+      if (dateEl) dateEl.value = todayIso;
+    } else if (lower === 'on shelf') {
+      if (assignedEl) assignedEl.value = 'On Shelf';
+      if (locEl) locEl.value = 'Helena';
+      if (dateEl) dateEl.value = todayIso;
+    } else if (lower === 'ready for test') {
+      if (assignedEl) assignedEl.value = 'Packed For Testing';
+      if (locEl) locEl.value = "Cody's Truck";
+      if (dateEl) dateEl.value = todayIso;
+    } else if (lower === 'ready for delivery') {
+      if (assignedEl) assignedEl.value = 'Packed For Delivery';
+      if (locEl) locEl.value = "Cody's Truck";
+      if (dateEl) dateEl.value = todayIso;
+    } else if (lower === 'failed rubber') {
+      if (assignedEl) assignedEl.value = 'Failed Rubber';
+      if (locEl) locEl.value = 'Destroyed';
+      if (dateEl) dateEl.value = todayIso;
+    } else if (lower === 'lost') {
+      if (assignedEl) assignedEl.value = 'Lost';
+      if (locEl) locEl.value = 'Lost';
+      if (dateEl) dateEl.value = todayIso;
+    }
+  }
+
+  /**
+   * Auto-adjusts status, location, and date assigned when an employee name or status is entered in the Dossier
    */
   handleDossierAssignedToInput(val) {
     const trimmed = String(val || '').trim();
     if (!trimmed) return;
     const lower = trimmed.toLowerCase();
-    const nonEmpHolders = ['on shelf', 'in testing', 'packed for testing', 'packed for delivery', 'failed rubber', 'failed', 'lost', 'destroyed', 'new', 'unassigned', 'n/a', '—', '-'];
-    if (nonEmpHolders.includes(lower)) {
-      if (lower === 'on shelf') {
-        const statEl = document.getElementById('dossier-edit-status');
-        const locEl = document.getElementById('dossier-edit-location');
-        if (statEl) statEl.value = 'On Shelf';
-        if (locEl) locEl.value = 'Helena';
-      }
-      return;
-    }
-
     const statEl = document.getElementById('dossier-edit-status');
     const locEl = document.getElementById('dossier-edit-location');
     const dateEl = document.getElementById('dossier-edit-date-assigned');
+    const todayIso = new Date().toISOString().split('T')[0];
+
+    if (lower === 'in testing' || lower === 'testing' || lower === 'lab' || lower === 'arnett' || lower === 'jm test' || lower === 'arnett / jm test') {
+      if (statEl) statEl.value = 'In Testing';
+      if (locEl) locEl.value = 'Arnett / JM Test';
+      if (dateEl) dateEl.value = todayIso;
+      return;
+    }
+    if (lower === 'on shelf' || lower === 'shelf') {
+      if (statEl) statEl.value = 'On Shelf';
+      if (locEl) locEl.value = 'Helena';
+      if (dateEl) dateEl.value = todayIso;
+      return;
+    }
+    if (lower === 'packed for testing' || lower === 'ready for test') {
+      if (statEl) statEl.value = 'Ready For Test';
+      if (locEl) locEl.value = "Cody's Truck";
+      if (dateEl) dateEl.value = todayIso;
+      return;
+    }
+    if (lower === 'packed for delivery' || lower === 'ready for delivery') {
+      if (statEl) statEl.value = 'Ready For Delivery';
+      if (locEl) locEl.value = "Cody's Truck";
+      if (dateEl) dateEl.value = todayIso;
+      return;
+    }
+    if (lower === 'failed rubber' || lower === 'failed' || lower === 'destroyed') {
+      if (statEl) statEl.value = 'Failed Rubber';
+      if (locEl) locEl.value = 'Destroyed';
+      if (dateEl) dateEl.value = todayIso;
+      return;
+    }
+    if (lower === 'lost' || lower === 'missing') {
+      if (statEl) statEl.value = 'Lost';
+      if (locEl) locEl.value = 'Lost';
+      if (dateEl) dateEl.value = todayIso;
+      return;
+    }
+
+    const nonEmpHolders = ['new', 'unassigned', 'n/a', '—', '-'];
+    if (nonEmpHolders.includes(lower)) return;
 
     if (statEl) statEl.value = 'Assigned';
 
@@ -2617,8 +2686,8 @@ class ItemStatsEngine {
       }
     }
 
-    if (dateEl && !dateEl.value) {
-      dateEl.value = new Date().toISOString().split('T')[0];
+    if (dateEl) {
+      dateEl.value = todayIso;
     }
   }
 
@@ -2720,6 +2789,60 @@ class ItemStatsEngine {
       }
     }
 
+    const isInTesting = newStatus.toLowerCase() === 'in testing' || newAssignedTo.toLowerCase() === 'in testing';
+    if (isInTesting && !isFailedRubber && !isOnShelf) {
+      newStatus = 'In Testing';
+      newAssignedTo = 'In Testing';
+      if (!newLocation || newLocation === 'Helena' || newLocation === 'Belgrade') {
+        newLocation = 'Arnett / JM Test';
+      }
+      const today = new Date();
+      const todayFormatted = `${String(today.getMonth() + 1).padStart(2, '0')}/${String(today.getDate()).padStart(2, '0')}/${today.getFullYear()}`;
+      const prevDate = String(row['Date Assigned'] || '').trim();
+      const prevAssigned = String(row['Assigned To'] || '').trim().toLowerCase();
+      if (prevAssigned !== 'in testing' || newDateAssigned === prevDate || !newDateAssigned) {
+        newDateAssigned = todayFormatted;
+      }
+    }
+
+    const isPackedTesting = newStatus.toLowerCase() === 'ready for test' || newAssignedTo.toLowerCase() === 'packed for testing';
+    if (isPackedTesting && !isFailedRubber && !isOnShelf && !isInTesting) {
+      newStatus = 'Ready For Test';
+      newAssignedTo = 'Packed For Testing';
+      newLocation = "Cody's Truck";
+      const today = new Date();
+      const todayFormatted = `${String(today.getMonth() + 1).padStart(2, '0')}/${String(today.getDate()).padStart(2, '0')}/${today.getFullYear()}`;
+      const prevDate = String(row['Date Assigned'] || '').trim();
+      const prevAssigned = String(row['Assigned To'] || '').trim().toLowerCase();
+      if (prevAssigned !== 'packed for testing' || newDateAssigned === prevDate || !newDateAssigned) {
+        newDateAssigned = todayFormatted;
+      }
+    }
+
+    const isPackedDelivery = newStatus.toLowerCase() === 'ready for delivery' || newAssignedTo.toLowerCase() === 'packed for delivery';
+    if (isPackedDelivery && !isFailedRubber && !isOnShelf && !isInTesting && !isPackedTesting) {
+      newStatus = 'Ready For Delivery';
+      newAssignedTo = 'Packed For Delivery';
+      newLocation = "Cody's Truck";
+      const today = new Date();
+      const todayFormatted = `${String(today.getMonth() + 1).padStart(2, '0')}/${String(today.getDate()).padStart(2, '0')}/${today.getFullYear()}`;
+      const prevDate = String(row['Date Assigned'] || '').trim();
+      const prevAssigned = String(row['Assigned To'] || '').trim().toLowerCase();
+      if (prevAssigned !== 'packed for delivery' || newDateAssigned === prevDate || !newDateAssigned) {
+        newDateAssigned = todayFormatted;
+      }
+    }
+
+    const isLost = newStatus.toLowerCase() === 'lost' || newAssignedTo.toLowerCase() === 'lost';
+    if (isLost && !isFailedRubber && !isOnShelf && !isInTesting && !isPackedTesting && !isPackedDelivery) {
+      newStatus = 'Lost';
+      newAssignedTo = 'Lost';
+      newLocation = 'Lost';
+      const today = new Date();
+      const todayFormatted = `${String(today.getMonth() + 1).padStart(2, '0')}/${String(today.getDate()).padStart(2, '0')}/${today.getFullYear()}`;
+      newDateAssigned = todayFormatted;
+    }
+
     // Identify which header names exist on this sheet
     const testHeader = table.headers.find(h => /test\s*date|calibration|pad\s*exp/i.test(h)) || 'Test Date';
     let dateAssignedHeader = table.headers.find(h => /date\s*assigned/i.test(h)) || 'Date Assigned';
@@ -2732,7 +2855,7 @@ class ItemStatsEngine {
     const eslHeader = table.headers.find(h => /^esl\s*id$/i.test(h));
 
     // Calculate new Change Out Date
-    let newChgOut = isFailedRubber ? 'N/A' : '';
+    let newChgOut = (isFailedRubber || isLost) ? 'N/A' : '';
     if (!isFailedRubber && window.inventoryManager && typeof window.inventoryManager.calculateChangeOutDate === 'function') {
       newChgOut = window.inventoryManager.calculateChangeOutDate(
         newDateAssigned || newTestDate, newLocation, newAssignedTo, activeSheetKey, {
@@ -2799,7 +2922,21 @@ class ItemStatsEngine {
     }
 
     // Auto-record history transition if status/assigned changed
-    await this.db.recordItemHistoryEvent(sheetName, row, row['Notes'] || `Dates updated`);
+    let histNote = row['Notes'] || 'Dates updated';
+    if (newAssignedTo === 'In Testing') {
+      histNote = 'In Testing (Arnett / JM Test)';
+    } else if (newAssignedTo === 'On Shelf') {
+      histNote = 'Returned to Shelf';
+    } else if (newAssignedTo === 'Packed For Testing') {
+      histNote = "Packed For Testing (Cody's Truck)";
+    } else if (newAssignedTo === 'Packed For Delivery') {
+      histNote = "Packed For Delivery (Cody's Truck)";
+    } else if (newAssignedTo === 'Lost') {
+      histNote = 'Marked Lost / Missing';
+    } else if (newAssignedTo && !['new', 'unassigned', 'n/a'].includes(newAssignedTo.toLowerCase())) {
+      histNote = `Assigned to ${newAssignedTo}`;
+    }
+    await this.db.recordItemHistoryEvent(sheetName, row, histNote);
 
     // Persist snapshot to storage
     if (this.db.snapshot) {
@@ -2845,9 +2982,6 @@ class ItemStatsEngine {
       return;
     }
 
-    const assignedTo = String(itemRow['Assigned To'] || itemRow['Assigned to'] || itemRow['Status'] || '').trim();
-    const location = String(itemRow['Location'] || 'Helena').trim();
-    const dateAssigned = itemRow['Date Assigned'] || itemRow['Test Date'] || new Date();
     const notes = String(itemRow['Notes'] || '').trim();
     const status = String(itemRow['Status'] || '').trim();
 

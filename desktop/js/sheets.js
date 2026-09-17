@@ -3394,6 +3394,205 @@ class SheetNavigator {
             const nonEmpHolders = ['on shelf', 'in testing', 'packed for testing', 'packed for delivery', 'failed rubber', 'failed', 'lost', 'destroyed', 'new', 'unassigned', 'n/a', '—', '-'];
             const isAssignedToEmp = curAssigned && !nonEmpHolders.includes(curAssignedLower);
 
+            // In Testing (Lab)
+            const isInTesting = valLower === 'in testing' || valLower === 'testing' || valLower === 'lab' || valLower === 'arnett' || valLower === 'jm test' || valLower === 'arnett / jm test';
+            if ((isAssignedCol || isStatusCol) && isInTesting) {
+              const today = new Date();
+              const todayFormatted = `${String(today.getMonth() + 1).padStart(2, '0')}/${String(today.getDate()).padStart(2, '0')}/${today.getFullYear()}`;
+
+              const targetAssigned = 'In Testing';
+              const targetStatus = 'In Testing';
+              const targetLoc = 'Arnett / JM Test';
+              const targetDate = todayFormatted;
+
+              newVal = isAssignedCol ? targetAssigned : targetStatus;
+              targetCell.textContent = newVal;
+
+              if (tableRow) {
+                if (assignedColName) tableRow[assignedColName] = targetAssigned;
+                if (statusColName) tableRow[statusColName] = targetStatus;
+                if (locationColName) tableRow[locationColName] = targetLoc;
+                if (dateAssignedColName) tableRow[dateAssignedColName] = targetDate;
+                if (pickedColName) tableRow[pickedColName] = '';
+              }
+
+              // Recalculate Change Out Date
+              const curTestDate = testDateColName ? (tableRow[testDateColName] || '') : '';
+              let calculatedChgOut = '';
+              if (window.inventoryManager && typeof window.inventoryManager.calculateChangeOutDate === 'function') {
+                calculatedChgOut = window.inventoryManager.calculateChangeOutDate(
+                  targetDate || curTestDate,
+                  targetLoc,
+                  targetAssigned,
+                  this.currentSheetKey,
+                  { testDate: curTestDate, calibrationDate: curTestDate }
+                );
+              }
+              if (calculatedChgOut && chgOutColName && calculatedChgOut !== 'N/A') {
+                tableRow[chgOutColName] = calculatedChgOut;
+              }
+
+              syncTableRowToGrid();
+
+              if (assignedColName) { await queueCell(assignedColName, targetAssigned, true); updateRowCell(assignedColName, targetAssigned); }
+              if (statusColName) { await queueCell(statusColName, targetStatus, true); updateRowCell(statusColName, targetStatus); }
+              if (locationColName) { await queueCell(locationColName, targetLoc, true); updateRowCell(locationColName, targetLoc); }
+              if (dateAssignedColName) { await queueCell(dateAssignedColName, targetDate, true); updateRowCell(dateAssignedColName, targetDate); }
+              if (pickedColName) { await queueCell(pickedColName, '', true); updateRowCell(pickedColName, ''); }
+              if (chgOutColName && calculatedChgOut && calculatedChgOut !== 'N/A') {
+                await queueCell(chgOutColName, calculatedChgOut, true);
+                updateRowCell(chgOutColName, calculatedChgOut);
+              }
+
+              await this.db.recordItemHistoryEvent(sheetName, tableRow, 'In Testing (Arnett / JM Test)');
+              flashSuccess();
+              return;
+            }
+
+            // Packed For Testing (Truck staging for test lab)
+            const isPackedTesting = valLower === 'packed for testing' || valLower === 'ready for test';
+            if ((isAssignedCol || isStatusCol) && isPackedTesting) {
+              const today = new Date();
+              const todayFormatted = `${String(today.getMonth() + 1).padStart(2, '0')}/${String(today.getDate()).padStart(2, '0')}/${today.getFullYear()}`;
+
+              const targetAssigned = 'Packed For Testing';
+              const targetStatus = 'Ready For Test';
+              const targetLoc = "Cody's Truck";
+              const targetDate = todayFormatted;
+
+              newVal = isAssignedCol ? targetAssigned : targetStatus;
+              targetCell.textContent = newVal;
+
+              if (tableRow) {
+                if (assignedColName) tableRow[assignedColName] = targetAssigned;
+                if (statusColName) tableRow[statusColName] = targetStatus;
+                if (locationColName) tableRow[locationColName] = targetLoc;
+                if (dateAssignedColName) tableRow[dateAssignedColName] = targetDate;
+                if (pickedColName) tableRow[pickedColName] = '';
+              }
+
+              const curTestDate = testDateColName ? (tableRow[testDateColName] || '') : '';
+              let calculatedChgOut = '';
+              if (window.inventoryManager && typeof window.inventoryManager.calculateChangeOutDate === 'function') {
+                calculatedChgOut = window.inventoryManager.calculateChangeOutDate(
+                  targetDate || curTestDate,
+                  targetLoc,
+                  targetAssigned,
+                  this.currentSheetKey,
+                  { testDate: curTestDate, calibrationDate: curTestDate }
+                );
+              }
+              if (calculatedChgOut && chgOutColName && calculatedChgOut !== 'N/A') {
+                tableRow[chgOutColName] = calculatedChgOut;
+              }
+
+              syncTableRowToGrid();
+
+              if (assignedColName) { await queueCell(assignedColName, targetAssigned, true); updateRowCell(assignedColName, targetAssigned); }
+              if (statusColName) { await queueCell(statusColName, targetStatus, true); updateRowCell(statusColName, targetStatus); }
+              if (locationColName) { await queueCell(locationColName, targetLoc, true); updateRowCell(locationColName, targetLoc); }
+              if (dateAssignedColName) { await queueCell(dateAssignedColName, targetDate, true); updateRowCell(dateAssignedColName, targetDate); }
+              if (pickedColName) { await queueCell(pickedColName, '', true); updateRowCell(pickedColName, ''); }
+              if (chgOutColName && calculatedChgOut && calculatedChgOut !== 'N/A') {
+                await queueCell(chgOutColName, calculatedChgOut, true);
+                updateRowCell(chgOutColName, calculatedChgOut);
+              }
+
+              await this.db.recordItemHistoryEvent(sheetName, tableRow, "Packed For Testing (Cody's Truck)");
+              flashSuccess();
+              return;
+            }
+
+            // Packed For Delivery (Truck staging for field delivery)
+            const isPackedDelivery = valLower === 'packed for delivery' || valLower === 'ready for delivery';
+            if ((isAssignedCol || isStatusCol) && isPackedDelivery) {
+              const today = new Date();
+              const todayFormatted = `${String(today.getMonth() + 1).padStart(2, '0')}/${String(today.getDate()).padStart(2, '0')}/${today.getFullYear()}`;
+
+              const targetAssigned = 'Packed For Delivery';
+              const targetStatus = 'Ready For Delivery';
+              const targetLoc = "Cody's Truck";
+              const targetDate = todayFormatted;
+
+              newVal = isAssignedCol ? targetAssigned : targetStatus;
+              targetCell.textContent = newVal;
+
+              if (tableRow) {
+                if (assignedColName) tableRow[assignedColName] = targetAssigned;
+                if (statusColName) tableRow[statusColName] = targetStatus;
+                if (locationColName) tableRow[locationColName] = targetLoc;
+                if (dateAssignedColName) tableRow[dateAssignedColName] = targetDate;
+              }
+
+              const curTestDate = testDateColName ? (tableRow[testDateColName] || '') : '';
+              let calculatedChgOut = '';
+              if (window.inventoryManager && typeof window.inventoryManager.calculateChangeOutDate === 'function') {
+                calculatedChgOut = window.inventoryManager.calculateChangeOutDate(
+                  targetDate || curTestDate,
+                  targetLoc,
+                  targetAssigned,
+                  this.currentSheetKey,
+                  { testDate: curTestDate, calibrationDate: curTestDate }
+                );
+              }
+              if (calculatedChgOut && chgOutColName && calculatedChgOut !== 'N/A') {
+                tableRow[chgOutColName] = calculatedChgOut;
+              }
+
+              syncTableRowToGrid();
+
+              if (assignedColName) { await queueCell(assignedColName, targetAssigned, true); updateRowCell(assignedColName, targetAssigned); }
+              if (statusColName) { await queueCell(statusColName, targetStatus, true); updateRowCell(statusColName, targetStatus); }
+              if (locationColName) { await queueCell(locationColName, targetLoc, true); updateRowCell(locationColName, targetLoc); }
+              if (dateAssignedColName) { await queueCell(dateAssignedColName, targetDate, true); updateRowCell(dateAssignedColName, targetDate); }
+              if (chgOutColName && calculatedChgOut && calculatedChgOut !== 'N/A') {
+                await queueCell(chgOutColName, calculatedChgOut, true);
+                updateRowCell(chgOutColName, calculatedChgOut);
+              }
+
+              await this.db.recordItemHistoryEvent(sheetName, tableRow, "Packed For Delivery (Cody's Truck)");
+              flashSuccess();
+              return;
+            }
+
+            // Lost / Missing
+            const isLost = valLower === 'lost' || valLower === 'missing';
+            if ((isAssignedCol || isStatusCol) && isLost) {
+              const today = new Date();
+              const todayFormatted = `${String(today.getMonth() + 1).padStart(2, '0')}/${String(today.getDate()).padStart(2, '0')}/${today.getFullYear()}`;
+
+              const targetAssigned = 'Lost';
+              const targetStatus = 'Lost';
+              const targetLoc = 'Lost';
+              const targetDate = todayFormatted;
+              const targetChgOut = 'N/A';
+
+              newVal = isAssignedCol ? targetAssigned : targetStatus;
+              targetCell.textContent = newVal;
+
+              if (tableRow) {
+                if (assignedColName) tableRow[assignedColName] = targetAssigned;
+                if (statusColName) tableRow[statusColName] = targetStatus;
+                if (locationColName) tableRow[locationColName] = targetLoc;
+                if (dateAssignedColName) tableRow[dateAssignedColName] = targetDate;
+                if (chgOutColName) tableRow[chgOutColName] = targetChgOut;
+                if (pickedColName) tableRow[pickedColName] = '';
+              }
+
+              syncTableRowToGrid();
+
+              if (assignedColName) { await queueCell(assignedColName, targetAssigned, true); updateRowCell(assignedColName, targetAssigned); }
+              if (statusColName) { await queueCell(statusColName, targetStatus, true); updateRowCell(statusColName, targetStatus); }
+              if (locationColName) { await queueCell(locationColName, targetLoc, true); updateRowCell(locationColName, targetLoc); }
+              if (dateAssignedColName) { await queueCell(dateAssignedColName, targetDate, true); updateRowCell(dateAssignedColName, targetDate); }
+              if (chgOutColName) { await queueCell(chgOutColName, targetChgOut, true); updateRowCell(chgOutColName, targetChgOut); }
+              if (pickedColName) { await queueCell(pickedColName, '', true); updateRowCell(pickedColName, ''); }
+
+              await this.db.recordItemHistoryEvent(sheetName, tableRow, 'Marked Lost / Missing');
+              flashSuccess();
+              return;
+            }
+
             // When Assigned To is changed to an employee, prompt for Date Assigned and update atomically
             if (isAssignedCol && isAssignedToEmp) {
               const today = new Date();
@@ -3503,12 +3702,13 @@ class SheetNavigator {
             if (cIdx !== -1) tableData.rawGrid[actualRowIdx - 1][cIdx] = newVal;
           }
 
-          // 2. If Date Assigned, Test Date, or Calibration Date was changed on an inventory sheet, recalculate Change Out Date!
+          // 2. If Date Assigned, Test Date, Calibration Date, or Location was changed on an inventory sheet, recalculate Change Out Date!
           if (isInventorySheet && tableRow && tableData) {
             const isDateAssigned = hLower.includes('date assigned');
             const isTestDate = hLower.includes('test date') || hLower.includes('calibration');
+            const isLocation = hLower === 'location';
 
-            if (isDateAssigned || isTestDate) {
+            if (isDateAssigned || isTestDate || isLocation) {
               const dateAssignedColName = (tableData.headers || []).find(h => /date\s*assigned/i.test(h));
               const testDateColName = (tableData.headers || []).find(h => /test\s*date|calibration/i.test(h));
               const locationColName = (tableData.headers || []).find(h => /^location$/i.test(h));
@@ -3517,7 +3717,7 @@ class SheetNavigator {
 
               const curDateAssigned = dateAssignedColName ? (tableRow[dateAssignedColName] || '') : '';
               const curTestDate = testDateColName ? (tableRow[testDateColName] || '') : '';
-              const curLoc = locationColName ? (tableRow[locationColName] || '') : '';
+              const curLoc = isLocation ? newVal : (locationColName ? (tableRow[locationColName] || '') : '');
               const curAssignedTo = assignedColName ? (tableRow[assignedColName] || '') : '';
 
               const dateAssignedVal = isDateAssigned ? newVal : curDateAssigned;

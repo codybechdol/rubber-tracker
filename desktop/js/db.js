@@ -1025,6 +1025,10 @@ class LocalDatabase {
     const location = String(cleanLoc || itemRow['Location'] || 'Helena').trim();
     const notes = reasonNote || itemRow['Notes'] || '';
 
+    let latest = null;
+    let lAssigned = '';
+    let lLoc = '';
+
     // Check if the chronologically latest history entry for this item already has the identical assignedTo and location
     if (histTable.rows && histTable.rows.length > 0) {
       const isNum = /^\d+$/.test(itemNum);
@@ -1038,7 +1042,6 @@ class LocalDatabase {
 
       if (itemHistRows.length > 0) {
         // Find the chronologically latest record for this item
-        let latest = null;
         let latestTime = -Infinity;
         for (const r of itemHistRows) {
           const dStr = String(r['Date Assigned'] || r['Date'] || Object.values(r)[0] || '').trim();
@@ -1057,8 +1060,8 @@ class LocalDatabase {
         }
 
         if (latest) {
-          const lAssigned = String(latest['Assigned To'] || latest['Status'] || '').trim().toLowerCase();
-          const lLoc = String(latest['Location'] || '').trim().toLowerCase();
+          lAssigned = String(latest['Assigned To'] || latest['Status'] || '').trim().toLowerCase();
+          lLoc = String(latest['Location'] || '').trim().toLowerCase();
           if (lAssigned === assignedTo.toLowerCase() && lLoc === location.toLowerCase()) {
             const newDate = String(itemRow['Date Assigned'] || itemRow['Date'] || '').trim();
             const curDate = String(latest['Date Assigned'] || latest['Date'] || '').trim();
@@ -1092,8 +1095,14 @@ class LocalDatabase {
       }
     }
 
+    let eventDate = String(itemRow['Date Assigned'] || itemRow['Date'] || '').trim();
+    if (!eventDate || (latest && lAssigned !== assignedTo.toLowerCase() && eventDate === String(latest['Date Assigned'] || latest['Date'] || '').trim())) {
+      eventDate = todayStr;
+      itemRow['Date Assigned'] = todayStr;
+    }
+
     const histRow = {
-      'Date Assigned': itemRow['Date Assigned'] || todayStr,
+      'Date Assigned': eventDate || todayStr,
       'Item #': itemNum,
       'Location': location,
       'Assigned To': assignedTo,
