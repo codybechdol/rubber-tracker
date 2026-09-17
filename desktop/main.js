@@ -5,7 +5,9 @@ const dns = require('dns');
 
 try {
   dns.setDefaultResultOrder('ipv4first');
-} catch (e) {}
+} catch {
+  // Ignore if setDefaultResultOrder is not supported in environment
+}
 
 app.setAppUserModelId('com.safetyassistant.desktop');
 
@@ -141,16 +143,14 @@ ipcMain.handle('select-snapshot-file', async () => {
 // Native HTTPS Sync Bridge (bypasses browser CORS & redirects seamlessly)
 const https = require('https');
 
-function makeGoogleAppsScriptRequest(targetUrl, method = 'GET', data = null) {
+function makeGoogleAppsScriptRequest(targetUrl, method = 'GET', data = null, timeoutMs = 45000) {
   return new Promise((resolve, reject) => {
-    const wasOriginallyPost = method === 'POST';
-
     function requestWithRedirect(currentUrl, currentMethod, currentData, redirectCount = 0) {
       if (redirectCount > 5) {
         return resolve({
           success: false,
           statusCode: 504,
-          error: 'The Google Apps Script server timed out or redirected too many times. Please try selecting a smaller date range or try again.'
+          error: 'The Google Apps Script server redirected too many times.'
         });
       }
 
@@ -191,7 +191,7 @@ function makeGoogleAppsScriptRequest(targetUrl, method = 'GET', data = null) {
             return resolve({
               success: false,
               statusCode: 504,
-              error: 'The Google Apps Script server timed out while processing. Please try selecting a smaller date range or try again.'
+              error: 'The Google Apps Script server timed out or is busy while processing this batch.'
             });
           }
 
@@ -214,26 +214,27 @@ function makeGoogleAppsScriptRequest(targetUrl, method = 'GET', data = null) {
           try {
             const json = JSON.parse(responseBody);
             resolve({ success: true, statusCode: res.statusCode, data: json });
-          } catch (e) {
+          } catch {
             let errorMsg = 'Web App returned non-JSON response.';
             if (res.statusCode === 404) {
               errorMsg = 'Google Apps Script Web App returned 404 Not Found. The server may have timed out or the deployment URL is invalid.';
             } else if (res.statusCode >= 500) {
               errorMsg = `Google Apps Script server error (HTTP ${res.statusCode}). The script may have timed out or exceeded memory limits.`;
             } else if (responseBody.includes('Google Docs - Exception') || responseBody.includes('exceeded maximum execution time') || responseBody.includes('Timed out')) {
-              errorMsg = 'The Google Apps Script server timed out or failed to complete processing. Please try selecting a smaller date range or try again.';
+              errorMsg = 'The Google Apps Script server timed out while processing.';
             } else if (responseBody.includes('ServiceLogin') || responseBody.includes('accounts.google.com')) {
               errorMsg = 'Google returned a login page. Please verify in Google Sheets: Extensions > Apps Script > Deploy > Manage deployments, and ensure "Who has access" is set to "Anyone".';
             } else {
-              errorMsg = `The Google Apps Script server returned a non-JSON response (HTTP ${res.statusCode}). Please try selecting a smaller date range or try again.`;
+              errorMsg = `The Google Apps Script server returned a non-JSON response (HTTP ${res.statusCode}).`;
             }
             resolve({ success: false, statusCode: res.statusCode, raw: responseBody, error: errorMsg });
           }
         });
       });
 
-      req.setTimeout(360000, () => {
-        req.destroy(new Error('Sync network request timed out after 360 seconds. Please check your internet connection or Web App deployment.'));
+      const effectiveTimeout = timeoutMs || 45000;
+      req.setTimeout(effectiveTimeout, () => {
+        req.destroy(new Error(`Sync network request timed out after ${effectiveTimeout / 1000} seconds.`));
       });
 
       req.on('error', (err) => {
@@ -250,9 +251,9 @@ function makeGoogleAppsScriptRequest(targetUrl, method = 'GET', data = null) {
   });
 }
 
-ipcMain.handle('send-sync-request', async (event, { url, method, body }) => {
+ipcMain.handle('send-sync-request', async (event, { url, method, body, timeoutMs }) => {
   try {
-    return await makeGoogleAppsScriptRequest(url, method, body);
+    return await makeGoogleAppsScriptRequest(url, method, body, timeoutMs);
   } catch (err) {
     return { success: false, error: err.message };
   }

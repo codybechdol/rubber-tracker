@@ -2972,6 +2972,482 @@ class TripPlannerApp {
     this.notifyAccomplishmentsModal();
   }
 
+  openSwapDetailsModal(target, crewId = null, location = null) {
+    if (!target) return;
+
+    const modal = document.getElementById('swap-details-modal');
+    const iconEl = document.getElementById('swap-details-modal-icon');
+    const titleEl = document.getElementById('swap-details-modal-title');
+    const bodyEl = document.getElementById('swap-details-modal-body');
+    const actionsEl = document.getElementById('swap-details-modal-actions');
+    if (!modal || !bodyEl) return;
+
+    // 1. Identify Employee Name
+    const empName = String(target.employee || target.employeeName || target.empName || target.name || '').trim();
+
+    // 2. Identify Equipment Type & Table Keys
+    const rawType = String(target.type || target.itemType || target.category || 'Glove').trim();
+    const tLower = rawType.toLowerCase();
+    const sLower = String(target.sourceSheet || '').toLowerCase();
+
+    let tableKey = target.tableKey || target.swapSheetKey;
+    if (!tableKey) {
+      if (tLower.includes('glove') || sLower.includes('glove')) tableKey = 'glove_swaps';
+      else if (tLower.includes('sleeve') || sLower.includes('sleeve')) tableKey = 'sleeve_swaps';
+      else if (tLower.includes('blanket') || sLower.includes('blanket')) tableKey = 'blanket_swaps';
+      else if (tLower.includes('mack') || sLower.includes('mack')) tableKey = 'mack_swaps';
+      else if (tLower.includes('tester') || sLower.includes('tester')) tableKey = 'hv_tester_swaps';
+      else if (tLower.includes('phasing') || sLower.includes('phasing')) tableKey = 'phasing_set_swaps';
+      else if (tLower.includes('aed') || sLower.includes('aed')) tableKey = 'aed_swaps';
+      else if (tLower.includes('ground') || sLower.includes('ground')) tableKey = 'ground_swaps';
+      else if (tLower.includes('hot_stick') || sLower.includes('hot stick')) tableKey = 'hot_stick_swaps';
+      else tableKey = 'glove_swaps';
+    }
+
+    const invMap = {
+      'glove_swaps': 'gloves',
+      'sleeve_swaps': 'sleeves',
+      'blanket_swaps': 'blankets',
+      'mack_swaps': 'macks',
+      'hv_tester_swaps': 'hv_testers',
+      'phasing_set_swaps': 'phasing_sets',
+      'aed_swaps': 'aed',
+      'ground_swaps': 'grounds',
+      'hot_stick_swaps': 'hot_sticks'
+    };
+    const invKey = invMap[tableKey] || 'gloves';
+
+    const itemLabel = tableKey.includes('glove') ? 'Glove' :
+                      tableKey.includes('sleeve') ? 'Sleeve' :
+                      tableKey.includes('blanket') ? 'Blanket' :
+                      tableKey.includes('mack') ? 'MACK' :
+                      tableKey.includes('tester') ? 'HV Tester' :
+                      tableKey.includes('phasing') ? 'Phasing Set' :
+                      tableKey.includes('aed') ? 'AED' :
+                      tableKey.includes('ground') ? 'Ground' :
+                      tableKey.includes('hot_stick') ? 'Hot Stick' : 'PPE';
+    const itemIcon = tableKey.includes('glove') ? '🧤' :
+                     tableKey.includes('sleeve') ? '🧤' :
+                     tableKey.includes('blanket') ? '🛏️' :
+                     tableKey.includes('mack') ? '⚡' :
+                     tableKey.includes('aed') ? '❤️' : '🧰';
+
+    // 3. Locate Swap Row in swapTable
+    const swTable = this.db ? this.db.getTable(tableKey) : null;
+    let swRow = null;
+    let swRowIdx = target.swapRowIdx || (typeof target.rowIdx === 'number' ? target.rowIdx : null);
+
+    if (swTable && swTable.rows) {
+      if (typeof swRowIdx === 'number' && swTable.rows[swRowIdx]) {
+        swRow = swTable.rows[swRowIdx];
+      } else {
+        const curItmClean = String(target.currentItem || '').trim().toLowerCase();
+        swRow = swTable.rows.find(r => {
+          const rEmp = String(r['Employee'] || r['Crew Lead / Employee'] || r['Assigned To'] || '').trim().toLowerCase();
+          const rOld = String(r['Current Glove #'] || r['Current Sleeve #'] || r['Current Blanket #'] || r['Current MACK #'] || r['Current Item #'] || r['Item #'] || '').trim().toLowerCase();
+          const empMatch = rEmp === empName.toLowerCase();
+          if (curItmClean) {
+            return empMatch && (rOld === curItmClean || rOld.includes(curItmClean) || curItmClean.includes(rOld));
+          }
+          return empMatch;
+        });
+        if (swRow && swTable.rows) {
+          swRowIdx = swTable.rows.indexOf(swRow);
+        }
+      }
+    }
+
+    // 4. Extract Item Identifiers & Status from swRow and target
+    const oldItemNum = String(
+      (swRow && (swRow['Current Glove #'] || swRow['Current Sleeve #'] || swRow['Current Blanket #'] || swRow['Current MACK #'] || swRow['Current Item #'] || swRow['Item #'])) ||
+      target.currentItem || ''
+    ).trim();
+
+    const pickItemNum = String(
+      (swRow && (swRow['Pick List Item #'] || swRow['Pick List Glove #'] || swRow['Pick List Sleeve #'] || swRow['Pick List Blanket #'] || swRow['Pick List MACK #'] || swRow['Pick List'] || swRow['Item #'])) ||
+      target.pickItem || target.pickListItem || ''
+    ).trim();
+
+    const swStatus = String(
+      (swRow && (swRow['Status'] || swRow['Stage'])) ||
+      target.status || 'Pending'
+    ).trim();
+
+    const dateChangedVal = String(
+      (swRow && (swRow['Date Changed'] || swRow['Delivered Date'])) || ''
+    ).trim();
+    const isAlreadyCompleted = !!dateChangedVal || swStatus.toLowerCase().includes('delivered');
+
+    const swDueDate = String(
+      (swRow && (swRow['Change Out Date'] || swRow['Due Date'])) ||
+      target.dueDate || 'N/A'
+    ).trim();
+
+    const swDaysLeft = String(
+      (swRow && (swRow['Days Left'] || swRow['Days'])) || ''
+    ).trim();
+
+    const itemSize = String(
+      (swRow && swRow['Size']) || target.size || ''
+    ).trim();
+
+    const itemClass = String(
+      (swRow && (swRow['Class'] || swRow['KV'])) || target.itemClass || ''
+    ).trim();
+
+    // 5. Query Employee Information from employees & job_tracking
+    const empTable = this.db ? this.db.getTable('employees') : null;
+    let empRecord = null;
+    if (empTable && empTable.rows) {
+      empRecord = empTable.rows.find(e => 
+        String(e['Name'] || e['Employee Name'] || Object.values(e)[0] || '').trim().toLowerCase() === empName.toLowerCase()
+      );
+    }
+
+    const empPhone = empRecord ? String(empRecord['Phone'] || empRecord['Phone Number'] || empRecord['Mobile'] || '').trim() : '';
+    const empClassification = empRecord ? String(empRecord['Classification'] || empRecord['Title'] || '').trim() : (target.classification || '');
+    const empLoc = empRecord ? String(empRecord['Location'] || '').trim() : (location || target.location || 'Helena');
+    const finalCrewId = crewId || (empRecord ? String(empRecord['Job Number'] || '').trim() : '') || target.crewId || 'Unassigned Crew';
+
+    // Look up foreman from job_tracking
+    const jobTable = this.db ? this.db.getTable('job_tracking') : null;
+    let foremanName = target.foreman || '';
+    if (!foremanName && jobTable && jobTable.rows && finalCrewId) {
+      const sigJob = typeof this.getSignificantJobNumber === 'function' ? this.getSignificantJobNumber(finalCrewId) : finalCrewId;
+      const jRow = jobTable.rows.find(j => {
+        const jNum = String(j['Job Number'] || j['Job #'] || j['Crew'] || '').trim();
+        return jNum === finalCrewId || jNum.startsWith(sigJob) || sigJob.startsWith(jNum);
+      });
+      if (jRow) {
+        foremanName = String(jRow['Foreman'] || jRow['Crew Lead'] || jRow['Lead'] || '').trim();
+      }
+    }
+    if (!foremanName) foremanName = 'Lead / Foreman';
+
+    // 6. Query Inventory Details for Old & New Items
+    const invTable = this.db ? this.db.getTable(invKey) : null;
+    let oldRow = null;
+    let newRow = null;
+
+    if (invTable && invTable.rows) {
+      if (oldItemNum && oldItemNum !== '—' && oldItemNum !== '-') {
+        oldRow = invTable.rows.find(it => {
+          const num = String(it['Item #'] || it['Glove'] || it['Sleeve'] || it['Blanket'] || it['MACK'] || it['Serial #'] || it['ESL ID'] || Object.values(it)[0] || '').trim();
+          return num === oldItemNum;
+        });
+      }
+      if (pickItemNum && pickItemNum !== '—' && pickItemNum !== '-') {
+        newRow = invTable.rows.find(it => {
+          const num = String(it['Item #'] || it['Glove'] || it['Sleeve'] || it['Blanket'] || it['MACK'] || it['Serial #'] || it['ESL ID'] || Object.values(it)[0] || '').trim();
+          return num === pickItemNum;
+        });
+      }
+    }
+
+    // Calculated fields for old item
+    const oldEsl = oldRow ? String(oldRow['ESL ID'] || '—').trim() : '—';
+    const oldSize = (oldRow && oldRow['Size']) ? oldRow['Size'] : (itemSize || '—');
+    const oldClass = (oldRow && (oldRow['Class'] || oldRow['KV'])) ? (oldRow['Class'] || oldRow['KV']) : (itemClass || '—');
+    const oldTestDate = oldRow ? String(oldRow['Test Date'] || oldRow['Calibration Date'] || '—').trim() : '—';
+    const oldDateAssigned = oldRow ? String(oldRow['Date Assigned'] || '—').trim() : '—';
+    const oldStatus = oldRow ? String(oldRow['Status'] || 'Assigned').trim() : 'Assigned';
+
+    // Calculated fields for new replacement item
+    const newEsl = newRow ? String(newRow['ESL ID'] || '—').trim() : '—';
+    const newSize = (newRow && newRow['Size']) ? newRow['Size'] : (itemSize || '—');
+    const newClass = (newRow && (newRow['Class'] || newRow['KV'])) ? (newRow['Class'] || newRow['KV']) : (itemClass || '—');
+    const newTestDate = newRow ? String(newRow['Test Date'] || newRow['Calibration Date'] || '—').trim() : '—';
+    const newLocation = newRow ? String(newRow['Location'] || "Cody's Truck").trim() : (pickItemNum ? "Cody's Truck" : 'Helena');
+    const newStatus = newRow ? String(newRow['Status'] || (pickItemNum ? 'Ready For Delivery' : 'In Stock')).trim() : 'Ready For Delivery';
+
+    // Calculate projected next change-out date (+3 months for gloves, +12 months for sleeves/blankets/macks)
+    const today = new Date();
+    const intervalMonths = tableKey.includes('sleeve') || tableKey.includes('blanket') || tableKey.includes('mack') ? 12 : 3;
+    const projectedDate = new Date(today);
+    projectedDate.setMonth(projectedDate.getMonth() + intervalMonths);
+    const projectedChgOutStr = `${String(projectedDate.getMonth() + 1).padStart(2, '0')}/${String(projectedDate.getDate()).padStart(2, '0')}/${projectedDate.getFullYear()}`;
+
+    const todayIso = today.toISOString().split('T')[0];
+
+    // Update Header
+    if (iconEl) iconEl.textContent = itemIcon;
+    if (titleEl) titleEl.textContent = `${itemLabel} Swap Details & Completion`;
+
+    // Render Body
+    bodyEl.innerHTML = `
+      <!-- Employee Profile Summary Card -->
+      <div style="background: linear-gradient(135deg, rgba(30, 41, 59, 0.9) 0%, rgba(15, 23, 42, 0.95) 100%); border: 1px solid var(--border-color); border-radius: 8px; padding: 14px 18px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.25);">
+        <div>
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px; flex-wrap: wrap;">
+            <span style="font-size: 16px; font-weight: 800; color: #f8fafc;">👤 ${this.escapeHtml(empName)}</span>
+            ${empClassification ? `
+              <span class="badge" style="background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.35); font-weight: 700; font-size: 11px; padding: 2px 7px;">
+                ${this.escapeHtml(empClassification)}
+              </span>
+            ` : ''}
+            <span class="badge" style="background: rgba(234, 179, 8, 0.15); color: #fde047; border: 1px solid rgba(234, 179, 8, 0.35); font-weight: 700; font-size: 11px; padding: 2px 7px;">
+              🚚 Crew ${this.escapeHtml(finalCrewId)}
+            </span>
+          </div>
+          <div style="font-size: 12px; color: var(--text-secondary); display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-top: 4px;">
+            <span>📍 Location: <strong style="color: #cbd5e1;">${this.escapeHtml(empLoc)}</strong></span>
+            <span>👷 Foreman: <strong style="color: #cbd5e1;">${this.escapeHtml(foremanName)}</strong></span>
+            ${empPhone ? `<span>📞 Phone: <strong style="color: #38bdf8;">${this.escapeHtml(empPhone)}</strong></span>` : ''}
+          </div>
+        </div>
+        <button class="btn btn-secondary" style="font-size: 11.5px; padding: 4px 10px; color: #60a5fa; border: 1px solid rgba(96, 165, 250, 0.3); border-radius: 4px; cursor: pointer; display: flex; align-items: center; gap: 5px;" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(empName)}');}">
+          <span>👤 View Full Profile</span>
+        </button>
+      </div>
+
+      <!-- Side-by-Side Equipment Cards (Old vs New) -->
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px;">
+        
+        <!-- Left: Current Issued Equipment (Returning) -->
+        <div style="background: var(--bg-primary); border: 1px solid var(--border-color); border-top: 4px solid #ef4444; border-radius: 8px; padding: 14px; display: flex; flex-direction: column; gap: 10px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 8px;">
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <span style="font-size: 16px;">🔄</span>
+              <span style="font-weight: 800; font-size: 13px; color: #fca5a5;">Current ${itemLabel} (Returning)</span>
+            </div>
+            <span class="badge" style="background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); font-size: 10.5px; font-weight: 700; padding: 2px 6px;">
+              ${oldStatus}
+            </span>
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 6px; font-size: 12px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span style="color: var(--text-secondary);">Item #:</span>
+              <strong style="font-family: monospace; font-size: 13px; color: #f87171;">${this.escapeHtml(oldItemNum || '—')}</strong>
+            </div>
+            ${oldEsl && oldEsl !== '—' ? `
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="color: var(--text-secondary);">ESL ID:</span>
+                <span style="font-family: monospace; color: #cbd5e1;">${this.escapeHtml(oldEsl)}</span>
+              </div>
+            ` : ''}
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span style="color: var(--text-secondary);">Size / Class:</span>
+              <span style="font-weight: 600; color: #f8fafc;">${this.escapeHtml(oldSize)} ${oldClass !== '—' ? `• Class ${this.escapeHtml(oldClass)}` : ''}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span style="color: var(--text-secondary);">Last Test Date:</span>
+              <span style="color: #cbd5e1;">${this.escapeHtml(oldTestDate)}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span style="color: var(--text-secondary);">Date Assigned:</span>
+              <span style="color: #cbd5e1;">${this.escapeHtml(oldDateAssigned)}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span style="color: var(--text-secondary);">Change Out Due:</span>
+              <strong style="color: ${swDaysLeft.includes('EXP') || swDaysLeft.includes('OVERDUE') ? '#ef4444' : '#f59e0b'};">${this.escapeHtml(swDueDate)} ${swDaysLeft ? `(${this.escapeHtml(swDaysLeft)})` : ''}</strong>
+            </div>
+          </div>
+
+          <div style="margin-top: auto; padding-top: 8px; border-top: 1px dashed var(--border-color); font-size: 11px; color: #94a3b8; display: flex; align-items: center; gap: 6px;">
+            <span>📦 Destination:</span>
+            <strong style="color: #fca5a5;">Cody's Truck (Ready For Test)</strong>
+          </div>
+        </div>
+
+        <!-- Right: New Replacement Equipment (Issuing) -->
+        <div style="background: var(--bg-primary); border: 1px solid var(--border-color); border-top: 4px solid #10b981; border-radius: 8px; padding: 14px; display: flex; flex-direction: column; gap: 10px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 8px;">
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <span style="font-size: 16px;">✨</span>
+              <span style="font-weight: 800; font-size: 13px; color: #86efac;">New Replacement ${itemLabel}</span>
+            </div>
+            <span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); font-size: 10.5px; font-weight: 700; padding: 2px 6px;">
+              ${pickItemNum ? newStatus : '⚠️ Not Picked Yet'}
+            </span>
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 6px; font-size: 12px;">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span style="color: var(--text-secondary);">Pick List Item #:</span>
+              <strong style="font-family: monospace; font-size: 13px; color: #4ade80;">${this.escapeHtml(pickItemNum || '—')}</strong>
+            </div>
+            ${newEsl && newEsl !== '—' ? `
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="color: var(--text-secondary);">ESL ID:</span>
+                <span style="font-family: monospace; color: #cbd5e1;">${this.escapeHtml(newEsl)}</span>
+              </div>
+            ` : ''}
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span style="color: var(--text-secondary);">Size / Class:</span>
+              <span style="font-weight: 600; color: #f8fafc;">${this.escapeHtml(newSize)} ${newClass !== '—' ? `• Class ${this.escapeHtml(newClass)}` : ''}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span style="color: var(--text-secondary);">Test Date:</span>
+              <span style="color: #cbd5e1;">${this.escapeHtml(newTestDate)}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span style="color: var(--text-secondary);">Current Location:</span>
+              <span style="color: #cbd5e1;">${this.escapeHtml(newLocation)}</span>
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <span style="color: var(--text-secondary);">New Change Out:</span>
+              <strong style="color: #34d399;">${projectedChgOutStr} (+${intervalMonths} mo)</strong>
+            </div>
+          </div>
+
+          <div style="margin-top: auto; padding-top: 8px; border-top: 1px dashed var(--border-color); font-size: 11px; color: #94a3b8; display: flex; align-items: center; gap: 6px;">
+            <span>👤 Assigned To:</span>
+            <strong style="color: #4ade80;">${this.escapeHtml(empName)} @ ${this.escapeHtml(empLoc)}</strong>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- Swap Completion Form Card -->
+      <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 8px; padding: 14px 18px; display: flex; flex-direction: column; gap: 10px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+          <div>
+            <h4 style="margin: 0; font-size: 13.5px; font-weight: 800; color: #f8fafc; display: flex; align-items: center; gap: 6px;">
+              <span>✅</span>
+              <span>${isAlreadyCompleted ? 'Swap Completed & Delivered' : 'Complete Swap & Deliver Equipment'}</span>
+            </h4>
+            <p style="margin: 2px 0 0 0; font-size: 11.5px; color: var(--text-secondary);">
+              ${isAlreadyCompleted ? `Delivered on ${this.escapeHtml(dateChangedVal)}. Old item sent to Cody's Truck; new item assigned to employee.` : `Entering a date marks the swap Delivered ✅, reassigns old item ${oldItemNum || ''} to Cody's Truck (Ready For Test), and assigns ${pickItemNum || ''} to ${empName}.`}
+            </p>
+          </div>
+          ${isAlreadyCompleted ? `
+            <span class="badge" style="background: #10b981; color: #fff; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 4px;">
+              ✓ Delivered on ${this.escapeHtml(dateChangedVal)}
+            </span>
+          ` : ''}
+        </div>
+
+        ${!isAlreadyCompleted ? `
+          <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 4px;">
+            <label style="font-size: 12px; font-weight: 700; color: #cbd5e1; display: flex; align-items: center; gap: 6px;">
+              <span>📅 Swap Date:</span>
+              <input type="date" id="swap-completion-date" value="${todayIso}" class="form-control" style="padding: 5px 10px; font-size: 12px; background: var(--bg-primary); color: #f8fafc; border: 1px solid var(--border-color); border-radius: 4px;" />
+            </label>
+            <span style="font-size: 11px; color: var(--text-muted);">Defaults to today (${today.toLocaleDateString()})</span>
+          </div>
+        ` : ''}
+      </div>
+    `;
+
+    // Render Modal Footer Actions
+    if (actionsEl) {
+      if (!isAlreadyCompleted) {
+        actionsEl.innerHTML = `
+          <button class="btn" style="background-color: #10b981; color: white; font-weight: 800; font-size: 13px; padding: 8px 18px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 6px; box-shadow: 0 2px 8px rgba(16, 185, 129, 0.4);" onclick="window.tripPlanner.executeCompleteSwapFromModal('${tableKey}', ${swRowIdx !== null ? swRowIdx : `'${this.escapeJs(empName)}'`}, '${this.escapeJs(empName)}', '${this.escapeJs(oldItemNum)}')">
+            <span>✓ Complete Swap & Update Inventory</span>
+          </button>
+        `;
+      } else {
+        actionsEl.innerHTML = `
+          <button class="btn btn-secondary" style="color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4); font-size: 12px; font-weight: 700; padding: 6px 14px; border-radius: 6px; cursor: pointer;" onclick="window.tripPlanner.revertSwapFromModal('${tableKey}', ${swRowIdx !== null ? swRowIdx : `'${this.escapeJs(empName)}'`}, '${this.escapeJs(empName)}', '${this.escapeJs(oldItemNum)}')">
+            <span>↩ Revert Swap to Pending</span>
+          </button>
+        `;
+      }
+    }
+
+    modal.classList.add('active');
+  }
+
+  closeSwapDetailsModal() {
+    const modal = document.getElementById('swap-details-modal');
+    if (modal) modal.classList.remove('active');
+  }
+
+  async executeCompleteSwapFromModal(tableKey, rowIdxOrEmp, empName, currentItem) {
+    const dateInput = document.getElementById('swap-completion-date');
+    const dateVal = dateInput ? dateInput.value : '';
+    if (!dateVal) {
+      alert('Please select a valid date for the swap completion.');
+      return;
+    }
+
+    const dObj = this.parseDate(dateVal) || new Date();
+    const dateFormatted = `${String(dObj.getMonth() + 1).padStart(2, '0')}/${String(dObj.getDate()).padStart(2, '0')}/${dObj.getFullYear()}`;
+
+    const swTable = this.db ? this.db.getTable(tableKey) : null;
+    let swRow = null;
+    if (swTable && swTable.rows) {
+      if (typeof rowIdxOrEmp === 'number' && swTable.rows[rowIdxOrEmp]) {
+        swRow = swTable.rows[rowIdxOrEmp];
+      } else {
+        swRow = swTable.rows.find(r => {
+          const emp = String(r['Employee'] || r['Crew Lead / Employee'] || '').trim().toLowerCase();
+          const itm = String(r['Current Glove #'] || r['Current Sleeve #'] || r['Current Blanket #'] || r['Current Item #'] || '').trim().toLowerCase();
+          return emp === (empName || '').toLowerCase() && (!currentItem || itm === (currentItem || '').toLowerCase());
+        });
+      }
+    }
+
+    const sm = window.swapEngine || window.swapsManager;
+    if (swRow && sm && typeof sm.handleDateChangedEdit === 'function') {
+      await sm.handleDateChangedEdit(tableKey, swRow, dateFormatted);
+    } else if (sm && typeof sm.handleDateChangedEdit === 'function') {
+      await sm.handleDateChangedEdit(tableKey, rowIdxOrEmp, dateFormatted);
+    }
+
+    // Clean up from scheduledSwaps
+    if (this.scheduledSwaps) {
+      const targetEmp = (empName || '').trim().toLowerCase();
+      const targetItm = (currentItem || '').trim().toLowerCase();
+      Object.keys(this.scheduledSwaps).forEach(k => {
+        if (k.includes(targetEmp) && (!targetItm || k.includes(targetItm))) {
+          delete this.scheduledSwaps[k];
+        }
+      });
+      this.saveScheduledSwaps();
+    }
+
+    this.closeSwapDetailsModal();
+    this.showToast(`✅ Swap completed for ${empName}! Swaps sheet & Inventory updated.`);
+    this.renderPlanner();
+    this.renderPickedSwapsList();
+    this.notifyAccomplishmentsModal();
+
+    // Re-render open checklist modal if active
+    if (this.activeModalCrewId) {
+      this.openCrewTasksModal(this.activeModalCrewId, this.activeModalLocation, this.activeModalCat, this.activeModalDateKey);
+    }
+  }
+
+  async revertSwapFromModal(tableKey, rowIdxOrEmp, empName, currentItem) {
+    if (!confirm(`Revert swap for ${empName} back to pending/ready for delivery? This will restore the previous inventory assignments.`)) {
+      return;
+    }
+
+    const swTable = this.db ? this.db.getTable(tableKey) : null;
+    let swRow = null;
+    if (swTable && swTable.rows) {
+      if (typeof rowIdxOrEmp === 'number' && swTable.rows[rowIdxOrEmp]) {
+        swRow = swTable.rows[rowIdxOrEmp];
+      } else {
+        swRow = swTable.rows.find(r => {
+          const emp = String(r['Employee'] || r['Crew Lead / Employee'] || '').trim().toLowerCase();
+          const itm = String(r['Current Glove #'] || r['Current Sleeve #'] || r['Current Blanket #'] || r['Current Item #'] || '').trim().toLowerCase();
+          return emp === (empName || '').toLowerCase() && (!currentItem || itm === (currentItem || '').toLowerCase());
+        });
+      }
+    }
+
+    const sm = window.swapEngine || window.swapsManager;
+    if (swRow && sm && typeof sm.handleDateChangedEdit === 'function') {
+      await sm.handleDateChangedEdit(tableKey, swRow, '');
+    } else if (sm && typeof sm.handleDateChangedEdit === 'function') {
+      await sm.handleDateChangedEdit(tableKey, rowIdxOrEmp, '');
+    }
+
+    this.closeSwapDetailsModal();
+    this.showToast(`↩ Swap reverted to pending for ${empName}.`);
+    this.renderPlanner();
+    this.renderPickedSwapsList();
+    this.notifyAccomplishmentsModal();
+
+    if (this.activeModalCrewId) {
+      this.openCrewTasksModal(this.activeModalCrewId, this.activeModalLocation, this.activeModalCat, this.activeModalDateKey);
+    }
+  }
+
   removeTrip(dateKey, locationToRemove = null) {
     if (!locationToRemove) {
       delete this.plannedTrips[dateKey];
@@ -5448,13 +5924,13 @@ class TripPlannerApp {
                                         <span>🚚 Picked Swaps Ready (${crewPickedSwaps.length})</span>
                                       </div>
                                       ${crewPickedSwaps.map(ps => `
-                                        <div style="font-size: 9.5px; color: #e2e8f0; display: flex; justify-content: space-between; align-items: center; margin-top: 3px; gap: 4px;">
+                                        <div style="font-size: 9.5px; color: #e2e8f0; display: flex; justify-content: space-between; align-items: center; margin-top: 3px; gap: 4px; cursor: pointer; padding: 2px 4px; border-radius: 3px; transition: background 0.15s;" onmouseover="this.style.background='rgba(255,255,255,0.08)'" onmouseout="this.style.background='transparent'" onclick="event.stopPropagation(); window.tripPlanner.openSwapDetailsModal(${JSON.stringify(ps).replace(/"/g, '&quot;')}, '${this.escapeJs(c.crewId)}', '${this.escapeJs(trip.location)}')" title="Click to view swap details & complete swap">
                                           <span style="flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
                                             <strong>${this.escapeHtml(ps.employeeName)}</strong>: ${ps.type === 'Glove' ? '🧤 Glove' : '🧤 Sleeve'} <span style="color: #fca5a5;">${this.escapeHtml(ps.currentItem || '—')}</span> ➔ <strong style="color: #4ade80;">${this.escapeHtml(ps.pickItem || '—')}</strong>
                                             ${ps.size ? `<span style="color: #94a3b8; font-size: 9px;"> (${this.escapeHtml(ps.size)})</span>` : ''}
                                           </span>
-                                          <button class="btn btn-primary" style="padding: 1px 6px; font-size: 8.5px; background: #10b981; border: none; font-weight: 700; cursor: pointer; border-radius: 3px; white-space: nowrap;" onclick="event.stopPropagation(); window.tripPlanner.completeSwapDirectly('${ps.tableKey}', ${ps.rowIdx}, '${this.escapeJs(ps.employeeName)}', '${this.escapeJs(ps.currentItem)}')" title="Mark swap delivered and update inventory">
-                                            ✓ Done
+                                          <button class="btn btn-primary" style="padding: 1px 6px; font-size: 8.5px; background: #10b981; border: none; font-weight: 700; cursor: pointer; border-radius: 3px; white-space: nowrap;" onclick="event.stopPropagation(); window.tripPlanner.openSwapDetailsModal(${JSON.stringify(ps).replace(/"/g, '&quot;')}, '${this.escapeJs(c.crewId)}', '${this.escapeJs(trip.location)}')" title="View swap details & complete swap">
+                                            🔍 Swap
                                           </button>
                                         </div>
                                       `).join('')}
@@ -6113,7 +6589,7 @@ class TripPlannerApp {
             const typeBorder = isGlove ? 'rgba(59, 130, 246, 0.3)' : 'rgba(168, 85, 247, 0.3)';
 
             return `
-              <div class="picked-swap-item-card" draggable="true" style="background: rgba(0, 0, 0, 0.25); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 4px; padding: 5px 7px; margin-top: 4px; cursor: grab;" title="Drag this swap to schedule it">
+              <div class="picked-swap-item-card" draggable="true" style="background: rgba(0, 0, 0, 0.25); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 4px; padding: 5px 7px; margin-top: 4px; cursor: pointer;" title="Click to view swap details or drag to schedule" onclick="window.tripPlanner.openSwapDetailsModal(${JSON.stringify(s).replace(/"/g, '&quot;')}, null, '${this.escapeJs(locName)}')">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px;">
                   <span class="badge" style="background: ${typeBg}; color: ${typeColor}; border: 1px solid ${typeBorder}; font-size: 9.5px; font-weight: 700; padding: 1px 5px; border-radius: 3px;">
                     ${isGlove ? '🧤 Glove' : '🧤 Sleeve'}${s.itemClass ? ` (CL ${this.escapeHtml(s.itemClass)})` : ''}
@@ -6300,12 +6776,13 @@ class TripPlannerApp {
           const isOverdue = t.isOverdue || String(t.status || '').toLowerCase() === 'overdue';
           const isReady = !isComplete && !isOverdue && (String(t.status || '').toLowerCase().includes('ready') || String(t.status || '').toLowerCase().includes('picked'));
           const badgeColor = isComplete ? '#10b981' : (isOverdue ? '#ef4444' : (isReady ? '#10b981' : '#f59e0b'));
+          const isSwapTask = (t.category === 'PPE' || t.category === 'Equipment' || String(t.type || '').toLowerCase().includes('swap') || String(t.sourceSheet || '').toLowerCase().includes('swap'));
 
           return `
             <div style="background-color: var(--bg-primary); border: 1px solid var(--border-color); border-left: 4px solid ${badgeColor}; border-radius: 6px; padding: 12px 14px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
               <div style="flex: 1; min-width: 260px;">
                 <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px; flex-wrap: wrap;">
-                  <span style="font-weight: 800; font-size: 14px; color: #f8fafc;">
+                  <span style="font-weight: 800; font-size: 14px; color: #f8fafc; cursor: ${isSwapTask ? 'pointer' : 'default'};" ${isSwapTask ? `onclick="window.tripPlanner.openSwapDetailsModal(window.taskManager.getTaskById('${this.escapeHtml(t.id)}') || ${JSON.stringify(t).replace(/"/g, '&quot;')}, '${this.escapeHtml(crewId)}', '${this.escapeHtml(loc)}')"` : ''} title="${isSwapTask ? 'Click to view swap details' : ''}">
                     ${this.escapeHtml(t.type)}: ${this.escapeHtml(t.itemType)}
                   </span>
                   ${t.truckNumber ? `
@@ -6326,6 +6803,11 @@ class TripPlannerApp {
                   ${t.currentItem ? `
                     <span class="badge" style="background: rgba(255,255,255,0.06); color: #93c5fd; font-family: monospace; font-size: 11px; padding: 1px 6px;">
                       ${this.escapeHtml(t.currentItem)}
+                    </span>
+                  ` : ''}
+                  ${t.pickListItem ? `
+                    <span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); font-weight: 700; font-size: 11px; padding: 2px 7px;">
+                      ➔ New: ${this.escapeHtml(t.pickListItem)}
                     </span>
                   ` : ''}
                 </div>
@@ -6363,6 +6845,11 @@ class TripPlannerApp {
                 <span class="badge" style="background: ${isComplete ? '#15803d' : (isOverdue ? '#b91c1c' : (isReady ? '#059669' : '#d97706'))}; color: #fff; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 4px;">
                   ${isComplete ? '✅ Complete' : (isOverdue ? '🔴 Overdue' : (isReady ? '🚚 Ready For Delivery' : '⏳ Pending'))}
                 </span>
+                ${isSwapTask ? `
+                  <button class="btn btn-secondary" style="color: #60a5fa; border: 1px solid rgba(96, 165, 250, 0.4); padding: 4px 9px; font-size: 11px; font-weight: 700; border-radius: 4px; cursor: pointer;" onclick="window.tripPlanner.openSwapDetailsModal(window.taskManager.getTaskById('${this.escapeHtml(t.id)}') || ${JSON.stringify(t).replace(/"/g, '&quot;')}, '${this.escapeHtml(crewId)}', '${this.escapeHtml(loc)}')">
+                    🔍 Swap Details
+                  </button>
+                ` : ''}
                 ${!isComplete ? `
                   <button class="btn" style="background-color: #10b981; color: #fff; padding: 4px 10px; font-size: 11px; font-weight: 700; border-radius: 4px; cursor: pointer;" onclick="window.tripPlanner.completeTaskInModal('${this.escapeHtml(t.id)}', '${this.escapeHtml(crewId)}', '${this.escapeHtml(loc)}')">
                     ✓ Mark Complete
@@ -6403,6 +6890,13 @@ class TripPlannerApp {
     // If it's a Safety Report task, open the Resolution Modal with options!
     if (task && (task.category === 'Safety Reports' || String(task.type).toLowerCase().includes('safety report') || String(task.id).toLowerCase().startsWith('safetycompliance_'))) {
       this.openSafetyReportResolutionModal(task, crewId, location);
+      return;
+    }
+
+    // If it's a Glove / PPE / Equipment Swap task, open the Swap Details & Completion Modal!
+    const isSwapTask = task && (task.category === 'PPE' || task.category === 'Equipment' || String(task.type || '').toLowerCase().includes('swap') || String(task.sourceSheet || '').toLowerCase().includes('swap'));
+    if (isSwapTask) {
+      this.openSwapDetailsModal(task, crewId, location);
       return;
     }
 

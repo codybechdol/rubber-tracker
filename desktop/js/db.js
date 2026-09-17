@@ -1566,8 +1566,24 @@ class LocalDatabase {
     if (!mutation) return null;
 
     // Discard redundant cell edits where oldValue === value
-    if (mutation.action === 'UPDATE_CELL' && mutation.oldValue !== undefined && mutation.oldValue === mutation.value) {
-      return null;
+    if (mutation.action === 'UPDATE_CELL') {
+      const normOld = (mutation.oldValue === undefined || mutation.oldValue === null) ? '' : String(mutation.oldValue).trim();
+      const normNew = (mutation.value === undefined || mutation.value === null) ? '' : String(mutation.value).trim();
+      if (normOld === normNew) {
+        return null;
+      }
+
+      // If oldValue was not specified, verify against current cell value in local snapshot
+      if (mutation.oldValue === undefined && mutation.sheetName && mutation.row && mutation.col) {
+        const tableKey = this.getTableKeyForSheet(mutation.sheetName);
+        const tbl = tableKey ? this.getTable(tableKey) : null;
+        if (tbl && tbl.rawGrid && tbl.rawGrid[mutation.row - 1]) {
+          const curCellVal = String(tbl.rawGrid[mutation.row - 1][mutation.col - 1] || '').trim();
+          if (curCellVal === normNew) {
+            return null; // Cell already contains this value
+          }
+        }
+      }
     }
 
       // Coalesce / update existing pending cell edit in outbox if present
@@ -1893,7 +1909,7 @@ class LocalDatabase {
                 }
 
                 if (invTable && invTable.rows) {
-                  const invSheetName = (invTable && invTable.name) ? invTable.name : (this.getSheetNameForTableKey(invKey) || invKey);
+                  const invSheetName = (invTable && invTable.name) ? invTable.name : (this.getSheetNameForTableKey(invTableKey) || invTableKey);
 
                   // 1. Pick list item -> Assigned
                   if (pickItemNum && pickItemNum !== '—' && pickItemNum !== '-') {

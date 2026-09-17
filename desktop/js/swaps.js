@@ -2171,7 +2171,7 @@ class SwapGenerationEngine {
         this.syncRowToRawGrid(invTable, oldRow);
         const invSheetName = (invTable && invTable.name) ? invTable.name : (this.db.getSheetNameForTableKey(invKey) || invKey);
         await this.db.recordItemHistoryEvent(invSheetName, oldRow, `Packed For Testing (Reclaim from ${empName})`);
-        await this.queueRowMutations(invKey, oldRow);
+        await this.queueRowMutations(invKey, oldRow, ['Location', 'Status', 'Assigned To', 'Date Assigned', 'Picked For', 'Change Out Date']);
       } else {
         if (row) {
           row['Picked'] = false;
@@ -2187,7 +2187,7 @@ class SwapGenerationEngine {
         oldRow['Assigned To'] = empName;
         oldRow['Picked For'] = '';
         this.syncRowToRawGrid(invTable, oldRow);
-        await this.queueRowMutations(invKey, oldRow);
+        await this.queueRowMutations(invKey, oldRow, ['Location', 'Status', 'Assigned To', 'Picked For']);
       }
 
       if (window.sheetNavigator) window.sheetNavigator.renderActiveView();
@@ -2224,7 +2224,7 @@ class SwapGenerationEngine {
         this.syncRowToRawGrid(invTable, invRow);
         const invSheetName = (invTable && invTable.name) ? invTable.name : (this.db.getSheetNameForTableKey(invKey) || invKey);
         await this.db.recordItemHistoryEvent(invSheetName, invRow, `Packed For Delivery (${empName})`);
-        await this.queueRowMutations(invKey, invRow);
+        await this.queueRowMutations(invKey, invRow, ['Location', 'Status', 'Assigned To', 'Date Assigned', 'Picked For']);
       }
     } else {
       // Uncheck Picked -> Revert to On Shelf
@@ -2302,7 +2302,7 @@ class SwapGenerationEngine {
           return itNum === pickNum && (assignedTo.includes('Packed For Delivery') || notes.includes('Packed For Delivery'));
         });
 
-        await this.queueRowMutations(invKey, invRow);
+        await this.queueRowMutations(invKey, invRow, ['Location', 'Status', 'Assigned To', 'Date Assigned', 'Picked For', 'Change Out Date']);
       }
     }
 
@@ -2400,7 +2400,7 @@ class SwapGenerationEngine {
         this.syncRowToRawGrid(invTable, oldRow);
         const invSheetName = (invTable && invTable.name) ? invTable.name : (this.db.getSheetNameForTableKey(invKey) || invKey);
         await this.db.recordItemHistoryEvent(invSheetName, oldRow, `Reclaimed from ${empName} (Packed For Testing)`);
-        await this.queueRowMutations(invKey, oldRow);
+        await this.queueRowMutations(invKey, oldRow, ['Location', 'Status', 'Assigned To', 'Date Assigned', 'Picked For', 'Change Out Date']);
       } else {
         if (row) {
           row['Date Changed'] = '';
@@ -2451,7 +2451,7 @@ class SwapGenerationEngine {
         this.syncRowToRawGrid(invTable, oldRow);
         const invSheetName = (invTable && invTable.name) ? invTable.name : (this.db.getSheetNameForTableKey(invKey) || invKey);
         await this.db.recordItemHistoryEvent(invSheetName, oldRow, `Returned from ${empName} (Swap Completed)`);
-        await this.queueRowMutations(invKey, oldRow);
+        await this.queueRowMutations(invKey, oldRow, ['Location', 'Status', 'Assigned To', 'Date Assigned', 'Picked For', 'Change Out Date']);
       }
 
       // 2. Assign New Replacement Item -> Employee / Assigned / Active Location
@@ -2483,12 +2483,12 @@ class SwapGenerationEngine {
 
         const invSheetName = (invTable && invTable.name) ? invTable.name : (this.db.getSheetNameForTableKey(invKey) || invKey);
         await this.db.recordItemHistoryEvent(invSheetName, newRow, `Assigned to ${empName}`);
-        await this.queueRowMutations(invKey, newRow);
+        await this.queueRowMutations(invKey, newRow, ['Location', 'Status', 'Assigned To', 'Date Assigned', 'Picked For', 'Change Out Date']);
       }
 
       if (row) {
         this.syncRowToRawGrid(swapTable, row);
-        await this.queueRowMutations(swapSheetKey, row);
+        await this.queueRowMutations(swapSheetKey, row, ['Date Changed', 'Status', 'Days Left']);
       }
     } else {
       // STAGE 4: Date Changed removed -> Revert to Stage 2 (Ready For Delivery)
@@ -2523,7 +2523,7 @@ class SwapGenerationEngine {
         // Re-record Stage 2 "Packed For Delivery" history entry
         const invSheetName = (invTable && invTable.name) ? invTable.name : (this.db.getSheetNameForTableKey(invKey) || invKey);
         await this.db.recordItemHistoryEvent(invSheetName, newRow, `Packed For Delivery (${empName})`);
-        await this.queueRowMutations(invKey, newRow);
+        await this.queueRowMutations(invKey, newRow, ['Location', 'Status', 'Assigned To', 'Date Assigned', 'Picked For', 'Change Out Date']);
       }
 
       // 2. Revert Old Item -> Employee / Assigned
@@ -2543,12 +2543,12 @@ class SwapGenerationEngine {
           return itNum === oldItemNum && (assignedTo.includes('Packed For Testing') || notes.includes(`Returned from ${empName}`));
         });
 
-        await this.queueRowMutations(invKey, oldRow);
+        await this.queueRowMutations(invKey, oldRow, ['Location', 'Status', 'Assigned To', 'Picked For']);
       }
 
       if (row) {
         this.syncRowToRawGrid(swapTable, row);
-        await this.queueRowMutations(swapSheetKey, row);
+        await this.queueRowMutations(swapSheetKey, row, ['Date Changed', 'Status', 'Days Left']);
       }
     }
 
@@ -2561,7 +2561,7 @@ class SwapGenerationEngine {
     }
   }
 
-  async queueRowMutations(tableKey, rowObj) {
+  async queueRowMutations(tableKey, rowObj, allowedKeys = null) {
     if (!this.db || !rowObj) return;
     const table = this.db.getTable(tableKey);
     if (!table || !table.headers) return;
@@ -2571,8 +2571,15 @@ class SwapGenerationEngine {
 
     const itemIdentifier = String(rowObj['Item #'] || rowObj['Glove'] || rowObj['Sleeve'] || rowObj['Blanket'] || rowObj['MACK'] || rowObj['Serial #'] || rowObj['ESL ID'] || Object.values(rowObj)[0] || '').trim();
 
+    const allowedSet = (allowedKeys && Array.isArray(allowedKeys))
+      ? new Set(allowedKeys.map(k => String(k).trim().toLowerCase()))
+      : null;
+
     for (let cIdx = 0; cIdx < table.headers.length; cIdx++) {
       const header = table.headers[cIdx];
+      if (allowedSet && !allowedSet.has(String(header).trim().toLowerCase())) {
+        continue;
+      }
       const val = rowObj[header];
       if (val !== undefined && typeof this.db.addMutation === 'function') {
         await this.db.addMutation({

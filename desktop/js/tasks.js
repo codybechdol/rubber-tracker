@@ -299,6 +299,15 @@ class TaskManagerApp {
                   if (swStage.includes('ready') || swStage.includes('picked') || String(swRow['Picked']).toLowerCase() === 'true') {
                     taskObj.status = 'Ready For Delivery';
                   }
+                  const pickItem = String(swRow['Pick List Item #'] || swRow['Pick List Glove #'] || swRow['Pick List Sleeve #'] || swRow['Pick List Blanket #'] || swRow['Pick List MACK #'] || swRow['Pick List'] || '').trim();
+                  if (pickItem && pickItem !== '—' && pickItem !== '-') {
+                    taskObj.pickListItem = pickItem;
+                  }
+                  taskObj.swapSheetKey = swKey;
+                  taskObj.tableKey = swKey;
+                  taskObj.swapRowIdx = swRow._rowIdx || (swTable.rows ? swTable.rows.indexOf(swRow) + 2 : null);
+                  if (swRow['Size']) taskObj.size = String(swRow['Size']).trim();
+                  if (swRow['Class']) taskObj.itemClass = String(swRow['Class']).trim();
                 }
               }
             }
@@ -382,6 +391,7 @@ class TaskManagerApp {
                 }
               }
             }
+            const pickListItem = String(r['Pick List Item #'] || r['Pick List Glove #'] || r['Pick List Sleeve #'] || r['Pick List Blanket #'] || r['Pick List MACK #'] || r['Pick List'] || '').trim();
             allTasks.push({
               id: swapId,
               sourceSheet: sw.name,
@@ -389,6 +399,12 @@ class TaskManagerApp {
               type: sw.name,
               itemType: specs || sw.name,
               currentItem: itemNum,
+              pickListItem: (pickListItem && pickListItem !== '—' && pickListItem !== '-') ? pickListItem : '',
+              swapSheetKey: sw.key,
+              tableKey: sw.key,
+              swapRowIdx: r._rowIdx || (idx + 2),
+              size: String(r['Size'] || '').trim(),
+              itemClass: String(r['Class'] || '').trim(),
               employee: emp,
               crewId: crewId,
               foreman: foreman,
@@ -623,6 +639,12 @@ class TaskManagerApp {
     }
 
     return allTasks;
+  }
+
+  getTaskById(taskId) {
+    if (!taskId) return null;
+    const allTasks = this.collectAllTasks();
+    return allTasks.find(t => String(t.id).toLowerCase() === String(taskId).toLowerCase()) || null;
   }
 
   isEquipmentSwapCompleted(sourceSheet, itemNum, employeeName) {
@@ -1164,13 +1186,14 @@ class TaskManagerApp {
     const isOverdue = task.isOverdue;
     const badgeColor = isComplete ? '#10b981' : (isOverdue ? '#ef4444' : '#f59e0b');
     const borderColor = isComplete ? 'rgba(16, 185, 129, 0.4)' : (isOverdue ? 'rgba(239, 68, 68, 0.4)' : 'var(--border-color)');
+    const isSwapTask = task && (task.category === 'PPE' || task.category === 'Equipment' || String(task.type || '').toLowerCase().includes('swap') || String(task.sourceSheet || '').toLowerCase().includes('swap'));
 
     return `
       <div style="background-color: var(--bg-primary); border: 1px solid ${borderColor}; border-left: 4px solid ${badgeColor}; border-radius: 6px; padding: 12px 14px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
         
         <div style="flex: 1; min-width: 260px;">
-          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
-            <span style="font-weight: 800; font-size: 13.5px; color: #f8fafc;">
+          <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px; flex-wrap: wrap;">
+            <span style="font-weight: 800; font-size: 13.5px; color: #f8fafc; cursor: ${isSwapTask ? 'pointer' : 'default'};" ${isSwapTask ? `onclick="if(window.tripPlanner){window.tripPlanner.openSwapDetailsModal(window.taskManager.getTaskById('${this.escapeHtml(task.id)}') || ${JSON.stringify(task).replace(/"/g, '&quot;')}, '${this.escapeHtml(task.crewId)}', '${this.escapeHtml(task.location)}');}" title="Click to view swap details"` : ''}>
               ${this.escapeHtml(task.type)}: ${this.escapeHtml(task.itemType)}
             </span>
             ${task.truckNumber ? `
@@ -1181,6 +1204,11 @@ class TaskManagerApp {
             ${task.currentItem ? `
               <span class="badge" style="background: rgba(255,255,255,0.06); color: #93c5fd; font-family: monospace; font-size: 11px; padding: 1px 6px;">
                 ${this.escapeHtml(task.currentItem)}
+              </span>
+            ` : ''}
+            ${task.pickListItem ? `
+              <span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); font-weight: 700; font-size: 11px; padding: 1px 6px;">
+                ➔ New: ${this.escapeHtml(task.pickListItem)}
               </span>
             ` : ''}
           </div>
@@ -1216,6 +1244,11 @@ class TaskManagerApp {
           <span class="badge" style="background: ${isComplete ? '#15803d' : (isOverdue ? '#b91c1c' : '#d97706')}; color: #fff; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 4px;">
             ${isComplete ? '✅ Complete' : (isOverdue ? '🔴 Overdue' : '⏳ Pending')}
           </span>
+          ${isSwapTask ? `
+            <button class="btn btn-secondary" style="color: #60a5fa; border: 1px solid rgba(96, 165, 250, 0.4); padding: 4px 8px; font-size: 11px; font-weight: 700; border-radius: 4px; cursor: pointer;" onclick="if(window.tripPlanner){window.tripPlanner.openSwapDetailsModal(window.taskManager.getTaskById('${this.escapeHtml(task.id)}') || ${JSON.stringify(task).replace(/"/g, '&quot;')}, '${this.escapeHtml(task.crewId)}', '${this.escapeHtml(task.location)}');}">
+              🔍 Swap Details
+            </button>
+          ` : ''}
           ${!isComplete ? `
             <button class="btn" style="background-color: #10b981; color: #fff; padding: 4px 10px; font-size: 11px; font-weight: 700; border-radius: 4px; cursor: pointer;" onclick="window.taskManager.completeTask('${this.escapeHtml(task.id)}')">
               ✓ Mark Complete
@@ -1243,6 +1276,15 @@ class TaskManagerApp {
     if (!forceDirect && task && (task.category === 'Safety Reports' || String(task.type).toLowerCase().includes('safety report') || String(task.id).toLowerCase().startsWith('safetycompliance_'))) {
       if (window.tripPlanner && typeof window.tripPlanner.openSafetyReportResolutionModal === 'function') {
         window.tripPlanner.openSafetyReportResolutionModal(task, task.crewId, task.location);
+        return;
+      }
+    }
+
+    // If it's a Glove / PPE / Equipment Swap task, delegate to the Swap Details & Completion Modal!
+    const isSwapTask = task && (task.category === 'PPE' || task.category === 'Equipment' || String(task.type || '').toLowerCase().includes('swap') || String(task.sourceSheet || '').toLowerCase().includes('swap'));
+    if (!forceDirect && isSwapTask) {
+      if (window.tripPlanner && typeof window.tripPlanner.openSwapDetailsModal === 'function') {
+        window.tripPlanner.openSwapDetailsModal(task, task.crewId, task.location);
         return;
       }
     }

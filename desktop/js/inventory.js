@@ -1663,6 +1663,10 @@ class InventoryManager {
               batteryExpiration: row['Battery Expiration']
             });
 
+            // Capture current values before modifying row object
+            const curChangeOut = String(row['Change Out Date'] || row['Pad Expiration'] || '').trim();
+            const curPickedFor = String(row['Picked For'] || '').trim();
+
             // Apply changes to local row object
             const oldAssignedSummary = `${curAssignedTo} (${curStatus})`;
             const newAssignedSummary = `${newAssignedTo} (${newStatus})`;
@@ -1706,8 +1710,12 @@ class InventoryManager {
             await queueColUpdate('Assigned To', curAssignedTo, newAssignedTo);
             await queueColUpdate('Location', curLocation, newLocation);
             await queueColUpdate('Date Assigned', curDateAssigned, newDateAssigned);
-            await queueColUpdate('Change Out Date', row['Change Out Date'], newChangeOut);
-            await queueColUpdate('Picked For', row['Picked For'], '');
+            if (curChangeOut !== newChangeOut) {
+              await queueColUpdate('Change Out Date', curChangeOut, newChangeOut);
+            }
+            if (curPickedFor) {
+              await queueColUpdate('Picked For', curPickedFor, '');
+            }
 
             if (row['Notes'] === 'Not New' || row['Notes'] === 'New Purchase') {
               const oldNotes = row['Notes'];

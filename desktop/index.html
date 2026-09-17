@@ -1269,6 +1269,28 @@
     </div>
   </div>
 
+  <!-- Glove & PPE Swap Details & Completion Modal -->
+  <div id="swap-details-modal" class="modal-overlay" style="z-index: 10600;">
+    <div class="modal-box" style="max-width: 720px; width: 94%; max-height: 90vh; display: flex; flex-direction: column;">
+      <div class="modal-header" style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); color: white; display: flex; justify-content: space-between; align-items: center;">
+        <div style="display: flex; align-items: center; gap: 8px;">
+          <span style="font-size: 20px;" id="swap-details-modal-icon">🧤</span>
+          <span id="swap-details-modal-title" style="font-weight: 800; font-size: 15px;">Glove Swap Details</span>
+        </div>
+        <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 12px; background: rgba(0,0,0,0.2); border: none; color: white; cursor: pointer;" onclick="window.tripPlanner.closeSwapDetailsModal()">✕</button>
+      </div>
+      <div class="modal-body" id="swap-details-modal-body" style="padding: 20px; max-height: 75vh; overflow-y: auto; display: flex; flex-direction: column; gap: 14px;">
+        <!-- Injected dynamically by trip-planner.js -->
+      </div>
+      <div class="modal-footer" id="swap-details-modal-footer" style="display: flex; justify-content: space-between; align-items: center; padding: 12px 20px; background: var(--bg-secondary); border-top: 1px solid var(--border-color);">
+        <button class="btn btn-secondary" onclick="window.tripPlanner.closeSwapDetailsModal()">Close</button>
+        <div style="display: flex; gap: 8px; align-items: center;" id="swap-details-modal-actions">
+          <!-- Action buttons injected dynamically -->
+        </div>
+      </div>
+    </div>
+  </div>
+
   <!-- Add Manual Task Modal (Trip Planner) -->
   <div id="manual-task-modal" class="modal-overlay">
     <div class="modal-box" style="max-width: 580px; width: 92%; max-height: 90vh; display: flex; flex-direction: column;">

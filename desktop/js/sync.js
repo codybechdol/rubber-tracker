@@ -32,10 +32,10 @@ class SyncEngine {
     localStorage.setItem('sa_sync_url', this.syncUrl);
   }
 
-  async executeNetworkRequest(url, method = 'GET', body = null, timeoutMs = 120000) {
+  async executeNetworkRequest(url, method = 'GET', body = null, timeoutMs = 45000) {
     // 1. If running inside Electron desktop app, use native Node HTTPS bridge
     if (window.desktopAPI && typeof window.desktopAPI.sendSyncRequest === 'function') {
-      const res = await window.desktopAPI.sendSyncRequest({ url, method, body });
+      const res = await window.desktopAPI.sendSyncRequest({ url, method, body, timeoutMs });
       if (res && res.success && res.data) {
         return res.data;
       } else if (res && res.data) {
@@ -850,7 +850,7 @@ class SyncEngine {
       while (i < totalCount) {
         batchNum++;
         // Push heavy operations (full-table swaps, history log imports, row deletions) 1 at a time;
-        // Standard lightweight edits up to 4 per batch to avoid Google gateway limits
+        // Standard lightweight edits up to 3-4 per batch to stay safely within Google Apps Script execution and HTTP redirect limits
         const currentMut = currentOutbox[i];
         const isHeavyMutation = (m) => m && (
           m.action === 'REPLACE_SWAP_TABLE' || 
@@ -868,7 +868,7 @@ class SyncEngine {
             chunkSize++;
           }
         }
-        const chunk = currentOutbox.slice(i, i + chunkSize);
+        let chunk = currentOutbox.slice(i, i + chunkSize);
 
         // Sanitize: never allow a header-only rawGrid to wipe out valid row objects
         chunk.forEach(m => {
@@ -887,7 +887,7 @@ class SyncEngine {
         let pushResult = null;
         let lastBatchErr = null;
         const maxAttempts = 3;
-        const retryDelays = [1500, 3500, 7000];
+        const retryDelays = [1200, 2500, 5000];
 
         for (let attempt = 1; attempt <= maxAttempts; attempt++) {
           try {
@@ -898,29 +898,23 @@ class SyncEngine {
               force: true,
               skipPostProcessing: true,
               returnSnapshot: false
-            }, 75000);
+            }, 45000);
             if (pushResult && (pushResult.success || pushResult.status === 'ok')) {
               break;
             }
           } catch (pushErr) {
             lastBatchErr = pushErr;
-            const encodedChunk = encodeURIComponent(JSON.stringify(chunk));
-            if (encodedChunk.length < 1800) {
-              try {
-                const getUrl = `${this.syncUrl}?action=applyMutations&mutations=${encodedChunk}&detectConflicts=false&force=true&skipPostProcessing=true&returnSnapshot=false`;
-                pushResult = await this.executeNetworkRequest(getUrl, 'GET');
-                if (pushResult && (pushResult.success || pushResult.status === 'ok')) {
-                  break;
-                }
-              } catch (getErr) {
-                lastBatchErr = getErr;
-              }
+            // If batch has multiple items and failed, immediately shrink chunk to 1 item to isolate the failure and ensure progress
+            if (chunk.length > 1) {
+              chunk = [currentOutbox[i]];
+              console.warn(`[Sync] Batch ${batchNum} failed with ${chunkSize} items, shrinking to 1 item and retrying immediately...`, pushErr);
+              continue;
             }
           }
 
           if (attempt < maxAttempts) {
             const delay = retryDelays[attempt - 1];
-            console.warn(`Batch ${batchNum} attempt ${attempt} failed, retrying in ${delay}ms...`, lastBatchErr);
+            console.warn(`[Sync] Batch ${batchNum} attempt ${attempt} failed, retrying in ${delay}ms...`, lastBatchErr);
             await new Promise(r => setTimeout(r, delay));
           }
         }
