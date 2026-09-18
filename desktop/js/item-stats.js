@@ -1457,34 +1457,21 @@ class ItemStatsEngine {
     }
   }
 
-  openDossierModal(itemKey, sheetKey, options = {}) {
-    const modal = document.getElementById('item-lifecycle-modal');
-    const body = document.getElementById('item-lifecycle-modal-body');
-    const titleEl = document.getElementById('item-lifecycle-modal-title');
-    if (!modal || !body) return;
-
-    this.initBookPagingListeners();
-
+  /**
+   * Retrieves history rows and active inventory row for an item with robust, consistent matching
+   * and fallback baseline synthesis when no history rows exist yet.
+   */
+  getItemHistoryAndActive(sheetKey, itemKey) {
+    const histKey = sheetKey.endsWith('_history') ? sheetKey : `${sheetKey}_history`;
+    const histTable = this.db ? this.db.getTable(histKey) : null;
+    const activeKey = histKey.replace('_history', '');
+    const activeTable = this.db ? this.db.getTable(activeKey) : null;
     const cleanItemKey = String(itemKey || '').trim();
-    this.currentActiveItemKey = cleanItemKey;
-    this.currentActiveSheetKey = sheetKey;
 
-    // Build ordered list of items for this equipment section
-    this.currentSectionItems = this.getSectionItemList(sheetKey, cleanItemKey);
     const numKey = parseInt(cleanItemKey, 10);
     const isPureNumKey = !isNaN(numKey) && String(numKey) === cleanItemKey;
 
-    this.currentActiveItemIndex = this.currentSectionItems.findIndex(k => {
-      if (k.toLowerCase() === cleanItemKey.toLowerCase()) return true;
-      const kNum = parseInt(k, 10);
-      return !isNaN(numKey) && !isNaN(kNum) && numKey === kNum;
-    });
-    if (this.currentActiveItemIndex === -1 && this.currentSectionItems.length > 0) {
-      this.currentActiveItemIndex = 0;
-    }
-
-    const tableData = this.db.getTable(sheetKey);
-    const rows = tableData ? (tableData.rows || []) : [];
+    const rows = histTable ? (histTable.rows || []) : [];
 
     let groupRows = rows.filter(r => {
       for (const k in r) {
@@ -1511,9 +1498,6 @@ class ItemStatsEngine {
       return false;
     });
 
-    // If no history entries exist yet, synthesize an active baseline record from the active inventory sheet
-    const activeSheetKey = sheetKey.replace('_history', '');
-    const activeTable = this.db.getTable(activeSheetKey);
     let foundActive = null;
     if (activeTable && activeTable.rows) {
       foundActive = activeTable.rows.find(r => {
@@ -1531,14 +1515,17 @@ class ItemStatsEngine {
             const val = String(r[k] || '').trim();
             if (!val) continue;
             if (val.toLowerCase() === cleanItemKey.toLowerCase()) return true;
-            if (isPureNumKey && parseInt(val, 10) === numKey) return true;
+            if (isPureNumKey) {
+              const rNum = parseInt(val, 10);
+              if (!isNaN(rNum) && String(rNum) === val && rNum === numKey) return true;
+            }
           }
         }
         return false;
       });
     }
 
-    if (foundActive) {
+    if (foundActive && groupRows.length === 0) {
       const activeStatus = String(foundActive['Status'] || '').trim().toLowerCase();
       const activeNotes = String(foundActive['Notes'] || '').trim();
       const hasOriginNote = activeNotes.toLowerCase().includes('new purchase') ||
@@ -1546,46 +1533,87 @@ class ItemStatsEngine {
                             activeNotes.toLowerCase().includes('item found') ||
                             activeNotes.toLowerCase().includes('initial purchase');
 
-      if (groupRows.length === 0) {
-        if (hasOriginNote && (activeStatus === 'failed rubber' || activeStatus === 'destroyed' || activeStatus === 'lost' || activeStatus === 'assigned' || activeStatus === 'in testing' || activeStatus === 'ready for delivery' || activeStatus === 'ready for test')) {
-          // Event 1: Origin Purchase on shelf
-          groupRows.push({
-            'Date Assigned': foundActive['Test Date'] || foundActive['Date Assigned'] || new Date().toISOString(),
-            'Item #': cleanItemKey,
-            'Size': foundActive['Size'] || '',
-            'Class': foundActive['Class'] || '',
-            'Location': 'Helena',
-            'Assigned To': 'On Shelf',
-            'Status': 'In Stock',
-            'Notes': activeNotes
-          });
-          // Event 2: Current Status
-          groupRows.push({
-            'Date Assigned': foundActive['Date Assigned'] || new Date().toISOString(),
-            'Item #': cleanItemKey,
-            'Size': foundActive['Size'] || '',
-            'Class': foundActive['Class'] || '',
-            'Location': foundActive['Location'] || (activeStatus.includes('failed') ? 'Destroyed' : (activeStatus.includes('lost') ? 'Lost' : 'Helena')),
-            'Assigned To': foundActive['Assigned To'] || foundActive['Status'] || 'Failed Rubber',
-            'Status': foundActive['Status'] || 'Failed Rubber',
-            'Notes': (foundActive['Status'] === 'Failed Rubber' ? 'Failed Rubber' : (foundActive['Status'] === 'Lost' ? 'Lost' : ''))
-          });
-        } else {
-          groupRows.push({
-            'Date Assigned': foundActive['Date Assigned'] || foundActive['Test Date'] || new Date().toISOString(),
-            'Item #': cleanItemKey,
-            'Size': foundActive['Size'] || '',
-            'Class': foundActive['Class'] || '',
-            'Location': foundActive['Location'] || 'Helena',
-            'Assigned To': foundActive['Assigned To'] || foundActive['Status'] || 'On Shelf',
-            'Status': foundActive['Status'] || 'On Shelf',
-            'Notes': activeNotes || 'Current Active Inventory Status'
-          });
-        }
+      if (hasOriginNote && (activeStatus === 'failed rubber' || activeStatus === 'destroyed' || activeStatus === 'lost' || activeStatus === 'assigned' || activeStatus === 'in testing' || activeStatus === 'ready for delivery' || activeStatus === 'ready for test')) {
+        // Event 1: Origin Purchase on shelf
+        groupRows.push({
+          'Date Assigned': foundActive['Test Date'] || foundActive['Date Assigned'] || new Date().toISOString(),
+          'Item #': cleanItemKey,
+          'Size': foundActive['Size'] || '',
+          'Class': foundActive['Class'] || '',
+          'Location': 'Helena',
+          'Assigned To': 'On Shelf',
+          'Status': 'In Stock',
+          'Notes': activeNotes,
+          _isSynthesized: true
+        });
+        // Event 2: Current Status
+        groupRows.push({
+          'Date Assigned': foundActive['Date Assigned'] || new Date().toISOString(),
+          'Item #': cleanItemKey,
+          'Size': foundActive['Size'] || '',
+          'Class': foundActive['Class'] || '',
+          'Location': foundActive['Location'] || (activeStatus.includes('failed') ? 'Destroyed' : (activeStatus.includes('lost') ? 'Lost' : 'Helena')),
+          'Assigned To': foundActive['Assigned To'] || foundActive['Status'] || 'Failed Rubber',
+          'Status': foundActive['Status'] || 'Failed Rubber',
+          'Notes': (foundActive['Status'] === 'Failed Rubber' ? 'Failed Rubber' : (foundActive['Status'] === 'Lost' ? 'Lost' : '')),
+          _isSynthesized: true
+        });
+      } else {
+        groupRows.push({
+          'Date Assigned': foundActive['Date Assigned'] || foundActive['Test Date'] || new Date().toISOString(),
+          'Item #': cleanItemKey,
+          'Size': foundActive['Size'] || '',
+          'Class': foundActive['Class'] || '',
+          'Location': foundActive['Location'] || 'Helena',
+          'Assigned To': foundActive['Assigned To'] || foundActive['Status'] || 'On Shelf',
+          'Status': foundActive['Status'] || 'On Shelf',
+          'Notes': activeNotes || 'Current Active Inventory Status',
+          _isSynthesized: true
+        });
       }
     }
 
     const stats = this.analyzeLifecycle(cleanItemKey, groupRows, foundActive);
+
+    return {
+      histKey,
+      histTable,
+      activeKey,
+      activeTable,
+      cleanItemKey,
+      groupRows,
+      foundActive,
+      stats
+    };
+  }
+
+  openDossierModal(itemKey, sheetKey, options = {}) {
+    const modal = document.getElementById('item-lifecycle-modal');
+    const body = document.getElementById('item-lifecycle-modal-body');
+    const titleEl = document.getElementById('item-lifecycle-modal-title');
+    if (!modal || !body) return;
+
+    this.initBookPagingListeners();
+
+    const cleanItemKey = String(itemKey || '').trim();
+    this.currentActiveItemKey = cleanItemKey;
+    this.currentActiveSheetKey = sheetKey;
+
+    // Build ordered list of items for this equipment section
+    this.currentSectionItems = this.getSectionItemList(sheetKey, cleanItemKey);
+    const numKey = parseInt(cleanItemKey, 10);
+
+    this.currentActiveItemIndex = this.currentSectionItems.findIndex(k => {
+      if (k.toLowerCase() === cleanItemKey.toLowerCase()) return true;
+      const kNum = parseInt(k, 10);
+      return !isNaN(numKey) && !isNaN(kNum) && numKey === kNum;
+    });
+    if (this.currentActiveItemIndex === -1 && this.currentSectionItems.length > 0) {
+      this.currentActiveItemIndex = 0;
+    }
+
+    const { histKey, activeKey, activeTable, groupRows, foundActive, stats } = this.getItemHistoryAndActive(sheetKey, cleanItemKey);
+    const activeSheetKey = activeKey;
     const sheetTitle = sheetKey.replace('_history', '').replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase());
 
     if (titleEl) {
@@ -2267,43 +2295,16 @@ class ItemStatsEngine {
    * Deletes a single history milestone event from a dossier view
    */
   async deleteMilestoneRecord(sheetKey, itemKey, milestoneIdx) {
-    const histKey = sheetKey.endsWith('_history') ? sheetKey : `${sheetKey}_history`;
-    const histTable = this.db.getTable(histKey);
+    const { histKey, histTable, cleanItemKey, stats } = this.getItemHistoryAndActive(sheetKey, itemKey);
     if (!histTable || !histTable.rows) return;
-
-    const activeKey = histKey.replace('_history', '');
-    const activeTable = this.db.getTable(activeKey);
-    const cleanItemKey = String(itemKey || '').trim();
-
-    const groupRows = histTable.rows.filter(r => {
-      for (const k of Object.keys(r)) {
-        const kl = k.toLowerCase();
-        if (kl.includes('item') || kl.includes('serial') || kl.includes('glove') || kl.includes('sleeve') || kl.includes('blanket') || kl.includes('mack')) {
-          if (String(r[k] || '').trim() === cleanItemKey) return true;
-        }
-      }
-      return false;
-    });
-
-    const foundActive = activeTable && activeTable.rows ? activeTable.rows.find(r => {
-      for (const k of Object.keys(r)) {
-        const kl = k.toLowerCase();
-        if (kl.includes('item') || kl.includes('serial') || kl.includes('glove') || kl.includes('sleeve') || kl.includes('blanket') || kl.includes('mack')) {
-          if (String(r[k] || '').trim() === cleanItemKey) return true;
-        }
-      }
-      return false;
-    }) : null;
-
-    const stats = this.analyzeLifecycle(cleanItemKey, groupRows, foundActive);
     if (!stats || !stats.milestones || !stats.milestones[milestoneIdx]) return;
 
     const m = stats.milestones[milestoneIdx];
-    const confirmMsg = `🗑️ Delete History Record?\n\n• Item: #${itemKey}\n• Date: ${m.startDateFormatted}\n• Status / Holder: ${m.assignedTo || m.state.label}\n• Notes: ${m.notes || 'None'}\n\nAre you sure you want to permanently delete this entry?`;
+    const confirmMsg = `🗑️ Delete History Record?\n\n• Item: #${cleanItemKey}\n• Date: ${m.startDateFormatted}\n• Status / Holder: ${m.assignedTo || m.state.label}\n• Notes: ${m.notes || 'None'}\n\nAre you sure you want to permanently delete this entry?`;
     
     if (!confirm(confirmMsg)) return;
 
-    if (m.rawRow) {
+    if (m.rawRow && !m.rawRow._isSynthesized) {
       await this.db.deleteHistoryRow(histKey, m.rawRow);
     } else {
       await this.db.deleteHistoryRow(histKey, r => {
@@ -2314,49 +2315,15 @@ class ItemStatsEngine {
     }
 
     // Refresh UI
-    this.openDossierModal(itemKey, histKey);
+    this.openDossierModal(cleanItemKey, histKey);
     if (window.historyNavigator) {
       window.historyNavigator.renderCurrentHistory();
     }
   }
 
   openEditMilestoneModal(sheetKey, itemKey, milestoneIdx) {
-    const histKey = sheetKey.endsWith('_history') ? sheetKey : `${sheetKey}_history`;
-    const histTable = this.db.getTable(histKey);
+    const { histKey, histTable, activeKey, activeTable, cleanItemKey, stats } = this.getItemHistoryAndActive(sheetKey, itemKey);
     if (!histTable || !histTable.rows) return;
-
-    const activeKey = histKey.replace('_history', '');
-    const activeTable = this.db.getTable(activeKey);
-    const cleanItemKey = String(itemKey || '').trim();
-
-    const numKey = parseInt(cleanItemKey, 10);
-    const isPureNumKey = !isNaN(numKey) && String(numKey) === cleanItemKey;
-
-    const groupRows = histTable.rows.filter(r => {
-      for (const k of Object.keys(r)) {
-        const kl = k.toLowerCase();
-        if (kl.includes('item') || kl.includes('serial') || kl.includes('glove') || kl.includes('sleeve') || kl.includes('blanket') || kl.includes('mack')) {
-          const val = String(r[k] || '').trim();
-          if (val === cleanItemKey) return true;
-          if (isPureNumKey && parseInt(val, 10) === numKey) return true;
-        }
-      }
-      return false;
-    });
-
-    const foundActive = activeTable && activeTable.rows ? activeTable.rows.find(r => {
-      for (const k of Object.keys(r)) {
-        const kl = k.toLowerCase();
-        if (kl.includes('item') || kl.includes('serial') || kl.includes('glove') || kl.includes('sleeve') || kl.includes('blanket') || kl.includes('mack')) {
-          const val = String(r[k] || '').trim();
-          if (val === cleanItemKey) return true;
-          if (isPureNumKey && parseInt(val, 10) === numKey) return true;
-        }
-      }
-      return false;
-    }) : null;
-
-    const stats = this.analyzeLifecycle(cleanItemKey, groupRows, foundActive);
     if (!stats || !stats.milestones || !stats.milestones[milestoneIdx]) return;
 
     const m = stats.milestones[milestoneIdx];
@@ -2464,9 +2431,50 @@ class ItemStatsEngine {
     }
 
     const assignedTo = assignedInput ? assignedInput.value.trim() : (milestone.assignedTo || '');
-    const location = locationInput ? locationInput.value.trim() : (milestone.location || 'Helena');
+    let location = locationInput ? locationInput.value.trim() : (milestone.location || 'Helena');
     const notes = notesInput ? notesInput.value.trim() : (milestone.notes || '');
     const shouldSyncActive = syncActiveCheck ? syncActiveCheck.checked : false;
+
+    // Determine coordinated status & location if assignedTo is a standard state
+    const assignedLower = assignedTo.toLowerCase();
+    let coordinatedStatus = '';
+    if (assignedLower === 'in testing' || assignedLower === 'testing' || assignedLower === 'lab' || assignedLower === 'arnett' || assignedLower === 'jm test' || assignedLower === 'arnett / jm test') {
+      coordinatedStatus = 'In Testing';
+      if (!location || location === 'Helena' || location === "Cody's Truck" || location === 'Belgrade') {
+        location = 'Arnett / JM Test';
+      }
+    } else if (assignedLower === 'on shelf' || assignedLower === 'shelf') {
+      coordinatedStatus = 'On Shelf';
+      if (!location || location === "Cody's Truck" || location === 'Arnett / JM Test') {
+        location = 'Helena';
+      }
+    } else if (assignedLower === 'packed for testing' || assignedLower === 'ready for test') {
+      coordinatedStatus = 'Ready For Test';
+      location = "Cody's Truck";
+    } else if (assignedLower === 'packed for delivery' || assignedLower === 'ready for delivery') {
+      coordinatedStatus = 'Ready For Delivery';
+      location = "Cody's Truck";
+    } else if (assignedLower === 'failed rubber' || assignedLower === 'failed' || assignedLower === 'destroyed') {
+      coordinatedStatus = 'Failed Rubber';
+      location = 'Destroyed';
+    } else if (assignedLower === 'lost' || assignedLower === 'missing') {
+      coordinatedStatus = 'Lost';
+      location = 'Lost';
+    } else {
+      const nonEmpHolders = ['new', 'unassigned', 'n/a', '—', '-'];
+      if (!nonEmpHolders.includes(assignedLower)) {
+        coordinatedStatus = 'Assigned';
+        const empTable = this.db ? this.db.getTable('employees') : (window.localDB ? window.localDB.getTable('employees') : null);
+        if (empTable && empTable.rows) {
+          const empMatch = empTable.rows.find(e => String(e['Name'] || e['Employee Name'] || Object.values(e)[0] || '').trim().toLowerCase() === assignedLower);
+          if (empMatch) {
+            const rawLoc = String(empMatch['Location'] || '').trim();
+            const cleanLoc = (window.getPhysicalLocation ? window.getPhysicalLocation(rawLoc) : rawLoc) || 'Helena';
+            location = cleanLoc;
+          }
+        }
+      }
+    }
 
     // Update history table row using db.updateHistoryRow
     const updatedFields = {
@@ -2476,14 +2484,36 @@ class ItemStatsEngine {
       'Notes': notes
     };
 
-    if (rawRow) {
-      await this.db.updateHistoryRow(sheetKey, rawRow, updatedFields);
+    let historyUpdated = false;
+    if (rawRow && !rawRow._isSynthesized) {
+      historyUpdated = await this.db.updateHistoryRow(sheetKey, rawRow, updatedFields);
     } else {
-      await this.db.updateHistoryRow(sheetKey, r => {
+      historyUpdated = await this.db.updateHistoryRow(sheetKey, r => {
         const d = String(r['Date Assigned'] || r['Date'] || Object.values(r)[0] || '').trim();
         const a = String(r['Assigned To'] || r['Employee Name'] || '').trim();
-        return d === milestone.startDateFormatted && a === milestone.assignedTo;
+        const itemVal = String(r['Item #'] || r['Item'] || r['Serial #'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || '').trim();
+        return (itemVal ? itemVal.toLowerCase() === itemKey.toLowerCase() : true) && d === milestone.startDateFormatted && a === milestone.assignedTo;
       }, updatedFields);
+    }
+
+    // If rawRow was synthesized from active inventory baseline or not found in history table, insert as a real history record now:
+    if (!historyUpdated) {
+      const activeTable = this.db.getTable(activeSheetKey);
+      const activeRow = activeTable?.rows?.find(r => {
+        const id = String(r['Serial #'] || r['Item #'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['MACK'] || Object.values(r)[0] || '').trim();
+        return id.toLowerCase() === itemKey.toLowerCase();
+      });
+      await this.db.recordItemHistoryEvent(
+        activeTable ? activeTable.name : activeSheetKey,
+        {
+          ...(activeRow || {}),
+          'Date Assigned': dateFormatted,
+          'Assigned To': assignedTo,
+          'Location': location,
+          'Notes': notes
+        },
+        notes || `History milestone updated: ${assignedTo}`
+      );
     }
 
     // If this is the current state and should sync with active sheet
@@ -2499,7 +2529,10 @@ class ItemStatsEngine {
             if (kl.includes('item') || kl.includes('serial') || kl.includes('glove') || kl.includes('sleeve') || kl.includes('blanket') || kl.includes('mack')) {
               const val = String(r[k] || '').trim();
               if (val.toLowerCase() === itemKey.toLowerCase()) return true;
-              if (isPureNumKey && parseInt(val, 10) === numKey) return true;
+              if (isPureNumKey) {
+                const rNum = parseInt(val, 10);
+                if (!isNaN(rNum) && String(rNum) === val && rNum === numKey) return true;
+              }
             }
           }
           return false;
@@ -2509,15 +2542,32 @@ class ItemStatsEngine {
           const dateAssignedCol = (activeTable.headers || []).find(h => /date\s*assigned/i.test(h));
           const assignedToCol = (activeTable.headers || []).find(h => /assigned\s*to|^assigned$|^holder$/i.test(h));
           const locationCol = (activeTable.headers || []).find(h => /^location$/i.test(h));
+          const statusCol = (activeTable.headers || []).find(h => /^status$|^item\s*status$/i.test(h));
+          const pickedCol = (activeTable.headers || []).find(h => /^picked\s*for$/i.test(h));
           const chgOutCol = (activeTable.headers || []).find(h => /change\s*out/i.test(h));
+
+          const oldVals = {
+            dateAssigned: dateAssignedCol ? activeRow[dateAssignedCol] : undefined,
+            assignedTo: assignedToCol ? activeRow[assignedToCol] : undefined,
+            location: locationCol ? activeRow[locationCol] : undefined,
+            status: statusCol ? activeRow[statusCol] : undefined,
+            pickedFor: pickedCol ? activeRow[pickedCol] : undefined,
+            chgOut: chgOutCol ? activeRow[chgOutCol] : undefined
+          };
 
           if (dateAssignedCol) activeRow[dateAssignedCol] = dateFormatted;
           if (assignedToCol) activeRow[assignedToCol] = assignedTo;
           if (locationCol) activeRow[locationCol] = location;
+          if (statusCol && coordinatedStatus) activeRow[statusCol] = coordinatedStatus;
+          if (pickedCol && ['in testing', 'on shelf', 'failed rubber', 'lost', 'ready for test'].includes(assignedLower)) {
+            activeRow[pickedCol] = '';
+          }
 
           // Recalculate Change Out Date
           let calculatedChgOut = '';
-          if (window.inventoryManager && typeof window.inventoryManager.calculateChangeOutDate === 'function') {
+          if (coordinatedStatus === 'Failed Rubber' || coordinatedStatus === 'Lost') {
+            calculatedChgOut = 'N/A';
+          } else if (window.inventoryManager && typeof window.inventoryManager.calculateChangeOutDate === 'function') {
             const testD = activeRow['Test Date'] || activeRow['Calibration Date'] || '';
             calculatedChgOut = window.inventoryManager.calculateChangeOutDate(
               dateFormatted || testD,
@@ -2540,7 +2590,7 @@ class ItemStatsEngine {
             });
           }
 
-          const queueCell = async (hName, val) => {
+          const queueCell = async (hName, val, oldVal) => {
             if (!hName || val === undefined) return;
             const cIdx = (activeTable.headers || []).indexOf(hName);
             if (cIdx !== -1 && rIdx) {
@@ -2551,17 +2601,28 @@ class ItemStatsEngine {
                 col: cIdx + 1,
                 header: hName,
                 itemIdentifier: itemKey,
-                value: val
+                oldValue: oldVal,
+                value: val,
+                skipHistory: true // Prevent duplicate history unshift since history row is already updated above
               });
             }
           };
 
-          if (dateAssignedCol) await queueCell(dateAssignedCol, dateFormatted);
-          if (assignedToCol) await queueCell(assignedToCol, assignedTo);
-          if (locationCol) await queueCell(locationCol, location);
-          if (calculatedChgOut && chgOutCol) await queueCell(chgOutCol, calculatedChgOut);
+          if (dateAssignedCol) await queueCell(dateAssignedCol, dateFormatted, oldVals.dateAssigned);
+          if (assignedToCol) await queueCell(assignedToCol, assignedTo, oldVals.assignedTo);
+          if (locationCol) await queueCell(locationCol, location, oldVals.location);
+          if (statusCol && coordinatedStatus) await queueCell(statusCol, coordinatedStatus, oldVals.status);
+          if (pickedCol && ['in testing', 'on shelf', 'failed rubber', 'lost', 'ready for test'].includes(assignedLower)) {
+            await queueCell(pickedCol, '', oldVals.pickedFor);
+          }
+          if (calculatedChgOut && chgOutCol) await queueCell(chgOutCol, calculatedChgOut, oldVals.chgOut);
         }
       }
+    }
+
+    // Persist snapshot to storage
+    if (this.db && this.db.snapshot) {
+      await this.db.setSnapshot(this.db.snapshot);
     }
 
     this.closeEditMilestoneModal();
