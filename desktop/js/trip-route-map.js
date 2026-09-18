@@ -34,6 +34,8 @@ class TripRouteMap {
     this.isTracking = false;
     this.mapViewMode = 'google-maps'; // 'google-maps' (default embedded) or 'gps-tracker'
     this.customStopOrder = {};
+    this.roadGeometryCache = {};
+    this.lastRoutedOrigin = null;
 
     // Standard Montana Hubs, Substations, and Service Bases with verified GPS coordinates
     this.montanaCoordinates = {
@@ -317,7 +319,9 @@ class TripRouteMap {
    */
   generateGoogleMapsEmbedUrl(routeData, layerType = 'streets') {
     const tParam = (layerType === 'satellite') ? 'k' : 'm';
-    const origin = 'Helena,+MT';
+    const origin = (this.userPosition && this.userPosition.lat && this.userPosition.lng)
+      ? `${this.userPosition.lat},${this.userPosition.lng}`
+      : 'Helena,+MT';
     const destination = 'Helena,+MT';
 
     if (!routeData || !routeData.stops || routeData.stops.length === 0) {
@@ -666,6 +670,17 @@ class TripRouteMap {
 
     // Update real-time distance and ETA to next scheduled stop
     this.updateLiveNextStopHud();
+
+    // Re-plan route if user position shifts or on first fix so route connects to current location
+    const prevOrigin = this.lastRoutedOrigin;
+    const distFromPrev = prevOrigin ? this.calculateDistance(latitude, longitude, prevOrigin[0], prevOrigin[1]) : 999;
+    if (distFromPrev > 0.2) {
+      this.lastRoutedOrigin = [latitude, longitude];
+      if (this.activeMode === 'single-day') {
+        this.renderMap();
+        this.renderItinerarySidebar();
+      }
+    }
   }
 
   toggleFollowMe() {
@@ -1275,18 +1290,26 @@ class TripRouteMap {
         </div>
       `;
     } else {
-      // Build chronological stops timeline
+      // Build chronological stops timeline: start from Current Location if GPS active, else Helena HQ
+      const hasUserPos = !!(this.userPosition && this.userPosition.lat && this.userPosition.lng);
+      const startTitle = hasUserPos ? 'Current Location' : 'Helena Base HQ';
+      const startSubtitle = hasUserPos
+        ? `${this.userPosition.city || 'Montana City / Helena Area'} (GPS Navigation Origin)`
+        : 'Trip Starting Point (Montana Safety Base)';
+      const startBadge = hasUserPos ? '🧭' : 'HQ';
+      const departTime = hasUserPos ? 'DEPART NOW' : 'DEPART ~7:00 AM';
+
       stopsTimelineHtml = `
         <div class="stops-timeline" style="margin-top: 14px;">
-          <!-- Origin: Helena HQ -->
+          <!-- Origin: Current Location or Helena HQ -->
           <div class="stop-item origin">
-            <div class="stop-marker-badge origin">HQ</div>
+            <div class="stop-marker-badge origin" style="${hasUserPos ? 'background: #2563eb; color: white; font-size: 13px;' : ''}">${startBadge}</div>
             <div class="stop-content">
               <div style="display: flex; justify-content: space-between; align-items: baseline;">
-                <span class="stop-title">Helena Base HQ</span>
-                <span style="font-size: 10px; color: var(--text-muted); font-weight: 700;">DEPART ~7:00 AM</span>
+                <span class="stop-title">${startTitle}</span>
+                <span style="font-size: 10px; color: ${hasUserPos ? '#60a5fa' : 'var(--text-muted)'}; font-weight: 700;">${departTime}</span>
               </div>
-              <div style="font-size: 11px; color: var(--text-muted);">Trip Starting Point (Montana Safety Base)</div>
+              <div style="font-size: 11px; color: var(--text-muted);">${startSubtitle}</div>
             </div>
           </div>
       `;
@@ -1295,12 +1318,21 @@ class TripRouteMap {
         const stopNum = idx + 1;
         const totalStops = routeData.stops.length;
 
+        // Calculate live leg distance for stop 1 from current position if available
+        let legMiles = stop.legMiles;
+        let legTime = stop.legTime;
+        if (hasUserPos && idx === 0) {
+          const liveMiles = this.calculateDistance(this.userPosition.lat, this.userPosition.lng, stop.coords.lat, stop.coords.lng);
+          legMiles = Math.round(liveMiles);
+          legTime = this.formatMinutes(Math.round((liveMiles / 55) * 60));
+        }
+
         stopsTimelineHtml += `
           <!-- Travel Leg Connector -->
           <div class="stop-travel-leg">
             <div class="travel-leg-line"></div>
             <div class="travel-leg-info">
-              🚗 ${stop.legMiles} mi • ~${stop.legTime}
+              🚗 ${legMiles} mi • ~${legTime}
             </div>
           </div>
 
@@ -1578,15 +1610,22 @@ class TripRouteMap {
           `);
 
           this.routePolylines.push(polyline);
+          this.applyRoadRouteGeometry(latLngs, polyline);
         }
       });
     } else {
-      // Single-day mode
+      // Single-day mode: plan route from live current position if available, else Helena Base HQ
       const routeData = this.collectRouteDataForDate(this.activeDateKey);
       if (routeData && routeData.stops.length > 0) {
-        const latLngs = [[hq.lat, hq.lng]];
+        const hasUserPos = !!(this.userPosition && this.userPosition.lat && this.userPosition.lng);
+        const startPoint = hasUserPos
+          ? [this.userPosition.lat, this.userPosition.lng]
+          : [hq.lat, hq.lng];
 
-        // Add Helena Base HQ marker
+        const latLngs = [startPoint];
+        bounds.extend(startPoint);
+
+        // Add Helena Base HQ marker as return anchor
         const hqMarker = this.createHqMarker();
         hqMarker.addTo(this.map);
         this.routeMarkers.push(hqMarker);
@@ -1600,8 +1639,9 @@ class TripRouteMap {
           this.routeMarkers.push(stopMarker);
         });
 
-        // Return leg to Helena
+        // Return leg to Helena HQ
         latLngs.push([hq.lat, hq.lng]);
+        bounds.extend([hq.lat, hq.lng]);
 
         // Main Route Polyline (Google Maps style solid blue with subtle shadow)
         const polyShadow = L.polyline(latLngs, {
@@ -1619,6 +1659,9 @@ class TripRouteMap {
           lineJoin: 'round'
         }).addTo(this.map);
         this.routePolylines.push(polyline);
+
+        // Fetch real highway road geometry (OSRM) to replace straight lines!
+        this.applyRoadRouteGeometry(latLngs, polyline, polyShadow);
       } else {
         // No stops on this date: show HQ marker
         const hqMarker = this.createHqMarker();
@@ -1631,6 +1674,56 @@ class TripRouteMap {
     if (bounds.isValid() && !this.followMe) {
       this.map.fitBounds(bounds, { padding: [40, 40], maxZoom: 13 });
     }
+  }
+
+  /**
+   * Fetches real highway road driving geometry via OSRM to curve along actual roads.
+   */
+  async applyRoadRouteGeometry(latLngs, polyline, polyShadow) {
+    if (!latLngs || latLngs.length < 2) return;
+    try {
+      const roadCoords = await this.fetchRoadGeometry(latLngs);
+      if (roadCoords && roadCoords.length > 1) {
+        if (polyline && this.map && this.map.hasLayer(polyline)) {
+          polyline.setLatLngs(roadCoords);
+        }
+        if (polyShadow && this.map && this.map.hasLayer(polyShadow)) {
+          polyShadow.setLatLngs(roadCoords);
+        }
+      }
+    } catch (err) {
+      console.warn('Road routing geometry error:', err);
+    }
+  }
+
+  async fetchRoadGeometry(latLngPoints) {
+    if (!this.roadGeometryCache) this.roadGeometryCache = {};
+    const cacheKey = latLngPoints.map(p => `${p[0].toFixed(3)},${p[1].toFixed(3)}`).join(';');
+    if (this.roadGeometryCache[cacheKey]) {
+      return this.roadGeometryCache[cacheKey];
+    }
+
+    try {
+      const coordsStr = latLngPoints.map(p => `${p[1].toFixed(5)},${p[0].toFixed(5)}`).join(';');
+      const url = `https://router.project-osrm.org/route/v1/driving/${coordsStr}?overview=full&geometries=geojson`;
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 6000);
+      const res = await fetch(url, { signal: controller.signal });
+      clearTimeout(timeoutId);
+
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.routes && data.routes[0] && data.routes[0].geometry && data.routes[0].geometry.coordinates) {
+          const roadLatLngs = data.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
+          this.roadGeometryCache[cacheKey] = roadLatLngs;
+          return roadLatLngs;
+        }
+      }
+    } catch (e) {
+      console.warn('OSRM routing fetch warning (using straight line fallback):', e);
+    }
+    return latLngPoints;
   }
 
   createHqMarker() {
@@ -1728,7 +1821,9 @@ class TripRouteMap {
    */
   generateGoogleMapsUrl(routeData) {
     if (!routeData || routeData.stops.length === 0) return '';
-    const origin = 'Helena,+MT';
+    const origin = (this.userPosition && this.userPosition.lat && this.userPosition.lng)
+      ? `${this.userPosition.lat},${this.userPosition.lng}`
+      : 'Helena,+MT';
     const destination = 'Helena,+MT';
     const waypoints = routeData.stops.map(s => {
       return encodeURIComponent(s.location + ', MT');
