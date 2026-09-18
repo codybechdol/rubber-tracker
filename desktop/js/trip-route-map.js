@@ -12,6 +12,8 @@
  * - 1-Click "Open in Google Maps" turn-by-turn voice navigation export
  */
 
+/* global L */
+
 class TripRouteMap {
   constructor(db, tripPlanner) {
     this.db = db;
@@ -515,7 +517,7 @@ class TripRouteMap {
     }
   }
 
-  setFollowMe(val, temporary = false) {
+  setFollowMe(val) {
     this.followMe = !!val;
     const btn = document.getElementById('map-btn-follow-me');
     if (btn) {

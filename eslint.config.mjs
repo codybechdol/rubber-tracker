@@ -25,6 +25,8 @@ export default defineConfig([
 				ContentService: "readonly",
 				// Desktop Application Vendor & Cross-Script globals
 				XLSX: "readonly",
+				L: "readonly",
+				TripRouteMap: "readonly",
 				EmployeeNameResolver: "readonly",
 				EmployeeProfileEngine: "readonly",
 				DrugTestingEngine: "readonly",
