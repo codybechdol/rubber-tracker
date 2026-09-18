@@ -52,6 +52,12 @@ class TripRouteMap {
       'three forks': { name: 'Three Forks', lat: 45.8927, lng: -111.5519, type: 'Town Center' },
       'three rivers sub': { name: 'Three Rivers Sub', lat: 45.8927, lng: -111.5519, type: 'Substation' },
       'townsend': { name: 'Townsend', lat: 46.3208, lng: -111.5175, type: 'Field Site' },
+      'montana city': { name: 'Montana City', lat: 46.5372, lng: -111.9286, type: 'Service Area' },
+      'east helena': { name: 'East Helena', lat: 46.5911, lng: -111.9161, type: 'Service Dock' },
+      'clancy': { name: 'Clancy', lat: 46.4644, lng: -111.9861, type: 'Town Center' },
+      'jefferson city': { name: 'Jefferson City', lat: 46.3983, lng: -112.0233, type: 'Town Center' },
+      'boulder': { name: 'Boulder', lat: 46.2372, lng: -112.1197, type: 'Town Center' },
+      'whitehall': { name: 'Whitehall', lat: 45.8708, lng: -112.0975, type: 'Town Center' },
       'anaconda': { name: 'Anaconda', lat: 46.1285, lng: -112.9423, type: 'Town Center' },
       'anaconda city sub': { name: 'Anaconda City Sub', lat: 46.1285, lng: -112.9423, type: 'Substation' },
       'ennis': { name: 'Ennis', lat: 45.3491, lng: -111.7297, type: 'Field Site' },
@@ -280,6 +286,9 @@ class TripRouteMap {
       if (gpsControls) gpsControls.style.display = 'flex';
       this.ensureMap();
       this.renderMap();
+      if (!this.isTracking) {
+        this.startGpsTracking();
+      }
       setTimeout(() => { if (this.map) this.map.invalidateSize(); }, 60);
     }
   }
@@ -411,19 +420,42 @@ class TripRouteMap {
     this.setFollowMe(true);
     this.updateGpsStatusUi(true, 'Acquiring GPS fix...');
 
-    this.gpsWatchId = navigator.geolocation.watchPosition(
-      (pos) => this.onGpsPosition(pos),
-      (err) => {
-        console.warn('GPS Watch error:', err.message);
-        this.updateGpsStatusUi(false, 'GPS Standby (No Sensor Fix)');
-        this.setFollowMe(false);
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 5000
-      }
-    );
+    const btn = document.getElementById('map-btn-gps-toggle');
+    if (btn) {
+      btn.classList.add('active');
+      btn.innerHTML = '<span>📡</span> Tracking On';
+    }
+
+    // 2-stage strategy: try high accuracy (GNSS hardware) first; if timeout/no GPS chip, fall back to Wi-Fi/network
+    const startWatch = (highAccuracy) => {
+      return navigator.geolocation.watchPosition(
+        (pos) => this.onGpsPosition(pos),
+        (err) => {
+          console.warn(`GPS Watch (highAccuracy=${highAccuracy}) error:`, err.message);
+          if (highAccuracy) {
+            console.log('Laptop GNSS unavailable or timed out; falling back to Wi-Fi/network location...');
+            this.updateGpsStatusUi(true, 'Acquiring Wi-Fi location...');
+            if (this.gpsWatchId !== null) {
+              navigator.geolocation.clearWatch(this.gpsWatchId);
+            }
+            this.gpsWatchId = startWatch(false);
+          } else {
+            this.updateGpsStatusUi(false, 'GPS Standby (No Sensor Fix)');
+            this.setFollowMe(false);
+          }
+        },
+        {
+          enableHighAccuracy: highAccuracy,
+          timeout: highAccuracy ? 8000 : 20000,
+          maximumAge: 10000
+        }
+      );
+    };
+
+    if (this.gpsWatchId !== null) {
+      navigator.geolocation.clearWatch(this.gpsWatchId);
+    }
+    this.gpsWatchId = startWatch(true);
   }
 
   stopGpsTracking() {
@@ -433,7 +465,13 @@ class TripRouteMap {
     }
     this.isTracking = false;
     this.setFollowMe(false);
-    this.updateGpsStatusUi(false, 'GPS Tracking Paused');
+    this.updateGpsStatusUi(false, 'GPS Standby');
+
+    const btn = document.getElementById('map-btn-gps-toggle');
+    if (btn) {
+      btn.classList.remove('active');
+      btn.innerHTML = '<span>📡</span> Live GPS';
+    }
 
     if (this.userMarker && this.map) {
       this.map.removeLayer(this.userMarker);
@@ -453,7 +491,8 @@ class TripRouteMap {
     const { latitude, longitude, accuracy, speed, heading } = pos.coords;
     this.userPosition = { lat: latitude, lng: longitude, accuracy, speed, heading, timestamp: new Date() };
 
-    this.updateGpsStatusUi(true, `Active: ${latitude.toFixed(4)}°, ${longitude.toFixed(4)}° (±${Math.round(accuracy)}m)`);
+    const accLabel = accuracy > 120 ? `Wi-Fi Est. (±${Math.round(accuracy)}m)` : `Active (±${Math.round(accuracy)}m)`;
+    this.updateGpsStatusUi(true, accLabel);
 
     if (!this.map) return;
 
@@ -1491,9 +1530,10 @@ class TripRouteMap {
     const m = L.marker([hq.lat, hq.lng], { icon });
     m.bindPopup(`
       <div style="font-size: 12px; font-weight: 700; color: #1e293b; padding: 2px;">
-        🏢 Helena Base HQ (Origin / Return)<br>
+        🏢 Helena Base HQ (Origin & Return Base)<br>
         <span style="font-size: 11px; font-weight: 400; color: #64748b;">
-          Montana Safety Assistant Base
+          Scheduled Route Starting Point<br>
+          <i>(Note: This is the trip base, not your current vehicle location)</i>
         </span>
       </div>
     `);
