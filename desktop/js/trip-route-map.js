@@ -403,13 +403,9 @@ class TripRouteMap {
       if (this.followMe) {
         btn.classList.add('active');
         btn.innerHTML = '<span>🎯</span> Following Me';
-        btn.style.borderColor = '#3b82f6';
-        btn.style.color = '#93c5fd';
       } else {
         btn.classList.remove('active');
         btn.innerHTML = '<span>🎯</span> Follow Me';
-        btn.style.borderColor = 'var(--border-color)';
-        btn.style.color = 'var(--text-muted)';
       }
     }
   }

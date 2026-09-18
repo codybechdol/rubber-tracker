@@ -10,7 +10,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="stylesheet" href="css/leaflet.css">
-  <link rel="stylesheet" href="css/app.css?v=20260909_45">
+  <link rel="stylesheet" href="css/app.css?v=20260918_02">
 </head>
 <body>
 
@@ -335,11 +335,11 @@
             <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
               <h2 style="font-size: 16px; margin: 0;">🗺️ Trip Planner & Route Scheduler</h2>
               <!-- Sub-tabs: Board vs Route Map -->
-              <div class="trip-subtabs-nav">
-                <button class="trip-subtab-btn active" id="btn-tp-tab-board" onclick="window.tripPlanner.switchTab('board')" title="Multi-week schedule calendar board">
+              <div style="display: flex; align-items: center; gap: 3px; background: var(--bg-primary); padding: 2px 4px; border-radius: 6px; border: 1px solid var(--border-color);">
+                <button class="btn btn-secondary active" id="btn-tp-tab-board" style="padding: 2px 8px; font-size: 11px; font-weight: 700;" onclick="window.tripPlanner.switchTab('board')" title="Multi-week schedule calendar board">
                   <span>📅</span> Schedule Board
                 </button>
-                <button class="trip-subtab-btn" id="btn-tp-tab-map" onclick="window.tripPlanner.switchTab('map')" title="Interactive route map with stops and live GPS tracking">
+                <button class="btn btn-secondary" id="btn-tp-tab-map" style="padding: 2px 8px; font-size: 11px; font-weight: 700;" onclick="window.tripPlanner.switchTab('map')" title="Interactive route map with stops and live GPS tracking">
                   <span>🗺️</span> Route Map & Stops
                 </button>
               </div>
@@ -471,31 +471,31 @@
               </div>
 
               <!-- Live GPS Tracking Toggle -->
-              <button class="route-map-btn" id="map-btn-gps-toggle" onclick="window.tripRouteMap.toggleGpsTracking()" title="Toggle live GPS vehicle tracking">
+              <button class="btn btn-secondary route-map-btn" id="map-btn-gps-toggle" onclick="window.tripRouteMap.toggleGpsTracking()" title="Toggle live GPS vehicle tracking">
                 <span>📍</span> Live GPS
               </button>
 
               <!-- Follow Me Lock -->
-              <button class="route-map-btn" id="map-btn-follow-me" onclick="window.tripRouteMap.toggleFollowMe()" title="Lock map view to keep your vehicle centered">
+              <button class="btn btn-secondary route-map-btn" id="map-btn-follow-me" onclick="window.tripRouteMap.toggleFollowMe()" title="Lock map view to keep your vehicle centered">
                 <span>🎯</span> Follow Me
               </button>
 
               <!-- Recenter on User -->
-              <button class="route-map-btn" onclick="window.tripRouteMap.recenterOnUser()" title="Center map on your current GPS location">
+              <button class="btn btn-secondary route-map-btn" onclick="window.tripRouteMap.recenterOnUser()" title="Center map on your current GPS location">
                 <span>🎯</span> Recenter
               </button>
 
               <!-- Fit Route Bounds -->
-              <button class="route-map-btn" onclick="window.tripRouteMap.fitRoute()" title="Zoom to fit day/week route">
+              <button class="btn btn-secondary route-map-btn" onclick="window.tripRouteMap.fitRoute()" title="Zoom to fit day/week route">
                 <span>📐</span> Fit Route
               </button>
 
               <!-- Layer Switcher (Roads vs Satellite) -->
               <div style="display: flex; gap: 2px; margin-left: 4px; border-left: 1px solid rgba(255,255,255,0.15); padding-left: 6px;">
-                <button class="route-map-btn active" id="map-btn-layer-streets" onclick="window.tripRouteMap.setMapLayer('streets')" title="Google Maps style road map">
+                <button class="btn btn-secondary route-map-btn active" id="map-btn-layer-streets" onclick="window.tripRouteMap.setMapLayer('streets')" title="Google Maps style road map">
                   Roads
                 </button>
-                <button class="route-map-btn" id="map-btn-layer-sat" onclick="window.tripRouteMap.setMapLayer('satellite')" title="Satellite imagery view">
+                <button class="btn btn-secondary route-map-btn" id="map-btn-layer-sat" onclick="window.tripRouteMap.setMapLayer('satellite')" title="Satellite imagery view">
                   Satellite
                 </button>
               </div>
