@@ -218,16 +218,16 @@ class TripRouteMap {
         attributionControl: false
       });
 
-      // Layer 1: Google Maps Styled Road Layer
-      // Uses high-contrast Voyager / OSM tiles with clear highway badges and crisp road lines
-      this.streetsLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
-        maxZoom: 19,
-        subdomains: 'abcd'
+      // Layer 1: Google Maps Standard Road Layer (Crisp highways, road shields, towns - No API Key / No Watermarks)
+      this.streetsLayer = L.tileLayer('https://mt{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}', {
+        maxZoom: 20,
+        subdomains: ['0', '1', '2', '3']
       });
 
-      // Layer 2: High-Resolution Satellite Imagery Layer
-      this.satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
-        maxZoom: 19
+      // Layer 2: Google Maps Hybrid Satellite Layer (Satellite photography + roads & place names)
+      this.satelliteLayer = L.tileLayer('https://mt{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}', {
+        maxZoom: 20,
+        subdomains: ['0', '1', '2', '3']
       });
 
       // Add default layer
@@ -243,7 +243,7 @@ class TripRouteMap {
       this.map.on('dragstart', () => {
         // If user manually drags map, temporarily unlock "Follow Me" so user can explore
         if (this.followMe) {
-          this.setFollowMe(false, true);
+          this.setFollowMe(false);
         }
       });
     }
