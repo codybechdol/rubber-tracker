@@ -53,9 +53,18 @@ app.whenReady().then(async () => {
       await session.defaultSession.clearStorageData({
         storages: ['serviceworkers', 'cachestorage']
       });
+
+      // Ensure embedded iframes (Google Maps, ArcGIS, JM Test) are permitted without X-Frame-Options blocks
+      session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
+        const responseHeaders = Object.assign({}, details.responseHeaders);
+        delete responseHeaders['x-frame-options'];
+        delete responseHeaders['X-Frame-Options'];
+        delete responseHeaders['frame-options'];
+        callback({ cancel: false, responseHeaders });
+      });
     }
   } catch (e) {
-    console.warn('Session clearStorageData warning:', e);
+    console.warn('Session configuration warning:', e);
   }
 
   createWindow();

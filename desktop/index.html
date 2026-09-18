@@ -10,7 +10,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="stylesheet" href="css/leaflet.css">
-  <link rel="stylesheet" href="css/app.css?v=20260918_02">
+  <link rel="stylesheet" href="css/app.css?v=20260918_03">
 </head>
 <body>
 
@@ -461,48 +461,71 @@
           <!-- Left: Itinerary & Stops Checklist Panel -->
           <div id="trip-route-stops-panel"></div>
 
-          <!-- Right: Interactive Leaflet Map Panel -->
+          <!-- Right: Integrated Google Maps & GPS Tracker Panel -->
           <div id="trip-route-map-panel">
             <div class="route-map-controls-bar">
-              <!-- Live GPS Status Badge -->
-              <div id="route-map-gps-badge" style="display: flex; align-items: center; gap: 5px; padding: 2px 8px; font-size: 11px; font-weight: 700; color: #cbd5e1; border-right: 1px solid rgba(255,255,255,0.15); margin-right: 2px;">
-                <span id="route-map-gps-dot" style="width: 7px; height: 7px; border-radius: 50%; background: #94a3b8; display: inline-block;"></span>
-                <span id="route-map-gps-text">GPS Standby</span>
+              <!-- Map Engine Mode: Google Maps (Default) vs GPS Tracker -->
+              <div style="display: flex; gap: 3px; background: rgba(0,0,0,0.25); padding: 2px 4px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.1);">
+                <button class="btn btn-secondary route-map-btn active" id="map-btn-mode-gmaps" onclick="window.tripRouteMap.setMapMode('google-maps')" title="Embedded interactive Google Maps with turn-by-turn route, traffic, and directions">
+                  <span>🗺️</span> Google Maps
+                </button>
+                <button class="btn btn-secondary route-map-btn" id="map-btn-mode-gps" onclick="window.tripRouteMap.setMapMode('gps-tracker')" title="Live GPS vehicle tracker with speed, heading, and proximity alerts">
+                  <span>📍</span> GPS Tracker
+                </button>
               </div>
 
-              <!-- Live GPS Tracking Toggle -->
-              <button class="btn btn-secondary route-map-btn" id="map-btn-gps-toggle" onclick="window.tripRouteMap.toggleGpsTracking()" title="Toggle live GPS vehicle tracking">
-                <span>📍</span> Live GPS
-              </button>
-
-              <!-- Follow Me Lock -->
-              <button class="btn btn-secondary route-map-btn" id="map-btn-follow-me" onclick="window.tripRouteMap.toggleFollowMe()" title="Lock map view to keep your vehicle centered">
-                <span>🎯</span> Follow Me
-              </button>
-
-              <!-- Recenter on User -->
-              <button class="btn btn-secondary route-map-btn" onclick="window.tripRouteMap.recenterOnUser()" title="Center map on your current GPS location">
-                <span>🎯</span> Recenter
-              </button>
-
-              <!-- Fit Route Bounds -->
-              <button class="btn btn-secondary route-map-btn" onclick="window.tripRouteMap.fitRoute()" title="Zoom to fit day/week route">
-                <span>📐</span> Fit Route
-              </button>
-
               <!-- Layer Switcher (Roads vs Satellite) -->
-              <div style="display: flex; gap: 2px; margin-left: 4px; border-left: 1px solid rgba(255,255,255,0.15); padding-left: 6px;">
-                <button class="btn btn-secondary route-map-btn active" id="map-btn-layer-streets" onclick="window.tripRouteMap.setMapLayer('streets')" title="Google Maps style road map">
-                  Roads
+              <div style="display: flex; gap: 2px; margin-left: 2px; padding-left: 4px; border-left: 1px solid rgba(255,255,255,0.15);">
+                <button class="btn btn-secondary route-map-btn active" id="map-btn-layer-streets" onclick="window.tripRouteMap.setMapLayer('streets')" title="Google Maps standard road map">
+                  🚗 Roads
                 </button>
-                <button class="btn btn-secondary route-map-btn" id="map-btn-layer-sat" onclick="window.tripRouteMap.setMapLayer('satellite')" title="Satellite imagery view">
-                  Satellite
+                <button class="btn btn-secondary route-map-btn" id="map-btn-layer-sat" onclick="window.tripRouteMap.setMapLayer('satellite')" title="Satellite imagery with terrain">
+                  🛰️ Satellite
+                </button>
+              </div>
+
+              <!-- Reload Map Button -->
+              <button class="btn btn-secondary route-map-btn" onclick="window.tripRouteMap.reloadCurrentMap()" title="Refresh map and reload route waypoints">
+                <span>🔄</span> Reload
+              </button>
+
+              <!-- GPS Tracker Sub-controls (Shown when GPS Tracker mode is active) -->
+              <div id="gps-tracker-controls-group" style="display: none; align-items: center; gap: 4px; border-left: 1px solid rgba(255,255,255,0.15); padding-left: 6px; margin-left: 2px;">
+                <!-- Live GPS Status Badge -->
+                <div id="route-map-gps-badge" style="display: flex; align-items: center; gap: 5px; padding: 2px 8px; font-size: 11px; font-weight: 700; color: #cbd5e1; border-right: 1px solid rgba(255,255,255,0.15); margin-right: 2px;">
+                  <span id="route-map-gps-dot" style="width: 7px; height: 7px; border-radius: 50%; background: #94a3b8; display: inline-block;"></span>
+                  <span id="route-map-gps-text">GPS Standby</span>
+                </div>
+
+                <!-- Live GPS Tracking Toggle -->
+                <button class="btn btn-secondary route-map-btn" id="map-btn-gps-toggle" onclick="window.tripRouteMap.toggleGpsTracking()" title="Toggle live GPS vehicle tracking">
+                  <span>📡</span> Live GPS
+                </button>
+
+                <!-- Follow Me Lock -->
+                <button class="btn btn-secondary route-map-btn" id="map-btn-follow-me" onclick="window.tripRouteMap.toggleFollowMe()" title="Lock map view to keep your vehicle centered">
+                  <span>🎯</span> Follow Me
+                </button>
+
+                <!-- Recenter on User -->
+                <button class="btn btn-secondary route-map-btn" onclick="window.tripRouteMap.recenterOnUser()" title="Center map on your current GPS location">
+                  <span>🎯</span> Recenter
+                </button>
+
+                <!-- Fit Route Bounds -->
+                <button class="btn btn-secondary route-map-btn" onclick="window.tripRouteMap.fitRoute()" title="Zoom to fit day/week route">
+                  <span>📐</span> Fit Route
                 </button>
               </div>
             </div>
 
-            <!-- Leaflet Map Container -->
-            <div id="trip-route-map"></div>
+            <!-- 1. Embedded Google Maps Container (Primary View) -->
+            <div id="google-maps-embed-container" style="width: 100%; flex: 1; height: 100%; position: relative; background: #0f172a; overflow: hidden; display: flex;">
+              <iframe id="google-maps-embed-frame" title="Integrated Google Maps Route" style="width: 100%; height: 100%; border: none; flex: 1;" allow="geolocation; camera; microphone; clipboard-read; clipboard-write;" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
+            </div>
+
+            <!-- 2. Leaflet GPS Tracker Map Container (Secondary View) -->
+            <div id="trip-route-map" style="display: none; width: 100%; flex: 1; height: 100%;"></div>
           </div>
         </div>
       </section>
@@ -2348,7 +2371,7 @@
   <script src="js/tasks.js?v=20260901_25"></script>
   <script src="js/trip-planner.js?v=20260903_34"></script>
   <script src="js/vendor/leaflet.js"></script>
-  <script src="js/trip-route-map.js?v=20260918_1"></script>
+  <script src="js/trip-route-map.js?v=20260918_03"></script>
   <script src="js/lookup.js?v=20260901_25"></script>
   <script src="js/procurement.js?v=20260901_25"></script>
   <script src="js/aging.js?v=20260901_25"></script>

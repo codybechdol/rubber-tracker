@@ -1737,6 +1737,7 @@ body.inspector-mode .brand-badge {
   border-color: rgba(59, 130, 246, 0.4);
   color: #93c5fd;
   transform: translateY(-1px);
+}
 
 /* ============================================================================
    TRIP PLANNER ROUTE MAP & LIVE GPS TRACKING (Phase 9)
@@ -1762,9 +1763,9 @@ body.inspector-mode .brand-badge {
 }
 
 #trip-route-stops-panel {
-  width: 420px;
-  min-width: 380px;
-  max-width: 480px;
+  width: 440px;
+  min-width: 390px;
+  max-width: 500px;
   background: var(--bg-secondary);
   border-right: 1px solid var(--border-color);
   display: flex;
@@ -1782,6 +1783,22 @@ body.inspector-mode .brand-badge {
   background: #0f172a;
 }
 
+#google-maps-embed-container {
+  width: 100%;
+  flex: 1;
+  height: 100%;
+  position: relative;
+  background: #0f172a;
+  overflow: hidden;
+}
+
+#google-maps-embed-frame {
+  width: 100%;
+  height: 100%;
+  border: none;
+  display: block;
+}
+
 #trip-route-map {
   width: 100%;
   flex: 1;
@@ -1789,20 +1806,77 @@ body.inspector-mode .brand-badge {
   z-index: 1;
 }
 
+/* Day & Trip Navigation Header */
+.route-nav-header {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 14px;
+  background: rgba(0, 0, 0, 0.22);
+  border-bottom: 1px solid var(--border-color);
+}
+
+.route-day-nav-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.route-date-input {
+  flex: 1;
+  max-width: 150px;
+  padding: 4px 8px;
+  font-size: 11.5px;
+  font-weight: 700;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: #93c5fd;
+  text-align: center;
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+.route-date-input:focus {
+  border-color: #3b82f6;
+  box-shadow: 0 0 6px rgba(59, 130, 246, 0.35);
+}
+
+.route-trip-select {
+  width: 100%;
+  padding: 5px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  background: var(--bg-primary);
+  border: 1px solid rgba(59, 130, 246, 0.4);
+  border-radius: 6px;
+  color: #60a5fa;
+  cursor: pointer;
+  outline: none;
+  transition: all 0.15s ease;
+}
+
+.route-trip-select:hover {
+  border-color: #3b82f6;
+  background: rgba(59, 130, 246, 0.08);
+}
+
 .route-day-pills-bar {
   display: flex;
   gap: 6px;
-  padding: 10px 14px;
+  padding: 8px 12px;
   border-bottom: 1px solid var(--border-color);
-  background: rgba(0, 0, 0, 0.15);
+  background: rgba(0, 0, 0, 0.12);
   overflow-x: auto;
   scrollbar-width: thin;
+  align-items: stretch;
 }
 
 .route-day-pill {
   flex: 1;
-  min-width: 65px;
-  padding: 6px 8px;
+  min-width: 62px;
+  padding: 6px 4px;
   background: var(--bg-primary);
   border: 1px solid var(--border-color);
   border-radius: 6px;
@@ -1811,6 +1885,7 @@ body.inspector-mode .brand-badge {
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: center;
   gap: 2px;
   transition: all 0.15s ease;
   user-select: none;
@@ -1823,10 +1898,10 @@ body.inspector-mode .brand-badge {
 }
 
 .route-day-pill.active {
-  background: rgba(59, 130, 246, 0.2);
+  background: rgba(59, 130, 246, 0.22);
   border-color: #3b82f6;
   color: #93c5fd;
-  box-shadow: 0 0 8px rgba(59, 130, 246, 0.3);
+  box-shadow: 0 0 10px rgba(59, 130, 246, 0.35);
 }
 
 /* Timeline & Stops */
