@@ -1717,6 +1717,191 @@ class LocalDatabase {
     return this.snapshot.tables[tableKey];
   }
 
+  /**
+   * Cleans duplicate history rows from an equipment history table (or for a specific item).
+   * Two rows are duplicates if they have the same item identifier, date assigned, and assigned to holder.
+   * Merges notes, preserves physical locations, re-indexes _rowIdx, rebuilds rawGrid, and queues REPLACE_TABLE_DATA.
+   * @param {string} tableKey - e.g. 'gloves_history', 'sleeves_history', etc.
+   * @param {string|number|null} [itemKey] - optional item identifier to limit cleanup to
+   * @returns {Promise<{ removedCount: number, totalRemaining: number, tableKey: string }>}
+   */
+  async cleanDuplicateHistoryRows(tableKey, itemKey = null) {
+    const table = this.getTable(tableKey);
+    if (!table || !table.rows || table.rows.length === 0) {
+      return { removedCount: 0, totalRemaining: 0, tableKey };
+    }
+
+    const cleanFilterItem = itemKey !== null && itemKey !== undefined ? String(itemKey).trim() : null;
+    const isPureFilterNum = cleanFilterItem && /^\d+$/.test(cleanFilterItem);
+    const filterNum = isPureFilterNum ? parseInt(cleanFilterItem, 10) : null;
+
+    let itemColIdx = -1;
+    let dateColIdx = -1;
+    let assignedColIdx = -1;
+    let locationColIdx = -1;
+    let notesColIdx = -1;
+
+    if (table.headers) {
+      itemColIdx = table.headers.findIndex(h => /^(item(\s*#)?|serial(\s*#)?|glove|sleeve|blanket|mack|hv\s*tester|phasing|model)/i.test(String(h).trim()));
+      dateColIdx = table.headers.findIndex(h => /^(date(\s*assigned)?|action\s*date|^date$)/i.test(String(h).trim()));
+      assignedColIdx = table.headers.findIndex(h => /^(assigned\s*to|employee(\s*name)?|employee|holder)/i.test(String(h).trim()));
+      locationColIdx = table.headers.findIndex(h => /^location$/i.test(String(h).trim()));
+      notesColIdx = table.headers.findIndex(h => /^(notes?|comment)/i.test(String(h).trim()));
+    }
+
+    const itemColName = itemColIdx !== -1 && table.headers ? table.headers[itemColIdx] : 'Item #';
+    const dateColName = dateColIdx !== -1 && table.headers ? table.headers[dateColIdx] : 'Date Assigned';
+    const assignedColName = assignedColIdx !== -1 && table.headers ? table.headers[assignedColIdx] : 'Assigned To';
+    const locColName = locationColIdx !== -1 && table.headers ? table.headers[locationColIdx] : 'Location';
+    const notesColName = notesColIdx !== -1 && table.headers ? table.headers[notesColIdx] : 'Notes';
+
+    const normalizeDateStr = (dStr) => {
+      if (!dStr) return '';
+      const s = String(dStr).trim();
+      if (s.includes('/')) {
+        const parts = s.split('/');
+        if (parts.length === 3) {
+          const m = parts[0].padStart(2, '0');
+          const d = parts[1].padStart(2, '0');
+          const y = parts[2].length === 2 ? '20' + parts[2] : parts[2];
+          return `${y}-${m}-${d}`;
+        }
+      } else if (s.includes('-')) {
+        const parts = s.split('-');
+        if (parts.length === 3) {
+          return `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
+        }
+      }
+      return s;
+    };
+
+    const normalizeItemStr = (val) => {
+      const s = String(val || '').trim();
+      if (/^\d+$/.test(s)) return String(parseInt(s, 10));
+      return s.toLowerCase();
+    };
+
+    const seenGroups = new Map();
+    const cleanedRows = [];
+    let removedCount = 0;
+
+    for (let i = 0; i < table.rows.length; i++) {
+      const row = table.rows[i];
+      const rowItemRaw = String(row[itemColName] || row['Item #'] || row['Serial #'] || Object.values(row)[1] || Object.values(row)[0] || '').trim();
+      const rowItemNorm = normalizeItemStr(rowItemRaw);
+
+      // If filtering by a specific item, bypass other items without modification
+      if (cleanFilterItem) {
+        let isTarget = rowItemNorm === normalizeItemStr(cleanFilterItem);
+        if (!isTarget && isPureFilterNum && /^\d+$/.test(rowItemRaw)) {
+          isTarget = parseInt(rowItemRaw, 10) === filterNum;
+        }
+        if (!isTarget) {
+          cleanedRows.push(row);
+          continue;
+        }
+      }
+
+      const dateRaw = String(row[dateColName] || row['Date Assigned'] || row['Date'] || '').trim();
+      const dateNorm = normalizeDateStr(dateRaw);
+      const assignedRaw = String(row[assignedColName] || row['Assigned To'] || '').trim().toLowerCase();
+
+      // Key consists of Item + Normalized Date + Assigned To holder
+      const dedupKey = `${rowItemNorm}::${dateNorm}::${assignedRaw}`;
+
+      if (seenGroups.has(dedupKey)) {
+        removedCount++;
+        const masterRow = seenGroups.get(dedupKey);
+
+        // Merge Notes
+        const masterNotes = String(masterRow[notesColName] || masterRow['Notes'] || '').trim();
+        const dupNotes = String(row[notesColName] || row['Notes'] || '').trim();
+        if (!masterNotes && dupNotes) {
+          masterRow[notesColName] = dupNotes;
+        } else if (masterNotes && dupNotes && masterNotes.toLowerCase() !== dupNotes.toLowerCase()) {
+          if (!masterNotes.toLowerCase().includes(dupNotes.toLowerCase())) {
+            masterRow[notesColName] = `${masterNotes} | ${dupNotes}`;
+          }
+        }
+
+        // Merge Location (favor specific physical location over default 'Helena' or empty)
+        const masterLoc = String(masterRow[locColName] || masterRow['Location'] || '').trim();
+        const dupLoc = String(row[locColName] || row['Location'] || '').trim();
+        if ((!masterLoc || masterLoc.toLowerCase() === 'helena') && dupLoc && dupLoc.toLowerCase() !== 'helena') {
+          masterRow[locColName] = dupLoc;
+        }
+
+        // Merge other attributes if missing in master
+        for (const [k, v] of Object.entries(row)) {
+          if (v !== undefined && v !== null && String(v).trim() !== '') {
+            if (masterRow[k] === undefined || masterRow[k] === null || String(masterRow[k]).trim() === '') {
+              masterRow[k] = v;
+            }
+          }
+        }
+      } else {
+        seenGroups.set(dedupKey, row);
+        cleanedRows.push(row);
+      }
+    }
+
+    if (removedCount > 0) {
+      table.rows = cleanedRows;
+      table.rowCount = cleanedRows.length;
+
+      // Re-index _rowIdx for all remaining rows
+      table.rows.forEach((r, idx) => {
+        r._rowIdx = idx + 2;
+      });
+
+      // Rebuild rawGrid to ensure 100% sync
+      if (table.headers) {
+        table.rawGrid = [
+          [...table.headers],
+          ...table.rows.map(r => table.headers.map(h => r[h] !== undefined && r[h] !== null ? r[h] : ''))
+        ];
+        table.maxRows = table.rawGrid.length;
+      }
+
+      await this.saveTable(tableKey, table);
+    }
+
+    return { removedCount, totalRemaining: table.rows.length, tableKey };
+  }
+
+  /**
+   * Cleans duplicate history rows across all equipment history tables in a single batch.
+   * @returns {Promise<{ totalRemoved: number, tableBreakdown: Record<string, number> }>}
+   */
+  async cleanAllHistoryDuplicates() {
+    const historyTables = [
+      'gloves_history',
+      'sleeves_history',
+      'blankets_history',
+      'macks_history',
+      'hv_testers_history',
+      'phasing_sets_history',
+      'aed_history',
+      'grounds_history',
+      'hot_sticks_history'
+    ];
+
+    let totalRemoved = 0;
+    const tableBreakdown = {};
+
+    for (const key of historyTables) {
+      if (this.getTable(key)) {
+        const res = await this.cleanDuplicateHistoryRows(key);
+        if (res.removedCount > 0) {
+          tableBreakdown[key] = res.removedCount;
+          totalRemoved += res.removedCount;
+        }
+      }
+    }
+
+    return { totalRemoved, tableBreakdown };
+  }
+
   async addMutation(mutation) {
     if (!mutation) return null;
 

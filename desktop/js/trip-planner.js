@@ -66,6 +66,33 @@ class TripPlannerApp {
     this.swapsSearchTerm = '';
     this.dismissedMonthlyTrainings = this.loadDismissedMonthlyTrainings();
     this.scheduledSwaps = this.loadScheduledSwaps();
+    this.activeTab = 'board'; // 'board' or 'map'
+  }
+
+  switchTab(tab) {
+    this.activeTab = tab || 'board';
+    const boardContainer = document.getElementById('trip-planner-board-container');
+    const mapContainer = document.getElementById('trip-planner-map-container');
+    const btnBoard = document.getElementById('btn-tp-tab-board');
+    const btnMap = document.getElementById('btn-tp-tab-map');
+
+    if (this.activeTab === 'map') {
+      if (boardContainer) boardContainer.style.display = 'none';
+      if (mapContainer) mapContainer.style.display = 'flex';
+      if (btnBoard) btnBoard.classList.remove('active');
+      if (btnMap) btnMap.classList.add('active');
+
+      if (window.tripRouteMap) {
+        window.tripRouteMap.activeWeekMonday = this.getMondayForDate(this.currentDate);
+        window.tripRouteMap.render();
+      }
+    } else {
+      if (mapContainer) mapContainer.style.display = 'none';
+      if (boardContainer) boardContainer.style.display = 'flex';
+      if (btnMap) btnMap.classList.remove('active');
+      if (btnBoard) btnBoard.classList.add('active');
+      this.renderPlanner();
+    }
   }
 
   loadScheduledSwaps() {
@@ -5345,6 +5372,10 @@ class TripPlannerApp {
 
   renderPlanner() {
     this.loadSavedTrips();
+    if (this.activeTab === 'map' && window.tripRouteMap) {
+      window.tripRouteMap.activeWeekMonday = this.getMondayForDate(this.currentDate);
+      window.tripRouteMap.render();
+    }
     const board = document.getElementById('trip-planner-board');
     const scheduleBadge = document.getElementById('trip-planner-schedule-badge');
     if (!board) return;

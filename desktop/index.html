@@ -9,6 +9,7 @@
   <meta name="theme-color" content="#0f172a">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <link rel="stylesheet" href="css/leaflet.css">
   <link rel="stylesheet" href="css/app.css?v=20260909_45">
 </head>
 <body>
@@ -314,6 +315,14 @@
             <span class="brand-badge" id="history-row-count">0 rows</span>
           </div>
           <input type="text" id="history-search-input" class="sheet-search" placeholder="Filter history records...">
+          <div style="display: flex; align-items: center; gap: 8px; margin-left: auto;">
+            <button class="btn btn-secondary" id="btn-clean-history-duplicates" style="font-size: 12px; padding: 6px 12px; color: #f59e0b; border-color: rgba(245, 158, 11, 0.4);" onclick="window.historyNavigator.cleanCurrentHistoryDuplicates()" title="Remove duplicate history entries for this equipment history sheet (same holder and date)">
+              🧹 Clean Sheet Duplicates
+            </button>
+            <button class="btn btn-secondary" id="btn-clean-all-history-duplicates" style="font-size: 12px; padding: 6px 12px; color: #fbbf24; border-color: rgba(251, 191, 36, 0.5);" onclick="window.historyNavigator.cleanAllDuplicateHistory()" title="Scan and remove duplicate history entries across all equipment history sheets">
+              ⚡ Clean All History Tables
+            </button>
+          </div>
         </div>
         <div class="grid-wrapper" id="history-grid-container"></div>
       </section>
@@ -325,6 +334,15 @@
           <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
             <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
               <h2 style="font-size: 16px; margin: 0;">🗺️ Trip Planner & Route Scheduler</h2>
+              <!-- Sub-tabs: Board vs Route Map -->
+              <div class="trip-subtabs-nav">
+                <button class="trip-subtab-btn active" id="btn-tp-tab-board" onclick="window.tripPlanner.switchTab('board')" title="Multi-week schedule calendar board">
+                  <span>📅</span> Schedule Board
+                </button>
+                <button class="trip-subtab-btn" id="btn-tp-tab-map" onclick="window.tripPlanner.switchTab('map')" title="Interactive route map with stops and live GPS tracking">
+                  <span>🗺️</span> Route Map & Stops
+                </button>
+              </div>
               <!-- Week Span Selector -->
               <div style="display: flex; align-items: center; gap: 3px; background: var(--bg-primary); padding: 2px 4px; border-radius: 6px; border: 1px solid var(--border-color);">
                 <span style="font-size: 10.5px; color: var(--text-muted); font-weight: 700; margin: 0 4px;">VIEW:</span>
@@ -378,7 +396,7 @@
             </div>
           </div>
         </div>
-        <div style="display: flex; flex: 1; overflow: hidden; position: relative;">
+        <div id="trip-planner-board-container" style="display: flex; flex: 1; overflow: hidden; position: relative;">
           <!-- 1. Collapsed Bar for Cities (Visible when cities sidebar is collapsed) -->
           <div id="trip-cities-collapsed-bar" onclick="window.tripPlanner.toggleCitiesSidebar()" style="display: none; width: 34px; min-width: 34px; background: var(--bg-secondary); border-right: 1px solid var(--border-color); cursor: pointer; flex-direction: column; align-items: center; padding: 14px 0; gap: 12px; user-select: none; transition: background 0.15s ease;" onmouseover="this.style.background='rgba(59, 130, 246, 0.08)'" onmouseout="this.style.background='var(--bg-secondary)'" title="Click to expand Available Cities">
             <span style="font-size: 11px; color: #93c5fd;">▶</span>
@@ -436,6 +454,56 @@
 
           <!-- 5. Main Calendar Board -->
           <div class="trip-planner-board" id="trip-planner-board"></div>
+        </div>
+
+        <!-- Subtab 2: Route Map & Stops Container -->
+        <div id="trip-planner-map-container" style="display: none;">
+          <!-- Left: Itinerary & Stops Checklist Panel -->
+          <div id="trip-route-stops-panel"></div>
+
+          <!-- Right: Interactive Leaflet Map Panel -->
+          <div id="trip-route-map-panel">
+            <div class="route-map-controls-bar">
+              <!-- Live GPS Status Badge -->
+              <div id="route-map-gps-badge" style="display: flex; align-items: center; gap: 5px; padding: 2px 8px; font-size: 11px; font-weight: 700; color: #cbd5e1; border-right: 1px solid rgba(255,255,255,0.15); margin-right: 2px;">
+                <span id="route-map-gps-dot" style="width: 7px; height: 7px; border-radius: 50%; background: #94a3b8; display: inline-block;"></span>
+                <span id="route-map-gps-text">GPS Standby</span>
+              </div>
+
+              <!-- Live GPS Tracking Toggle -->
+              <button class="route-map-btn" id="map-btn-gps-toggle" onclick="window.tripRouteMap.toggleGpsTracking()" title="Toggle live GPS vehicle tracking">
+                <span>📍</span> Live GPS
+              </button>
+
+              <!-- Follow Me Lock -->
+              <button class="route-map-btn" id="map-btn-follow-me" onclick="window.tripRouteMap.toggleFollowMe()" title="Lock map view to keep your vehicle centered">
+                <span>🎯</span> Follow Me
+              </button>
+
+              <!-- Recenter on User -->
+              <button class="route-map-btn" onclick="window.tripRouteMap.recenterOnUser()" title="Center map on your current GPS location">
+                <span>🎯</span> Recenter
+              </button>
+
+              <!-- Fit Route Bounds -->
+              <button class="route-map-btn" onclick="window.tripRouteMap.fitRoute()" title="Zoom to fit day/week route">
+                <span>📐</span> Fit Route
+              </button>
+
+              <!-- Layer Switcher (Roads vs Satellite) -->
+              <div style="display: flex; gap: 2px; margin-left: 4px; border-left: 1px solid rgba(255,255,255,0.15); padding-left: 6px;">
+                <button class="route-map-btn active" id="map-btn-layer-streets" onclick="window.tripRouteMap.setMapLayer('streets')" title="Google Maps style road map">
+                  Roads
+                </button>
+                <button class="route-map-btn" id="map-btn-layer-sat" onclick="window.tripRouteMap.setMapLayer('satellite')" title="Satellite imagery view">
+                  Satellite
+                </button>
+              </div>
+            </div>
+
+            <!-- Leaflet Map Container -->
+            <div id="trip-route-map"></div>
+          </div>
         </div>
       </section>
 
@@ -822,6 +890,9 @@
         </div>
 
         <div style="display: flex; align-items: center; gap: 8px;">
+          <button id="dossier-clean-dupes-btn" class="btn btn-secondary" style="font-size: 11px; padding: 4px 10px; display: inline-flex; align-items: center; gap: 4px; color: #fbbf24; border-color: rgba(245, 158, 11, 0.4);" onclick="window.itemStatsEngine.cleanCurrentItemDuplicates()" title="Clean duplicate history entries for this item">
+            <span>🧹</span> Clean Duplicates
+          </button>
           <button class="btn btn-secondary" style="font-size: 11px; padding: 4px 10px; display: flex; align-items: center; gap: 4px;" onclick="window.itemStatsEngine.openImportLogModal()">
             <span>📥</span> Import History Log
           </button>
@@ -2276,6 +2347,8 @@
   <script src="js/previous-employees.js?v=20260914_2"></script>
   <script src="js/tasks.js?v=20260901_25"></script>
   <script src="js/trip-planner.js?v=20260903_34"></script>
+  <script src="js/vendor/leaflet.js"></script>
+  <script src="js/trip-route-map.js?v=20260918_1"></script>
   <script src="js/lookup.js?v=20260901_25"></script>
   <script src="js/procurement.js?v=20260901_25"></script>
   <script src="js/aging.js?v=20260901_25"></script>
@@ -2300,7 +2373,12 @@
       // Close mobile drawer on selection
       document.querySelector('.app-sidebar')?.classList.remove('mobile-open');
 
-      if (viewId === 'trip-planner-view') window.tripPlanner.setWeeksToShow(window.tripPlanner.weeksToShow || 8);
+      if (viewId === 'trip-planner-view') {
+        window.tripPlanner.setWeeksToShow(window.tripPlanner.weeksToShow || 8);
+        if (window.tripPlanner.activeTab === 'map' && window.tripRouteMap) {
+          window.tripRouteMap.render();
+        }
+      }
       if (viewId === 'tasks-view') window.taskManager.renderTasks();
       if (viewId === 'sheets-view') window.sheetNavigator.renderCurrentSheet();
       if (viewId === 'crew-import-view') window.crewImportEngine.render();
@@ -2448,6 +2526,8 @@
       window.historyNavigator.init();
       window.taskManager.init();
       window.tripPlanner.init();
+      window.tripRouteMap = new TripRouteMap(window.localDB, window.tripPlanner);
+      window.tripRouteMap.init();
       window.lookupApp.init();
       if (window.employeeProfileEngine) window.employeeProfileEngine.init();
       if (window.smsDialogEngine) window.smsDialogEngine.init();

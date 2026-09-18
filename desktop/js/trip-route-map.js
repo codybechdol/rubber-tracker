@@ -1,0 +1,1261 @@
+/**
+ * trip-route-map.js - Interactive Google Maps-Style Route Scheduler & Live GPS Tracking
+ * 
+ * Features:
+ * - Google Maps-style road & satellite views with Leaflet.js
+ * - Live GPS "Follow Me" vehicle tracking (pulsing blue location dot, accuracy radius, heading)
+ * - Real-time distance and drive time readout to the next scheduled stop
+ * - Proximity arrival detection (<0.5 mi) with quick check-in
+ * - Daily itinerary sequence (Helena HQ -> Stops -> Return to Helena)
+ * - Stops checklist: equipment swaps, crew trainings, drug tests, vehicle unit numbers
+ * - All-Week Route Overview with color-coded daily loops
+ * - 1-Click "Open in Google Maps" turn-by-turn voice navigation export
+ */
+
+class TripRouteMap {
+  constructor(db, tripPlanner) {
+    this.db = db;
+    this.tripPlanner = tripPlanner;
+    this.map = null;
+    this.currentTileLayer = null;
+    this.activeLayerType = 'streets'; // 'streets' or 'satellite'
+    this.activeMode = 'single-day'; // 'single-day' or 'all-week'
+    this.activeDateKey = null;
+    this.activeWeekMonday = null;
+    this.routeMarkers = [];
+    this.routePolylines = [];
+    this.gpsWatchId = null;
+    this.userPosition = null;
+    this.userMarker = null;
+    this.accuracyCircle = null;
+    this.followMe = false;
+    this.isTracking = false;
+
+    // Standard Montana Hubs, Substations, and Service Bases with verified GPS coordinates
+    this.montanaCoordinates = {
+      'helena': { name: 'Helena', lat: 46.5958, lng: -112.0270, type: 'HQ Base' },
+      'belgrade': { name: 'Belgrade', lat: 45.7760, lng: -111.1764, type: 'Service Dock' },
+      'belgrade dock': { name: 'Belgrade Dock', lat: 45.7760, lng: -111.1764, type: 'Service Dock' },
+      'bozeman': { name: 'Bozeman', lat: 45.6770, lng: -111.0429, type: 'Town Center' },
+      'great falls': { name: 'Great Falls', lat: 47.5053, lng: -111.3008, type: 'Division Base' },
+      'butte': { name: 'Butte', lat: 46.0038, lng: -112.5348, type: 'Division Base' },
+      'missoula': { name: 'Missoula', lat: 46.8721, lng: -113.9940, type: 'Division Base' },
+      'billings': { name: 'Billings', lat: 45.7833, lng: -108.5007, type: 'Division Base' },
+      'big sky': { name: 'Big Sky', lat: 45.2638, lng: -111.3033, type: 'Service Area' },
+      'hamilton': { name: 'Hamilton', lat: 46.2471, lng: -114.1557, type: 'Service Dock' },
+      'darby': { name: 'Darby', lat: 45.9755, lng: -114.1782, type: 'Field Site' },
+      'livingston': { name: 'Livingston', lat: 45.6624, lng: -110.5613, type: 'Town Center' },
+      'three forks': { name: 'Three Forks', lat: 45.8927, lng: -111.5519, type: 'Town Center' },
+      'three rivers sub': { name: 'Three Rivers Sub', lat: 45.8927, lng: -111.5519, type: 'Substation' },
+      'townsend': { name: 'Townsend', lat: 46.3208, lng: -111.5175, type: 'Field Site' },
+      'anaconda': { name: 'Anaconda', lat: 46.1285, lng: -112.9423, type: 'Town Center' },
+      'anaconda city sub': { name: 'Anaconda City Sub', lat: 46.1285, lng: -112.9423, type: 'Substation' },
+      'ennis': { name: 'Ennis', lat: 45.3491, lng: -111.7297, type: 'Field Site' },
+      'melville': { name: 'Melville', lat: 46.0355, lng: -110.0468, type: 'Field Site' },
+      'laurel': { name: 'Laurel', lat: 45.6708, lng: -108.7724, type: 'Service Dock' },
+      'kalispell': { name: 'Kalispell', lat: 48.1958, lng: -114.3129, type: 'Division Base' },
+      'miles city': { name: 'Miles City', lat: 46.4083, lng: -105.8406, type: 'Service Dock' },
+      'glendive': { name: 'Glendive', lat: 47.1053, lng: -104.7125, type: 'Field Site' },
+      'sidney': { name: 'Sidney', lat: 47.7169, lng: -104.1561, type: 'Service Dock' },
+      'havre': { name: 'Havre', lat: 48.5500, lng: -109.6841, type: 'Division Base' },
+      'elliston': { name: 'Elliston', lat: 46.5647, lng: -112.4289, type: 'Town Center' },
+      'deer lodge': { name: 'Deer Lodge', lat: 46.3958, lng: -112.7303, type: 'Town Center' },
+      'manhattan': { name: 'Manhattan', lat: 45.8588, lng: -111.3314, type: 'Town Center' },
+      'glen': { name: 'Glen', lat: 45.4744, lng: -112.6844, type: 'Field Site' },
+      'raynesford': { name: 'Raynesford', lat: 47.2880, lng: -110.7410, type: 'Substation' },
+      'raynesford sub': { name: 'Raynesford Sub', lat: 47.2880, lng: -110.7410, type: 'Substation' },
+      'dillon': { name: 'Dillon', lat: 45.2163, lng: -112.6372, type: 'Town Center' },
+      'lolo': { name: 'Lolo', lat: 46.7588, lng: -114.0798, type: 'Town Center' },
+      'stanford': { name: 'Stanford', lat: 47.1530, lng: -110.2177, type: 'Town Center' },
+      'post falls': { name: 'Post Falls', lat: 47.7121, lng: -116.9496, type: 'Service Dock' },
+      'northern lights': { name: 'Northern Lights (Sandpoint)', lat: 48.2766, lng: -116.5532, type: 'Service Dock' },
+      'whitefish': { name: 'Whitefish', lat: 48.4111, lng: -114.3376, type: 'Town Center' },
+      'lewistown': { name: 'Lewistown', lat: 47.0625, lng: -109.4282, type: 'Division Base' },
+      'polson': { name: 'Polson', lat: 47.6936, lng: -114.1632, type: 'Town Center' },
+      'cut bank': { name: 'Cut Bank', lat: 48.6328, lng: -112.3261, type: 'Town Center' },
+      'shelby': { name: 'Shelby', lat: 48.5050, lng: -111.8569, type: 'Town Center' },
+      'conrad': { name: 'Conrad', lat: 48.1703, lng: -111.9458, type: 'Town Center' },
+      'choteau': { name: 'Choteau', lat: 47.8116, lng: -112.1822, type: 'Town Center' },
+      'columbus': { name: 'Columbus', lat: 45.6369, lng: -109.2504, type: 'Town Center' },
+      'red lodge': { name: 'Red Lodge', lat: 45.1858, lng: -109.2468, type: 'Town Center' },
+      'big timber': { name: 'Big Timber', lat: 45.8344, lng: -109.9546, type: 'Town Center' },
+      'roundup': { name: 'Roundup', lat: 46.4464, lng: -108.5418, type: 'Town Center' },
+      'hardin': { name: 'Hardin', lat: 45.7311, lng: -107.6115, type: 'Town Center' },
+      'baker': { name: 'Baker', lat: 46.3683, lng: -104.2830, type: 'Town Center' },
+      'glasgow': { name: 'Glasgow', lat: 48.1969, lng: -106.6353, type: 'Town Center' },
+      'wolf point': { name: 'Wolf Point', lat: 48.0903, lng: -105.6417, type: 'Town Center' }
+    };
+
+    // Week day color themes for multi-day route loops
+    this.dayColors = {
+      0: { name: 'Monday', hex: '#3b82f6', bg: 'rgba(59, 130, 246, 0.15)', border: '#3b82f6' },
+      1: { name: 'Tuesday', hex: '#10b981', bg: 'rgba(16, 185, 129, 0.15)', border: '#10b981' },
+      2: { name: 'Wednesday', hex: '#f59e0b', bg: 'rgba(245, 158, 11, 0.15)', border: '#f59e0b' },
+      3: { name: 'Thursday', hex: '#a855f7', bg: 'rgba(168, 85, 247, 0.15)', border: '#a855f7' },
+      4: { name: 'Friday', hex: '#ec4899', bg: 'rgba(236, 72, 153, 0.15)', border: '#ec4899' }
+    };
+  }
+
+  /**
+   * Initializes the Route Map system.
+   */
+  init() {
+    this.setDefaultDate();
+  }
+
+  /**
+   * Sets default date based on TripPlanner's current week/date.
+   */
+  setDefaultDate() {
+    if (this.tripPlanner && this.tripPlanner.currentDate) {
+      const mon = this.tripPlanner.getMondayForDate(this.tripPlanner.currentDate);
+      this.activeWeekMonday = mon;
+      // Default to current date key or Monday of active week
+      const todayKey = this.formatDateToKey(new Date());
+      const weekDays = this.tripPlanner.getDaysForWeek(mon, this.tripPlanner.activeSchedule || 'Mon-Thu');
+      const hasToday = weekDays.some(d => d.dateKey === todayKey);
+      this.activeDateKey = hasToday ? todayKey : (weekDays[0] ? weekDays[0].dateKey : todayKey);
+    } else {
+      const now = new Date();
+      this.activeDateKey = this.formatDateToKey(now);
+    }
+  }
+
+  formatDateToKey(d) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+
+  parseDateKey(dateKey) {
+    if (!dateKey) return new Date();
+    const parts = dateKey.split('-');
+    return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10), 12, 0, 0);
+  }
+
+  /**
+   * Resolves location name to GPS coordinates.
+   */
+  getCoords(locationName) {
+    if (!locationName) return this.montanaCoordinates['helena'];
+    const clean = String(locationName).trim().toLowerCase()
+      .replace(/\s*\([^)]*\)/g, '') // remove parentheses like (Dock)
+      .trim();
+
+    if (this.montanaCoordinates[clean]) {
+      return this.montanaCoordinates[clean];
+    }
+
+    // Partial match search
+    const keys = Object.keys(this.montanaCoordinates);
+    for (const k of keys) {
+      if (clean.includes(k) || k.includes(clean)) {
+        return this.montanaCoordinates[k];
+      }
+    }
+
+    // Default fallback to Helena HQ
+    return { name: locationName, lat: 46.5958, lng: -112.0270, type: 'Field Location' };
+  }
+
+  /**
+   * Computes Haversine distance in miles between two coordinates.
+   */
+  calculateDistanceMiles(lat1, lon1, lat2, lon2) {
+    const R = 3958.8; // Radius of Earth in miles
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = 
+      Math.sin(dLat/2) * Math.sin(dLat/2) +
+      Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * 
+      Math.sin(dLon/2) * Math.sin(dLon/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return Math.round((R * c) * 10) / 10;
+  }
+
+  /**
+   * Estimates highway drive time given distance in miles.
+   */
+  estimateDriveTime(miles) {
+    if (miles <= 0) return '0m';
+    // Assume average 58 mph highway travel including turns
+    const minutes = Math.round((miles / 58) * 60);
+    const h = Math.floor(minutes / 60);
+    const m = minutes % 60;
+    if (h === 0) return `${m}m`;
+    return `${h}h ${m < 10 ? '0' : ''}${m}m`;
+  }
+
+  /**
+   * Initializes Leaflet Map instance with Google Maps-style tiles.
+   */
+  ensureMap() {
+    const container = document.getElementById('trip-route-map');
+    if (!container) return;
+
+    if (!this.map && typeof L !== 'undefined') {
+      // Default center: Helena, MT (state capital & HQ)
+      this.map = L.map('trip-route-map', {
+        center: [46.5958, -112.0270],
+        zoom: 8,
+        zoomControl: true,
+        attributionControl: false
+      });
+
+      // Layer 1: Google Maps Styled Road Layer
+      // Uses high-contrast Voyager / OSM tiles with clear highway badges and crisp road lines
+      this.streetsLayer = L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+        maxZoom: 19,
+        subdomains: 'abcd'
+      });
+
+      // Layer 2: High-Resolution Satellite Imagery Layer
+      this.satelliteLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+        maxZoom: 19
+      });
+
+      // Add default layer
+      if (this.activeLayerType === 'satellite') {
+        this.satelliteLayer.addTo(this.map);
+        this.currentTileLayer = this.satelliteLayer;
+      } else {
+        this.streetsLayer.addTo(this.map);
+        this.currentTileLayer = this.streetsLayer;
+      }
+
+      // Add custom Leaflet listeners
+      this.map.on('dragstart', () => {
+        // If user manually drags map, temporarily unlock "Follow Me" so user can explore
+        if (this.followMe) {
+          this.setFollowMe(false, true);
+        }
+      });
+    }
+
+    // Force map to recalculate container dimensions when rendered
+    setTimeout(() => {
+      if (this.map) this.map.invalidateSize();
+    }, 100);
+  }
+
+  /**
+   * Toggles between Streets and Satellite views.
+   */
+  setMapLayer(type) {
+    this.activeLayerType = type;
+    if (!this.map) return;
+
+    if (type === 'satellite') {
+      if (this.map.hasLayer(this.streetsLayer)) this.map.removeLayer(this.streetsLayer);
+      this.satelliteLayer.addTo(this.map);
+      this.currentTileLayer = this.satelliteLayer;
+    } else {
+      if (this.map.hasLayer(this.satelliteLayer)) this.map.removeLayer(this.satelliteLayer);
+      this.streetsLayer.addTo(this.map);
+      this.currentTileLayer = this.streetsLayer;
+    }
+
+    // Update buttons in UI
+    const btnStreets = document.getElementById('map-btn-layer-streets');
+    const btnSat = document.getElementById('map-btn-layer-sat');
+    if (btnStreets && btnSat) {
+      if (type === 'satellite') {
+        btnSat.classList.add('active');
+        btnStreets.classList.remove('active');
+      } else {
+        btnStreets.classList.add('active');
+        btnSat.classList.remove('active');
+      }
+    }
+  }
+
+  /**
+   * Starts or stops live GPS tracking.
+   */
+  toggleGpsTracking() {
+    if (this.isTracking) {
+      this.stopGpsTracking();
+    } else {
+      this.startGpsTracking();
+    }
+  }
+
+  startGpsTracking() {
+    if (!navigator.geolocation) {
+      alert('Geolocation is not supported by your device or browser.');
+      return;
+    }
+
+    this.isTracking = true;
+    this.setFollowMe(true);
+    this.updateGpsStatusUi(true, 'Acquiring GPS fix...');
+
+    this.gpsWatchId = navigator.geolocation.watchPosition(
+      (pos) => this.onGpsPosition(pos),
+      (err) => {
+        console.warn('GPS Watch error:', err.message);
+        this.updateGpsStatusUi(false, `GPS Error: ${err.message}`);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 5000
+      }
+    );
+  }
+
+  stopGpsTracking() {
+    if (this.gpsWatchId !== null) {
+      navigator.geolocation.clearWatch(this.gpsWatchId);
+      this.gpsWatchId = null;
+    }
+    this.isTracking = false;
+    this.setFollowMe(false);
+    this.updateGpsStatusUi(false, 'GPS Tracking Paused');
+
+    if (this.userMarker && this.map) {
+      this.map.removeLayer(this.userMarker);
+      this.userMarker = null;
+    }
+    if (this.accuracyCircle && this.map) {
+      this.map.removeLayer(this.accuracyCircle);
+      this.accuracyCircle = null;
+    }
+  }
+
+  /**
+   * Handles incoming real-time GPS position update.
+   */
+  onGpsPosition(pos) {
+    if (!pos || !pos.coords) return;
+    const { latitude, longitude, accuracy, speed, heading } = pos.coords;
+    this.userPosition = { lat: latitude, lng: longitude, accuracy, speed, heading, timestamp: new Date() };
+
+    this.updateGpsStatusUi(true, `Active: ${latitude.toFixed(4)}°, ${longitude.toFixed(4)}° (±${Math.round(accuracy)}m)`);
+
+    if (!this.map) return;
+
+    const latLng = [latitude, longitude];
+
+    // Create or update pulsing blue dot marker
+    if (!this.userMarker) {
+      const userIcon = L.divIcon({
+        className: 'gps-user-marker-container',
+        html: `
+          <div class="gps-user-marker">
+            <div class="gps-user-marker-pulse"></div>
+            <div class="gps-user-marker-dot"></div>
+          </div>
+        `,
+        iconSize: [24, 24],
+        iconAnchor: [12, 12]
+      });
+
+      this.userMarker = L.marker(latLng, { icon: userIcon, zIndexOffset: 1000 }).addTo(this.map);
+      this.userMarker.bindPopup(`
+        <div style="font-size: 12px; font-weight: 700; color: #1e293b; padding: 2px;">
+          📍 Your Current Location<br>
+          <span style="font-size: 11px; font-weight: 400; color: #64748b;">
+            Speed: ${speed ? Math.round(speed * 2.23694) + ' mph' : '0 mph'}<br>
+            Accuracy: ±${Math.round(accuracy)} meters
+          </span>
+        </div>
+      `);
+    } else {
+      this.userMarker.setLatLng(latLng);
+    }
+
+    // Create or update accuracy ring
+    if (!this.accuracyCircle) {
+      this.accuracyCircle = L.circle(latLng, {
+        radius: Math.max(accuracy, 20),
+        color: '#3b82f6',
+        weight: 1,
+        fillColor: '#3b82f6',
+        fillOpacity: 0.12
+      }).addTo(this.map);
+    } else {
+      this.accuracyCircle.setLatLng(latLng);
+      this.accuracyCircle.setRadius(Math.max(accuracy, 20));
+    }
+
+    // Auto-center if "Follow Me" is enabled
+    if (this.followMe) {
+      this.map.panTo(latLng, { animate: true, duration: 0.8 });
+    }
+
+    // Update real-time distance and ETA to next scheduled stop
+    this.updateLiveNextStopHud();
+  }
+
+  toggleFollowMe() {
+    this.setFollowMe(!this.followMe);
+    if (this.followMe && this.userPosition && this.map) {
+      this.map.setView([this.userPosition.lat, this.userPosition.lng], 12);
+    }
+  }
+
+  setFollowMe(val, temporary = false) {
+    this.followMe = !!val;
+    const btn = document.getElementById('map-btn-follow-me');
+    if (btn) {
+      if (this.followMe) {
+        btn.classList.add('active');
+        btn.innerHTML = '<span>🎯</span> Following Me';
+        btn.style.borderColor = '#3b82f6';
+        btn.style.color = '#93c5fd';
+      } else {
+        btn.classList.remove('active');
+        btn.innerHTML = '<span>🎯</span> Follow Me';
+        btn.style.borderColor = 'var(--border-color)';
+        btn.style.color = 'var(--text-muted)';
+      }
+    }
+  }
+
+  recenterOnUser() {
+    if (this.userPosition && this.map) {
+      this.setFollowMe(true);
+      this.map.setView([this.userPosition.lat, this.userPosition.lng], 13, { animate: true });
+    } else {
+      this.startGpsTracking();
+    }
+  }
+
+  updateGpsStatusUi(isActive, message) {
+    const badge = document.getElementById('route-map-gps-badge');
+    const text = document.getElementById('route-map-gps-text');
+    const dot = document.getElementById('route-map-gps-dot');
+    if (badge && text) {
+      text.textContent = message;
+      if (isActive) {
+        dot.style.background = '#10b981';
+        dot.style.boxShadow = '0 0 8px #10b981';
+      } else {
+        dot.style.background = '#94a3b8';
+        dot.style.boxShadow = 'none';
+      }
+    }
+  }
+
+  /**
+   * Recalculates distance and ETA from current GPS coordinates to the next stop.
+   */
+  updateLiveNextStopHud() {
+    const hudEl = document.getElementById('route-map-next-stop-hud');
+    if (!hudEl) return;
+
+    if (!this.userPosition) {
+      hudEl.innerHTML = `
+        <div style="display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-muted); padding: 4px 0;">
+          <span>🚗</span> <span>GPS active — tracking position along route...</span>
+        </div>
+      `;
+      return;
+    }
+
+    const routeData = this.collectRouteDataForDate(this.activeDateKey);
+    if (!routeData || routeData.stops.length === 0) {
+      hudEl.innerHTML = `
+        <div style="font-size: 11px; color: var(--text-muted); padding: 4px 0;">
+          ⚪ No destinations scheduled for ${this.activeDateKey}
+        </div>
+      `;
+      return;
+    }
+
+    // Find nearest stop or next stop in sequence
+    let nearestStop = null;
+    let minDistance = Infinity;
+
+    routeData.stops.forEach((stop, idx) => {
+      const dist = this.calculateDistanceMiles(
+        this.userPosition.lat, this.userPosition.lng,
+        stop.coords.lat, stop.coords.lng
+      );
+      if (dist < minDistance) {
+        minDistance = dist;
+        nearestStop = { ...stop, distanceMiles: dist, index: idx + 1 };
+      }
+    });
+
+    if (!nearestStop) return;
+
+    const timeEstimate = this.estimateDriveTime(nearestStop.distanceMiles);
+
+    // If within 0.5 miles: Arrived at stop!
+    if (nearestStop.distanceMiles <= 0.5) {
+      hudEl.innerHTML = `
+        <div style="background: rgba(16, 185, 129, 0.2); border: 1px solid rgba(16, 185, 129, 0.4); border-radius: 6px; padding: 6px 10px; display: flex; justify-content: space-between; align-items: center;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 14px;">📍</span>
+            <span style="font-size: 11.5px; font-weight: 800; color: #4ade80;">
+              Arrived at Stop ${nearestStop.index}: ${nearestStop.location}
+            </span>
+          </div>
+          <button class="btn btn-primary" style="padding: 2px 8px; font-size: 10.5px; background: #10b981; border: none;" onclick="window.tripRouteMap.quickCheckIn('${nearestStop.location}')">
+            Check In
+          </button>
+        </div>
+      `;
+    } else {
+      hudEl.innerHTML = `
+        <div style="background: rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 6px; padding: 6px 10px; display: flex; justify-content: space-between; align-items: center;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 13px;">🚗</span>
+            <span style="font-size: 11.5px; color: #93c5fd; font-weight: 700;">
+              En Route to Stop ${nearestStop.index}: <strong style="color: #fff;">${nearestStop.location}</strong>
+            </span>
+          </div>
+          <span style="font-size: 11.5px; font-weight: 800; color: #facc15;">
+            ${nearestStop.distanceMiles} mi (~${timeEstimate})
+          </span>
+        </div>
+      `;
+    }
+  }
+
+  quickCheckIn(locationName) {
+    if (window.performGpsCheckIn) {
+      window.performGpsCheckIn();
+    } else {
+      alert(`📍 Check-in recorded for ${locationName}!`);
+    }
+  }
+
+  /**
+   * Collects all route waypoints, tasks, swaps, and trainings for a single date.
+   */
+  collectRouteDataForDate(dateKey) {
+    if (!this.tripPlanner) return null;
+
+    const trips = this.tripPlanner.getTripsForDate(dateKey);
+    const drugTests = this.tripPlanner.getDrugTestsForDate(dateKey);
+    const manualTasks = this.tripPlanner.getManualTasksForDate(dateKey);
+    const isHoliday = this.tripPlanner.isDayHoliday(dateKey);
+    const holidayName = this.tripPlanner.getHolidayName(dateKey);
+
+    // Picked equipment swaps
+    const pickedData = this.tripPlanner.getPickedSwapsData();
+    const allPicked = (pickedData && pickedData.items) ? pickedData.items : [];
+    const scheduledSwaps = this.tripPlanner.scheduledSwaps || {};
+
+    // Base origin: Helena HQ
+    const hq = this.montanaCoordinates['helena'];
+    const stops = [];
+
+    // Map scheduled cities to stop objects
+    trips.forEach((t, idx) => {
+      const locName = t.location || 'Unknown';
+      const coords = this.getCoords(locName);
+
+      // Swaps matching this location
+      const locSwaps = allPicked.filter(item => {
+        const sKey = this.tripPlanner.getSwapKey(item);
+        const sched = scheduledSwaps[sKey];
+        if (sched && sched.dateKey === dateKey) return true;
+        return (item.location || '').toLowerCase() === locName.toLowerCase();
+      });
+
+      // Drug tests matching this location
+      const locDrugTests = drugTests.filter(d => 
+        (d.clinicCity || d.city || '').toLowerCase() === locName.toLowerCase() ||
+        (d.location || '').toLowerCase() === locName.toLowerCase()
+      );
+
+      // Manual tasks matching this location
+      const locManualTasks = manualTasks.filter(m => 
+        (m.location || '').toLowerCase() === locName.toLowerCase()
+      );
+
+      // Crews in this location
+      const crews = [];
+      const jobTable = this.db.getTable('job_tracking') || this.db.getTable('Job Tracking');
+      if (jobTable && jobTable.rows) {
+        jobTable.rows.forEach(r => {
+          const rLoc = String(r['Location'] || '').trim().toLowerCase();
+          if (rLoc.includes(locName.toLowerCase()) || locName.toLowerCase().includes(rLoc)) {
+            const cId = this.tripPlanner.getSignificantJobNumber(r['Job Number'] || r['Crew'] || '');
+            if (cId && !crews.some(c => c.crewId === cId)) {
+              crews.push({
+                crewId: cId,
+                lead: String(r['Foreman'] || r['Crew Lead'] || r['Lead'] || 'Unknown').trim(),
+                vehicle: String(r['Vehicle'] || r['Unit #'] || r['Truck'] || '').trim(),
+                jobName: String(r['Job Name'] || '').trim()
+              });
+            }
+          }
+        });
+      }
+
+      stops.push({
+        location: locName,
+        coords: coords,
+        crews: crews,
+        swaps: locSwaps,
+        drugTests: locDrugTests,
+        manualTasks: locManualTasks,
+        crewId: t.crew || (crews[0] ? crews[0].crewId : '')
+      });
+    });
+
+    // Calculate leg distances & cumulative time
+    let totalMiles = 0;
+    let prevCoords = hq;
+
+    stops.forEach((stop) => {
+      const legMiles = this.calculateDistanceMiles(prevCoords.lat, prevCoords.lng, stop.coords.lat, stop.coords.lng);
+      stop.legMiles = legMiles;
+      stop.legTime = this.estimateDriveTime(legMiles);
+      totalMiles += legMiles;
+      prevCoords = stop.coords;
+    });
+
+    // Return leg to Helena HQ
+    let returnMiles = 0;
+    let returnTime = '0m';
+    if (stops.length > 0) {
+      returnMiles = this.calculateDistanceMiles(prevCoords.lat, prevCoords.lng, hq.lat, hq.lng);
+      returnTime = this.estimateDriveTime(returnMiles);
+      totalMiles += returnMiles;
+    }
+
+    return {
+      dateKey: dateKey,
+      isHoliday: isHoliday,
+      holidayName: holidayName,
+      origin: hq,
+      stops: stops,
+      returnLeg: { coords: hq, miles: returnMiles, time: returnTime },
+      totalMiles: Math.round(totalMiles),
+      totalDriveTime: this.estimateDriveTime(totalMiles)
+    };
+  }
+
+  /**
+   * Collects all route data across all days of the selected week.
+   */
+  collectWeekData(weekMonday) {
+    if (!this.tripPlanner) return [];
+    const workSchedule = this.tripPlanner.activeSchedule || 'Mon-Thu';
+    const weekDays = this.tripPlanner.getDaysForWeek(weekMonday, workSchedule);
+
+    return weekDays.map((d, index) => {
+      const data = this.collectRouteDataForDate(d.dateKey);
+      return {
+        ...data,
+        dayIndex: index,
+        dayName: d.dayName,
+        dateFormatted: d.formattedDate,
+        color: this.dayColors[index] || this.dayColors[0]
+      };
+    });
+  }
+
+  /**
+   * Switches the active date and re-renders.
+   */
+  setDate(dateKey) {
+    this.activeDateKey = dateKey;
+    this.activeMode = 'single-day';
+    this.render();
+  }
+
+  /**
+   * Switches view to All-Week Overview mode.
+   */
+  setAllWeekMode() {
+    this.activeMode = 'all-week';
+    this.render();
+  }
+
+  /**
+   * Main render method for the Route Map view.
+   */
+  render() {
+    this.ensureMap();
+    this.renderStopsPanel();
+    this.renderMap();
+    this.updateLiveNextStopHud();
+  }
+
+  /**
+   * Renders the left itinerary panel with Day Pills, Route Summary, and Stops Timeline.
+   */
+  renderStopsPanel() {
+    const panel = document.getElementById('trip-route-stops-panel');
+    if (!panel) return;
+
+    const mon = this.activeWeekMonday || (this.tripPlanner ? this.tripPlanner.getMondayForDate(this.tripPlanner.currentDate) : new Date());
+    const workSchedule = this.tripPlanner ? this.tripPlanner.activeSchedule || 'Mon-Thu' : 'Mon-Thu';
+    const weekDays = this.tripPlanner ? this.tripPlanner.getDaysForWeek(mon, workSchedule) : [];
+
+    // 1. Day Selector Pills
+    let dayPillsHtml = weekDays.map((d, idx) => {
+      const isSelected = (this.activeMode === 'single-day' && this.activeDateKey === d.dateKey);
+      const trips = this.tripPlanner ? this.tripPlanner.getTripsForDate(d.dateKey) : [];
+      const stopCount = trips.length;
+      const isHol = this.tripPlanner ? this.tripPlanner.isDayHoliday(d.dateKey) : false;
+
+      return `
+        <button class="route-day-pill ${isSelected ? 'active' : ''}" onclick="window.tripRouteMap.setDate('${d.dateKey}')" title="${d.dayName} ${d.formattedDate}">
+          <span style="font-weight: 800;">${d.dayName.substring(0, 3)}</span>
+          <span style="font-size: 10px; opacity: 0.85;">${d.formattedDate.split(',')[0]}</span>
+          ${isHol ? `
+            <span class="badge" style="background: rgba(234, 179, 8, 0.25); color: #fde047; font-size: 8.5px; padding: 0 4px; border-radius: 6px;">🏖️</span>
+          ` : stopCount > 0 ? `
+            <span class="badge" style="background: rgba(59, 130, 246, 0.3); color: #93c5fd; font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 8px;">
+              ${stopCount} ${stopCount === 1 ? 'stop' : 'stops'}
+            </span>
+          ` : `
+            <span style="font-size: 9px; opacity: 0.4;">0</span>
+          `}
+        </button>
+      `;
+    }).join('');
+
+    // All-Week Overview Pill
+    const isAllWeek = (this.activeMode === 'all-week');
+    dayPillsHtml += `
+      <button class="route-day-pill ${isAllWeek ? 'active' : ''}" onclick="window.tripRouteMap.setAllWeekMode()" style="background: ${isAllWeek ? 'linear-gradient(135deg, #8b5cf6 0%, #6d28d9 100%)' : 'rgba(255,255,255,0.05)'}; color: ${isAllWeek ? '#fff' : '#c084fc'}; border-color: rgba(168, 85, 247, 0.4);" title="View all routes for the entire week">
+        <span style="font-weight: 800;">🌐 All Week</span>
+        <span style="font-size: 10px; opacity: 0.85;">Overview</span>
+      </button>
+    `;
+
+    // 2. Body based on mode (single-day vs all-week)
+    if (this.activeMode === 'all-week') {
+      panel.innerHTML = this.renderAllWeekPanelHtml(mon, dayPillsHtml);
+    } else {
+      const routeData = this.collectRouteDataForDate(this.activeDateKey);
+      panel.innerHTML = this.renderSingleDayPanelHtml(routeData, dayPillsHtml);
+    }
+  }
+
+  /**
+   * HTML for single day stops timeline.
+   */
+  renderSingleDayPanelHtml(routeData, dayPillsHtml) {
+    if (!routeData) return '<div style="padding: 16px; color: var(--text-muted);">No date selected.</div>';
+
+    const d = this.parseDateKey(routeData.dateKey);
+    const dayName = d.toLocaleDateString('en-US', { weekday: 'long' });
+    const fullDate = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+
+    let stopsTimelineHtml = '';
+
+    if (routeData.isHoliday) {
+      stopsTimelineHtml = `
+        <div style="background: rgba(234, 179, 8, 0.12); border: 1px solid rgba(234, 179, 8, 0.35); border-radius: 8px; padding: 16px; text-align: center; margin: 16px 0;">
+          <div style="font-size: 28px; margin-bottom: 6px;">🏖️</div>
+          <div style="font-size: 14px; font-weight: 800; color: #fde047; margin-bottom: 4px;">Company Holiday / Blackout Day</div>
+          <div style="font-size: 12px; color: #cbd5e1;">${routeData.holidayName || 'Holiday'}</div>
+          <div style="font-size: 11px; color: var(--text-muted); margin-top: 8px;">Field crew visits and trips are excused for this date.</div>
+        </div>
+      `;
+    } else if (routeData.stops.length === 0) {
+      stopsTimelineHtml = `
+        <div style="background: rgba(255,255,255,0.03); border: 1px dashed var(--border-color); border-radius: 8px; padding: 24px 16px; text-align: center; margin: 16px 0;">
+          <div style="font-size: 30px; margin-bottom: 8px; opacity: 0.7;">🗺️</div>
+          <div style="font-size: 13px; font-weight: 700; color: #fff; margin-bottom: 4px;">No Destinations Scheduled</div>
+          <div style="font-size: 11.5px; color: var(--text-muted); line-height: 1.5; margin-bottom: 14px;">
+            Switch to the <strong>📅 Schedule Board</strong> tab to drag and drop service cities, crew swaps, or trainings onto this day.
+          </div>
+          <button class="btn btn-secondary" onclick="window.tripPlanner.switchTab('board')" style="font-size: 11px; font-weight: 700; color: #93c5fd; border-color: rgba(59, 130, 246, 0.4);">
+            ◀ Open Schedule Board
+          </button>
+        </div>
+      `;
+    } else {
+      // Build chronological stops timeline
+      stopsTimelineHtml = `
+        <div class="stops-timeline" style="margin-top: 14px;">
+          <!-- Origin: Helena HQ -->
+          <div class="stop-item origin">
+            <div class="stop-marker-badge origin">HQ</div>
+            <div class="stop-content">
+              <div style="display: flex; justify-content: space-between; align-items: baseline;">
+                <span class="stop-title">Helena Base HQ</span>
+                <span style="font-size: 10px; color: var(--text-muted); font-weight: 700;">DEPART ~7:00 AM</span>
+              </div>
+              <div style="font-size: 11px; color: var(--text-muted);">Trip Starting Point (Montana Safety Base)</div>
+            </div>
+          </div>
+      `;
+
+      routeData.stops.forEach((stop, idx) => {
+        const stopNum = idx + 1;
+
+        stopsTimelineHtml += `
+          <!-- Travel Leg Connector -->
+          <div class="stop-travel-leg">
+            <div class="travel-leg-line"></div>
+            <div class="travel-leg-info">
+              🚗 ${stop.legMiles} mi • ~${stop.legTime}
+            </div>
+          </div>
+
+          <!-- Stop ${stopNum} -->
+          <div class="stop-item stop-waypoint" id="stop-card-${stopNum}" onclick="window.tripRouteMap.focusStop(${idx})">
+            <div class="stop-marker-badge waypoint">${stopNum}</div>
+            <div class="stop-content">
+              <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px;">
+                <div>
+                  <span class="stop-title">${stop.location}</span>
+                  <span class="badge" style="background: rgba(255,255,255,0.08); font-size: 9.5px; padding: 1px 6px; margin-left: 5px;">
+                    ${stop.coords.type || 'Field Site'}
+                  </span>
+                </div>
+                <button class="btn btn-secondary" style="padding: 1px 6px; font-size: 9.5px; color: #4ade80; border-color: rgba(34, 197, 94, 0.4);" onclick="event.stopPropagation(); window.tripRouteMap.quickCheckIn('${stop.location}')" title="Check in current GPS location at this stop">
+                  📍 Check In
+                </button>
+              </div>
+
+              <!-- Crew Details -->
+              ${stop.crews.length > 0 ? `
+                <div style="margin-bottom: 6px;">
+                  ${stop.crews.map(c => `
+                    <div style="font-size: 11px; color: #cbd5e1; display: flex; align-items: center; gap: 6px;">
+                      <span class="badge" style="background: rgba(59, 130, 246, 0.2); color: #93c5fd; font-weight: 800; font-size: 9.5px;">Crew ${c.crewId}</span>
+                      <span style="font-weight: 600;">${c.lead || 'Lead N/A'}</span>
+                      ${c.vehicle ? `<span style="color: #a7f3d0; font-size: 10px;">(${c.vehicle})</span>` : ''}
+                    </div>
+                  `).join('')}
+                </div>
+              ` : ''}
+
+              <!-- Work Checklist Pills -->
+              <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px;">
+                ${stop.swaps.length > 0 ? `
+                  <span class="badge" style="background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.35); font-size: 10px; font-weight: 700;">
+                    🧤 ${stop.swaps.length} Swap${stop.swaps.length > 1 ? 's' : ''}
+                  </span>
+                ` : ''}
+                ${stop.drugTests.length > 0 ? `
+                  <span class="badge" style="background: rgba(168, 85, 247, 0.2); color: #d8b4fe; border: 1px solid rgba(168, 85, 247, 0.35); font-size: 10px; font-weight: 700;">
+                    🧪 ${stop.drugTests.length} Drug Test${stop.drugTests.length > 1 ? 's' : ''}
+                  </span>
+                ` : ''}
+                ${stop.manualTasks.length > 0 ? `
+                  <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #6ee7b7; border: 1px solid rgba(16, 185, 129, 0.35); font-size: 10px; font-weight: 700;">
+                    📋 ${stop.manualTasks.length} Task${stop.manualTasks.length > 1 ? 's' : ''}
+                  </span>
+                ` : ''}
+              </div>
+
+              <!-- Detailed Swaps & Tasks list snippet -->
+              ${stop.swaps.length > 0 ? `
+                <div style="margin-top: 6px; padding-top: 6px; border-top: 1px dashed rgba(255,255,255,0.08); font-size: 10.5px; color: var(--text-muted);">
+                  ${stop.swaps.slice(0, 3).map(s => `
+                    <div style="display: flex; justify-content: space-between; padding: 1px 0;">
+                      <span>• ${s.employeeName || s.employee || 'Worker'}: ${s.type || 'Glove'} #${s.pickItem || s.currentItem || ''}</span>
+                      <span style="color: #4ade80;">Picked</span>
+                    </div>
+                  `).join('')}
+                  ${stop.swaps.length > 3 ? `<div style="font-size: 9.5px; color: #93c5fd;">+ ${stop.swaps.length - 3} more items...</div>` : ''}
+                </div>
+              ` : ''}
+            </div>
+          </div>
+        `;
+      });
+
+      // Return leg to Helena HQ
+      stopsTimelineHtml += `
+          <!-- Return Leg -->
+          <div class="stop-travel-leg">
+            <div class="travel-leg-line"></div>
+            <div class="travel-leg-info">
+              🚗 ${routeData.returnLeg.miles} mi • ~${routeData.returnLeg.time}
+            </div>
+          </div>
+
+          <!-- Return to Helena HQ -->
+          <div class="stop-item destination">
+            <div class="stop-marker-badge destination">🏁</div>
+            <div class="stop-content">
+              <div style="display: flex; justify-content: space-between; align-items: baseline;">
+                <span class="stop-title">Return to Helena HQ</span>
+                <span style="font-size: 10px; color: #4ade80; font-weight: 700;">RETURN ~4:30 PM</span>
+              </div>
+              <div style="font-size: 11px; color: var(--text-muted);">Base HQ Finish • Day Complete</div>
+            </div>
+          </div>
+        </div>
+      `;
+    }
+
+    return `
+      <!-- Top Days Navigation Pills -->
+      <div class="route-day-pills-bar">
+        ${dayPillsHtml}
+      </div>
+
+      <div style="padding: 14px 16px; overflow-y: auto; flex: 1;">
+        <!-- Day Title & Summary Header -->
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 12px;">
+          <div>
+            <h3 style="margin: 0; font-size: 15px; font-weight: 800; color: #fff;">
+              ${dayName} Itinerary
+            </h3>
+            <span style="font-size: 11.5px; color: var(--text-muted);">${fullDate}</span>
+          </div>
+
+          <div style="text-align: right;">
+            <div style="font-size: 13px; font-weight: 800; color: #60a5fa;">
+              🚗 ${routeData.totalMiles} miles
+            </div>
+            <span style="font-size: 11px; color: var(--text-muted); font-weight: 600;">
+              Total: ${routeData.totalDriveTime} drive
+            </span>
+          </div>
+        </div>
+
+        <!-- Live Next Stop Banner -->
+        <div id="route-map-next-stop-hud" style="margin-bottom: 12px;"></div>
+
+        <!-- Google Maps Turn-by-Turn Export Button -->
+        ${routeData.stops.length > 0 ? `
+          <button class="btn btn-primary" onclick="window.tripRouteMap.openInGoogleMaps()" style="width: 100%; box-sizing: border-box; padding: 8px 12px; font-size: 12px; font-weight: 700; background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); border: none; display: flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 2px 8px rgba(37, 99, 235, 0.35); margin-bottom: 12px; border-radius: 6px;">
+            <span>🗺️</span> Open in Google Maps (Turn-by-Turn GPS)
+          </button>
+        ` : ''}
+
+        <!-- Timeline of Stops -->
+        ${stopsTimelineHtml}
+      </div>
+    `;
+  }
+
+  /**
+   * HTML for All-Week route overview panel.
+   */
+  renderAllWeekPanelHtml(mon, dayPillsHtml) {
+    const weekData = this.collectWeekData(mon);
+    const totalWeeklyMiles = weekData.reduce((sum, d) => sum + (d.totalMiles || 0), 0);
+    const totalWeeklyStops = weekData.reduce((sum, d) => sum + (d.stops ? d.stops.length : 0), 0);
+
+    return `
+      <!-- Top Days Navigation Pills -->
+      <div class="route-day-pills-bar">
+        ${dayPillsHtml}
+      </div>
+
+      <div style="padding: 14px 16px; overflow-y: auto; flex: 1;">
+        <div style="margin-bottom: 14px;">
+          <h3 style="margin: 0; font-size: 15px; font-weight: 800; color: #c084fc;">
+            🌐 All-Week Multi-Route Overview
+          </h3>
+          <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 2px;">
+            Viewing all daily travel corridors across Montana simultaneously
+          </div>
+        </div>
+
+        <!-- Weekly Summary Stats -->
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 14px;">
+          <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px; text-align: center;">
+            <div style="font-size: 11px; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">Total Weekly Distance</div>
+            <div style="font-size: 16px; font-weight: 800; color: #93c5fd; margin-top: 2px;">🚗 ${totalWeeklyMiles} mi</div>
+          </div>
+          <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px; text-align: center;">
+            <div style="font-size: 11px; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">Total Destinations</div>
+            <div style="font-size: 16px; font-weight: 800; color: #4ade80; margin-top: 2px;">📍 ${totalWeeklyStops} Stops</div>
+          </div>
+        </div>
+
+        <!-- Daily Route Cards -->
+        <div style="display: flex; flex-direction: column; gap: 8px;">
+          ${weekData.map((d) => `
+            <div style="background: ${d.color.bg}; border: 1px solid ${d.color.border}; border-radius: 8px; padding: 10px 12px; cursor: pointer; transition: transform 0.15s ease;" onclick="window.tripRouteMap.setDate('${d.dateKey}')" onmouseover="this.style.transform='translateX(3px)'" onmouseout="this.style.transform='translateX(0)'">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                <span style="font-weight: 800; font-size: 12.5px; color: ${d.color.hex};">
+                  ● ${d.dayName} (${d.dateFormatted.split(',')[0]})
+                </span>
+                <span style="font-size: 11px; font-weight: 700; color: #fff;">
+                  ${d.totalMiles > 0 ? `${d.totalMiles} mi • ${d.totalDriveTime}` : '0 mi'}
+                </span>
+              </div>
+
+              <div style="font-size: 11.5px; color: #cbd5e1;">
+                ${d.isHoliday ? `
+                  <span style="color: #fde047;">🏖️ Holiday (${d.holidayName || 'Excused'})</span>
+                ` : d.stops.length > 0 ? `
+                  <span>Helena ➔ ${d.stops.map(s => `<strong>${s.location}</strong>`).join(' ➔ ')} ➔ Helena</span>
+                ` : `
+                  <span style="color: var(--text-muted);">No field visits scheduled</span>
+                `}
+              </div>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `;
+  }
+
+  /**
+   * Renders the interactive Leaflet map markers, connecting route polylines, and popups.
+   */
+  renderMap() {
+    if (!this.map || typeof L === 'undefined') return;
+
+    // Clear existing route layers
+    this.routeMarkers.forEach(m => this.map.removeLayer(m));
+    this.routeMarkers = [];
+    this.routePolylines.forEach(p => this.map.removeLayer(p));
+    this.routePolylines = [];
+
+    const bounds = L.latLngBounds();
+
+    // Helena HQ always included in bounds
+    const hq = this.montanaCoordinates['helena'];
+    bounds.extend([hq.lat, hq.lng]);
+
+    if (this.activeMode === 'all-week') {
+      // Render all days of the week with distinct colors
+      const mon = this.activeWeekMonday || (this.tripPlanner ? this.tripPlanner.getMondayForDate(this.tripPlanner.currentDate) : new Date());
+      const weekData = this.collectWeekData(mon);
+
+      weekData.forEach((dayData) => {
+        if (dayData.stops && dayData.stops.length > 0) {
+          const latLngs = [[hq.lat, hq.lng]];
+
+          dayData.stops.forEach((stop, sIdx) => {
+            latLngs.push([stop.coords.lat, stop.coords.lng]);
+            bounds.extend([stop.coords.lat, stop.coords.lng]);
+
+            // Add stop marker
+            const marker = this.createStopMarker(stop, sIdx + 1, dayData.color.hex, dayData.dayName);
+            marker.addTo(this.map);
+            this.routeMarkers.push(marker);
+          });
+
+          // Return to Helena
+          latLngs.push([hq.lat, hq.lng]);
+
+          // Draw route polyline with day color
+          const polyline = L.polyline(latLngs, {
+            color: dayData.color.hex,
+            weight: 4,
+            opacity: 0.85,
+            dashArray: '8, 6',
+            lineJoin: 'round'
+          }).addTo(this.map);
+
+          polyline.bindPopup(`
+            <div style="font-weight: 700; color: ${dayData.color.hex}; font-size: 12px;">
+              ● ${dayData.dayName} Route (${dayData.totalMiles} mi)
+            </div>
+          `);
+
+          this.routePolylines.push(polyline);
+        }
+      });
+    } else {
+      // Single-day mode
+      const routeData = this.collectRouteDataForDate(this.activeDateKey);
+      if (routeData && routeData.stops.length > 0) {
+        const latLngs = [[hq.lat, hq.lng]];
+
+        // Add Helena Base HQ marker
+        const hqMarker = this.createHqMarker();
+        hqMarker.addTo(this.map);
+        this.routeMarkers.push(hqMarker);
+
+        routeData.stops.forEach((stop, idx) => {
+          latLngs.push([stop.coords.lat, stop.coords.lng]);
+          bounds.extend([stop.coords.lat, stop.coords.lng]);
+
+          const stopMarker = this.createStopMarker(stop, idx + 1, '#3b82f6', routeData.dateKey);
+          stopMarker.addTo(this.map);
+          this.routeMarkers.push(stopMarker);
+        });
+
+        // Return leg to Helena
+        latLngs.push([hq.lat, hq.lng]);
+
+        // Main Route Polyline (Google Maps style solid blue with subtle shadow)
+        const polyShadow = L.polyline(latLngs, {
+          color: '#1e3a8a',
+          weight: 7,
+          opacity: 0.45,
+          lineJoin: 'round'
+        }).addTo(this.map);
+        this.routePolylines.push(polyShadow);
+
+        const polyline = L.polyline(latLngs, {
+          color: '#3b82f6',
+          weight: 4.5,
+          opacity: 0.95,
+          lineJoin: 'round'
+        }).addTo(this.map);
+        this.routePolylines.push(polyline);
+      } else {
+        // No stops on this date: show HQ marker
+        const hqMarker = this.createHqMarker();
+        hqMarker.addTo(this.map);
+        this.routeMarkers.push(hqMarker);
+      }
+    }
+
+    // Auto-fit map to route bounds
+    if (bounds.isValid() && !this.followMe) {
+      this.map.fitBounds(bounds, { padding: [40, 40], maxZoom: 13 });
+    }
+  }
+
+  createHqMarker() {
+    const hq = this.montanaCoordinates['helena'];
+    const icon = L.divIcon({
+      className: 'route-map-pin-container',
+      html: `
+        <div class="route-map-pin hq">
+          <span>🏢</span>
+        </div>
+      `,
+      iconSize: [30, 30],
+      iconAnchor: [15, 15]
+    });
+
+    const m = L.marker([hq.lat, hq.lng], { icon });
+    m.bindPopup(`
+      <div style="font-size: 12px; font-weight: 700; color: #1e293b; padding: 2px;">
+        🏢 Helena Base HQ (Origin / Return)<br>
+        <span style="font-size: 11px; font-weight: 400; color: #64748b;">
+          Montana Safety Assistant Base
+        </span>
+      </div>
+    `);
+    return m;
+  }
+
+  createStopMarker(stop, index, colorHex = '#3b82f6', subtitle = '') {
+    const icon = L.divIcon({
+      className: 'route-map-pin-container',
+      html: `
+        <div class="route-map-pin stop" style="background: ${colorHex}; border-color: #ffffff;">
+          <span>${index}</span>
+        </div>
+      `,
+      iconSize: [28, 28],
+      iconAnchor: [14, 14]
+    });
+
+    const m = L.marker([stop.coords.lat, stop.coords.lng], { icon });
+    m.bindPopup(`
+      <div style="font-size: 12px; color: #1e293b; min-width: 170px; padding: 2px;">
+        <div style="font-weight: 800; font-size: 13px; color: ${colorHex}; margin-bottom: 2px;">
+          Stop ${index}: ${stop.location}
+        </div>
+        <div style="font-size: 11px; color: #64748b; margin-bottom: 6px;">
+          ${subtitle ? subtitle + ' • ' : ''}${stop.legMiles ? stop.legMiles + ' mi from prev leg' : ''}
+        </div>
+
+        ${stop.crews.length > 0 ? `
+          <div style="font-size: 11px; margin-bottom: 6px;">
+            <strong>Crew:</strong> ${stop.crews.map(c => `${c.crewId} (${c.lead})`).join(', ')}
+          </div>
+        ` : ''}
+
+        <div style="font-size: 11px; line-height: 1.5;">
+          ${stop.swaps.length > 0 ? `🧤 <strong>${stop.swaps.length}</strong> Equipment Swaps<br>` : ''}
+          ${stop.drugTests.length > 0 ? `🧪 <strong>${stop.drugTests.length}</strong> Drug Tests<br>` : ''}
+          ${stop.manualTasks.length > 0 ? `📋 <strong>${stop.manualTasks.length}</strong> Tasks<br>` : ''}
+        </div>
+
+        <button style="margin-top: 8px; width: 100%; background: #2563eb; color: #fff; border: none; border-radius: 4px; padding: 4px; font-size: 10.5px; font-weight: 700; cursor: pointer;" onclick="window.tripRouteMap.focusStop(${index - 1})">
+          View in Itinerary
+        </button>
+      </div>
+    `);
+
+    return m;
+  }
+
+  focusStop(index) {
+    const routeData = this.collectRouteDataForDate(this.activeDateKey);
+    if (!routeData || !routeData.stops[index]) return;
+    const stop = routeData.stops[index];
+
+    if (this.map) {
+      this.map.setView([stop.coords.lat, stop.coords.lng], 12, { animate: true });
+    }
+
+    const card = document.getElementById(`stop-card-${index + 1}`);
+    if (card) {
+      card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      card.style.borderColor = '#3b82f6';
+      card.style.boxShadow = '0 0 12px rgba(59, 130, 246, 0.4)';
+      setTimeout(() => {
+        card.style.borderColor = 'var(--border-color)';
+        card.style.boxShadow = 'none';
+      }, 2000);
+    }
+  }
+
+  /**
+   * Generates Google Maps multi-stop directions URL.
+   */
+  generateGoogleMapsUrl(routeData) {
+    if (!routeData || routeData.stops.length === 0) return '';
+    const origin = 'Helena,+MT';
+    const destination = 'Helena,+MT';
+    const waypoints = routeData.stops.map(s => {
+      return encodeURIComponent(s.location + ', MT');
+    }).join('/');
+
+    return `https://www.google.com/maps/dir/${origin}/${waypoints}/${destination}`;
+  }
+
+  /**
+   * Opens Google Maps navigation in default browser / native app.
+   */
+  openInGoogleMaps() {
+    const routeData = this.collectRouteDataForDate(this.activeDateKey);
+    if (!routeData) return;
+    const url = this.generateGoogleMapsUrl(routeData);
+    if (!url) return;
+
+    if (window.desktopAPI && typeof window.desktopAPI.openExternal === 'function') {
+      window.desktopAPI.openExternal(url);
+    } else {
+      window.open(url, '_blank');
+    }
+  }
+
+  /**
+   * Fits map to route bounds.
+   */
+  fitRoute() {
+    if (!this.map) return;
+    const bounds = L.latLngBounds();
+    const hq = this.montanaCoordinates['helena'];
+    bounds.extend([hq.lat, hq.lng]);
+
+    if (this.activeMode === 'all-week') {
+      const mon = this.activeWeekMonday || (this.tripPlanner ? this.tripPlanner.getMondayForDate(this.tripPlanner.currentDate) : new Date());
+      const weekData = this.collectWeekData(mon);
+      weekData.forEach(d => {
+        (d.stops || []).forEach(s => bounds.extend([s.coords.lat, s.coords.lng]));
+      });
+    } else {
+      const routeData = this.collectRouteDataForDate(this.activeDateKey);
+      if (routeData) {
+        routeData.stops.forEach(s => bounds.extend([s.coords.lat, s.coords.lng]));
+      }
+    }
+
+    if (bounds.isValid()) {
+      this.map.fitBounds(bounds, { padding: [40, 40], maxZoom: 13 });
+    }
+  }
+}
+
+// Global instance attached to window
+if (typeof window !== 'undefined') {
+  window.TripRouteMap = TripRouteMap;
+  window.tripRouteMap = null;
+}
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = TripRouteMap;
+}

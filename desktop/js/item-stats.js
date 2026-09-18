@@ -1633,6 +1633,33 @@ class ItemStatsEngine {
       return;
     }
 
+    // Detect duplicate history entries for this item (same assigned to & date assigned)
+    let dupesCount = 0;
+    const seenMap = new Set();
+    for (const r of groupRows) {
+      const d = String(r['Date Assigned'] || r['Date'] || Object.values(r)[0] || '').trim();
+      const a = String(r['Assigned To'] || r['Employee Name'] || '').trim().toLowerCase();
+      const k = `${d}::${a}`;
+      if (seenMap.has(k)) {
+        dupesCount++;
+      } else {
+        seenMap.add(k);
+      }
+    }
+
+    const cleanDupesBtn = document.getElementById('dossier-clean-dupes-btn');
+    if (cleanDupesBtn) {
+      if (dupesCount > 0) {
+        cleanDupesBtn.style.display = 'inline-flex';
+        cleanDupesBtn.innerHTML = `<span>🧹</span> Clean Duplicates (${dupesCount})`;
+        cleanDupesBtn.title = `Remove ${dupesCount} duplicate history ${dupesCount === 1 ? 'record' : 'records'} for #${cleanItemKey} (same holder & date)`;
+      } else {
+        cleanDupesBtn.style.display = 'inline-flex';
+        cleanDupesBtn.innerHTML = `<span>🧹</span> Clean Duplicates`;
+        cleanDupesBtn.title = `No duplicate history records found for #${cleanItemKey}`;
+      }
+    }
+
     const firstRow = groupRows[0] || {};
     let metaChips = [];
     const metaOrder = ['size', 'class', 'type', 'kv', 'model', 'length'];
@@ -1836,6 +1863,19 @@ class ItemStatsEngine {
               </div>
             </div>
           ` : ''}
+          ${dupesCount > 0 ? `
+            <div style="background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.4); border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; gap: 10px;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="font-size: 18px;">🧹</span>
+                <div style="font-size: 12px; color: #fcd34d; line-height: 1.4;">
+                  <strong>Duplicate History Records Detected (${dupesCount}):</strong> This item has ${dupesCount} redundant ${dupesCount === 1 ? 'entry' : 'entries'} for the same holder on the same date logging 0 days.
+                </div>
+              </div>
+              <button class="btn btn-secondary" style="padding: 4px 10px; font-size: 11px; font-weight: 700; color: #fbbf24; border-color: rgba(245, 158, 11, 0.5); background: rgba(245, 158, 11, 0.18); cursor: pointer; white-space: nowrap;" onclick="window.itemStatsEngine.cleanCurrentItemDuplicates()">
+                🧹 Clean Duplicates
+              </button>
+            </div>
+          ` : ''}
           <div style="position: relative; padding-left: 20px; border-left: 2px solid var(--border-color); margin-left: 8px;">
     `;
 
@@ -1945,6 +1985,9 @@ class ItemStatsEngine {
             </button>
           </div>
           <div style="display: flex; align-items: center; gap: 8px;">
+            <button class="btn btn-secondary" style="font-size: 12px; display: inline-flex; align-items: center; gap: 5px; cursor: pointer; ${dupesCount > 0 ? 'color: #fbbf24; border-color: rgba(245, 158, 11, 0.4); background: rgba(245, 158, 11, 0.1);' : ''}" onclick="window.itemStatsEngine.cleanCurrentItemDuplicates()" title="${dupesCount > 0 ? `Remove ${dupesCount} duplicate entries for #${this.escapeHtml(cleanItemKey)}` : 'Scan and clean duplicate entries'}">
+              <span>🧹</span> Clean Duplicates${dupesCount > 0 ? ` (${dupesCount})` : ''}
+            </button>
             <button class="btn btn-secondary" style="font-size: 12px; display: inline-flex; align-items: center; gap: 5px; cursor: pointer;" onclick="window.itemStatsEngine.openImportLogModal('${this.escapeHtml(cleanItemKey)}', '${this.escapeHtml(sheetKey)}')">
               📥 Import History Log
             </button>
@@ -2318,6 +2361,36 @@ class ItemStatsEngine {
     this.openDossierModal(cleanItemKey, histKey);
     if (window.historyNavigator) {
       window.historyNavigator.renderCurrentHistory();
+    }
+  }
+
+  /**
+   * Cleans duplicate history records for the currently viewed item in the dossier
+   */
+  async cleanCurrentItemDuplicates() {
+    const cleanItemKey = this.currentActiveItemKey;
+    const sheetKey = this.currentActiveSheetKey || 'gloves_history';
+    if (!cleanItemKey || !this.db) return;
+
+    const histKey = sheetKey.endsWith('_history') ? sheetKey : `${sheetKey}_history`;
+    const res = await this.db.cleanDuplicateHistoryRows(histKey, cleanItemKey);
+
+    if (res.removedCount > 0) {
+      if (window.inventoryManager && typeof window.inventoryManager.showToast === 'function') {
+        window.inventoryManager.showToast(`✅ Cleaned ${res.removedCount} duplicate history ${res.removedCount === 1 ? 'record' : 'records'} for #${cleanItemKey}!`);
+      } else if (window.showToast) {
+        window.showToast(`✅ Cleaned ${res.removedCount} duplicate history ${res.removedCount === 1 ? 'record' : 'records'} for #${cleanItemKey}!`);
+      }
+      this.openDossierModal(cleanItemKey, sheetKey);
+      if (window.historyNavigator) {
+        window.historyNavigator.renderCurrentHistory();
+      }
+    } else {
+      if (window.inventoryManager && typeof window.inventoryManager.showToast === 'function') {
+        window.inventoryManager.showToast(`ℹ️ No duplicate history records found for #${cleanItemKey}.`);
+      } else if (window.showToast) {
+        window.showToast(`ℹ️ No duplicate history records found for #${cleanItemKey}.`);
+      }
     }
   }
 

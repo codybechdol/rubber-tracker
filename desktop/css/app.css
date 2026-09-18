@@ -1737,5 +1737,322 @@ body.inspector-mode .brand-badge {
   border-color: rgba(59, 130, 246, 0.4);
   color: #93c5fd;
   transform: translateY(-1px);
+
+/* ============================================================================
+   TRIP PLANNER ROUTE MAP & LIVE GPS TRACKING (Phase 9)
+   ============================================================================ */
+
+.trip-subtabs-nav {
+  display: inline-flex;
+  align-items: center;
+  background: var(--bg-primary);
+  padding: 2px;
+  border-radius: 7px;
+  border: 1px solid var(--border-color);
+  gap: 3px;
+}
+
+.trip-subtab-btn {
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 5px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.trip-subtab-btn:hover {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.05);
+}
+
+.trip-subtab-btn.active {
+  background: rgba(59, 130, 246, 0.2);
+  color: #93c5fd;
+  border-color: rgba(59, 130, 246, 0.4);
+}
+
+#trip-planner-map-container {
+  display: flex;
+  flex: 1;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg-primary);
+}
+
+#trip-route-stops-panel {
+  width: 420px;
+  min-width: 380px;
+  max-width: 480px;
+  background: var(--bg-secondary);
+  border-right: 1px solid var(--border-color);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  height: 100%;
+}
+
+#trip-route-map-panel {
+  flex: 1;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  background: #0f172a;
+}
+
+#trip-route-map {
+  width: 100%;
+  flex: 1;
+  height: 100%;
+  z-index: 1;
+}
+
+.route-day-pills-bar {
+  display: flex;
+  gap: 6px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border-color);
+  background: rgba(0, 0, 0, 0.15);
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.route-day-pill {
+  flex: 1;
+  min-width: 65px;
+  padding: 6px 8px;
+  background: var(--bg-primary);
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.route-day-pill:hover {
+  border-color: rgba(59, 130, 246, 0.4);
+  color: #fff;
+  transform: translateY(-1px);
+}
+
+.route-day-pill.active {
+  background: rgba(59, 130, 246, 0.2);
+  border-color: #3b82f6;
+  color: #93c5fd;
+  box-shadow: 0 0 8px rgba(59, 130, 246, 0.3);
+}
+
+/* Timeline & Stops */
+.stops-timeline {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+}
+
+.stop-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  padding: 10px 12px;
+  position: relative;
+  transition: all 0.2s ease;
+}
+
+.stop-item.origin {
+  border-left: 3px solid #3b82f6;
+}
+
+.stop-item.destination {
+  border-left: 3px solid #10b981;
+}
+
+.stop-item.stop-waypoint {
+  cursor: pointer;
+}
+
+.stop-item.stop-waypoint:hover {
+  border-color: rgba(59, 130, 246, 0.5);
+  background: rgba(59, 130, 246, 0.05);
+  transform: translateX(2px);
+}
+
+.stop-marker-badge {
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 11px;
+  color: #fff;
+}
+
+.stop-marker-badge.origin {
+  background: #1e3a8a;
+  border: 2px solid #3b82f6;
+}
+
+.stop-marker-badge.destination {
+  background: #065f46;
+  border: 2px solid #10b981;
+}
+
+.stop-marker-badge.waypoint {
+  background: #2563eb;
+  border: 2px solid #ffffff;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+}
+
+.stop-content {
+  flex: 1;
+  min-width: 0;
+}
+
+.stop-title {
+  font-size: 13px;
+  font-weight: 800;
+  color: #ffffff;
+}
+
+.stop-travel-leg {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 0 6px 14px;
+}
+
+.travel-leg-line {
+  width: 2px;
+  height: 20px;
+  background: repeating-linear-gradient(to bottom, #3b82f6 0, #3b82f6 4px, transparent 4px, transparent 8px);
+}
+
+.travel-leg-info {
+  font-size: 10.5px;
+  color: #93c5fd;
+  font-weight: 700;
+  background: rgba(59, 130, 246, 0.1);
+  padding: 2px 8px;
+  border-radius: 4px;
+  border: 1px solid rgba(59, 130, 246, 0.25);
+}
+
+/* Map Floating Controls Overlay */
+.route-map-controls-bar {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(8px);
+  padding: 4px 6px;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.route-map-btn {
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.05);
+  color: #cbd5e1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  transition: all 0.15s ease;
+}
+
+.route-map-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+  color: #fff;
+}
+
+.route-map-btn.active {
+  background: #2563eb;
+  color: #ffffff;
+  border-color: #3b82f6;
+}
+
+/* Pulsing Blue GPS Marker */
+.gps-user-marker {
+  position: relative;
+  width: 24px;
+  height: 24px;
+}
+
+.gps-user-marker-pulse {
+  position: absolute;
+  inset: -6px;
+  border-radius: 50%;
+  background: rgba(59, 130, 246, 0.4);
+  animation: pulse-gps 2s infinite ease-out;
+}
+
+.gps-user-marker-dot {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 18px;
+  height: 18px;
+  background: #3b82f6;
+  border: 2.5px solid #ffffff;
+  border-radius: 50%;
+  box-shadow: 0 0 10px rgba(59, 130, 246, 0.9);
+}
+
+@keyframes pulse-gps {
+  0% {
+    transform: scale(0.5);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(2.4);
+    opacity: 0;
+  }
+}
+
+.route-map-pin {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 11px;
+  color: #ffffff;
+  box-shadow: 0 3px 8px rgba(0, 0, 0, 0.45);
+  border: 2px solid #ffffff;
+}
+
+.route-map-pin.hq {
+  background: #1e3a8a;
+  border-color: #60a5fa;
+  font-size: 14px;
 }
 

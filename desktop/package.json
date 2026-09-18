@@ -9,7 +9,12 @@
     "build:installer": "electron-builder --win nsis",
     "build:portable": "electron-builder --win portable"
   },
-  "keywords": ["safety", "ppe", "offline", "field"],
+  "keywords": [
+    "safety",
+    "ppe",
+    "offline",
+    "field"
+  ],
   "author": "Safety Assistant",
   "license": "ISC",
   "devDependencies": {
@@ -17,7 +22,8 @@
     "electron-builder": "^25.1.8"
   },
   "dependencies": {
-    "dexie": "^4.0.10"
+    "dexie": "^4.0.10",
+    "leaflet": "^1.9.4"
   },
   "build": {
     "appId": "com.safetyassistant.desktop",
@@ -29,11 +35,15 @@
       "target": [
         {
           "target": "nsis",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         },
         {
           "target": "portable",
-          "arch": ["x64"]
+          "arch": [
+            "x64"
+          ]
         }
       ]
     },

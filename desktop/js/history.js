@@ -646,6 +646,57 @@ class HistoryNavigator {
     this.renderCurrentHistory();
   }
 
+  /**
+   * Cleans duplicate history records in the active history sheet
+   */
+  async cleanCurrentHistoryDuplicates() {
+    const table = this.db.getTable(this.currentSheetKey);
+    if (!table || !table.rows) return;
+
+    const label = this.sheetList.find(s => s.key === this.currentSheetKey)?.label || this.currentSheetKey;
+    if (!confirm(`🧹 Clean Duplicate History Records?\n\nThis will scan ${label} and remove redundant duplicate entries that have the identical item, holder, and date assigned, preserving the richest notes and details.\n\nProceed?`)) {
+      return;
+    }
+
+    const res = await this.db.cleanDuplicateHistoryRows(this.currentSheetKey);
+    if (res.removedCount > 0) {
+      if (window.showToast) {
+        window.showToast(`✅ Cleaned ${res.removedCount} duplicate history ${res.removedCount === 1 ? 'record' : 'records'} from ${label}!`);
+      }
+      this.renderCurrentHistory();
+    } else {
+      if (window.showToast) {
+        window.showToast(`ℹ️ No duplicate history records found in ${label}.`);
+      }
+    }
+  }
+
+  /**
+   * Batch cleans duplicate history records across ALL history tables
+   */
+  async cleanAllDuplicateHistory() {
+    if (!confirm(`⚡ Clean All History Tables?\n\nThis will scan ALL equipment history sheets and remove duplicate entries with identical item, holder, and date assigned, merging notes and re-indexing the database.\n\nProceed?`)) {
+      return;
+    }
+
+    const res = await this.db.cleanAllHistoryDuplicates();
+    if (res.totalRemoved > 0) {
+      const details = Object.entries(res.tableBreakdown)
+        .map(([k, count]) => `• ${k.replace('_history', '').toUpperCase()}: ${count}`)
+        .join('\n');
+      alert(`✅ Duplicate Cleanup Complete!\n\nRemoved ${res.totalRemoved} duplicate records across ${Object.keys(res.tableBreakdown).length} history tables:\n\n${details}`);
+      if (window.showToast) {
+        window.showToast(`✅ Cleaned ${res.totalRemoved} duplicate history records!`);
+      }
+      this.renderCurrentHistory();
+    } else {
+      alert(`ℹ️ No duplicate history records were found across any history tables.`);
+      if (window.showToast) {
+        window.showToast(`ℹ️ All history tables are already clean.`);
+      }
+    }
+  }
+
   escapeHtml(text) {
     if (!text) return '';
     return String(text)
