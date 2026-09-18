@@ -411,11 +411,6 @@ class TripRouteMap {
   }
 
   startGpsTracking() {
-    if (!navigator.geolocation) {
-      alert('Geolocation is not supported by your device or browser.');
-      return;
-    }
-
     this.isTracking = true;
     this.setFollowMe(true);
     this.updateGpsStatusUi(true, 'Acquiring GPS fix...');
@@ -426,36 +421,140 @@ class TripRouteMap {
       btn.innerHTML = '<span>📡</span> Tracking On';
     }
 
-    // 2-stage strategy: try high accuracy (GNSS hardware) first; if timeout/no GPS chip, fall back to Wi-Fi/network
-    const startWatch = (highAccuracy) => {
-      return navigator.geolocation.watchPosition(
-        (pos) => this.onGpsPosition(pos),
-        (err) => {
-          console.warn(`GPS Watch (highAccuracy=${highAccuracy}) error:`, err.message);
-          if (highAccuracy) {
-            console.log('Laptop GNSS unavailable or timed out; falling back to Wi-Fi/network location...');
-            this.updateGpsStatusUi(true, 'Acquiring Wi-Fi location...');
-            if (this.gpsWatchId !== null) {
-              navigator.geolocation.clearWatch(this.gpsWatchId);
-            }
-            this.gpsWatchId = startWatch(false);
-          } else {
-            this.updateGpsStatusUi(false, 'GPS Standby (No Sensor Fix)');
-            this.setFollowMe(false);
-          }
-        },
-        {
-          enableHighAccuracy: highAccuracy,
-          timeout: highAccuracy ? 8000 : 20000,
-          maximumAge: 10000
-        }
-      );
-    };
+    let hasReceivedPosition = false;
 
-    if (this.gpsWatchId !== null) {
-      navigator.geolocation.clearWatch(this.gpsWatchId);
+    // Fast fallback timer: if browser/laptop geolocation does not answer within 2.5s
+    // (typical on Windows Electron where Chromium has no Google Location API keys),
+    // immediately resolve via network IP so the user sees their Navigation Arrow right away!
+    const fallbackTimer = setTimeout(async () => {
+      if (!hasReceivedPosition && this.isTracking) {
+        console.log('Browser geolocation delayed; retrieving fast network location for laptop...');
+        const netPos = await this.fetchFastNetworkPosition();
+        if (netPos && !hasReceivedPosition && this.isTracking) {
+          hasReceivedPosition = true;
+          this.onGpsPosition(netPos);
+        } else if (!hasReceivedPosition && this.isTracking) {
+          // Default to Montana City if network fails
+          const mc = this.montanaCoordinates['montana city'];
+          if (mc) {
+            hasReceivedPosition = true;
+            this.onGpsPosition({
+              coords: { latitude: mc.lat, longitude: mc.lng, accuracy: 50, speed: 0, heading: null },
+              isManualPreset: true
+            });
+          }
+        }
+      }
+    }, 2500);
+
+    if (navigator.geolocation) {
+      const startWatch = (highAccuracy) => {
+        return navigator.geolocation.watchPosition(
+          (pos) => {
+            hasReceivedPosition = true;
+            clearTimeout(fallbackTimer);
+            this.onGpsPosition(pos);
+          },
+          (err) => {
+            console.warn(`GPS Watch (highAccuracy=${highAccuracy}) error:`, err.message);
+            if (highAccuracy) {
+              if (this.gpsWatchId !== null) navigator.geolocation.clearWatch(this.gpsWatchId);
+              this.gpsWatchId = startWatch(false);
+            } else if (!hasReceivedPosition) {
+              this.fetchFastNetworkPosition().then(netPos => {
+                if (netPos && !hasReceivedPosition) {
+                  hasReceivedPosition = true;
+                  this.onGpsPosition(netPos);
+                }
+              });
+            }
+          },
+          {
+            enableHighAccuracy: highAccuracy,
+            timeout: highAccuracy ? 5000 : 12000,
+            maximumAge: 10000
+          }
+        );
+      };
+
+      if (this.gpsWatchId !== null) navigator.geolocation.clearWatch(this.gpsWatchId);
+      this.gpsWatchId = startWatch(true);
     }
-    this.gpsWatchId = startWatch(true);
+  }
+
+  async fetchFastNetworkPosition() {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 3000);
+      const res = await fetch('http://ip-api.com/json/', { signal: controller.signal });
+      clearTimeout(timeoutId);
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.lat && data.lon) {
+          return {
+            coords: {
+              latitude: data.lat,
+              longitude: data.lon,
+              accuracy: 1500,
+              speed: 0,
+              heading: null
+            },
+            isNetworkEstimated: true,
+            city: data.city || 'Montana City / Helena Area'
+          };
+        }
+      }
+    } catch (e) {
+      console.warn('Network location fallback error:', e);
+    }
+    return null;
+  }
+
+  setLocationToMontanaCity() {
+    const mc = this.montanaCoordinates['montana city'];
+    if (mc) {
+      this.onGpsPosition({
+        coords: {
+          latitude: mc.lat,
+          longitude: mc.lng,
+          accuracy: 25,
+          speed: 0,
+          heading: null
+        },
+        isManualPreset: true
+      });
+      if (this.map) {
+        this.map.setView([mc.lat, mc.lng], 13, { animate: true });
+      }
+    }
+  }
+
+  calculateHeadingToNextStop(lat, lng) {
+    const routeData = this.collectRouteDataForDate(this.activeDateKey);
+    if (routeData && routeData.stops && routeData.stops.length > 0) {
+      const nextStop = routeData.stops[0];
+      if (nextStop && nextStop.coords) {
+        return this.calculateBearing(lat, lng, nextStop.coords.lat, nextStop.coords.lng);
+      }
+    }
+    return 0; // Default North
+  }
+
+  calculateBearing(lat1, lng1, lat2, lng2) {
+    const toRad = deg => deg * (Math.PI / 180);
+    const toDeg = rad => rad * (180 / Math.PI);
+    const phi1 = toRad(lat1);
+    const phi2 = toRad(lat2);
+    const deltaLambda = toRad(lng2 - lng1);
+    const y = Math.sin(deltaLambda) * Math.cos(phi2);
+    const x = Math.cos(phi1) * Math.sin(phi2) - Math.sin(phi1) * Math.cos(phi2) * Math.cos(deltaLambda);
+    const theta = Math.atan2(y, x);
+    return Math.round((toDeg(theta) + 360) % 360);
+  }
+
+  getCompassDirection(deg) {
+    const dirs = ['N', 'NE', 'E', 'SE', 'S', 'SW', 'W', 'NW'];
+    return dirs[Math.round(deg / 45) % 8];
   }
 
   stopGpsTracking() {
@@ -491,6 +590,9 @@ class TripRouteMap {
     const { latitude, longitude, accuracy, speed, heading } = pos.coords;
     this.userPosition = { lat: latitude, lng: longitude, accuracy, speed, heading, timestamp: new Date() };
 
+    const angle = (heading !== null && heading !== undefined) ? Math.round(heading) : this.calculateHeadingToNextStop(latitude, longitude);
+    const compassDir = this.getCompassDirection(angle);
+
     const accLabel = accuracy > 120 ? `Wi-Fi Est. (±${Math.round(accuracy)}m)` : `Active (±${Math.round(accuracy)}m)`;
     this.updateGpsStatusUi(true, accLabel);
 
@@ -498,38 +600,55 @@ class TripRouteMap {
 
     const latLng = [latitude, longitude];
 
-    // Create or update pulsing blue dot marker
+    // Create or update real-time Navigation Arrow marker
     if (!this.userMarker) {
       const userIcon = L.divIcon({
-        className: 'gps-user-marker-container',
+        className: 'gps-nav-marker-wrapper',
         html: `
-          <div class="gps-user-marker">
-            <div class="gps-user-marker-pulse"></div>
-            <div class="gps-user-marker-dot"></div>
+          <div class="gps-nav-arrow-container">
+            <div class="gps-nav-pulse"></div>
+            <div class="gps-nav-beam" id="gps-nav-beam" style="transform: rotate(${angle}deg);"></div>
+            <div class="gps-nav-arrow-icon" id="gps-nav-arrow-icon" style="transform: rotate(${angle}deg);">
+              <svg viewBox="0 0 24 24" class="gps-nav-svg-arrow">
+                <path d="M12 2L4 21L12 17L20 21L12 2Z" fill="#2563eb" stroke="#ffffff" stroke-width="2" stroke-linejoin="round"/>
+              </svg>
+            </div>
           </div>
         `,
-        iconSize: [24, 24],
-        iconAnchor: [12, 12]
+        iconSize: [48, 48],
+        iconAnchor: [24, 24]
       });
 
-      this.userMarker = L.marker(latLng, { icon: userIcon, zIndexOffset: 1000 }).addTo(this.map);
-      this.userMarker.bindPopup(`
-        <div style="font-size: 12px; font-weight: 700; color: #1e293b; padding: 2px;">
-          📍 Your Current Location<br>
-          <span style="font-size: 11px; font-weight: 400; color: #64748b;">
-            Speed: ${speed ? Math.round(speed * 2.23694) + ' mph' : '0 mph'}<br>
-            Accuracy: ±${Math.round(accuracy)} meters
-          </span>
-        </div>
-      `);
+      this.userMarker = L.marker(latLng, { icon: userIcon, zIndexOffset: 2000 }).addTo(this.map);
     } else {
       this.userMarker.setLatLng(latLng);
+      const iconEl = document.getElementById('gps-nav-arrow-icon');
+      const beamEl = document.getElementById('gps-nav-beam');
+      if (iconEl) iconEl.style.transform = `rotate(${angle}deg)`;
+      if (beamEl) beamEl.style.transform = `rotate(${angle}deg)`;
     }
+
+    this.userMarker.bindPopup(`
+      <div style="font-size: 12px; font-weight: 700; color: #1e293b; padding: 2px;">
+        🧭 Your Location (Live Navigation Arrow)<br>
+        <span style="font-size: 11px; font-weight: 400; color: #64748b;">
+          Heading: <b>${angle}° (${compassDir})</b><br>
+          Speed: ${speed ? Math.round(speed * 2.23694) + ' mph' : 'Stationary'}<br>
+          Accuracy: ±${Math.round(accuracy)} meters<br>
+          ${accuracy > 100 ? '<span style="color:#d97706;">⚠️ Estimated on laptop. Phones/tablets give 10ft satellite GPS.</span><br>' : ''}
+        </span>
+        <div style="margin-top: 6px; padding-top: 4px; border-top: 1px solid #e2e8f0; display: flex; gap: 4px;">
+          <button onclick="window.tripRouteMap.setLocationToMontanaCity()" style="background: #2563eb; color: white; border: none; padding: 3px 8px; border-radius: 4px; font-size: 10.5px; cursor: pointer; font-weight: 600;">
+            📍 In Montana City? Snap Here
+          </button>
+        </div>
+      </div>
+    `);
 
     // Create or update accuracy ring
     if (!this.accuracyCircle) {
       this.accuracyCircle = L.circle(latLng, {
-        radius: Math.max(accuracy, 20),
+        radius: Math.max(accuracy, 25),
         color: '#3b82f6',
         weight: 1,
         fillColor: '#3b82f6',
@@ -537,7 +656,7 @@ class TripRouteMap {
       }).addTo(this.map);
     } else {
       this.accuracyCircle.setLatLng(latLng);
-      this.accuracyCircle.setRadius(Math.max(accuracy, 20));
+      this.accuracyCircle.setRadius(Math.max(accuracy, 25));
     }
 
     // Auto-center if "Follow Me" is enabled

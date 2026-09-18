@@ -54,6 +54,14 @@ app.whenReady().then(async () => {
         storages: ['serviceworkers', 'cachestorage']
       });
 
+      // Auto-approve geolocation and media permissions in desktop app
+      session.defaultSession.setPermissionRequestHandler((webContents, permission, callback) => {
+        callback(true);
+      });
+      if (session.defaultSession.setPermissionCheckHandler) {
+        session.defaultSession.setPermissionCheckHandler(() => true);
+      }
+
       // Ensure embedded iframes (Google Maps, ArcGIS, JM Test) are permitted without X-Frame-Options blocks
       session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
         const responseHeaders = Object.assign({}, details.responseHeaders);

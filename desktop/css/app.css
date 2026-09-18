@@ -2049,7 +2049,58 @@ body.inspector-mode .brand-badge {
   border-color: #3b82f6;
 }
 
-/* Pulsing Blue GPS Marker */
+/* Google Maps Style Real-Time Navigation Arrow */
+.gps-nav-arrow-container {
+  position: relative;
+  width: 48px;
+  height: 48px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+}
+
+.gps-nav-pulse {
+  position: absolute;
+  width: 42px;
+  height: 42px;
+  border-radius: 50%;
+  background: rgba(37, 99, 235, 0.28);
+  animation: pulse-gps 2s infinite ease-out;
+  pointer-events: none;
+}
+
+.gps-nav-beam {
+  position: absolute;
+  top: -12px;
+  width: 0;
+  height: 0;
+  border-left: 15px solid transparent;
+  border-right: 15px solid transparent;
+  border-bottom: 26px solid rgba(59, 130, 246, 0.25);
+  filter: blur(2px);
+  transform-origin: center bottom;
+  pointer-events: none;
+}
+
+.gps-nav-arrow-icon {
+  position: relative;
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  filter: drop-shadow(0 3px 6px rgba(0, 0, 0, 0.5));
+  transition: transform 0.25s ease-out;
+}
+
+.gps-nav-svg-arrow {
+  width: 32px;
+  height: 32px;
+  transform-origin: center center;
+}
+
+/* Legacy Pulsing Dot Fallback */
 .gps-user-marker {
   position: relative;
   width: 24px;
