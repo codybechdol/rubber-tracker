@@ -160,7 +160,7 @@ ipcMain.handle('select-snapshot-file', async () => {
 // Native HTTPS Sync Bridge (bypasses browser CORS & redirects seamlessly)
 const https = require('https');
 
-function makeGoogleAppsScriptRequest(targetUrl, method = 'GET', data = null, timeoutMs = 45000) {
+function makeGoogleAppsScriptRequest(targetUrl, method = 'GET', data = null, timeoutMs = 60000) {
   return new Promise((resolve, reject) => {
     function requestWithRedirect(currentUrl, currentMethod, currentData, redirectCount = 0) {
       if (redirectCount > 5) {
@@ -202,9 +202,9 @@ function makeGoogleAppsScriptRequest(targetUrl, method = 'GET', data = null, tim
           // Consume redirect body stream so underlying socket is cleanly handled
           res.resume();
 
-          // If a request redirects back to the script exec URL (rather than the usercontent echo URL),
-          // it indicates that Google Apps Script failed to complete the POST execution (gateway timeout).
-          if (redirectCount > 0 && redirectUrl.includes('script.google.com') && redirectUrl.includes('/exec')) {
+          // If a POST request redirects back to the script exec URL (rather than the usercontent echo URL),
+          // it indicates that Google Apps Script failed to complete the POST execution (gateway timeout / busy).
+          if ((redirectCount > 0 || isPost) && redirectUrl.includes('script.google.com') && redirectUrl.includes('/exec')) {
             return resolve({
               success: false,
               statusCode: 504,
@@ -249,7 +249,7 @@ function makeGoogleAppsScriptRequest(targetUrl, method = 'GET', data = null, tim
         });
       });
 
-      const effectiveTimeout = timeoutMs || 45000;
+      const effectiveTimeout = timeoutMs || 60000;
       req.setTimeout(effectiveTimeout, () => {
         req.destroy(new Error(`Sync network request timed out after ${effectiveTimeout / 1000} seconds.`));
       });

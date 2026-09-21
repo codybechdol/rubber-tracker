@@ -81,11 +81,11 @@ function setupJobClassificationDropdown() {
       .setFontColor('white');
   }
 
-  // Create data validation rule with dropdown - STRICT (no invalid entries allowed)
+  // Create data validation rule with dropdown - allow all valid and new classifications
   var rule = SpreadsheetApp.newDataValidation()
     .requireValueInList(classifications, true)
-    .setAllowInvalid(false) // Only allow approved classifications
-    .setHelpText('Select employee job classification. Only approved values allowed.')
+    .setAllowInvalid(true)
+    .setHelpText('Select employee job classification.')
     .build();
 
   // Apply to column N, rows 2 onwards (skip header)

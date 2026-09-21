@@ -15420,7 +15420,7 @@ function setupTaskMetadataSheet() {
   var statusValues = ['Unassigned', 'Assigned', 'Complete', 'Overdue', 'Deferred'];
   var statusRule = SpreadsheetApp.newDataValidation()
     .requireValueInList(statusValues)
-    .setAllowInvalid(false)
+    .setAllowInvalid(true)
     .build();
   sheet.getRange(2, 15, sheet.getMaxRows() - 1, 1).setDataValidation(statusRule);
 
@@ -15877,7 +15877,7 @@ function setupLocationsSheet() {
   // Add data validation for Rubber Class Approval column
   var approvalRule = SpreadsheetApp.newDataValidation()
     .requireValueInList(['None', 'CL2', 'CL3', 'CL2 & CL3'], true)
-    .setAllowInvalid(false)
+    .setAllowInvalid(true)
     .build();
   sheet.getRange(2, 7, defaultLocationsWithApproval.length, 1).setDataValidation(approvalRule);
 
@@ -15998,7 +15998,7 @@ function migrateLocationsSheetForRubberClass() {
   // Set validation rule
   var approvalRule = SpreadsheetApp.newDataValidation()
     .requireValueInList(['None', 'CL2', 'CL3', 'CL2 & CL3'], true)
-    .setAllowInvalid(false)
+    .setAllowInvalid(true)
     .build();
   locationsSheet.getRange(2, targetCol, lastRow - 1, 1).setDataValidation(approvalRule);
   
@@ -16992,7 +16992,7 @@ function fixTaskMetadataStatusValidation() {
   var validStatuses = ['Unassigned', 'Assigned', 'Complete', 'Overdue', 'Deferred'];
   var statusValidation = SpreadsheetApp.newDataValidation()
     .requireValueInList(validStatuses, true)
-    .setAllowInvalid(false)
+    .setAllowInvalid(true)
     .build();
 
   // Only apply to rows with data
@@ -17463,7 +17463,7 @@ function generateTaskMetadata() {
       var validStatuses = ['Unassigned', 'Assigned', 'Complete', 'Overdue', 'Deferred'];
       var statusValidation = SpreadsheetApp.newDataValidation()
         .requireValueInList(validStatuses, true)
-        .setAllowInvalid(false)
+        .setAllowInvalid(true)
         .build();
 
       var sheetMaxRow = metadataSheet.getMaxRows();
@@ -18976,7 +18976,7 @@ function getChecklistTasks() {
     if (lastRow > 1) {
       var validation = SpreadsheetApp.newDataValidation()
         .requireValueInList(['TRUE', ''], true)
-        .setAllowInvalid(false)
+        .setAllowInvalid(true)
         .build();
       metadataSheet.getRange(2, newColIndex, lastRow - 1, 1).setDataValidation(validation);
     }
@@ -20668,21 +20668,21 @@ function buildSheets() {
       // Type dropdown (Column B) - Regular or Split
       var typeRule = SpreadsheetApp.newDataValidation()
         .requireValueInList(['Regular', 'Split'], true)
-        .setAllowInvalid(false)
+        .setAllowInvalid(true)
         .build();
       blanketsSheet.getRange(2, 2, blanketRowCount, 1).setDataValidation(typeRule);
 
       // Class dropdown (Column C) - 2 or 4
       var classRule = SpreadsheetApp.newDataValidation()
         .requireValueInList(['2', '4'], true)
-        .setAllowInvalid(false)
+        .setAllowInvalid(true)
         .build();
       blanketsSheet.getRange(2, 3, blanketRowCount, 1).setDataValidation(classRule);
 
       // Status dropdown (Column G) - Blanket-specific statuses
       var statusRule = SpreadsheetApp.newDataValidation()
         .requireValueInList(['In Service', 'On Shelf', 'In Testing', 'Failed', 'Lost'], true)
-        .setAllowInvalid(false)
+        .setAllowInvalid(true)
         .build();
       blanketsSheet.getRange(2, 7, blanketRowCount, 1).setDataValidation(statusRule);
     }
@@ -20705,7 +20705,7 @@ function buildSheets() {
       // Status dropdown (Column H) - same as blankets
       var mackStatusRule = SpreadsheetApp.newDataValidation()
         .requireValueInList(['In Service', 'On Shelf', 'In Testing', 'Failed', 'Lost'], true)
-        .setAllowInvalid(false)
+        .setAllowInvalid(true)
         .build();
       macksSheet.getRange(2, 8, mackRowCount, 1).setDataValidation(mackStatusRule);
     }
@@ -20727,7 +20727,7 @@ function buildSheets() {
       // Status dropdown (Column G)
       var hvStatusRule = SpreadsheetApp.newDataValidation()
         .requireValueInList(['In Service', 'On Shelf', 'Out for Calibration', 'Failed', 'Lost', 'Retired'], true)
-        .setAllowInvalid(false)
+        .setAllowInvalid(true)
         .build();
       hvTestersSheet.getRange(2, 7, hvRowCount, 1).setDataValidation(hvStatusRule);
     }
@@ -20749,7 +20749,7 @@ function buildSheets() {
       // Status dropdown (Column G)
       var psStatusRule = SpreadsheetApp.newDataValidation()
         .requireValueInList(['In Service', 'On Shelf', 'Out for Calibration', 'Failed', 'Lost', 'Retired'], true)
-        .setAllowInvalid(false)
+        .setAllowInvalid(true)
         .build();
       phasingSetsSheet.getRange(2, 7, psRowCount, 1).setDataValidation(psStatusRule);
     }
@@ -20771,7 +20771,7 @@ function buildSheets() {
       // Status dropdown (Column G = 7)
       var aedStatusRule = SpreadsheetApp.newDataValidation()
         .requireValueInList(['On Shelf', 'In Service', 'Out of Service', 'Retired', 'Lost'], true)
-        .setAllowInvalid(false)
+        .setAllowInvalid(true)
         .build();
       aedSheetForValidation.getRange(2, COLS.AED.STATUS, aedRowCount, 1).setDataValidation(aedStatusRule);
 
@@ -20824,7 +20824,7 @@ function buildSheets() {
           var reasonRange = employeesSheet.getRange(2, lastDayReasonColIdx, lastRow - 1, 1);
           var reasonRule = SpreadsheetApp.newDataValidation()
             .requireValueInList(['Quit', 'Fired', 'Layoff', 'Resigned'], true)
-            .setAllowInvalid(false)
+            .setAllowInvalid(true)
             .build();
           reasonRange.setDataValidation(reasonRule);
         } catch (e) {
@@ -29030,7 +29030,7 @@ function migrateHVTestersAddKVColumn() {
       var validationRows = Math.max(dataRowCount, 100);
       var statusValidation = SpreadsheetApp.newDataValidation()
         .requireValueInList(['In Service', 'On Shelf', 'In Calibration', 'Out of Service', 'Retired', 'Lost'], true)
-        .setAllowInvalid(false)
+        .setAllowInvalid(true)
         .build();
       sheet.getRange(2, COLS.HV_TESTERS.STATUS, validationRows, 1).setDataValidation(statusValidation);
     }
@@ -29135,7 +29135,7 @@ function setupHVTesterAndPhasingSetSheets() {
     // Add Status dropdown validation (column H = 8)
     var statusValidation = SpreadsheetApp.newDataValidation()
       .requireValueInList(['In Service', 'On Shelf', 'In Calibration', 'Out of Service', 'Retired', 'Lost'], true)
-      .setAllowInvalid(false)
+      .setAllowInvalid(true)
       .build();
     sheet.getRange(2, 8, 100, 1).setDataValidation(statusValidation);
 
@@ -29197,7 +29197,7 @@ function setupHVTesterAndPhasingSetSheets() {
     // Add Status dropdown validation (column 8)
     var swapStatusValidation = SpreadsheetApp.newDataValidation()
       .requireValueInList(['Pending', 'Ready', 'Complete', 'Cancelled'], true)
-      .setAllowInvalid(false)
+      .setAllowInvalid(true)
       .build();
     sheet.getRange(2, 8, 100, 1).setDataValidation(swapStatusValidation);
 
@@ -30703,7 +30703,7 @@ function setupAEDSheet() {
   // Status dropdown (column G = 7)
   var statusValidation = SpreadsheetApp.newDataValidation()
     .requireValueInList(['On Shelf', 'In Service', 'Out of Service', 'Retired', 'Lost'], true)
-    .setAllowInvalid(false)
+    .setAllowInvalid(true)
     .build();
   sheet.getRange(2, COLS.AED.STATUS, 100, 1).setDataValidation(statusValidation);
 
@@ -31350,7 +31350,7 @@ function setupGroundsSheet() {
   // Type dropdown: OH (overhead) or UG (underground)
   var typeValidation = SpreadsheetApp.newDataValidation()
     .requireValueInList(['OH', 'UG'], true)
-    .setAllowInvalid(false)
+    .setAllowInvalid(true)
     .build();
   sheet.getRange(2, COLS.GROUNDS.TYPE, 100, 1).setDataValidation(typeValidation);
 
@@ -31371,7 +31371,7 @@ function setupGroundsSheet() {
   // Status dropdown
   var statusValidation = SpreadsheetApp.newDataValidation()
     .requireValueInList(['On Shelf', 'In Service', 'In Testing', 'Out of Service', 'Retired', 'Lost'], true)
-    .setAllowInvalid(false)
+    .setAllowInvalid(true)
     .build();
   sheet.getRange(2, COLS.GROUNDS.STATUS, 100, 1).setDataValidation(statusValidation);
 
@@ -32034,7 +32034,7 @@ function setupHotSticksSheet() {
   // Status dropdown
   var statusValidation = SpreadsheetApp.newDataValidation()
     .requireValueInList(['On Shelf', 'In Service', 'In Testing', 'Out of Service', 'Retired', 'Lost'], true)
-    .setAllowInvalid(false)
+    .setAllowInvalid(true)
     .build();
   sheet.getRange(2, COLS.HOT_STICKS.STATUS, 100, 1).setDataValidation(statusValidation);
 
@@ -33005,9 +33005,9 @@ function setupDashboardLayout(sheet) {
   sheet.getRange("T" + filterRow).setValue("All").setHorizontalAlignment("center");
 
   // Dropdown validations
-  var yearRule = SpreadsheetApp.newDataValidation().requireValueInList(["All", "2026", "2027", "2028"], true).setAllowInvalid(false).build();
-  var quarterRule = SpreadsheetApp.newDataValidation().requireValueInList(["All", "Q1", "Q2", "Q3", "Q4"], true).setAllowInvalid(false).build();
-  var monthRule = SpreadsheetApp.newDataValidation().requireValueInList(["All", "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"], true).setAllowInvalid(false).build();
+  var yearRule = SpreadsheetApp.newDataValidation().requireValueInList(["All", "2026", "2027", "2028"], true).setAllowInvalid(true).build();
+  var quarterRule = SpreadsheetApp.newDataValidation().requireValueInList(["All", "Q1", "Q2", "Q3", "Q4"], true).setAllowInvalid(true).build();
+  var monthRule = SpreadsheetApp.newDataValidation().requireValueInList(["All", "January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"], true).setAllowInvalid(true).build();
 
   sheet.getRange("N" + filterRow).setDataValidation(yearRule);
   sheet.getRange("Q" + filterRow).setDataValidation(quarterRule);
@@ -33597,6 +33597,72 @@ function clearCertNotifiedStatus(employeeName, certType) {
   } catch (e) {
     Logger.log('clearCertNotifiedStatus ERROR: ' + e.message);
   }
+}
+
+/**
+ * Utility: Strips all legacy restrictive data validation rules (like dropdowns that reject input)
+ * across all sheets, while strictly preserving checkbox validations.
+ * This guarantees Google Sheets behaves as a pure, passive cloud data store.
+ */
+function clearAllStrictValidations(silent) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheets = ss.getSheets();
+  var clearedTotal = 0;
+  var processedSheets = [];
+
+  for (var s = 0; s < sheets.length; s++) {
+    var sheet = sheets[s];
+    var sName = sheet.getName();
+    var maxRows = sheet.getMaxRows();
+    var maxCols = sheet.getMaxColumns();
+    if (maxRows < 2 || maxCols < 1) continue;
+
+    var numDataRows = Math.min(sheet.getLastRow(), maxRows) - 1;
+    if (numDataRows < 1) continue;
+
+    try {
+      var range = sheet.getRange(2, 1, numDataRows, maxCols);
+      var rules = range.getDataValidations();
+      var hasChanges = false;
+
+      for (var r = 0; r < rules.length; r++) {
+        for (var c = 0; c < rules[r].length; c++) {
+          var rule = rules[r][c];
+          if (rule) {
+            var criteria = rule.getCriteriaType();
+            // Strictly preserve checkboxes!
+            if (criteria === SpreadsheetApp.DataValidationCriteria.CHECKBOX) {
+              continue;
+            }
+            // Remove restrictive dropdown / text / number validation rules
+            rules[r][c] = null;
+            hasChanges = true;
+            clearedTotal++;
+          }
+        }
+      }
+
+      if (hasChanges) {
+        range.setDataValidations(rules);
+        processedSheets.push(sName);
+      }
+    } catch (sheetErr) {
+      Logger.log('clearAllStrictValidations error on sheet ' + sName + ': ' + sheetErr);
+    }
+  }
+
+  Logger.log('clearAllStrictValidations: Cleared ' + clearedTotal + ' restrictive validation rules across: ' + processedSheets.join(', '));
+  if (!silent) {
+    try {
+      SpreadsheetApp.getUi().alert('Data Validations Cleared', 'Successfully removed ' + clearedTotal + ' restrictive validation dropdowns across ' + processedSheets.length + ' sheets while preserving all checkboxes.\n\nGoogle Sheets is now configured as a passive cloud data store.', SpreadsheetApp.getUi().ButtonSet.OK);
+    } catch (uiErr) {}
+  }
+  return {
+    status: 'ok',
+    success: true,
+    clearedTotal: clearedTotal,
+    sheetsCleaned: processedSheets
+  };
 }
 
 /**

@@ -80,7 +80,7 @@ function ensureLocationsInValidation(sheet, locationColNum, locationsToAdd) {
     existingLocations.sort();
     var newRule = SpreadsheetApp.newDataValidation()
       .requireValueInList(existingLocations, true)
-      .setAllowInvalid(false)
+      .setAllowInvalid(true)
       .build();
 
     // Apply to entire Location column (rows 2-500)
@@ -181,7 +181,7 @@ function ensureLocationsInLocationsSheet(ss, locations) {
           var approvalCell = locationsSheet.getRange(targetRow, 7);
           var rule = SpreadsheetApp.newDataValidation()
             .requireValueInList(['None', 'CL2', 'CL3', 'CL2 & CL3'], true)
-            .setAllowInvalid(false)
+            .setAllowInvalid(true)
             .build();
           approvalCell.setDataValidation(rule);
         } catch (eHL) {}
@@ -558,7 +558,7 @@ function applyCrewChanges(changes) {
     if (allLocs.length > 0) {
       var revalidationRule = SpreadsheetApp.newDataValidation()
         .requireValueInList(allLocs, true)
-        .setAllowInvalid(false)
+        .setAllowInvalid(true)
         .build();
       try {
         locationRange.setDataValidation(revalidationRule);

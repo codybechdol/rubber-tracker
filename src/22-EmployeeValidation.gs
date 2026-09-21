@@ -137,7 +137,7 @@ function fixLastDayReasonValidation() {
 
   var reasonRule = SpreadsheetApp.newDataValidation()
     .requireValueInList(['Quit', 'Fired', 'Layoff', 'Resigned'], true)
-    .setAllowInvalid(false)  // Reject invalid entries
+    .setAllowInvalid(true)  // Allow invalid entries (passive storage)
     .build();
 
   reasonRange.setDataValidation(reasonRule);
@@ -510,7 +510,7 @@ function setupJobTrackingSheet() {
   var statusValues = ['Active', 'Pending Start', 'Completed', 'On Hold'];
   var statusRule = SpreadsheetApp.newDataValidation()
     .requireValueInList(statusValues, true)
-    .setAllowInvalid(false)
+    .setAllowInvalid(true)
     .build();
   sheet.getRange(2, 10, 500, 1).setDataValidation(statusRule);
 
@@ -632,7 +632,7 @@ function migrateJobTrackingSheet() {
     var statusValues = ['Active', 'Pending Start', 'Completed', 'On Hold'];
     var statusRule = SpreadsheetApp.newDataValidation()
       .requireValueInList(statusValues, true)
-      .setAllowInvalid(false)
+      .setAllowInvalid(true)
       .build();
     sheet.getRange(2, 10, 500, 1).setDataValidation(statusRule);
 

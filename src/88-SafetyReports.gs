@@ -11026,7 +11026,7 @@ function setupSafetyComplianceSheet() {
   var statusValues = ['Complete', 'Missing Reports', 'Pending', 'Resolved'];
   var statusRule = SpreadsheetApp.newDataValidation()
     .requireValueInList(statusValues, true)
-    .setAllowInvalid(false)
+    .setAllowInvalid(true)
     .build();
   sheet.getRange(2, 13, 1000, 1).setDataValidation(statusRule);
 

@@ -3159,7 +3159,16 @@ class CrewImportEngine {
 
         let jobRow = jtTable.rows.find(j => {
           const jn = String(j['Job Number'] || j['Job #'] || Object.values(j)[0] || '').trim();
-          return jn === crew.jobNumber;
+          if (jn === crew.jobNumber) return true;
+          // If this is a sub-crew whose row was manually renamed to baseJobNumber, match by baseJobNumber + foreman
+          if (crew.isSubCrew && jn === (crew.baseJobNumber || crew.jobNumber.split(' ')[0])) {
+            const rowForeman = String(j['Foreman'] || '').trim().toLowerCase();
+            const crewForeman = String(crew.lead ? crew.lead.name : '').trim().toLowerCase();
+            if (rowForeman && crewForeman && (rowForeman === crewForeman || rowForeman.includes(crewForeman) || crewForeman.includes(rowForeman))) {
+              return true;
+            }
+          }
+          return false;
         });
 
         const isNewJob = !jobRow;
@@ -3214,6 +3223,7 @@ class CrewImportEngine {
 
           const finalStatus = isStatusChangeApproved ? status : oldJobStatus;
 
+          jobRow['Job Number'] = crew.jobNumber;
           jobRow['Location'] = physicalLoc;
           jobRow['Foreman'] = foremanName;
           jobRow['Crew Size'] = crewSize;
@@ -3246,6 +3256,7 @@ class CrewImportEngine {
           this.syncRowToRawGrid(jtTable, jobRow);
 
           const updatedJobFields = {
+            'Job Number': crew.jobNumber,
             'Location': physicalLoc,
             'Foreman': foremanName,
             'Crew Size': crewSize,

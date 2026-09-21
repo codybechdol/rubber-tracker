@@ -1325,14 +1325,14 @@ function setupCrewVisitConfig() {
   // Add data validation for frequency
   var frequencyRule = SpreadsheetApp.newDataValidation()
     .requireValueInList(['Weekly', 'Bi-Weekly', 'Monthly'], true)
-    .setAllowInvalid(false)
+    .setAllowInvalid(true)
     .build();
   sheet.getRange(2, 5, Math.max(crewData.length, 100), 1).setDataValidation(frequencyRule);
 
   // Add data validation for priority
   var priorityRule = SpreadsheetApp.newDataValidation()
     .requireValueInList(['High', 'Medium', 'Low'], true)
-    .setAllowInvalid(false)
+    .setAllowInvalid(true)
     .build();
   sheet.getRange(2, 10, Math.max(crewData.length, 100), 1).setDataValidation(priorityRule);
 
@@ -1658,7 +1658,7 @@ function setupTrainingConfig() {
   // Add data validation for frequency
   var frequencyRule = SpreadsheetApp.newDataValidation()
     .requireValueInList(['Monthly', 'Quarterly', 'Annual'], true)
-    .setAllowInvalid(false)
+    .setAllowInvalid(true)
     .build();
   sheet.getRange(2, 4, 100, 1).setDataValidation(frequencyRule);
 
@@ -1923,7 +1923,7 @@ function setupTrainingTracking() {
   // Add data validation for Status
   var statusRule = SpreadsheetApp.newDataValidation()
     .requireValueInList(['Pending', 'In Progress', 'Complete', 'Overdue', 'N/A'], true)
-    .setAllowInvalid(false)
+    .setAllowInvalid(true)
     .build();
   sheet.getRange(3, 10, Math.max(dataRows.length, 100), 1).setDataValidation(statusRule);
 
@@ -1932,7 +1932,7 @@ function setupTrainingTracking() {
                 'July', 'August', 'September', 'October', 'November', 'December'];
   var monthRule = SpreadsheetApp.newDataValidation()
     .requireValueInList(months, true)
-    .setAllowInvalid(false)
+    .setAllowInvalid(true)
     .build();
   sheet.getRange(3, 1, Math.max(dataRows.length, 100), 1).setDataValidation(monthRule);
 

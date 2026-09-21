@@ -898,8 +898,8 @@ class SyncEngine {
               force: true,
               skipPostProcessing: true,
               returnSnapshot: false
-            }, 45000);
-            if (pushResult && (pushResult.success || pushResult.status === 'ok')) {
+            }, 60000);
+            if (pushResult && (pushResult.success === true || (pushResult.status === 'ok' && pushResult.appliedCount !== undefined))) {
               break;
             }
             // If batch returned server errors and has multiple items, immediately isolate to 1 item
