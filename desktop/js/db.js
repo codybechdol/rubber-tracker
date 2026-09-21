@@ -2373,7 +2373,11 @@ class LocalDatabase {
       // 2. Direct rawGrid and row update for Inventory or Data Sheets (Gloves, Sleeves, Blankets, MACKs, Grounds, etc.)
       if (table && table.rows && table.headers) {
         let row = null;
-        if (mut.itemIdentifier && String(mut.itemIdentifier).trim() !== '') {
+        const sheetNameLower = (mut.sheetName || table.name || '').toLowerCase();
+        const isMultiItemTable = sheetNameLower.includes('history') || sheetNameLower.includes('log') || sheetNameLower.includes('swaps');
+
+        // Only use itemIdentifier alone for primary tables where each item appears exactly once
+        if (!isMultiItemTable && mut.itemIdentifier && String(mut.itemIdentifier).trim() !== '') {
           const idClean = String(mut.itemIdentifier).trim().toLowerCase();
           // Priority 1: Exact match on primary item identifier keys
           row = table.rows.find(r => {
@@ -2393,6 +2397,8 @@ class LocalDatabase {
             });
           }
         }
+
+        // For history/multi-item tables or if not matched by itemIdentifier, match strictly by row index
         if (!row && mut.row) {
           row = table.rows.find(r => r._rowIdx === mut.row);
         }
@@ -2404,13 +2410,16 @@ class LocalDatabase {
         if (row && colHeader) {
           row[colHeader] = mut.value;
 
-          let gridRowIdx = (row._rowIdx && row._rowIdx >= 2) ? (row._rowIdx - 1) : -1;
-          if (gridRowIdx === -1 && mut.itemIdentifier && table.rawGrid) {
+          let gridRowIdx = -1;
+          if (typeof mut.row === 'number' && mut.row >= 2) {
+            gridRowIdx = mut.row - 1;
+          } else if (row._rowIdx && row._rowIdx >= 2) {
+            gridRowIdx = row._rowIdx - 1;
+          }
+
+          if (!isMultiItemTable && gridRowIdx === -1 && mut.itemIdentifier && table.rawGrid) {
             const idClean = String(mut.itemIdentifier).trim().toLowerCase();
             gridRowIdx = table.rawGrid.findIndex((gr, idx) => idx > 0 && String(gr[0] || '').trim().toLowerCase() === idClean);
-          }
-          if (gridRowIdx === -1 && typeof mut.row === 'number' && mut.row >= 2) {
-            gridRowIdx = mut.row - 1;
           }
           if (gridRowIdx !== -1 && table.rawGrid && table.rawGrid[gridRowIdx]) {
             const colIdx = (typeof mut.col === 'number' && mut.col >= 1) ? (mut.col - 1) : table.headers.indexOf(colHeader);
@@ -2746,25 +2755,57 @@ class LocalDatabase {
     }
 
     // Delete Row mutation replay
-    if (mut.action === 'DELETE_ROW' && mut.itemIdentifier) {
+    if (mut.action === 'DELETE_ROW') {
       const table = Object.values(this.snapshot.tables).find(t => t.name === mut.sheetName) || this.snapshot.tables[mut.tableKey];
       if (table) {
-        const idLower = String(mut.itemIdentifier).trim().toLowerCase();
-        if (table.rows) {
-          const rowIdx = table.rows.findIndex(r => {
-            return Object.values(r).some(val => String(val || '').trim().toLowerCase() === idLower);
-          });
-          if (rowIdx !== -1) {
-            table.rows.splice(rowIdx, 1);
-            table.rowCount = table.rows.length;
+        if (mut.rowData) {
+          const mDate = String(mut.rowData['Date Assigned'] || mut.rowData['Date'] || Object.values(mut.rowData)[0] || '').trim();
+          const mAssigned = String(mut.rowData['Assigned To'] || '').trim().toLowerCase();
+          const mItem = String(mut.rowData['Item #'] || mut.rowData['Serial #'] || Object.values(mut.rowData)[1] || '').trim().toLowerCase();
+          const mNotes = String(mut.rowData['Notes'] || mut.rowData['Note'] || '').trim();
+
+          if (table.rows) {
+            const rowIdx = table.rows.findIndex(r => {
+              const rDate = String(r['Date Assigned'] || r['Date'] || Object.values(r)[0] || '').trim();
+              const rAssigned = String(r['Assigned To'] || '').trim().toLowerCase();
+              const rItem = String(r['Item #'] || r['Serial #'] || Object.values(r)[1] || '').trim().toLowerCase();
+              const rNotes = String(r['Notes'] || r['Note'] || '').trim();
+              return (!mItem || rItem === mItem) && (!mDate || rDate === mDate) && (!mAssigned || rAssigned === mAssigned) && (!mNotes || rNotes === mNotes);
+            });
+            if (rowIdx !== -1) {
+              table.rows.splice(rowIdx, 1);
+              table.rowCount = table.rows.length;
+            }
           }
-        }
-        if (table.rawGrid) {
-          table.rawGrid = table.rawGrid.filter((gr, idx) => {
-            if (idx === 0) return true;
-            return !gr.some(cell => String(cell || '').trim().toLowerCase() === idLower);
-          });
-          table.maxRows = table.rawGrid.length;
+          if (table.rawGrid) {
+            const gIdx = table.rawGrid.findIndex((gr, idx) => {
+              if (idx === 0) return false;
+              const grStr = gr.map(c => String(c || '').trim().toLowerCase());
+              return (!mItem || grStr.includes(mItem)) && (!mDate || grStr.includes(mDate.toLowerCase())) && (!mAssigned || grStr.includes(mAssigned));
+            });
+            if (gIdx > 0) {
+              table.rawGrid.splice(gIdx, 1);
+              table.maxRows = table.rawGrid.length;
+            }
+          }
+        } else if (mut.itemIdentifier) {
+          const idLower = String(mut.itemIdentifier).trim().toLowerCase();
+          if (table.rows) {
+            const rowIdx = table.rows.findIndex(r => {
+              return Object.values(r).some(val => String(val || '').trim().toLowerCase() === idLower);
+            });
+            if (rowIdx !== -1) {
+              table.rows.splice(rowIdx, 1);
+              table.rowCount = table.rows.length;
+            }
+          }
+          if (table.rawGrid) {
+            table.rawGrid = table.rawGrid.filter((gr, idx) => {
+              if (idx === 0) return true;
+              return !gr.some(cell => String(cell || '').trim().toLowerCase() === idLower);
+            });
+            table.maxRows = table.rawGrid.length;
+          }
         }
       }
     }

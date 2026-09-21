@@ -699,6 +699,12 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
     if (!invItemIndexCache) invItemIndexCache = {};
     var sName = targetSheetName || (targetSheet ? targetSheet.getName() : '');
     if (!sName) return -1;
+    var sLower = sName.toLowerCase();
+    // Only primary inventory and employee sheets have unique single-row item identifiers.
+    // History, Log, Swaps, and Tracking sheets have repeated items and must NOT use getInvItemRowIndexFast.
+    if (sLower.indexOf('history') !== -1 || sLower.indexOf('log') !== -1 || sLower.indexOf('swaps') !== -1 || sLower.indexOf('tracking') !== -1) {
+      return -1;
+    }
     if (!invItemIndexCache[sName]) {
       invItemIndexCache[sName] = {};
       if (targetSheet && targetSheet.getLastRow() > 1) {
@@ -865,9 +871,56 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
       switch (mut.action) {
         case 'UPDATE_CELL':
           var targetRow = mut.row;
-          if (mut.itemIdentifier) {
+          var sNameLower = String(sheetName || '').toLowerCase();
+          var isHistorySheet = sNameLower.indexOf('history') !== -1;
+
+          if (!isHistorySheet && mut.itemIdentifier) {
             var foundRow = getInvItemRowIndexFast(sheet, sheetName, mut.itemIdentifier);
             if (foundRow !== -1) targetRow = foundRow;
+          } else if (isHistorySheet && mut.itemIdentifier && mut.oldValue !== undefined && mut.oldValue !== null && mut.col) {
+            // For history sheets, verify if targetRow still holds oldValue or if rows shifted from prior deletions
+            var data = activeSheetData[sheetName];
+            if (!data) {
+              data = sheet.getDataRange().getValues();
+              activeSheetData[sheetName] = data;
+            }
+            var formatCell = function(c) {
+              if (c instanceof Date && !isNaN(c.getTime())) {
+                var m = c.getMonth() + 1;
+                var d = c.getDate();
+                var yr = c.getFullYear();
+                return (m < 10 ? '0' + m : m) + '/' + (d < 10 ? '0' + d : d) + '/' + yr;
+              }
+              return String(c || '').trim();
+            };
+            var targetMatch = false;
+            if (targetRow && targetRow <= data.length) {
+              var cellVal = formatCell(data[targetRow - 1][mut.col - 1]);
+              var oldNorm = formatCell(mut.oldValue);
+              if (cellVal === oldNorm) {
+                targetMatch = true;
+              }
+            }
+            if (!targetMatch && data.length > 1) {
+              var idClean = String(mut.itemIdentifier).trim().toLowerCase();
+              var oldNorm = formatCell(mut.oldValue);
+              for (var delta = 0; delta < data.length; delta++) {
+                var candidates = delta === 0 ? [targetRow] : [targetRow - delta, targetRow + delta];
+                for (var ci = 0; ci < candidates.length; ci++) {
+                  var cr = candidates[ci];
+                  if (cr >= 2 && cr <= data.length) {
+                    var rItem = String(data[cr - 1][1] || '').trim().toLowerCase();
+                    var rCell = formatCell(data[cr - 1][mut.col - 1]);
+                    if (rItem === idClean && rCell === oldNorm) {
+                      targetRow = cr;
+                      targetMatch = true;
+                      break;
+                    }
+                  }
+                }
+                if (targetMatch) break;
+              }
+            }
           }
           if (targetRow && mut.col) {
             var valToWrite = mut.value;
