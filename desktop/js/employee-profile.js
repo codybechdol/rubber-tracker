@@ -2197,6 +2197,11 @@ class EmployeeProfileEngine {
     const ct = String(certType || '').trim().toLowerCase();
     const ctNorm = this.normalizeName(certType);
 
+    // DL, Driver's License, MEC, CPR, 1st Aid ALWAYS expire
+    if (ct === 'dl' || ct.includes('driver') || ct.includes('mec') || ct.includes('cpr') || ct.includes('1st aid') || ct.includes('first aid')) {
+      return false;
+    }
+
     if (window.certsConfigEngine && Array.isArray(window.certsConfigEngine.certs)) {
       const conf = window.certsConfigEngine.certs.find(c => {
         const k = String(c.key || c.name || '').toLowerCase().trim();
@@ -2222,6 +2227,7 @@ class EmployeeProfileEngine {
   getCertCycleInfo(certType) {
     const ct = String(certType || '').trim().toLowerCase();
     const ctNorm = this.normalizeName(certType);
+    const isDl = ct === 'dl' || ct.includes('driver');
 
     if (window.certsConfigEngine && Array.isArray(window.certsConfigEngine.certs)) {
       const conf = window.certsConfigEngine.certs.find(c => {
@@ -2231,18 +2237,23 @@ class EmployeeProfileEngine {
       });
 
       if (conf) {
-        if (conf.isIssuedDate || conf.termMonths === 0) {
+        if (!isDl && (conf.isIssuedDate || conf.termMonths === 0)) {
           return { isExpiring: false, years: null, months: 0, label: 'Non-Expiring (Completion Date)' };
         }
-        const months = conf.termMonths || 12;
+        const months = isDl ? (conf.termMonths || 96) : (conf.termMonths || 12);
         const years = months / 12;
-        const yearLabel = (years === 1) ? '1-Year Cycle (Annual)' : (Number.isInteger(years) ? `${years}-Year Cycle` : `${months} Months`);
+        const yearLabel = isDl
+          ? `Driver's License (${Number.isInteger(years) ? `${years}-Year Cycle` : `${months} Mos`})`
+          : ((years === 1) ? '1-Year Cycle (Annual)' : (Number.isInteger(years) ? `${years}-Year Cycle` : `${months} Months`));
         return { isExpiring: true, years: years, months: months, label: yearLabel };
       }
     }
 
-    if (this.isNonExpiringCert(certType)) {
+    if (!isDl && this.isNonExpiringCert(certType)) {
       return { isExpiring: false, years: null, months: 0, label: 'Non-Expiring Qualification' };
+    }
+    if (isDl) {
+      return { isExpiring: true, years: 8, months: 96, label: "Driver's License (8-Year Cycle)" };
     }
     if (ct.includes('pole top') || ct.includes('harass') || ct.includes('annual')) {
       return { isExpiring: true, years: 1, months: 12, label: '1-Year Cycle (Annual)' };
@@ -2255,9 +2266,6 @@ class EmployeeProfileEngine {
     }
     if (ct.includes('crane')) {
       return { isExpiring: true, years: 5, months: 60, label: '5-Year Cycle' };
-    }
-    if (ct.includes('dl') || ct.includes('driver')) {
-      return { isExpiring: true, years: 8, months: 96, label: '8-Year Cycle' };
     }
     if (ct.includes('mec') || ct.includes('dot') || ct.includes('medical') || ct.includes('physical')) {
       return { isExpiring: true, years: 2, months: 24, label: '2-Year Cycle (DOT)' };
@@ -2306,6 +2314,25 @@ class EmployeeProfileEngine {
    */
   calculateCertDaysAndStatus(certType, expDateStr, acqDateStr) {
     const isNonExp = this.isNonExpiringCert(certType);
+
+    // If an expiration date is provided, calculate status based on expiration date
+    if (expDateStr && expDateStr !== 'N/A' && String(expDateStr).trim() !== '') {
+      const expDt = this.parseDate(expDateStr);
+      if (expDt) {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const diffMs = expDt.getTime() - today.getTime();
+        const daysLeft = Math.round(diffMs / (1000 * 60 * 60 * 24));
+        let status = 'OK';
+        if (daysLeft < 0) status = 'Expired';
+        else if (daysLeft <= 7) status = 'Critical';
+        else if (daysLeft <= 30) status = 'Warning';
+        else if (daysLeft <= 60) status = 'Upcoming';
+        else status = 'OK';
+        return { daysLeft, status };
+      }
+    }
+
     if (isNonExp) {
       const hasAcq = acqDateStr && acqDateStr !== 'N/A' && String(acqDateStr).trim() !== '';
       return {
@@ -2314,33 +2341,10 @@ class EmployeeProfileEngine {
       };
     }
 
-    if (!expDateStr || expDateStr === 'N/A' || String(expDateStr).trim() === '') {
-      return {
-        daysLeft: null,
-        status: 'No Date Set'
-      };
-    }
-
-    const expDt = this.parseDate(expDateStr);
-    if (!expDt) {
-      return {
-        daysLeft: null,
-        status: 'No Date Set'
-      };
-    }
-
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const diffMs = expDt.getTime() - today.getTime();
-    const daysLeft = Math.round(diffMs / (1000 * 60 * 60 * 24));
-    let status = 'OK';
-    if (daysLeft < 0) status = 'Expired';
-    else if (daysLeft <= 7) status = 'Critical';
-    else if (daysLeft <= 30) status = 'Warning';
-    else if (daysLeft <= 60) status = 'Upcoming';
-    else status = 'OK';
-
-    return { daysLeft, status };
+    return {
+      daysLeft: null,
+      status: 'No Date Set'
+    };
   }
 
   /**
@@ -2359,8 +2363,9 @@ class EmployeeProfileEngine {
 
   /**
    * Opens the Edit Certification Dates Modal
+   * Supports both profile view and direct invocation from the Expiring Certs table
    */
-  openEditCertModal(employeeName, certType) {
+  openEditCertModal(employeeName, certType, initialAcqDate = null, initialExpDate = null) {
     const modal = document.getElementById('edit-cert-dates-modal');
     const body = document.getElementById('edit-cert-dates-modal-body');
     const titleEl = document.getElementById('edit-cert-dates-modal-title');
@@ -2375,19 +2380,47 @@ class EmployeeProfileEngine {
       certObj = data.certifications.find(c => c.certType === certType || this.normalizeName(c.certType) === this.normalizeName(certType));
     }
 
-    const currentAcq = certObj ? certObj.testDate : '';
-    const currentExp = certObj ? certObj.expDate : '';
-    const currentNotes = certObj ? certObj.notes : '';
+    // Direct lookup in expiring_certs table if not in profile view or for fallback data
+    let certRow = null;
+    const snap = this.db.getSnapshot();
+    const certsTable = snap && snap.tables ? snap.tables['expiring_certs'] : null;
+    if (certsTable && certsTable.rows) {
+      certRow = certsTable.rows.find(r => {
+        const emp = r['Employee Name'] || r['Employee'] || r['Name'] || '';
+        const cType = this.getCertType(r, certsTable.headers);
+        return this.isNameMatch(emp, empName) && (cType === certType || this.normalizeName(cType) === this.normalizeName(certType));
+      });
+    }
+
+    let currentAcq = initialAcqDate || (certObj ? certObj.testDate : (certRow ? (certRow['Date Acquired'] || certRow['Acquired Date'] || '') : ''));
+    let currentExp = initialExpDate || (certObj ? certObj.expDate : (certRow ? (certRow['Expiration Date'] || certRow['Expiration'] || '') : ''));
+    let currentNotes = certObj ? certObj.notes : (certRow ? (certRow['Notes'] || '') : '');
+
+    const cycle = this.getCertCycleInfo(certType);
+    const ctLower = String(certType || '').toLowerCase().trim();
+    const isCprFirstAid = ctLower.includes('cpr') || ctLower.includes('1st aid') || ctLower.includes('first aid');
+    const companionCertType = (ctLower.includes('1st') || ctLower.includes('first')) ? 'CPR' : '1st Aid';
+
+    // If initialAcqDate was provided and currentExp is either blank or was previously earlier than the new acquired date, auto-calc new expiration
+    if (initialAcqDate && cycle.isExpiring) {
+      const parsedAcq = this.parseDate(initialAcqDate);
+      const parsedExp = currentExp ? this.parseDate(currentExp) : null;
+      if (!parsedExp || (parsedAcq && parsedExp <= parsedAcq)) {
+        const autoExp = this.calculateCertExpDate(certType, parsedAcq);
+        if (autoExp) currentExp = this.formatDateDisplay(autoExp);
+      }
+    }
 
     const acqIso = this.formatDateInput(currentAcq);
     const expIso = this.formatDateInput(currentExp);
 
-    const cycle = this.getCertCycleInfo(certType);
-
     this.activeEditCert = {
       employeeName: empName,
       certType: certType,
-      certObj: certObj
+      certObj: certObj,
+      isCprFirstAid: isCprFirstAid,
+      companionCertType: companionCertType,
+      selectedProvider: 'redcross'
     };
 
     const displayTitle = (certObj && certObj.label) ? certObj.label : certType;
@@ -2396,7 +2429,7 @@ class EmployeeProfileEngine {
     }
 
     body.innerHTML = `
-      <div style="display: flex; flex-direction: column; gap: 16px;">
+      <div style="display: flex; flex-direction: column; gap: 14px;">
         <!-- Cert Info Header Card -->
         <div style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
           <div style="display: flex; align-items: center; gap: 10px;">
@@ -2415,6 +2448,32 @@ class EmployeeProfileEngine {
             </span>
           </div>
         </div>
+
+        ${isCprFirstAid ? `
+        <!-- Training Provider Selection for 1st Aid / CPR -->
+        <div style="background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.25); border-radius: 8px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px;">
+          <div style="display: flex; align-items: center; justify-content: space-between;">
+            <span style="font-size: 12px; font-weight: 700; color: #f87171;">🚑 Select Training Provider:</span>
+            <span style="font-size: 11px; color: var(--text-muted);">Expiration term depends on training agency</span>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+            <button type="button" id="provider-btn-redcross" onclick="window.employeeProfileEngine.selectTrainingProvider('redcross')" style="padding: 9px 12px; text-align: left; background: rgba(239, 68, 68, 0.22); border: 1.5px solid #ef4444; border-radius: 6px; color: #fca5a5; cursor: pointer; transition: all 0.2s ease;">
+              <span style="font-size: 12.5px; display: block; font-weight: 800;">🔴 Red Cross CPR / 1st Aid</span>
+              <span style="display: block; font-size: 11px; color: #cbd5e1; margin-top: 2px;">Sets Expiration to <strong>+2 Years</strong></span>
+            </button>
+            <button type="button" id="provider-btn-coin" onclick="window.employeeProfileEngine.selectTrainingProvider('coin')" style="padding: 9px 12px; text-align: left; background: rgba(234, 179, 8, 0.08); border: 1px solid rgba(234, 179, 8, 0.35); border-radius: 6px; color: #fde047; cursor: pointer; transition: all 0.2s ease;">
+              <span style="font-size: 12.5px; display: block; font-weight: 800;">🪙 Coin CPR / 1st Aid</span>
+              <span style="display: block; font-size: 11px; color: #cbd5e1; margin-top: 2px;">Sets Expiration to <strong>+1 Year</strong></span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Companion Sync Checkbox for 1st Aid & CPR -->
+        <label style="display: flex; align-items: center; gap: 9px; cursor: pointer; font-size: 12px; font-weight: 600; color: #93c5fd; background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.25); border-radius: 6px; padding: 9px 12px; margin: 0;">
+          <input type="checkbox" id="cert-edit-sync-companion" checked style="width: 16px; height: 16px; cursor: pointer;">
+          <span>Also update companion <strong>${this.escapeHtml(companionCertType)}</strong> record with this same date &amp; provider</span>
+        </label>
+        ` : ''}
 
         <!-- Date Inputs Grid -->
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
@@ -2438,20 +2497,17 @@ class EmployeeProfileEngine {
             <label style="font-size: 12px; font-weight: 700; color: var(--text-primary); display: flex; align-items: center; justify-content: space-between;">
               <span>⏳ Expiration Date</span>
             </label>
-            <input type="date" id="cert-edit-exp-date" value="${expIso}" ${!cycle.isExpiring ? 'disabled placeholder="N/A (Non-Expiring)"' : ''} style="width: 100%; background: ${!cycle.isExpiring ? 'rgba(0,0,0,0.2)' : 'var(--bg-primary)'}; border: 1px solid var(--border-color); border-radius: 6px; color: ${!cycle.isExpiring ? 'var(--text-muted)' : 'var(--text-primary)'}; padding: 8px 10px; font-size: 13px; outline: none;">
+            <input type="date" id="cert-edit-exp-date" value="${expIso}" style="width: 100%; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 8px 10px; font-size: 13px; outline: none;">
             <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-top: 2px;">
-              ${cycle.isExpiring ? `
-                <button type="button" class="btn-preset" onclick="window.employeeProfileEngine.quickSetExpDate('auto')">🔄 Auto-Calc</button>
-                <button type="button" class="btn-preset" onclick="window.employeeProfileEngine.quickSetExpDate('+1yr')">+1 Yr</button>
-                <button type="button" class="btn-preset" onclick="window.employeeProfileEngine.quickSetExpDate('+2yr')">+2 Yrs</button>
-                <button type="button" class="btn-preset" onclick="window.employeeProfileEngine.quickSetExpDate('+5yr')">+5 Yrs</button>
-                <button type="button" class="btn-preset" onclick="window.employeeProfileEngine.quickSetExpDate('clear')">✕ Clear</button>
-              ` : `
-                <span style="font-size: 11px; color: var(--text-muted); padding: 4px 0;">Non-expiring qualification (N/A)</span>
-              `}
+              <button type="button" class="btn-preset" onclick="window.employeeProfileEngine.quickSetExpDate('auto')">🔄 Auto-Calc</button>
+              <button type="button" class="btn-preset" onclick="window.employeeProfileEngine.quickSetExpDate('+1yr')">+1 Yr</button>
+              <button type="button" class="btn-preset" onclick="window.employeeProfileEngine.quickSetExpDate('+2yr')">+2 Yrs</button>
+              <button type="button" class="btn-preset" onclick="window.employeeProfileEngine.quickSetExpDate('+4yr')">+4 Yrs</button>
+              <button type="button" class="btn-preset" onclick="window.employeeProfileEngine.quickSetExpDate('+8yr')">+8 Yrs</button>
+              <button type="button" class="btn-preset" onclick="window.employeeProfileEngine.quickSetExpDate('clear')">✕ Clear</button>
             </div>
             <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">
-              ${cycle.isExpiring ? 'Enter custom expiration or choose preset.' : 'Expiration date is not required.'}
+              ${cycle.isExpiring ? 'Enter custom expiration date or choose a quick preset.' : 'Typically non-expiring qualification (can be cleared/blank, or set custom expiration).'}
             </div>
           </div>
         </div>
@@ -2479,8 +2535,12 @@ class EmployeeProfileEngine {
       acqInput.addEventListener('change', () => {
         const acqVal = acqInput.value;
         if (acqVal && cycle.isExpiring && expInput) {
-          const expDate = this.calculateCertExpDate(certType, acqVal);
-          if (expDate) {
+          const provider = (this.activeEditCert && this.activeEditCert.selectedProvider) ? this.activeEditCert.selectedProvider : 'redcross';
+          const months = (isCprFirstAid && provider === 'coin') ? 12 : (cycle.months || 24);
+          const baseDate = this.parseDate(acqVal);
+          if (baseDate) {
+            const expDate = new Date(baseDate.getTime());
+            expDate.setMonth(expDate.getMonth() + months);
             expInput.value = this.formatDateInput(expDate);
           }
         }
@@ -2495,7 +2555,49 @@ class EmployeeProfileEngine {
     }
 
     this.updateLiveCertPreview();
+    modal.style.display = 'flex';
     modal.classList.add('active');
+  }
+
+  /**
+   * Selects training provider (Red Cross 24 mos vs Coin CPR 12 mos)
+   */
+  selectTrainingProvider(provider) {
+    if (!this.activeEditCert) return;
+    this.activeEditCert.selectedProvider = provider;
+
+    const acqInput = document.getElementById('cert-edit-acq-date');
+    const expInput = document.getElementById('cert-edit-exp-date');
+    const btnRedCross = document.getElementById('provider-btn-redcross');
+    const btnCoin = document.getElementById('provider-btn-coin');
+
+    const acqVal = acqInput ? acqInput.value : '';
+    let baseDate = acqVal ? this.parseDate(acqVal) : new Date();
+    if (!baseDate) baseDate = new Date();
+
+    const months = (provider === 'coin') ? 12 : 24;
+    const exp = new Date(baseDate.getTime());
+    exp.setMonth(exp.getMonth() + months);
+
+    if (expInput) {
+      expInput.value = this.formatDateInput(exp);
+    }
+
+    if (btnRedCross && btnCoin) {
+      if (provider === 'coin') {
+        btnCoin.style.background = 'rgba(234, 179, 8, 0.25)';
+        btnCoin.style.border = '1.5px solid #eab308';
+        btnRedCross.style.background = 'rgba(239, 68, 68, 0.08)';
+        btnRedCross.style.border = '1px solid rgba(239, 68, 68, 0.35)';
+      } else {
+        btnRedCross.style.background = 'rgba(239, 68, 68, 0.25)';
+        btnRedCross.style.border = '1.5px solid #ef4444';
+        btnCoin.style.background = 'rgba(234, 179, 8, 0.08)';
+        btnCoin.style.border = '1px solid rgba(234, 179, 8, 0.35)';
+      }
+    }
+
+    this.updateLiveCertPreview();
   }
 
   /**
@@ -2503,7 +2605,10 @@ class EmployeeProfileEngine {
    */
   closeEditCertModal() {
     const modal = document.getElementById('edit-cert-dates-modal');
-    if (modal) modal.classList.remove('active');
+    if (modal) {
+      modal.classList.remove('active');
+      modal.style.display = 'none';
+    }
     this.activeEditCert = null;
   }
 
@@ -2523,8 +2628,11 @@ class EmployeeProfileEngine {
       const todayIso = this.formatDateInput(today);
       acqInput.value = todayIso;
       if (cycle.isExpiring && expInput) {
-        const expDate = this.calculateCertExpDate(certType, today);
-        if (expDate) expInput.value = this.formatDateInput(expDate);
+        const provider = this.activeEditCert.selectedProvider || 'redcross';
+        const months = (this.activeEditCert.isCprFirstAid && provider === 'coin') ? 12 : (cycle.months || 24);
+        const expDate = new Date(today.getTime());
+        expDate.setMonth(expDate.getMonth() + months);
+        expInput.value = this.formatDateInput(expDate);
       }
     } else if (preset === 'clear') {
       acqInput.value = '';
@@ -2544,9 +2652,24 @@ class EmployeeProfileEngine {
 
     if (preset === 'auto') {
       const acqVal = acqInput ? acqInput.value : '';
+      const cycle = this.getCertCycleInfo(certType);
       if (acqVal) {
         const expDate = this.calculateCertExpDate(certType, acqVal);
-        if (expDate) expInput.value = this.formatDateInput(expDate);
+        if (expDate) {
+          expInput.value = this.formatDateInput(expDate);
+        } else {
+          const baseDate = this.parseDate(acqVal) || new Date();
+          const target = new Date(baseDate.getTime());
+          const months = (cycle && cycle.months) ? cycle.months : 12;
+          target.setMonth(target.getMonth() + months);
+          expInput.value = this.formatDateInput(target);
+        }
+      } else {
+        const today = new Date();
+        const target = new Date(today.getTime());
+        const months = (cycle && cycle.months) ? cycle.months : 12;
+        target.setMonth(target.getMonth() + months);
+        expInput.value = this.formatDateInput(target);
       }
     } else if (preset.startsWith('+')) {
       const years = parseInt(preset.replace('+', '').replace('yr', '').replace('yrs', ''), 10) || 1;
@@ -2627,10 +2750,12 @@ class EmployeeProfileEngine {
   async saveCertDates() {
     if (!this.activeEditCert) return;
 
-    const { employeeName, certType } = this.activeEditCert;
+    const { employeeName, certType, companionCertType } = this.activeEditCert;
     const acqInput = document.getElementById('cert-edit-acq-date');
     const expInput = document.getElementById('cert-edit-exp-date');
     const notesInput = document.getElementById('cert-edit-notes');
+    const syncCompanionEl = document.getElementById('cert-edit-sync-companion');
+    const shouldSyncCompanion = !!(syncCompanionEl && syncCompanionEl.checked);
 
     const rawAcqVal = acqInput ? acqInput.value : '';
     const rawExpVal = expInput ? expInput.value : '';
@@ -2644,205 +2769,317 @@ class EmployeeProfileEngine {
       formattedAcq = d ? this.formatDateDisplay(d) : rawAcqVal;
     }
 
-    let formattedExp = 'N/A';
-    if (!isNonExp && rawExpVal) {
+    let formattedExp = '';
+    if (rawExpVal) {
       const d = this.parseDate(rawExpVal);
       formattedExp = d ? this.formatDateDisplay(d) : rawExpVal;
+    } else if (isNonExp) {
+      formattedExp = 'N/A';
     }
 
     const { daysLeft, status } = this.calculateCertDaysAndStatus(certType, formattedExp, formattedAcq);
 
-    const snap = this.db.getSnapshot();
-    const certsTable = snap && snap.tables ? snap.tables['expiring_certs'] : null;
+    const acqValueToSave = formattedAcq !== 'N/A' ? formattedAcq : '';
+    const expValueToSave = formattedExp !== 'N/A' ? formattedExp : (isNonExp ? 'N/A' : '');
 
-    if (certsTable) {
-      const headers = certsTable.headers || [];
-      let colAcq = -1;
-      let colExp = -1;
-      let colDays = -1;
-      let colStat = -1;
-      let colSms = -1;
-      let colNotes = -1;
+    try {
+      const snap = this.db.getSnapshot();
+      const certsTable = snap && snap.tables ? snap.tables['expiring_certs'] : null;
 
-      headers.forEach((h, idx) => {
-        const hl = String(h || '').toLowerCase().trim();
-        if (/date.*acq|acq.*date|test.*date|issue.*date|class.*date/.test(hl) && colAcq === -1) colAcq = idx + 1;
-        else if (/expir.*date|expir/.test(hl) && colExp === -1) colExp = idx + 1;
-        else if (/days/.test(hl) && colDays === -1) colDays = idx + 1;
-        else if (/^status$/.test(hl) && colStat === -1) colStat = idx + 1;
-        else if (/sms/.test(hl) && colSms === -1) colSms = idx + 1;
-        else if (/note/.test(hl) && colNotes === -1) colNotes = idx + 1;
-      });
+      if (certsTable) {
+        const headers = certsTable.headers || [];
+        let colAcq = -1;
+        let colExp = -1;
+        let colDays = -1;
+        let colStat = -1;
+        let colSms = -1;
+        let colNotes = -1;
 
-      if (colAcq === -1) colAcq = 3;
-      if (colExp === -1) colExp = 4;
-      if (colDays === -1) colDays = 7;
-      if (colStat === -1) colStat = 8;
-      if (colSms === -1) colSms = 9;
-
-      // Find row in certsTable.rows
-      let matchedRow = null;
-      if (certsTable.rows) {
-        matchedRow = certsTable.rows.find(r => {
-          const emp = r['Employee Name'] || r['Employee'] || r['Name'] || '';
-          const cType = this.getCertType(r, headers);
-          return this.isNameMatch(emp, employeeName) && (cType === certType || this.normalizeName(cType) === this.normalizeName(certType));
+        headers.forEach((h, idx) => {
+          const hl = String(h || '').toLowerCase().trim();
+          if (/date.*acq|acq.*date|test.*date|issue.*date|class.*date/.test(hl) && colAcq === -1) colAcq = idx + 1;
+          else if (/expir.*date|expir/.test(hl) && colExp === -1) colExp = idx + 1;
+          else if (/days/.test(hl) && colDays === -1) colDays = idx + 1;
+          else if (/^status$/.test(hl) && colStat === -1) colStat = idx + 1;
+          else if (/sms/.test(hl) && colSms === -1) colSms = idx + 1;
+          else if (/note/.test(hl) && colNotes === -1) colNotes = idx + 1;
         });
-      }
 
-      if (matchedRow) {
-        const rowIdx = matchedRow._rowIdx;
-        const oldAcq = matchedRow['Date Acquired'] || matchedRow['Acquired Date'] || '';
-        const oldExp = matchedRow['Expiration Date'] || matchedRow['Expiration'] || '';
-        const oldStat = matchedRow['Status'] || '';
-        const oldNotes = matchedRow['Notes'] || '';
+        if (colAcq === -1) colAcq = 3;
+        if (colExp === -1) colExp = 4;
+        if (colDays === -1) colDays = 7;
+        if (colStat === -1) colStat = 8;
+        if (colSms === -1) colSms = 9;
 
-        const acqValueToSave = formattedAcq !== 'N/A' ? formattedAcq : '';
-        const expValueToSave = formattedExp !== 'N/A' ? formattedExp : (isNonExp ? 'N/A' : '');
-
-        // Mutations for offline outbox & sync back to Google Sheets
-        if (rowIdx) {
-          if (acqValueToSave !== oldAcq) {
-            await this.db.addMutation({
-              action: 'UPDATE_CELL',
-              sheetName: 'Expiring Certs',
-              row: rowIdx,
-              col: colAcq,
-              header: headers[colAcq - 1] || 'Date Acquired',
-              oldValue: oldAcq,
-              value: acqValueToSave
-            });
-          }
-          if (expValueToSave !== oldExp) {
-            await this.db.addMutation({
-              action: 'UPDATE_CELL',
-              sheetName: 'Expiring Certs',
-              row: rowIdx,
-              col: colExp,
-              header: headers[colExp - 1] || 'Expiration Date',
-              oldValue: oldExp,
-              value: expValueToSave
-            });
-          }
-          if (status !== oldStat) {
-            await this.db.addMutation({
-              action: 'UPDATE_CELL',
-              sheetName: 'Expiring Certs',
-              row: rowIdx,
-              col: colStat,
-              header: headers[colStat - 1] || 'Status',
-              oldValue: oldStat,
-              value: status
-            });
-          }
-          if (colNotes !== -1 && newNotes !== oldNotes) {
-            await this.db.addMutation({
-              action: 'UPDATE_CELL',
-              sheetName: 'Expiring Certs',
-              row: rowIdx,
-              col: colNotes,
-              header: headers[colNotes - 1] || 'Notes',
-              oldValue: oldNotes,
-              value: newNotes
-            });
-          }
-        }
-
-        // Optimistically update in-memory row
-        matchedRow['Date Acquired'] = acqValueToSave;
-        matchedRow['Expiration Date'] = expValueToSave;
-        matchedRow['Days Until Expiration'] = daysLeft !== null ? String(daysLeft) : (isNonExp ? 'N/A' : '');
-        matchedRow['Status'] = status;
-        if (colNotes !== -1) matchedRow['Notes'] = newNotes;
-        matchedRow['SMS'] = '';
-
-        // Also update rawGrid if present
-        if (certsTable.rawGrid && rowIdx && certsTable.rawGrid[rowIdx - 1]) {
-          certsTable.rawGrid[rowIdx - 1][colAcq - 1] = acqValueToSave;
-          certsTable.rawGrid[rowIdx - 1][colExp - 1] = expValueToSave;
-          if (colDays !== -1) certsTable.rawGrid[rowIdx - 1][colDays - 1] = daysLeft !== null ? String(daysLeft) : (isNonExp ? 'N/A' : '');
-          certsTable.rawGrid[rowIdx - 1][colStat - 1] = status;
-          if (colNotes !== -1) certsTable.rawGrid[rowIdx - 1][colNotes - 1] = newNotes;
-          if (colSms !== -1) certsTable.rawGrid[rowIdx - 1][colSms - 1] = '';
-        }
-      } else {
-        const acqValueToSave = formattedAcq !== 'N/A' ? formattedAcq : '';
-        const expValueToSave = formattedExp !== 'N/A' ? formattedExp : (isNonExp ? 'N/A' : '');
-
-        const newCertRow = {
-          'Employee Name': employeeName,
-          'Name': employeeName,
-          'Item Type': certType,
-          'Cert Type': certType,
-          'Date Acquired': acqValueToSave,
-          'Expiration Date': expValueToSave,
-          'Days Until Expiration': daysLeft !== null ? String(daysLeft) : (isNonExp ? 'N/A' : ''),
-          'Status': status,
-          'SMS': '',
-          'Notes': newNotes
-        };
-        if (!certsTable.rows) certsTable.rows = [];
-        certsTable.rows.push(newCertRow);
-        certsTable.rowCount = certsTable.rows.length;
-        newCertRow._rowIdx = certsTable.rowCount + 1;
-
-        if (certsTable.rawGrid) {
-          const rowArr = headers.map(h => newCertRow[h] !== undefined ? newCertRow[h] : '');
-          certsTable.rawGrid.push(rowArr);
-          certsTable.maxRows = certsTable.rawGrid.length;
-        }
-
-        await this.db.addMutation({
-          action: 'ADD_ROW',
-          sheetName: 'Expiring Certs',
-          tableKey: 'expiring_certs',
-          rowData: newCertRow
-        });
-      }
-    }
-
-    // Update in-memory state in currentEmployeeData
-    if (this.currentEmployeeData && this.currentEmployeeData.certifications) {
-      const certItem = this.currentEmployeeData.certifications.find(c => c.certType === certType || this.normalizeName(c.certType) === this.normalizeName(certType));
-      if (certItem) {
-        certItem.testDate = formattedAcq;
-        certItem.expDate = formattedExp;
-        certItem.daysLeft = daysLeft;
-        certItem.status = status;
-        certItem.notes = newNotes;
-        certItem.smsStatus = '';
-      }
-
-      // Update career milestones in currentEmployeeData.employeeHistory
-      const milestoneDate = formattedAcq !== 'N/A' ? formattedAcq : (formattedExp !== 'N/A' ? formattedExp : null);
-      if (milestoneDate && this.currentEmployeeData.employeeHistory) {
-        const existingHist = this.currentEmployeeData.employeeHistory.find(h => h.type === 'cert' && h.event.includes(certType));
-        let milestoneDetail = `Valid · ${certType}`;
-        if (formattedAcq !== 'N/A' && formattedExp !== 'N/A') {
-          milestoneDetail = `Updated / Acquired: ${formattedAcq} · Expires: ${formattedExp}`;
-        } else if (formattedExp !== 'N/A') {
-          milestoneDetail = `Expires: ${formattedExp}`;
-        } else if (formattedAcq !== 'N/A') {
-          milestoneDetail = `Date Acquired: ${formattedAcq}`;
-        }
-
-        if (existingHist) {
-          existingHist.date = milestoneDate;
-          existingHist.details = milestoneDetail;
-        } else {
-          this.currentEmployeeData.employeeHistory.unshift({
-            type: 'cert',
-            date: milestoneDate,
-            event: `📜 Cert Updated: ${certType}`,
-            details: milestoneDetail,
-            location: this.currentEmployeeData.location,
-            job: this.currentEmployeeData.jobNumber
+        // 1. Update primary cert row
+        let matchedRow = null;
+        if (certsTable.rows) {
+          matchedRow = certsTable.rows.find(r => {
+            const emp = r['Employee Name'] || r['Employee'] || r['Name'] || '';
+            const cType = this.getCertType(r, headers);
+            return this.isNameMatch(emp, employeeName) && (cType === certType || this.normalizeName(cType) === this.normalizeName(certType));
           });
         }
-      }
-    }
 
-    this.closeEditCertModal();
+        if (matchedRow) {
+          const rowIdx = matchedRow._rowIdx;
+          const oldAcq = matchedRow['Date Acquired'] || matchedRow['Acquired Date'] || '';
+          const oldExp = matchedRow['Expiration Date'] || matchedRow['Expiration'] || '';
+          const oldStat = matchedRow['Status'] || '';
+          const oldNotes = matchedRow['Notes'] || '';
+
+          // Mutations for offline outbox & sync back to Google Sheets
+          if (rowIdx) {
+            if (acqValueToSave !== oldAcq) {
+              await this.db.addMutation({
+                action: 'UPDATE_CELL',
+                sheetName: 'Expiring Certs',
+                row: rowIdx,
+                col: colAcq,
+                header: headers[colAcq - 1] || 'Date Acquired',
+                oldValue: oldAcq,
+                value: acqValueToSave
+              });
+            }
+            if (expValueToSave !== oldExp) {
+              await this.db.addMutation({
+                action: 'UPDATE_CELL',
+                sheetName: 'Expiring Certs',
+                row: rowIdx,
+                col: colExp,
+                header: headers[colExp - 1] || 'Expiration Date',
+                oldValue: oldExp,
+                value: expValueToSave
+              });
+            }
+            if (status !== oldStat) {
+              await this.db.addMutation({
+                action: 'UPDATE_CELL',
+                sheetName: 'Expiring Certs',
+                row: rowIdx,
+                col: colStat,
+                header: headers[colStat - 1] || 'Status',
+                oldValue: oldStat,
+                value: status
+              });
+            }
+            if (colNotes !== -1 && newNotes && newNotes !== oldNotes) {
+              await this.db.addMutation({
+                action: 'UPDATE_CELL',
+                sheetName: 'Expiring Certs',
+                row: rowIdx,
+                col: colNotes,
+                header: headers[colNotes - 1] || 'Notes',
+                oldValue: oldNotes,
+                value: newNotes
+              });
+            }
+          }
+
+          // Optimistically update in-memory row
+          matchedRow['Date Acquired'] = acqValueToSave;
+          matchedRow['Expiration Date'] = expValueToSave;
+          matchedRow['Days Until Expiration'] = daysLeft !== null ? String(daysLeft) : (isNonExp ? 'N/A' : '');
+          matchedRow['Status'] = status;
+          if (colNotes !== -1 && newNotes) matchedRow['Notes'] = newNotes;
+          matchedRow['SMS'] = '';
+
+          // Also update rawGrid if present
+          if (certsTable.rawGrid && rowIdx && certsTable.rawGrid[rowIdx - 1]) {
+            certsTable.rawGrid[rowIdx - 1][colAcq - 1] = acqValueToSave;
+            certsTable.rawGrid[rowIdx - 1][colExp - 1] = expValueToSave;
+            if (colDays !== -1) certsTable.rawGrid[rowIdx - 1][colDays - 1] = daysLeft !== null ? String(daysLeft) : (isNonExp ? 'N/A' : '');
+            certsTable.rawGrid[rowIdx - 1][colStat - 1] = status;
+            if (colNotes !== -1 && newNotes) certsTable.rawGrid[rowIdx - 1][colNotes - 1] = newNotes;
+            if (colSms !== -1) certsTable.rawGrid[rowIdx - 1][colSms - 1] = '';
+          }
+        } else {
+          const newCertRow = {
+            'Employee Name': employeeName,
+            'Name': employeeName,
+            'Item Type': certType,
+            'Cert Type': certType,
+            'Date Acquired': acqValueToSave,
+            'Expiration Date': expValueToSave,
+            'Days Until Expiration': daysLeft !== null ? String(daysLeft) : (isNonExp ? 'N/A' : ''),
+            'Status': status,
+            'SMS': '',
+            'Notes': newNotes
+          };
+          if (!certsTable.rows) certsTable.rows = [];
+          certsTable.rows.push(newCertRow);
+          certsTable.rowCount = certsTable.rows.length;
+          newCertRow._rowIdx = certsTable.rowCount + 1;
+
+          if (certsTable.rawGrid) {
+            const rowArr = headers.map(h => newCertRow[h] !== undefined ? newCertRow[h] : '');
+            certsTable.rawGrid.push(rowArr);
+            certsTable.maxRows = certsTable.rawGrid.length;
+          }
+
+          await this.db.addMutation({
+            action: 'ADD_ROW',
+            sheetName: 'Expiring Certs',
+            tableKey: 'expiring_certs',
+            rowData: newCertRow
+          });
+        }
+
+        // 2. Check if companion cert sync was requested for 1st Aid / CPR
+        if (shouldSyncCompanion && companionCertType && certsTable.rows) {
+          const compType = companionCertType;
+          const compRow = certsTable.rows.find(r => {
+            const emp = r['Employee Name'] || r['Employee'] || r['Name'] || '';
+            const cType = this.getCertType(r, headers);
+            return this.isNameMatch(emp, employeeName) && (cType === compType || this.normalizeName(cType) === this.normalizeName(compType));
+          });
+
+          if (compRow) {
+            const compRowIdx = compRow._rowIdx;
+            const oldCompAcq = compRow['Date Acquired'] || compRow['Acquired Date'] || '';
+            const oldCompExp = compRow['Expiration Date'] || compRow['Expiration'] || '';
+            const oldCompStat = compRow['Status'] || '';
+            const oldCompNotes = compRow['Notes'] || '';
+
+            // Compute companion cert's specific status & days remaining
+            const compStatusInfo = this.calculateCertDaysAndStatus(compType, formattedExp, formattedAcq);
+            const compDays = compStatusInfo.daysLeft;
+            const compStat = compStatusInfo.status;
+
+            // Mutations for offline outbox & sync back to Google Sheets
+            if (compRowIdx) {
+              if (acqValueToSave !== oldCompAcq) {
+                await this.db.addMutation({
+                  action: 'UPDATE_CELL',
+                  sheetName: 'Expiring Certs',
+                  row: compRowIdx,
+                  col: colAcq,
+                  header: headers[colAcq - 1] || 'Date Acquired',
+                  oldValue: oldCompAcq,
+                  value: acqValueToSave
+                });
+              }
+              if (expValueToSave !== oldCompExp) {
+                await this.db.addMutation({
+                  action: 'UPDATE_CELL',
+                  sheetName: 'Expiring Certs',
+                  row: compRowIdx,
+                  col: colExp,
+                  header: headers[colExp - 1] || 'Expiration Date',
+                  oldValue: oldCompExp,
+                  value: expValueToSave
+                });
+              }
+              if (compStat !== oldCompStat) {
+                await this.db.addMutation({
+                  action: 'UPDATE_CELL',
+                  sheetName: 'Expiring Certs',
+                  row: compRowIdx,
+                  col: colStat,
+                  header: headers[colStat - 1] || 'Status',
+                  oldValue: oldCompStat,
+                  value: compStat
+                });
+              }
+              if (colNotes !== -1 && newNotes && newNotes !== oldCompNotes) {
+                await this.db.addMutation({
+                  action: 'UPDATE_CELL',
+                  sheetName: 'Expiring Certs',
+                  row: compRowIdx,
+                  col: colNotes,
+                  header: headers[colNotes - 1] || 'Notes',
+                  oldValue: oldCompNotes,
+                  value: newNotes
+                });
+              }
+            }
+
+            // Optimistically update companion row in memory
+            compRow['Date Acquired'] = acqValueToSave;
+            compRow['Expiration Date'] = expValueToSave;
+            compRow['Days Until Expiration'] = compDays !== null ? String(compDays) : (isNonExp ? 'N/A' : '');
+            compRow['Status'] = compStat;
+            if (colNotes !== -1 && newNotes) compRow['Notes'] = newNotes;
+            compRow['SMS'] = '';
+
+            if (certsTable.rawGrid && compRowIdx && certsTable.rawGrid[compRowIdx - 1]) {
+              certsTable.rawGrid[compRowIdx - 1][colAcq - 1] = acqValueToSave;
+              certsTable.rawGrid[compRowIdx - 1][colExp - 1] = expValueToSave;
+              if (colDays !== -1) certsTable.rawGrid[compRowIdx - 1][colDays - 1] = compDays !== null ? String(compDays) : (isNonExp ? 'N/A' : '');
+              certsTable.rawGrid[compRowIdx - 1][colStat - 1] = compStat;
+              if (colNotes !== -1 && newNotes) certsTable.rawGrid[compRowIdx - 1][colNotes - 1] = newNotes;
+              if (colSms !== -1) certsTable.rawGrid[compRowIdx - 1][colSms - 1] = '';
+            }
+
+            // Update in currentEmployeeData if present
+            if (this.currentEmployeeData && this.currentEmployeeData.certifications) {
+              const compItem = this.currentEmployeeData.certifications.find(c => c.certType === compType || this.normalizeName(c.certType) === this.normalizeName(compType));
+              if (compItem) {
+                compItem.testDate = formattedAcq;
+                compItem.expDate = formattedExp;
+                compItem.daysLeft = compDays;
+                compItem.status = compStat;
+                if (newNotes) compItem.notes = newNotes;
+                compItem.smsStatus = '';
+              }
+            }
+          }
+        }
+      }
+
+      if (typeof this.db.saveLocalSnapshot === 'function') {
+        await this.db.saveLocalSnapshot();
+      }
+
+      // Update in-memory state in currentEmployeeData
+      if (this.currentEmployeeData && this.currentEmployeeData.certifications) {
+        const certItem = this.currentEmployeeData.certifications.find(c => c.certType === certType || this.normalizeName(c.certType) === this.normalizeName(certType));
+        if (certItem) {
+          certItem.testDate = formattedAcq;
+          certItem.expDate = formattedExp;
+          certItem.daysLeft = daysLeft;
+          certItem.status = status;
+          certItem.notes = newNotes;
+          certItem.smsStatus = '';
+        }
+
+        // Update career milestones in currentEmployeeData.employeeHistory
+        const milestoneDate = formattedAcq !== 'N/A' ? formattedAcq : (formattedExp !== 'N/A' ? formattedExp : null);
+        if (milestoneDate && this.currentEmployeeData.employeeHistory) {
+          const existingHist = this.currentEmployeeData.employeeHistory.find(h => h.type === 'cert' && h.event.includes(certType));
+          let milestoneDetail = `Valid · ${certType}`;
+          if (formattedAcq !== 'N/A' && formattedExp !== 'N/A') {
+            milestoneDetail = `Updated / Acquired: ${formattedAcq} · Expires: ${formattedExp}`;
+          } else if (formattedExp !== 'N/A') {
+            milestoneDetail = `Expires: ${formattedExp}`;
+          } else if (formattedAcq !== 'N/A') {
+            milestoneDetail = `Date Acquired: ${formattedAcq}`;
+          }
+
+          if (existingHist) {
+            existingHist.date = milestoneDate;
+            existingHist.details = milestoneDetail;
+          } else {
+            this.currentEmployeeData.employeeHistory.unshift({
+              type: 'cert',
+              date: milestoneDate,
+              event: `📜 Cert Updated: ${certType}`,
+              details: milestoneDetail,
+              location: this.currentEmployeeData.location,
+              job: this.currentEmployeeData.jobNumber
+            });
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Error saving certification dates:', err);
+      if (typeof window.showToast === 'function') {
+        window.showToast(`Error saving cert dates: ${err.message || err}`, 'error');
+      }
+    } finally {
+      // Modal ALWAYS closes cleanly
+      this.closeEditCertModal();
+    }
 
     // Re-render the profile modal body immediately to show updated dates & badges
     const modalBody = document.getElementById('employee-profile-modal-body');
@@ -2850,9 +3087,14 @@ class EmployeeProfileEngine {
       this.renderModalContent(modalBody);
     }
 
-    // Refresh sheetNavigator view if Expiring Certs is open in background
+    // Refresh sheetNavigator view immediately so table updates live on screen
     if (window.sheetNavigator && window.sheetNavigator.currentSheetKey === 'expiring_certs') {
       window.sheetNavigator.renderExpiringCerts();
+    }
+
+    if (typeof window.showToast === 'function') {
+      const companionNote = shouldSyncCompanion ? ` & ${companionCertType}` : '';
+      window.showToast(`Saved ${certType}${companionNote} dates for ${employeeName}`, 'success');
     }
   }
 

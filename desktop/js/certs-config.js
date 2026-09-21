@@ -53,7 +53,7 @@ class CertsConfigEngine {
     this.defaultCerts = [
       { key: '1st Aid', name: '1st Aid', label: '1st Aid / First Aid', termMonths: 24, requirementScope: 'all', requiredJobClasses: [], isIssuedDate: false, custom: false },
       { key: 'CPR', name: 'CPR', label: 'CPR / AED', termMonths: 24, requirementScope: 'all', requiredJobClasses: [], isIssuedDate: false, custom: false },
-      { key: 'DL', name: 'DL', label: "Driver's License (DL)", termMonths: 0, requirementScope: 'all', requiredJobClasses: [], isIssuedDate: false, custom: false },
+      { key: 'DL', name: 'DL', label: "Driver's License (DL)", termMonths: 96, requirementScope: 'all', requiredJobClasses: [], isIssuedDate: false, custom: false },
       { key: 'MEC Expiration', name: 'MEC Expiration', label: 'MEC Expiration (Medical Card)', termMonths: 24, requirementScope: 'all', requiredJobClasses: [], isIssuedDate: false, custom: false },
       { key: 'Harassment Training', name: 'Harassment Training', label: 'Harassment Training', termMonths: 12, requirementScope: 'all', requiredJobClasses: [], isIssuedDate: false, custom: false },
       { key: 'Pole Top Rescue', name: 'Pole Top Rescue', label: 'Pole Top Rescue', termMonths: 12, requirementScope: 'job_class', requiredJobClasses: ['F', 'GF', 'SUP', 'GTO F', 'JRY', 'WT', 'GTO', 'AP 1-7', 'ST 1-7'], isIssuedDate: false, custom: false },
@@ -94,9 +94,15 @@ class CertsConfigEngine {
               filtered.push(dc);
             }
           });
-          // Ensure non-expiring rules like OSHA Trench Comp Person are normalized if saved previously with termMonths
+          // Ensure Driver's License has validity term and non-expiring rules are normalized
           filtered.forEach(c => {
             const cName = String(c.key || c.name || '').toLowerCase().trim();
+            if (cName === 'dl' || cName.includes("driver's license") || cName.includes('driver license')) {
+              if (!c.termMonths || c.termMonths === 0) {
+                c.termMonths = 96;
+              }
+              c.isIssuedDate = false;
+            }
             if (cName.includes('trench') && (c.isIssuedDate || c.termMonths === 0)) {
               c.termMonths = 0;
               c.isIssuedDate = true;
@@ -132,17 +138,59 @@ class CertsConfigEngine {
     const dict = {};
     this.certs.forEach(c => {
       const key = c.key || c.name;
+      const isDl = (String(key).toLowerCase().trim() === 'dl' || String(c.label || '').toLowerCase().includes('driver'));
       dict[key] = {
         key: key,
         label: c.label || key,
-        nonExpiring: c.isIssuedDate || c.termMonths === 0,
-        isIssuedDate: !!c.isIssuedDate,
-        termMonths: c.termMonths || 0,
+        nonExpiring: isDl ? false : (c.isIssuedDate || c.termMonths === 0),
+        isIssuedDate: isDl ? false : !!c.isIssuedDate,
+        termMonths: isDl ? (c.termMonths || 96) : (c.termMonths || 0),
         requirementScope: c.requirementScope || 'all',
         requiredJobClasses: Array.isArray(c.requiredJobClasses) ? c.requiredJobClasses : []
       };
     });
     return dict;
+  }
+
+  /**
+   * Returns whether a cert is strictly non-expiring
+   */
+  isNonExpiringCert(certKey) {
+    if (!certKey) return false;
+    const ck = String(certKey).toLowerCase().trim();
+    if (ck === 'dl' || ck.includes('driver') || ck.includes('mec') || ck.includes('cpr') || ck.includes('1st aid')) {
+      return false;
+    }
+    const cert = this.certs.find(c => (c.key || c.name || '').toLowerCase().trim() === ck || (c.label || '').toLowerCase().trim() === ck);
+    if (cert) {
+      return !!cert.isIssuedDate || cert.termMonths === 0;
+    }
+    return ck.includes('osha 1910') || ck.includes('crane eval') || ck.includes('bnsf') || ck.includes('msha') || ck.includes('eica');
+  }
+
+  /**
+   * Returns cycle term info for a cert
+   */
+  getCertCycleInfo(certKey) {
+    if (!certKey) return { isExpiring: true, years: 1, months: 12, label: '1-Year Cycle' };
+    const ck = String(certKey).toLowerCase().trim();
+    const isDl = ck === 'dl' || ck.includes('driver');
+    const cert = this.certs.find(c => (c.key || c.name || '').toLowerCase().trim() === ck || (c.label || '').toLowerCase().trim() === ck);
+    if (cert) {
+      if (!isDl && (cert.isIssuedDate || cert.termMonths === 0)) {
+        return { isExpiring: false, years: null, months: 0, label: 'Non-Expiring (Completion Date)' };
+      }
+      const months = isDl ? (cert.termMonths || 96) : (cert.termMonths || 12);
+      const years = months / 12;
+      const yearLabel = isDl
+        ? `Driver's License (${Number.isInteger(years) ? `${years}-Year Cycle` : `${months} Mos`})`
+        : ((years === 1) ? '1-Year Cycle (Annual)' : (Number.isInteger(years) ? `${years}-Year Cycle` : `${months} Months`));
+      return { isExpiring: true, years: years, months: months, label: yearLabel };
+    }
+    if (isDl) {
+      return { isExpiring: true, years: 8, months: 96, label: "Driver's License (8-Year Cycle)" };
+    }
+    return { isExpiring: true, years: 1, months: 12, label: '1-Year Cycle' };
   }
 
   /**

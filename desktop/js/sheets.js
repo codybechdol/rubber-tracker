@@ -776,6 +776,34 @@ class SheetNavigator {
   }
 
   /**
+   * Opens the certification date, provider, and notes modal from Expiring Certs table.
+   */
+  openCertEditModal(sheetRowIdx) {
+    const tableData = this.db ? this.db.getTable('expiring_certs') : null;
+    if (!tableData || !tableData.rows) return;
+
+    let targetIdx = -1;
+    if (tableData.rows.some(r => r._rowIdx !== undefined)) {
+      targetIdx = tableData.rows.findIndex(r => r._rowIdx === sheetRowIdx);
+    }
+    if (targetIdx === -1 && sheetRowIdx >= 2) {
+      targetIdx = sheetRowIdx - 2;
+    }
+
+    const targetRow = tableData.rows[targetIdx];
+    if (!targetRow) return;
+
+    const empName = String(targetRow['Employee Name'] || targetRow['Name'] || Object.values(targetRow)[0] || '').trim();
+    const certType = String(targetRow['Item Type'] || targetRow['Cert Type'] || targetRow['Certification'] || '').trim();
+    const acqDate = String(targetRow['Date Acquired'] || targetRow['Acquired Date'] || '').trim();
+    const expDate = String(targetRow['Expiration Date'] || targetRow['Expiration'] || '').trim();
+
+    if (empName && certType && window.employeeProfileEngine) {
+      window.employeeProfileEngine.openEditCertModal(empName, certType, acqDate || null, expDate || null);
+    }
+  }
+
+  /**
    * Returns a Set of lowercase normalized names of all departed / previous employees.
    */
   getPreviousEmployeeNamesSet() {
@@ -2980,7 +3008,8 @@ class SheetNavigator {
                      data-sheet="${this.escapeHtml(tableData.name)}">${customCellHtml !== null ? customCellHtml : this.escapeHtml(val)}</td>`;
       });
       if (this.currentSheetKey === 'expiring_certs') {
-        html += `<td style="text-align: center; width: 48px;">
+        html += `<td style="text-align: center; width: 74px; white-space: nowrap;">
+          <button class="btn btn-secondary" style="padding: 2px 7px; font-size: 11px; color: #60a5fa; border-color: rgba(96, 165, 250, 0.35); background: rgba(96, 165, 250, 0.08); cursor: pointer; margin-right: 4px;" onclick="window.sheetNavigator.openCertEditModal(${sheetRowIdx})" title="Edit certification dates, provider & notes">✏️</button>
           <button class="btn btn-secondary" style="padding: 2px 7px; font-size: 11px; color: #f87171; border-color: rgba(239, 68, 68, 0.35); background: rgba(239, 68, 68, 0.08); cursor: pointer;" onclick="window.sheetNavigator.deleteCertRow(${sheetRowIdx})" title="Delete this certification record">🗑️</button>
         </td>`;
       }
@@ -3765,7 +3794,11 @@ class SheetNavigator {
               itemTypeLower.includes('1910') || itemTypeLower.includes('bnsf') || itemTypeLower.includes('msha') ||
               itemTypeLower.includes('helo') || itemTypeLower.includes('helicopter');
 
-            if (window.certsConfig && typeof window.certsConfig.isNonExpiringCert === 'function') {
+            if (itemTypeLower === 'dl' || itemTypeLower.includes('driver') || itemTypeLower.includes('mec') || itemTypeLower.includes('cpr') || itemTypeLower.includes('1st aid')) {
+              isNonExpCert = false;
+            } else if (window.certsConfigEngine && typeof window.certsConfigEngine.isNonExpiringCert === 'function') {
+              if (window.certsConfigEngine.isNonExpiringCert(itemType)) isNonExpCert = true;
+            } else if (window.certsConfig && typeof window.certsConfig.isNonExpiringCert === 'function') {
               if (window.certsConfig.isNonExpiringCert(itemType)) isNonExpCert = true;
             }
 
@@ -3778,12 +3811,12 @@ class SheetNavigator {
               const valTrimmed = String(newVal || '').trim();
               const isValNA = valTrimmed.toUpperCase() === 'N/A' || valTrimmed.toLowerCase() === 'no date set' || !valTrimmed;
 
-              if (isValNA || isNonExpCert) {
-                const targetExp = 'N/A';
-                const targetDays = 'N/A';
+              if (isValNA) {
+                const targetExp = isNonExpCert ? 'N/A' : '';
+                const targetDays = isNonExpCert ? 'N/A' : '';
                 const curAcq = String((acqColName ? tableRow[acqColName] : '') || '').trim();
                 const hasAcq = curAcq && curAcq !== 'N/A' && curAcq !== 'No Date Set';
-                const targetStatus = hasAcq ? 'OK' : 'No Date Set';
+                const targetStatus = isNonExpCert ? (hasAcq ? 'OK' : 'No Date Set') : 'No Date Set';
 
                 if (expColName) { tableRow[expColName] = targetExp; newVal = targetExp; }
                 if (daysColName) {
@@ -3797,8 +3830,10 @@ class SheetNavigator {
                   updateRowCell(statusColName, targetStatus);
                 }
               } else {
-                const expDateObj = new Date(valTrimmed);
-                if (!isNaN(expDateObj.getTime())) {
+                const expDateObj = (window.employeeProfileEngine && typeof window.employeeProfileEngine.parseDate === 'function')
+                  ? window.employeeProfileEngine.parseDate(valTrimmed)
+                  : new Date(valTrimmed);
+                if (expDateObj && !isNaN(expDateObj.getTime())) {
                   const todayZero = new Date();
                   todayZero.setHours(0, 0, 0, 0);
                   const expZero = new Date(expDateObj);
@@ -3842,6 +3877,77 @@ class SheetNavigator {
                 tableRow[statusColName] = targetStatus;
                 await queueCell(statusColName, targetStatus);
                 updateRowCell(statusColName, targetStatus);
+              }
+            } else if (isAcqDateEdit && !isNonExpCert) {
+              const valTrimmed = String(newVal || '').trim();
+              const empName = String(tableRow['Employee Name'] || tableRow['Name'] || Object.values(tableRow)[0] || '').trim();
+
+              if (valTrimmed && valTrimmed.toUpperCase() !== 'N/A' && valTrimmed.toLowerCase() !== 'no date set') {
+                let termMonths = 12;
+                if (itemTypeLower.includes('cpr') || itemTypeLower.includes('1st aid') || itemTypeLower.includes('first aid')) {
+                  termMonths = 24; // Red Cross 2-year default
+                } else if (itemTypeLower.includes('forklift') || itemTypeLower.includes('rigging')) {
+                  termMonths = 36;
+                } else if (itemTypeLower.includes('crane')) {
+                  termMonths = 60;
+                } else if (itemTypeLower.includes('dl')) {
+                  termMonths = 96;
+                } else if (itemTypeLower.includes('mec') || itemTypeLower.includes('medical')) {
+                  termMonths = 24;
+                }
+
+                if (window.certsConfigEngine && typeof window.certsConfigEngine.getCertCycleInfo === 'function') {
+                  const cInfo = window.certsConfigEngine.getCertCycleInfo(itemType);
+                  if (cInfo && cInfo.months) termMonths = cInfo.months;
+                }
+
+                const acqDateObj = (window.employeeProfileEngine && typeof window.employeeProfileEngine.parseDate === 'function')
+                  ? window.employeeProfileEngine.parseDate(valTrimmed)
+                  : new Date(valTrimmed);
+
+                if (acqDateObj && !isNaN(acqDateObj.getTime())) {
+                  const expDateObj = new Date(acqDateObj.getTime());
+                  expDateObj.setMonth(expDateObj.getMonth() + termMonths);
+                  const expM = String(expDateObj.getMonth() + 1).padStart(2, '0');
+                  const expD = String(expDateObj.getDate()).padStart(2, '0');
+                  const expY = expDateObj.getFullYear();
+                  const calcExpStr = `${expM}/${expD}/${expY}`;
+
+                  const todayZero = new Date();
+                  todayZero.setHours(0, 0, 0, 0);
+                  const expZero = new Date(expDateObj);
+                  expZero.setHours(0, 0, 0, 0);
+                  const diffDays = Math.ceil((expZero.getTime() - todayZero.getTime()) / (1000 * 60 * 60 * 24));
+
+                  let targetStatus = 'OK';
+                  if (diffDays < 0) targetStatus = 'EXPIRED';
+                  else if (diffDays <= 30) targetStatus = 'CRITICAL';
+                  else if (diffDays <= 60) targetStatus = 'WARNING';
+                  else if (diffDays <= 90) targetStatus = 'UPCOMING';
+
+                  if (expColName) {
+                    tableRow[expColName] = calcExpStr;
+                    await queueCell(expColName, calcExpStr);
+                    updateRowCell(expColName, calcExpStr);
+                  }
+                  if (daysColName) {
+                    tableRow[daysColName] = diffDays;
+                    await queueCell(daysColName, diffDays);
+                    updateRowCell(daysColName, diffDays);
+                  }
+                  if (statusColName) {
+                    tableRow[statusColName] = targetStatus;
+                    await queueCell(statusColName, targetStatus);
+                    updateRowCell(statusColName, targetStatus);
+                  }
+                }
+
+                // Immediately popup the modal for provider selection, companion sync & notes
+                if (window.employeeProfileEngine && empName && itemType) {
+                  setTimeout(() => {
+                    window.employeeProfileEngine.openEditCertModal(empName, itemType, valTrimmed);
+                  }, 60);
+                }
               }
             }
           }
