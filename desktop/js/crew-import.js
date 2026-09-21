@@ -1469,6 +1469,37 @@ class CrewImportEngine {
       return 'Belgrade';
     }
 
+    const l = clean.toLowerCase();
+
+    // Shorthand/abbreviation mappings for Montana locations
+    if (/\b(g\s*falls|gfalls|gtf)\b/i.test(l) || l.startsWith('g falls') || l.startsWith('gfalls')) {
+      return 'Great Falls';
+    }
+    if (/\b(msla)\b/i.test(l)) {
+      return 'Missoula';
+    }
+    if (/\b(drldge|deer\s*lodge|deerlodge)\b/i.test(l)) {
+      return 'Deer Lodge';
+    }
+    if (/\b(willow\s*crk|willow\s*creek)\b/i.test(l)) {
+      return 'Willow Creek';
+    }
+    if (/\b(3\s*rivers|three\s*rivers)\b/i.test(l)) {
+      return 'Three Rivers';
+    }
+    if (/\b(3\s*forks|three\s*forks)\b/i.test(l)) {
+      return 'Three Forks';
+    }
+    if (/\b(w\s*sulphur|wss|white\s*sulphur)\b/i.test(l)) {
+      return 'White Sulphur';
+    }
+    if (/\b(c\s*falls|cfalls|columbia\s*falls)\b/i.test(l)) {
+      return 'Columbia Falls';
+    }
+    if (/\b(t\s*falls|tfalls|thompson\s*falls)\b/i.test(l)) {
+      return 'Thompson Falls';
+    }
+
     const knownCities = [
       'Big Timber', 'Three Rivers', 'Three Forks', 'Willow Creek', 'Great Falls',
       'Miles City', 'Gold Creek', 'White Sulphur', 'Cut Bank', 'Big Sky',
@@ -1481,12 +1512,11 @@ class CrewImportEngine {
       'Philipsburg', 'Superior', 'Plains', 'Thompson Falls', 'Eureka', 'Libby'
     ];
 
-    const l = clean.toLowerCase();
     for (const city of knownCities) {
       if (l.includes(city.toLowerCase())) return city.replace('St. Regis', 'St Regis');
     }
 
-    clean = clean.replace(/\b(dock|trans|tran|sub|poles|bid|facility|shop|office|gas|line|dist|distribution|transmission|substation|bid\s*job)\b/gi, '').trim();
+    clean = clean.replace(/\b(dock|trans|tran|sub|poles|bid|facility|shop|office|gas|line|dist|distribution|transmission|substation|bid\s*job|2man\s*crew|crew)\b/gi, '').trim();
     return clean || 'Helena';
   }
 
