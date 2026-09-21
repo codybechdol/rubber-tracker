@@ -1470,14 +1470,12 @@ class LocalDatabase {
       let dateColIdx = -1;
       let assignedColIdx = -1;
       let locationColIdx = -1;
-      let notesColIdx = -1;
 
       if (table.headers) {
         itemColIdx = table.headers.findIndex(h => /^(item(\s*#)?|serial(\s*#)?|glove|sleeve|blanket|mack|hv\s*tester|phasing)/i.test(String(h).trim()));
         dateColIdx = table.headers.findIndex(h => /^(date(\s*assigned)?|action\s*date|date)/i.test(String(h).trim()));
         assignedColIdx = table.headers.findIndex(h => /^(assigned\s*to|employee(\s*name)?|employee|holder)/i.test(String(h).trim()));
         locationColIdx = table.headers.findIndex(h => /^location$/i.test(String(h).trim()));
-        notesColIdx = table.headers.findIndex(h => /^(notes?|comment)/i.test(String(h).trim()));
       }
       if (itemColIdx === -1) itemColIdx = 1;
       if (dateColIdx === -1) dateColIdx = 0;

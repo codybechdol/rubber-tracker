@@ -72,7 +72,9 @@ class CrewImportEngine {
             ? JSON.parse(this.db.snapshot.configs['CREW_IMPORT_MISSING_ROSTER_ACTIONS'])
             : this.db.snapshot.configs['CREW_IMPORT_MISSING_ROSTER_ACTIONS'];
           this.savedMissingRosterActions = Object.assign({}, cfg, this.savedMissingRosterActions);
-        } catch (e) {}
+        } catch (err) {
+          console.debug('Could not load saved missing roster actions:', err);
+        }
       }
       if (this.db.snapshot.configs['CREW_IMPORT_PRIMARY_JOB_SELECTIONS']) {
         try {
@@ -80,7 +82,9 @@ class CrewImportEngine {
             ? JSON.parse(this.db.snapshot.configs['CREW_IMPORT_PRIMARY_JOB_SELECTIONS'])
             : this.db.snapshot.configs['CREW_IMPORT_PRIMARY_JOB_SELECTIONS'];
           this.savedPrimaryJobSelections = Object.assign({}, cfg, this.savedPrimaryJobSelections);
-        } catch (e) {}
+        } catch (err) {
+          console.debug('Could not load saved primary job selections:', err);
+        }
       }
     }
   }
@@ -826,13 +830,13 @@ class CrewImportEngine {
       if (/\b(on\s*hold|hold)\b/i.test(fullStatusSearch)) {
         initialStatus = 'On Hold';
         onHoldDate = todayFormatted;
-        const retMatch = (crewNote || '').match(/(?:until|thru|return(?:ing)?|back|est\.?\s*return)\s*[:\-]?\s*(\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?)/i);
+        const retMatch = (crewNote || '').match(/(?:until|thru|return(?:ing)?|back|est\.?\s*return)\s*[:-]?\s*(\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?)/i);
         if (retMatch) {
           estimatedReturn = retMatch[1];
         }
       } else if (/\b(pending\s*start|tentative|starts?)\b/i.test(fullStatusSearch)) {
         initialStatus = 'Pending Start';
-        const startMatch = (crewNote || '').match(/(?:starts?|start\s*date|beginning)\s*[:\-]?\s*(\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?)/i);
+        const startMatch = (crewNote || '').match(/(?:starts?|start\s*date|beginning)\s*[:-]?\s*(\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?)/i);
         if (startMatch) {
           startDate = startMatch[1];
         }
@@ -2178,9 +2182,11 @@ class CrewImportEngine {
       let secOccs = occurrences.filter(o => o !== primaryOcc);
 
       const empName = (explicitPrimary || occurrences[0]).emp.name;
+      const cleanEmpName = this.cleanNameForMatch(empName);
       let primaryJob = primaryOcc.emp.fullJobNumber;
       let primaryLoc = primaryOcc.crew.location;
       const rosterExplicitClass = ((explicitPrimary || occurrences[0]).emp.classification || '').trim();
+      const primaryClass = rosterExplicitClass || primaryOcc.emp.role || (existing ? this.getEmpRowClassification(existing) : '') || 'JRY';
       let secJobNum = secOccs.map(s => s.emp.fullJobNumber).filter(Boolean).join(', ');
 
       // Check if this employee has a scheduled departure in quits (e.g. Dillon Doane on 052-26 until 8/27)
@@ -2217,9 +2223,9 @@ class CrewImportEngine {
           secJobNum = occurrences.map(s => s.emp.fullJobNumber).filter(Boolean).join(', ');
         }
 
-        const cleanEmpName = this.cleanNameForMatch(dbName);
+        const cleanDbName = this.cleanNameForMatch(dbName);
         const changeItem = {
-          changeId: 'emp_' + cleanEmpName,
+          changeId: 'emp_' + cleanDbName,
           employeeName: dbName,
           rosterName: empName,
           targetRow: existing,
@@ -2454,7 +2460,7 @@ class CrewImportEngine {
       this.computedDeltas = this.computeChangeDeltas();
     }
 
-    const { newHires, rehires, matchedEmployeeChanges, quits, timeOff, missingFromRoster } = this.computedDeltas;
+    const { newHires, matchedEmployeeChanges, quits, timeOff, missingFromRoster } = this.computedDeltas;
     const empTable = this.db.getTable('employees');
     const jtTable = this.db.getTable('job_tracking');
     const histTable = this.db.getTable('employee_history');
