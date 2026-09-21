@@ -1086,6 +1086,12 @@ class InventoryManager {
       }
     }
 
+    const rawTestDate = document.getElementById('f-test-date') ? document.getElementById('f-test-date').value : '';
+    const rawDateAssigned = document.getElementById('f-date-assigned') ? document.getElementById('f-date-assigned').value : '';
+    const rawCalDate = document.getElementById('f-cal-date') ? document.getElementById('f-cal-date').value : '';
+    const rawPadExp = document.getElementById('f-pad-exp') ? document.getElementById('f-pad-exp').value : '';
+    const rawBatExp = document.getElementById('f-bat-exp') ? document.getElementById('f-bat-exp').value : '';
+
     // Process Origin Reason and Notes:
     // If Origin Reason is 'New Purchase', populate or prefix 'New' in Notes column.
     const originReason = document.getElementById('new-item-origin-reason') ? document.getElementById('new-item-origin-reason').value.trim() : 'New Purchase';
@@ -1103,12 +1109,6 @@ class InventoryManager {
         }
       }
     }
-
-    const rawTestDate = document.getElementById('f-test-date') ? document.getElementById('f-test-date').value : '';
-    const rawDateAssigned = document.getElementById('f-date-assigned') ? document.getElementById('f-date-assigned').value : '';
-    const rawCalDate = document.getElementById('f-cal-date') ? document.getElementById('f-cal-date').value : '';
-    const rawPadExp = document.getElementById('f-pad-exp') ? document.getElementById('f-pad-exp').value : '';
-    const rawBatExp = document.getElementById('f-bat-exp') ? document.getElementById('f-bat-exp').value : '';
 
     const formatToMdY = (dStr) => {
       if (!dStr) return '';
