@@ -1559,20 +1559,61 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
                 }
               }
 
-              // For Job Tracking: if itemIdentifier is a sub-crew (e.g. "040-26 (Fri-Sat)") but sheet only has "040-26",
-              // match by base job number + foreman
+              // For Job Tracking: if itemIdentifier is a sub-crew (e.g. "040-26 (Fri-Sat)") but sheet only has "040-26"
               if (targetRowIdx === -1 && idStr && (sheetName.toLowerCase().indexOf('job tracking') !== -1 || (typeof SHEET_JOB_TRACKING !== 'undefined' && sheetName === SHEET_JOB_TRACKING))) {
                 var baseJob = idStr.replace(/\s*\([^)]*\)/g, '').trim();
+                var subSuffixMatch = idStr.match(/\(([^)]+)\)/);
+                var subSuffix = subSuffixMatch ? subSuffixMatch[1].trim().toLowerCase() : '';
                 var foremanColIdx = headers.indexOf('Foreman');
                 if (foremanColIdx === -1) foremanColIdx = 2;
+                var jobNameColIdx = headers.indexOf('Job Name');
+                var schedColIdx = headers.indexOf('Work Schedule');
                 var targetForeman = fields && fields['Foreman'] ? String(fields['Foreman']).trim().toLowerCase() : '';
-                if (baseJob && targetForeman) {
-                  for (var r = 1; r < data.length; r++) {
-                    var c0 = String(data[r][0] || '').trim().toLowerCase();
-                    var cForeman = String(data[r][foremanColIdx] || '').trim().toLowerCase();
-                    if (c0 === baseJob && (cForeman === targetForeman || cForeman.indexOf(targetForeman) !== -1 || targetForeman.indexOf(cForeman) !== -1)) {
-                      targetRowIdx = r + 1;
-                      break;
+
+                if (baseJob) {
+                  // Strategy 1: Match base job + foreman
+                  if (targetForeman) {
+                    for (var r = 1; r < data.length; r++) {
+                      var c0 = String(data[r][0] || '').trim().toLowerCase();
+                      var cForeman = String(data[r][foremanColIdx] || '').trim().toLowerCase();
+                      if (c0 === baseJob && (cForeman === targetForeman || cForeman.indexOf(targetForeman) !== -1 || targetForeman.indexOf(cForeman) !== -1)) {
+                        targetRowIdx = r + 1;
+                        break;
+                      }
+                    }
+                  }
+
+                  // Strategy 2: Match base job + sub-crew schedule tokens in Job Name or Work Schedule (e.g. "Fri & Sat" or "Fri-Sat")
+                  if (targetRowIdx === -1 && subSuffix) {
+                    var suffixTokens = subSuffix.replace(/[^a-z0-9]/g, ' ').split(/\s+/).filter(Boolean);
+                    for (var r = 1; r < data.length; r++) {
+                      var c0 = String(data[r][0] || '').trim().toLowerCase();
+                      if (c0 === baseJob) {
+                        var cJobName = (jobNameColIdx !== -1 && data[r][jobNameColIdx]) ? String(data[r][jobNameColIdx]).toLowerCase() : '';
+                        var cSched = (schedColIdx !== -1 && data[r][schedColIdx]) ? String(data[r][schedColIdx]).toLowerCase() : '';
+                        var rowText = cJobName + ' ' + cSched;
+                        var matchesAllTokens = suffixTokens.length > 0 && suffixTokens.every(function(t) { return rowText.indexOf(t) !== -1; });
+                        if (matchesAllTokens) {
+                          targetRowIdx = r + 1;
+                          break;
+                        }
+                      }
+                    }
+                  }
+
+                  // Strategy 3: If only one other row exists for baseJob besides a primary Mon-Thu crew
+                  if (targetRowIdx === -1) {
+                    var baseRows = [];
+                    for (var r = 1; r < data.length; r++) {
+                      var c0 = String(data[r][0] || '').trim().toLowerCase();
+                      if (c0 === baseJob) {
+                        baseRows.push(r + 1);
+                      }
+                    }
+                    if (baseRows.length === 1) {
+                      targetRowIdx = baseRows[0];
+                    } else if (baseRows.length > 1) {
+                      targetRowIdx = baseRows[baseRows.length - 1];
                     }
                   }
                 }
@@ -1589,6 +1630,17 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
               if (targetRowIdx !== -1) {
                 var rowVals = (data[targetRowIdx - 1] || []).slice();
                 var dirtyCells = [];
+
+                // Option A: If this is a sub-crew in Job Tracking, ensure Col 0 has the sub-crew Job Number
+                if (sheetName.toLowerCase().indexOf('job tracking') !== -1 || (typeof SHEET_JOB_TRACKING !== 'undefined' && sheetName === SHEET_JOB_TRACKING)) {
+                  var curCol0 = String(rowVals[0] || '').trim();
+                  var desiredJobNum = String((fields && fields['Job Number']) || mut.itemIdentifier || '').trim();
+                  if (desiredJobNum && curCol0 !== desiredJobNum && desiredJobNum.indexOf('(') !== -1) {
+                    rowVals[0] = desiredJobNum;
+                    if (data[targetRowIdx - 1]) data[targetRowIdx - 1][0] = desiredJobNum;
+                    dirtyCells.push({ col: 1, val: desiredJobNum });
+                  }
+                }
                 for (var colName in fields) {
                   var fldVal = fields[colName];
                   var fldLower = colName.toLowerCase().trim();

@@ -3285,10 +3285,13 @@ class CrewImportEngine {
           if (jobRow['Start Date'] !== undefined) updatedJobFields['Start Date'] = jobRow['Start Date'];
           if (jobRow['Actual End Date'] !== undefined) updatedJobFields['Actual End Date'] = jobRow['Actual End Date'];
 
+          const jtRowIdx = jobRow._rowIdx || (jtTable.rows ? jtTable.rows.indexOf(jobRow) + 2 : null);
+
           await this.db.addMutation({
             action: 'UPDATE_ROW',
             sheetName: jtTable.name,
             tableKey: 'job_tracking',
+            row: jtRowIdx,
             itemIdentifier: crew.jobNumber,
             updatedFields: updatedJobFields
           });
