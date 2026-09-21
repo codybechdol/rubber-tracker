@@ -80,6 +80,23 @@ class SnapshotStorage {
 }
 
 class LocalDatabase {
+  /**
+   * Strips the "New" note marker from a notes string while preserving all other notes
+   * (e.g. "New, Visual" -> "Visual", "New" -> "")
+   */
+  static stripNewNote(notes) {
+    if (!notes) return '';
+    let cleaned = String(notes)
+      .replace(/(^|\s*[,;]\s*)\bnew\b(\s*[,;]\s*|$)/gi, (match, p1, p2) => {
+        if (p1 && p2 && p1.includes(',') && p2.includes(',')) return ', ';
+        if (p1 && p2 && p1.includes(';') && p2.includes(';')) return '; ';
+        return '';
+      })
+      .trim();
+    cleaned = cleaned.replace(/^[,;]\s*/, '').replace(/\s*[,;]$/, '').trim();
+    return cleaned;
+  }
+
   constructor() {
     this.snapshot = null;
     this.outbox = [];
@@ -606,6 +623,42 @@ class LocalDatabase {
           // Clean 'Not New' or 'New Purchase' if written directly to active notes column
           if (r['Notes'] === 'Not New' || r['Notes'] === 'New Purchase') {
             r['Notes'] = '';
+          }
+
+          // Annual rollover for 'New' notes:
+          // Once the purchase year has completed, 'New' falls off so each year starts fresh.
+          if (r['Notes'] && /\bnew\b/i.test(r['Notes'])) {
+            const currentYear = new Date().getFullYear();
+            let itemYear = null;
+            const itemNum = String(r['Serial #'] || r['Item #'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['MACK'] || r['Model'] || Object.values(r)[0] || '').trim();
+            const histKey = tableKey + '_history';
+            const histTable = (this.snapshot && this.snapshot.tables) ? this.snapshot.tables[histKey] : null;
+            if (histTable && histTable.rows) {
+              const hRows = histTable.rows.filter(hr => {
+                const hn = String(hr['Item #'] || hr['Model'] || hr['Serial #'] || hr['Glove'] || hr['Sleeve'] || Object.values(hr)[1] || Object.values(hr)[0] || '').trim().toLowerCase();
+                return hn === itemNum.toLowerCase();
+              });
+              if (hRows.length > 0) {
+                let earliestTime = Infinity;
+                for (const hr of hRows) {
+                  const dStr = String(hr['Date Assigned'] || hr['Date'] || Object.values(hr)[0] || '').trim();
+                  const pd = new Date(dStr);
+                  if (!isNaN(pd.getTime()) && pd.getTime() < earliestTime) {
+                    earliestTime = pd.getTime();
+                    itemYear = pd.getFullYear();
+                  }
+                }
+              }
+            }
+            if (!itemYear) {
+              const dateStr = String(r['Date Assigned'] || r['Test Date'] || r['Calibration Date'] || '').trim();
+              const pd = new Date(dateStr);
+              if (!isNaN(pd.getTime())) itemYear = pd.getFullYear();
+            }
+            if (itemYear && itemYear < currentYear) {
+              r['Notes'] = LocalDatabase.stripNewNote(r['Notes']);
+              this.syncRowToRawGrid(table, r);
+            }
           }
 
           // Specific healing for OH-105

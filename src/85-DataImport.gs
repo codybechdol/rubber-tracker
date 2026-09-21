@@ -3826,14 +3826,61 @@ function applyFiscalYearTransition(oldFY, newFY, crewsToTransition) {
     }
   }
 
+  // Also clear completed year "New" notes from inventory so the new year starts fresh
+  var invSheets = [
+    typeof SHEET_GLOVES !== 'undefined' ? SHEET_GLOVES : 'Gloves',
+    typeof SHEET_SLEEVES !== 'undefined' ? SHEET_SLEEVES : 'Sleeves',
+    typeof SHEET_BLANKETS !== 'undefined' ? SHEET_BLANKETS : 'Blankets',
+    typeof SHEET_MACKS !== 'undefined' ? SHEET_MACKS : 'MACKs',
+    typeof SHEET_HV_TESTERS !== 'undefined' ? SHEET_HV_TESTERS : 'HV Testers',
+    typeof SHEET_PHASING_SETS !== 'undefined' ? SHEET_PHASING_SETS : 'Phasing Sets',
+    typeof SHEET_AED !== 'undefined' ? SHEET_AED : 'AED',
+    typeof SHEET_GROUNDS !== 'undefined' ? SHEET_GROUNDS : 'Grounds',
+    typeof SHEET_HOT_STICKS !== 'undefined' ? SHEET_HOT_STICKS : 'Hot Sticks'
+  ];
+  var newNotesCleared = 0;
+  for (var sIdx = 0; sIdx < invSheets.length; sIdx++) {
+    var invSheet = ss.getSheetByName(invSheets[sIdx]);
+    if (!invSheet || invSheet.getLastRow() < 2) continue;
+    var invData = invSheet.getDataRange().getValues();
+    var invHeaders = invData[0];
+    var notesCol = invHeaders.indexOf('Notes') + 1;
+    if (notesCol === 0) continue;
+    for (var r = 1; r < invData.length; r++) {
+      var noteVal = String(invData[r][notesCol - 1] || '').trim();
+      if (/\bnew\b/i.test(noteVal)) {
+        var cleanedNote = noteVal
+          .replace(/(^|\s*[,;]\s*)\bnew\b(\s*[,;]\s*|$)/gi, function(match, p1, p2) {
+            if (p1 && p2 && p1.indexOf(',') !== -1 && p2.indexOf(',') !== -1) return ', ';
+            if (p1 && p2 && p1.indexOf(';') !== -1 && p2.indexOf(';') !== -1) return '; ';
+            return '';
+          })
+          .trim()
+          .replace(/^[,;]\s*/, '')
+          .replace(/\s*[,;]$/, '')
+          .trim();
+        if (cleanedNote !== noteVal) {
+          invSheet.getRange(r + 1, notesCol).setValue(cleanedNote);
+          newNotesCleared++;
+        }
+      }
+    }
+  }
+  if (newNotesCleared > 0) {
+    Logger.log('applyFiscalYearTransition: Cleared ' + newNotesCleared + ' completed year "New" notes across inventory');
+  }
+
   Logger.log('=== applyFiscalYearTransition END ===');
-  Logger.log('Updated ' + updatedCount + ' employees, ' + trainingUpdated + ' training rows');
+  Logger.log('Updated ' + updatedCount + ' employees, ' + trainingUpdated + ' training rows, ' + newNotesCleared + ' inventory notes');
 
   logEvent('Fiscal Year Transition: -' + oldFY + ' to -' + newFY + ', ' + updatedCount + ' employees updated');
 
   var message = '✅ Fiscal Year Transition Complete!\n\n';
   message += '📝 Updated ' + updatedCount + ' employee job number(s)\n';
   message += '📋 Updated ' + trainingUpdated + ' training tracking row(s)\n';
+  if (newNotesCleared > 0) {
+    message += '🧤 Reset ' + newNotesCleared + ' inventory "New" note(s) for fresh year\n';
+  }
   message += '📋 Logged ' + updatedEmployees.length + ' history entries';
 
   return { success: true, message: message };

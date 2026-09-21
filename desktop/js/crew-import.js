@@ -18,6 +18,8 @@ class CrewImportEngine {
     this.computedDeltas = null;
     this.savedLeadSelections = {};
     this.manualLeadOverrides = {};
+    this.savedMissingRosterActions = {};
+    this.savedPrimaryJobSelections = {};
     this.deselectedChangeIds = new Set();
     this.missingRosterConfigs = new Map();
     this.activeStep = 1; // 1: Upload, 2: Review Crews, 3: Configure New Hires, 4: Review Changes & Apply
@@ -44,6 +46,43 @@ class CrewImportEngine {
     } catch (e) {
       console.warn('Could not load saved crew lead selections:', e);
     }
+
+    try {
+      const savedMissing = localStorage.getItem('CREW_IMPORT_MISSING_ROSTER_ACTIONS');
+      if (savedMissing) {
+        this.savedMissingRosterActions = JSON.parse(savedMissing) || {};
+      }
+    } catch (e) {
+      console.warn('Could not load saved missing roster actions:', e);
+    }
+
+    try {
+      const savedPrimary = localStorage.getItem('CREW_IMPORT_PRIMARY_JOB_SELECTIONS');
+      if (savedPrimary) {
+        this.savedPrimaryJobSelections = JSON.parse(savedPrimary) || {};
+      }
+    } catch (e) {
+      console.warn('Could not load saved primary job selections:', e);
+    }
+
+    if (this.db?.snapshot?.configs) {
+      if (this.db.snapshot.configs['CREW_IMPORT_MISSING_ROSTER_ACTIONS']) {
+        try {
+          const cfg = typeof this.db.snapshot.configs['CREW_IMPORT_MISSING_ROSTER_ACTIONS'] === 'string'
+            ? JSON.parse(this.db.snapshot.configs['CREW_IMPORT_MISSING_ROSTER_ACTIONS'])
+            : this.db.snapshot.configs['CREW_IMPORT_MISSING_ROSTER_ACTIONS'];
+          this.savedMissingRosterActions = Object.assign({}, cfg, this.savedMissingRosterActions);
+        } catch (e) {}
+      }
+      if (this.db.snapshot.configs['CREW_IMPORT_PRIMARY_JOB_SELECTIONS']) {
+        try {
+          const cfg = typeof this.db.snapshot.configs['CREW_IMPORT_PRIMARY_JOB_SELECTIONS'] === 'string'
+            ? JSON.parse(this.db.snapshot.configs['CREW_IMPORT_PRIMARY_JOB_SELECTIONS'])
+            : this.db.snapshot.configs['CREW_IMPORT_PRIMARY_JOB_SELECTIONS'];
+          this.savedPrimaryJobSelections = Object.assign({}, cfg, this.savedPrimaryJobSelections);
+        } catch (e) {}
+      }
+    }
   }
 
   saveLeadSelection(jobNumber, leadName) {
@@ -53,6 +92,36 @@ class CrewImportEngine {
       localStorage.setItem('CREW_IMPORT_LEAD_SELECTIONS', JSON.stringify(this.savedLeadSelections));
     } catch (e) {
       console.warn('Could not save crew lead selection:', e);
+    }
+  }
+
+  saveMissingRosterAction(employeeName, action) {
+    if (!employeeName) return;
+    const cleanKey = this.cleanNameForMatch(employeeName);
+    if (!this.savedMissingRosterActions) this.savedMissingRosterActions = {};
+    this.savedMissingRosterActions[cleanKey] = action;
+    try {
+      localStorage.setItem('CREW_IMPORT_MISSING_ROSTER_ACTIONS', JSON.stringify(this.savedMissingRosterActions));
+    } catch (e) {
+      console.warn('Could not save missing roster action:', e);
+    }
+    if (this.db?.snapshot?.configs) {
+      this.db.snapshot.configs['CREW_IMPORT_MISSING_ROSTER_ACTIONS'] = this.savedMissingRosterActions;
+    }
+  }
+
+  savePrimaryJobSelection(employeeName, targetJobNumber) {
+    if (!employeeName || !targetJobNumber) return;
+    const cleanKey = this.cleanNameForMatch(employeeName);
+    if (!this.savedPrimaryJobSelections) this.savedPrimaryJobSelections = {};
+    this.savedPrimaryJobSelections[cleanKey] = targetJobNumber;
+    try {
+      localStorage.setItem('CREW_IMPORT_PRIMARY_JOB_SELECTIONS', JSON.stringify(this.savedPrimaryJobSelections));
+    } catch (e) {
+      console.warn('Could not save primary job selection:', e);
+    }
+    if (this.db?.snapshot?.configs) {
+      this.db.snapshot.configs['CREW_IMPORT_PRIMARY_JOB_SELECTIONS'] = this.savedPrimaryJobSelections;
     }
   }
 
@@ -100,18 +169,20 @@ class CrewImportEngine {
   getNewHireConfig(empName, nh = null) {
     if (!this.newHireConfigs[empName]) {
       const defaultHireDate = this.rosterDate || this.parseRosterDate(this.selectedSheet);
-      const gloveDefault = nh?.historyRecord ? (nh.historyRecord['Glove Size'] || 'N/A') : 'N/A';
-      const sleeveDefault = nh?.historyRecord ? (nh.historyRecord['Sleeve Size'] || 'N/A') : 'N/A';
-      const phoneDefault = nh?.historyRecord ? (nh.historyRecord['Phone Number'] || '') : '';
-      const classDefault = nh?.classification || nh?.role || '1 AP';
+      const prevRec = nh?.historyRecord || nh?.targetRow;
+      const gloveDefault = prevRec ? (prevRec['Glove Size'] || 'N/A') : 'N/A';
+      const sleeveDefault = prevRec ? (prevRec['Sleeve Size'] || 'N/A') : 'N/A';
+      const phoneDefault = prevRec ? (prevRec['Phone Number'] || prevRec['Phone'] || '') : '';
+      const emailDefault = prevRec ? (prevRec['Email Address'] || prevRec['Email'] || prevRec['MP Email'] || '') : '';
+      const classDefault = nh?.classification || nh?.role || (prevRec ? (prevRec['Job Classification'] || prevRec['Classification'] || prevRec['Role']) : '') || '1 AP';
 
       this.newHireConfigs[empName] = {
         name: empName,
         hireDate: defaultHireDate,
-        gloveSize: gloveDefault,
-        sleeveSize: sleeveDefault,
+        gloveSize: String(gloveDefault).trim() || 'N/A',
+        sleeveSize: String(sleeveDefault).trim() || 'N/A',
         phone: phoneDefault,
-        email: '',
+        email: emailDefault,
         classification: classDefault
       };
     }
@@ -376,19 +447,22 @@ class CrewImportEngine {
     // Ignore pure job numbers (e.g. "013-26", "Helena Dock 009-26 4 10's M-Th")
     if (clean.match(/\d{3}-\d{2}/)) return false;
 
-    // Ignore committee & non-crew sections
-    if (clean.match(/\b(Safety\s*Committ?ee|MSLCAT|Subcommittee|Committee|Safety\s*Meeting|Interviews|St\s*Regis|Facility|Shop|Yard|Office\s*Notes)\b/i)) return false;
+    // Ignore committee & non-crew section headers that start with known header titles
+    if (clean.match(/^(Safety\s*Committ?ee|MSLCAT|Subcommittee|Committee|Safety\s*Meeting|Interviews|St\s*Regis|Facility|Shop\s*Notes?|Yard\b|Office\s*Notes)/i)) return false;
 
-    // Ignore note continuations, appointments, and delegates
-    if (clean.match(/^(&|and\b|off\b|back\b|wks?\b|as\b|next\b|appointment|due\b|baby\b|resume\b|on hold\b|starting\b|tentative\b|shop\s*note|starts?\b|possible\b|digging\b)/i)) return false;
-    if (clean.match(/\b(Appointment|Delegate|Convention|shoulder\s*recovery)\b/i)) return false;
+    // Ignore note continuations, standalone appointments, and delegates (lines wrapped or starting with continuation tokens)
+    if (clean.match(/^(&|and\b|w\/\b|off\b|back\b|wks?\b|as\b|next\b|appointment\b|delegate\b|convention\b|due\b|baby\b|resume\b|on hold\b|starting\b|tentative\b|shop\s*note|starts?\b|possible\b|digging\b|shoulder\s*recovery\b)/i)) return false;
 
     // Ignore date announcements & notes (e.g. "February 2027, possibly sooner", "Starts 8-31 Mon", "TBD")
     if (clean.match(/\b(January|February|March|April|May|June|July|August|September|October|November|December)\b.*\b(202\d|sooner|later|possibly|tentative|TBD)\b/i)) return false;
     if (clean.match(/^(\d{1,2}[-/]\d{1,2}[-/]\d{2,4}|TBD|Pending|N\/A)$/i)) return false;
 
-    // Ignore dock / sub dock / bid header titles
-    if (clean.match(/\b(Dock|Sub\s*Dock|Tran\s*Dock|Bid)\b/i)) return false;
+    // Ignore dock / sub dock / bid header titles (e.g. "Willow Crk Sub Dock", "Deer Lodge City Sub Dock", "Florence Trans Bid")
+    // Only reject if it ends with Dock/Bid and does NOT contain a recognized trade role
+    if (clean.match(/\b(Dock|Sub\s*Dock|Tran\s*Dock|Bid)\s*$/i) &&
+        !clean.match(/\b(SUP|GF|F|GTO\s*F|GTO|JL|JRY|WT|EO\s*[12]|EO[12]|\d+\s*ap|\d+\s*st|Op|Operator|Apprentice|Trainee|NEW\s*HIRE|NEWHIRE)\b/i)) {
+      return false;
+    }
 
     // Ignore known headers and non-employee announcements
     if (clean.match(/^(NWE|Aprox|Tentative|Completed|On Hold|Schedule|Released|Layoff|Dock|Sub|Trans)\b/i)) return false;
@@ -403,14 +477,14 @@ class CrewImportEngine {
     // Recognize if it contains recognized roles, apprentices, operators, or annotations
     if (clean.match(/\b(SUP|GF|F|GTO\s*F|GTO|JL|JRY|WT|EO\s*[12]|EO[12]|\d+\s*ap|\d+\s*st|Op|Operator|Apprentice|Trainee|NEW\s*HIRE|NEWHIRE)\b/i)) {
       const firstWord = clean.split(/\s+/)[0];
-      if (firstWord.match(/^(off|back|next|wks?|as|due|baby|starts?|on|resume|set|fly|approved|to|from|open|need|call|tbd|vacant|unassigned|placeholder|tbh|coming|work|possible|possibly|tentative|digging|another)$/i)) return false;
+      if (firstWord.match(/^(off|back|next|wks?|as|due|baby|starts?|on|resume|set|fly|approved|to|from|open|need|call|tbd|vacant|unassigned|placeholder|tbh|coming|work|possible|possibly|tentative|digging|another|safety|mslcat|subcommittee|committee|interview|interviews|crane|dock|trans|sub)$/i)) return false;
       return true;
     }
 
     // Name pattern: At least two words (First Last)
     const words = clean.split(/\s+/).filter(w => /^[A-Za-z]/.test(w));
     if (words.length < 2) return false;
-    if (words[0].match(/^(off|back|next|wks?|as|due|baby|starts?|on|resume|set|fly|approved|meeting|shop|to|from|open|need|call|tbd|vacant|unassigned|placeholder|tbh|coming|work|possible|possibly|tentative|digging|another)$/i)) return false;
+    if (words[0].match(/^(off|back|next|wks?|as|due|baby|starts?|on|resume|set|fly|approved|meeting|shop|to|from|open|need|call|tbd|vacant|unassigned|placeholder|tbh|coming|work|possible|possibly|tentative|digging|another|safety|mslcat|subcommittee|committee|interview|interviews|crane|dock|trans|sub)$/i)) return false;
     return true;
   }
 
@@ -468,16 +542,36 @@ class CrewImportEngine {
       }
     }
 
-    // Fallback: If no role token matched, check if there is a note separator (e.g. "Brian Dixon off wk 9-14")
+    // Fallback: If no role token matched, check if there is a note separator (e.g. "Brian Dixon off wk 9-14", "JT Kale Mon 9-21 Only")
     if (!role) {
-      const noteSep = clean.match(/\b(off\b|last day\b|Quit\b|Quitting\b|Resign\b|Crane\s*Class\b|Light\s*Duty\b|Baby\s*due\b|injury\b|recovery\b|starts?\b|resume\b)/i);
-      if (noteSep && noteSep.index !== undefined) {
-        const potentialName = clean.substring(0, noteSep.index).trim();
-        if (potentialName.length >= 2) {
+      // 1. Check for bracketed or parenthesized note at end: e.g. "JT Kale (Mon 9-21 Only)" or "JT Kale [Mon Only]"
+      const parenMatch = clean.match(/\s*[([]([^)\]]+)[)\]]\s*$/);
+      if (parenMatch && parenMatch.index !== undefined) {
+        const potentialName = clean.substring(0, parenMatch.index).trim();
+        const words = potentialName.split(/\s+/).filter(w => /^[A-Za-z]/.test(w));
+        if (words.length >= 2) {
           namePart = potentialName;
-          notesPart = clean.substring(noteSep.index).trim();
+          notesPart = parenMatch[1].trim();
         }
       }
+
+      // 2. Keyword & Schedule separator (day-of-week, dates, off/covering/etc.)
+      if (!notesPart) {
+        const noteSep = clean.match(/\b(off\b|last day\b|Quit\b|Quitting\b|Resign\b|Crane\s*Class\b|Light\s*Duty\b|Baby\s*due\b|injury\b|recovery\b|starts?\b|resume\b|covering\b|split\b|secondary\b|temp\b|\d{1,2}[-/]\d{1,2}|(?:Mon|Monday|Tue|Tues|Tuesday|Wed|Wednesday|Thu|Thur|Thurs|Thursday|Fri|Friday|Sat|Saturday|Sun|Sunday)\b)/i);
+        if (noteSep && noteSep.index !== undefined) {
+          const potentialName = clean.substring(0, noteSep.index).trim();
+          const words = potentialName.split(/\s+/).filter(w => /^[A-Za-z]/.test(w));
+          if (words.length >= 2) {
+            namePart = potentialName;
+            notesPart = clean.substring(noteSep.index).trim();
+          }
+        }
+      }
+    }
+
+    // Clean notesPart punctuation
+    if (notesPart) {
+      notesPart = notesPart.replace(/^[,\s()[\]-]+|[,\s()[\]-]+$/g, '').trim();
     }
 
     // 3. Clean Name
@@ -496,7 +590,7 @@ class CrewImportEngine {
     }
 
     // 4. Secondary / Split / Bid note detection
-    const hasSecondaryNote = /\b(Crew\s+\d+[-/]\d+|\bMon\s*Only\b|\bTue\s*Only\b|\bWed\s*Only\b|\bThu\s*Only\b|\bFri\s*Only\b|\bSat\s*Only\b|\bSun\s*Only\b|Mon\s*-\s*Wed|Thurs?\s*&\s*Fri|Fri\s*&\s*Sat|Secondary|Split|Temp|Covering)\b/i.test(notesPart);
+    const hasSecondaryNote = /\b(Crew\s+\d+[-/]\d+|(?:Mon|Monday|Tue|Tues|Tuesday|Wed|Wednesday|Thu|Thur|Thurs|Thursday|Fri|Friday|Sat|Saturday|Sun|Sunday)\w*\b.*?(?:Only|thru|to|-|&|\d{1,2}[-/]\d{1,2})|\b(?:Mon|Monday|Tue|Tues|Tuesday|Wed|Wednesday|Thu|Thur|Thurs|Thursday|Fri|Friday|Sat|Saturday|Sun|Sunday)\s*Only\b|Mon\s*-\s*Wed|Thurs?\s*&\s*Fri|Fri\s*&\s*Sat|Secondary|Split|Temp|Covering)\b/i.test(notesPart);
 
     return {
       originalText: cellText,
@@ -659,8 +753,26 @@ class CrewImportEngine {
         }
       }
 
-      // Ignore placeholder bid cards with 0 valid employees
-      if (employees.length === 0) {
+      // Check if this crew indicates a status change (On Hold, Pending Start, Completed) or is an existing tracked job
+      const isStatusIndicator = /\b(on\s*hold|hold|pending\s*start|tentative|starts?|completed|closed|done|cancelled)\b/i.test(crewNote) ||
+                                /\b(on\s*hold|hold|pending\s*start|tentative|starts?|completed|closed|done)\b/i.test(header.fullText);
+      const jtTable = this.db ? (this.db.getTable('job_tracking') || this.db.getTable('Job Tracking')) : null;
+      let existingJobInDb = null;
+      if (jtTable && jtTable.rows) {
+        existingJobInDb = jtTable.rows.find(r => {
+          let jNum = '';
+          for (const k of Object.keys(r)) {
+            const kl = k.toLowerCase().trim();
+            if (kl === 'job number' || kl === 'job #' || kl === 'job') { jNum = String(r[k] || '').trim(); break; }
+          }
+          if (!jNum) jNum = String(Object.values(r)[0] || '').trim();
+          return jNum === header.jobNumber;
+        });
+      }
+      const isKnownJob = !!existingJobInDb;
+
+      // Ignore placeholder bid cards with 0 valid employees only if they aren't status changes or known jobs
+      if (employees.length === 0 && !isStatusIndicator && !isKnownJob) {
         continue;
       }
 
@@ -702,6 +814,46 @@ class CrewImportEngine {
       const physicalLoc = this.normalizeLocation(header.locationName);
       const schedDays = this.getScheduleFlags(sched.label);
 
+      let initialStatus = 'Active';
+      let onHoldDate = '';
+      let estimatedReturn = '';
+      let startDate = '';
+      let actualEndDate = '';
+
+      const todayFormatted = this.rosterDateFormatted || new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+      const fullStatusSearch = `${header.fullText} ${crewNote}`.toLowerCase();
+
+      if (/\b(on\s*hold|hold)\b/i.test(fullStatusSearch)) {
+        initialStatus = 'On Hold';
+        onHoldDate = todayFormatted;
+        const retMatch = (crewNote || '').match(/(?:until|thru|return(?:ing)?|back|est\.?\s*return)\s*[:\-]?\s*(\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?)/i);
+        if (retMatch) {
+          estimatedReturn = retMatch[1];
+        }
+      } else if (/\b(pending\s*start|tentative|starts?)\b/i.test(fullStatusSearch)) {
+        initialStatus = 'Pending Start';
+        const startMatch = (crewNote || '').match(/(?:starts?|start\s*date|beginning)\s*[:\-]?\s*(\d{1,2}[./-]\d{1,2}(?:[./-]\d{2,4})?)/i);
+        if (startMatch) {
+          startDate = startMatch[1];
+        }
+      } else if (/\b(completed|closed|done|ended)\b/i.test(fullStatusSearch)) {
+        initialStatus = 'Completed';
+        actualEndDate = todayFormatted;
+      } else if (employees.length === 0 && isKnownJob && existingJobInDb) {
+        const existingStatus = String(existingJobInDb['Status'] || '').trim();
+        if (existingStatus) {
+          initialStatus = existingStatus;
+          if (existingStatus === 'On Hold') {
+            onHoldDate = existingJobInDb['Put On Hold Date'] || todayFormatted;
+            estimatedReturn = existingJobInDb['Estimated Return'] || '';
+          } else if (existingStatus === 'Pending Start') {
+            startDate = existingJobInDb['Start Date'] || '';
+          } else if (existingStatus === 'Completed') {
+            actualEndDate = existingJobInDb['Actual End Date'] || todayFormatted;
+          }
+        }
+      }
+
       this.parsedCrews.push({
         jobNumber: header.jobNumber,
         location: physicalLoc,
@@ -712,11 +864,11 @@ class CrewImportEngine {
         scheduleLabel: sched.label,
         scheduleBadgeColor: sched.badgeColor,
         scheduleDays: schedDays,
-        status: 'Active',
-        startDate: '',
-        onHoldDate: '',
-        estimatedReturn: '',
-        actualEndDate: '',
+        status: initialStatus,
+        startDate: startDate,
+        onHoldDate: onHoldDate,
+        estimatedReturn: estimatedReturn,
+        actualEndDate: actualEndDate,
         excluded: false,
         employees: employees
       });
@@ -736,6 +888,9 @@ class CrewImportEngine {
 
     // 6. Parse bottom special sections (Quits, Time Off, Light Duty)
     this.specialCircumstances = this.parseSpecialSections(data, specialHeaders, [...crewHeaders, ...otherSectionHeaders]);
+
+    // 7. Auto-detect & resolve conflicts where employees in full-week Time Off / Departure were left on crews
+    this.detectAndResolveTimeOffConflicts();
 
     return this.parsedCrews;
   }
@@ -905,10 +1060,22 @@ class CrewImportEngine {
         // Find which occurrence is Primary vs Secondary
         let primaryIdx = -1;
 
+        // 0. Check if user previously chose a preferred primary job for this employee
+        const cleanEmpName = this.cleanNameForMatch(occurrences[0].emp.name);
+        const savedPrimaryJob = this.savedPrimaryJobSelections ? this.savedPrimaryJobSelections[cleanEmpName] : null;
+        if (savedPrimaryJob) {
+          const matchedIdx = occurrences.findIndex(occ => this.areJobNumbersEquivalent(occ.crew.jobNumber, savedPrimaryJob));
+          if (matchedIdx !== -1) {
+            primaryIdx = matchedIdx;
+          }
+        }
+
         // 1. If an occurrence has secondary note (e.g. "Crew 8-24 Mon Only", "Mon Only", "Secondary", "Split"), other is Primary
-        const nonSecOccs = occurrences.filter(occ => !occ.emp.hasSecondaryNote && !occ.emp.notes.toLowerCase().includes('only'));
-        if (nonSecOccs.length > 0) {
-          primaryIdx = occurrences.indexOf(nonSecOccs[0]);
+        if (primaryIdx === -1) {
+          const nonSecOccs = occurrences.filter(occ => !occ.emp.hasSecondaryNote && !occ.emp.notes.toLowerCase().includes('only'));
+          if (nonSecOccs.length > 0) {
+            primaryIdx = occurrences.indexOf(nonSecOccs[0]);
+          }
         }
 
         // 2. If neither or all have notes, check schedule type (Primary schedule e.g. Mon-Thu/Tue-Fri wins over Split/Secondary)
@@ -938,8 +1105,42 @@ class CrewImportEngine {
           primaryJobNumber: occurrences[primaryIdx].crew.jobNumber
         });
       } else {
-        occurrences[0].emp.isPrimary = true;
-        occurrences[0].emp.isSecondary = false;
+        const single = occurrences[0];
+        // Check if this single occurrence has a secondary/partial schedule note (e.g. "Mon 9-21 Only", "Mon Only")
+        // and matches an existing active employee in the database on another job!
+        let matchedDbJob = null;
+        if (single.emp.hasSecondaryNote || /\b(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\w*\b.*?(?:Only|thru|to|-|&|\d{1,2}[-/]\d{1,2})/i.test(single.emp.notes)) {
+          const empTable = this.db ? this.db.getTable('employees') : null;
+          if (empTable && empTable.rows) {
+            const matchedEmp = this.findMatchingEmployee(single.emp.name, empTable.rows);
+            if (matchedEmp) {
+              const currentJob = this.getEmpRowJobNumber(matchedEmp);
+              const currentLoc = (this.getEmpRowLocation(matchedEmp) || '').toLowerCase();
+              const isPrev = currentLoc.includes('previous') || String(matchedEmp['Status'] || '').toLowerCase().includes('previous');
+              if (currentJob && !isPrev && currentJob !== single.crew.jobNumber && !currentJob.startsWith(single.crew.jobNumber + '.')) {
+                matchedDbJob = currentJob;
+              }
+            }
+          }
+        }
+
+        if (matchedDbJob) {
+          single.emp.isPrimary = false;
+          single.emp.isSecondary = true;
+          const baseDbJob = matchedDbJob.replace(/\.\d+$/, '');
+          single.emp.otherJobNumber = baseDbJob;
+          single.emp.otherFullJobNumber = matchedDbJob;
+
+          this.multiCrewEmployees.push({
+            employeeName: single.emp.name,
+            occurrences: [single],
+            primaryJobNumber: baseDbJob,
+            isDbPrimary: true
+          });
+        } else {
+          single.emp.isPrimary = true;
+          single.emp.isSecondary = false;
+        }
       }
     }
   }
@@ -955,6 +1156,7 @@ class CrewImportEngine {
       occ.emp.isSecondary = !isPrimary;
     });
 
+    this.savePrimaryJobSelection(employeeName, targetJobNumber);
     this.render();
   }
 
@@ -1002,10 +1204,151 @@ class CrewImportEngine {
         e.fullJobNumber = `${crew.jobNumber}.${idx + 1}`;
       });
       crew.crewSize = crew.employees.length;
+      crew.lead = this.detectCrewLead(crew.jobNumber, crew.employees);
     }
 
-    // Recompute deltas and re-render
+    // Refresh multi-crew detection, recompute deltas, and re-render
+    this.detectMultiCrewAssignments();
     this.computedDeltas = this.computeChangeDeltas();
+    this.render();
+  }
+
+  detectAndResolveTimeOffConflicts() {
+    this.resolvedRosterConflicts = [];
+    if (!this.specialCircumstances) return;
+
+    const timeOffList = this.specialCircumstances.timeOffCurrentWeek || [];
+    const quitsList = this.specialCircumstances.quits || [];
+    const allAbsences = [...timeOffList, ...quitsList];
+
+    for (const item of allAbsences) {
+      const cleanAbsenceName = this.cleanNameForMatch(item.name);
+      if (!cleanAbsenceName) continue;
+
+      const rawNote = String(item.note || item.rawText || '').trim();
+      const lowerNote = rawNote.toLowerCase();
+
+      // Check if this absence is a full-week absence or departure
+      const isQuit = Boolean(item.isQuit);
+      const isFullWeekNote = lowerNote.includes('off wk') || 
+                             lowerNote.includes('off week') || 
+                             lowerNote.includes('all week') || 
+                             lowerNote.includes('whole week') || 
+                             lowerNote.includes('vacation') || 
+                             lowerNote.includes('wedding') || 
+                             lowerNote.includes('delegate') || 
+                             lowerNote.includes('convention');
+
+      const isPartialDay = /\b(mon|tue|wed|thu|fri|sat|sun)\w*\b.*?\bonly\b/i.test(lowerNote);
+
+      if (!isQuit && !isFullWeekNote && isPartialDay) {
+        // Partial day absence (e.g. off Tuesday for MSLCAT interviews) - do not auto-remove from crew
+        continue;
+      }
+
+      // If it IS a full week absence or quit:
+      for (const crew of this.parsedCrews) {
+        if (crew.excluded) continue;
+        const matchingEmpIndex = crew.employees.findIndex(e => {
+          return this.cleanNameForMatch(e.name) === cleanAbsenceName ||
+                 Boolean(this.findMatchingEmployee(e.name, [{ 'Employee Name': item.name }]));
+        });
+
+        if (matchingEmpIndex !== -1) {
+          const matchingEmp = crew.employees[matchingEmpIndex];
+
+          // If it's a quit: check if this is a scheduled departure (last day this week or upcoming)
+          const isUpcoming = /upcoming/i.test(item.header || '');
+
+          if (isQuit) {
+            const departureIso = this.extractDepartureDateIso(rawNote, this.rosterDate);
+            const rosterIso = this.rosterDate || new Date().toISOString().split('T')[0];
+
+            if (isUpcoming || (departureIso && departureIso >= rosterIso)) {
+              // Scheduled departure! Employee is still actively working on their crew this week until last day.
+              const cleanNoteMatch = rawNote.match(/\b(last\s*day\s*.*|quit\s*.*)/i);
+              const badgeNote = cleanNoteMatch ? cleanNoteMatch[0].trim() : rawNote;
+              if (!matchingEmp.notes) {
+                matchingEmp.notes = badgeNote;
+              } else if (!matchingEmp.notes.toLowerCase().includes('last day') && !matchingEmp.notes.toLowerCase().includes('quit')) {
+                matchingEmp.notes += ` | ${badgeNote}`;
+              }
+              matchingEmp.isScheduledDeparture = true;
+              matchingEmp.departureDate = departureIso;
+              continue;
+            }
+          }
+
+          // Upcoming time off is for future weeks - never auto-remove from current week's crew
+          if (isUpcoming) {
+            continue;
+          }
+
+          // Record auto-resolved conflict
+          const conflictId = `conflict_${cleanAbsenceName}_${crew.jobNumber}_${Date.now()}`;
+          this.resolvedRosterConflicts.push({
+            id: conflictId,
+            employeeName: matchingEmp.name,
+            crewJobNumber: crew.jobNumber,
+            crewLocation: crew.location,
+            reason: rawNote,
+            removedEmp: { ...matchingEmp },
+            crewIndex: this.parsedCrews.indexOf(crew)
+          });
+
+          // Remove employee from crew
+          crew.employees.splice(matchingEmpIndex, 1);
+
+          // Re-index position numbers
+          crew.employees.forEach((e, idx) => {
+            e.position = idx + 1;
+            e.fullJobNumber = `${crew.jobNumber}.${idx + 1}`;
+          });
+          crew.crewSize = crew.employees.length;
+
+          // Recalculate crew lead (foreman)
+          crew.lead = this.detectCrewLead(crew.jobNumber, crew.employees);
+          crew.suggestedForeman = crew.lead ? crew.lead.name : '';
+        }
+      }
+    }
+
+    if (this.resolvedRosterConflicts.length > 0) {
+      this.detectMultiCrewAssignments();
+    }
+  }
+
+  restoreConflictEmployee(conflictId) {
+    const conflictIndex = (this.resolvedRosterConflicts || []).findIndex(c => c.id === conflictId);
+    if (conflictIndex === -1) return;
+
+    const conflict = this.resolvedRosterConflicts[conflictIndex];
+    const crew = this.parsedCrews.find(c => c.jobNumber === conflict.crewJobNumber);
+    if (crew && conflict.removedEmp) {
+      crew.employees.push(conflict.removedEmp);
+
+      // Sort employees by role priority
+      crew.employees.sort((a, b) => {
+        const pA = this.getRolePriority(this.getEffectiveRole(a));
+        const pB = this.getRolePriority(this.getEffectiveRole(b));
+        return pA - pB;
+      });
+
+      // Re-index position numbers
+      crew.employees.forEach((e, idx) => {
+        e.position = idx + 1;
+        e.fullJobNumber = `${crew.jobNumber}.${idx + 1}`;
+      });
+      crew.crewSize = crew.employees.length;
+
+      // Re-detect crew lead
+      crew.lead = this.detectCrewLead(crew.jobNumber, crew.employees);
+      crew.suggestedForeman = crew.lead ? crew.lead.name : '';
+    }
+
+    this.resolvedRosterConflicts.splice(conflictIndex, 1);
+    this.detectMultiCrewAssignments();
+    this.computedDeltas = null;
     this.render();
   }
 
@@ -1420,7 +1763,9 @@ class CrewImportEngine {
         year += 2000;
       }
       if (!year) {
-        if (referenceDate instanceof Date && !isNaN(referenceDate.getTime())) {
+        if (typeof referenceDate === 'string' && referenceDate.match(/^\d{4}/)) {
+          year = parseInt(referenceDate.substring(0, 4), 10);
+        } else if (referenceDate instanceof Date && !isNaN(referenceDate.getTime())) {
           year = referenceDate.getFullYear();
         } else {
           year = new Date().getFullYear();
@@ -1430,6 +1775,17 @@ class CrewImportEngine {
         const mm = String(month).padStart(2, '0');
         const dd = String(day).padStart(2, '0');
         return `${mm}/${dd}/${year}`;
+      }
+    }
+    return '';
+  }
+
+  extractDepartureDateIso(noteText, referenceDate = null) {
+    const formatted = this.extractDepartureDate(noteText, referenceDate);
+    if (formatted) {
+      const parts = formatted.split('/');
+      if (parts.length === 3) {
+        return `${parts[2]}-${parts[0]}-${parts[1]}`;
       }
     }
     return '';
@@ -1493,22 +1849,63 @@ class CrewImportEngine {
     (d.secondaryChanges || []).forEach(x => x.changeId && ids.push(x.changeId));
     (d.positionUpdates || []).forEach(x => x.changeId && ids.push(x.changeId));
     (d.newJobsDetected || []).forEach(x => x.changeId && ids.push(x.changeId));
-    return ids;
+    (d.jobStatusChanges || []).forEach(x => x.changeId && ids.push(x.changeId));
+    return [...new Set(ids)];
   }
 
   setMissingRosterAction(changeId, action) {
     if (!this.missingRosterConfigs) this.missingRosterConfigs = new Map();
     const cur = this.missingRosterConfigs.get(changeId) || {};
     cur.action = action;
-    cur.reason = action === 'time_off' ? 'Time Off / Vacation' : 'Missing from Roster / Departed';
+    if (action === 'keep_active') {
+      cur.reason = 'Keep Active (Still on Current Job)';
+    } else if (action === 'time_off') {
+      cur.reason = 'Time Off / Vacation';
+    } else {
+      cur.reason = 'Missing from Roster / Departed';
+    }
     this.missingRosterConfigs.set(changeId, cur);
 
+    let empName = '';
     if (this.computedDeltas && this.computedDeltas.missingFromRoster) {
       const m = this.computedDeltas.missingFromRoster.find(x => x.changeId === changeId);
       if (m) {
         m.action = action;
         m.reason = cur.reason;
+        empName = m.name;
       }
+    }
+
+    this.saveMissingRosterAction(empName || changeId.replace(/^missing_/, ''), action);
+
+    // Dynamic UI updates without full re-render
+    const isKeepActive = (action === 'keep_active');
+    const isTimeOff = (action === 'time_off');
+
+    const dateInput = document.getElementById(`date_${changeId}`);
+    if (dateInput) {
+      dateInput.style.display = isKeepActive ? 'none' : 'inline-block';
+      dateInput.title = isTimeOff ? 'Effective Vacation Date' : 'Last Working Day';
+    }
+
+    const badge = document.getElementById(`badge_${changeId}`);
+    if (badge) {
+      badge.textContent = isKeepActive ? '✅ Keep Active' : (isTimeOff ? '🏖️ Time Off' : '⚠️ Missing from Roster');
+      badge.style.background = isKeepActive ? 'rgba(16, 185, 129, 0.2)' : (isTimeOff ? 'rgba(59, 130, 246, 0.2)' : 'rgba(245, 158, 11, 0.2)');
+      badge.style.color = isKeepActive ? '#10b981' : (isTimeOff ? '#60a5fa' : '#f59e0b');
+    }
+
+    const nameEl = document.getElementById(`name_${changeId}`);
+    if (nameEl) {
+      const cleanName = empName || nameEl.textContent.replace(/^[^\w\s]+\s*/, '').trim();
+      const icon = isKeepActive ? '✅' : (isTimeOff ? '🏖️' : '⚠️');
+      nameEl.textContent = `${icon} ${cleanName}`;
+      nameEl.style.color = isKeepActive ? '#10b981' : (isTimeOff ? '#60a5fa' : '#f59e0b');
+    }
+
+    const rowEl = document.getElementById(`row_${changeId}`);
+    if (rowEl) {
+      rowEl.style.background = isKeepActive ? 'rgba(16, 185, 129, 0.04)' : (isTimeOff ? 'rgba(59, 130, 246, 0.04)' : 'rgba(245, 158, 11, 0.05)');
     }
   }
 
@@ -1626,6 +2023,32 @@ class CrewImportEngine {
           crewSize: crew.crewSize,
           scheduleLabel: crew.scheduleLabel || 'Mon-Thu (4 10s)'
         });
+      }
+    }
+
+    // 1b. Detect job status changes (Active -> On Hold, On Hold -> Active, Completed, Pending Start)
+    const jobStatusChanges = [];
+    for (const crew of this.parsedCrews) {
+      if (crew.excluded) continue;
+      const oldJob = jtMap.get(crew.jobNumber);
+      if (oldJob) {
+        const oldStatus = String(oldJob['Status'] || 'Active').trim();
+        const newStatus = String(crew.status || 'Active').trim();
+        if (oldStatus && newStatus && oldStatus.toLowerCase() !== newStatus.toLowerCase()) {
+          jobStatusChanges.push({
+            changeId: 'jsc_' + crew.jobNumber,
+            jobNumber: crew.jobNumber,
+            location: crew.location,
+            oldStatus: oldStatus,
+            newStatus: newStatus,
+            note: crew.crewNote || '',
+            onHoldDate: crew.onHoldDate || '',
+            estimatedReturn: crew.estimatedReturn || '',
+            startDate: crew.startDate || '',
+            actualEndDate: crew.actualEndDate || '',
+            crewSize: crew.crewSize
+          });
+        }
       }
     }
 
@@ -1748,14 +2171,17 @@ class CrewImportEngine {
 
     // 5. Process each unique employee
     for (const [nameKey, occurrences] of uniqueEmployees.entries()) {
-      const primaryOcc = occurrences.find(o => o.emp.isPrimary) || occurrences[0];
-      const secOccs = occurrences.filter(o => o !== primaryOcc);
+      const explicitPrimary = occurrences.find(o => o.emp.isPrimary);
+      const isSecondaryOnly = !explicitPrimary && occurrences.some(o => o.emp.isSecondary);
 
-      const empName = primaryOcc.emp.name;
-      const primaryJob = primaryOcc.emp.fullJobNumber;
-      const primaryLoc = primaryOcc.crew.location;
-      const rosterExplicitClass = (primaryOcc.emp.classification || '').trim();
-      const secJobNum = secOccs.map(s => s.emp.fullJobNumber).filter(Boolean).join(', ');
+      let primaryOcc = explicitPrimary || occurrences[0];
+      let secOccs = occurrences.filter(o => o !== primaryOcc);
+
+      const empName = (explicitPrimary || occurrences[0]).emp.name;
+      let primaryJob = primaryOcc.emp.fullJobNumber;
+      let primaryLoc = primaryOcc.crew.location;
+      const rosterExplicitClass = ((explicitPrimary || occurrences[0]).emp.classification || '').trim();
+      let secJobNum = secOccs.map(s => s.emp.fullJobNumber).filter(Boolean).join(', ');
 
       // Check if this employee has a scheduled departure in quits (e.g. Dillon Doane on 052-26 until 8/27)
       const isScheduledDeparture = quits.some(q => q.isScheduledDeparture && (
@@ -1782,6 +2208,14 @@ class CrewImportEngine {
         const oldJob = this.getEmpRowJobNumber(existing);
         const oldClass = this.getEmpRowClassification(existing);
         const oldSecJob = this.getEmpRowSecJob(existing);
+
+        if (isSecondaryOnly) {
+          // Employee appears on roster ONLY as a secondary/temporary assignment!
+          // Maintain their primary job and location from their existing active DB record.
+          primaryJob = oldJob;
+          primaryLoc = oldLoc;
+          secJobNum = occurrences.map(s => s.emp.fullJobNumber).filter(Boolean).join(', ');
+        }
 
         const cleanEmpName = this.cleanNameForMatch(dbName);
         const changeItem = {
@@ -1810,6 +2244,12 @@ class CrewImportEngine {
           changeItem.type = 'Transfer';
           transfers.push(changeItem);
           changed = true;
+          for (const occ of occurrences) {
+            if (occ.emp) {
+              occ.emp.isTransfer = true;
+              occ.emp.previousJobNumber = oldJob;
+            }
+          }
         } else if (primaryJob && oldJob !== primaryJob) {
           // Intra-crew position renumbering or formatting normalization (e.g. 043-26.04 -> 043-26.1)
           changeItem.newJobNumber = primaryJob;
@@ -1857,8 +2297,7 @@ class CrewImportEngine {
         const foundHist = this.findMatchingEmployee(empName, histTable.rows || []);
         const isRehire = !isScheduledDeparture && (isExistingPreviousEmployee || !!foundPrev || !!foundHist);
 
-        const primaryClass = rosterExplicitClass || 'JRY';
-        const cleanEmpName = this.cleanNameForMatch(empName);
+        const prevRecord = existing || foundPrev || foundHist || null;
         const newHireObj = {
           changeId: (isRehire ? 'rh_' : 'nh_') + cleanEmpName,
           name: existing ? (this.getEmpRowName(existing) || empName) : empName,
@@ -1869,14 +2308,14 @@ class CrewImportEngine {
           secondaryJobNumber: secJobNum,
           crewNumber: primaryOcc.crew.jobNumber,
           isRehire: isRehire,
-          historyRecord: foundPrev || foundHist || null,
+          historyRecord: prevRecord,
           targetRow: existing || null
         };
 
+        // All incoming personnel (new hires and rehires) appear on the New Hire list
+        newHires.push(newHireObj);
         if (newHireObj.isRehire) {
           rehires.push(newHireObj);
-        } else {
-          newHires.push(newHireObj);
         }
       }
     }
@@ -1895,7 +2334,20 @@ class CrewImportEngine {
       const loc = (this.getEmpRowLocation(empRow) || '').trim();
       const locLower = loc.toLowerCase();
       const stat = String(empRow['Status'] || empRow['Employee Status'] || '').toLowerCase().trim();
-      const job = (this.getEmpRowJobNumber(empRow) || '').trim();
+      let job = (this.getEmpRowJobNumber(empRow) || '').trim();
+
+      // If job is blank (e.g. employee was marked Vacation or had job cleared), look up their last known active job from employee history
+      if (!job && histTable && histTable.rows) {
+        const lastHist = histTable.rows.find(h => {
+          const hName = h['Employee Name'] || h['Name'] || '';
+          const hJob = h['Job Number'] || h['Job #'] || '';
+          return this.cleanNameForMatch(hName) === cleanEmpName && hJob && !hJob.startsWith('005') && !hJob.startsWith('002');
+        });
+        if (lastHist) {
+          job = (lastHist['Job Number'] || lastHist['Job #'] || '').trim();
+        }
+      }
+
       const jobPrefix = job.substring(0, 3);
 
       // Exclude office/management (005-), equipment/lost (002-), or records without a job number
@@ -1946,6 +2398,19 @@ class CrewImportEngine {
 
       if (!foundInRoster) {
         const savedCfg = (this.missingRosterConfigs && this.missingRosterConfigs.get('missing_' + cleanEmpName)) || {};
+        const persistedAction = (this.savedMissingRosterActions && this.savedMissingRosterActions[cleanEmpName]) || null;
+        const initialAction = savedCfg.action || persistedAction || 'depart';
+        let initialReason = savedCfg.reason;
+        if (!initialReason) {
+          if (initialAction === 'keep_active') {
+            initialReason = 'Keep Active (Still on Current Job)';
+          } else if (initialAction === 'time_off') {
+            initialReason = 'Time Off / Vacation';
+          } else {
+            initialReason = 'Missing from Roster / Departed';
+          }
+        }
+
         missingFromRoster.push({
           changeId: 'missing_' + cleanEmpName,
           name: empName,
@@ -1953,10 +2418,10 @@ class CrewImportEngine {
           currentJob: job,
           currentLocation: loc || 'Unknown',
           classification: this.getEmpRowClassification(empRow) || 'Lineman',
-          action: savedCfg.action || 'depart',
+          action: initialAction,
           departureDate: savedCfg.departureDate || this.rosterDateFormatted || todayFormatted,
           departureDateIso: savedCfg.departureDateIso || this.rosterDate || todayIso,
-          reason: savedCfg.reason || (savedCfg.action === 'time_off' ? 'Time Off / Vacation' : 'Missing from Roster / Departed')
+          reason: initialReason
         });
       }
     }
@@ -1969,11 +2434,12 @@ class CrewImportEngine {
       secondaryChanges: secondaryChanges,
       positionUpdates: positionUpdates,
       newJobsDetected: newJobsDetected,
+      jobStatusChanges: jobStatusChanges,
       quits: quits,
       timeOff: timeOff,
       missingFromRoster: missingFromRoster,
       matchedEmployeeChanges: matchedEmployeeChanges,
-      totalChanges: newHires.length + rehires.length + matchedEmployeeChanges.length + newJobsDetected.length + quits.length + timeOff.length + missingFromRoster.length
+      totalChanges: newHires.length + rehires.length + matchedEmployeeChanges.length + newJobsDetected.length + jobStatusChanges.length + quits.length + timeOff.length + missingFromRoster.length
     };
 
     return this.computedDeltas;
@@ -2341,7 +2807,55 @@ class CrewImportEngine {
         const row = m.targetRow || this.findMatchingEmployee(m.name, empTable.rows);
         if (!row) continue;
 
-        if (m.action === 'time_off') {
+        if (m.action === 'keep_active') {
+          // Keep Active: Employee remains an active field employee on their current job
+          const oldLoc = this.getEmpRowLocation(row) || '';
+          const currentJob = this.getEmpRowJobNumber(row) || '';
+          const updatedFields = {};
+          let needsUpdate = false;
+
+          // If location previously contained (Vacation), restore physical city
+          if (oldLoc.includes('(Vacation)')) {
+            const cleanCity = oldLoc.replace(/\s*\(Vacation\)/i, '').trim();
+            if (locKey && cleanCity) {
+              row[locKey] = cleanCity;
+              updatedFields[locKey] = cleanCity;
+              needsUpdate = true;
+            }
+          }
+
+          // If job was previously cleared or blank, restore their active job
+          if (!currentJob && m.currentJob && jobKey) {
+            row[jobKey] = m.currentJob;
+            updatedFields[jobKey] = m.currentJob;
+            needsUpdate = true;
+          }
+
+          // Ensure status is Active if previously set to Previous Employee or inactive
+          const curStatus = String(row[statusKey || 'Status'] || '').toLowerCase();
+          if (curStatus.includes('previous') || curStatus.includes('inactive')) {
+            if (statusKey) {
+              row[statusKey] = 'Active';
+              updatedFields[statusKey] = 'Active';
+              needsUpdate = true;
+            }
+          }
+
+          if (needsUpdate) {
+            this.syncRowToRawGrid(empTable, row);
+            const empRowIdx = row._rowIdx || (empTable.rows ? empTable.rows.indexOf(row) + 2 : null);
+            await this.db.addMutation({
+              action: 'UPDATE_ROW',
+              sheetName: empTable.name,
+              tableKey: 'employees',
+              employeeName: this.getEmpRowName(row) || m.name,
+              row: empRowIdx,
+              itemIdentifier: this.getEmpRowName(row) || m.name,
+              updatedFields: updatedFields
+            });
+          }
+          appliedCount++;
+        } else if (m.action === 'time_off') {
           // Process as Vacation / Time Off
           const oldLoc = this.getEmpRowLocation(row);
           const rawCity = oldLoc ? oldLoc.replace(/\s*\([^)]*\)/g, '').trim() : 'Helena';
@@ -2507,7 +3021,7 @@ class CrewImportEngine {
     }
 
     // 2. Process New Hires & Rehires
-    const allNewEmps = [...newHires, ...rehires];
+    const allNewEmps = [...new Map(newHires.map(x => [x.changeId, x])).values()];
     if (empTable && empTable.rows) {
       const nameKey = getEmpFieldKey(empTable.headers, 'employee name');
       const statusKey = getEmpFieldKey(empTable.headers, 'status');
@@ -2557,6 +3071,12 @@ class CrewImportEngine {
           if (hireKey) {
             targetEmpRow[hireKey] = hireDateFormatted;
             updatedFields[hireKey] = hireDateFormatted;
+          }
+          if (nh.isRehire) {
+            const lastDayKey = getEmpFieldKey(empTable.headers, 'last day');
+            const lastDayReasonKey = getEmpFieldKey(empTable.headers, 'last day reason');
+            if (lastDayKey) { targetEmpRow[lastDayKey] = ''; updatedFields[lastDayKey] = ''; }
+            if (lastDayReasonKey) { targetEmpRow[lastDayReasonKey] = ''; updatedFields[lastDayReasonKey] = ''; }
           }
           if (gloveKey && gloveVal) { targetEmpRow[gloveKey] = gloveVal; updatedFields[gloveKey] = gloveVal; }
           if (sleeveKey && sleeveVal) { targetEmpRow[sleeveKey] = sleeveVal; updatedFields[sleeveKey] = sleeveVal; }
@@ -2686,10 +3206,18 @@ class CrewImportEngine {
         } else {
           // Update existing job
           const oldForeman = String(jobRow['Foreman'] || '').trim();
+          const oldJobStatus = String(jobRow['Status'] || 'Active').trim();
+          const statusChangeId = 'jsc_' + crew.jobNumber;
+          const isStatusChangeApproved = !this.computedDeltas || !this.computedDeltas.jobStatusChanges ||
+            !this.computedDeltas.jobStatusChanges.some(j => j.changeId === statusChangeId) ||
+            this.isChangeSelected(statusChangeId);
+
+          const finalStatus = isStatusChangeApproved ? status : oldJobStatus;
+
           jobRow['Location'] = physicalLoc;
           jobRow['Foreman'] = foremanName;
           jobRow['Crew Size'] = crewSize;
-          jobRow['Status'] = status;
+          jobRow['Status'] = finalStatus;
           jobRow['Skip Sun'] = days.skipSun;
           jobRow['Skip Mon'] = days.skipMon;
           jobRow['Skip Tue'] = days.skipTue;
@@ -2702,14 +3230,14 @@ class CrewImportEngine {
           jobRow['Work Schedule'] = days.label || crew.scheduleLabel || 'Mon-Thu';
           jobRow['Last Updated'] = todayFormatted;
 
-          if (status === 'On Hold') {
+          if (finalStatus === 'On Hold') {
             jobRow['Put On Hold Date'] = crew.onHoldDate || todayFormatted;
             jobRow['Estimated Return'] = crew.estimatedReturn || '';
-          } else if (status === 'Pending Start') {
+          } else if (finalStatus === 'Pending Start') {
             jobRow['Start Date'] = crew.startDate || '';
-          } else if (status === 'Completed') {
+          } else if (finalStatus === 'Completed') {
             jobRow['Actual End Date'] = crew.actualEndDate || todayFormatted;
-          } else if (status === 'Active') {
+          } else if (finalStatus === 'Active') {
             if (!jobRow['Start Date']) jobRow['Start Date'] = todayFormatted;
             jobRow['Put On Hold Date'] = '';
             jobRow['Estimated Return'] = '';
@@ -2717,28 +3245,35 @@ class CrewImportEngine {
 
           this.syncRowToRawGrid(jtTable, jobRow);
 
+          const updatedJobFields = {
+            'Location': physicalLoc,
+            'Foreman': foremanName,
+            'Crew Size': crewSize,
+            'Status': finalStatus,
+            'Skip Sun': days.skipSun,
+            'Skip Mon': days.skipMon,
+            'Skip Tue': days.skipTue,
+            'Skip Wed': days.skipWed,
+            'Skip Thu': days.skipThu,
+            'Skip Fri': days.skipFri,
+            'Skip Sat': days.skipSat,
+            'Skip Weekly Meeting': days.skipMeeting,
+            'Skip Monthly Checklist': days.skipChecklist,
+            'Work Schedule': jobRow['Work Schedule'],
+            'Last Updated': todayFormatted
+          };
+
+          if (jobRow['Put On Hold Date'] !== undefined) updatedJobFields['Put On Hold Date'] = jobRow['Put On Hold Date'];
+          if (jobRow['Estimated Return'] !== undefined) updatedJobFields['Estimated Return'] = jobRow['Estimated Return'];
+          if (jobRow['Start Date'] !== undefined) updatedJobFields['Start Date'] = jobRow['Start Date'];
+          if (jobRow['Actual End Date'] !== undefined) updatedJobFields['Actual End Date'] = jobRow['Actual End Date'];
+
           await this.db.addMutation({
             action: 'UPDATE_ROW',
             sheetName: jtTable.name,
             tableKey: 'job_tracking',
             itemIdentifier: crew.jobNumber,
-            updatedFields: {
-              'Location': physicalLoc,
-              'Foreman': foremanName,
-              'Crew Size': crewSize,
-              'Status': status,
-              'Skip Sun': days.skipSun,
-              'Skip Mon': days.skipMon,
-              'Skip Tue': days.skipTue,
-              'Skip Wed': days.skipWed,
-              'Skip Thu': days.skipThu,
-              'Skip Fri': days.skipFri,
-              'Skip Sat': days.skipSat,
-              'Skip Weekly Meeting': days.skipMeeting,
-              'Skip Monthly Checklist': days.skipChecklist,
-              'Work Schedule': jobRow['Work Schedule'],
-              'Last Updated': todayFormatted
-            }
+            updatedFields: updatedJobFields
           });
 
           // Automatically transfer crew equipment (Blankets, MACKs, HV Testers, Phasing Sets, AED, Grounds, Hot Sticks)
@@ -3063,14 +3598,98 @@ class CrewImportEngine {
             </div>
           ` : ''}
 
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
-            <div style="font-size: 14px; font-weight: 800; color: var(--text-primary);">
-              Parsed Crews (${visibleCrews.length} Active Crews Found)
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; flex-wrap: wrap; gap: 12px;">
+            <div>
+              <div style="font-size: 15px; font-weight: 800; color: var(--text-primary); display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                <span>Parsed Crews (${visibleCrews.length} Found)</span>
+                ${deltas && deltas.jobStatusChanges && deltas.jobStatusChanges.length > 0 ? `
+                  <span class="badge" style="background: rgba(100, 116, 139, 0.2); color: #cbd5e1; border: 1px solid #64748b; font-size: 11px; padding: 2px 7px; border-radius: 4px; font-weight: 700;">
+                    ⏸️ ${deltas.jobStatusChanges.length} Status Change${deltas.jobStatusChanges.length > 1 ? 's' : ''}
+                  </span>
+                ` : ''}
+                ${deltas && deltas.transfers && deltas.transfers.length > 0 ? `
+                  <span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.4); font-size: 11px; padding: 2px 7px; border-radius: 4px; font-weight: 700;">
+                    ⇄ ${deltas.transfers.length} Transfer${deltas.transfers.length > 1 ? 's' : ''}
+                  </span>
+                ` : ''}
+                ${deltas && deltas.newHires && deltas.newHires.length > 0 ? `
+                  <span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 11px; padding: 2px 7px; border-radius: 4px; font-weight: 700;">
+                    👤 ${deltas.newHires.length} New Hire${deltas.newHires.length > 1 ? 's' : ''}
+                  </span>
+                ` : ''}
+                ${deltas && ((deltas.quits && deltas.quits.length) || (deltas.missingFromRoster && deltas.missingFromRoster.length)) ? `
+                  <span class="badge" style="background: rgba(239, 68, 68, 0.15); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.4); font-size: 11px; padding: 2px 7px; border-radius: 4px; font-weight: 700;">
+                    🚪 ${(deltas.quits ? deltas.quits.length : 0) + (deltas.missingFromRoster ? deltas.missingFromRoster.length : 0)} Departure${((deltas.quits ? deltas.quits.length : 0) + (deltas.missingFromRoster ? deltas.missingFromRoster.length : 0)) > 1 ? 's' : ''}
+                  </span>
+                ` : ''}
+              </div>
+              <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 2px;">
+                Review foremen assignments, schedules, and job status transitions below before proceeding.
+              </div>
             </div>
             <button class="btn btn-primary" onclick="${hasNewHires ? 'window.crewImportEngine.goToStep(3)' : 'window.crewImportEngine.goToStep(4)'}" style="font-size: 13px; font-weight: 700; display: inline-flex; align-items: center; gap: 6px; cursor: pointer;">
               ${hasNewHires ? `Configure New Hires (${deltas.newHires.length}) ➡️` : 'Proceed to Changes Preview ➡️'}
             </button>
           </div>
+
+          <!-- Job Status Changes Detected Banner -->
+          ${deltas && deltas.jobStatusChanges && deltas.jobStatusChanges.length > 0 ? `
+            <div style="background: rgba(100, 116, 139, 0.15); border: 1px solid #64748b; border-left: 4px solid #94a3b8; border-radius: 8px; padding: 12px 16px; margin-bottom: 16px;">
+              <div style="display: flex; align-items: flex-start; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+                <div style="display: flex; align-items: flex-start; gap: 10px;">
+                  <span style="font-size: 20px; line-height: 1;">📋</span>
+                  <div>
+                    <div style="font-size: 13px; font-weight: 800; color: #f1f5f9; display: flex; align-items: center; gap: 8px;">
+                      <span>Job Status Changes Detected (${deltas.jobStatusChanges.length})</span>
+                      <span style="font-size: 11px; font-weight: 400; color: #94a3b8;">Review crew lifecycle changes below</span>
+                    </div>
+                    <div style="font-size: 12px; color: #cbd5e1; margin-top: 4px; line-height: 1.5;">
+                      ${deltas.jobStatusChanges.map(j => `
+                        <div>
+                          <strong>Job ${this.escapeHtml(j.jobNumber)} (${this.escapeHtml(j.location)})</strong>: 
+                          status changing from <span style="text-decoration: line-through; color: #94a3b8;">${this.escapeHtml(j.oldStatus)}</span> 
+                          ➡️ <strong style="color: ${j.newStatus === 'On Hold' ? '#cbd5e1' : (j.newStatus === 'Completed' ? '#60a5fa' : (j.newStatus === 'Pending Start' ? '#f59e0b' : '#10b981'))};">${this.escapeHtml(j.newStatus)}</strong>
+                          ${j.note ? `<span style="color: #fbbf24; font-size: 11px; margin-left: 4px;">(Note: "${this.escapeHtml(j.note)}")</span>` : ''}
+                          ${j.newStatus === 'On Hold' && j.onHoldDate ? `<span style="color: #94a3b8; font-size: 11px; margin-left: 4px;">[Hold Date: ${this.escapeHtml(j.onHoldDate)}${j.estimatedReturn ? ` · Return: ${this.escapeHtml(j.estimatedReturn)}` : ''}]</span>` : ''}
+                        </div>
+                      `).join('')}
+                    </div>
+                  </div>
+                </div>
+                <div style="font-size: 11px; color: #94a3b8; background: rgba(0,0,0,0.2); padding: 4px 8px; border-radius: 4px;">
+                  You can adjust any crew's status using the card dropdown below.
+                </div>
+              </div>
+            </div>
+          ` : ''}
+
+          <!-- Roster Conflict Auto-Resolved Banner -->
+          ${this.resolvedRosterConflicts && this.resolvedRosterConflicts.length > 0 ? `
+            <div style="background: rgba(245, 158, 11, 0.12); border: 1px solid #f59e0b; border-left: 4px solid #f59e0b; border-radius: 8px; padding: 12px 16px; margin-bottom: 16px;">
+              <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                  <span style="font-size: 20px;">⚡</span>
+                  <div>
+                    <div style="font-size: 13px; font-weight: 800; color: #fbbf24;">
+                      Roster Conflict Auto-Resolved (${this.resolvedRosterConflicts.length})
+                    </div>
+                    <div style="font-size: 12px; color: #cbd5e1; margin-top: 2px;">
+                      ${this.resolvedRosterConflicts.map(c => `
+                        <strong>${this.escapeHtml(c.employeeName)}</strong> was automatically removed from <strong>Job ${this.escapeHtml(c.crewJobNumber)}</strong> (${this.escapeHtml(c.crewLocation)}) because they are off for the full week: <em style="color: #94a3b8;">"${this.escapeHtml(c.reason)}"</em>. Foreman updated.
+                      `).join('<br>')}
+                    </div>
+                  </div>
+                </div>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                  ${this.resolvedRosterConflicts.map(c => `
+                    <button type="button" class="btn btn-secondary" onclick="window.crewImportEngine.restoreConflictEmployee('${c.id}')" style="font-size: 11.5px; font-weight: 700; padding: 4px 10px; cursor: pointer; border-color: #f59e0b; color: #fbbf24; background: rgba(245, 158, 11, 0.15);">
+                      ↩️ Restore ${this.escapeHtml(c.employeeName)} to ${this.escapeHtml(c.crewJobNumber)}
+                    </button>
+                  `).join('')}
+                </div>
+              </div>
+            </div>
+          ` : ''}
 
           <!-- Crew Cards Grid -->
           <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 16px;">
@@ -3086,7 +3705,7 @@ class CrewImportEngine {
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px;">
             <div>
               <h3 style="font-size: 16px; font-weight: 800; color: var(--text-primary); margin: 0; display: flex; align-items: center; gap: 8px;">
-                <span>👤</span> Configure New Hire Information (${deltas.newHires.length} New Hires Detected)
+                <span>👤</span> Configure New Hire & Rehire Information (${deltas.newHires.length} Detected)
               </h3>
               <p style="font-size: 12.5px; color: var(--text-muted); margin: 4px 0 0 0;">
                 Review and customize the exact Start / Hire Date, PPE Sizes, Phone Number, and Role before proceeding to approval.
@@ -3108,14 +3727,20 @@ class CrewImportEngine {
               const cfg = this.getNewHireConfig(nh.name, nh);
               const gloveOptions = ['N/A', '8', '8.5', '9', '9.5', '10', '10.5', '11', '11.5', '12'];
               const sleeveOptions = ['N/A', 'Regular', 'Large', 'X-Large'];
+              const isRehire = Boolean(nh.isRehire);
+              const cardBorder = isRehire ? '#f97316' : '#10b981';
+              const badgeText = isRehire ? 'REHIRE' : 'NEW HIRE';
+              const badgeBg = isRehire ? 'rgba(249, 115, 22, 0.2)' : 'rgba(16, 185, 129, 0.2)';
+              const badgeColor = isRehire ? '#f97316' : '#10b981';
 
               return `
-                <div class="new-hire-card" style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-left: 4px solid #10b981; border-radius: 8px; padding: 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.2);">
+                <div class="new-hire-card" style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-left: 4px solid ${cardBorder}; border-radius: 8px; padding: 16px; box-shadow: 0 1px 4px rgba(0,0,0,0.2);">
                   <!-- Top Row: Name, Location, Job, Badges & Remove Button -->
                   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid rgba(255,255,255,0.06); padding-bottom: 8px; flex-wrap: wrap; gap: 8px;">
                     <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-                      <span id="nh-title-${this.escapeJsString(nh.name)}" style="font-size: 15px; font-weight: 800; color: #f8fafc;">👤 ${this.escapeHtml(cfg.name || nh.name)}</span>
-                      <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 10.5px; font-weight: 700; padding: 2px 6px; border-radius: 4px;">NEW HIRE</span>
+                      <span id="nh-title-${this.escapeJsString(nh.name)}" style="font-size: 15px; font-weight: 800; color: #f8fafc;">${isRehire ? '🔄' : '👤'} ${this.escapeHtml(cfg.name || nh.name)}</span>
+                      <span class="badge" style="background: ${badgeBg}; color: ${badgeColor}; border: 1px solid ${badgeColor}; font-size: 10.5px; font-weight: 700; padding: 2px 6px; border-radius: 4px;">${badgeText}</span>
+                      ${isRehire ? `<span class="badge" style="background: rgba(249, 115, 22, 0.15); color: #fb923c; font-size: 10px; padding: 2px 6px; border-radius: 4px;">↺ Previous Employee</span>` : ''}
                       <span class="badge" style="background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4); font-size: 11px; font-weight: 700; padding: 2px 6px; border-radius: 4px;">📍 ${this.escapeHtml(nh.location)} — Job ${this.escapeHtml(nh.jobNumber)}</span>
                     </div>
                     <div style="display: flex; align-items: center; gap: 10px;">
@@ -3142,7 +3767,7 @@ class CrewImportEngine {
 
                     <!-- Hire Date / Start Date -->
                     <div>
-                      <label style="font-size: 11px; font-weight: 700; color: #94a3b8; display: block; margin-bottom: 4px;">📅 Start / Hire Date</label>
+                      <label style="font-size: 11px; font-weight: 700; color: #94a3b8; display: block; margin-bottom: 4px;">${isRehire ? '📅 Start / Rehire Date' : '📅 Start / Hire Date'}</label>
                       <input type="date" value="${cfg.hireDate}" style="width: 100%; box-sizing: border-box; padding: 6px 8px; font-size: 12px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; font-weight: 700;" onchange="window.crewImportEngine.updateNewHireConfig('${this.escapeJsString(nh.name)}', 'hireDate', this.value)">
                     </div>
 
@@ -3241,6 +3866,18 @@ class CrewImportEngine {
               <div style="font-size: 10px; color: var(--text-muted); font-weight: 700;">NEW JOBS</div>
               <div style="font-size: 20px; font-weight: 800; color: #06b6d4;">${deltas ? deltas.newJobsDetected.length : 0}</div>
             </div>
+            ${deltas && deltas.jobStatusChanges && deltas.jobStatusChanges.length > 0 ? `
+              <div style="background: var(--bg-secondary); border-left: 4px solid #64748b; border-radius: 8px; padding: 10px 12px;">
+                <div style="font-size: 10px; color: #94a3b8; font-weight: 700;">JOB STATUS</div>
+                <div style="font-size: 20px; font-weight: 800; color: #cbd5e1;">${deltas.jobStatusChanges.length}</div>
+              </div>
+            ` : ''}
+            ${deltas && deltas.secondaryChanges && deltas.secondaryChanges.length > 0 ? `
+              <div style="background: var(--bg-secondary); border-left: 4px solid #f59e0b; border-radius: 8px; padding: 10px 12px;">
+                <div style="font-size: 10px; color: #f59e0b; font-weight: 700;">SECONDARY JOBS</div>
+                <div style="font-size: 20px; font-weight: 800; color: #f59e0b;">${deltas.secondaryChanges.length}</div>
+              </div>
+            ` : ''}
             ${deltas && deltas.missingFromRoster && deltas.missingFromRoster.length > 0 ? `
               <div style="background: var(--bg-secondary); border-left: 4px solid #f59e0b; border-radius: 8px; padding: 10px 12px;">
                 <div style="font-size: 10px; color: #f59e0b; font-weight: 700;">MISSING FROM ROSTER</div>
@@ -3290,14 +3927,19 @@ class CrewImportEngine {
                     const cfg = this.getNewHireConfig(nh.name, nh);
                     const formattedDate = cfg.hireDate ? this.formatDateForSheet(cfg.hireDate) : (this.rosterDateFormatted || '');
                     const isSelected = this.isChangeSelected(nh.changeId);
+                    const isRehire = Boolean(nh.isRehire);
+                    const badgeText = isRehire ? 'Rehire' : 'New Hire';
+                    const badgeBg = isRehire ? 'rgba(249, 115, 22, 0.2)' : 'rgba(16, 185, 129, 0.2)';
+                    const badgeColor = isRehire ? '#f97316' : '#10b981';
+                    const icon = isRehire ? '🔄' : '👤';
                     return `
                       <tr style="border-bottom: 1px solid var(--border-color); ${isSelected ? '' : 'opacity: 0.45; filter: grayscale(0.6);'}">
                         <td style="padding: 8px 10px; text-align: center;">
                           <input type="checkbox" class="ci-change-checkbox" data-change-id="${nh.changeId}" onchange="window.crewImportEngine.toggleChange('${nh.changeId}', this.checked)" ${isSelected ? 'checked' : ''} style="cursor: pointer;">
                         </td>
-                        <td style="padding: 8px 12px; font-weight: 700; color: #10b981;">👤 ${this.escapeHtml(nh.name)}</td>
-                        <td style="padding: 8px 12px;"><span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #10b981; padding: 2px 6px; border-radius: 4px; font-weight: 700;">New Hire</span></td>
-                        <td style="padding: 8px 12px; color: var(--text-muted);">Location: <strong style="color: var(--text-primary);">${this.escapeHtml(nh.location)}</strong>, Job: <strong style="color: #60a5fa; font-family: monospace;">${this.escapeHtml(nh.jobNumber)}</strong>, Start: <strong style="color: #10b981;">${this.escapeHtml(formattedDate)}</strong>, Gloves: <strong style="color: #facc15;">${this.escapeHtml(cfg.gloveSize)}</strong>, Sleeves: <strong style="color: #facc15;">${this.escapeHtml(cfg.sleeveSize)}</strong>, Role: <strong style="color: var(--text-primary);">${this.escapeHtml(cfg.classification)}</strong></td>
+                        <td style="padding: 8px 12px; font-weight: 700; color: ${badgeColor};">${icon} ${this.escapeHtml(nh.name)}</td>
+                        <td style="padding: 8px 12px;"><span class="badge" style="background: ${badgeBg}; color: ${badgeColor}; padding: 2px 6px; border-radius: 4px; font-weight: 700;">${badgeText}</span></td>
+                        <td style="padding: 8px 12px; color: var(--text-muted);">Location: <strong style="color: var(--text-primary);">${this.escapeHtml(nh.location)}</strong>, Job: <strong style="color: #60a5fa; font-family: monospace;">${this.escapeHtml(nh.jobNumber)}</strong>, Start: <strong style="color: ${badgeColor};">${this.escapeHtml(formattedDate)}</strong>, Gloves: <strong style="color: #facc15;">${this.escapeHtml(cfg.gloveSize)}</strong>, Sleeves: <strong style="color: #facc15;">${this.escapeHtml(cfg.sleeveSize)}</strong>, Role: <strong style="color: var(--text-primary);">${this.escapeHtml(cfg.classification)}</strong>${isRehire ? ' <span style="color: #f97316; font-size: 11px; font-weight: 700;">(Rehire)</span>' : ''}</td>
                       </tr>
                     `;
                   }).join('') : ''}
@@ -3334,19 +3976,27 @@ class CrewImportEngine {
 
                   ${deltas ? (deltas.missingFromRoster || []).map(m => {
                     const isSelected = this.isChangeSelected(m.changeId);
-                    const badgeBg = 'rgba(245, 158, 11, 0.2)';
-                    const badgeColor = '#f59e0b';
+                    const isKeepActive = (m.action === 'keep_active');
+                    const isTimeOff = (m.action === 'time_off');
+
+                    const badgeBg = isKeepActive ? 'rgba(16, 185, 129, 0.2)' : (isTimeOff ? 'rgba(59, 130, 246, 0.2)' : 'rgba(245, 158, 11, 0.2)');
+                    const badgeColor = isKeepActive ? '#10b981' : (isTimeOff ? '#60a5fa' : '#f59e0b');
+                    const badgeText = isKeepActive ? '✅ Keep Active' : (isTimeOff ? '🏖️ Time Off' : '⚠️ Missing from Roster');
+                    const rowBg = isKeepActive ? 'rgba(16, 185, 129, 0.04)' : (isTimeOff ? 'rgba(59, 130, 246, 0.04)' : 'rgba(245, 158, 11, 0.05)');
+                    const nameColor = isKeepActive ? '#10b981' : (isTimeOff ? '#60a5fa' : '#f59e0b');
+                    const icon = isKeepActive ? '✅' : (isTimeOff ? '🏖️' : '⚠️');
+
                     return `
-                      <tr style="border-bottom: 1px solid var(--border-color); background: rgba(245, 158, 11, 0.05); ${isSelected ? '' : 'opacity: 0.45; filter: grayscale(0.6);'}">
+                      <tr id="row_${m.changeId}" style="border-bottom: 1px solid var(--border-color); background: ${rowBg}; ${isSelected ? '' : 'opacity: 0.45; filter: grayscale(0.6);'}">
                         <td style="padding: 8px 10px; text-align: center;">
                           <input type="checkbox" class="ci-change-checkbox" data-change-id="${m.changeId}" onchange="window.crewImportEngine.toggleChange('${m.changeId}', this.checked)" ${isSelected ? 'checked' : ''} style="cursor: pointer;">
                         </td>
-                        <td style="padding: 8px 12px; font-weight: 700; color: #f59e0b;">
-                          ⚠️ ${this.escapeHtml(m.name)}
+                        <td id="name_${m.changeId}" style="padding: 8px 12px; font-weight: 700; color: ${nameColor};">
+                          ${icon} ${this.escapeHtml(m.name)}
                         </td>
                         <td style="padding: 8px 12px;">
-                          <span class="badge" style="background: ${badgeBg}; color: ${badgeColor}; padding: 2px 6px; border-radius: 4px; font-weight: 700;">
-                            ⚠️ Missing from Roster
+                          <span id="badge_${m.changeId}" class="badge" style="background: ${badgeBg}; color: ${badgeColor}; padding: 2px 6px; border-radius: 4px; font-weight: 700;">
+                            ${badgeText}
                           </span>
                         </td>
                         <td style="padding: 8px 12px; color: var(--text-primary); font-size: 12px;">
@@ -3355,11 +4005,12 @@ class CrewImportEngine {
                               Last active on <strong style="color: #60a5fa;">${this.escapeHtml(m.currentJob)}</strong> (<span style="color: #a78bfa;">📍 ${this.escapeHtml(m.currentLocation)}</span>) • Not found on any crew or notes
                             </div>
                             <div style="display: flex; align-items: center; gap: 6px;">
-                              <select style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); font-size: 11px; padding: 2px 6px;" onchange="window.crewImportEngine.setMissingRosterAction('${m.changeId}', this.value)">
+                              <select id="action_${m.changeId}" style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); font-size: 11px; padding: 2px 6px;" onchange="window.crewImportEngine.setMissingRosterAction('${m.changeId}', this.value)">
+                                <option value="keep_active" ${isKeepActive ? 'selected' : ''}>✅ Keep Active (Still on Current Job)</option>
                                 <option value="depart" ${m.action === 'depart' ? 'selected' : ''}>🚪 Mark as Departed / Previous Employee</option>
-                                <option value="time_off" ${m.action === 'time_off' ? 'selected' : ''}>🏖️ Mark as Vacation / Time Off</option>
+                                <option value="time_off" ${isTimeOff ? 'selected' : ''}>🏖️ Mark as Vacation / Time Off</option>
                               </select>
-                              <input type="date" value="${m.departureDateIso || new Date().toISOString().split('T')[0]}" style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); font-size: 11px; padding: 2px 5px;" onchange="window.crewImportEngine.setMissingRosterDate('${m.changeId}', this.value)" title="Last Working Day">
+                              <input type="date" id="date_${m.changeId}" value="${m.departureDateIso || new Date().toISOString().split('T')[0]}" style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); font-size: 11px; padding: 2px 5px; ${isKeepActive ? 'display: none;' : ''}" onchange="window.crewImportEngine.setMissingRosterDate('${m.changeId}', this.value)" title="${isTimeOff ? 'Effective Vacation Date' : 'Last Working Day'}">
                             </div>
                           </div>
                         </td>
@@ -3442,19 +4093,6 @@ class CrewImportEngine {
                     `;
                   }).join('') : ''}
 
-                  ${deltas ? deltas.rehires.map(rh => {
-                    const isSelected = this.isChangeSelected(rh.changeId);
-                    return `
-                      <tr style="border-bottom: 1px solid var(--border-color); ${isSelected ? '' : 'opacity: 0.45; filter: grayscale(0.6);'}">
-                        <td style="padding: 8px 10px; text-align: center;">
-                          <input type="checkbox" class="ci-change-checkbox" data-change-id="${rh.changeId}" onchange="window.crewImportEngine.toggleChange('${rh.changeId}', this.checked)" ${isSelected ? 'checked' : ''} style="cursor: pointer;">
-                        </td>
-                        <td style="padding: 8px 12px; font-weight: 700; color: #f59e0b;">👤 ${this.escapeHtml(rh.name)}</td>
-                        <td style="padding: 8px 12px;"><span class="badge" style="background: rgba(245, 158, 11, 0.2); color: #f59e0b; padding: 2px 6px; border-radius: 4px; font-weight: 700;">Rehire</span></td>
-                        <td style="padding: 8px 12px; color: var(--text-muted);">Rejoining at Location: <strong style="color: var(--text-primary);">${this.escapeHtml(rh.location)}</strong>, Job: <strong style="color: #60a5fa; font-family: monospace;">${this.escapeHtml(rh.jobNumber)}</strong></td>
-                      </tr>
-                    `;
-                  }).join('') : ''}
 
                   ${deltas ? deltas.newJobsDetected.map(nj => {
                     const isSelected = this.isChangeSelected(nj.changeId);
@@ -3466,6 +4104,36 @@ class CrewImportEngine {
                         <td style="padding: 8px 12px; font-weight: 700; color: #06b6d4; font-family: monospace;">📋 ${this.escapeHtml(nj.jobNumber)}</td>
                         <td style="padding: 8px 12px;"><span class="badge" style="background: rgba(6, 182, 212, 0.2); color: #06b6d4; padding: 2px 6px; border-radius: 4px; font-weight: 700;">New Job</span></td>
                         <td style="padding: 8px 12px; color: var(--text-muted);">New Job in ${this.escapeHtml(nj.location)} (Crew Size: ${nj.crewSize}, Lead: ${this.escapeHtml(nj.suggestedForeman || 'TBD')}, Sched: ${this.escapeHtml(nj.scheduleLabel)})</td>
+                      </tr>
+                    `;
+                  }).join('') : ''}
+
+                  ${deltas ? (deltas.jobStatusChanges || []).map(jsc => {
+                    const isSelected = this.isChangeSelected(jsc.changeId);
+                    const statusColor = jsc.newStatus === 'On Hold' ? '#94a3b8' : (jsc.newStatus === 'Completed' ? '#60a5fa' : (jsc.newStatus === 'Pending Start' ? '#f59e0b' : '#10b981'));
+                    const statusBg = jsc.newStatus === 'On Hold' ? 'rgba(100, 116, 139, 0.2)' : (jsc.newStatus === 'Completed' ? 'rgba(59, 130, 246, 0.2)' : (jsc.newStatus === 'Pending Start' ? 'rgba(245, 158, 11, 0.2)' : 'rgba(16, 185, 129, 0.2)'));
+                    const statusIcon = jsc.newStatus === 'On Hold' ? '⏸️' : (jsc.newStatus === 'Completed' ? '🏁' : (jsc.newStatus === 'Pending Start' ? '🟡' : '🟢'));
+                    return `
+                      <tr style="border-bottom: 1px solid var(--border-color); background: rgba(100, 116, 139, 0.05); ${isSelected ? '' : 'opacity: 0.45; filter: grayscale(0.6);'}">
+                        <td style="padding: 8px 10px; text-align: center;">
+                          <input type="checkbox" class="ci-change-checkbox" data-change-id="${jsc.changeId}" onchange="window.crewImportEngine.toggleChange('${jsc.changeId}', this.checked)" ${isSelected ? 'checked' : ''} style="cursor: pointer;">
+                        </td>
+                        <td style="padding: 8px 12px; font-weight: 700; color: #60a5fa; font-family: monospace;">
+                          📋 Job ${this.escapeHtml(jsc.jobNumber)} (${this.escapeHtml(jsc.location)})
+                        </td>
+                        <td style="padding: 8px 12px;">
+                          <span class="badge" style="background: ${statusBg}; color: ${statusColor}; padding: 2px 6px; border-radius: 4px; font-weight: 700;">
+                            ${statusIcon} Status: ${this.escapeHtml(jsc.newStatus)}
+                          </span>
+                        </td>
+                        <td style="padding: 8px 12px; color: var(--text-muted);">
+                          Status changing from <span style="text-decoration: line-through; color: #94a3b8;">${this.escapeHtml(jsc.oldStatus)}</span> 
+                          ➡️ <strong style="color: ${statusColor};">${this.escapeHtml(jsc.newStatus)}</strong>
+                          ${jsc.note ? `<span style="color: #fbbf24; font-size: 11px; margin-left: 6px;">(Note: "${this.escapeHtml(jsc.note)}")</span>` : ''}
+                          ${jsc.newStatus === 'On Hold' && jsc.onHoldDate ? `<span style="color: #cbd5e1; font-size: 11px; margin-left: 6px;">[Hold Date: ${this.escapeHtml(jsc.onHoldDate)}${jsc.estimatedReturn ? ` · Return: ${this.escapeHtml(jsc.estimatedReturn)}` : ''}]</span>` : ''}
+                          ${jsc.newStatus === 'Pending Start' && jsc.startDate ? `<span style="color: #fbbf24; font-size: 11px; margin-left: 6px;">[Start Date: ${this.escapeHtml(jsc.startDate)}]</span>` : ''}
+                          ${jsc.newStatus === 'Completed' && jsc.actualEndDate ? `<span style="color: #60a5fa; font-size: 11px; margin-left: 6px;">[End Date: ${this.escapeHtml(jsc.actualEndDate)}]</span>` : ''}
+                        </td>
                       </tr>
                     `;
                   }).join('') : ''}
@@ -3503,6 +4171,23 @@ class CrewImportEngine {
     const leadName = crew.lead ? crew.lead.name : '';
     const days = crew.scheduleDays || this.getScheduleFlags(crew.scheduleLabel);
     const status = crew.status || 'Active';
+
+    const jtTable = this.db ? (this.db.getTable('job_tracking') || this.db.getTable('Job Tracking')) : null;
+    let oldJob = null;
+    if (jtTable && jtTable.rows) {
+      oldJob = jtTable.rows.find(r => {
+        let jNum = '';
+        for (const k of Object.keys(r)) {
+          const kl = k.toLowerCase().trim();
+          if (kl === 'job number' || kl === 'job #' || kl === 'job') { jNum = String(r[k] || '').trim(); break; }
+        }
+        if (!jNum) jNum = String(Object.values(r)[0] || '').trim();
+        return jNum === crew.jobNumber;
+      });
+    }
+    const oldStatus = oldJob ? String(oldJob['Status'] || '').trim() : '';
+    const isStatusChanged = oldStatus && status && oldStatus.toLowerCase() !== status.toLowerCase();
+    const isNewJob = !oldJob;
 
     const statusBadgeStyles = {
       'Active': { bg: 'rgba(16, 185, 129, 0.15)', color: '#10b981', border: '#10b981', label: 'Active' },
@@ -3578,6 +4263,16 @@ class CrewImportEngine {
                   onchange="window.crewImportEngine.updateCrewJobNumber('${this.escapeJsString(crew.jobNumber)}', this.value)">
               </div>
               ${crew.isSubCrew ? `<span class="badge" style="background: rgba(139, 92, 246, 0.2); color: #a78bfa; border: 1px solid rgba(139, 92, 246, 0.4); font-size: 10px; font-weight: 700; padding: 1px 5px; border-radius: 4px;" title="Secondary crew sharing base job ${this.escapeHtml(crew.baseJobNumber || '')}">Sub-Crew</span>` : ''}
+              ${isStatusChanged ? `
+                <span class="badge" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.5); font-size: 10px; font-weight: 800; padding: 2px 6px; border-radius: 4px;" title="Status change detected from Job Tracking">
+                  ⚡ Status: ${this.escapeHtml(oldStatus)} ➔ ${this.escapeHtml(status)}
+                </span>
+              ` : ''}
+              ${isNewJob ? `
+                <span class="badge" style="background: rgba(6, 182, 212, 0.2); color: #67e8f9; border: 1px solid rgba(6, 182, 212, 0.4); font-size: 10px; font-weight: 800; padding: 2px 6px; border-radius: 4px;">
+                  ✨ New Job
+                </span>
+              ` : ''}
             </div>
             <div style="font-size: 11px; color: var(--text-muted); margin-top: 3px;">
               ${this.escapeHtml(crew.fullHeaderText)}
@@ -3647,13 +4342,20 @@ class CrewImportEngine {
         <div style="margin-bottom: 10px; display: flex; align-items: center; gap: 6px;">
           <span style="font-size: 11px; font-weight: 700; color: var(--text-muted);">Foreman:</span>
           <select class="form-control" style="font-size: 11px; padding: 2px 6px; background: var(--bg-tertiary); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 4px; flex: 1;" onchange="window.crewImportEngine.setManualForeman('${crew.jobNumber}', this.value)">
-            ${crew.employees.map(e => `
+            ${crew.employees.length > 0 ? crew.employees.map(e => `
               <option value="${e.name}" ${e.name === leadName ? 'selected' : ''}>
                 ${e.name} (${e.classification || e.role})
               </option>
-            `).join('')}
+            `).join('') : `<option value="">(None — Crew ${this.escapeHtml(status)})</option>`}
           </select>
         </div>
+
+        <!-- Conflict Auto-Resolution Notice (if an employee was auto-removed from this crew) -->
+        ${(this.resolvedRosterConflicts || []).some(c => c.crewJobNumber === crew.jobNumber) ? `
+          <div style="background: rgba(245, 158, 11, 0.12); border-left: 3px solid #f59e0b; padding: 4px 8px; border-radius: 4px; font-size: 11px; color: #fbbf24; margin-bottom: 8px;">
+            <span>⚡ Auto-removed: <strong>${this.escapeHtml((this.resolvedRosterConflicts || []).filter(c => c.crewJobNumber === crew.jobNumber).map(c => c.employeeName).join(', '))}</strong> (Off Full Week)</span>
+          </div>
+        ` : ''}
 
         <!-- Status Info Bar (if not Active) -->
         ${status === 'On Hold' ? `
@@ -3674,13 +4376,15 @@ class CrewImportEngine {
 
         <!-- Employee List -->
         <div style="font-size: 12px;">
-          ${crew.employees.map(e => `
+          ${crew.employees.length > 0 ? crew.employees.map(e => `
             <div style="display: flex; justify-content: space-between; align-items: center; padding: 4px 0; border-bottom: 1px dashed rgba(255,255,255,0.05);">
               <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
                 <span style="color: var(--text-muted); font-size: 10px; font-family: monospace;">${e.fullJobNumber}</span>
                 <span style="color: var(--text-primary); font-weight: ${e.name === leadName ? '700' : '400'};">${this.escapeHtml(e.name)}</span>
                 
                 ${e.isNewHire ? '<span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #10b981; font-size: 9px; padding: 1px 4px; border-radius: 3px; font-weight: 700;">NEW</span>' : ''}
+                ${e.isTransfer ? `<span class="badge" style="background: rgba(59, 130, 246, 0.2); color: #60a5fa; font-size: 9px; padding: 1px 5px; border-radius: 3px; font-weight: 700;" title="Transferred from Job ${this.escapeHtml(e.previousJobNumber || '')}">⇄ From ${this.escapeHtml(e.previousJobNumber || '')}</span>` : ''}
+                ${e.isRehire ? '<span class="badge" style="background: rgba(249, 115, 22, 0.2); color: #f97316; font-size: 9px; padding: 1px 5px; border-radius: 3px; font-weight: 700;">REHIRE</span>' : ''}
                 
                 ${e.otherJobNumber ? `
                   <button type="button" onclick="window.crewImportEngine.toggleEmployeePrimaryJob('${this.escapeHtml(e.name)}', '${e.isPrimary ? e.otherJobNumber : crew.jobNumber}')" 
@@ -3695,10 +4399,16 @@ class CrewImportEngine {
                   if (/Crane\s*Class/i.test(e.notes)) {
                     return `<span class="badge" style="background: rgba(99, 102, 241, 0.2); color: #a5b4fc; border: 1px solid rgba(99, 102, 241, 0.4); font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 3px;" title="Mandatory Training / Class">🎓 ${this.escapeHtml(e.notes)}</span>`;
                   }
+                  if (e.isScheduledDeparture || /Last\s*day|Scheduled\s*Departure/i.test(e.notes)) {
+                    return `<span class="badge" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 3px;" title="Scheduled Departure: Active on crew until last day">⏳ ${this.escapeHtml(e.notes)}</span>`;
+                  }
+                  if (/MSLCAT|Interview|Int\b/i.test(e.notes)) {
+                    return `<span class="badge" style="background: rgba(168, 85, 247, 0.2); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.4); font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 3px;" title="MSLCAT Interview / Apprentice Event">📋 ${this.escapeHtml(e.notes)}</span>`;
+                  }
                   if (/Under\s*21/i.test(e.notes)) {
                     return `<span class="badge" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 3px;" title="Under 21 Driver Restriction">⚠️ ${this.escapeHtml(e.notes)}</span>`;
                   }
-                  if (/Fri\s*Only|Mon\s*Only|Tue\s*Only|Wed\s*Only|Thu\s*Only|Partial|Schedule/i.test(e.notes)) {
+                  if (/(?:Fri|Mon|Tue|Wed|Thu|Sat|Sun)\w*\b.*?(?:Only|thru|to|-|&|\d{1,2}[-/]\d{1,2})|Partial|Schedule/i.test(e.notes)) {
                     return `<span class="badge" style="background: rgba(6, 182, 212, 0.2); color: #67e8f9; border: 1px solid rgba(6, 182, 212, 0.4); font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 3px;" title="Partial Week Schedule">📅 ${this.escapeHtml(e.notes)}</span>`;
                   }
                   return `<span style="color: #f59e0b; font-size: 10px; font-weight: 600; background: rgba(245, 158, 11, 0.12); padding: 1px 5px; border-radius: 3px; border: 1px solid rgba(245, 158, 11, 0.25);">📝 ${this.escapeHtml(e.notes)}</span>`;
@@ -3714,7 +4424,11 @@ class CrewImportEngine {
                   title="Remove employee row from crew">✕</button>
               </div>
             </div>
-          `).join('')}
+          `).join('') : `
+            <div style="color: #94a3b8; font-size: 12px; font-style: italic; padding: 12px 6px; text-align: center; background: rgba(0,0,0,0.15); border-radius: 6px; border: 1px dashed rgba(255,255,255,0.08);">
+              ${status === 'On Hold' ? '⏸️ Crew is On Hold — No active employees assigned' : (status === 'Completed' ? '🏁 Crew is Completed — No active employees assigned' : (status === 'Pending Start' ? '🟡 Crew is Pending Start — No active employees assigned' : 'No active employees assigned'))}
+            </div>
+          `}
         </div>
       </div>
     `;
@@ -3841,6 +4555,7 @@ class CrewImportEngine {
       crew.onHoldDate = '';
       crew.estimatedReturn = '';
       crew.actualEndDate = '';
+      this.computedDeltas = this.computeChangeDeltas();
       this.render();
     }
   }
@@ -3849,6 +4564,7 @@ class CrewImportEngine {
     const crew = this.parsedCrews.find(c => c.jobNumber === jobNumber);
     if (crew) {
       crew.excluded = true;
+      this.computedDeltas = this.computeChangeDeltas();
       this.render();
     }
   }
@@ -3912,6 +4628,7 @@ class CrewImportEngine {
     crew.status = 'On Hold';
     crew.onHoldDate = holdDate;
     crew.estimatedReturn = estReturn;
+    this.computedDeltas = this.computeChangeDeltas();
 
     const modal = document.getElementById('crew-lifecycle-modal');
     if (modal) modal.remove();
@@ -3969,6 +4686,7 @@ class CrewImportEngine {
 
     crew.status = 'Pending Start';
     crew.startDate = startDate;
+    this.computedDeltas = this.computeChangeDeltas();
 
     const modal = document.getElementById('crew-lifecycle-modal');
     if (modal) modal.remove();
@@ -4021,6 +4739,7 @@ class CrewImportEngine {
 
     crew.status = 'Completed';
     crew.actualEndDate = endDate;
+    this.computedDeltas = this.computeChangeDeltas();
 
     const modal = document.getElementById('crew-lifecycle-modal');
     if (modal) modal.remove();

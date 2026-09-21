@@ -924,7 +924,7 @@ class InventoryManager {
       } else if (originVal === 'Not New') {
         notesInput.placeholder = 'Optional details (e.g., Existing ground set, transferred, re-entered)...';
       } else {
-        notesInput.placeholder = 'Optional additional notes (e.g., PO #)...';
+        notesInput.placeholder = 'Optional notes (e.g., PO #, Visual)... "New" is automatically included';
       }
     }
     this.updatePreview();
@@ -1087,11 +1087,22 @@ class InventoryManager {
     }
 
     // Process Origin Reason and Notes:
-    // The Notes column in active inventory should ONLY contain what user entered in Notes input.
-    // 'New Purchase' / 'Not New' is origin tracking for history and accounting, not active item notes.
+    // If Origin Reason is 'New Purchase', populate or prefix 'New' in Notes column.
     const originReason = document.getElementById('new-item-origin-reason') ? document.getElementById('new-item-origin-reason').value.trim() : 'New Purchase';
     const userNotes = document.getElementById('f-notes') ? document.getElementById('f-notes').value.trim() : '';
-    const notes = userNotes;
+    let notes = userNotes;
+    if (originReason === 'New Purchase') {
+      const itemDateStr = rawDateAssigned || rawTestDate || rawCalDate || '';
+      const itemYear = itemDateStr ? new Date(itemDateStr).getFullYear() : new Date().getFullYear();
+      const currentYear = new Date().getFullYear();
+      if (!itemYear || itemYear >= currentYear) {
+        if (!userNotes) {
+          notes = 'New';
+        } else if (!/\bnew\b/i.test(userNotes)) {
+          notes = `New, ${userNotes}`;
+        }
+      }
+    }
 
     const rawTestDate = document.getElementById('f-test-date') ? document.getElementById('f-test-date').value : '';
     const rawDateAssigned = document.getElementById('f-date-assigned') ? document.getElementById('f-date-assigned').value : '';

@@ -402,7 +402,7 @@ class ItemStatsEngine {
         days: days,
         durationFormatted: this.formatDuration(days),
         state: state,
-        assignedTo: state.key === 'NEW_PURCHASE' ? 'New (Purchased)' : assignedTo,
+        assignedTo: state.key === 'NEW_PURCHASE' ? (assignedTo || 'New (Purchased)') : assignedTo,
         location: location || 'Helena',
         notes: notes,
         isCurrent: i === sorted.length - 1 && !isRetired,
@@ -1773,7 +1773,27 @@ class ItemStatsEngine {
 
         ${(() => {
           const latestM = (stats.milestones && stats.milestones.length > 0) ? stats.milestones[stats.milestones.length - 1] : null;
-          const hasDisc = latestM && (
+          if (!latestM) return '';
+
+          // Normalize shelf/storage states: Brand New on shelf, In Stock, and On Shelf are all the same physical shelf status
+          const isHistShelf = latestM.state.key === 'SHELF' || latestM.state.key === 'NEW_PURCHASE' ||
+            ['on shelf', 'shelf', 'in stock', 'storage', 'unassigned', 'new (purchased)', 'new', 'brand new (on shelf)'].includes((latestM.assignedTo || '').toLowerCase());
+          const isActiveShelf = curStatus.toLowerCase() === 'on shelf' || curAssignedTo.toLowerCase() === 'on shelf' || !curAssignedTo;
+
+          // If both history and active sheet show the item is On Shelf / In Stock, there is NO discrepancy
+          if (isHistShelf && isActiveShelf) return '';
+
+          // Normalize in-testing states
+          const isHistTesting = latestM.state.key === 'TESTING' || ['in testing', 'arnett', 'jm test', 'arnett / jm test', 'lab', 'testing', 'ready for test'].includes((latestM.assignedTo || '').toLowerCase());
+          const isActiveTesting = ['in testing', 'ready for test'].includes(curStatus.toLowerCase()) || ['in testing', 'ready for test'].includes(curAssignedTo.toLowerCase());
+          if (isHistTesting && isActiveTesting) return '';
+
+          // Normalize packed delivery states
+          const isHistDelivery = latestM.state.key === 'PACKED_DELIVERY' || ['packed for delivery', 'ready for delivery'].includes((latestM.assignedTo || '').toLowerCase());
+          const isActiveDelivery = ['packed for delivery', 'ready for delivery'].includes(curStatus.toLowerCase()) || ['packed for delivery', 'ready for delivery'].includes(curAssignedTo.toLowerCase());
+          if (isHistDelivery && isActiveDelivery) return '';
+
+          const hasDisc = (
             (latestM.assignedTo && latestM.assignedTo.toLowerCase() !== curAssignedTo.toLowerCase()) ||
             (latestM.state.key === 'FIELD' && curStatus.toLowerCase() === 'on shelf')
           );
