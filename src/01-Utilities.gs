@@ -544,6 +544,28 @@ function safeWriteRowToTable(sheet, rowIndex, rowData, headers) {
         }
       }
       
+      // Handle data validation rules (e.g. newly introduced location or classification not in Google Sheets dropdown)
+      if (String(err).indexOf('violates the data validation rules') !== -1) {
+        try {
+          var rule = cell.getDataValidation();
+          if (rule) {
+            cell.setDataValidation(rule.copy().setAllowInvalid(true).build());
+          } else {
+            cell.clearDataValidations();
+          }
+          cell.setValue(val);
+          Logger.log('  -> Auto-relaxed data validation rule on ' + headerName + ' and saved value');
+          continue;
+        } catch (errVal) {
+          try {
+            cell.clearDataValidations();
+            cell.setValue(val);
+            Logger.log('  -> Cleared data validation rule on ' + headerName + ' and saved value');
+            continue;
+          } catch (errClr) {}
+        }
+      }
+
       // Re-throw if unhandled
       throw err;
     }

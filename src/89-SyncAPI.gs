@@ -546,6 +546,41 @@ function getFastSnapshotFromDriveOrExport() {
 }
 
 /**
+ * Safely sets a cell value, automatically handling and relaxing restrictive Google Sheets
+ * Data Validation rules (e.g. "reject input" dropdowns that reject newly introduced locations or job titles).
+ */
+function safeSetCellWithValidationFallback(range, value) {
+  try {
+    range.setValue(value);
+  } catch (err) {
+    var errStr = String(err || '');
+    if (errStr.indexOf('violates the data validation rules') !== -1) {
+      try {
+        var rule = range.getDataValidation();
+        if (rule) {
+          range.setDataValidation(rule.copy().setAllowInvalid(true).build());
+        } else {
+          range.clearDataValidations();
+        }
+        range.setValue(value);
+        Logger.log('safeSetCellWithValidationFallback: Relaxed validation rule on ' + range.getA1Notation() + ' to allow "' + value + '"');
+        return;
+      } catch (valErr) {
+        try {
+          range.clearDataValidations();
+          range.setValue(value);
+          Logger.log('safeSetCellWithValidationFallback: Cleared validation rule on ' + range.getA1Notation() + ' and wrote "' + value + '"');
+          return;
+        } catch (clrErr) {
+          throw err;
+        }
+      }
+    }
+    throw err;
+  }
+}
+
+/**
  * Applies a batch of mutations (edits, creations, updates) from the offline desktop app back into Google Sheets.
  *
  * @param {Array<Object>} mutations - Array of mutation objects from the offline outbox
@@ -567,6 +602,27 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
   if (!mutations || !Array.isArray(mutations) || mutations.length === 0) {
     var emptySnap = returnSnapshot ? exportFullDatabaseSnapshot() : null;
     return { success: true, appliedCount: 0, errors: [], snapshot: emptySnap };
+  }
+
+  // Proactively clear restrictive data validation rules on Employees Location column
+  // so newly introduced job site locations never get rejected by Google Sheets.
+  try {
+    var empSheetName = typeof SHEET_EMPLOYEES !== 'undefined' ? SHEET_EMPLOYEES : 'Employees';
+    var empSheet = ss ? ss.getSheetByName(empSheetName) : null;
+    if (empSheet && empSheet.getLastRow() > 1) {
+      var empHeaders = empSheet.getRange(1, 1, 1, Math.min(empSheet.getLastColumn(), 20)).getValues()[0];
+      var locColIdx = 3;
+      for (var eh = 0; eh < empHeaders.length; eh++) {
+        if (String(empHeaders[eh] || '').trim().toLowerCase() === 'location') {
+          locColIdx = eh + 1;
+          break;
+        }
+      }
+      empSheet.getRange(2, locColIdx, empSheet.getLastRow() - 1, 1).clearDataValidations();
+      Logger.log('applyBatchSyncMutations: Cleared restrictive data validations on Employees location column ' + locColIdx);
+    }
+  } catch (dvErr) {
+    Logger.log('Data validation clear note: ' + dvErr);
   }
 
   // 1. Conflict Detection Pre-Pass
@@ -821,7 +877,7 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
               valToWrite = false;
             }
 
-            sheet.getRange(targetRow, mut.col).setValue(valToWrite);
+            safeSetCellWithValidationFallback(sheet.getRange(targetRow, mut.col), valToWrite);
             sheetsModified[sheetName] = true;
             appliedCount++;
 
@@ -1486,7 +1542,7 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
                     if (typeof fldVal === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(fldVal)) {
                       fldVal = typeof parseDateNoon === 'function' ? parseDateNoon(fldVal) : new Date(fldVal);
                     }
-                    sheet.getRange(targetRowIdx, cIdx + 1).setValue(fldVal);
+                    safeSetCellWithValidationFallback(sheet.getRange(targetRowIdx, cIdx + 1), fldVal);
                   }
                 }
                 sheetsModified[sheetName] = true;
@@ -1524,7 +1580,7 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
                 if (typeof val === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(val)) {
                   val = parseDateNoon(val);
                 }
-                sheet.getRange(targetRowIdx, cIdx + 1).setValue(val);
+                safeSetCellWithValidationFallback(sheet.getRange(targetRowIdx, cIdx + 1), val);
               }
             }
             sheetsModified[sheetName] = true;
@@ -2137,7 +2193,34 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
   }
 
   // Force spreadsheet to commit all pending writes
-  SpreadsheetApp.flush();
+  try {
+    SpreadsheetApp.flush();
+  } catch (flushErr) {
+    Logger.log('applyBatchSyncMutations SpreadsheetApp.flush error: ' + flushErr);
+    var fErrStr = String(flushErr || '');
+    if (fErrStr.indexOf('violates the data validation rules') !== -1) {
+      try {
+        var matchCell = fErrStr.match(/cell\s+([A-Z]+)(\d+)/i);
+        if (matchCell) {
+          var colLetter = matchCell[1];
+          for (var sName in sheetsModified) {
+            var sh = ss.getSheetByName(sName);
+            if (sh && sh.getLastRow() > 1) {
+              sh.getRange(colLetter + '2:' + colLetter + sh.getLastRow()).clearDataValidations();
+            }
+          }
+          SpreadsheetApp.flush();
+          Logger.log('Recovered from data validation error by clearing validations on column ' + colLetter);
+        } else {
+          errors.push('Spreadsheet flush validation error: ' + flushErr.toString());
+        }
+      } catch (retryFlushErr) {
+        errors.push('Spreadsheet flush validation error: ' + retryFlushErr.toString());
+      }
+    } else {
+      errors.push('Spreadsheet flush error: ' + flushErr.toString());
+    }
+  }
 
   var skipPostProcessing = options && options.skipPostProcessing === true;
 

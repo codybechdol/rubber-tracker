@@ -902,6 +902,12 @@ class SyncEngine {
             if (pushResult && (pushResult.success || pushResult.status === 'ok')) {
               break;
             }
+            // If batch returned server errors and has multiple items, immediately isolate to 1 item
+            if (pushResult && pushResult.errors && pushResult.errors.length > 0 && chunk.length > 1) {
+              console.warn(`[Sync] Batch ${batchNum} returned server errors with ${chunk.length} items, shrinking to 1 item to isolate...`, pushResult.errors);
+              chunk = [currentOutbox[i]];
+              continue;
+            }
           } catch (pushErr) {
             lastBatchErr = pushErr;
             // If batch has multiple items and failed, immediately shrink chunk to 1 item to isolate the failure and ensure progress
