@@ -380,9 +380,12 @@ class ItemStatsEngine {
     });
 
     // 2. Discard 0-day intermediate shelf artifacts that occur on the exact same date as an employee assignment
-    const noIntermediateShelf = sorted.filter(r => {
+    const noIntermediateShelf = sorted.filter((r, idx) => {
       const st = this.classifyState(r['Assigned To'], r['Location'], r['Notes'], r['Status']);
-      if (st.key === 'SHELF' || st.key === 'NEW_PURCHASE') {
+      // Never discard the lifecycle purchase origin record or baseline record!
+      if (st.key === 'NEW_PURCHASE' || (idx === 0 && isPurchaseOrigin)) return true;
+      if (st.key === 'SHELF') {
+        if (idx === 0) return true; // Keep origin baseline even if shelf
         const dObj = this.parseDate(r['Date Assigned'] || r['Date'] || Object.values(r)[0]);
         if (dObj && empAssignmentDates.has(dObj.toISOString().slice(0, 10))) {
           return false; // Discard 0-day intermediate shelf artifact

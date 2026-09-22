@@ -1035,6 +1035,78 @@ class LocalDatabase {
   }
 
   /**
+   * Updates an existing history row in a history table and syncs to rawGrid and Google Sheets mutation outbox
+   */
+  async updateHistoryRow(sheetKey, targetRowOrPredicate, updatedFields) {
+    if (!this.snapshot || !this.snapshot.tables || !targetRowOrPredicate || !updatedFields) return false;
+    const cleanKey = String(sheetKey || '').toLowerCase().trim();
+    const histKey = cleanKey.endsWith('_history') ? cleanKey : `${cleanKey}_history`;
+    const table = this.snapshot.tables[histKey] || this.getTable(histKey);
+    if (!table || !table.rows) return false;
+
+    let targetRow = null;
+    if (typeof targetRowOrPredicate === 'function') {
+      targetRow = table.rows.find(targetRowOrPredicate);
+    } else if (typeof targetRowOrPredicate === 'object') {
+      targetRow = table.rows.find(r => r === targetRowOrPredicate);
+      if (!targetRow && targetRowOrPredicate._rowIdx) {
+        targetRow = table.rows.find(r => r._rowIdx === targetRowOrPredicate._rowIdx);
+      }
+      if (!targetRow) {
+        const itemVal = String(targetRowOrPredicate['Item #'] || targetRowOrPredicate['Serial #'] || targetRowOrPredicate['Model'] || Object.values(targetRowOrPredicate)[1] || Object.values(targetRowOrPredicate)[0] || '').trim().toLowerCase();
+        const dateVal = String(targetRowOrPredicate['Date Assigned'] || targetRowOrPredicate['Date'] || '').trim();
+        const assignedVal = String(targetRowOrPredicate['Assigned To'] || targetRowOrPredicate['Employee Name'] || '').trim().toLowerCase();
+        targetRow = table.rows.find(r => {
+          const rItem = String(r['Item #'] || r['Serial #'] || r['Model'] || Object.values(r)[1] || Object.values(r)[0] || '').trim().toLowerCase();
+          const rDate = String(r['Date Assigned'] || r['Date'] || '').trim();
+          const rAssigned = String(r['Assigned To'] || r['Employee Name'] || '').trim().toLowerCase();
+          return (!itemVal || rItem === itemVal) && (!dateVal || rDate === dateVal) && (!assignedVal || rAssigned === assignedVal);
+        });
+      }
+    }
+
+    if (!targetRow) return false;
+
+    // Apply updatedFields to row object
+    for (const [k, v] of Object.entries(updatedFields)) {
+      targetRow[k] = v;
+      if (table.headers) {
+        const matchingHeader = table.headers.find(h => h.toLowerCase() === k.toLowerCase());
+        if (matchingHeader && matchingHeader !== k) {
+          targetRow[matchingHeader] = v;
+        }
+      }
+    }
+
+    // Sync to rawGrid
+    this.syncRowToRawGrid(table, targetRow);
+
+    // Queue UPDATE_CELL mutations for sync
+    const rIdx = targetRow._rowIdx || (table.rows.indexOf(targetRow) !== -1 ? table.rows.indexOf(targetRow) + 2 : null);
+    if (rIdx && table.headers) {
+      const itemIdentifier = String(targetRow['Item #'] || targetRow['Serial #'] || targetRow['Model'] || Object.values(targetRow)[1] || Object.values(targetRow)[0] || '');
+      for (const [k, v] of Object.entries(updatedFields)) {
+        const colIdx = table.headers.findIndex(h => h.toLowerCase() === k.toLowerCase());
+        if (colIdx !== -1) {
+          await this.addMutation({
+            action: 'UPDATE_CELL',
+            sheetName: table.name,
+            row: rIdx,
+            col: colIdx + 1,
+            header: table.headers[colIdx],
+            itemIdentifier: itemIdentifier,
+            value: v
+          });
+        }
+      }
+    }
+
+    this.schedulePersistSnapshot(this.snapshot, 400);
+    this.notify();
+    return true;
+  }
+
+  /**
    * Records an item state transition event to the corresponding History table and syncs to Google Sheets
    */
   async recordItemHistoryEvent(sheetName, itemRow, reasonNote = '') {
@@ -1198,7 +1270,7 @@ class LocalDatabase {
         itemRow['Date Assigned'] = todayStr;
       }
     }
-    if (!eventDate || (latest && lAssigned !== assignedTo.toLowerCase() && eventDate === String(latest['Date Assigned'] || latest['Date'] || '').trim())) {
+    if (!eventDate) {
       eventDate = todayStr;
       itemRow['Date Assigned'] = todayStr;
     }
@@ -2117,7 +2189,8 @@ class LocalDatabase {
       });
 
       // 2. Discard 0-day intermediate shelf records on dates where an employee assignment occurred
-      const noIntermediateShelf = groupRows.filter(r => {
+      const noIntermediateShelf = groupRows.filter((r, idx) => {
+        if (idx === 0) return true; // Never discard the item's initial origin record
         const aVal = r[assignedColName] || r['Assigned To'] || '';
         if (getRank(aVal) === 2) {
           const dStr = normalizeDateStr(r[dateColName] || r['Date Assigned'] || r['Date'] || Object.values(r)[0]);
