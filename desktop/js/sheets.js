@@ -917,6 +917,15 @@ class SheetNavigator {
   }
 
   /**
+   * Checks whether an employee row represents an active employee (not departed/inactive/previous).
+   */
+  isEmployeeActive(r, prevEmpNames = null) {
+    if (!r) return false;
+    if (!prevEmpNames) prevEmpNames = this.getPreviousEmployeeNamesSet();
+    return !this.isRowPreviousEmployee(r, prevEmpNames);
+  }
+
+  /**
    * Initializes all 16 company certification records for all active employees if missing in expiring_certs.
    */
   async ensureAllEmployeeCertsExist(silent = false) {
@@ -1933,20 +1942,7 @@ class SheetNavigator {
     const prevEmpNames = this.getPreviousEmployeeNamesSet();
 
     // Filter out previous/inactive employees
-    let activeRows = (tableData.rows || []).filter(r => {
-      const loc = String(r['Location'] || '').toLowerCase().trim();
-      const stat = String(r['Status'] || '').toLowerCase().trim();
-      const job = String(r['Job Number'] || r['Job #'] || '').toLowerCase().trim();
-      const name = String(r['Employee Name'] || r['Name'] || Object.values(r)[0] || '').toLowerCase().trim();
-      if (!name) return false;
-      if (prevEmpNames && prevEmpNames.has(name)) return false;
-      if (loc === 'previous employee' || loc.includes('previous') ||
-          stat === 'previous employee' || stat.includes('inactive') || stat.includes('terminated') ||
-          job.includes('previous') || job.startsWith('002-') || name.includes('former')) {
-        return false;
-      }
-      return true;
-    });
+    let activeRows = (tableData.rows || []).filter(r => this.isEmployeeActive(r, prevEmpNames));
 
     const totalActiveCount = activeRows.length;
 
@@ -2546,7 +2542,7 @@ class SheetNavigator {
             <div style="flex: 1; min-width: 0;">
               <div style="font-weight: 800; font-size: 14px; color: var(--text-primary); display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
                 <span title="Crew Base Location">📍 ${this.escapeHtml(crew.location)}</span>
-                <span style="font-family: monospace; font-weight: 800; font-size: 13px; color: #60a5fa; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; padding: 2px 6px;">
+                <span style="font-family: monospace; font-weight: 800; font-size: 13px; color: #60a5fa; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; padding: 2px 6px; white-space: nowrap;">
                   ${this.escapeHtml(crew.jobNumber)}
                 </span>
                 ${getStatusBadge(crew.status)}
@@ -2881,8 +2877,11 @@ class SheetNavigator {
     });
     const destLoc = (destJt && destJt['Location']) ? String(destJt['Location']).trim() : 'Helena';
 
-    // Calculate destination slot (.N + 1)
+    const prevEmpNames = this.getPreviousEmployeeNamesSet();
+
+    // Calculate destination slot (.N + 1 or lowest missing slot starting at .1) for ACTIVE members only
     const destMembers = (empTable.rows || []).filter(e => {
+      if (!this.isEmployeeActive(e, prevEmpNames)) return false;
       const jn = String(e['Job Number'] || e['Job #'] || '').trim();
       return jn === destBaseJob || jn.startsWith(destBaseJob + '.');
     });
@@ -2892,16 +2891,20 @@ class SheetNavigator {
       return m ? parseInt(m[1], 10) : 0;
     }).filter(n => n > 0);
 
-    const nextSuffix = (destSuffixes.length > 0 ? Math.max(...destSuffixes) : 0) + 1;
+    let nextSuffix = 1;
+    while (destSuffixes.includes(nextSuffix)) {
+      nextSuffix++;
+    }
     const newSlot = `${destBaseJob}.${nextSuffix}`;
 
-    // Source crew renumbering candidates
+    // Source crew renumbering candidates among ACTIVE members
     let membersToRenumber = [];
     let oldSourceSize = 0;
     let newSourceSize = 0;
 
     if (!isSecondary && fromBaseJob && fromBaseJob !== 'Vacation' && fromBaseJob !== 'Leave' && fromBaseJob !== 'Light Duty') {
       const sourceMembers = (empTable.rows || []).filter(e => {
+        if (!this.isEmployeeActive(e, prevEmpNames)) return false;
         const jn = String(e['Job Number'] || e['Job #'] || '').trim();
         return jn === fromBaseJob || jn.startsWith(fromBaseJob + '.');
       });
@@ -3245,9 +3248,10 @@ class SheetNavigator {
       }
     }
 
-    // 3. Update Job Tracking Crew Sizes
+    // 3. Update Job Tracking Crew Sizes using actual active member counts
     if (jtTable.rows) {
       const sizeColIdx = (jtTable.headers || []).findIndex(h => /^crew\s*size$/i.test(h)) + 1;
+      const prevEmpNames = this.getPreviousEmployeeNamesSet();
 
       // Source JT
       if (fromBaseJob && !isSecondary) {
@@ -3256,12 +3260,16 @@ class SheetNavigator {
           return jn === fromBaseJob || jn.replace(/\.\d+.*$/, '').trim() === fromBaseJob;
         });
         if (sourceJt) {
-          const curSize = parseInt(sourceJt['Crew Size'], 10) || 1;
-          const newSize = Math.max(0, curSize - 1);
-          sourceJt['Crew Size'] = newSize;
+          const activeSourceCount = (empTable.rows || []).filter(e => {
+            if (!this.isEmployeeActive(e, prevEmpNames)) return false;
+            const jn = String(e['Job Number'] || e['Job #'] || '').trim();
+            return jn === fromBaseJob || jn.startsWith(fromBaseJob + '.');
+          }).length;
+
+          sourceJt['Crew Size'] = activeSourceCount;
           const sRowIdx = sourceJt._rowIdx || (jtTable.rows.indexOf(sourceJt) + 2);
           if (jtTable.rawGrid && jtTable.rawGrid[sRowIdx - 1] && sizeColIdx > 0) {
-            jtTable.rawGrid[sRowIdx - 1][sizeColIdx - 1] = newSize;
+            jtTable.rawGrid[sRowIdx - 1][sizeColIdx - 1] = activeSourceCount;
           }
           await this.db.addMutation({
             action: 'UPDATE_CELL',
@@ -3271,7 +3279,7 @@ class SheetNavigator {
             col: sizeColIdx > 0 ? sizeColIdx : 4,
             header: 'Crew Size',
             itemIdentifier: fromBaseJob,
-            value: newSize
+            value: activeSourceCount
           });
         }
       }
@@ -3282,12 +3290,16 @@ class SheetNavigator {
         return jn === destBaseJob || jn.replace(/\.\d+.*$/, '').trim() === destBaseJob;
       });
       if (destJt) {
-        const curSize = parseInt(destJt['Crew Size'], 10) || 0;
-        const newSize = curSize + 1;
-        destJt['Crew Size'] = newSize;
+        const activeDestCount = (empTable.rows || []).filter(e => {
+          if (!this.isEmployeeActive(e, prevEmpNames)) return false;
+          const jn = String(e['Job Number'] || e['Job #'] || '').trim();
+          return jn === destBaseJob || jn.startsWith(destBaseJob + '.');
+        }).length;
+
+        destJt['Crew Size'] = activeDestCount;
         const dRowIdx = destJt._rowIdx || (jtTable.rows.indexOf(destJt) + 2);
         if (jtTable.rawGrid && jtTable.rawGrid[dRowIdx - 1] && sizeColIdx > 0) {
-          jtTable.rawGrid[dRowIdx - 1][sizeColIdx - 1] = newSize;
+          jtTable.rawGrid[dRowIdx - 1][sizeColIdx - 1] = activeDestCount;
         }
         await this.db.addMutation({
           action: 'UPDATE_CELL',
@@ -3297,7 +3309,7 @@ class SheetNavigator {
           col: sizeColIdx > 0 ? sizeColIdx : 4,
           header: 'Crew Size',
           itemIdentifier: destBaseJob,
-          value: newSize
+          value: activeDestCount
         });
       }
     }
@@ -3396,8 +3408,10 @@ class SheetNavigator {
       return jn === baseJob || jn.replace(/\.\d+.*$/, '').trim() === baseJob;
     }) : null;
     const foreman = jt ? String(jt['Foreman'] || '').trim() : '';
+    const prevEmpNames = this.getPreviousEmployeeNamesSet();
 
     const members = empTable.rows.filter(e => {
+      if (!this.isEmployeeActive(e, prevEmpNames)) return false;
       const j = String(e['Job Number'] || e['Job #'] || '').trim();
       return j === baseJob || j.startsWith(baseJob + '.');
     });
@@ -3782,12 +3796,16 @@ class SheetNavigator {
 
   promptChangeForeman(baseJob, currentForeman) {
     const empTable = this.db.getTable('employees');
+    const prevEmpNames = this.getPreviousEmployeeNamesSet();
+
     const members = (empTable?.rows || []).filter(e => {
+      if (!this.isEmployeeActive(e, prevEmpNames)) return false;
       const j = String(e['Job Number'] || '').trim();
       return j === baseJob || j.startsWith(baseJob + '.');
     });
 
     const otherEmps = (empTable?.rows || []).filter(e => {
+      if (!this.isEmployeeActive(e, prevEmpNames)) return false;
       const n = String(e['Employee Name'] || e['Name'] || '').trim();
       return !members.some(m => String(m['Employee Name'] || m['Name'] || '').trim().toLowerCase() === n.toLowerCase());
     });
