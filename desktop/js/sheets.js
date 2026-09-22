@@ -926,6 +926,21 @@ class SheetNavigator {
   }
 
   /**
+   * Checks whether an employee is currently assigned to a temporary non-field status (Vacation, Leave, Light Duty, Medical).
+   */
+  isStatusEmployee(r) {
+    if (!r) return false;
+    const loc = String(r['Location'] || '').toLowerCase().trim();
+    return loc.includes('(vacation)') || loc === 'vacation' ||
+           loc.includes('(leave)') || loc === 'leave' ||
+           loc.includes('(light duty)') || loc === 'light duty' ||
+           loc.includes('(weeds)') || loc === 'weeds' ||
+           loc.includes('(medical)') || loc === 'medical' ||
+           loc.includes("worker's comp") || loc.includes('fmla') ||
+           loc.includes('military');
+  }
+
+  /**
    * Initializes all 16 company certification records for all active employees if missing in expiring_certs.
    */
   async ensureAllEmployeeCertsExist(silent = false) {
@@ -3444,6 +3459,12 @@ class SheetNavigator {
       const isBForm = nameMatchesForeman(b, foreman);
       if (isAForm && !isBForm) return -1;
       if (!isAForm && isBForm) return 1;
+
+      // Active field members take precedence over members currently on Vacation/Leave/Light Duty
+      const isAStatus = this.isStatusEmployee(a);
+      const isBStatus = this.isStatusEmployee(b);
+      if (!isAStatus && isBStatus) return -1;
+      if (isAStatus && !isBStatus) return 1;
 
       const pA = getRolePriority(a['Job Classification'] || a['Classification']);
       const pB = getRolePriority(b['Job Classification'] || b['Classification']);
