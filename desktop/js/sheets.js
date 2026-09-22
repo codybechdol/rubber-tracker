@@ -2175,7 +2175,7 @@ class SheetNavigator {
           suffixCounts.set(sNum, (suffixCounts.get(sNum) || 0) + 1);
         }
       });
-      const duplicateSuffixes = Array.from(suffixCounts.entries()).filter(([num, count]) => count > 1).map(([num]) => num);
+      const duplicateSuffixes = Array.from(suffixCounts.entries()).filter(([, count]) => count > 1).map(([n]) => n);
       let hasGaps = false;
       if (suffixes.length > 0) {
         const maxSuffix = Math.max(...suffixes);
@@ -2208,7 +2208,9 @@ class SheetNavigator {
     try {
       const savedStr = localStorage.getItem('CREW_IMPORT_ORDER');
       if (savedStr) savedImportOrder = JSON.parse(savedStr);
-    } catch (e) {}
+    } catch {
+      // Ignore parse errors from stale localStorage values
+    }
     if (!savedImportOrder && window._crewImportOrder) {
       savedImportOrder = window._crewImportOrder;
     }
@@ -2271,7 +2273,7 @@ class SheetNavigator {
     })).filter(a => a.name);
 
     // Helper for rendering a single employee row inside a card
-    const renderMemberRow = (e, isLead = false, baseJob = '', isSecondaryCard = false) => {
+    const renderMemberRow = (e, isLead = false, baseJob = '', _isSecondaryCard = false) => {
       return `
         <div class="crew-member-row"
              draggable="true"
@@ -2818,7 +2820,9 @@ class SheetNavigator {
         try {
           const raw = e.dataTransfer.getData('application/json');
           if (raw) data = JSON.parse(raw);
-        } catch (err) {}
+        } catch {
+          // Ignore drag data parse error
+        }
         if (!data && window._activeCrewDragData) data = window._activeCrewDragData;
 
         if (data) {
@@ -2855,7 +2859,9 @@ class SheetNavigator {
         try {
           const raw = e.dataTransfer.getData('application/json');
           if (raw) data = JSON.parse(raw);
-        } catch (err) {}
+        } catch {
+          // Ignore drag data parse error
+        }
         if (!data && window._activeCrewDragData) data = window._activeCrewDragData;
 
         if (data) {
@@ -2870,7 +2876,7 @@ class SheetNavigator {
    */
   async handleCrewCardDrop(dragData, destBaseJob) {
     if (!dragData || !destBaseJob) return;
-    const { empName, fromBaseJob, fromSlot, isSecondary, primaryJob, sourceLoc } = dragData;
+    const { empName, fromBaseJob, fromSlot, isSecondary } = dragData;
 
     if (fromBaseJob === destBaseJob) {
       if (typeof window.showToast === 'function') {
@@ -3208,7 +3214,6 @@ class SheetNavigator {
           value: finalSec
         });
       } else {
-        const oldSlot = emp['Job Number'];
         emp['Job Number'] = newSlot;
         if (emp['Job #']) emp['Job #'] = newSlot;
         emp['Location'] = destLoc;
@@ -3539,7 +3544,7 @@ class SheetNavigator {
     await this.db.persistSnapshot(this.db.snapshot);
     this.renderCurrentSheet();
     if (typeof window.showToast === 'function') {
-      window.showToast(`✅ Fixed numbering for ${baseJob}: ${members.length} member(s) sequentially numbered .1 to .${members.length}`);
+      window.showToast(`✅ Fixed numbering for ${baseJob}: ${updatedCount} member slot(s) updated, now sequentially numbered .1 to .${members.length}`);
     }
   }
 
@@ -5407,6 +5412,7 @@ class SheetNavigator {
         }
 
         const isSmsCol = hLower.includes('sms');
+        const isEditable = !isPrimaryItemCol && !isEmployeeNameCol && !isSmsCol && !hLower.includes('change out') && !hLower.startsWith('skip ');
         let itemIdentifier = '';
         if (this.currentSheetKey === 'expiring_certs') {
           itemIdentifier = `${row['Employee Name'] || row['Name'] || ''} | ${row['Item Type'] || row['Cert Type'] || ''}`;
