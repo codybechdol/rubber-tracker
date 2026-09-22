@@ -896,6 +896,16 @@ class CrewImportEngine {
     // 7. Auto-detect & resolve conflicts where employees in full-week Time Off / Departure were left on crews
     this.detectAndResolveTimeOffConflicts();
 
+    // 8. Cache parsed crew import order to maintain exact Excel sequence on UI cards
+    const orderList = this.parsedCrews.map(c => String(c.jobNumber || '').replace(/\.\d+.*$/, '').trim()).filter(Boolean);
+    try {
+      localStorage.setItem('CREW_IMPORT_ORDER', JSON.stringify(orderList));
+    } catch (e) {}
+    window._crewImportOrder = orderList;
+    if (this.db?.snapshot?.configs) {
+      this.db.snapshot.configs['CREW_IMPORT_ORDER'] = orderList;
+    }
+
     return this.parsedCrews;
   }
 
@@ -2482,6 +2492,239 @@ class CrewImportEngine {
   }
 
   // ==========================================================================
+  // VACATION SUFFIX & ABSENCE JOB ALLOCATION
+  // ==========================================================================
+
+  /**
+   * Allocates the next available 005-26.X job number for Light Duty, Medical, or Leave
+   */
+  allocateNext005JobNumber(empTable) {
+    const prefix = '005-26';
+    let maxSuffix = 0;
+    const rows = (empTable && empTable.rows) || [];
+    for (const r of rows) {
+      const job = String(r['Job Number'] || r['Job #'] || '').trim();
+      const match = job.match(/^005-26\.(\d+)/i);
+      if (match) {
+        const val = parseInt(match[1], 10);
+        if (val > maxSuffix) maxSuffix = val;
+      }
+    }
+    return `${prefix}.${maxSuffix + 1}`;
+  }
+
+  /**
+   * Allocates the appropriate suffix for an employee on vacation:
+   * - Retains original base job number (###-##).
+   * - If entire crew is on vacation (0 working members in field), retains original suffix.
+   * - If active working members exist (.1 through .M), sequences immediately after (.M+1, .M+2, etc.).
+   * - Multiple vacationers on same crew ordered alphabetically, then by earliest vacation date.
+   */
+  allocateVacationJobNumber(empRow, baseJobNumber, empTable, histTable, vacationCandidates = []) {
+    if (!baseJobNumber) return '';
+    const cleanBase = String(baseJobNumber).replace(/\.\d+.*$/, '').trim();
+    if (!cleanBase) return '';
+
+    const empRows = (empTable && empTable.rows) || [];
+    const empName = this.getEmpRowName(empRow) || '';
+
+    // 1. Find all active working employees on this base job (excluding status locations)
+    const workingMembers = [];
+    for (const r of empRows) {
+      const j = String(this.getEmpRowJobNumber(r) || '').trim();
+      if (!j.startsWith(cleanBase + '.')) continue;
+      const loc = String(this.getEmpRowLocation(r) || '').toLowerCase();
+      const isStatus = ['vacation', 'light duty', 'leave', 'medical', "worker's comp", 'previous'].some(s => loc.includes(s));
+      if (isStatus) continue;
+
+      const match = j.match(new RegExp(`^${cleanBase.replace('-', '\\-')}\\.(\\d+)`));
+      if (match) {
+        workingMembers.push({
+          row: r,
+          suffix: parseInt(match[1], 10),
+          name: this.getEmpRowName(r)
+        });
+      }
+    }
+
+    // If 0 working members on this crew, keep original suffix
+    if (workingMembers.length === 0) {
+      const curJob = String(this.getEmpRowJobNumber(empRow) || '').trim();
+      const match = curJob.match(new RegExp(`^${cleanBase.replace('-', '\\-')}\\.(\\d+)`));
+      if (match) return `${cleanBase}.${match[1]}`;
+      // Check history for their previous suffix
+      if (histTable && histTable.rows) {
+        const past = histTable.rows.find(h => {
+          const hName = h['Employee Name'] || h['Name'] || '';
+          const hJob = String(h['Job Number'] || h['Job #'] || '').trim();
+          return this.cleanNameForMatch(hName) === this.cleanNameForMatch(empName) && hJob.startsWith(cleanBase + '.');
+        });
+        if (past) {
+          const pMatch = String(past['Job Number'] || '').match(new RegExp(`^${cleanBase.replace('-', '\\-')}\\.(\\d+)`));
+          if (pMatch) return `${cleanBase}.${pMatch[1]}`;
+        }
+      }
+      return `${cleanBase}.1`;
+    }
+
+    // Working crew exists! Find maximum working suffix
+    const maxWorkingSuffix = Math.max(...workingMembers.map(m => m.suffix));
+
+    // Find all employees on vacation for this base job
+    const vacationers = [];
+    const seenNames = new Set();
+
+    // Add candidates from the current import batch
+    for (const vc of vacationCandidates) {
+      const vName = vc.name || vc.rosterName || '';
+      const vJob = (vc.oldJob || vc.currentJob || '').replace(/\.\d+.*$/, '').trim();
+      if (vJob === cleanBase && !seenNames.has(vName.toLowerCase())) {
+        seenNames.add(vName.toLowerCase());
+        vacationers.push({
+          name: vName,
+          date: vc.departureDateIso || vc.departureDate || ''
+        });
+      }
+    }
+
+    // Also check any already marked on vacation in the DB
+    for (const r of empRows) {
+      const rName = this.getEmpRowName(r) || '';
+      if (!rName || seenNames.has(rName.toLowerCase())) continue;
+      const rLoc = String(this.getEmpRowLocation(r) || '').toLowerCase();
+      if (!rLoc.includes('vacation')) continue;
+      let rJob = String(this.getEmpRowJobNumber(r) || '').replace(/\.\d+.*$/, '').trim();
+      if (rJob === cleanBase) {
+        seenNames.add(rName.toLowerCase());
+        vacationers.push({
+          name: rName,
+          date: ''
+        });
+      }
+    }
+
+    // If current employee wasn't already in vacationers, add them
+    if (!seenNames.has(empName.toLowerCase())) {
+      vacationers.push({ name: empName, date: '' });
+    }
+
+    // Sort vacationers: Alphabetically by employee name, then by earliest date
+    vacationers.sort((a, b) => {
+      const nameCmp = a.name.localeCompare(b.name);
+      if (nameCmp !== 0) return nameCmp;
+      const dateA = a.date ? new Date(a.date).getTime() : 0;
+      const dateB = b.date ? new Date(b.date).getTime() : 0;
+      return dateA - dateB;
+    });
+
+    const empRank = vacationers.findIndex(v => v.name.toLowerCase() === empName.toLowerCase());
+    const assignedSuffix = maxWorkingSuffix + 1 + (empRank >= 0 ? empRank : 0);
+    return `${cleanBase}.${assignedSuffix}`;
+  }
+
+  /**
+   * One-time automated repair utility:
+   * Scans all employees in local DB:
+   * - Employees with (Vacation) and blank job number: recovers base job from history, assigns next available suffix.
+   * - Employees with (Medical) or (Leave) and blank / non-005 job: assigns 005-26.#.
+   */
+  async repairVacationAndLeaveJobNumbers() {
+    const empTable = this.db.getTable('employees');
+    const histTable = this.db.getTable('employee_history');
+    if (!empTable || !empTable.rows) return { repairedCount: 0 };
+
+    let repairedCount = 0;
+    const headers = empTable.headers || [];
+    const getFieldKey = (target) => {
+      const t = target.toLowerCase();
+      return headers.find(h => h.toLowerCase().trim() === t) || target;
+    };
+    const locKey = getFieldKey('location');
+    const jobKey = getFieldKey('job number');
+
+    const cleanName = (n) => String(n || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+
+    for (const row of empTable.rows) {
+      const loc = String(row[locKey] || '').trim();
+      const locLower = loc.toLowerCase();
+      const job = String(row[jobKey] || '').trim();
+      const empName = this.getEmpRowName(row) || '';
+
+      if (locLower.includes('(vacation)')) {
+        if (!job) {
+          // Recover base job from employee_history
+          let baseJob = '';
+          if (histTable && histTable.rows) {
+            const pastRows = histTable.rows.filter(h => {
+              const hName = h['Employee Name'] || h['Name'] || '';
+              const hJob = String(h['Job Number'] || h['Job #'] || '').trim();
+              return cleanName(hName) === cleanName(empName) && hJob && !hJob.startsWith('005') && !hJob.startsWith('002');
+            });
+
+            pastRows.sort((a, b) => {
+              const parseD = (s) => {
+                if (!s) return 0;
+                const p = String(s).split(/[-/]/);
+                if (p.length === 3) {
+                  let m = parseInt(p[0], 10), d = parseInt(p[1], 10), y = parseInt(p[2], 10);
+                  if (y < 100) y += 2000;
+                  return new Date(y, m - 1, d).getTime();
+                }
+                return new Date(s).getTime() || 0;
+              };
+              return parseD(b.Date) - parseD(a.Date);
+            });
+
+            if (pastRows.length > 0) {
+              baseJob = String(pastRows[0]['Job Number'] || '').replace(/\.\d+.*$/, '').trim();
+            }
+          }
+
+          if (baseJob) {
+            const newJob = this.allocateVacationJobNumber(row, baseJob, empTable, histTable, []);
+            if (newJob) {
+              row[jobKey] = newJob;
+              this.syncRowToRawGrid(empTable, row);
+              const empRowIdx = row._rowIdx || (empTable.rows.indexOf(row) + 2);
+              await this.db.addMutation({
+                action: 'UPDATE_ROW',
+                sheetName: empTable.name,
+                tableKey: 'employees',
+                employeeName: empName,
+                row: empRowIdx,
+                itemIdentifier: empName,
+                updatedFields: { [jobKey]: newJob }
+              });
+              repairedCount++;
+              console.log(`[AutoRepair] Restored vacation job for ${empName}: ${newJob}`);
+            }
+          }
+        }
+      } else if (locLower.includes('(medical)') || locLower.includes('(leave)')) {
+        if (!job || !job.startsWith('005-26.')) {
+          const new005 = this.allocateNext005JobNumber(empTable);
+          row[jobKey] = new005;
+          this.syncRowToRawGrid(empTable, row);
+          const empRowIdx = row._rowIdx || (empTable.rows.indexOf(row) + 2);
+          await this.db.addMutation({
+            action: 'UPDATE_ROW',
+            sheetName: empTable.name,
+            tableKey: 'employees',
+            employeeName: empName,
+            row: empRowIdx,
+            itemIdentifier: empName,
+            updatedFields: { [jobKey]: new005 }
+          });
+          repairedCount++;
+          console.log(`[AutoRepair] Allocated 005 job for ${empName}: ${new005}`);
+        }
+      }
+    }
+
+    return { repairedCount };
+  }
+
+  // ==========================================================================
   // 4. ATOMIC DATABASE APPLY & MUTATION SYNCHRONIZATION
   // ==========================================================================
 
@@ -2897,9 +3140,20 @@ class CrewImportEngine {
           const rawCity = oldLoc ? oldLoc.replace(/\s*\([^)]*\)/g, '').trim() : 'Helena';
           const absenceLoc = `${rawCity || 'Helena'} (Vacation)`;
 
+          let baseJob = (m.currentJob || this.getEmpRowJobNumber(row) || '').replace(/\.\d+.*$/, '').trim();
+          if (!baseJob && histTable && histTable.rows) {
+            const past = histTable.rows.find(h => {
+              const hName = h['Employee Name'] || h['Name'] || '';
+              const hJob = h['Job Number'] || h['Job #'] || '';
+              return this.cleanNameForMatch(hName) === this.cleanNameForMatch(m.name) && hJob && !hJob.startsWith('005') && !hJob.startsWith('002');
+            });
+            if (past) baseJob = (past['Job Number'] || '').replace(/\.\d+.*$/, '').trim();
+          }
+          const assignedJob = this.allocateVacationJobNumber(row, baseJob, empTable, histTable, (missingFromRoster || []).filter(x => x.action === 'time_off'));
+
           const updatedFields = {};
           if (locKey) { row[locKey] = absenceLoc; updatedFields[locKey] = absenceLoc; }
-          if (jobKey) { row[jobKey] = ''; updatedFields[jobKey] = ''; }
+          if (jobKey && assignedJob) { row[jobKey] = assignedJob; updatedFields[jobKey] = assignedJob; }
           if (notesKey) {
             row[notesKey] = `Vacation / Unscheduled (${this.rosterDateFormatted || todayFormatted})`;
             updatedFields[notesKey] = row[notesKey];
@@ -2908,12 +3162,14 @@ class CrewImportEngine {
           appliedCount++;
 
           if (histTable) {
+            // Log as `${baseJob} Vacation` in lifecycle history without suffix logging
+            const histJob = assignedJob ? `${assignedJob.replace(/\.\d+.*$/, '')} Vacation` : `${baseJob || '000-00'} Vacation`;
             const histRow = {
               'Date': todayFormatted,
               'Employee Name': this.getEmpRowName(row) || m.name,
               'Event Type': 'Time Off',
               'Location': rawCity || 'Helena',
-              'Job Number': m.currentJob || '',
+              'Job Number': histJob,
               'Notes': `Time Off / Not on Roster (${this.rosterDateFormatted || todayFormatted})`
             };
             histTable.rows.unshift(histRow);
@@ -3010,9 +3266,26 @@ class CrewImportEngine {
             }
             const absenceLoc = `${rawCity || 'Helena'} (${statusSuffix})`;
 
+            let assignedJob = '';
+            if (statusSuffix === 'Vacation') {
+              let baseJob = (to.oldJob || this.getEmpRowJobNumber(row) || '').replace(/\.\d+.*$/, '').trim();
+              if (!baseJob && histTable && histTable.rows) {
+                const past = histTable.rows.find(h => {
+                  const hName = h['Employee Name'] || h['Name'] || '';
+                  const hJob = h['Job Number'] || h['Job #'] || '';
+                  return this.cleanNameForMatch(hName) === this.cleanNameForMatch(to.name) && hJob && !hJob.startsWith('005') && !hJob.startsWith('002');
+                });
+                if (past) baseJob = (past['Job Number'] || '').replace(/\.\d+.*$/, '').trim();
+              }
+              assignedJob = this.allocateVacationJobNumber(row, baseJob, empTable, histTable, (timeOff || []).filter(x => x.isFullWeekOff));
+            } else {
+              // Medical, Leave, Light Duty -> route to 005-26.#
+              assignedJob = this.allocateNext005JobNumber(empTable);
+            }
+
             const updatedFields = {};
             if (locKey) { row[locKey] = absenceLoc; updatedFields[locKey] = absenceLoc; }
-            if (jobKey) { row[jobKey] = ''; updatedFields[jobKey] = ''; }
+            if (jobKey && assignedJob) { row[jobKey] = assignedJob; updatedFields[jobKey] = assignedJob; }
             if (notesKey) {
               row[notesKey] = to.note || (`${statusSuffix} ` + (this.rosterDateFormatted || todayFormatted));
               updatedFields[notesKey] = row[notesKey];
@@ -3021,13 +3294,15 @@ class CrewImportEngine {
             appliedCount++;
 
             if (histTable) {
+              // Lifecycle history lists simply as `027-26 Vacation` without logging suffix change
+              const histJob = (statusSuffix === 'Vacation' && assignedJob) ? `${assignedJob.replace(/\.\d+.*$/, '')} Vacation` : (assignedJob || '');
               const histRow = {
                 'Date': todayFormatted,
                 'Employee Name': this.getEmpRowName(row) || to.name,
                 'Event Type': statusSuffix === 'Vacation' ? 'Time Off' : statusSuffix,
                 'Location': absenceLoc,
-                'Job Number': '',
-                'Notes': `${statusSuffix}: ${to.note}`
+                'Job Number': histJob,
+                'Notes': statusSuffix === 'Vacation' ? `${histJob}: ${to.note}` : `${statusSuffix}: ${to.note}`
               };
               histTable.rows.unshift(histRow);
               histTable.rowCount = histTable.rows.length;
@@ -3370,6 +3645,16 @@ class CrewImportEngine {
       } catch (certErr) {
         console.warn('Could not auto-apply cert requirements after crew import:', certErr);
       }
+    }
+
+    // Persist crew import order to maintain exact Excel sequence on UI cards
+    const orderList = this.parsedCrews.map(c => String(c.jobNumber || '').replace(/\.\d+.*$/, '').trim()).filter(Boolean);
+    try {
+      localStorage.setItem('CREW_IMPORT_ORDER', JSON.stringify(orderList));
+    } catch (e) {}
+    window._crewImportOrder = orderList;
+    if (this.db?.snapshot?.configs) {
+      this.db.snapshot.configs['CREW_IMPORT_ORDER'] = orderList;
     }
 
     // Save database state
@@ -4093,7 +4378,7 @@ class CrewImportEngine {
                         <td style="padding: 8px 12px;"><span class="badge" style="background: rgba(245, 158, 11, 0.2); color: #f59e0b; padding: 2px 6px; border-radius: 4px; font-weight: 700;">${to.isFullWeekOff ? 'Time Off (Full Wk)' : 'Time Off (Partial Wk)'}</span></td>
                         <td style="padding: 8px 12px; color: #fbbf24; font-weight: 600;">
                           ${this.escapeHtml(to.note)}
-                          ${to.isFullWeekOff && to.oldJob ? `<span style="color: #60a5fa; margin-left: 8px;">(Moving off ${this.escapeHtml(to.oldJob)} → ${this.escapeHtml(to.oldLocation ? to.oldLocation.replace(/\\s*\\([^)]*\\)/g, '') : '')} (Vacation))</span>` : ''}
+                          ${to.isFullWeekOff && to.oldJob ? `<span style="color: #60a5fa; margin-left: 8px;">(Moving to ${this.escapeHtml(to.oldLocation ? to.oldLocation.replace(/\\s*\\([^)]*\\)/g, '') : '')} (Vacation) · Retains Job ${this.escapeHtml(to.oldJob.replace(/\.\d+.*$/, ''))}.?)</span>` : ''}
                           ${!to.isFullWeekOff && to.activeCrewJob ? `<span style="color: #10b981; margin-left: 8px;">(Working on ${this.escapeHtml(to.activeCrewJob)})</span>` : ''}
                         </td>
                       </tr>

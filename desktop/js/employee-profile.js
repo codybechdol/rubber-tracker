@@ -1341,6 +1341,9 @@ class EmployeeProfileEngine {
       mpEmail,
       notifEmail,
       hireDate,
+      gloveSize: primaryRow ? (primaryRow['Glove Size'] || primaryRow['Glove'] || '') : '',
+      sleeveSize: primaryRow ? (primaryRow['Sleeve Size'] || primaryRow['Sleeve'] || '') : '',
+      alternateNames: primaryRow ? (primaryRow['Alternate Names'] || primaryRow['Aliases'] || '') : '',
       assignedEquipment,
       equipmentHistory,
       certifications,
@@ -1520,6 +1523,11 @@ class EmployeeProfileEngine {
                 onclick="window.employeeProfileEngine.setTab('history')">
           🎓 Training & Lifecycle (${data.trainingList.length + data.employeeHistory.length})
         </button>
+        <button class="btn ${this.currentActiveTab === 'details' ? 'btn-primary' : 'btn-secondary'}" 
+                style="padding: 7px 14px; font-size: 12px; font-weight: 700;" 
+                onclick="window.employeeProfileEngine.setTab('details')">
+          👤 Contact & Details
+        </button>
       </div>
 
       <!-- Tab Content Area -->
@@ -1610,12 +1618,211 @@ class EmployeeProfileEngine {
     `;
   }
 
+  renderDetailsTabContent(data) {
+    if (!data) return '';
+
+    const gloveSizes = ['N/A', '8', '8.5', '9', '9.5', '10', '10.5', '11', '11.5', '12'];
+    const sleeveSizes = ['N/A', 'Regular', 'Large', 'X-Large'];
+    const classifications = [
+      'SUP', 'GF', 'F', 'GTO F', 'JRY', 'JRY OP', 'WT', 'GTO',
+      'EO 1', 'EO 2', 'AP 7', 'AP 6', 'AP 5', 'AP 4', 'AP 3', 'AP 2', 'AP 1',
+      'UG TECH 1', 'Other'
+    ];
+
+    const curGlove = String(data.gloveSize || '').trim();
+    const curSleeve = String(data.sleeveSize || '').trim();
+    const curRole = String(data.role || '').trim();
+
+    return `
+      <div style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 8px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.2);">
+        <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 12px; margin-bottom: 18px; flex-wrap: wrap; gap: 10px;">
+          <div>
+            <h4 style="font-size: 15px; font-weight: 800; color: #f8fafc; margin: 0; display: flex; align-items: center; gap: 8px;">
+              <span>👤</span> Edit Employee Information: <span style="color: #60a5fa;">${this.escapeHtml(data.displayName)}</span>
+            </h4>
+            <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 3px;">
+              All updates are saved directly to the Employees table and synchronized to Google Sheets.
+            </div>
+          </div>
+          <button type="button" class="btn btn-primary" style="padding: 7px 18px; font-size: 12.5px; font-weight: 700; display: flex; align-items: center; gap: 6px;" onclick="window.employeeProfileEngine.saveEmployeeDetails('${this.escapeJs(data.displayName)}')">
+            <span>💾</span> Save Changes
+          </button>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px;">
+          <!-- Section 1: Contact Details -->
+          <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px; padding: 14px;">
+            <div style="font-size: 12.5px; font-weight: 800; color: #93c5fd; margin-bottom: 12px; display: flex; align-items: center; gap: 6px;">
+              <span>📞</span> Contact Information
+            </div>
+            
+            <div style="margin-bottom: 10px;">
+              <label style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 4px;">Phone Number</label>
+              <input type="text" id="edit-emp-phone" class="form-control" style="width: 100%; font-size: 12px; padding: 6px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary);" value="${this.escapeHtml(data.phone !== 'N/A' ? data.phone : '')}" placeholder="(406) 555-1234">
+            </div>
+
+            <div style="margin-bottom: 10px;">
+              <label style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 4px;">Primary Email Address</label>
+              <input type="email" id="edit-emp-email" class="form-control" style="width: 100%; font-size: 12px; padding: 6px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary);" value="${this.escapeHtml(data.email)}" placeholder="employee@example.com">
+            </div>
+
+            <div style="margin-bottom: 10px;">
+              <label style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 4px;">MP Company Email</label>
+              <input type="email" id="edit-emp-mp-email" class="form-control" style="width: 100%; font-size: 12px; padding: 6px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary);" value="${this.escapeHtml(data.mpEmail)}" placeholder="username@mountainpower.com">
+            </div>
+
+            <div>
+              <label style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 4px;">Notification Emails (comma separated)</label>
+              <input type="text" id="edit-emp-notif-email" class="form-control" style="width: 100%; font-size: 12px; padding: 6px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary);" value="${this.escapeHtml(data.notifEmail)}" placeholder="alert1@email.com, alert2@email.com">
+            </div>
+          </div>
+
+          <!-- Section 2: PPE Sizing -->
+          <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px; padding: 14px;">
+            <div style="font-size: 12.5px; font-weight: 800; color: #a78bfa; margin-bottom: 12px; display: flex; align-items: center; gap: 6px;">
+              <span>🧤</span> PPE Sizing Specifications
+            </div>
+
+            <div style="margin-bottom: 12px;">
+              <label style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 4px;">Rubber Glove Size</label>
+              <select id="edit-emp-glove-size" class="form-control" style="width: 100%; font-size: 12px; padding: 6px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary);">
+                ${gloveSizes.map(s => `<option value="${s}" ${s === curGlove ? 'selected' : ''}>${s}</option>`).join('')}
+                ${curGlove && !gloveSizes.includes(curGlove) ? `<option value="${this.escapeHtml(curGlove)}" selected>${this.escapeHtml(curGlove)}</option>` : ''}
+              </select>
+            </div>
+
+            <div style="margin-bottom: 12px;">
+              <label style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 4px;">Rubber Sleeve Size</label>
+              <select id="edit-emp-sleeve-size" class="form-control" style="width: 100%; font-size: 12px; padding: 6px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary);">
+                ${sleeveSizes.map(s => `<option value="${s}" ${s.toLowerCase() === curSleeve.toLowerCase() ? 'selected' : ''}>${s}</option>`).join('')}
+                ${curSleeve && !sleeveSizes.some(s => s.toLowerCase() === curSleeve.toLowerCase()) ? `<option value="${this.escapeHtml(curSleeve)}" selected>${this.escapeHtml(curSleeve)}</option>` : ''}
+              </select>
+            </div>
+          </div>
+
+          <!-- Section 3: Classification & Crew Assignment -->
+          <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px; padding: 14px;">
+            <div style="font-size: 12.5px; font-weight: 800; color: #4ade80; margin-bottom: 12px; display: flex; align-items: center; gap: 6px;">
+              <span>⚡</span> Classification & Roles
+            </div>
+
+            <div style="margin-bottom: 12px;">
+              <label style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 4px;">Job Classification</label>
+              <select id="edit-emp-classification" class="form-control" style="width: 100%; font-size: 12px; padding: 6px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary);">
+                ${classifications.map(c => `<option value="${c}" ${c === curRole ? 'selected' : ''}>${c}</option>`).join('')}
+                ${curRole && !classifications.includes(curRole) ? `<option value="${this.escapeHtml(curRole)}" selected>${this.escapeHtml(curRole)}</option>` : ''}
+              </select>
+            </div>
+
+            <div style="margin-bottom: 12px;">
+              <label style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 4px;">Secondary Job Number(s)</label>
+              <input type="text" id="edit-emp-sec-job" class="form-control" style="width: 100%; font-size: 12px; padding: 6px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary);" value="${this.escapeHtml(data.secondaryJob)}" placeholder="e.g. 040-26.1">
+            </div>
+
+            <div>
+              <label style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 4px;">Alternate Names / Aliases</label>
+              <input type="text" id="edit-emp-alt-names" class="form-control" style="width: 100%; font-size: 12px; padding: 6px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary);" value="${this.escapeHtml(data.alternateNames || '')}" placeholder="e.g. Mike Smith, Johnny Smith">
+            </div>
+          </div>
+        </div>
+
+        <div style="margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border-color); display: flex; justify-content: flex-end;">
+          <button type="button" class="btn btn-primary" style="padding: 7px 20px; font-size: 13px; font-weight: 700; display: flex; align-items: center; gap: 6px;" onclick="window.employeeProfileEngine.saveEmployeeDetails('${this.escapeJs(data.displayName)}')">
+            <span>💾</span> Save Changes
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  async saveEmployeeDetails(displayName) {
+    if (!displayName) return;
+    const empTable = this.db.getTable('employees');
+    if (!empTable || !empTable.rows) {
+      alert('Employees table not available.');
+      return;
+    }
+
+    const row = empTable.rows.find(r => this.isNameMatch(r['Employee Name'] || r['Name'] || '', displayName));
+    if (!row) {
+      alert(`Could not find record for "${displayName}" in active Employees sheet.`);
+      return;
+    }
+
+    const getVal = (id) => {
+      const el = document.getElementById(id);
+      return el ? el.value.trim() : '';
+    };
+
+    const newPhone = getVal('edit-emp-phone');
+    const newEmail = getVal('edit-emp-email');
+    const newMpEmail = getVal('edit-emp-mp-email');
+    const newNotifEmail = getVal('edit-emp-notif-email');
+    const newGlove = getVal('edit-emp-glove-size');
+    const newSleeve = getVal('edit-emp-sleeve-size');
+    const newClass = getVal('edit-emp-classification');
+    const newSecJob = getVal('edit-emp-sec-job');
+    const newAltNames = getVal('edit-emp-alt-names');
+
+    const headers = empTable.headers || [];
+    const getFieldKey = (target) => headers.find(h => h.toLowerCase().trim() === target.toLowerCase().trim()) || target;
+
+    const phoneKey = getFieldKey('Phone Number');
+    const emailKey = getFieldKey('Email Address');
+    const mpEmailKey = getFieldKey('MP Email');
+    const notifEmailKey = getFieldKey('Notification Emails');
+    const gloveKey = getFieldKey('Glove Size');
+    const sleeveKey = getFieldKey('Sleeve Size');
+    const classKey = getFieldKey('Job Classification');
+    const secJobKey = getFieldKey('Secondary Job Number');
+    const altKey = getFieldKey('Alternate Names');
+
+    const updatedFields = {
+      [phoneKey]: newPhone,
+      [emailKey]: newEmail,
+      [mpEmailKey]: newMpEmail,
+      [notifEmailKey]: newNotifEmail,
+      [gloveKey]: newGlove,
+      [sleeveKey]: newSleeve,
+      [classKey]: newClass,
+      [secJobKey]: newSecJob,
+      [altKey]: newAltNames
+    };
+
+    Object.assign(row, updatedFields);
+    if (window.sheetNavigator && typeof window.sheetNavigator.syncRowToRawGrid === 'function') {
+      window.sheetNavigator.syncRowToRawGrid(empTable, row);
+    }
+
+    const empRowIdx = row._rowIdx || (empTable.rows.indexOf(row) + 2);
+    await this.db.addMutation({
+      action: 'UPDATE_ROW',
+      sheetName: empTable.name,
+      tableKey: 'employees',
+      employeeName: displayName,
+      row: empRowIdx,
+      itemIdentifier: displayName,
+      updatedFields: updatedFields
+    });
+
+    // Refresh profile modal
+    this.openProfileModal(displayName, 'details');
+
+    if (window.sheetNavigator) {
+      window.sheetNavigator.renderCurrentSheet();
+    }
+  }
+
   /**
    * Renders the current selected tab body
    */
   renderActiveTabContent() {
     const data = this.currentEmployeeData;
     if (!data) return '';
+
+    if (this.currentActiveTab === 'details') {
+      return this.renderDetailsTabContent(data);
+    }
 
     if (this.currentActiveTab === 'equipment') {
       const allEq = data.assignedEquipment || [];

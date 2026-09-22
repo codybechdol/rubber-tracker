@@ -1094,7 +1094,8 @@ class LocalDatabase {
       });
 
       if (itemHistRows.length > 0) {
-        // Find the chronologically latest record for this item
+        // Find the chronologically latest record for this item (ignoring anomalous future dates)
+        const nowMs = Date.now() + 86400000;
         let latestTime = -Infinity;
         for (const r of itemHistRows) {
           const dStr = String(r['Date Assigned'] || r['Date'] || Object.values(r)[0] || '').trim();
@@ -1106,7 +1107,7 @@ class LocalDatabase {
             const pd = new Date(dStr);
             t = !isNaN(pd.getTime()) ? pd.getTime() : 0;
           }
-          if (!latest || t > latestTime) {
+          if (t <= nowMs && (!latest || t > latestTime)) {
             latestTime = t;
             latest = r;
           }
@@ -1115,55 +1116,71 @@ class LocalDatabase {
         if (latest) {
           lAssigned = String(latest['Assigned To'] || latest['Status'] || '').trim().toLowerCase();
           lLoc = String(latest['Location'] || '').trim().toLowerCase();
-          if (lAssigned === assignedTo.toLowerCase() && lLoc === location.toLowerCase()) {
+          const isSameHolder = this.areSameEmployee(lAssigned, assignedTo);
+          const isBothShelf = (lAssigned === 'on shelf' || lAssigned === 'storage' || lAssigned === 'in stock') && 
+                              (assignedTo.toLowerCase() === 'on shelf' || assignedTo.toLowerCase() === 'storage' || assignedTo.toLowerCase() === 'in stock');
+          if (isSameHolder || isBothShelf) {
             const newDate = String(itemRow['Date Assigned'] || itemRow['Date'] || '').trim();
             const curDate = String(latest['Date Assigned'] || latest['Date'] || '').trim();
+            let hasChange = false;
+            if (assignedTo && String(latest['Assigned To'] || '').trim() !== assignedTo) {
+              latest['Assigned To'] = assignedTo;
+              hasChange = true;
+            }
             if (newDate && newDate !== curDate) {
               latest['Date Assigned'] = newDate;
-              if (itemRow['Notes'] !== undefined) latest['Notes'] = itemRow['Notes'];
-              if (histTable.rawGrid && histTable.headers) {
-                const dateColIdx = histTable.headers.findIndex(h => /date\s*assigned|^date$/i.test(h));
-                const itemColIdx = histTable.headers.findIndex(h => /^(item(\s*#)?|serial(\s*#)?|glove|sleeve|blanket|mack|hv\s*tester|phasing|model)/i.test(h));
-                let rIdx = null;
-                if (latest._rowIdx && latest._rowIdx >= 2 && latest._rowIdx <= histTable.rawGrid.length) {
-                  const checkRow = histTable.rawGrid[latest._rowIdx - 1];
-                  const checkItem = itemColIdx !== -1 ? String(checkRow[itemColIdx] || '').trim() : '';
-                  if (!itemNum || checkItem.toLowerCase() === itemNum.toLowerCase()) {
-                    rIdx = latest._rowIdx;
-                  }
-                }
-                if (!rIdx) {
-                  const gIdx = histTable.rawGrid.findIndex((gr, idx) => {
-                    if (idx === 0) return false;
-                    const grItem = itemColIdx !== -1 ? String(gr[itemColIdx] || '').trim() : '';
-                    const grDate = dateColIdx !== -1 ? String(gr[dateColIdx] || '').trim() : '';
-                    return (!itemNum || grItem.toLowerCase() === itemNum.toLowerCase()) && (!curDate || grDate === curDate);
-                  });
-                  if (gIdx !== -1) {
-                    rIdx = gIdx + 1;
-                    latest._rowIdx = rIdx;
-                  } else {
-                    rIdx = histTable.rows.indexOf(latest) !== -1 ? histTable.rows.indexOf(latest) + 2 : null;
-                  }
-                }
-                if (rIdx && histTable.rawGrid[rIdx - 1] && dateColIdx !== -1) {
-                  histTable.rawGrid[rIdx - 1][dateColIdx] = newDate;
-                }
-                if (rIdx && dateColIdx !== -1) {
-                  await this.addMutation({
-                    action: 'UPDATE_CELL',
-                    sheetName: histTable.name,
-                    row: rIdx,
-                    col: dateColIdx + 1,
-                    header: histTable.headers[dateColIdx],
-                    itemIdentifier: itemNum,
-                    value: newDate
-                  });
+              hasChange = true;
+            }
+            if (location && lLoc !== location.toLowerCase()) {
+              latest['Location'] = location;
+              hasChange = true;
+            }
+            if (notes && latest['Notes'] !== notes) {
+              latest['Notes'] = notes;
+              hasChange = true;
+            }
+            if (hasChange && histTable.rawGrid && histTable.headers) {
+              const dateColIdx = histTable.headers.findIndex(h => /date\s*assigned|^date$/i.test(h));
+              const itemColIdx = histTable.headers.findIndex(h => /^(item(\s*#)?|serial(\s*#)?|glove|sleeve|blanket|mack|hv\s*tester|phasing|model)/i.test(h));
+              let rIdx = null;
+              if (latest._rowIdx && latest._rowIdx >= 2 && latest._rowIdx <= histTable.rawGrid.length) {
+                const checkRow = histTable.rawGrid[latest._rowIdx - 1];
+                const checkItem = itemColIdx !== -1 ? String(checkRow[itemColIdx] || '').trim() : '';
+                if (!itemNum || checkItem.toLowerCase() === itemNum.toLowerCase()) {
+                  rIdx = latest._rowIdx;
                 }
               }
-              this.schedulePersistSnapshot(this.snapshot, 600);
-              this.notify();
+              if (!rIdx) {
+                const gIdx = histTable.rawGrid.findIndex((gr, idx) => {
+                  if (idx === 0) return false;
+                  const grItem = itemColIdx !== -1 ? String(gr[itemColIdx] || '').trim() : '';
+                  const grDate = dateColIdx !== -1 ? String(gr[dateColIdx] || '').trim() : '';
+                  return (!itemNum || grItem.toLowerCase() === itemNum.toLowerCase()) && (!curDate || grDate === curDate);
+                });
+                if (gIdx !== -1) {
+                  rIdx = gIdx + 1;
+                  latest._rowIdx = rIdx;
+                } else {
+                  rIdx = histTable.rows.indexOf(latest) !== -1 ? histTable.rows.indexOf(latest) + 2 : null;
+                }
+              }
+              if (rIdx && histTable.rawGrid[rIdx - 1] && dateColIdx !== -1 && newDate) {
+                histTable.rawGrid[rIdx - 1][dateColIdx] = newDate;
+              }
+              if (rIdx && dateColIdx !== -1 && newDate) {
+                await this.addMutation({
+                  action: 'UPDATE_CELL',
+                  sheetName: histTable.name,
+                  row: rIdx,
+                  col: dateColIdx + 1,
+                  header: histTable.headers[dateColIdx],
+                  itemIdentifier: itemNum,
+                  value: newDate
+                });
+              }
             }
+            this.schedulePersistSnapshot(this.snapshot, 600);
+            this.notify();
             return; // Already recorded & date synced
           }
         }
@@ -1171,6 +1188,16 @@ class LocalDatabase {
     }
 
     let eventDate = String(itemRow['Date Assigned'] || itemRow['Date'] || '').trim();
+    // Guard: Prevent future assignment dates from being recorded to history
+    if (eventDate) {
+      const parsedDt = window.itemStatsEngine && typeof window.itemStatsEngine.parseDate === 'function'
+        ? window.itemStatsEngine.parseDate(eventDate)
+        : new Date(eventDate);
+      if (parsedDt && !isNaN(parsedDt.getTime()) && parsedDt.getTime() > (Date.now() + 86400000)) {
+        eventDate = todayStr;
+        itemRow['Date Assigned'] = todayStr;
+      }
+    }
     if (!eventDate || (latest && lAssigned !== assignedTo.toLowerCase() && eventDate === String(latest['Date Assigned'] || latest['Date'] || '').trim())) {
       eventDate = todayStr;
       itemRow['Date Assigned'] = todayStr;
@@ -1769,6 +1796,89 @@ class LocalDatabase {
   }
 
   /**
+   * Resolves a holder name to its canonical employee name using employeeResolver or employees table
+   */
+  getCanonicalEmployeeName(rawName) {
+    if (!rawName) return '';
+    const clean = String(rawName).trim();
+    if (typeof window !== 'undefined' && window.employeeResolver && typeof window.employeeResolver.getCanonicalName === 'function') {
+      return window.employeeResolver.getCanonicalName(clean);
+    }
+    if (this._empAliasMap) {
+      const lower = clean.toLowerCase();
+      if (this._empAliasMap.has(lower)) return this._empAliasMap.get(lower);
+    } else {
+      this._buildEmpAliasMap();
+      if (this._empAliasMap) {
+        const lower = clean.toLowerCase();
+        if (this._empAliasMap.has(lower)) return this._empAliasMap.get(lower);
+      }
+    }
+    return clean;
+  }
+
+  /**
+   * Checks if two names refer to the same employee or special status
+   */
+  areSameEmployee(nameA, nameB) {
+    if (!nameA || !nameB) return false;
+    const sA = String(nameA).trim().toLowerCase();
+    const sB = String(nameB).trim().toLowerCase();
+    if (sA === sB) return true;
+
+    if (typeof window !== 'undefined' && window.employeeResolver && typeof window.employeeResolver.areSameEmployee === 'function') {
+      return window.employeeResolver.areSameEmployee(nameA, nameB);
+    }
+
+    const canA = this.getCanonicalEmployeeName(nameA).toLowerCase();
+    const canB = this.getCanonicalEmployeeName(nameB).toLowerCase();
+    if (canA && canB && canA === canB) return true;
+
+    // Special statuses
+    const shelfWords = ['on shelf', 'shelf', 'storage', 'in stock', 'unassigned'];
+    if (shelfWords.includes(sA) && shelfWords.includes(sB)) return true;
+    const testWords = ['in testing', 'testing', 'arnett', 'jm test', 'arnett / jm test', 'lab'];
+    if (testWords.includes(sA) && testWords.includes(sB)) return true;
+    const packedDeliv = ['packed for delivery', 'ready for delivery'];
+    if (packedDeliv.includes(sA) && packedDeliv.includes(sB)) return true;
+    const packedTest = ['packed for testing', 'ready for test'];
+    if (packedTest.includes(sA) && packedTest.includes(sB)) return true;
+
+    return false;
+  }
+
+  _buildEmpAliasMap() {
+    this._empAliasMap = new Map();
+    const empTable = this.getTable ? this.getTable('employees') : (this.snapshot && this.snapshot.tables ? this.snapshot.tables['employees'] : null);
+    if (!empTable || !empTable.rows) return;
+
+    empTable.rows.forEach(r => {
+      const canonical = String(r['Employee Name'] || r['Name'] || Object.values(r)[0] || '').trim();
+      if (!canonical) return;
+      this._empAliasMap.set(canonical.toLowerCase(), canonical);
+
+      let altNamesRaw = '';
+      for (const [k, v] of Object.entries(r)) {
+        if (/^(alt(ernat(e|ive))?(\s*names?)?|also\s*known\s*as|aka|aliases?)$/i.test(k.trim())) {
+          altNamesRaw = String(v || '').trim();
+          if (altNamesRaw) break;
+        }
+      }
+      if (!altNamesRaw) {
+        altNamesRaw = String(r['Alternate Names'] || r['Alternative names'] || r['Alternative Names'] || r['Aliases'] || r['Alt Names'] || '').trim();
+      }
+      if (altNamesRaw) {
+        altNamesRaw.split(/[;,/]+/).forEach(alt => {
+          const cleanAlt = alt.trim();
+          if (cleanAlt) {
+            this._empAliasMap.set(cleanAlt.toLowerCase(), canonical);
+          }
+        });
+      }
+    });
+  }
+
+  /**
    * Cleans duplicate history rows from an equipment history table (or for a specific item).
    * Two rows are duplicates if they have the same item identifier, date assigned, and assigned to holder.
    * Merges notes, preserves physical locations, re-indexes _rowIdx, rebuilds rawGrid, and queues REPLACE_TABLE_DATA.
@@ -1814,13 +1924,21 @@ class LocalDatabase {
         if (parts.length === 3) {
           const m = parts[0].padStart(2, '0');
           const d = parts[1].padStart(2, '0');
-          const y = parts[2].length === 2 ? '20' + parts[2] : parts[2];
+          let y = parts[2];
+          const yNum = parseInt(y, 10);
+          if (yNum > 2100 && yNum >= 20200 && yNum <= 20300) y = String(Math.floor(yNum / 10));
+          else if (yNum === 2032) y = '2022';
+          else if (y.length === 2) y = '20' + y;
           return `${y}-${m}-${d}`;
         }
       } else if (s.includes('-')) {
         const parts = s.split('-');
         if (parts.length === 3) {
-          return `${parts[0]}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
+          let y = parts[0];
+          const yNum = parseInt(y, 10);
+          if (yNum > 2100 && yNum >= 20200 && yNum <= 20300) y = String(Math.floor(yNum / 10));
+          else if (yNum === 2032) y = '2022';
+          return `${y}-${parts[1].padStart(2, '0')}-${parts[2].padStart(2, '0')}`;
         }
       }
       return s;
@@ -1832,9 +1950,30 @@ class LocalDatabase {
       return s.toLowerCase();
     };
 
+    const parseRowTimestamp = (dStr) => {
+      if (!dStr) return 0;
+      const s = String(dStr).trim();
+      if (s.includes('/')) {
+        const parts = s.split('/');
+        if (parts.length === 3) {
+          const m = parseInt(parts[0], 10) - 1;
+          const d = parseInt(parts[1], 10);
+          let y = parseInt(parts[2], 10);
+          if (y > 2100 && y >= 20200 && y <= 20300) y = Math.floor(y / 10);
+          else if (y === 2032) y = 2022;
+          else if (y < 100) y = y < 50 ? 2000 + y : 1900 + y;
+          const dt = new Date(y, m, d, 12, 0, 0);
+          return isNaN(dt.getTime()) ? 0 : dt.getTime();
+        }
+      }
+      const dt = new Date(s);
+      return isNaN(dt.getTime()) ? 0 : dt.getTime();
+    };
+
     const seenGroups = new Map();
-    const cleanedRows = [];
+    let pass1Rows = [];
     let removedCount = 0;
+    const nowBuffer = Date.now() + 86400000; // 1 day buffer for timezone differences
 
     for (let i = 0; i < table.rows.length; i++) {
       const row = table.rows[i];
@@ -1848,21 +1987,45 @@ class LocalDatabase {
           isTarget = parseInt(rowItemRaw, 10) === filterNum;
         }
         if (!isTarget) {
-          cleanedRows.push(row);
+          pass1Rows.push(row);
           continue;
         }
       }
 
       const dateRaw = String(row[dateColName] || row['Date Assigned'] || row['Date'] || '').trim();
-      const dateNorm = normalizeDateStr(dateRaw);
-      const assignedRaw = String(row[assignedColName] || row['Assigned To'] || '').trim().toLowerCase();
+      const rowTime = parseRowTimestamp(dateRaw);
 
-      // Key consists of Item + Normalized Date + Assigned To holder
-      const dedupKey = `${rowItemNorm}::${dateNorm}::${assignedRaw}`;
+      // 1. Guard: Purge future date anomalies (e.g. 10/29/2026 In Testing, 02/03/2027)
+      if (rowTime > nowBuffer) {
+        removedCount++;
+        continue;
+      }
+
+      // Repair year typo in row if detected (e.g. 20026 -> 2026, 2032 -> 2022)
+      if (dateRaw.includes('20026') || dateRaw.includes('2032')) {
+        const repairedDate = dateRaw.replace('20026', '2026').replace('2032', '2022');
+        row[dateColName] = repairedDate;
+        if (row['Date Assigned']) row['Date Assigned'] = repairedDate;
+      }
+
+      const dateNorm = normalizeDateStr(String(row[dateColName] || row['Date Assigned'] || '').trim());
+      const assignedRaw = String(row[assignedColName] || row['Assigned To'] || '').trim();
+      const canonicalAssigned = this.getCanonicalEmployeeName(assignedRaw).toLowerCase();
+
+      // Key consists of Item + Normalized Date + Canonical Assigned To holder
+      const dedupKey = `${rowItemNorm}::${dateNorm}::${canonicalAssigned}`;
 
       if (seenGroups.has(dedupKey)) {
         removedCount++;
         const masterRow = seenGroups.get(dedupKey);
+
+        // Prefer active assigned name or canonical name if master currently has alias
+        const curAssigned = String(row[assignedColName] || row['Assigned To'] || '').trim();
+        const masterAssigned = String(masterRow[assignedColName] || masterRow['Assigned To'] || '').trim();
+        if (curAssigned && masterAssigned && curAssigned.toLowerCase() === canonicalAssigned && masterAssigned.toLowerCase() !== canonicalAssigned) {
+          masterRow[assignedColName] = curAssigned;
+          if (masterRow['Assigned To']) masterRow['Assigned To'] = curAssigned;
+        }
 
         // Merge Notes
         const masterNotes = String(masterRow[notesColName] || masterRow['Notes'] || '').trim();
@@ -1892,9 +2055,143 @@ class LocalDatabase {
         }
       } else {
         seenGroups.set(dedupKey, row);
-        cleanedRows.push(row);
+        pass1Rows.push(row);
       }
     }
+
+    // 2. Consecutive same-holder collapse
+    // Group remaining rows by item, sort chronologically, and merge back-to-back duplicate states
+    const itemRowGroups = new Map();
+    const otherRows = [];
+
+    pass1Rows.forEach(row => {
+      const rowItemRaw = String(row[itemColName] || row['Item #'] || row['Serial #'] || Object.values(row)[1] || Object.values(row)[0] || '').trim();
+      const rowItemNorm = normalizeItemStr(rowItemRaw);
+      if (cleanFilterItem && rowItemNorm !== normalizeItemStr(cleanFilterItem)) {
+        otherRows.push(row);
+        return;
+      }
+      if (!itemRowGroups.has(rowItemNorm)) itemRowGroups.set(rowItemNorm, []);
+      itemRowGroups.get(rowItemNorm).push(row);
+    });
+
+    const cleanedRows = [...otherRows];
+
+    itemRowGroups.forEach((groupRows) => {
+      if (groupRows.length <= 1) {
+        cleanedRows.push(...groupRows);
+        return;
+      }
+
+      const statePrecedence = {
+        'new_purchase': 1, 'new': 1,
+        'on shelf': 2, 'shelf': 2, 'storage': 2, 'in stock': 2,
+        'packed for delivery': 3,
+        'field': 4,
+        'packed for testing': 5,
+        'in testing': 6, 'testing': 6,
+        'lost': 7,
+        'failed rubber': 8, 'destroyed': 8
+      };
+
+      const getRank = (assigned) => {
+        const a = String(assigned || '').toLowerCase().trim();
+        if (statePrecedence[a] !== undefined) return statePrecedence[a];
+        if (a.includes('fail') || a.includes('destroy')) return 8;
+        if (a.includes('lost')) return 7;
+        if (a.includes('test')) return 6;
+        if (a.includes('packed') && a.includes('test')) return 5;
+        if (a.includes('packed') && a.includes('deliv')) return 3;
+        if (a.includes('shelf') || a.includes('stock') || a.includes('stor')) return 2;
+        return 4; // Field assignment to employee
+      };
+
+      // 1. Identify dates where active employee field assignments exist
+      const empAssignmentDates = new Set();
+      groupRows.forEach(r => {
+        const aVal = r[assignedColName] || r['Assigned To'] || '';
+        if (getRank(aVal) === 4) {
+          const dStr = normalizeDateStr(r[dateColName] || r['Date Assigned'] || r['Date'] || Object.values(r)[0]);
+          if (dStr) empAssignmentDates.add(dStr);
+        }
+      });
+
+      // 2. Discard 0-day intermediate shelf records on dates where an employee assignment occurred
+      const noIntermediateShelf = groupRows.filter(r => {
+        const aVal = r[assignedColName] || r['Assigned To'] || '';
+        if (getRank(aVal) === 2) {
+          const dStr = normalizeDateStr(r[dateColName] || r['Date Assigned'] || r['Date'] || Object.values(r)[0]);
+          if (dStr && empAssignmentDates.has(dStr)) {
+            removedCount++;
+            return false;
+          }
+        }
+        return true;
+      });
+
+      // 3. Sort chronologically ascending, tie-breaking by canonical lifecycle state rank
+      noIntermediateShelf.sort((a, b) => {
+        const tA = parseRowTimestamp(a[dateColName] || a['Date Assigned'] || a['Date'] || Object.values(a)[0]);
+        const tB = parseRowTimestamp(b[dateColName] || b['Date Assigned'] || b['Date'] || Object.values(b)[0]);
+        if (tA !== tB) return tA - tB;
+        return getRank(a[assignedColName] || a['Assigned To']) - getRank(b[assignedColName] || b['Assigned To']);
+      });
+
+      // 4. Consecutive same-holder collapse
+      const collapsed = [];
+      for (let g = 0; g < noIntermediateShelf.length; g++) {
+        const cur = noIntermediateShelf[g];
+        const curAssigned = String(cur[assignedColName] || cur['Assigned To'] || '').trim().toLowerCase();
+        
+        if (collapsed.length > 0) {
+          const prev = collapsed[collapsed.length - 1];
+          const prevAssigned = String(prev[assignedColName] || prev['Assigned To'] || '').trim().toLowerCase();
+          const prevRank = getRank(prevAssigned);
+          const curRank = getRank(curAssigned);
+
+          const isSameHolder = this.areSameEmployee(curAssigned, prevAssigned);
+          const isBothShelf = prevRank === 2 && curRank === 2;
+
+          if (isSameHolder || isBothShelf) {
+            removedCount++;
+            // Update prev to the later date and merge notes & location
+            const curDate = cur[dateColName] || cur['Date Assigned'] || '';
+            if (curDate) {
+              prev[dateColName] = curDate;
+              if (prev['Date Assigned']) prev['Date Assigned'] = curDate;
+            }
+
+            // Update assignedTo to the latest assignment spelling if matching
+            const origCur = String(cur[assignedColName] || cur['Assigned To'] || '').trim();
+            if (origCur && String(prev[assignedColName] || prev['Assigned To'] || '').trim() !== origCur) {
+              prev[assignedColName] = origCur;
+              if (prev['Assigned To']) prev['Assigned To'] = origCur;
+            }
+
+            const pNotes = String(prev[notesColName] || prev['Notes'] || '').trim();
+            const cNotes = String(cur[notesColName] || cur['Notes'] || '').trim();
+            if (!pNotes && cNotes) {
+              prev[notesColName] = cNotes;
+              if (prev['Notes']) prev['Notes'] = cNotes;
+            } else if (pNotes && cNotes && !pNotes.toLowerCase().includes(cNotes.toLowerCase())) {
+              const combined = `${pNotes} | ${cNotes}`;
+              prev[notesColName] = combined;
+              if (prev['Notes']) prev['Notes'] = combined;
+            }
+
+            const pLoc = String(prev[locColName] || prev['Location'] || '').trim();
+            const cLoc = String(cur[locColName] || cur['Location'] || '').trim();
+            if ((!pLoc || pLoc.toLowerCase() === 'helena') && cLoc && cLoc.toLowerCase() !== 'helena') {
+              prev[locColName] = cLoc;
+              if (prev['Location']) prev['Location'] = cLoc;
+            }
+            continue; // Collapsed!
+          }
+        }
+        collapsed.push(cur);
+      }
+      cleanedRows.push(...collapsed);
+    });
 
     if (removedCount > 0) {
       table.rows = cleanedRows;

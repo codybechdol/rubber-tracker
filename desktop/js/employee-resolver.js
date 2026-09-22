@@ -271,18 +271,17 @@ class EmployeeNameResolver {
         }
       }
 
-      // If resolving from an initial like "P. Johnson" and the employee has an alias with the same last name
+      // If resolving from an initial like "P. Johnson" or "P Johnson" and the employee has an alias with the same last name
       // (e.g. "Payton Johnson" when canonical is "Payton Miller-Johnson"), prefer the matching alias
-      if (cleanInput.includes('.') || cleanInput.length <= 12) {
-        const inputParts = cleanInput.replace(/\./g, ' ').trim().split(/\s+/);
-        if (inputParts.length >= 2) {
-          const inputLast = inputParts[inputParts.length - 1].toLowerCase();
-          for (const alt of emp.alternateNames) {
-            const altLast = alt.trim().split(/\s+/).pop().toLowerCase();
-            if (altLast === inputLast) {
-              chosenName = alt;
-              break;
-            }
+      const inputParts = cleanInput.replace(/\./g, ' ').trim().split(/\s+/);
+      const isInitial = cleanInput.includes('.') || (inputParts.length >= 2 && inputParts[0].length === 1);
+      if (isInitial && inputParts.length >= 2) {
+        const inputLast = inputParts[inputParts.length - 1].toLowerCase();
+        for (const alt of emp.alternateNames) {
+          const altLast = alt.trim().split(/\s+/).pop().toLowerCase();
+          if (altLast === inputLast) {
+            chosenName = alt;
+            break;
           }
         }
       }
@@ -306,6 +305,42 @@ class EmployeeNameResolver {
       employeeName: cleanInput,
       location: 'Helena'
     };
+  }
+
+  /**
+   * Returns canonical employee name if matched; otherwise returns original input
+   */
+  getCanonicalName(rawInput) {
+    if (!rawInput) return '';
+    const res = this.resolve(rawInput);
+    if (res.match && !res.isStatus && res.canonicalName) {
+      return res.canonicalName;
+    }
+    return String(rawInput).trim();
+  }
+
+  /**
+   * Checks whether two names/holders refer to the same employee or status
+   */
+  areSameEmployee(nameA, nameB) {
+    if (!nameA || !nameB) return false;
+    const sA = String(nameA).trim().toLowerCase();
+    const sB = String(nameB).trim().toLowerCase();
+    if (sA === sB) return true;
+
+    const resA = this.resolve(nameA);
+    const resB = this.resolve(nameB);
+
+    if (resA.match && resB.match) {
+      if (resA.isStatus && resB.isStatus) {
+        return resA.status === resB.status;
+      }
+      if (!resA.isStatus && !resB.isStatus && resA.canonicalName && resB.canonicalName) {
+        return resA.canonicalName.toLowerCase() === resB.canonicalName.toLowerCase();
+      }
+    }
+
+    return false;
   }
 
   /**

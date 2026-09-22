@@ -13263,7 +13263,11 @@ function parseDateStringFlex(str) {
     } else {
       // MM/DD/YYYY or MM/DD/YY
       var yr = p2;
-      if (yr < 100) {
+      if (yr > 2100 && yr >= 20200 && yr <= 20300) {
+        yr = Math.floor(yr / 10);
+      } else if (yr === 2032) {
+        yr = 2022;
+      } else if (yr < 100) {
         yr = yr < 50 ? 2000 + yr : 1900 + yr;
       }
       var dt = new Date(yr, p0 - 1, p1, 12, 0, 0);
@@ -13275,7 +13279,11 @@ function parseDateStringFlex(str) {
     var m = parseInt(slashParts[0], 10);
     var d = parseInt(slashParts[1], 10);
     if (!isNaN(m) && !isNaN(d) && m >= 1 && m <= 12 && d >= 1 && d <= 31) {
-      var yr = new Date().getFullYear();
+      var now = new Date();
+      var yr = now.getFullYear();
+      if (m - 1 > now.getMonth() || (m - 1 === now.getMonth() && d > now.getDate())) {
+        yr = yr - 1;
+      }
       var dt = new Date(yr, m - 1, d, 12, 0, 0);
       return isNaN(dt.getTime()) ? null : dt;
     }
@@ -13687,27 +13695,49 @@ function cleanAndRepairHistorySheets(silent) {
     try { ss.toast('Cleaning & repairing history sheets...', '🧹 Please wait', -1); } catch (eToast) {}
   }
 
-  // 1. Build Name -> Physical Location map from Employees
+  // 1. Build Name -> Physical Location map and Alias -> Canonical map from Employees
   var nameToLocation = {};
+  var aliasToCanonical = {};
   var employeesSheet = ss.getSheetByName('Employees');
   if (employeesSheet && employeesSheet.getLastRow() > 1) {
     var empData = employeesSheet.getDataRange().getValues();
     var empHeaders = empData[0];
     var empNameIdx = 0;
     var empLocIdx = -1;
+    var empAltIdx = -1;
     for (var eh = 0; eh < empHeaders.length; eh++) {
-      if (String(empHeaders[eh]).trim().toLowerCase().indexOf('location') !== -1) {
+      var hStr = String(empHeaders[eh]).trim().toLowerCase();
+      if (hStr.indexOf('location') !== -1) {
         empLocIdx = eh;
-        break;
+      }
+      if (/^(alt(ernat(e|ive))?(\s*names?)?|also\s*known\s*as|aka|aliases?)$/i.test(hStr)) {
+        empAltIdx = eh;
       }
     }
     if (empLocIdx === -1) empLocIdx = 2; // Column C fallback
     for (var er = 1; er < empData.length; er++) {
-      var eName = String(empData[er][empNameIdx] || '').trim().toLowerCase();
+      var rawCanonical = String(empData[er][empNameIdx] || '').trim();
+      var eName = rawCanonical.toLowerCase();
       var rawLoc = String(empData[er][empLocIdx] || '').trim();
       var physLoc = typeof getPhysicalLocation === 'function' ? getPhysicalLocation(rawLoc) : rawLoc;
-      if (eName && physLoc) {
-        nameToLocation[eName] = physLoc;
+      if (eName) {
+        if (physLoc) nameToLocation[eName] = physLoc;
+        aliasToCanonical[eName] = eName;
+      }
+      if (empAltIdx !== -1 && empData[er][empAltIdx]) {
+        var altRaw = String(empData[er][empAltIdx]).trim();
+        if (altRaw) {
+          var altList = altRaw.split(/[;,/]+/);
+          for (var ai = 0; ai < altList.length; ai++) {
+            var altClean = altList[ai].trim().toLowerCase();
+            if (altClean) {
+              aliasToCanonical[altClean] = eName;
+              if (physLoc && !nameToLocation[altClean]) {
+                nameToLocation[altClean] = physLoc;
+              }
+            }
+          }
+        }
       }
     }
   }
@@ -14198,14 +14228,37 @@ function cleanAndRepairHistorySheets(silent) {
         var entry = group[g];
         var curAssignedLower = String(entry.assignedTo || '').toLowerCase().trim();
 
+        // Guard: Purge future date anomalies (e.g. 10/29/2026 In Testing)
+        if (entry.timestamp > (new Date().getTime() + 86400000)) {
+          removedCount++;
+          continue;
+        }
+
         if (prevEntry) {
           var prevAssignedLower = String(prevEntry.assignedTo || '').toLowerCase().trim();
+          var isBothShelf = (curAssignedLower === 'on shelf' || curAssignedLower === 'storage') &&
+                            (prevAssignedLower === 'on shelf' || prevAssignedLower === 'storage');
 
-          // If identical assigned to or redundant same-day New entry
-          if (curAssignedLower === prevAssignedLower || (curAssignedLower === 'new' && entry.timestamp <= prevEntry.timestamp)) {
+          var curCan = aliasToCanonical[curAssignedLower] || curAssignedLower;
+          var prevCan = aliasToCanonical[prevAssignedLower] || prevAssignedLower;
+          var isSameHolder = (curCan === prevCan);
+
+          // If identical assigned to (or aliases of same employee), consecutive shelf entries, or redundant same-day New entry
+          if (isSameHolder || isBothShelf || (curAssignedLower === 'new' && entry.timestamp <= prevEntry.timestamp)) {
             removedCount++;
             if (entry.location && entry.location.toLowerCase() !== 'unknown') {
               prevEntry.location = entry.location;
+            }
+            if (entry.timestamp > prevEntry.timestamp) {
+              prevEntry.dateDisp = entry.dateDisp;
+              prevEntry.timestamp = entry.timestamp;
+            }
+            var itemMeta = cfg.meta[entry.itemNum] || cfg.meta[entry.itemNum.toLowerCase()] || {};
+            if (itemMeta.assignedTo && String(entry.assignedTo).trim().toLowerCase() === String(itemMeta.assignedTo).trim().toLowerCase()) {
+              prevEntry.assignedTo = entry.assignedTo;
+            }
+            if (entry.notes && (!prevEntry.notes || prevEntry.notes.indexOf(entry.notes) === -1)) {
+              prevEntry.notes = prevEntry.notes ? (prevEntry.notes + ' | ' + entry.notes) : entry.notes;
             }
             continue;
           }

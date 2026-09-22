@@ -24,6 +24,12 @@ class SheetNavigator {
       if (stored !== null) savedVisualsExp = (stored !== 'false');
     } catch { /* ignore */ }
     this.isVisualsExpanded = savedVisualsExp;
+    let savedEmpView = 'cards';
+    try {
+      const stored = localStorage.getItem('safety_assistant_emp_view_mode');
+      if (stored === 'cards' || stored === 'table') savedEmpView = stored;
+    } catch { /* ignore */ }
+    this.employeeViewMode = savedEmpView;
     this.sheetList = [
       { key: 'employees', label: '👥 Employees', icon: '👤', isSwap: false },
       { key: 'job_tracking', label: '📋 Job Tracking', icon: '📋', isSwap: false },
@@ -88,7 +94,9 @@ class SheetNavigator {
   init() {
     this.renderTabsBar();
     this.setupSearch();
+    this.setupEmployeeViewToggle();
     this.renderCurrentSheet();
+    this.runOneTimeVacationRepair();
   }
 
   setSizeFilter(val) {
@@ -279,6 +287,57 @@ class SheetNavigator {
       this.searchTerm = e.target.value.toLowerCase().trim();
       this.renderCurrentSheet();
     });
+  }
+
+  setEmployeeViewMode(mode) {
+    this.employeeViewMode = mode;
+    try {
+      localStorage.setItem('safety_assistant_emp_view_mode', mode);
+    } catch { /* ignore */ }
+    this.updateEmployeeViewToggleUI();
+    this.renderCurrentSheet();
+  }
+
+  updateEmployeeViewToggleUI() {
+    const toggle = document.getElementById('emp-view-toggle');
+    const btnCards = document.getElementById('btn-emp-cards-view');
+    const btnTable = document.getElementById('btn-emp-table-view');
+    if (!toggle) return;
+
+    if (this.currentSheetKey === 'employees') {
+      toggle.style.display = 'inline-flex';
+      if (btnCards && btnTable) {
+        if (this.employeeViewMode === 'cards') {
+          btnCards.classList.add('active');
+          btnTable.classList.remove('active');
+        } else {
+          btnTable.classList.add('active');
+          btnCards.classList.remove('active');
+        }
+      }
+    } else {
+      toggle.style.display = 'none';
+    }
+  }
+
+  setupEmployeeViewToggle() {
+    this.updateEmployeeViewToggleUI();
+  }
+
+  async runOneTimeVacationRepair() {
+    if (this._hasRunVacationRepair) return;
+    this._hasRunVacationRepair = true;
+    try {
+      if (window.crewImportEngine && typeof window.crewImportEngine.repairVacationAndLeaveJobNumbers === 'function') {
+        const res = await window.crewImportEngine.repairVacationAndLeaveJobNumbers();
+        if (res && res.repairedCount > 0) {
+          console.log(`[VacationRepair] Repaired ${res.repairedCount} employee record(s). Refreshing sheets.`);
+          this.renderCurrentSheet();
+        }
+      }
+    } catch (err) {
+      console.warn('Error running vacation repair:', err);
+    }
   }
 
   openCrewImport() {
@@ -1077,6 +1136,8 @@ class SheetNavigator {
     const sheetMeta = this.sheetList.find(s => s.key === this.currentSheetKey);
     if (title && sheetMeta) title.textContent = sheetMeta.label;
 
+    this.updateEmployeeViewToggleUI();
+
     // Toggle Action Buttons in Toolbar
     const btnNewItem = document.getElementById('btn-new-item');
     const btnNewEmployee = document.getElementById('btn-new-employee');
@@ -1185,6 +1246,12 @@ class SheetNavigator {
     // Render swap report sheets
     if (sheetMeta?.isSwap && tableData.rawGrid && tableData.rawGrid.length > 0) {
       this.renderSwapReportGrid(container, countBadge, tableData);
+      return;
+    }
+
+    // Render Employee Crew Cards View (Default view for Employees sheet)
+    if (this.currentSheetKey === 'employees' && this.employeeViewMode === 'cards') {
+      this.renderEmployeeCardsView(container, countBadge, tableData);
       return;
     }
 
@@ -1845,6 +1912,545 @@ class SheetNavigator {
         this.renderCurrentSheet();
       });
     });
+  }
+
+  /**
+   * Renders the interactive Employee Crew Cards View:
+   * - Dedicated status cards for Vacation, Leave, Light Duty (and Medical) with title only in header.
+   * - Active field crew cards matching Crew Import layout (location, job#, foreman, schedule, day pills, member list).
+   * - Clicking any employee name opens their Employee Profile modal.
+   * - Supports live search filtering by employee name, location, job number, classification, etc.
+   */
+  renderEmployeeCardsView(container, countBadge, tableData) {
+    if (!container) return;
+    if (!tableData) {
+      tableData = this.db.getTable('employees') || { headers: [], rows: [] };
+    }
+
+    const jobTable = this.db ? this.db.getTable('job_tracking') : null;
+    const jtRows = (jobTable && jobTable.rows) || [];
+    const prevEmpNames = this.getPreviousEmployeeNamesSet();
+
+    // Filter out previous/inactive employees
+    let activeRows = (tableData.rows || []).filter(r => {
+      const loc = String(r['Location'] || '').toLowerCase().trim();
+      const stat = String(r['Status'] || '').toLowerCase().trim();
+      const job = String(r['Job Number'] || r['Job #'] || '').toLowerCase().trim();
+      const name = String(r['Employee Name'] || r['Name'] || Object.values(r)[0] || '').toLowerCase().trim();
+      if (!name) return false;
+      if (prevEmpNames && prevEmpNames.has(name)) return false;
+      if (loc === 'previous employee' || loc.includes('previous') ||
+          stat === 'previous employee' || stat.includes('inactive') || stat.includes('terminated') ||
+          job.includes('previous') || job.startsWith('002-') || name.includes('former')) {
+        return false;
+      }
+      return true;
+    });
+
+    const totalActiveCount = activeRows.length;
+
+    // Search filter
+    const searchTerm = (this.searchTerm || '').toLowerCase().trim();
+    if (searchTerm) {
+      activeRows = activeRows.filter(r => {
+        return Object.values(r).some(val => {
+          if (val === null || val === undefined) return false;
+          return String(val).toLowerCase().includes(searchTerm);
+        });
+      });
+    }
+
+    // Separate into Status groups vs Active Field crews
+    const vacationList = [];
+    const leaveList = [];
+    const lightDutyList = [];
+    const medicalList = [];
+    const fieldCrewMembers = [];
+
+    activeRows.forEach(r => {
+      const name = String(r['Employee Name'] || r['Name'] || Object.values(r)[0] || '').trim();
+      const loc = String(r['Location'] || '').trim();
+      const locLower = loc.toLowerCase();
+      const job = String(r['Job Number'] || r['Job #'] || '').trim();
+      const classification = String(r['Job Classification'] || r['Classification'] || r['Role'] || '').trim();
+      const secondaryJob = String(r['Secondary Job Number'] || r['Secondary Job #'] || '').trim();
+      const altNames = String(r['Alternate Names'] || '').trim();
+      const phone = String(r['Phone Number'] || '').trim();
+      const email = String(r['Email Address'] || r['Email'] || '').trim();
+      const notes = String(r['Notes'] || '').trim();
+
+      const empObj = {
+        raw: r,
+        name,
+        location: loc,
+        jobNumber: job,
+        classification,
+        secondaryJob,
+        alternateNames: altNames,
+        phone,
+        email,
+        notes
+      };
+
+      if (locLower.includes('(vacation)') || locLower === 'vacation') {
+        vacationList.push(empObj);
+      } else if (locLower.includes('(leave)') || locLower === 'leave' || locLower.includes('fmla') || locLower.includes('military')) {
+        leaveList.push(empObj);
+      } else if (locLower.includes('(light duty)') || locLower === 'light duty' || locLower.includes('(weeds)') || locLower === 'weeds') {
+        lightDutyList.push(empObj);
+      } else if (locLower.includes('(medical)') || locLower === 'medical' || locLower.includes("worker's comp") || locLower.includes('(injury)')) {
+        medicalList.push(empObj);
+      } else {
+        fieldCrewMembers.push(empObj);
+      }
+    });
+
+    // Helper for role priority / ranking
+    const getRolePriority = (role) => {
+      if (window.crewImportEngine && typeof window.crewImportEngine.getRolePriority === 'function') {
+        return window.crewImportEngine.getRolePriority(role);
+      }
+      const r = String(role || '').toUpperCase().trim();
+      const map = {
+        'SUP': 1, 'SUPERINTENDENT': 1,
+        'GF': 2, 'GENERAL FOREMAN': 2,
+        'F': 3, 'FOREMAN': 3,
+        'GTO F': 4, 'GTO FOREMAN': 4,
+        'JL': 5, 'JRY': 5, 'JOURNEYMAN': 5, 'JOURNEYMAN LINEMAN': 5,
+        'JRY OP': 6, 'JOURNEYMAN OPERATOR': 6,
+        'WT': 7, 'WORKING TECH': 7, 'WORKING TECHNICIAN': 7,
+        'GTO': 8, 'GAS TECH OPERATOR': 8,
+        'EO 1': 9, 'EO1': 9, 'EQUIPMENT OPERATOR 1': 9,
+        'EO 2': 10, 'EO2': 10, 'EQUIPMENT OPERATOR 2': 10,
+        'AP 7': 11, 'AP 6': 12, 'AP 5': 13, 'AP 4': 14, 'AP 3': 15, 'AP 2': 16, 'AP 1': 17
+      };
+      return map[r] !== undefined ? map[r] : 999;
+    };
+
+    // Group field crew members by base job number (e.g. 049-26)
+    const crewGroups = new Map();
+    fieldCrewMembers.forEach(emp => {
+      let baseJob = emp.jobNumber.replace(/\.\d+.*$/, '').trim();
+      if (!baseJob) baseJob = 'Unassigned';
+      if (!crewGroups.has(baseJob)) {
+        crewGroups.set(baseJob, []);
+      }
+      crewGroups.get(baseJob).push(emp);
+    });
+
+    // Also include any active crews from job_tracking that currently have 0 assigned members (unless filtered out by search)
+    if (!searchTerm && jtRows.length > 0) {
+      jtRows.forEach(jt => {
+        const jn = String(jt['Job Number'] || jt['Job #'] || '').trim();
+        const base = jn.replace(/\.\d+.*$/, '').trim();
+        const stat = String(jt['Status'] || '').toLowerCase();
+        if (base && !crewGroups.has(base) && !base.startsWith('002') && !base.startsWith('005') && stat !== 'completed' && base.toLowerCase() !== 'job number' && base.toLowerCase() !== 'job #') {
+          crewGroups.set(base, []);
+        }
+      });
+    }
+
+    // Build crew card view models
+    const crewCards = [];
+    crewGroups.forEach((members, baseJob) => {
+      if (!baseJob || baseJob.toLowerCase() === 'job number' || baseJob.toLowerCase() === 'job #' || baseJob === '002-26') return;
+
+      // Find matching job_tracking row
+      const jt = jtRows.find(j => {
+        const jn = String(j['Job Number'] || j['Job #'] || '').trim();
+        return jn === baseJob || jn.replace(/\.\d+.*$/, '').trim() === baseJob;
+      });
+
+      // Crew Location: from job_tracking, or from first member, or Helena
+      let loc = (jt && jt['Location']) ? String(jt['Location']).trim() : '';
+      if (!loc && members.length > 0) {
+        loc = members[0].location.replace(/\s*\([^)]*\)/g, '').trim();
+      }
+      if (!loc) loc = 'Helena';
+
+      // Foreman
+      let foreman = (jt && jt['Foreman']) ? String(jt['Foreman']).trim() : '';
+      if (!foreman && members.length > 0) {
+        // Find member with highest rank
+        const sortedByRank = [...members].sort((a, b) => getRolePriority(a.classification) - getRolePriority(b.classification));
+        if (sortedByRank[0] && getRolePriority(sortedByRank[0].classification) <= 4) {
+          foreman = sortedByRank[0].name;
+        }
+      }
+
+      // Status
+      let status = (jt && jt['Status']) ? String(jt['Status']).trim() : 'Active';
+
+      // Work Schedule & Skips
+      let schedule = (jt && jt['Work Schedule']) ? String(jt['Work Schedule']).trim() : 'Mon-Thu (4 10s)';
+      const isSkipSun = jt ? (jt['Skip Sun'] === true || String(jt['Skip Sun']).toLowerCase() === 'true') : true;
+      const isSkipMon = jt ? (jt['Skip Mon'] === true || String(jt['Skip Mon']).toLowerCase() === 'true') : false;
+      const isSkipTue = jt ? (jt['Skip Tue'] === true || String(jt['Skip Tue']).toLowerCase() === 'true') : false;
+      const isSkipWed = jt ? (jt['Skip Wed'] === true || String(jt['Skip Wed']).toLowerCase() === 'true') : false;
+      const isSkipThu = jt ? (jt['Skip Thu'] === true || String(jt['Skip Thu']).toLowerCase() === 'true') : false;
+      const isSkipFri = jt ? (jt['Skip Fri'] === true || String(jt['Skip Fri']).toLowerCase() === 'true') : true;
+      const isSkipSat = jt ? (jt['Skip Sat'] === true || String(jt['Skip Sat']).toLowerCase() === 'true') : true;
+
+      const skipMtg = jt ? (jt['Skip Weekly Meeting'] === true || String(jt['Skip Weekly Meeting']).toLowerCase() === 'true') : false;
+      const skipChk = jt ? (jt['Skip Monthly Checklist'] === true || String(jt['Skip Monthly Checklist']).toLowerCase() === 'true') : false;
+
+      // Job Name (Site Name / Description)
+      const jobName = (jt && (jt['Job Name'] || jt['Site Name'] || jt['Description']))
+        ? String(jt['Job Name'] || jt['Site Name'] || jt['Description']).trim()
+        : '';
+
+      // Sort crew members: Foreman first, then by suffix numerical order, then alphabetically
+      members.sort((a, b) => {
+        const isAForm = (foreman && a.name.toLowerCase() === foreman.toLowerCase());
+        const isBForm = (foreman && b.name.toLowerCase() === foreman.toLowerCase());
+        if (isAForm && !isBForm) return -1;
+        if (!isAForm && isBForm) return 1;
+
+        const parseSuffix = (j) => {
+          const m = String(j || '').match(/\.(\d+)/);
+          return m ? parseInt(m[1], 10) : 999;
+        };
+        const sA = parseSuffix(a.jobNumber);
+        const sB = parseSuffix(b.jobNumber);
+        if (sA !== sB) return sA - sB;
+        return a.name.localeCompare(b.name);
+      });
+
+      crewCards.push({
+        baseJob,
+        jobNumber: (jt && jt['Job Number']) ? String(jt['Job Number']).trim() : baseJob,
+        location: loc,
+        foreman,
+        status,
+        schedule,
+        jobName,
+        isSkipSun, isSkipMon, isSkipTue, isSkipWed, isSkipThu, isSkipFri, isSkipSat,
+        skipMtg, skipChk,
+        members
+      });
+    });
+
+    // Helper to get import order index from saved order, in-memory import engine, or Job Tracking table
+    let savedImportOrder = null;
+    try {
+      const savedStr = localStorage.getItem('CREW_IMPORT_ORDER');
+      if (savedStr) savedImportOrder = JSON.parse(savedStr);
+    } catch (e) {}
+    if (!savedImportOrder && window._crewImportOrder) {
+      savedImportOrder = window._crewImportOrder;
+    }
+    if (!savedImportOrder && window.crewImportEngine && window.crewImportEngine.parsedCrews && window.crewImportEngine.parsedCrews.length > 0) {
+      savedImportOrder = window.crewImportEngine.parsedCrews.map(c => String(c.jobNumber || '').replace(/\.\d+.*$/, '').trim()).filter(Boolean);
+    }
+    if (!savedImportOrder && window.db?.snapshot?.configs?.['CREW_IMPORT_ORDER']) {
+      savedImportOrder = window.db.snapshot.configs['CREW_IMPORT_ORDER'];
+    }
+
+    const getImportOrderIndex = (baseJob) => {
+      if (!baseJob || baseJob === 'Unassigned') return 9999;
+      const clean = String(baseJob).replace(/\.\d+.*$/, '').trim().toLowerCase();
+      if (clean === 'job number' || clean === 'job #') return 9999;
+
+      // 1. Check saved import order list
+      if (Array.isArray(savedImportOrder) && savedImportOrder.length > 0) {
+        const idx = savedImportOrder.findIndex(j => String(j).replace(/\.\d+.*$/, '').trim().toLowerCase() === clean);
+        if (idx !== -1) return idx;
+      }
+
+      // 2. Check Job Tracking rows order (which mirrors Excel import sequence)
+      if (jtRows && jtRows.length > 0) {
+        const jtIdx = jtRows.findIndex(j => {
+          const jn = String(j['Job Number'] || j['Job #'] || '').replace(/\.\d+.*$/, '').trim().toLowerCase();
+          return jn && jn !== 'job number' && jn !== 'job #' && jn === clean;
+        });
+        if (jtIdx !== -1) return jtIdx;
+      }
+
+      return 999;
+    };
+
+    // Sort crew cards: match the exact order from the imported Excel sheet
+    crewCards.sort((a, b) => {
+      const idxA = getImportOrderIndex(a.baseJob);
+      const idxB = getImportOrderIndex(b.baseJob);
+      if (idxA !== idxB) return idxA - idxB;
+
+      const statOrder = { 'Active': 1, 'Pending Start': 2, 'On Hold': 3, 'Completed': 4 };
+      const sA = statOrder[a.status] || 5;
+      const sB = statOrder[b.status] || 5;
+      if (sA !== sB) return sA - sB;
+
+      return a.baseJob.localeCompare(b.baseJob, undefined, { numeric: true });
+    });
+
+    // Update row count badge in toolbar
+    const totalMatching = vacationList.length + leaveList.length + lightDutyList.length + medicalList.length + fieldCrewMembers.length;
+    if (countBadge) {
+      countBadge.textContent = searchTerm
+        ? `${totalMatching} of ${totalActiveCount} employees (${crewCards.length} crews)`
+        : `${totalActiveCount} employees (${crewCards.length} field crews)`;
+    }
+
+    // Helper for rendering a single employee row inside a card
+    const renderMemberRow = (e, isLead = false) => {
+      return `
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 5px 0; border-bottom: 1px dashed rgba(255,255,255,0.06); gap: 6px;">
+          <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap; flex: 1; min-width: 0;">
+            <span style="color: var(--text-muted); font-size: 11px; font-family: monospace; min-width: 48px;">
+              ${this.escapeHtml(e.jobNumber || '—')}
+            </span>
+            <a href="javascript:void(0)" onclick="window.employeeProfileEngine.openProfileModal('${this.escapeJs(e.name)}')"
+               style="color: var(--text-primary); font-weight: ${isLead ? '700' : '500'}; font-size: 12.5px; text-decoration: none; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;"
+               onmouseover="this.style.color='#60a5fa'; this.style.textDecoration='underline';"
+               onmouseout="this.style.color='var(--text-primary)'; this.style.textDecoration='none';"
+               title="Open Employee Profile for ${this.escapeHtml(e.name)}">
+              ${isLead ? '<span title="Crew Foreman / Lead" style="margin-right: 2px;">👑</span>' : ''}
+              <span>${this.escapeHtml(e.name)}</span>
+            </a>
+            ${e.secondaryJob ? `
+              <span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); font-size: 9.5px; font-weight: 700; padding: 1px 5px; border-radius: 3px;" title="Secondary Job: ${this.escapeHtml(e.secondaryJob)}">
+                ⚡ 2nd: ${this.escapeHtml(e.secondaryJob)}
+              </span>
+            ` : ''}
+            ${e.alternateNames ? `
+              <span class="badge" style="background: rgba(147, 197, 253, 0.12); color: #93c5fd; border: 1px solid rgba(147, 197, 253, 0.25); font-size: 9.5px; padding: 1px 4px; border-radius: 3px;" title="AKA: ${this.escapeHtml(e.alternateNames)}">
+                AKA
+              </span>
+            ` : ''}
+          </div>
+          <div style="display: flex; align-items: center; gap: 5px; flex-shrink: 0;">
+            <span class="badge" style="background: var(--bg-tertiary); color: var(--text-muted); font-size: 10px; padding: 1px 6px; border-radius: 3px; font-weight: 700;">
+              ${this.escapeHtml(e.classification || '—')}
+            </span>
+          </div>
+        </div>
+      `;
+    };
+
+    // Helper for rendering a status card (Vacation, Leave, Light Duty)
+    const renderStatusCard = (title, icon, color, borderColor, badgeBg, list, emptyMsg) => {
+      return `
+        <div class="crew-card status-crew-card" style="background: var(--bg-secondary); border: 1px solid ${borderColor}; border-radius: 8px; padding: 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.2); display: flex; flex-direction: column;">
+          <!-- Card Header (TITLE ONLY, no Job # or Location) -->
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; border-bottom: 1px solid var(--border-color); padding-bottom: 8px;">
+            <div style="font-weight: 800; font-size: 15px; color: ${color}; display: flex; align-items: center; gap: 8px;">
+              <span>${icon}</span>
+              <span>${title}</span>
+            </div>
+            <span class="badge" style="background: ${badgeBg}; color: ${color}; font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 12px; border: 1px solid ${borderColor};">
+              ${list.length} ${list.length === 1 ? 'Employee' : 'Employees'}
+            </span>
+          </div>
+          <!-- Employee List -->
+          <div style="flex: 1;">
+            ${list.length > 0 ? list.map(e => `
+              <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px dashed rgba(255,255,255,0.06); gap: 6px;">
+                <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap; flex: 1; min-width: 0;">
+                  <span style="color: #60a5fa; font-weight: 700; font-size: 11px; font-family: monospace; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; padding: 1px 5px;">
+                    ${this.escapeHtml(e.jobNumber || '—')}
+                  </span>
+                  <a href="javascript:void(0)" onclick="window.employeeProfileEngine.openProfileModal('${this.escapeJs(e.name)}')"
+                     style="color: var(--text-primary); font-weight: 600; font-size: 12.5px; text-decoration: none; cursor: pointer;"
+                     onmouseover="this.style.color='#60a5fa'; this.style.textDecoration='underline';"
+                     onmouseout="this.style.color='var(--text-primary)'; this.style.textDecoration='none';"
+                     title="Open Employee Profile for ${this.escapeHtml(e.name)}">
+                    ${this.escapeHtml(e.name)}
+                  </a>
+                  <span class="badge" style="background: rgba(255,255,255,0.05); color: var(--text-muted); font-size: 10px; padding: 1px 5px; border-radius: 4px;">
+                    📍 ${this.escapeHtml(e.location)}
+                  </span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 5px; flex-shrink: 0;">
+                  <span class="badge" style="background: var(--bg-tertiary); color: var(--text-muted); font-size: 10px; padding: 1px 6px; border-radius: 3px; font-weight: 700;">
+                    ${this.escapeHtml(e.classification || '—')}
+                  </span>
+                </div>
+              </div>
+            `).join('') : `
+              <div style="color: var(--text-muted); font-size: 12px; font-style: italic; padding: 16px 8px; text-align: center; background: rgba(0,0,0,0.12); border-radius: 6px;">
+                ${emptyMsg}
+              </div>
+            `}
+          </div>
+        </div>
+      `;
+    };
+
+    // Helper for rendering an Active Field Crew Card (Exact Crew Import styling)
+    const renderFieldCrewCard = (crew) => {
+      const dayPills = [
+        { key: 'M', label: 'M', isWork: !crew.isSkipMon },
+        { key: 'Tu', label: 'T', isWork: !crew.isSkipTue },
+        { key: 'W', label: 'W', isWork: !crew.isSkipWed },
+        { key: 'Th', label: 'Th', isWork: !crew.isSkipThu },
+        { key: 'F', label: 'F', isWork: !crew.isSkipFri },
+        { key: 'Sa', label: 'Sa', isWork: !crew.isSkipSat },
+        { key: 'Su', label: 'Su', isWork: !crew.isSkipSun }
+      ];
+
+      const getStatusBadge = (stat) => {
+        if (stat === 'Active') {
+          return `<span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.35); font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px;">🟢 Active</span>`;
+        }
+        if (stat === 'Pending Start') {
+          return `<span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.35); font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px;">🟡 Pending Start</span>`;
+        }
+        if (stat === 'On Hold') {
+          return `<span class="badge" style="background: rgba(100, 116, 139, 0.2); color: #94a3b8; border: 1px solid rgba(100, 116, 139, 0.4); font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px;">⏸️ On Hold</span>`;
+        }
+        if (stat === 'Completed') {
+          return `<span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.35); font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px;">🏁 Completed</span>`;
+        }
+        return `<span class="badge" style="background: var(--bg-tertiary); color: var(--text-muted); font-size: 10px; padding: 2px 6px; border-radius: 4px;">${this.escapeHtml(stat)}</span>`;
+      };
+
+      return `
+        <div class="crew-card" style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.2); display: flex; flex-direction: column;">
+          <!-- Card Header -->
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; border-bottom: 1px solid var(--border-color); padding-bottom: 8px;">
+            <div style="flex: 1; margin-right: 8px;">
+              <div style="font-weight: 800; font-size: 14px; color: var(--text-primary); display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                <span>📍 ${this.escapeHtml(crew.location)}</span>
+                <span style="font-family: monospace; font-weight: 800; font-size: 13px; color: #60a5fa; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; padding: 2px 6px;">
+                  ${this.escapeHtml(crew.jobNumber)}
+                </span>
+                ${getStatusBadge(crew.status)}
+              </div>
+              ${crew.jobName ? `
+                <div style="font-size: 11px; color: var(--text-muted); margin-top: 3px; font-weight: 500;">
+                  ${this.escapeHtml(crew.jobName)}
+                </div>
+              ` : ''}
+            </div>
+            <span class="badge" style="background: var(--bg-primary); color: var(--text-muted); font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 12px; border: 1px solid var(--border-color); flex-shrink: 0;">
+              ${crew.members.length} ${crew.members.length === 1 ? 'member' : 'members'}
+            </span>
+          </div>
+
+          <!-- Schedule & Workdays Bar -->
+          <div style="background: var(--bg-primary); border-radius: 6px; padding: 8px 10px; margin-bottom: 10px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+              <span style="font-size: 11px; font-weight: 700; color: var(--text-muted);">Schedule:</span>
+              <span style="font-size: 11px; font-weight: 700; color: #93c5fd; background: rgba(59, 130, 246, 0.1); padding: 1px 6px; border-radius: 3px; border: 1px solid rgba(59, 130, 246, 0.2);">
+                ${this.escapeHtml(crew.schedule)}
+              </span>
+            </div>
+            <div style="display: flex; align-items: center; justify-content: space-between; gap: 4px;">
+              <div style="display: flex; gap: 3px;">
+                ${dayPills.map(dp => `
+                  <div style="width: 24px; height: 22px; font-size: 9.5px; font-weight: 700; border-radius: 4px; border: 1px solid ${dp.isWork ? '#10b981' : '#334155'}; background: ${dp.isWork ? '#10b981' : 'var(--bg-secondary)'}; color: ${dp.isWork ? '#ffffff' : 'var(--text-muted)'}; display: flex; align-items: center; justify-content: center;" title="${dp.isWork ? 'Working day' : 'Skip / Off day'}">
+                    ${dp.label}
+                  </div>
+                `).join('')}
+              </div>
+              <div style="display: flex; gap: 4px;">
+                <span style="padding: 2px 5px; font-size: 9px; font-weight: 700; border-radius: 4px; border: 1px solid ${!crew.skipMtg ? '#3b82f6' : '#334155'}; background: ${!crew.skipMtg ? 'rgba(59, 130, 246, 0.2)' : 'var(--bg-secondary)'}; color: ${!crew.skipMtg ? '#60a5fa' : 'var(--text-muted)'};" title="${!crew.skipMtg ? 'Safety Meeting Tracked' : 'Skip Safety Meeting'}">
+                  Mtg ${!crew.skipMtg ? '✓' : '✗'}
+                </span>
+                <span style="padding: 2px 5px; font-size: 9px; font-weight: 700; border-radius: 4px; border: 1px solid ${!crew.skipChk ? '#8b5cf6' : '#334155'}; background: ${!crew.skipChk ? 'rgba(139, 92, 246, 0.2)' : 'var(--bg-secondary)'}; color: ${!crew.skipChk ? '#c084fc' : 'var(--text-muted)'};" title="${!crew.skipChk ? 'Monthly Checklist Tracked' : 'Skip Monthly Checklist'}">
+                  Chk ${!crew.skipChk ? '✓' : '✗'}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Foreman Row -->
+          <div style="margin-bottom: 8px; display: flex; align-items: center; gap: 6px; font-size: 11.5px; background: rgba(255,255,255,0.02); padding: 4px 8px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.04);">
+            <span style="font-weight: 700; color: var(--text-muted);">Foreman:</span>
+            ${crew.foreman ? `
+              <a href="javascript:void(0)" onclick="window.employeeProfileEngine.openProfileModal('${this.escapeJs(crew.foreman)}')"
+                 style="font-weight: 700; color: #f472b6; text-decoration: none; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;"
+                 onmouseover="this.style.textDecoration='underline';" onmouseout="this.style.textDecoration='none';"
+                 title="Open Profile for Foreman ${this.escapeHtml(crew.foreman)}">
+                <span>👑</span>
+                <span>${this.escapeHtml(crew.foreman)}</span>
+              </a>
+            ` : `<span style="color: var(--text-muted); font-style: italic;">(None designated)</span>`}
+          </div>
+
+          <!-- Member List -->
+          <div style="flex: 1; font-size: 12px;">
+            ${crew.members.length > 0 ? crew.members.map(e => {
+              const isLead = (crew.foreman && e.name.toLowerCase() === crew.foreman.toLowerCase());
+              return renderMemberRow(e, isLead);
+            }).join('') : `
+              <div style="color: #94a3b8; font-size: 12px; font-style: italic; padding: 12px 6px; text-align: center; background: rgba(0,0,0,0.15); border-radius: 6px; border: 1px dashed rgba(255,255,255,0.08);">
+                No active employees currently assigned
+              </div>
+            `}
+          </div>
+        </div>
+      `;
+    };
+
+    // Assemble final container HTML
+    container.innerHTML = `
+      <div class="employee-cards-wrapper" style="height: 100%; overflow-y: auto; padding: 16px; box-sizing: border-box;">
+        
+        <!-- Summary Stats Banner -->
+        <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 16px; margin-bottom: 18px;">
+          <div style="display: flex; align-items: center; gap: 14px; flex-wrap: wrap; font-size: 12.5px; font-weight: 700;">
+            <span style="color: var(--text-primary); display: flex; align-items: center; gap: 5px;">
+              👥 <strong style="color: #60a5fa;">${totalActiveCount}</strong> Active Employees
+            </span>
+            <span style="color: var(--text-muted);">|</span>
+            <span style="color: var(--text-primary); display: flex; align-items: center; gap: 5px;">
+              🚜 <strong style="color: #34d399;">${crewCards.length}</strong> Field Crews
+            </span>
+            <span style="color: var(--text-muted);">|</span>
+            <span style="color: #fbbf24; display: flex; align-items: center; gap: 5px;">
+              🏖️ <strong>${vacationList.length}</strong> Vacation
+            </span>
+            <span style="color: #60a5fa; display: flex; align-items: center; gap: 5px;">
+              🌴 <strong>${leaveList.length}</strong> Leave
+            </span>
+            <span style="color: #34d399; display: flex; align-items: center; gap: 5px;">
+              🩺 <strong>${lightDutyList.length}</strong> Light Duty
+            </span>
+            ${medicalList.length > 0 ? `
+              <span style="color: #f472b6; display: flex; align-items: center; gap: 5px;">
+                🏥 <strong>${medicalList.length}</strong> Medical
+              </span>
+            ` : ''}
+          </div>
+          <div style="font-size: 11px; color: var(--text-muted);">
+            💡 <em>Click any employee name to open their Profile, view sizes, contact info, or edit records.</em>
+          </div>
+        </div>
+
+        <!-- 1. Dedicated Status Cards (Vacation, Leave, Light Duty, Medical) -->
+        <div style="margin-bottom: 20px;">
+          <div style="font-size: 12px; font-weight: 800; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.5px; margin-bottom: 10px; display: flex; align-items: center; gap: 6px;">
+            <span>📋</span> Status Assignments
+          </div>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px;">
+            ${renderStatusCard('Vacation', '🏖️', '#fbbf24', 'rgba(245, 158, 11, 0.4)', 'rgba(245, 158, 11, 0.15)', vacationList, 'No employees currently on Vacation')}
+            ${renderStatusCard('Leave', '🌴', '#60a5fa', 'rgba(59, 130, 246, 0.4)', 'rgba(59, 130, 246, 0.15)', leaveList, 'No employees currently on Leave')}
+            ${renderStatusCard('Light Duty', '🩺', '#34d399', 'rgba(16, 185, 129, 0.4)', 'rgba(16, 185, 129, 0.15)', lightDutyList, 'No employees currently on Light Duty')}
+            ${medicalList.length > 0 ? renderStatusCard('Medical', '🏥', '#f472b6', 'rgba(244, 114, 182, 0.4)', 'rgba(244, 114, 182, 0.15)', medicalList, 'No employees currently on Medical') : ''}
+          </div>
+        </div>
+
+        <!-- 2. Active Field Crews -->
+        <div>
+          <div style="font-size: 12px; font-weight: 800; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.5px; margin-bottom: 10px; display: flex; align-items: center; gap: 6px;">
+            <span>🚜</span> Field Crews (${crewCards.length})
+          </div>
+          ${crewCards.length > 0 ? `
+            <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 16px;">
+              ${crewCards.map(c => renderFieldCrewCard(c)).join('')}
+            </div>
+          ` : `
+            <div style="padding: 40px; text-align: center; color: var(--text-muted); background: var(--bg-secondary); border-radius: 8px; border: 1px solid var(--border-color);">
+              <div style="font-size: 32px; margin-bottom: 10px;">🔍</div>
+              <h4 style="color: var(--text-primary); margin: 0 0 6px 0;">No field crews found</h4>
+              <p style="margin: 0; font-size: 13px;">Try clearing your search query to view all active crews.</p>
+            </div>
+          `}
+        </div>
+
+      </div>
+    `;
   }
 
   renderStandardTable(container, countBadge, tableData) {

@@ -17,14 +17,27 @@ class ItemStatsEngine {
 
   parseDate(val) {
     if (!val || val === 'N/A') return null;
-    if (val instanceof Date) return val;
+    if (val instanceof Date) return isNaN(val.getTime()) ? null : val;
     const s = String(val).trim();
     if (s.includes('/')) {
       const parts = s.split('/');
       if (parts.length === 3) {
         const m = parseInt(parts[0], 10) - 1;
         const d = parseInt(parts[1], 10);
-        const y = parseInt(parts[2], 10);
+        let y = parseInt(parts[2], 10);
+        if (y > 2100 && y >= 20200 && y <= 20300) y = Math.floor(y / 10);
+        else if (y === 2032) y = 2022;
+        else if (y < 100) y = y < 50 ? 2000 + y : 1900 + y;
+        const dt = new Date(y, m, d, 12, 0, 0);
+        return isNaN(dt.getTime()) ? null : dt;
+      } else if (parts.length === 2) {
+        const m = parseInt(parts[0], 10) - 1;
+        const d = parseInt(parts[1], 10);
+        const now = new Date();
+        let y = now.getFullYear();
+        if (m > now.getMonth() || (m === now.getMonth() && d > now.getDate())) {
+          y = y - 1;
+        }
         const dt = new Date(y, m, d, 12, 0, 0);
         return isNaN(dt.getTime()) ? null : dt;
       }
@@ -62,6 +75,28 @@ class ItemStatsEngine {
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#039;');
+  }
+
+  getCanonicalEmployeeName(rawName) {
+    if (!rawName) return '';
+    if (this.db && typeof this.db.getCanonicalEmployeeName === 'function') {
+      return this.db.getCanonicalEmployeeName(rawName);
+    }
+    if (typeof window !== 'undefined' && window.employeeResolver && typeof window.employeeResolver.getCanonicalName === 'function') {
+      return window.employeeResolver.getCanonicalName(rawName);
+    }
+    return String(rawName).trim();
+  }
+
+  areSameEmployee(nameA, nameB) {
+    if (!nameA || !nameB) return false;
+    if (this.db && typeof this.db.areSameEmployee === 'function') {
+      return this.db.areSameEmployee(nameA, nameB);
+    }
+    if (typeof window !== 'undefined' && window.employeeResolver && typeof window.employeeResolver.areSameEmployee === 'function') {
+      return window.employeeResolver.areSameEmployee(nameA, nameB);
+    }
+    return String(nameA).trim().toLowerCase() === String(nameB).trim().toLowerCase();
   }
 
   classifyState(assignedTo, location, notes, status) {
@@ -267,7 +302,7 @@ class ItemStatsEngine {
     };
   }
 
-  analyzeLifecycle(itemKey, groupRows) {
+  analyzeLifecycle(itemKey, groupRows, activeItemRow = null) {
     if (!groupRows || groupRows.length === 0) {
       return null;
     }
@@ -333,9 +368,69 @@ class ItemStatsEngine {
     let retiredDate = null;
     let retiredReason = '';
 
-    for (let i = 0; i < sorted.length; i++) {
-      const current = sorted[i];
-      const next = i < sorted.length - 1 ? sorted[i + 1] : null;
+    // Sanitize sorted rows before generating milestones:
+    // 1. Identify dates where an active employee field assignment exists
+    const empAssignmentDates = new Set();
+    sorted.forEach(r => {
+      const st = this.classifyState(r['Assigned To'], r['Location'], r['Notes'], r['Status']);
+      if (st.key === 'FIELD') {
+        const dObj = this.parseDate(r['Date Assigned'] || r['Date'] || Object.values(r)[0]);
+        if (dObj) empAssignmentDates.add(dObj.toISOString().slice(0, 10));
+      }
+    });
+
+    // 2. Discard 0-day intermediate shelf artifacts that occur on the exact same date as an employee assignment
+    const noIntermediateShelf = sorted.filter(r => {
+      const st = this.classifyState(r['Assigned To'], r['Location'], r['Notes'], r['Status']);
+      if (st.key === 'SHELF' || st.key === 'NEW_PURCHASE') {
+        const dObj = this.parseDate(r['Date Assigned'] || r['Date'] || Object.values(r)[0]);
+        if (dObj && empAssignmentDates.has(dObj.toISOString().slice(0, 10))) {
+          return false; // Discard 0-day intermediate shelf artifact
+        }
+      }
+      return true;
+    });
+
+    // 3. Collapse consecutive same-state records
+    const cleanSorted = [];
+    for (let sIdx = 0; sIdx < noIntermediateShelf.length; sIdx++) {
+      const cur = noIntermediateShelf[sIdx];
+      if (cleanSorted.length > 0) {
+        const prev = cleanSorted[cleanSorted.length - 1];
+        const curSt = this.classifyState(cur['Assigned To'], cur['Location'], cur['Notes'], cur['Status']);
+        const prevSt = this.classifyState(prev['Assigned To'], prev['Location'], prev['Notes'], prev['Status']);
+
+        const isBothShelf = (curSt.key === 'SHELF' || curSt.key === 'NEW_PURCHASE') && (prevSt.key === 'SHELF' || prevSt.key === 'NEW_PURCHASE');
+        const isSameHolder = this.areSameEmployee(cur['Assigned To'], prev['Assigned To']);
+
+        if (isBothShelf || (curSt.key === prevSt.key && isSameHolder)) {
+          // Update prev with the later date & merge notes
+          const cDate = cur['Date Assigned'] || cur['Date'];
+          if (cDate) {
+            prev['Date Assigned'] = cDate;
+            if (prev['Date']) prev['Date'] = cDate;
+          }
+          if (cur['Notes'] && !String(prev['Notes'] || '').includes(cur['Notes'])) {
+            prev['Notes'] = prev['Notes'] ? `${prev['Notes']} | ${cur['Notes']}` : cur['Notes'];
+          }
+          if (cur['Location'] && String(cur['Location']).toLowerCase() !== 'helena') {
+            prev['Location'] = cur['Location'];
+          }
+          const curAssignedRaw = String(cur['Assigned To'] || '').trim();
+          if (curAssignedRaw && curAssignedRaw.toLowerCase() !== String(prev['Assigned To'] || '').trim().toLowerCase()) {
+            prev['Assigned To'] = curAssignedRaw;
+          }
+          continue; // Collapsed!
+        }
+      }
+      cleanSorted.push(cur);
+    }
+
+    const milestoneSource = cleanSorted.length > 0 ? cleanSorted : sorted;
+
+    for (let i = 0; i < milestoneSource.length; i++) {
+      const current = milestoneSource[i];
+      const next = i < milestoneSource.length - 1 ? milestoneSource[i + 1] : null;
 
       const dateStr = current['Date Assigned'] || current['Date'] || Object.values(current)[0];
       const startDate = this.parseDate(dateStr) || firstDate;
@@ -374,7 +469,18 @@ class ItemStatsEngine {
         fieldDays += days;
         const linemanName = assignedTo.trim();
         if (linemanName && !['new', 'n/a', 'unknown', 'none', 'shelf', 'storage'].includes(linemanName.toLowerCase())) {
-          linemenMap[linemanName] = (linemenMap[linemanName] || 0) + days;
+          const canKey = this.getCanonicalEmployeeName(linemanName);
+          if (!linemenMap[canKey]) {
+            linemenMap[canKey] = {
+              canonicalName: canKey,
+              displayName: linemanName,
+              days: 0
+            };
+          }
+          linemenMap[canKey].days += days;
+          if (i === milestoneSource.length - 1 && activeItemRow && activeItemRow['Assigned To']) {
+            linemenMap[canKey].displayName = String(activeItemRow['Assigned To']).trim() || canKey;
+          }
         }
       } else if (state.key === 'SHELF' || state.key === 'NEW_PURCHASE') {
         shelfDays += days; // "New" items on shelf count towards shelf/storage duration
@@ -393,6 +499,16 @@ class ItemStatsEngine {
 
       const isFutureDate = startDate.getTime() > (Date.now() + 30 * 86400000);
 
+      let assignedDisplay = assignedTo;
+      if (state.key === 'NEW_PURCHASE') {
+        assignedDisplay = assignedTo || 'New (Purchased)';
+      } else if (i === milestoneSource.length - 1 && !isRetired && activeItemRow && activeItemRow['Assigned To']) {
+        const actAssigned = String(activeItemRow['Assigned To']).trim();
+        if (actAssigned && this.areSameEmployee(actAssigned, assignedTo)) {
+          assignedDisplay = actAssigned;
+        }
+      }
+
       milestones.push({
         idx: i + 1,
         startDate: startDate,
@@ -402,10 +518,10 @@ class ItemStatsEngine {
         days: days,
         durationFormatted: this.formatDuration(days),
         state: state,
-        assignedTo: state.key === 'NEW_PURCHASE' ? (assignedTo || 'New (Purchased)') : assignedTo,
+        assignedTo: assignedDisplay,
         location: location || 'Helena',
         notes: notes,
-        isCurrent: i === sorted.length - 1 && !isRetired,
+        isCurrent: i === milestoneSource.length - 1 && !isRetired,
         isFutureDate: isFutureDate,
         isOriginRecord: i === 0,
         isPurchaseOrigin: i === 0 && isPurchaseOrigin,
@@ -424,13 +540,25 @@ class ItemStatsEngine {
     const lostPct = Math.max(0, 100 - fieldPct - shelfPct - testingPct - packedTestingPct - packedDeliveryPct);
 
     // Linemen list sorted by longest days
-    const linemenList = Object.keys(linemenMap).map(name => {
+    const activeAssignedTo = activeItemRow ? String(activeItemRow['Assigned To'] || '').trim() : '';
+    const linemenList = Object.keys(linemenMap).map(canKey => {
+      const entry = linemenMap[canKey];
+      const isCurrentLineman = !isRetired && (
+        (lastMilestone && lastMilestone.state.key === 'FIELD' && this.areSameEmployee(lastMilestone.assignedTo, canKey)) ||
+        (activeAssignedTo && this.areSameEmployee(activeAssignedTo, canKey))
+      );
+      let finalDisplayName = entry.displayName || canKey;
+      if (isCurrentLineman && activeAssignedTo) {
+        finalDisplayName = activeAssignedTo;
+      }
+
       return {
-        name: name,
-        days: linemenMap[name],
-        durationFormatted: this.formatDuration(linemenMap[name]),
-        pct: Math.round((linemenMap[name] / (fieldDays || 1)) * 100),
-        isCurrent: !isRetired && lastMilestone && lastMilestone.state.key === 'FIELD' && lastMilestone.assignedTo.toLowerCase() === name.toLowerCase()
+        name: finalDisplayName,
+        canonicalName: canKey,
+        days: entry.days,
+        durationFormatted: this.formatDuration(entry.days),
+        pct: Math.round((entry.days / (fieldDays || 1)) * 100),
+        isCurrent: isCurrentLineman
       };
     }).sort((a, b) => b.days - a.days);
 
@@ -1638,8 +1766,9 @@ class ItemStatsEngine {
     const seenMap = new Set();
     for (const r of groupRows) {
       const d = String(r['Date Assigned'] || r['Date'] || Object.values(r)[0] || '').trim();
-      const a = String(r['Assigned To'] || r['Employee Name'] || '').trim().toLowerCase();
-      const k = `${d}::${a}`;
+      const a = String(r['Assigned To'] || r['Employee Name'] || '').trim();
+      const canA = this.getCanonicalEmployeeName(a).toLowerCase();
+      const k = `${d}::${canA}`;
       if (seenMap.has(k)) {
         dupesCount++;
       } else {
