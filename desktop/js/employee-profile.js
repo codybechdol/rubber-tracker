@@ -2675,10 +2675,13 @@ class EmployeeProfileEngine {
           </div>
         </div>
 
-        <!-- Companion Sync Checkbox for 1st Aid & CPR -->
-        <label style="display: flex; align-items: center; gap: 9px; cursor: pointer; font-size: 12px; font-weight: 600; color: #93c5fd; background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.25); border-radius: 6px; padding: 9px 12px; margin: 0;">
-          <input type="checkbox" id="cert-edit-sync-companion" checked style="width: 16px; height: 16px; cursor: pointer;">
-          <span>Also update companion <strong>${this.escapeHtml(companionCertType)}</strong> record with this same date &amp; provider</span>
+        <!-- Optional Companion Sync Checkbox for 1st Aid & CPR (unchecked by default so certs stay independent) -->
+        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; font-size: 12px; font-weight: 600; color: #93c5fd; background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.22); border-radius: 6px; padding: 10px 12px; margin: 0;">
+          <input type="checkbox" id="cert-edit-sync-companion" style="width: 16px; height: 16px; cursor: pointer; flex-shrink: 0;">
+          <div>
+            <div>Also update companion <strong>${this.escapeHtml(companionCertType)}</strong> record with this same date &amp; provider</div>
+            <div style="font-size: 11px; color: var(--text-muted); font-weight: 400; margin-top: 2px;">Leave unchecked if 1st Aid and CPR have different expiration dates</div>
+          </div>
         </label>
         ` : ''}
 
