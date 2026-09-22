@@ -2054,8 +2054,10 @@ class SheetNavigator {
         existing.push({
           ...emp,
           isSecondaryMember: true,
-          // Display their secondary job number (e.g. "040-26 (Fri-Sat).3") instead of primary
-          jobNumber: emp.secondaryJob
+          // On the secondary card, display slot comes from secondary job (e.g. "040-26 (Fri-Sat).3")
+          jobNumber: emp.secondaryJob,
+          // Stash the original primary slot so the badge can show it instead
+          primaryJobNumber: emp.jobNumber
         });
       }
     });
@@ -2229,7 +2231,11 @@ class SheetNavigator {
               ${isLead ? '<span title="Crew Foreman / Lead" style="margin-right: 2px;">👑</span>' : ''}
               <span>${this.escapeHtml(e.name)}</span>
             </a>
-            ${e.secondaryJob ? `
+            ${e.isSecondaryMember && e.primaryJobNumber ? `
+              <span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); font-size: 9.5px; font-weight: 700; padding: 1px 5px; border-radius: 3px;" title="Primary Job: ${this.escapeHtml(e.primaryJobNumber)}">
+                ⚡ 1st: ${this.escapeHtml(e.primaryJobNumber)}
+              </span>
+            ` : e.secondaryJob ? `
               <span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); font-size: 9.5px; font-weight: 700; padding: 1px 5px; border-radius: 3px;" title="Secondary Job: ${this.escapeHtml(e.secondaryJob)}">
                 ⚡ 2nd: ${this.escapeHtml(e.secondaryJob)}
               </span>
