@@ -2139,8 +2139,11 @@ class EmployeeProfileEngine {
                   <span>✏️</span> Edit
                 </button>
                 ${c.smsStatus && (c.smsStatus.includes('Sent') || c.smsStatus.includes('Notified')) ? `
-                  <button class="btn btn-secondary" style="font-size: 11px; padding: 2px 6px; background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4); cursor: pointer; border-radius: 4px;" title="Notification logged (${this.escapeHtml(c.smsStatus)}). Click to resend SMS." onclick="if(window.smsDialogEngine){window.smsDialogEngine.openCertSms('${this.escapeHtml(data.displayName)}', '${this.escapeHtml(c.certType)}', '${this.escapeHtml(c.expDate)}');}">
-                    📱 ${this.escapeHtml(c.smsStatus)}
+                  <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #4ade80; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 11px; padding: 2px 7px; border-radius: 4px; font-weight: 700; display: inline-flex; align-items: center; gap: 4px;" title="Notification logged (${this.escapeHtml(c.smsStatus)})">
+                    ✅ Notified${c.smsStatus.replace(/^sent\s*/i, '').replace(/^notified\s*:?\s*/i, '').trim() ? `: ${this.escapeHtml(c.smsStatus.replace(/^sent\s*/i, '').replace(/^notified\s*:?\s*/i, '').trim())}` : ''}
+                  </span>
+                  <button class="btn btn-secondary" style="font-size: 11px; padding: 2px 7px; display: inline-flex; align-items: center; gap: 4px; color: #93c5fd; border-color: rgba(59, 130, 246, 0.4); background: rgba(59, 130, 246, 0.15); cursor: pointer; border-radius: 4px;" title="Send another SMS reminder to ${this.escapeHtml(data.displayName)}" onclick="if(window.smsDialogEngine){window.smsDialogEngine.openCertSms('${this.escapeHtml(data.displayName)}', '${this.escapeHtml(c.certType)}', '${this.escapeHtml(c.expDate)}');}">
+                    💬 Resend
                   </button>
                 ` : `
                   <button class="btn btn-primary" style="font-size: 11px; padding: 2px 8px; background-color: #f59e0b; border: 1px solid #d97706; color: #fff; font-weight: 700; cursor: pointer; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.2);" title="Send SMS reminder to ${this.escapeHtml(data.displayName)}" onclick="if(window.smsDialogEngine){window.smsDialogEngine.openCertSms('${this.escapeHtml(data.displayName)}', '${this.escapeHtml(c.certType)}', '${this.escapeHtml(c.expDate)}');}">

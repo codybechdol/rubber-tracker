@@ -175,6 +175,14 @@ class CprRosterEngine {
 
       const cprDateStr = cprCert ? String(cprCert.expDate || '').trim() : '';
       const firstAidDateStr = firstAidCert ? String(firstAidCert.expDate || '').trim() : '';
+      const cprSms = cprCert && cprCert.row ? String(cprCert.row['SMS'] || '').trim() : '';
+      const faSms = firstAidCert && firstAidCert.row ? String(firstAidCert.row['SMS'] || '').trim() : '';
+      let smsNotifDetails = '';
+      if (cprSms.includes('Sent') || cprSms.includes('Notified')) {
+        smsNotifDetails = cprSms;
+      } else if (faSms.includes('Sent') || faSms.includes('Notified')) {
+        smsNotifDetails = faSms;
+      }
 
       const cprDate = this.parseDate(cprDateStr);
       const firstAidDate = this.parseDate(firstAidDateStr);
@@ -243,6 +251,7 @@ class CprRosterEngine {
         firstAidDateStr: firstAidDateStr,
         status: status,
         statusDetails: statusDetails,
+        smsNotifDetails: smsNotifDetails,
         isCandidate: isCandidate,
         selected: (status === 'expired' || status === 'expiring' || status === 'scheduled') // Pre-select overdue/expiring by default
       });
@@ -604,6 +613,10 @@ class CprRosterEngine {
         badgeHtml = `<span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #a7f3d0; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 11px;">✅ Valid (${this.escapeHtml(emp.statusDetails)})</span>`;
       } else {
         badgeHtml = '<span class="badge" style="background: rgba(100, 116, 139, 0.2); color: #cbd5e1; border: 1px solid rgba(100, 116, 139, 0.3); font-size: 11px;">⚪ No Date on File</span>';
+      }
+
+      if (emp.smsNotifDetails) {
+        badgeHtml += ` <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #4ade80; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 10.5px; font-weight: 700; margin-left: 4px;" title="SMS notification logged">📱 ${this.escapeHtml(emp.smsNotifDetails)}</span>`;
       }
 
       const emailHtml = emp.email ? this.escapeHtml(emp.email) : '<span style="color: #ef4444; font-style: italic; font-size: 11px;">⚠️ Missing Email</span>';

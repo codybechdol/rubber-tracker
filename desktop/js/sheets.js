@@ -5308,7 +5308,17 @@ class SheetNavigator {
             const expDate = String(row['Expiration Date'] || row['Expiration'] || '').trim();
 
             if (vStr.includes('Sent') || vStr.includes('Notified')) {
-              customCellHtml = `<button class="btn btn-secondary" style="font-size: 11px; padding: 2px 8px; background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4); cursor: pointer; border-radius: 4px;" title="Notification logged (${this.escapeHtml(vStr)}). Click to resend SMS." onclick="if(window.smsDialogEngine){window.smsDialogEngine.openCertSms('${this.escapeJs(rowEmp)}', '${this.escapeJs(certType)}', '${this.escapeJs(expDate)}', ${sheetRowIdx}, ${colIdx + 1});}">📱 ${this.escapeHtml(val)}</button>`;
+              const displayDate = vStr.replace(/^sent\s*/i, '').replace(/^notified\s*:?\s*/i, '').trim();
+              customCellHtml = `
+                <div style="display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex-wrap: wrap;">
+                  <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #4ade80; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 11px; padding: 2px 7px; border-radius: 4px; font-weight: 700; display: inline-flex; align-items: center; gap: 4px;" title="Notification logged (${this.escapeHtml(vStr)})">
+                    ✅ Notified${displayDate ? `: ${this.escapeHtml(displayDate)}` : ''}
+                  </span>
+                  <button class="btn btn-secondary" style="font-size: 11px; padding: 2px 7px; display: inline-flex; align-items: center; gap: 4px; color: #93c5fd; border-color: rgba(59, 130, 246, 0.4); background: rgba(59, 130, 246, 0.15); cursor: pointer; border-radius: 4px;" title="Send another SMS reminder to ${this.escapeHtml(rowEmp)}" onclick="if(window.smsDialogEngine){window.smsDialogEngine.openCertSms('${this.escapeJs(rowEmp)}', '${this.escapeJs(certType)}', '${this.escapeJs(expDate)}', ${sheetRowIdx}, ${colIdx + 1});}">
+                    💬 Resend
+                  </button>
+                </div>
+              `;
             } else {
               customCellHtml = `<button class="btn btn-primary" style="font-size: 11px; padding: 2px 8px; background-color: #f59e0b; border: 1px solid #d97706; color: #fff; font-weight: 700; cursor: pointer; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.2);" title="Send SMS reminder to ${this.escapeHtml(rowEmp)}" onclick="if(window.smsDialogEngine){window.smsDialogEngine.openCertSms('${this.escapeJs(rowEmp)}', '${this.escapeJs(certType)}', '${this.escapeJs(expDate)}', ${sheetRowIdx}, ${colIdx + 1});}">💬 Send SMS</button>`;
             }

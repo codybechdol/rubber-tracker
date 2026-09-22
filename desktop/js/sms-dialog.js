@@ -443,31 +443,78 @@ class SMSDialogEngine {
   /**
    * Records that SMS notification was sent in IndexedDB / local database mutations
    */
-  recordSmsNotification() {
+  async recordSmsNotification() {
     const ctx = this.currentContext;
     if (!ctx) return;
 
     const todayStr = new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
     const notifStatus = `Sent ${todayStr}`;
 
-    // If opened from a table with rowIdx and colIdx, queue local mutation
-    if (ctx.rowIdx !== null && ctx.sheetName) {
-      this.db.queueMutation({
-        sheetName: ctx.sheetName,
-        row: ctx.rowIdx,
-        col: ctx.colIdx || 9,
-        header: 'SMS',
-        oldValue: '💬 Send SMS',
-        newValue: notifStatus
-      });
+    const snap = (this.db && typeof this.db.getSnapshot === 'function') ? this.db.getSnapshot() : (this.db ? this.db.snapshot : null);
+    const certsTable = snap && snap.tables ? (snap.tables['expiring_certs'] || snap.tables['Expiring Certs']) : null;
+
+    if (certsTable && certsTable.rows) {
+      const headers = certsTable.headers || [];
+      let colIdx = headers.findIndex(h => /^sms/i.test(h)) + 1;
+      if (colIdx <= 0) colIdx = 9;
+
+      let matchedRow = null;
+      if (ctx.rowIdx !== null) {
+        matchedRow = certsTable.rows.find(r => r._rowIdx === ctx.rowIdx);
+      }
+      if (!matchedRow) {
+        const empNorm = String(ctx.employeeName || '').toLowerCase().trim();
+        const certNorm = String(ctx.certType || '').toLowerCase().trim();
+        matchedRow = certsTable.rows.find(r => {
+          const rEmp = String(r['Employee Name'] || r['Name'] || Object.values(r)[0] || '').toLowerCase().trim();
+          const rType = String(r['Item Type'] || r['Cert Type'] || r['Type'] || '').toLowerCase().trim();
+          return (rEmp === empNorm || rEmp.includes(empNorm) || empNorm.includes(rEmp)) &&
+                 (rType === certNorm || rType.includes(certNorm) || certNorm.includes(rType));
+        });
+      }
+
+      if (matchedRow) {
+        const targetRowIdx = matchedRow._rowIdx || ctx.rowIdx;
+        matchedRow['SMS'] = notifStatus;
+        if (certsTable.rawGrid && targetRowIdx && certsTable.rawGrid[targetRowIdx - 1]) {
+          certsTable.rawGrid[targetRowIdx - 1][colIdx - 1] = notifStatus;
+        }
+
+        if (this.db && typeof this.db.addMutation === 'function') {
+          await this.db.addMutation({
+            action: 'UPDATE_CELL',
+            sheetName: certsTable.name || 'Expiring Certs',
+            tableKey: 'expiring_certs',
+            row: targetRowIdx,
+            col: colIdx,
+            header: headers[colIdx - 1] || 'SMS',
+            oldValue: '💬 Send SMS',
+            value: notifStatus
+          });
+        }
+
+        if (this.db && typeof this.db.saveLocalSnapshot === 'function') {
+          await this.db.saveLocalSnapshot();
+        } else if (this.db && typeof this.db.persistSnapshot === 'function') {
+          await this.db.persistSnapshot(snap);
+        }
+      }
     }
 
     // Refresh UI if visible
-    if (window.sheetNavigator && window.sheetNavigator.currentSheetKey === 'expiring_certs') {
-      window.sheetNavigator.renderExpiringCerts();
+    if (window.sheetNavigator) {
+      if (typeof window.sheetNavigator.renderCurrentSheet === 'function') {
+        window.sheetNavigator.renderCurrentSheet();
+      } else if (typeof window.sheetNavigator.renderExpiringCerts === 'function') {
+        window.sheetNavigator.renderExpiringCerts();
+      }
     }
     if (window.employeeProfileEngine && window.employeeProfileEngine.currentEmployeeData) {
-      const match = window.employeeProfileEngine.currentEmployeeData.certifications.find(c => c.certType === ctx.certType);
+      const match = (window.employeeProfileEngine.currentEmployeeData.certifications || []).find(c => {
+        const ct = String(c.certType || '').toLowerCase().trim();
+        const targetCt = String(ctx.certType || '').toLowerCase().trim();
+        return ct === targetCt || ct.includes(targetCt) || targetCt.includes(ct);
+      });
       if (match) {
         match.smsStatus = notifStatus;
         const modalBody = document.getElementById('employee-profile-modal-body');
@@ -475,9 +522,13 @@ class SMSDialogEngine {
       }
     }
 
+    if (typeof window.showToast === 'function') {
+      window.showToast(`✅ Recorded SMS notification for ${ctx.employeeName} (${ctx.certType})`);
+    }
+
     setTimeout(() => {
       this.closeSmsModal();
-    }, 600);
+    }, 400);
   }
 
   closeSmsModal() {

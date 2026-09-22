@@ -1295,13 +1295,16 @@
       <div class="modal-body" id="sms-notification-modal-body" style="max-height: 75vh; overflow-y: auto; padding: 20px;">
         <!-- Injected dynamically by sms-dialog.js -->
       </div>
-      <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center;">
+      <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
         <button class="btn btn-secondary" onclick="window.smsDialogEngine.closeSmsModal()">Cancel</button>
-        <div style="display: flex; gap: 8px;">
-          <button class="btn btn-secondary" onclick="window.smsDialogEngine.copyMessageToClipboard()" style="display: flex; align-items: center; gap: 6px;">
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+          <button class="btn btn-success" onclick="window.smsDialogEngine.recordSmsNotification()" style="background-color: #10b981; border: 1px solid #059669; color: #fff; display: inline-flex; align-items: center; gap: 6px; font-weight: 700; cursor: pointer; padding: 6px 14px; border-radius: 6px;" title="Mark this employee as notified without opening messaging app">
+            <span>✅</span> Mark as Notified
+          </button>
+          <button class="btn btn-secondary" onclick="window.smsDialogEngine.copyMessageToClipboard()" style="display: inline-flex; align-items: center; gap: 6px;">
             <span>📋</span> Copy Text
           </button>
-          <button class="btn btn-primary" onclick="window.smsDialogEngine.launchSmsClient()" style="background-color: #f59e0b; border-color: #d97706; display: flex; align-items: center; gap: 6px; font-weight: 700;">
+          <button class="btn btn-primary" onclick="window.smsDialogEngine.launchSmsClient()" style="background-color: #f59e0b; border-color: #d97706; display: inline-flex; align-items: center; gap: 6px; font-weight: 700;">
             <span>📲</span> Launch SMS App
           </button>
         </div>
