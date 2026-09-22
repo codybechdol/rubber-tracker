@@ -30,6 +30,7 @@ class SheetNavigator {
       if (stored === 'cards' || stored === 'table') savedEmpView = stored;
     } catch { /* ignore */ }
     this.employeeViewMode = savedEmpView;
+    this.editingCrewBaseJob = null;
     this.sheetList = [
       { key: 'employees', label: '👥 Employees', icon: '👤', isSwap: false },
       { key: 'job_tracking', label: '📋 Job Tracking', icon: '📋', isSwap: false },
@@ -2123,10 +2124,24 @@ class SheetNavigator {
         ? String(jt['Job Name'] || jt['Site Name'] || jt['Description']).trim()
         : '';
 
+      // Helper: match foreman name against an employee, including their alternate names.
+      // Handles cases where JT stores a nickname (Matt) but the employee row uses the full name (Matthew)
+      // or vice versa. alternateNames is a pipe- or comma-separated string.
+      const nameMatchesForeman = (emp, foremanName) => {
+        if (!foremanName) return false;
+        const fl = foremanName.trim().toLowerCase();
+        if (emp.name.toLowerCase() === fl) return true;
+        if (emp.alternateNames) {
+          const alts = emp.alternateNames.split(/[|,;]/).map(s => s.trim().toLowerCase()).filter(Boolean);
+          if (alts.includes(fl)) return true;
+        }
+        return false;
+      };
+
       // Sort crew members: Foreman first, then by suffix numerical order, then alphabetically
       members.sort((a, b) => {
-        const isAForm = (foreman && a.name.toLowerCase() === foreman.toLowerCase());
-        const isBForm = (foreman && b.name.toLowerCase() === foreman.toLowerCase());
+        const isAForm = nameMatchesForeman(a, foreman);
+        const isBForm = nameMatchesForeman(b, foreman);
         if (isAForm && !isBForm) return -1;
         if (!isAForm && isBForm) return 1;
 
@@ -2140,6 +2155,27 @@ class SheetNavigator {
         return a.name.localeCompare(b.name);
       });
 
+      // Suffix numbering validation (.1, .2, .3, ...)
+      const suffixes = [];
+      const suffixCounts = new Map();
+      members.forEach(m => {
+        const match = String(m.jobNumber || '').match(/\.(\d+)/);
+        if (match) {
+          const sNum = parseInt(match[1], 10);
+          suffixes.push(sNum);
+          suffixCounts.set(sNum, (suffixCounts.get(sNum) || 0) + 1);
+        }
+      });
+      const duplicateSuffixes = Array.from(suffixCounts.entries()).filter(([num, count]) => count > 1).map(([num]) => num);
+      let hasGaps = false;
+      if (suffixes.length > 0) {
+        const maxSuffix = Math.max(...suffixes);
+        if (maxSuffix > suffixes.length || !suffixCounts.has(1)) {
+          hasGaps = true;
+        }
+      }
+      const hasNumberingIssue = duplicateSuffixes.length > 0 || hasGaps;
+
       crewCards.push({
         baseJob,
         jobNumber: (jt && jt['Job Number']) ? String(jt['Job Number']).trim() : baseJob,
@@ -2150,7 +2186,11 @@ class SheetNavigator {
         jobName,
         isSkipSun, isSkipMon, isSkipTue, isSkipWed, isSkipThu, isSkipFri, isSkipSat,
         skipMtg, skipChk,
-        members
+        members,
+        nameMatchesForeman,  // pass helper down so renderFieldCrewCard can use it
+        hasNumberingIssue,
+        duplicateSuffixes,
+        hasGaps
       });
     });
 
@@ -2215,12 +2255,35 @@ class SheetNavigator {
         : `${totalActiveCount} employees (${crewCards.length} field crews)`;
     }
 
+    // List of all active employees for dropdowns (e.g. foreman selection)
+    const allActiveEmployees = activeRows.map(r => ({
+      name: String(r['Employee Name'] || r['Name'] || Object.values(r)[0] || '').trim(),
+      classification: String(r['Job Classification'] || r['Classification'] || r['Role'] || '').trim()
+    })).filter(a => a.name);
+
     // Helper for rendering a single employee row inside a card
-    const renderMemberRow = (e, isLead = false) => {
+    const renderMemberRow = (e, isLead = false, baseJob = '', isSecondaryCard = false) => {
       return `
-        <div style="display: flex; justify-content: space-between; align-items: center; padding: 5px 0; border-bottom: 1px dashed rgba(255,255,255,0.06); gap: 6px;">
-          <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap; flex: 1; min-width: 0;">
-            <span style="color: var(--text-muted); font-size: 11px; font-family: monospace; min-width: 48px;">
+        <div class="crew-member-row"
+             draggable="true"
+             data-emp-name="${this.escapeHtml(e.name)}"
+             data-job-number="${this.escapeHtml(e.jobNumber || '')}"
+             data-base-job="${this.escapeHtml(baseJob)}"
+             data-is-secondary="${e.isSecondaryMember ? 'true' : 'false'}"
+             data-primary-job="${this.escapeHtml(e.primaryJobNumber || e.jobNumber || '')}"
+             data-location="${this.escapeHtml(e.location || '')}"
+             style="display: flex; justify-content: space-between; align-items: center; padding: 5px 4px; border-bottom: 1px dashed rgba(255,255,255,0.06); gap: 6px; border-radius: 4px; transition: background 0.15s ease; cursor: grab;"
+             onmouseover="this.style.background='rgba(255,255,255,0.04)';"
+             onmouseout="this.style.background='transparent';">
+          <div style="display: flex; align-items: center; gap: 5px; flex-wrap: wrap; flex: 1; min-width: 0;">
+            <span class="drag-handle" style="cursor: grab; color: var(--text-muted); font-size: 13px; user-select: none; padding: 0 2px;" title="Drag to move this employee to another crew">
+              ⠿
+            </span>
+            <span style="color: var(--text-muted); font-size: 11px; font-family: monospace; min-width: 44px; cursor: pointer; padding: 1px 3px; border-radius: 3px;"
+                  onclick="window.sheetNavigator.promptChangeMemberSlot('${this.escapeJs(e.name)}', '${this.escapeJs(e.jobNumber || '')}', '${this.escapeJs(baseJob)}')"
+                  onmouseover="this.style.color='#60a5fa'; this.style.textDecoration='underline';"
+                  onmouseout="this.style.color='var(--text-muted)'; this.style.textDecoration='none';"
+                  title="Click to edit slot number">
               ${this.escapeHtml(e.jobNumber || '—')}
             </span>
             <a href="javascript:void(0)" onclick="window.employeeProfileEngine.openProfileModal('${this.escapeJs(e.name)}')"
@@ -2246,10 +2309,19 @@ class SheetNavigator {
               </span>
             ` : ''}
           </div>
-          <div style="display: flex; align-items: center; gap: 5px; flex-shrink: 0;">
-            <span class="badge" style="background: var(--bg-tertiary); color: var(--text-muted); font-size: 10px; padding: 1px 6px; border-radius: 3px; font-weight: 700;">
+          <div style="display: flex; align-items: center; gap: 4px; flex-shrink: 0;">
+            <span class="badge" style="background: var(--bg-tertiary); color: var(--text-muted); font-size: 10px; padding: 1px 6px; border-radius: 3px; font-weight: 700; cursor: pointer;"
+                  onclick="window.sheetNavigator.promptChangeMemberClassification('${this.escapeJs(e.name)}', '${this.escapeJs(e.classification || '')}')"
+                  onmouseover="this.style.color='#60a5fa';"
+                  onmouseout="this.style.color='var(--text-muted)';"
+                  title="Click to change classification">
               ${this.escapeHtml(e.classification || '—')}
             </span>
+            <button class="btn btn-xs" style="background: transparent; border: none; color: var(--text-muted); cursor: pointer; padding: 1px 4px; font-size: 12px; border-radius: 3px;"
+                    onclick="window.sheetNavigator.openMemberRowActions(event, '${this.escapeJs(e.name)}', '${this.escapeJs(baseJob)}', ${isLead}, ${Boolean(e.isSecondaryMember)})"
+                    title="Employee options">
+              ⋮
+            </button>
           </div>
         </div>
       `;
@@ -2258,7 +2330,9 @@ class SheetNavigator {
     // Helper for rendering a status card (Vacation, Leave, Light Duty)
     const renderStatusCard = (title, icon, color, borderColor, badgeBg, list, emptyMsg) => {
       return `
-        <div class="crew-card status-crew-card" style="background: var(--bg-secondary); border: 1px solid ${borderColor}; border-radius: 8px; padding: 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.2); display: flex; flex-direction: column;">
+        <div class="crew-card status-crew-card"
+             data-status-type="${title}"
+             style="background: var(--bg-secondary); border: 1px solid ${borderColor}; border-radius: 8px; padding: 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.2); display: flex; flex-direction: column; transition: all 0.2s ease;">
           <!-- Card Header (TITLE ONLY, no Job # or Location) -->
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; border-bottom: 1px solid var(--border-color); padding-bottom: 8px;">
             <div style="font-weight: 800; font-size: 15px; color: ${color}; display: flex; align-items: center; gap: 8px;">
@@ -2269,11 +2343,24 @@ class SheetNavigator {
               ${list.length} ${list.length === 1 ? 'Employee' : 'Employees'}
             </span>
           </div>
-          <!-- Employee List -->
-          <div style="flex: 1;">
+          <!-- Employee List (Status Drop Zone) -->
+          <div class="status-drop-zone" style="flex: 1; min-height: 48px;">
             ${list.length > 0 ? list.map(e => `
-              <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 0; border-bottom: 1px dashed rgba(255,255,255,0.06); gap: 6px;">
+              <div class="crew-member-row status-member-row"
+                   draggable="true"
+                   data-emp-name="${this.escapeHtml(e.name)}"
+                   data-job-number="${this.escapeHtml(e.jobNumber || '')}"
+                   data-base-job="${this.escapeHtml(title)}"
+                   data-is-secondary="false"
+                   data-primary-job="${this.escapeHtml(e.jobNumber || '')}"
+                   data-location="${this.escapeHtml(e.location || '')}"
+                   style="display: flex; justify-content: space-between; align-items: center; padding: 6px 4px; border-bottom: 1px dashed rgba(255,255,255,0.06); gap: 6px; cursor: grab;"
+                   onmouseover="this.style.background='rgba(255,255,255,0.04)';"
+                   onmouseout="this.style.background='transparent';">
                 <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap; flex: 1; min-width: 0;">
+                  <span class="drag-handle" style="cursor: grab; color: var(--text-muted); font-size: 13px; user-select: none; padding: 0 2px;" title="Drag to reassign to a field crew">
+                    ⠿
+                  </span>
                   <span style="color: #60a5fa; font-weight: 700; font-size: 11px; font-family: monospace; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; padding: 1px 5px;">
                     ${this.escapeHtml(e.jobNumber || '—')}
                   </span>
@@ -2304,16 +2391,18 @@ class SheetNavigator {
       `;
     };
 
-    // Helper for rendering an Active Field Crew Card (Exact Crew Import styling)
+    // Helper for rendering an Active Field Crew Card (supports normal and inline-edit modes)
     const renderFieldCrewCard = (crew) => {
+      const isEditing = this.editingCrewBaseJob === crew.baseJob;
+
       const dayPills = [
-        { key: 'M', label: 'M', isWork: !crew.isSkipMon },
-        { key: 'Tu', label: 'T', isWork: !crew.isSkipTue },
-        { key: 'W', label: 'W', isWork: !crew.isSkipWed },
-        { key: 'Th', label: 'Th', isWork: !crew.isSkipThu },
-        { key: 'F', label: 'F', isWork: !crew.isSkipFri },
-        { key: 'Sa', label: 'Sa', isWork: !crew.isSkipSat },
-        { key: 'Su', label: 'Su', isWork: !crew.isSkipSun }
+        { key: 'M', colKey: 'Mon', label: 'M', isWork: !crew.isSkipMon },
+        { key: 'Tu', colKey: 'Tue', label: 'T', isWork: !crew.isSkipTue },
+        { key: 'W', colKey: 'Wed', label: 'W', isWork: !crew.isSkipWed },
+        { key: 'Th', colKey: 'Thu', label: 'Th', isWork: !crew.isSkipThu },
+        { key: 'F', colKey: 'Fri', label: 'F', isWork: !crew.isSkipFri },
+        { key: 'Sa', colKey: 'Sat', label: 'Sa', isWork: !crew.isSkipSat },
+        { key: 'Su', colKey: 'Sun', label: 'Su', isWork: !crew.isSkipSun }
       ];
 
       const getStatusBadge = (stat) => {
@@ -2332,13 +2421,131 @@ class SheetNavigator {
         return `<span class="badge" style="background: var(--bg-tertiary); color: var(--text-muted); font-size: 10px; padding: 2px 6px; border-radius: 4px;">${this.escapeHtml(stat)}</span>`;
       };
 
+      if (isEditing) {
+        // INLINE EDIT MODE
+        return `
+          <div class="crew-card field-crew-card editing" data-crew-job="${this.escapeHtml(crew.baseJob)}"
+               style="background: var(--bg-secondary); border: 2px solid #3b82f6; border-radius: 8px; padding: 14px; box-shadow: 0 4px 16px rgba(59, 130, 246, 0.2); display: flex; flex-direction: column;">
+            <!-- Edit Mode Header -->
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; border-bottom: 1px solid var(--border-color); padding-bottom: 8px;">
+              <div style="font-weight: 800; font-size: 14px; color: #60a5fa; display: flex; align-items: center; gap: 6px;">
+                <span>✏️</span> Editing Crew ${this.escapeHtml(crew.jobNumber)}
+              </div>
+              <div style="display: flex; gap: 6px;">
+                <button class="btn btn-xs btn-secondary" onclick="window.sheetNavigator.cancelCrewCardEdit()" style="padding: 3px 8px; font-size: 11px;">
+                  Cancel
+                </button>
+                <button class="btn btn-xs btn-primary" onclick="window.sheetNavigator.saveCrewCardEdit('${this.escapeJs(crew.baseJob)}')" style="padding: 3px 10px; font-size: 11px; background: #2563eb; font-weight: 700;">
+                  💾 Save
+                </button>
+              </div>
+            </div>
+
+            <!-- Form Fields -->
+            <div style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px;">
+              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+                <div>
+                  <label style="font-size: 10.5px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 3px;">📍 Location</label>
+                  <input type="text" id="edit-crew-loc-${this.escapeHtml(crew.baseJob)}" value="${this.escapeHtml(crew.location)}" list="dl-crew-locations"
+                         style="width: 100%; box-sizing: border-box; padding: 5px 8px; font-size: 12px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary);">
+                </div>
+                <div>
+                  <label style="font-size: 10.5px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 3px;">Status</label>
+                  <select id="edit-crew-status-${this.escapeHtml(crew.baseJob)}"
+                          style="width: 100%; box-sizing: border-box; padding: 5px 8px; font-size: 12px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary);">
+                    <option value="Active" ${crew.status === 'Active' ? 'selected' : ''}>🟢 Active</option>
+                    <option value="Pending Start" ${crew.status === 'Pending Start' ? 'selected' : ''}>🟡 Pending Start</option>
+                    <option value="On Hold" ${crew.status === 'On Hold' ? 'selected' : ''}>⏸️ On Hold</option>
+                    <option value="Completed" ${crew.status === 'Completed' ? 'selected' : ''}>🏁 Completed</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label style="font-size: 10.5px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 3px;">Job Name / Site Description</label>
+                <input type="text" id="edit-crew-jobname-${this.escapeHtml(crew.baseJob)}" value="${this.escapeHtml(crew.jobName)}" placeholder="e.g. Belgrade Dock, Montana Ave Rebuild"
+                       style="width: 100%; box-sizing: border-box; padding: 5px 8px; font-size: 12px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary);">
+              </div>
+
+              <div>
+                <label style="font-size: 10.5px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 3px;">👑 Crew Foreman</label>
+                <select id="edit-crew-foreman-${this.escapeHtml(crew.baseJob)}"
+                        style="width: 100%; box-sizing: border-box; padding: 5px 8px; font-size: 12px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary);">
+                  <option value="">(None designated)</option>
+                  <optgroup label="Crew Members">
+                    ${crew.members.map(m => `<option value="${this.escapeHtml(m.name)}" ${crew.nameMatchesForeman(m, crew.foreman) ? 'selected' : ''}>👑 ${this.escapeHtml(m.name)} (${this.escapeHtml(m.classification || 'Crew')})</option>`).join('')}
+                  </optgroup>
+                  <optgroup label="Other Active Employees">
+                    ${allActiveEmployees.filter(a => !crew.members.some(m => m.name.toLowerCase() === a.name.toLowerCase())).map(a => `<option value="${this.escapeHtml(a.name)}" ${a.name.toLowerCase() === (crew.foreman || '').toLowerCase() ? 'selected' : ''}>${this.escapeHtml(a.name)}</option>`).join('')}
+                  </optgroup>
+                </select>
+              </div>
+
+              <div>
+                <label style="font-size: 10.5px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 3px;">Work Schedule Preset</label>
+                <select id="edit-crew-sched-${this.escapeHtml(crew.baseJob)}" onchange="window.sheetNavigator.handleSchedulePresetChange('${this.escapeJs(crew.baseJob)}', this.value)"
+                        style="width: 100%; box-sizing: border-box; padding: 5px 8px; font-size: 12px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary);">
+                  <option value="Mon-Thu (4 10s)" ${crew.schedule.includes('Mon-Thu') ? 'selected' : ''}>Mon-Thu (4 10s)</option>
+                  <option value="Tue-Fri (4 10s)" ${crew.schedule.includes('Tue-Fri') ? 'selected' : ''}>Tue-Fri (4 10s)</option>
+                  <option value="Fri-Sat Weekend" ${crew.schedule.includes('Fri-Sat') ? 'selected' : ''}>Fri-Sat Weekend</option>
+                  <option value="Mon-Fri (5 8s)" ${crew.schedule.includes('Mon-Fri') ? 'selected' : ''}>Mon-Fri (5 8s)</option>
+                  <option value="Custom" ${!crew.schedule.includes('Mon-Thu') && !crew.schedule.includes('Tue-Fri') && !crew.schedule.includes('Fri-Sat') && !crew.schedule.includes('Mon-Fri') ? 'selected' : ''}>Custom Schedule</option>
+                </select>
+              </div>
+
+              <div>
+                <label style="font-size: 10.5px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 3px;">Working Days (checked = working, unchecked = off)</label>
+                <div style="display: flex; gap: 8px; flex-wrap: wrap; background: var(--bg-primary); padding: 8px; border-radius: 4px; border: 1px solid var(--border-color);">
+                  ${[
+                    { key: 'Mon', label: 'Mon', checked: !crew.isSkipMon },
+                    { key: 'Tue', label: 'Tue', checked: !crew.isSkipTue },
+                    { key: 'Wed', label: 'Wed', checked: !crew.isSkipWed },
+                    { key: 'Thu', label: 'Thu', checked: !crew.isSkipThu },
+                    { key: 'Fri', label: 'Fri', checked: !crew.isSkipFri },
+                    { key: 'Sat', label: 'Sat', checked: !crew.isSkipSat },
+                    { key: 'Sun', label: 'Sun', checked: !crew.isSkipSun }
+                  ].map(d => `
+                    <label style="display: inline-flex; align-items: center; gap: 3px; font-size: 11px; cursor: pointer; color: var(--text-primary);">
+                      <input type="checkbox" id="edit-work-${d.key}-${this.escapeHtml(crew.baseJob)}" ${d.checked ? 'checked' : ''}>
+                      <span>${d.label}</span>
+                    </label>
+                  `).join('')}
+                </div>
+              </div>
+
+              <div style="display: flex; gap: 14px; background: var(--bg-primary); padding: 8px; border-radius: 4px; border: 1px solid var(--border-color); flex-wrap: wrap;">
+                <label style="display: inline-flex; align-items: center; gap: 5px; font-size: 11px; cursor: pointer; color: var(--text-primary);">
+                  <input type="checkbox" id="edit-skip-mtg-${this.escapeHtml(crew.baseJob)}" ${crew.skipMtg ? 'checked' : ''}>
+                  <span>Skip Safety Meeting</span>
+                </label>
+                <label style="display: inline-flex; align-items: center; gap: 5px; font-size: 11px; cursor: pointer; color: var(--text-primary);">
+                  <input type="checkbox" id="edit-skip-chk-${this.escapeHtml(crew.baseJob)}" ${crew.skipChk ? 'checked' : ''}>
+                  <span>Skip Monthly Checklist</span>
+                </label>
+              </div>
+            </div>
+
+            <!-- Member List inside edit mode -->
+            <div style="border-top: 1px solid var(--border-color); padding-top: 10px;">
+              <div style="font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px;">
+                Crew Members (${crew.members.length}):
+              </div>
+              ${crew.members.length > 0 ? crew.members.map(e => renderMemberRow(e, crew.nameMatchesForeman(e, crew.foreman), crew.baseJob)).join('') : '<div style="color: var(--text-muted); font-size: 12px; font-style: italic;">No members</div>'}
+            </div>
+          </div>
+        `;
+      }
+
+      // STANDARD VIEW MODE
       return `
-        <div class="crew-card" style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.2); display: flex; flex-direction: column;">
+        <div class="crew-card field-crew-card"
+             data-crew-job="${this.escapeHtml(crew.baseJob)}"
+             style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 14px; box-shadow: 0 1px 3px rgba(0,0,0,0.2); display: flex; flex-direction: column; transition: all 0.2s ease;">
           <!-- Card Header -->
-          <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; border-bottom: 1px solid var(--border-color); padding-bottom: 8px;">
-            <div style="flex: 1; margin-right: 8px;">
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; border-bottom: 1px solid var(--border-color); padding-bottom: 8px; gap: 6px;">
+            <div style="flex: 1; min-width: 0;">
               <div style="font-weight: 800; font-size: 14px; color: var(--text-primary); display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-                <span>📍 ${this.escapeHtml(crew.location)}</span>
+                <span title="Crew Base Location">📍 ${this.escapeHtml(crew.location)}</span>
                 <span style="font-family: monospace; font-weight: 800; font-size: 13px; color: #60a5fa; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; padding: 2px 6px;">
                   ${this.escapeHtml(crew.jobNumber)}
                 </span>
@@ -2350,9 +2557,30 @@ class SheetNavigator {
                 </div>
               ` : ''}
             </div>
-            <span class="badge" style="background: var(--bg-primary); color: var(--text-muted); font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 12px; border: 1px solid var(--border-color); flex-shrink: 0;">
-              ${crew.members.length} ${crew.members.length === 1 ? 'member' : 'members'}
-            </span>
+
+            <!-- Header Actions -->
+            <div style="display: flex; align-items: center; gap: 5px; flex-shrink: 0; flex-wrap: wrap; justify-content: flex-end;">
+              ${crew.hasNumberingIssue ? `
+                <span class="badge" style="background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.35); font-size: 9.5px; font-weight: 700; padding: 2px 5px; border-radius: 4px;" title="Duplicate suffixes (${crew.duplicateSuffixes.join(', ')}) or sequence gaps detected!">
+                  ⚠️ Numbering Issue
+                </span>
+                <button class="btn btn-xs" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); font-size: 9.5px; font-weight: 700; padding: 2px 6px; border-radius: 4px; cursor: pointer;"
+                        onclick="window.sheetNavigator.fixCrewNumbering('${this.escapeJs(crew.baseJob)}')"
+                        title="Automatically fix numbering gaps and assign sequential .1 to .N slots">
+                  🔄 Renumber
+                </button>
+              ` : ''}
+
+              <button class="btn btn-xs btn-secondary" style="font-size: 10.5px; padding: 2px 7px; border-radius: 4px; display: inline-flex; align-items: center; gap: 3px; cursor: pointer;"
+                      onclick="window.sheetNavigator.startCrewCardEdit('${this.escapeJs(crew.baseJob)}')"
+                      title="Edit crew fields (location, status, foreman, schedule, job name)">
+                <span>✏️</span> Edit
+              </button>
+
+              <span class="badge" style="background: var(--bg-primary); color: var(--text-muted); font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 12px; border: 1px solid var(--border-color); flex-shrink: 0;">
+                ${crew.members.length} ${crew.members.length === 1 ? 'member' : 'members'}
+              </span>
+            </div>
           </div>
 
           <!-- Schedule & Workdays Bar -->
@@ -2364,18 +2592,27 @@ class SheetNavigator {
               </span>
             </div>
             <div style="display: flex; align-items: center; justify-content: space-between; gap: 4px;">
+              <!-- Clickable Day Pills -->
               <div style="display: flex; gap: 3px;">
                 ${dayPills.map(dp => `
-                  <div style="width: 24px; height: 22px; font-size: 9.5px; font-weight: 700; border-radius: 4px; border: 1px solid ${dp.isWork ? '#10b981' : '#334155'}; background: ${dp.isWork ? '#10b981' : 'var(--bg-secondary)'}; color: ${dp.isWork ? '#ffffff' : 'var(--text-muted)'}; display: flex; align-items: center; justify-content: center;" title="${dp.isWork ? 'Working day' : 'Skip / Off day'}">
+                  <div style="width: 24px; height: 22px; font-size: 9.5px; font-weight: 700; border-radius: 4px; border: 1px solid ${dp.isWork ? '#10b981' : '#334155'}; background: ${dp.isWork ? '#10b981' : 'var(--bg-secondary)'}; color: ${dp.isWork ? '#ffffff' : 'var(--text-muted)'}; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: transform 0.1s ease;"
+                       onclick="window.sheetNavigator.toggleCrewDaySkip('${this.escapeJs(crew.baseJob)}', '${dp.colKey}')"
+                       title="${dp.isWork ? 'Working day (Click to toggle skip)' : 'Skip / Off day (Click to toggle work)'}"
+                       onmouseover="this.style.transform='scale(1.1)';" onmouseout="this.style.transform='scale(1)';">
                     ${dp.label}
                   </div>
                 `).join('')}
               </div>
+              <!-- Clickable Mtg & Chk pills -->
               <div style="display: flex; gap: 4px;">
-                <span style="padding: 2px 5px; font-size: 9px; font-weight: 700; border-radius: 4px; border: 1px solid ${!crew.skipMtg ? '#3b82f6' : '#334155'}; background: ${!crew.skipMtg ? 'rgba(59, 130, 246, 0.2)' : 'var(--bg-secondary)'}; color: ${!crew.skipMtg ? '#60a5fa' : 'var(--text-muted)'};" title="${!crew.skipMtg ? 'Safety Meeting Tracked' : 'Skip Safety Meeting'}">
+                <span style="padding: 2px 5px; font-size: 9px; font-weight: 700; border-radius: 4px; border: 1px solid ${!crew.skipMtg ? '#3b82f6' : '#334155'}; background: ${!crew.skipMtg ? 'rgba(59, 130, 246, 0.2)' : 'var(--bg-secondary)'}; color: ${!crew.skipMtg ? '#60a5fa' : 'var(--text-muted)'}; cursor: pointer;"
+                      onclick="window.sheetNavigator.toggleCrewMeetingSkip('${this.escapeJs(crew.baseJob)}')"
+                      title="${!crew.skipMtg ? 'Safety Meeting Tracked (Click to toggle skip)' : 'Skip Safety Meeting (Click to enable tracking)'}">
                   Mtg ${!crew.skipMtg ? '✓' : '✗'}
                 </span>
-                <span style="padding: 2px 5px; font-size: 9px; font-weight: 700; border-radius: 4px; border: 1px solid ${!crew.skipChk ? '#8b5cf6' : '#334155'}; background: ${!crew.skipChk ? 'rgba(139, 92, 246, 0.2)' : 'var(--bg-secondary)'}; color: ${!crew.skipChk ? '#c084fc' : 'var(--text-muted)'};" title="${!crew.skipChk ? 'Monthly Checklist Tracked' : 'Skip Monthly Checklist'}">
+                <span style="padding: 2px 5px; font-size: 9px; font-weight: 700; border-radius: 4px; border: 1px solid ${!crew.skipChk ? '#8b5cf6' : '#334155'}; background: ${!crew.skipChk ? 'rgba(139, 92, 246, 0.2)' : 'var(--bg-secondary)'}; color: ${!crew.skipChk ? '#c084fc' : 'var(--text-muted)'}; cursor: pointer;"
+                      onclick="window.sheetNavigator.toggleCrewChecklistSkip('${this.escapeJs(crew.baseJob)}')"
+                      title="${!crew.skipChk ? 'Monthly Checklist Tracked (Click to toggle skip)' : 'Skip Monthly Checklist (Click to enable tracking)'}">
                   Chk ${!crew.skipChk ? '✓' : '✗'}
                 </span>
               </div>
@@ -2383,27 +2620,34 @@ class SheetNavigator {
           </div>
 
           <!-- Foreman Row -->
-          <div style="margin-bottom: 8px; display: flex; align-items: center; gap: 6px; font-size: 11.5px; background: rgba(255,255,255,0.02); padding: 4px 8px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.04);">
-            <span style="font-weight: 700; color: var(--text-muted);">Foreman:</span>
-            ${crew.foreman ? `
-              <a href="javascript:void(0)" onclick="window.employeeProfileEngine.openProfileModal('${this.escapeJs(crew.foreman)}')"
-                 style="font-weight: 700; color: #f472b6; text-decoration: none; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;"
-                 onmouseover="this.style.textDecoration='underline';" onmouseout="this.style.textDecoration='none';"
-                 title="Open Profile for Foreman ${this.escapeHtml(crew.foreman)}">
-                <span>👑</span>
-                <span>${this.escapeHtml(crew.foreman)}</span>
-              </a>
-            ` : `<span style="color: var(--text-muted); font-style: italic;">(None designated)</span>`}
+          <div style="margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 11.5px; background: rgba(255,255,255,0.02); padding: 4px 8px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.04);">
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <span style="font-weight: 700; color: var(--text-muted);">Foreman:</span>
+              ${crew.foreman ? `
+                <a href="javascript:void(0)" onclick="window.employeeProfileEngine.openProfileModal('${this.escapeJs(crew.foreman)}')"
+                   style="font-weight: 700; color: #f472b6; text-decoration: none; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;"
+                   onmouseover="this.style.textDecoration='underline';" onmouseout="this.style.textDecoration='none';"
+                   title="Open Profile for Foreman ${this.escapeHtml(crew.foreman)}">
+                  <span>👑</span>
+                  <span>${this.escapeHtml(crew.foreman)}</span>
+                </a>
+              ` : `<span style="color: var(--text-muted); font-style: italic;">(None designated)</span>`}
+            </div>
+            <button class="btn btn-xs" style="background: transparent; border: 1px solid rgba(255,255,255,0.1); color: var(--text-muted); font-size: 10px; padding: 1px 5px; border-radius: 3px; cursor: pointer;"
+                    onclick="window.sheetNavigator.promptChangeForeman('${this.escapeJs(crew.baseJob)}', '${this.escapeJs(crew.foreman || '')}')"
+                    title="Designate a foreman for this crew">
+              Change
+            </button>
           </div>
 
-          <!-- Member List -->
-          <div style="flex: 1; font-size: 12px;">
+          <!-- Member List (Drop Zone) -->
+          <div class="crew-drop-zone" data-crew-job="${this.escapeHtml(crew.baseJob)}" style="flex: 1; font-size: 12px; min-height: 48px; border-radius: 6px; padding: 2px;">
             ${crew.members.length > 0 ? crew.members.map(e => {
-              const isLead = (crew.foreman && e.name.toLowerCase() === crew.foreman.toLowerCase());
-              return renderMemberRow(e, isLead);
+              const isLead = crew.nameMatchesForeman ? crew.nameMatchesForeman(e, crew.foreman) : (crew.foreman && e.name.toLowerCase() === crew.foreman.toLowerCase());
+              return renderMemberRow(e, isLead, crew.baseJob, Boolean(e.isSecondaryMember));
             }).join('') : `
-              <div style="color: #94a3b8; font-size: 12px; font-style: italic; padding: 12px 6px; text-align: center; background: rgba(0,0,0,0.15); border-radius: 6px; border: 1px dashed rgba(255,255,255,0.08);">
-                No active employees currently assigned
+              <div style="color: #94a3b8; font-size: 12px; font-style: italic; padding: 16px 6px; text-align: center; background: rgba(0,0,0,0.15); border-radius: 6px; border: 1px dashed rgba(255,255,255,0.1);">
+                Drop employees here to assign
               </div>
             `}
           </div>
@@ -2442,9 +2686,25 @@ class SheetNavigator {
             ` : ''}
           </div>
           <div style="font-size: 11px; color: var(--text-muted);">
-            💡 <em>Click any employee name to open their Profile, view sizes, contact info, or edit records.</em>
+            💡 <em>Drag employees between crews to reassign • Click ✏️ Edit on any card to update schedule, location, or foreman</em>
           </div>
         </div>
+
+        <!-- Datalist for Location Autocomplete -->
+        <datalist id="dl-crew-locations">
+          <option value="Helena">
+          <option value="Great Falls">
+          <option value="Bozeman">
+          <option value="Billings">
+          <option value="Butte">
+          <option value="Missoula">
+          <option value="Kalispell">
+          <option value="Melville">
+          <option value="Three Rivers">
+          <option value="Gold Creek">
+          <option value="Livingston">
+          <option value="Lewistown">
+        </datalist>
 
         <!-- 1. Dedicated Status Cards (Vacation, Leave, Light Duty, Medical) -->
         <div style="margin-bottom: 20px;">
@@ -2479,6 +2739,1469 @@ class SheetNavigator {
 
       </div>
     `;
+
+    // Attach interactive drag & drop and card events
+    this.attachCrewCardInteractiveHandlers(container);
+  }
+
+  /**
+   * Attaches drag & drop and interaction handlers across all crew cards and member rows
+   */
+  attachCrewCardInteractiveHandlers(container) {
+    if (!container) return;
+
+    // 1. Drag source setup on all member rows
+    container.querySelectorAll('.crew-member-row[draggable="true"]').forEach(row => {
+      row.addEventListener('dragstart', (e) => {
+        const dragData = {
+          empName: row.dataset.empName,
+          fromSlot: row.dataset.jobNumber,
+          fromBaseJob: row.dataset.baseJob,
+          isSecondary: row.dataset.isSecondary === 'true',
+          primaryJob: row.dataset.primaryJob,
+          sourceLoc: row.dataset.location
+        };
+        e.dataTransfer.setData('application/json', JSON.stringify(dragData));
+        e.dataTransfer.effectAllowed = 'move';
+        row.style.opacity = '0.35';
+        window._activeCrewDragData = dragData;
+      });
+
+      row.addEventListener('dragend', () => {
+        row.style.opacity = '1';
+        window._activeCrewDragData = null;
+        container.querySelectorAll('.field-crew-card, .status-crew-card').forEach(c => {
+          c.style.borderColor = '';
+          c.style.background = '';
+          c.style.boxShadow = '';
+        });
+      });
+    });
+
+    // 2. Drop target setup on Field Crew Cards
+    container.querySelectorAll('.field-crew-card').forEach(card => {
+      const destBaseJob = card.dataset.crewJob;
+      if (!destBaseJob) return;
+
+      card.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        card.style.borderColor = '#3b82f6';
+        card.style.background = 'rgba(59, 130, 246, 0.08)';
+        card.style.boxShadow = '0 0 12px rgba(59, 130, 246, 0.35)';
+      });
+
+      card.addEventListener('dragleave', (e) => {
+        if (!card.contains(e.relatedTarget)) {
+          card.style.borderColor = '';
+          card.style.background = '';
+          card.style.boxShadow = '';
+        }
+      });
+
+      card.addEventListener('drop', async (e) => {
+        e.preventDefault();
+        card.style.borderColor = '';
+        card.style.background = '';
+        card.style.boxShadow = '';
+
+        let data = null;
+        try {
+          const raw = e.dataTransfer.getData('application/json');
+          if (raw) data = JSON.parse(raw);
+        } catch (err) {}
+        if (!data && window._activeCrewDragData) data = window._activeCrewDragData;
+
+        if (data) {
+          await this.handleCrewCardDrop(data, destBaseJob);
+        }
+      });
+    });
+
+    // 3. Drop target setup on Status Cards (Vacation, Leave, Light Duty, Medical)
+    container.querySelectorAll('.status-crew-card').forEach(card => {
+      const statusType = card.dataset.statusType;
+      if (!statusType) return;
+
+      card.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        card.style.borderColor = '#f59e0b';
+        card.style.background = 'rgba(245, 158, 11, 0.08)';
+      });
+
+      card.addEventListener('dragleave', (e) => {
+        if (!card.contains(e.relatedTarget)) {
+          card.style.borderColor = '';
+          card.style.background = '';
+        }
+      });
+
+      card.addEventListener('drop', async (e) => {
+        e.preventDefault();
+        card.style.borderColor = '';
+        card.style.background = '';
+
+        let data = null;
+        try {
+          const raw = e.dataTransfer.getData('application/json');
+          if (raw) data = JSON.parse(raw);
+        } catch (err) {}
+        if (!data && window._activeCrewDragData) data = window._activeCrewDragData;
+
+        if (data) {
+          await this.handleStatusCardDrop(data, statusType);
+        }
+      });
+    });
+  }
+
+  /**
+   * Handles dropping an employee onto a destination field crew card
+   */
+  async handleCrewCardDrop(dragData, destBaseJob) {
+    if (!dragData || !destBaseJob) return;
+    const { empName, fromBaseJob, fromSlot, isSecondary, primaryJob, sourceLoc } = dragData;
+
+    if (fromBaseJob === destBaseJob) {
+      if (typeof window.showToast === 'function') {
+        window.showToast(`${empName} is already on crew ${destBaseJob}.`, 'info');
+      }
+      return;
+    }
+
+    const empTable = this.db.getTable('employees');
+    const jtTable = this.db.getTable('job_tracking');
+    if (!empTable || !jtTable) return;
+
+    // Find destination Job Tracking row & Location
+    const destJt = (jtTable.rows || []).find(j => {
+      const jn = String(j['Job Number'] || j['Job #'] || '').trim();
+      return jn === destBaseJob || jn.replace(/\.\d+.*$/, '').trim() === destBaseJob;
+    });
+    const destLoc = (destJt && destJt['Location']) ? String(destJt['Location']).trim() : 'Helena';
+
+    // Calculate destination slot (.N + 1)
+    const destMembers = (empTable.rows || []).filter(e => {
+      const jn = String(e['Job Number'] || e['Job #'] || '').trim();
+      return jn === destBaseJob || jn.startsWith(destBaseJob + '.');
+    });
+
+    const destSuffixes = destMembers.map(e => {
+      const m = String(e['Job Number'] || e['Job #'] || '').match(/\.(\d+)/);
+      return m ? parseInt(m[1], 10) : 0;
+    }).filter(n => n > 0);
+
+    const nextSuffix = (destSuffixes.length > 0 ? Math.max(...destSuffixes) : 0) + 1;
+    const newSlot = `${destBaseJob}.${nextSuffix}`;
+
+    // Source crew renumbering candidates
+    let membersToRenumber = [];
+    let oldSourceSize = 0;
+    let newSourceSize = 0;
+
+    if (!isSecondary && fromBaseJob && fromBaseJob !== 'Vacation' && fromBaseJob !== 'Leave' && fromBaseJob !== 'Light Duty') {
+      const sourceMembers = (empTable.rows || []).filter(e => {
+        const jn = String(e['Job Number'] || e['Job #'] || '').trim();
+        return jn === fromBaseJob || jn.startsWith(fromBaseJob + '.');
+      });
+      oldSourceSize = sourceMembers.length;
+      newSourceSize = Math.max(0, oldSourceSize - 1);
+
+      const fromMatch = String(fromSlot || '').match(/\.(\d+)/);
+      const fromNum = fromMatch ? parseInt(fromMatch[1], 10) : 999;
+
+      sourceMembers.forEach(m => {
+        const mName = String(m['Employee Name'] || m['Name'] || '').trim();
+        if (mName.toLowerCase() === empName.toLowerCase()) return;
+        const sMatch = String(m['Job Number'] || m['Job #'] || '').match(/\.(\d+)/);
+        if (sMatch) {
+          const sNum = parseInt(sMatch[1], 10);
+          if (sNum > fromNum) {
+            membersToRenumber.push({
+              emp: m,
+              oldSlot: String(m['Job Number'] || m['Job #'] || ''),
+              newSlot: `${fromBaseJob}.${sNum - 1}`
+            });
+          }
+        }
+      });
+    }
+
+    // Equipment items affected
+    const affectedEquipment = [];
+    const categories = ['gloves', 'sleeves', 'blankets', 'macks', 'hv_testers', 'phasing_sets', 'aed', 'grounds', 'hot_sticks'];
+    const cleanEmp = empName.toLowerCase().trim();
+
+    categories.forEach(key => {
+      const table = this.db.getTable(key);
+      if (!table || !table.rows) return;
+      table.rows.forEach(r => {
+        const assigned = String(r['Assigned To'] || '').toLowerCase().trim();
+        if (assigned === cleanEmp) {
+          const curItemLoc = String(r['Location'] || '').trim();
+          if (curItemLoc.toLowerCase() !== destLoc.toLowerCase()) {
+            affectedEquipment.push({
+              tableKey: key,
+              sheetName: table.name || key,
+              row: r,
+              oldLoc: curItemLoc,
+              newLoc: destLoc,
+              itemNum: r['Item #'] || r['Serial #'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['ESL ID'] || ''
+            });
+          }
+        }
+      });
+    });
+
+    // Show Confirmation Modal
+    this.showCrewReassignmentModal({
+      dragData,
+      destBaseJob,
+      newSlot,
+      destLoc,
+      membersToRenumber,
+      affectedEquipment,
+      oldSourceSize,
+      newSourceSize,
+      oldDestSize: destMembers.length,
+      newDestSize: destMembers.length + 1
+    });
+  }
+
+  /**
+   * Handles dropping an employee onto a dedicated status card (Vacation, Leave, Light Duty, Medical)
+   */
+  async handleStatusCardDrop(dragData, statusType) {
+    if (!dragData || !statusType) return;
+    const { empName, sourceLoc } = dragData;
+    const empTable = this.db.getTable('employees');
+    if (!empTable || !empTable.rows) return;
+
+    const emp = empTable.rows.find(e => String(e['Employee Name'] || e['Name'] || '').trim().toLowerCase() === empName.toLowerCase());
+    if (!emp) return;
+
+    // Clean physical city
+    let city = String(sourceLoc || emp['Location'] || '').replace(/\s*\([^)]*\)/g, '').trim();
+    if (!city || city.toLowerCase() === 'unassigned') city = 'Helena';
+
+    const newLocationValue = `${city} (${statusType})`;
+
+    if (confirm(`Move ${empName} to ${statusType}?\n\nLocation will be set to: "${newLocationValue}"`)) {
+      emp['Location'] = newLocationValue;
+      const locColIdx = (empTable.headers || []).findIndex(h => /^location$/i.test(h)) + 1;
+      const rIdx = emp._rowIdx || (empTable.rows.indexOf(emp) + 2);
+      if (empTable.rawGrid && empTable.rawGrid[rIdx - 1] && locColIdx > 0) {
+        empTable.rawGrid[rIdx - 1][locColIdx - 1] = newLocationValue;
+      }
+
+      await this.db.addMutation({
+        action: 'UPDATE_CELL',
+        sheetName: empTable.name || 'Employees',
+        tableKey: 'employees',
+        row: rIdx,
+        col: locColIdx > 0 ? locColIdx : 3,
+        header: 'Location',
+        itemIdentifier: empName,
+        value: newLocationValue
+      });
+
+      await this.db.persistSnapshot(this.db.snapshot);
+      this.renderCurrentSheet();
+      if (typeof window.showToast === 'function') {
+        window.showToast(`🏖️ Assigned ${empName} to ${statusType} (${newLocationValue}).`);
+      }
+    }
+  }
+
+  /**
+   * Displays the confirmation modal with detailed cascading updates before committing a move
+   */
+  showCrewReassignmentModal(params) {
+    const { dragData, destBaseJob, newSlot, destLoc, membersToRenumber, affectedEquipment, oldSourceSize, newSourceSize, oldDestSize, newDestSize } = params;
+    const empName = dragData.empName;
+    const fromBaseJob = dragData.fromBaseJob;
+    const fromSlot = dragData.fromSlot;
+
+    const modalId = 'crew-reassign-confirm-modal';
+    const oldModal = document.getElementById(modalId);
+    if (oldModal) oldModal.remove();
+
+    const modal = document.createElement('div');
+    modal.id = modalId;
+    modal.className = 'modal active';
+    modal.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.75); display: flex; align-items: center; justify-content: center; z-index: 1060; padding: 20px;';
+
+    modal.innerHTML = `
+      <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 10px; max-width: 540px; width: 100%; box-shadow: 0 15px 35px rgba(0,0,0,0.6); overflow: hidden; display: flex; flex-direction: column; max-height: 90vh;">
+        <!-- Header -->
+        <div style="padding: 16px 20px; border-bottom: 1px solid var(--border-color); background: var(--bg-primary); display: flex; justify-content: space-between; align-items: center;">
+          <div style="font-weight: 800; font-size: 16px; color: var(--text-primary); display: flex; align-items: center; gap: 8px;">
+            <span>🔄</span> Reassign Crew Member
+          </div>
+          <button class="btn btn-xs btn-secondary" onclick="document.getElementById('${modalId}').remove()" style="cursor: pointer;">✖</button>
+        </div>
+
+        <!-- Body -->
+        <div style="padding: 20px; overflow-y: auto; flex: 1;">
+          <!-- Move Summary Card -->
+          <div style="background: var(--bg-primary); border: 1px solid #3b82f6; border-radius: 8px; padding: 14px; margin-bottom: 16px;">
+            <div style="font-size: 14px; font-weight: 800; color: #60a5fa; margin-bottom: 8px;">
+              Moving <u>${this.escapeHtml(empName)}</u>
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr auto 1fr; gap: 8px; align-items: center; text-align: center; font-size: 13px;">
+              <div style="background: var(--bg-secondary); padding: 8px; border-radius: 6px; border: 1px solid var(--border-color);">
+                <div style="font-size: 10.5px; font-weight: 700; color: var(--text-muted); margin-bottom: 2px;">FROM CREW</div>
+                <div style="font-weight: 800; color: #94a3b8; font-family: monospace;">${this.escapeHtml(fromSlot)}</div>
+                <div style="font-size: 11px; color: var(--text-muted);">${this.escapeHtml(dragData.sourceLoc || 'Helena')}</div>
+              </div>
+              <div style="font-size: 18px; color: #60a5fa; font-weight: 800;">➔</div>
+              <div style="background: rgba(16, 185, 129, 0.1); padding: 8px; border-radius: 6px; border: 1px solid rgba(16, 185, 129, 0.3);">
+                <div style="font-size: 10.5px; font-weight: 700; color: #34d399; margin-bottom: 2px;">TO CREW</div>
+                <div style="font-weight: 800; color: #34d399; font-family: monospace;">${this.escapeHtml(newSlot)}</div>
+                <div style="font-size: 11px; color: #93c5fd;">📍 ${this.escapeHtml(destLoc)}</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Cascading Changes List -->
+          <div style="font-size: 12px; font-weight: 800; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;">
+            Cascading Updates:
+          </div>
+
+          <div style="display: flex; flex-direction: column; gap: 10px; font-size: 12.5px;">
+            <!-- Employee Table Updates -->
+            <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px 12px;">
+              <div style="font-weight: 700; color: var(--text-primary); margin-bottom: 4px;">
+                👥 Employees Table:
+              </div>
+              <div style="color: var(--text-muted); font-size: 12px; margin-left: 12px;">
+                • <strong>${this.escapeHtml(empName)}</strong>: Job Number ➔ <code>${this.escapeHtml(newSlot)}</code>, Location ➔ <code>${this.escapeHtml(destLoc)}</code>
+              </div>
+            </div>
+
+            <!-- Job Tracking Updates -->
+            <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px 12px;">
+              <div style="font-weight: 700; color: var(--text-primary); margin-bottom: 4px;">
+                📋 Job Tracking Crew Sizes:
+              </div>
+              <div style="color: var(--text-muted); font-size: 12px; margin-left: 12px;">
+                ${fromBaseJob ? `• Crew <strong>${this.escapeHtml(fromBaseJob)}</strong>: Crew Size ${oldSourceSize} ➔ ${newSourceSize}<br>` : ''}
+                • Crew <strong>${this.escapeHtml(destBaseJob)}</strong>: Crew Size ${oldDestSize} ➔ ${newDestSize}
+              </div>
+            </div>
+
+            <!-- Source Crew Renumbering -->
+            ${membersToRenumber.length > 0 ? `
+              <div style="background: rgba(245, 158, 11, 0.05); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 6px; padding: 10px 12px;">
+                <label style="display: flex; align-items: flex-start; gap: 8px; cursor: pointer;">
+                  <input type="checkbox" id="chk-renumber-source" checked style="margin-top: 2px;">
+                  <div>
+                    <div style="font-weight: 700; color: #fbbf24;">
+                      🔄 Renumber remaining members of ${this.escapeHtml(fromBaseJob)} to close gap (${membersToRenumber.length}):
+                    </div>
+                    <div style="color: var(--text-muted); font-size: 11.5px; margin-top: 4px;">
+                      ${membersToRenumber.map(r => `• ${this.escapeHtml(r.emp['Employee Name'] || r.emp['Name'])}: <code>${r.oldSlot}</code> ➔ <code>${r.newSlot}</code>`).join('<br>')}
+                    </div>
+                  </div>
+                </label>
+              </div>
+            ` : ''}
+
+            <!-- Inventory Updates -->
+            ${affectedEquipment.length > 0 ? `
+              <div style="background: rgba(14, 165, 233, 0.05); border: 1px solid rgba(14, 165, 233, 0.25); border-radius: 6px; padding: 10px 12px;">
+                <label style="display: flex; align-items: flex-start; gap: 8px; cursor: pointer;">
+                  <input type="checkbox" id="chk-update-equipment" checked style="margin-top: 2px;">
+                  <div>
+                    <div style="font-weight: 700; color: #38bdf8;">
+                      📦 Update assigned equipment Location to ${this.escapeHtml(destLoc)} (${affectedEquipment.length} item(s)):
+                    </div>
+                    <div style="color: var(--text-muted); font-size: 11.5px; margin-top: 4px; max-height: 100px; overflow-y: auto;">
+                      ${affectedEquipment.map(item => `• ${this.escapeHtml(item.sheetName)} #${this.escapeHtml(item.itemNum)}: ${this.escapeHtml(item.oldLoc || 'Unknown')} ➔ ${this.escapeHtml(destLoc)}`).join('<br>')}
+                    </div>
+                  </div>
+                </label>
+              </div>
+            ` : `
+              <div style="color: var(--text-muted); font-size: 11.5px; font-style: italic;">
+                📦 No assigned equipment found requiring a location change.
+              </div>
+            `}
+          </div>
+        </div>
+
+        <!-- Footer -->
+        <div style="padding: 14px 20px; border-top: 1px solid var(--border-color); background: var(--bg-primary); display: flex; justify-content: space-between; align-items: center;">
+          <button class="btn btn-secondary" onclick="document.getElementById('${modalId}').remove()">
+            Cancel
+          </button>
+          <button class="btn btn-primary" id="btn-execute-reassign" style="background: #2563eb; border-color: #2563eb; font-weight: 700; display: inline-flex; align-items: center; gap: 6px;">
+            <span>⚡</span> Confirm & Apply Changes
+          </button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(modal);
+
+    document.getElementById('btn-execute-reassign')?.addEventListener('click', async () => {
+      const doRenumber = document.getElementById('chk-renumber-source')?.checked ?? true;
+      const doUpdateEquip = document.getElementById('chk-update-equipment')?.checked ?? true;
+      modal.remove();
+      await this.executeCrewReassignment(params, doRenumber, doUpdateEquip);
+    });
+  }
+
+  /**
+   * Executes the full cascading reassignment after user confirmation
+   */
+  async executeCrewReassignment(params, doRenumber, doUpdateEquip) {
+    const { dragData, destBaseJob, newSlot, destLoc, membersToRenumber, affectedEquipment } = params;
+    const empName = dragData.empName;
+    const fromBaseJob = dragData.fromBaseJob;
+    const isSecondary = dragData.isSecondary;
+
+    const empTable = this.db.getTable('employees');
+    const jtTable = this.db.getTable('job_tracking');
+    if (!empTable || !jtTable) return;
+
+    // 1. Update Moved Employee row
+    const emp = empTable.rows.find(e => String(e['Employee Name'] || e['Name'] || '').trim().toLowerCase() === empName.toLowerCase());
+    if (emp) {
+      if (isSecondary) {
+        const isReturningToPrimary = (destBaseJob === String(dragData.primaryJob || '').replace(/\.\d+.*$/, '').trim());
+        const finalSec = isReturningToPrimary ? '' : newSlot;
+        emp['Secondary Job Number'] = finalSec;
+        if (emp['Secondary Job #']) emp['Secondary Job #'] = finalSec;
+
+        const secColIdx = (empTable.headers || []).findIndex(h => /secondary\s*job/i.test(h)) + 1;
+        const eRowIdx = emp._rowIdx || (empTable.rows.indexOf(emp) + 2);
+        if (empTable.rawGrid && empTable.rawGrid[eRowIdx - 1] && secColIdx > 0) {
+          empTable.rawGrid[eRowIdx - 1][secColIdx - 1] = finalSec;
+        }
+
+        await this.db.addMutation({
+          action: 'UPDATE_CELL',
+          sheetName: empTable.name || 'Employees',
+          tableKey: 'employees',
+          row: eRowIdx,
+          col: secColIdx > 0 ? secColIdx : 5,
+          header: 'Secondary Job Number',
+          itemIdentifier: empName,
+          value: finalSec
+        });
+      } else {
+        const oldSlot = emp['Job Number'];
+        emp['Job Number'] = newSlot;
+        if (emp['Job #']) emp['Job #'] = newSlot;
+        emp['Location'] = destLoc;
+
+        const jobColIdx = (empTable.headers || []).findIndex(h => /^(job\s*#|job\s*number)$/i.test(h)) + 1;
+        const locColIdx = (empTable.headers || []).findIndex(h => /^location$/i.test(h)) + 1;
+        const eRowIdx = emp._rowIdx || (empTable.rows.indexOf(emp) + 2);
+
+        if (empTable.rawGrid && empTable.rawGrid[eRowIdx - 1]) {
+          if (jobColIdx > 0) empTable.rawGrid[eRowIdx - 1][jobColIdx - 1] = newSlot;
+          if (locColIdx > 0) empTable.rawGrid[eRowIdx - 1][locColIdx - 1] = destLoc;
+        }
+
+        await this.db.addMutation({
+          action: 'UPDATE_ROW',
+          sheetName: empTable.name || 'Employees',
+          tableKey: 'employees',
+          itemIdentifier: empName,
+          row: eRowIdx,
+          updatedFields: {
+            'Job Number': newSlot,
+            'Location': destLoc
+          }
+        });
+      }
+    }
+
+    // 2. Renumber remaining source members if selected
+    if (doRenumber && membersToRenumber.length > 0) {
+      const jobColIdx = (empTable.headers || []).findIndex(h => /^(job\s*#|job\s*number)$/i.test(h)) + 1;
+      for (const r of membersToRenumber) {
+        r.emp['Job Number'] = r.newSlot;
+        if (r.emp['Job #']) r.emp['Job #'] = r.newSlot;
+        const rRowIdx = r.emp._rowIdx || (empTable.rows.indexOf(r.emp) + 2);
+        if (empTable.rawGrid && empTable.rawGrid[rRowIdx - 1] && jobColIdx > 0) {
+          empTable.rawGrid[rRowIdx - 1][jobColIdx - 1] = r.newSlot;
+        }
+
+        await this.db.addMutation({
+          action: 'UPDATE_CELL',
+          sheetName: empTable.name || 'Employees',
+          tableKey: 'employees',
+          row: rRowIdx,
+          col: jobColIdx > 0 ? jobColIdx : 2,
+          header: 'Job Number',
+          itemIdentifier: String(r.emp['Employee Name'] || r.emp['Name'] || ''),
+          oldValue: r.oldSlot,
+          value: r.newSlot
+        });
+      }
+    }
+
+    // 3. Update Job Tracking Crew Sizes
+    if (jtTable.rows) {
+      const sizeColIdx = (jtTable.headers || []).findIndex(h => /^crew\s*size$/i.test(h)) + 1;
+
+      // Source JT
+      if (fromBaseJob && !isSecondary) {
+        const sourceJt = jtTable.rows.find(j => {
+          const jn = String(j['Job Number'] || j['Job #'] || '').trim();
+          return jn === fromBaseJob || jn.replace(/\.\d+.*$/, '').trim() === fromBaseJob;
+        });
+        if (sourceJt) {
+          const curSize = parseInt(sourceJt['Crew Size'], 10) || 1;
+          const newSize = Math.max(0, curSize - 1);
+          sourceJt['Crew Size'] = newSize;
+          const sRowIdx = sourceJt._rowIdx || (jtTable.rows.indexOf(sourceJt) + 2);
+          if (jtTable.rawGrid && jtTable.rawGrid[sRowIdx - 1] && sizeColIdx > 0) {
+            jtTable.rawGrid[sRowIdx - 1][sizeColIdx - 1] = newSize;
+          }
+          await this.db.addMutation({
+            action: 'UPDATE_CELL',
+            sheetName: jtTable.name || 'Job Tracking',
+            tableKey: 'job_tracking',
+            row: sRowIdx,
+            col: sizeColIdx > 0 ? sizeColIdx : 4,
+            header: 'Crew Size',
+            itemIdentifier: fromBaseJob,
+            value: newSize
+          });
+        }
+      }
+
+      // Dest JT
+      const destJt = jtTable.rows.find(j => {
+        const jn = String(j['Job Number'] || j['Job #'] || '').trim();
+        return jn === destBaseJob || jn.replace(/\.\d+.*$/, '').trim() === destBaseJob;
+      });
+      if (destJt) {
+        const curSize = parseInt(destJt['Crew Size'], 10) || 0;
+        const newSize = curSize + 1;
+        destJt['Crew Size'] = newSize;
+        const dRowIdx = destJt._rowIdx || (jtTable.rows.indexOf(destJt) + 2);
+        if (jtTable.rawGrid && jtTable.rawGrid[dRowIdx - 1] && sizeColIdx > 0) {
+          jtTable.rawGrid[dRowIdx - 1][sizeColIdx - 1] = newSize;
+        }
+        await this.db.addMutation({
+          action: 'UPDATE_CELL',
+          sheetName: jtTable.name || 'Job Tracking',
+          tableKey: 'job_tracking',
+          row: dRowIdx,
+          col: sizeColIdx > 0 ? sizeColIdx : 4,
+          header: 'Crew Size',
+          itemIdentifier: destBaseJob,
+          value: newSize
+        });
+      }
+    }
+
+    // 4. Update Equipment Locations
+    if (doUpdateEquip && affectedEquipment.length > 0 && !isSecondary) {
+      await this.cascadeLocationToAssignedEquipment(empName, destLoc);
+    }
+
+    await this.db.persistSnapshot(this.db.snapshot);
+    this.renderCurrentSheet();
+
+    if (typeof window.showToast === 'function') {
+      window.showToast(`✅ Successfully moved ${empName} to ${newSlot}! All records updated.`);
+    }
+  }
+
+  /**
+   * Cascades a new location to all equipment items assigned to the employee across all 9 categories
+   */
+  async cascadeLocationToAssignedEquipment(empName, newLocation) {
+    if (!empName || !newLocation) return;
+    const cleanEmp = empName.toLowerCase().trim();
+    const categories = ['gloves', 'sleeves', 'blankets', 'macks', 'hv_testers', 'phasing_sets', 'aed', 'grounds', 'hot_sticks'];
+
+    for (const key of categories) {
+      const table = this.db.getTable(key);
+      if (!table || !table.rows) continue;
+
+      const locColIdx = (table.headers || []).findIndex(h => /^location$/i.test(h)) + 1;
+      const chgOutColIdx = (table.headers || []).findIndex(h => /change\s*out/i.test(h)) + 1;
+
+      for (let rIdx = 0; rIdx < table.rows.length; rIdx++) {
+        const row = table.rows[rIdx];
+        const assigned = String(row['Assigned To'] || '').toLowerCase().trim();
+        if (assigned === cleanEmp) {
+          const currentLoc = String(row['Location'] || '').trim();
+          if (currentLoc.toLowerCase() !== newLocation.toLowerCase()) {
+            row['Location'] = newLocation;
+            const sheetRow = row._rowIdx || (rIdx + 2);
+            if (table.rawGrid && table.rawGrid[sheetRow - 1] && locColIdx > 0) {
+              table.rawGrid[sheetRow - 1][locColIdx - 1] = newLocation;
+            }
+            await this.db.addMutation({
+              action: 'UPDATE_CELL',
+              sheetName: table.name,
+              tableKey: key,
+              row: sheetRow,
+              col: locColIdx,
+              header: 'Location',
+              itemIdentifier: row['Item #'] || row['Serial #'] || row['Glove'] || row['Sleeve'] || row['Blanket'] || '',
+              value: newLocation
+            });
+
+            // Recalculate Change Out Date if location affects cycle (e.g. gloves Northern Lights)
+            if (window.inventoryManager && typeof window.inventoryManager.calculateChangeOutDate === 'function') {
+              const dAssigned = row['Date Assigned'] || row['Test Date'] || '';
+              if (dAssigned) {
+                const newChg = window.inventoryManager.calculateChangeOutDate(dAssigned, newLocation, empName, key, {
+                  testDate: row['Test Date'],
+                  calibrationDate: row['Calibration Date']
+                });
+                if (newChg && newChg !== 'N/A' && newChg !== row['Change Out Date']) {
+                  row['Change Out Date'] = newChg;
+                  if (table.rawGrid && table.rawGrid[sheetRow - 1] && chgOutColIdx > 0) {
+                    table.rawGrid[sheetRow - 1][chgOutColIdx - 1] = newChg;
+                  }
+                  await this.db.addMutation({
+                    action: 'UPDATE_CELL',
+                    sheetName: table.name,
+                    tableKey: key,
+                    row: sheetRow,
+                    col: chgOutColIdx,
+                    header: 'Change Out Date',
+                    itemIdentifier: row['Item #'] || row['Serial #'] || row['Glove'] || row['Sleeve'] || row['Blanket'] || '',
+                    value: newChg
+                  });
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * Fixes numbering scheme for a crew: sequentially renumbers members from .1 to .N with no gaps or duplicates
+   */
+  async fixCrewNumbering(baseJob) {
+    const empTable = this.db.getTable('employees');
+    if (!empTable || !empTable.rows) return;
+    const jtTable = this.db.getTable('job_tracking');
+    const jt = jtTable ? jtTable.rows.find(j => {
+      const jn = String(j['Job Number'] || j['Job #'] || '').trim();
+      return jn === baseJob || jn.replace(/\.\d+.*$/, '').trim() === baseJob;
+    }) : null;
+    const foreman = jt ? String(jt['Foreman'] || '').trim() : '';
+
+    const members = empTable.rows.filter(e => {
+      const j = String(e['Job Number'] || e['Job #'] || '').trim();
+      return j === baseJob || j.startsWith(baseJob + '.');
+    });
+
+    if (members.length === 0) {
+      if (typeof window.showToast === 'function') window.showToast(`No members found on ${baseJob}.`, 'info');
+      return;
+    }
+
+    const nameMatchesForeman = (emp, fName) => {
+      if (!fName) return false;
+      const fl = fName.trim().toLowerCase();
+      const n = String(emp['Employee Name'] || emp['Name'] || '').trim().toLowerCase();
+      if (n === fl) return true;
+      const alts = String(emp['Alternate Names'] || '').split(/[|,;]/).map(s => s.trim().toLowerCase()).filter(Boolean);
+      return alts.includes(fl);
+    };
+
+    const getRolePriority = (role) => {
+      if (window.crewImportEngine && typeof window.crewImportEngine.getRolePriority === 'function') {
+        return window.crewImportEngine.getRolePriority(role);
+      }
+      const r = String(role || '').toUpperCase().trim();
+      const map = { 'SUP': 1, 'GF': 2, 'F': 3, 'GTO F': 4, 'JL': 5, 'JRY': 5, 'WT': 7, 'GTO': 8, 'EO 1': 9, 'EO 2': 10 };
+      return map[r] !== undefined ? map[r] : 99;
+    };
+
+    members.sort((a, b) => {
+      const isAForm = nameMatchesForeman(a, foreman);
+      const isBForm = nameMatchesForeman(b, foreman);
+      if (isAForm && !isBForm) return -1;
+      if (!isAForm && isBForm) return 1;
+
+      const pA = getRolePriority(a['Job Classification'] || a['Classification']);
+      const pB = getRolePriority(b['Job Classification'] || b['Classification']);
+      if (pA !== pB) return pA - pB;
+
+      const parseSuffix = (j) => {
+        const m = String(j || '').match(/\.(\d+)/);
+        return m ? parseInt(m[1], 10) : 999;
+      };
+      const sA = parseSuffix(a['Job Number']);
+      const sB = parseSuffix(b['Job Number']);
+      if (sA !== sB) return sA - sB;
+
+      const nA = String(a['Employee Name'] || a['Name'] || '');
+      const nB = String(b['Employee Name'] || b['Name'] || '');
+      return nA.localeCompare(nB);
+    });
+
+    let updatedCount = 0;
+    const colIdx = (empTable.headers || []).findIndex(h => /^(job\s*#|job\s*number)$/i.test(h)) + 1;
+
+    for (let i = 0; i < members.length; i++) {
+      const emp = members[i];
+      const targetSlot = `${baseJob}.${i + 1}`;
+      const currentSlot = String(emp['Job Number'] || emp['Job #'] || '').trim();
+      if (currentSlot !== targetSlot) {
+        emp['Job Number'] = targetSlot;
+        if (emp['Job #']) emp['Job #'] = targetSlot;
+        updatedCount++;
+
+        const empName = String(emp['Employee Name'] || emp['Name'] || '').trim();
+        const rIdx = emp._rowIdx || (empTable.rows.indexOf(emp) + 2);
+        if (empTable.rawGrid && empTable.rawGrid[rIdx - 1] && colIdx > 0) {
+          empTable.rawGrid[rIdx - 1][colIdx - 1] = targetSlot;
+        }
+
+        await this.db.addMutation({
+          action: 'UPDATE_CELL',
+          sheetName: empTable.name || 'Employees',
+          tableKey: 'employees',
+          row: rIdx,
+          col: colIdx > 0 ? colIdx : 2,
+          header: colIdx > 0 ? empTable.headers[colIdx - 1] : 'Job Number',
+          itemIdentifier: empName,
+          oldValue: currentSlot,
+          value: targetSlot
+        });
+      }
+    }
+
+    // Update Crew Size in Job Tracking if different
+    if (jt) {
+      const curSize = parseInt(jt['Crew Size'], 10);
+      if (curSize !== members.length) {
+        jt['Crew Size'] = members.length;
+        const jtColIdx = (jtTable.headers || []).findIndex(h => /^crew\s*size$/i.test(h)) + 1;
+        const jtRowIdx = jt._rowIdx || (jtTable.rows.indexOf(jt) + 2);
+        if (jtTable.rawGrid && jtTable.rawGrid[jtRowIdx - 1] && jtColIdx > 0) {
+          jtTable.rawGrid[jtRowIdx - 1][jtColIdx - 1] = members.length;
+        }
+        await this.db.addMutation({
+          action: 'UPDATE_CELL',
+          sheetName: jtTable.name || 'Job Tracking',
+          tableKey: 'job_tracking',
+          row: jtRowIdx,
+          col: jtColIdx > 0 ? jtColIdx : 4,
+          header: 'Crew Size',
+          itemIdentifier: baseJob,
+          value: members.length
+        });
+      }
+    }
+
+    await this.db.persistSnapshot(this.db.snapshot);
+    this.renderCurrentSheet();
+    if (typeof window.showToast === 'function') {
+      window.showToast(`✅ Fixed numbering for ${baseJob}: ${members.length} member(s) sequentially numbered .1 to .${members.length}`);
+    }
+  }
+
+  startCrewCardEdit(baseJob) {
+    this.editingCrewBaseJob = baseJob;
+    this.renderCurrentSheet();
+  }
+
+  cancelCrewCardEdit() {
+    this.editingCrewBaseJob = null;
+    this.renderCurrentSheet();
+  }
+
+  handleSchedulePresetChange(baseJob, preset) {
+    const isMonThu = preset === 'Mon-Thu (4 10s)';
+    const isTueFri = preset === 'Tue-Fri (4 10s)';
+    const isFriSat = preset === 'Fri-Sat Weekend';
+    const isMonFri = preset === 'Mon-Fri (5 8s)';
+
+    const setCb = (day, val) => {
+      const el = document.getElementById(`edit-work-${day}-${baseJob}`);
+      if (el) el.checked = val;
+    };
+
+    if (isMonThu) {
+      setCb('Mon', true); setCb('Tue', true); setCb('Wed', true); setCb('Thu', true);
+      setCb('Fri', false); setCb('Sat', false); setCb('Sun', false);
+    } else if (isTueFri) {
+      setCb('Mon', false); setCb('Tue', true); setCb('Wed', true); setCb('Thu', true);
+      setCb('Fri', true); setCb('Sat', false); setCb('Sun', false);
+    } else if (isFriSat) {
+      setCb('Mon', false); setCb('Tue', false); setCb('Wed', false); setCb('Thu', false);
+      setCb('Fri', true); setCb('Sat', true); setCb('Sun', false);
+    } else if (isMonFri) {
+      setCb('Mon', true); setCb('Tue', true); setCb('Wed', true); setCb('Thu', true);
+      setCb('Fri', true); setCb('Sat', false); setCb('Sun', false);
+    }
+  }
+
+  async saveCrewCardEdit(baseJob) {
+    const jtTable = this.db.getTable('job_tracking');
+    if (!jtTable || !jtTable.rows) return;
+    const jt = jtTable.rows.find(j => {
+      const jn = String(j['Job Number'] || j['Job #'] || '').trim();
+      return jn === baseJob || jn.replace(/\.\d+.*$/, '').trim() === baseJob;
+    });
+
+    const locInput = document.getElementById(`edit-crew-loc-${baseJob}`);
+    const statusSelect = document.getElementById(`edit-crew-status-${baseJob}`);
+    const jobNameInput = document.getElementById(`edit-crew-jobname-${baseJob}`);
+    const foremanSelect = document.getElementById(`edit-crew-foreman-${baseJob}`);
+    const schedSelect = document.getElementById(`edit-crew-sched-${baseJob}`);
+
+    const getWorkDay = (day) => {
+      const el = document.getElementById(`edit-work-${day}-${baseJob}`);
+      return el ? el.checked : true;
+    };
+
+    const newLoc = locInput ? locInput.value.trim() : (jt?.Location || 'Helena');
+    const newStatus = statusSelect ? statusSelect.value.trim() : (jt?.Status || 'Active');
+    const newJobName = jobNameInput ? jobNameInput.value.trim() : (jt?.['Job Name'] || '');
+    const newForeman = foremanSelect ? foremanSelect.value.trim() : (jt?.Foreman || '');
+    const newSchedule = schedSelect ? schedSelect.value.trim() : (jt?.['Work Schedule'] || 'Mon-Thu (4 10s)');
+
+    const isSkipMon = !getWorkDay('Mon');
+    const isSkipTue = !getWorkDay('Tue');
+    const isSkipWed = !getWorkDay('Wed');
+    const isSkipThu = !getWorkDay('Thu');
+    const isSkipFri = !getWorkDay('Fri');
+    const isSkipSat = !getWorkDay('Sat');
+    const isSkipSun = !getWorkDay('Sun');
+
+    const skipMtg = document.getElementById(`edit-skip-mtg-${baseJob}`)?.checked || false;
+    const skipChk = document.getElementById(`edit-skip-chk-${baseJob}`)?.checked || false;
+    const todayFormatted = new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+
+    const oldLoc = jt ? String(jt['Location'] || '').trim() : '';
+
+    if (jt) {
+      jt['Location'] = newLoc;
+      jt['Status'] = newStatus;
+      jt['Job Name'] = newJobName;
+      jt['Foreman'] = newForeman;
+      jt['Work Schedule'] = newSchedule;
+      jt['Skip Mon'] = isSkipMon;
+      jt['Skip Tue'] = isSkipTue;
+      jt['Skip Wed'] = isSkipWed;
+      jt['Skip Thu'] = isSkipThu;
+      jt['Skip Fri'] = isSkipFri;
+      jt['Skip Sat'] = isSkipSat;
+      jt['Skip Sun'] = isSkipSun;
+      jt['Skip Weekly Meeting'] = skipMtg;
+      jt['Skip Monthly Checklist'] = skipChk;
+      jt['Last Updated'] = todayFormatted;
+
+      const jtRowIdx = jt._rowIdx || (jtTable.rows.indexOf(jt) + 2);
+      if (jtTable.rawGrid && jtTable.rawGrid[jtRowIdx - 1]) {
+        jtTable.rawGrid[jtRowIdx - 1] = jtTable.headers.map(h => jt[h] !== undefined ? jt[h] : '');
+      }
+
+      await this.db.addMutation({
+        action: 'UPDATE_ROW',
+        sheetName: jtTable.name || 'Job Tracking',
+        tableKey: 'job_tracking',
+        itemIdentifier: baseJob,
+        row: jtRowIdx,
+        updatedFields: {
+          'Location': newLoc,
+          'Status': newStatus,
+          'Job Name': newJobName,
+          'Foreman': newForeman,
+          'Work Schedule': newSchedule,
+          'Skip Mon': isSkipMon,
+          'Skip Tue': isSkipTue,
+          'Skip Wed': isSkipWed,
+          'Skip Thu': isSkipThu,
+          'Skip Fri': isSkipFri,
+          'Skip Sat': isSkipSat,
+          'Skip Sun': isSkipSun,
+          'Skip Weekly Meeting': skipMtg,
+          'Skip Monthly Checklist': skipChk,
+          'Last Updated': todayFormatted
+        }
+      });
+    }
+
+    // If Location changed, cascade to primary members and their assigned equipment
+    if (oldLoc && newLoc && oldLoc.toLowerCase() !== newLoc.toLowerCase()) {
+      const empTable = this.db.getTable('employees');
+      if (empTable && empTable.rows) {
+        const members = empTable.rows.filter(e => {
+          const j = String(e['Job Number'] || e['Job #'] || '').trim();
+          return j === baseJob || j.startsWith(baseJob + '.');
+        });
+
+        const empLocColIdx = (empTable.headers || []).findIndex(h => /^location$/i.test(h)) + 1;
+        for (const emp of members) {
+          const empName = String(emp['Employee Name'] || emp['Name'] || '').trim();
+          emp['Location'] = newLoc;
+          const eRowIdx = emp._rowIdx || (empTable.rows.indexOf(emp) + 2);
+          if (empTable.rawGrid && empTable.rawGrid[eRowIdx - 1] && empLocColIdx > 0) {
+            empTable.rawGrid[eRowIdx - 1][empLocColIdx - 1] = newLoc;
+          }
+          await this.db.addMutation({
+            action: 'UPDATE_CELL',
+            sheetName: empTable.name || 'Employees',
+            tableKey: 'employees',
+            row: eRowIdx,
+            col: empLocColIdx > 0 ? empLocColIdx : 3,
+            header: 'Location',
+            itemIdentifier: empName,
+            value: newLoc
+          });
+
+          // Cascade to equipment
+          await this.cascadeLocationToAssignedEquipment(empName, newLoc);
+        }
+      }
+    }
+
+    this.editingCrewBaseJob = null;
+    await this.db.persistSnapshot(this.db.snapshot);
+    this.renderCurrentSheet();
+    if (typeof window.showToast === 'function') {
+      window.showToast(`✅ Saved changes for Job ${baseJob}`);
+    }
+  }
+
+  async toggleCrewDaySkip(baseJob, colKey) {
+    const jtTable = this.db.getTable('job_tracking');
+    if (!jtTable || !jtTable.rows) return;
+    const jt = jtTable.rows.find(j => {
+      const jn = String(j['Job Number'] || j['Job #'] || '').trim();
+      return jn === baseJob || jn.replace(/\.\d+.*$/, '').trim() === baseJob;
+    });
+    if (!jt) return;
+
+    const colName = `Skip ${colKey}`;
+    const curVal = (jt[colName] === true || String(jt[colName]).toLowerCase() === 'true');
+    const newVal = !curVal;
+    jt[colName] = newVal;
+
+    const colIdx = (jtTable.headers || []).findIndex(h => h.trim().toLowerCase() === colName.toLowerCase()) + 1;
+    const rowIdx = jt._rowIdx || (jtTable.rows.indexOf(jt) + 2);
+    if (jtTable.rawGrid && jtTable.rawGrid[rowIdx - 1] && colIdx > 0) {
+      jtTable.rawGrid[rowIdx - 1][colIdx - 1] = newVal ? 'TRUE' : 'FALSE';
+    }
+
+    await this.db.addMutation({
+      action: 'UPDATE_CELL',
+      sheetName: jtTable.name || 'Job Tracking',
+      tableKey: 'job_tracking',
+      row: rowIdx,
+      col: colIdx > 0 ? colIdx : 12,
+      header: colName,
+      itemIdentifier: baseJob,
+      value: newVal
+    });
+
+    await this.db.persistSnapshot(this.db.snapshot);
+    this.renderCurrentSheet();
+  }
+
+  async toggleCrewMeetingSkip(baseJob) {
+    const jtTable = this.db.getTable('job_tracking');
+    if (!jtTable || !jtTable.rows) return;
+    const jt = jtTable.rows.find(j => {
+      const jn = String(j['Job Number'] || j['Job #'] || '').trim();
+      return jn === baseJob || jn.replace(/\.\d+.*$/, '').trim() === baseJob;
+    });
+    if (!jt) return;
+
+    const colName = 'Skip Weekly Meeting';
+    const curVal = (jt[colName] === true || String(jt[colName]).toLowerCase() === 'true');
+    const newVal = !curVal;
+    jt[colName] = newVal;
+
+    const colIdx = (jtTable.headers || []).findIndex(h => h.trim().toLowerCase() === colName.toLowerCase()) + 1;
+    const rowIdx = jt._rowIdx || (jtTable.rows.indexOf(jt) + 2);
+    if (jtTable.rawGrid && jtTable.rawGrid[rowIdx - 1] && colIdx > 0) {
+      jtTable.rawGrid[rowIdx - 1][colIdx - 1] = newVal ? 'TRUE' : 'FALSE';
+    }
+
+    await this.db.addMutation({
+      action: 'UPDATE_CELL',
+      sheetName: jtTable.name || 'Job Tracking',
+      tableKey: 'job_tracking',
+      row: rowIdx,
+      col: colIdx > 0 ? colIdx : 19,
+      header: colName,
+      itemIdentifier: baseJob,
+      value: newVal
+    });
+
+    await this.db.persistSnapshot(this.db.snapshot);
+    this.renderCurrentSheet();
+  }
+
+  async toggleCrewChecklistSkip(baseJob) {
+    const jtTable = this.db.getTable('job_tracking');
+    if (!jtTable || !jtTable.rows) return;
+    const jt = jtTable.rows.find(j => {
+      const jn = String(j['Job Number'] || j['Job #'] || '').trim();
+      return jn === baseJob || jn.replace(/\.\d+.*$/, '').trim() === baseJob;
+    });
+    if (!jt) return;
+
+    const colName = 'Skip Monthly Checklist';
+    const curVal = (jt[colName] === true || String(jt[colName]).toLowerCase() === 'true');
+    const newVal = !curVal;
+    jt[colName] = newVal;
+
+    const colIdx = (jtTable.headers || []).findIndex(h => h.trim().toLowerCase() === colName.toLowerCase()) + 1;
+    const rowIdx = jt._rowIdx || (jtTable.rows.indexOf(jt) + 2);
+    if (jtTable.rawGrid && jtTable.rawGrid[rowIdx - 1] && colIdx > 0) {
+      jtTable.rawGrid[rowIdx - 1][colIdx - 1] = newVal ? 'TRUE' : 'FALSE';
+    }
+
+    await this.db.addMutation({
+      action: 'UPDATE_CELL',
+      sheetName: jtTable.name || 'Job Tracking',
+      tableKey: 'job_tracking',
+      row: rowIdx,
+      col: colIdx > 0 ? colIdx : 20,
+      header: colName,
+      itemIdentifier: baseJob,
+      value: newVal
+    });
+
+    await this.db.persistSnapshot(this.db.snapshot);
+    this.renderCurrentSheet();
+  }
+
+  promptChangeForeman(baseJob, currentForeman) {
+    const empTable = this.db.getTable('employees');
+    const members = (empTable?.rows || []).filter(e => {
+      const j = String(e['Job Number'] || '').trim();
+      return j === baseJob || j.startsWith(baseJob + '.');
+    });
+
+    const otherEmps = (empTable?.rows || []).filter(e => {
+      const n = String(e['Employee Name'] || e['Name'] || '').trim();
+      return !members.some(m => String(m['Employee Name'] || m['Name'] || '').trim().toLowerCase() === n.toLowerCase());
+    });
+
+    const modalId = 'change-foreman-picker-modal';
+    const oldModal = document.getElementById(modalId);
+    if (oldModal) oldModal.remove();
+
+    const modal = document.createElement('div');
+    modal.id = modalId;
+    modal.className = 'modal active';
+    modal.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 1050; padding: 20px;';
+    modal.innerHTML = `
+      <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; max-width: 440px; width: 100%; box-shadow: 0 10px 30px rgba(0,0,0,0.5); overflow: hidden;">
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border-bottom: 1px solid var(--border-color);">
+          <div style="font-weight: 800; font-size: 15px; color: var(--text-primary); display: flex; align-items: center; gap: 8px;">
+            <span>👑</span> Designate Foreman for ${this.escapeHtml(baseJob)}
+          </div>
+          <button class="btn btn-xs btn-secondary" onclick="document.getElementById('${modalId}').remove()" style="cursor: pointer;">✖</button>
+        </div>
+        <div style="padding: 16px 18px;">
+          <label style="font-size: 12px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 6px;">Select Foreman:</label>
+          <select id="modal-foreman-select" class="form-control" style="width: 100%; padding: 8px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); font-size: 13px;">
+            <option value="">(None designated)</option>
+            <optgroup label="Crew Members">
+              ${members.map(m => {
+                const n = String(m['Employee Name'] || m['Name'] || '').trim();
+                const c = String(m['Job Classification'] || m['Classification'] || '');
+                return `<option value="${this.escapeHtml(n)}" ${n.toLowerCase() === currentForeman.toLowerCase() ? 'selected' : ''}>👑 ${this.escapeHtml(n)} (${this.escapeHtml(c)})</option>`;
+              }).join('')}
+            </optgroup>
+            <optgroup label="Other Active Employees">
+              ${otherEmps.map(o => {
+                const n = String(o['Employee Name'] || o['Name'] || '').trim();
+                return `<option value="${this.escapeHtml(n)}" ${n.toLowerCase() === currentForeman.toLowerCase() ? 'selected' : ''}>${this.escapeHtml(n)}</option>`;
+              }).join('')}
+            </optgroup>
+          </select>
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 8px; padding: 12px 18px; border-top: 1px solid var(--border-color); background: var(--bg-primary);">
+          <button class="btn btn-secondary" onclick="document.getElementById('${modalId}').remove()">Cancel</button>
+          <button class="btn btn-primary" id="btn-save-foreman" style="background: #ec4899; border-color: #ec4899; font-weight: 700;">
+            👑 Set as Foreman
+          </button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+
+    document.getElementById('btn-save-foreman')?.addEventListener('click', async () => {
+      const selected = document.getElementById('modal-foreman-select')?.value.trim() || '';
+      modal.remove();
+      await this.setCrewForeman(baseJob, selected);
+    });
+  }
+
+  async setCrewForeman(baseJob, newForeman) {
+    const jtTable = this.db.getTable('job_tracking');
+    if (!jtTable || !jtTable.rows) return;
+    const jt = jtTable.rows.find(j => {
+      const jn = String(j['Job Number'] || j['Job #'] || '').trim();
+      return jn === baseJob || jn.replace(/\.\d+.*$/, '').trim() === baseJob;
+    });
+    if (!jt) return;
+
+    jt['Foreman'] = newForeman;
+    const colIdx = (jtTable.headers || []).findIndex(h => /^foreman$/i.test(h)) + 1;
+    const rowIdx = jt._rowIdx || (jtTable.rows.indexOf(jt) + 2);
+    if (jtTable.rawGrid && jtTable.rawGrid[rowIdx - 1] && colIdx > 0) {
+      jtTable.rawGrid[rowIdx - 1][colIdx - 1] = newForeman;
+    }
+
+    await this.db.addMutation({
+      action: 'UPDATE_CELL',
+      sheetName: jtTable.name || 'Job Tracking',
+      tableKey: 'job_tracking',
+      row: rowIdx,
+      col: colIdx > 0 ? colIdx : 3,
+      header: 'Foreman',
+      itemIdentifier: baseJob,
+      value: newForeman
+    });
+
+    await this.db.persistSnapshot(this.db.snapshot);
+    this.renderCurrentSheet();
+    if (typeof window.showToast === 'function') {
+      window.showToast(`👑 Updated foreman for ${baseJob} to ${newForeman || '(None)'}`);
+    }
+  }
+
+  promptChangeMemberSlot(empName, currentSlot, baseJob) {
+    const currentSuffix = (currentSlot.match(/\.(\d+)/) || [])[1] || '1';
+    const newSuffix = prompt(`Edit slot suffix for ${empName} on Job ${baseJob}:\n\nEnter position number (e.g. 1, 2, 3...):`, currentSuffix);
+    if (newSuffix === null || newSuffix.trim() === '' || newSuffix.trim() === currentSuffix) return;
+
+    const cleanNum = parseInt(newSuffix.trim(), 10);
+    if (isNaN(cleanNum) || cleanNum < 1) {
+      alert('Please enter a valid positive slot number (e.g. 1, 2, 3).');
+      return;
+    }
+
+    const newJobNumber = `${baseJob}.${cleanNum}`;
+    this.executeMemberSlotChange(empName, newJobNumber);
+  }
+
+  async executeMemberSlotChange(empName, newJobNumber) {
+    const empTable = this.db.getTable('employees');
+    if (!empTable || !empTable.rows) return;
+    const emp = empTable.rows.find(e => String(e['Employee Name'] || e['Name'] || '').trim().toLowerCase() === empName.toLowerCase());
+    if (!emp) return;
+
+    const oldSlot = emp['Job Number'];
+    emp['Job Number'] = newJobNumber;
+    if (emp['Job #']) emp['Job #'] = newJobNumber;
+
+    const colIdx = (empTable.headers || []).findIndex(h => /^(job\s*#|job\s*number)$/i.test(h)) + 1;
+    const rIdx = emp._rowIdx || (empTable.rows.indexOf(emp) + 2);
+    if (empTable.rawGrid && empTable.rawGrid[rIdx - 1] && colIdx > 0) {
+      empTable.rawGrid[rIdx - 1][colIdx - 1] = newJobNumber;
+    }
+
+    await this.db.addMutation({
+      action: 'UPDATE_CELL',
+      sheetName: empTable.name || 'Employees',
+      tableKey: 'employees',
+      row: rIdx,
+      col: colIdx > 0 ? colIdx : 2,
+      header: 'Job Number',
+      itemIdentifier: empName,
+      oldValue: oldSlot,
+      value: newJobNumber
+    });
+
+    await this.db.persistSnapshot(this.db.snapshot);
+    this.renderCurrentSheet();
+    if (typeof window.showToast === 'function') {
+      window.showToast(`✅ Updated slot for ${empName}: ${newJobNumber}`);
+    }
+  }
+
+  promptChangeMemberClassification(empName, currentClassification) {
+    const standardRoles = [
+      'SUP', 'GF', 'F', 'GTO F', 'JL', 'JRY', 'JRY OP', 'WT', 'GTO',
+      'EO 1', 'EO 2', 'AP 7', 'AP 6', 'AP 5', 'AP 4', 'AP 3', 'AP 2', 'AP 1'
+    ];
+
+    const modalId = 'change-classification-modal';
+    const oldModal = document.getElementById(modalId);
+    if (oldModal) oldModal.remove();
+
+    const modal = document.createElement('div');
+    modal.id = modalId;
+    modal.className = 'modal active';
+    modal.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 1050; padding: 20px;';
+    modal.innerHTML = `
+      <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; max-width: 400px; width: 100%; box-shadow: 0 10px 30px rgba(0,0,0,0.5); overflow: hidden;">
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border-bottom: 1px solid var(--border-color);">
+          <div style="font-weight: 800; font-size: 15px; color: var(--text-primary); display: flex; align-items: center; gap: 8px;">
+            <span>🏷️</span> Classification for ${this.escapeHtml(empName)}
+          </div>
+          <button class="btn btn-xs btn-secondary" onclick="document.getElementById('${modalId}').remove()" style="cursor: pointer;">✖</button>
+        </div>
+        <div style="padding: 16px 18px;">
+          <label style="font-size: 12px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 6px;">Select Job Classification:</label>
+          <select id="modal-role-select" class="form-control" style="width: 100%; padding: 8px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); font-size: 13px;">
+            ${standardRoles.map(r => `<option value="${r}" ${r.toUpperCase() === currentClassification.toUpperCase() ? 'selected' : ''}>${r}</option>`).join('')}
+          </select>
+        </div>
+        <div style="display: flex; justify-content: flex-end; gap: 8px; padding: 12px 18px; border-top: 1px solid var(--border-color); background: var(--bg-primary);">
+          <button class="btn btn-secondary" onclick="document.getElementById('${modalId}').remove()">Cancel</button>
+          <button class="btn btn-primary" id="btn-save-role" style="background: #2563eb; border-color: #2563eb; font-weight: 700;">
+            💾 Save Classification
+          </button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+
+    document.getElementById('btn-save-role')?.addEventListener('click', async () => {
+      const selected = document.getElementById('modal-role-select')?.value.trim() || '';
+      modal.remove();
+      if (selected) {
+        await this.executeMemberClassificationChange(empName, selected);
+      }
+    });
+  }
+
+  async executeMemberClassificationChange(empName, newRole) {
+    const empTable = this.db.getTable('employees');
+    if (!empTable || !empTable.rows) return;
+    const emp = empTable.rows.find(e => String(e['Employee Name'] || e['Name'] || '').trim().toLowerCase() === empName.toLowerCase());
+    if (!emp) return;
+
+    emp['Job Classification'] = newRole;
+    if (emp['Classification']) emp['Classification'] = newRole;
+    if (emp['Role']) emp['Role'] = newRole;
+
+    const colIdx = (empTable.headers || []).findIndex(h => /^(job\s*classification|classification|role)$/i.test(h)) + 1;
+    const rIdx = emp._rowIdx || (empTable.rows.indexOf(emp) + 2);
+    if (empTable.rawGrid && empTable.rawGrid[rIdx - 1] && colIdx > 0) {
+      empTable.rawGrid[rIdx - 1][colIdx - 1] = newRole;
+    }
+
+    await this.db.addMutation({
+      action: 'UPDATE_CELL',
+      sheetName: empTable.name || 'Employees',
+      tableKey: 'employees',
+      row: rIdx,
+      col: colIdx > 0 ? colIdx : 4,
+      header: 'Job Classification',
+      itemIdentifier: empName,
+      value: newRole
+    });
+
+    await this.db.persistSnapshot(this.db.snapshot);
+    this.renderCurrentSheet();
+    if (typeof window.showToast === 'function') {
+      window.showToast(`✅ Updated classification for ${empName}: ${newRole}`);
+    }
+  }
+
+  openMemberRowActions(event, empName, baseJob, isLead, isSecondary) {
+    event.stopPropagation();
+    const existing = document.getElementById('crew-member-actions-menu');
+    if (existing) existing.remove();
+
+    const menu = document.createElement('div');
+    menu.id = 'crew-member-actions-menu';
+    menu.style.cssText = `
+      position: fixed;
+      top: ${event.clientY + 5}px;
+      left: ${Math.min(event.clientX, window.innerWidth - 220)}px;
+      background: var(--bg-secondary);
+      border: 1px solid var(--border-color);
+      border-radius: 6px;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+      z-index: 1070;
+      min-width: 200px;
+      padding: 6px 0;
+      font-size: 12px;
+      display: flex;
+      flex-direction: column;
+    `;
+
+    const makeItem = (icon, label, onClick) => {
+      const btn = document.createElement('button');
+      btn.style.cssText = 'background: transparent; border: none; padding: 7px 14px; text-align: left; color: var(--text-primary); cursor: pointer; display: flex; align-items: center; gap: 8px; font-size: 12px; width: 100%;';
+      btn.innerHTML = `<span>${icon}</span> <span>${this.escapeHtml(label)}</span>`;
+      btn.onmouseover = () => { btn.style.background = 'rgba(255,255,255,0.06)'; };
+      btn.onmouseout = () => { btn.style.background = 'transparent'; };
+      btn.onclick = () => {
+        menu.remove();
+        onClick();
+      };
+      return btn;
+    };
+
+    if (!isLead) {
+      menu.appendChild(makeItem('👑', `Make Foreman for ${baseJob}`, () => {
+        this.setCrewForeman(baseJob, empName);
+      }));
+    }
+
+    menu.appendChild(makeItem('✏️', 'Edit Slot Number', () => {
+      const empTable = this.db.getTable('employees');
+      const emp = (empTable?.rows || []).find(e => String(e['Employee Name'] || e['Name'] || '').trim().toLowerCase() === empName.toLowerCase());
+      this.promptChangeMemberSlot(empName, emp?.['Job Number'] || '', baseJob);
+    }));
+
+    menu.appendChild(makeItem('🏷️', 'Change Classification', () => {
+      const empTable = this.db.getTable('employees');
+      const emp = (empTable?.rows || []).find(e => String(e['Employee Name'] || e['Name'] || '').trim().toLowerCase() === empName.toLowerCase());
+      this.promptChangeMemberClassification(empName, emp?.['Job Classification'] || '');
+    }));
+
+    menu.appendChild(makeItem('⚡', 'Assign Secondary Job', () => {
+      this.promptAssignSecondaryJob(empName);
+    }));
+
+    menu.appendChild(makeItem('👤', 'Open Employee Profile', () => {
+      if (window.employeeProfileEngine) {
+        window.employeeProfileEngine.openProfileModal(empName);
+      }
+    }));
+
+    const divider = document.createElement('div');
+    divider.style.cssText = 'height: 1px; background: var(--border-color); margin: 4px 0;';
+    menu.appendChild(divider);
+
+    menu.appendChild(makeItem('🚪', 'Remove from Crew', () => {
+      this.promptRemoveMemberFromCrew(empName, baseJob, isSecondary);
+    }));
+
+    document.body.appendChild(menu);
+
+    const closeHandler = (e) => {
+      if (!menu.contains(e.target)) {
+        menu.remove();
+        document.removeEventListener('click', closeHandler);
+      }
+    };
+    setTimeout(() => document.addEventListener('click', closeHandler), 10);
+  }
+
+  promptAssignSecondaryJob(empName) {
+    const empTable = this.db.getTable('employees');
+    const emp = (empTable?.rows || []).find(e => String(e['Employee Name'] || e['Name'] || '').trim().toLowerCase() === empName.toLowerCase());
+    const curSec = emp?.['Secondary Job Number'] || emp?.['Secondary Job #'] || '';
+    const newSec = prompt(`Assign or edit secondary job for ${empName}:\n(e.g. 040-26 (Fri-Sat).1 — or leave blank to clear)`, curSec);
+    if (newSec === null) return;
+    this.executeSecondaryJobChange(empName, newSec.trim());
+  }
+
+  async executeSecondaryJobChange(empName, newSecJob) {
+    const empTable = this.db.getTable('employees');
+    if (!empTable || !empTable.rows) return;
+    const emp = empTable.rows.find(e => String(e['Employee Name'] || e['Name'] || '').trim().toLowerCase() === empName.toLowerCase());
+    if (!emp) return;
+
+    emp['Secondary Job Number'] = newSecJob;
+    if (emp['Secondary Job #']) emp['Secondary Job #'] = newSecJob;
+
+    const colIdx = (empTable.headers || []).findIndex(h => /secondary\s*job/i.test(h)) + 1;
+    const rIdx = emp._rowIdx || (empTable.rows.indexOf(emp) + 2);
+    if (empTable.rawGrid && empTable.rawGrid[rIdx - 1] && colIdx > 0) {
+      empTable.rawGrid[rIdx - 1][colIdx - 1] = newSecJob;
+    }
+
+    await this.db.addMutation({
+      action: 'UPDATE_CELL',
+      sheetName: empTable.name || 'Employees',
+      tableKey: 'employees',
+      row: rIdx,
+      col: colIdx > 0 ? colIdx : 5,
+      header: 'Secondary Job Number',
+      itemIdentifier: empName,
+      value: newSecJob
+    });
+
+    await this.db.persistSnapshot(this.db.snapshot);
+    this.renderCurrentSheet();
+    if (typeof window.showToast === 'function') {
+      window.showToast(`⚡ Updated secondary job for ${empName}: ${newSecJob || '(Cleared)'}`);
+    }
+  }
+
+  async promptRemoveMemberFromCrew(empName, baseJob, isSecondary = false) {
+    if (!confirm(`Are you sure you want to remove ${empName} from ${baseJob}?`)) return;
+
+    const empTable = this.db.getTable('employees');
+    if (!empTable || !empTable.rows) return;
+    const emp = empTable.rows.find(e => String(e['Employee Name'] || e['Name'] || '').trim().toLowerCase() === empName.toLowerCase());
+    if (!emp) return;
+
+    if (isSecondary) {
+      await this.executeSecondaryJobChange(empName, '');
+      return;
+    }
+
+    const oldSlot = emp['Job Number'];
+    emp['Job Number'] = 'Unassigned';
+    if (emp['Job #']) emp['Job #'] = 'Unassigned';
+
+    const colIdx = (empTable.headers || []).findIndex(h => /^(job\s*#|job\s*number)$/i.test(h)) + 1;
+    const rIdx = emp._rowIdx || (empTable.rows.indexOf(emp) + 2);
+    if (empTable.rawGrid && empTable.rawGrid[rIdx - 1] && colIdx > 0) {
+      empTable.rawGrid[rIdx - 1][colIdx - 1] = 'Unassigned';
+    }
+
+    await this.db.addMutation({
+      action: 'UPDATE_CELL',
+      sheetName: empTable.name || 'Employees',
+      tableKey: 'employees',
+      row: rIdx,
+      col: colIdx > 0 ? colIdx : 2,
+      header: 'Job Number',
+      itemIdentifier: empName,
+      oldValue: oldSlot,
+      value: 'Unassigned'
+    });
+
+    // Update JT Crew Size
+    const jtTable = this.db.getTable('job_tracking');
+    if (jtTable && jtTable.rows) {
+      const jt = jtTable.rows.find(j => {
+        const jn = String(j['Job Number'] || j['Job #'] || '').trim();
+        return jn === baseJob || jn.replace(/\.\d+.*$/, '').trim() === baseJob;
+      });
+      if (jt) {
+        const curSize = parseInt(jt['Crew Size'], 10) || 1;
+        jt['Crew Size'] = Math.max(0, curSize - 1);
+        const jtColIdx = (jtTable.headers || []).findIndex(h => /^crew\s*size$/i.test(h)) + 1;
+        const jtRowIdx = jt._rowIdx || (jtTable.rows.indexOf(jt) + 2);
+        if (jtTable.rawGrid && jtTable.rawGrid[jtRowIdx - 1] && jtColIdx > 0) {
+          jtTable.rawGrid[jtRowIdx - 1][jtColIdx - 1] = jt['Crew Size'];
+        }
+        await this.db.addMutation({
+          action: 'UPDATE_CELL',
+          sheetName: jtTable.name || 'Job Tracking',
+          tableKey: 'job_tracking',
+          row: jtRowIdx,
+          col: jtColIdx > 0 ? jtColIdx : 4,
+          header: 'Crew Size',
+          itemIdentifier: baseJob,
+          value: jt['Crew Size']
+        });
+      }
+    }
+
+    await this.db.persistSnapshot(this.db.snapshot);
+    this.renderCurrentSheet();
+    if (typeof window.showToast === 'function') {
+      window.showToast(`🚪 Removed ${empName} from ${baseJob}. Status set to Unassigned.`);
+    }
   }
 
   renderStandardTable(container, countBadge, tableData) {
