@@ -2038,6 +2038,28 @@ class SheetNavigator {
       crewGroups.get(baseJob).push(emp);
     });
 
+    // Second pass: also register each employee under their secondary job's base crew group.
+    // This populates cards like "040-26 (Fri-Sat)" whose members are primarily on another crew.
+    fieldCrewMembers.forEach(emp => {
+      if (!emp.secondaryJob) return;
+      // Base of secondary job: strip trailing .N suffix but keep parenthesized schedule tag (e.g. "040-26 (Fri-Sat)")
+      const secBase = emp.secondaryJob.replace(/\.\d+\s*$/, '').trim();
+      if (!secBase || secBase === emp.jobNumber.replace(/\.\d+.*$/, '').trim()) return;
+      if (!crewGroups.has(secBase)) {
+        crewGroups.set(secBase, []);
+      }
+      // Don't double-add if already there
+      const existing = crewGroups.get(secBase);
+      if (!existing.find(m => m.name === emp.name && m.isSecondaryMember)) {
+        existing.push({
+          ...emp,
+          isSecondaryMember: true,
+          // Display their secondary job number (e.g. "040-26 (Fri-Sat).3") instead of primary
+          jobNumber: emp.secondaryJob
+        });
+      }
+    });
+
     // Also include any active crews from job_tracking that currently have 0 assigned members (unless filtered out by search)
     if (!searchTerm && jtRows.length > 0) {
       jtRows.forEach(jt => {
