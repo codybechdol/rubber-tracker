@@ -842,15 +842,13 @@ class SheetNavigator {
     const tableData = this.db ? this.db.getTable('expiring_certs') : null;
     if (!tableData || !tableData.rows) return;
 
-    let targetIdx = -1;
-    if (tableData.rows.some(r => r._rowIdx !== undefined)) {
-      targetIdx = tableData.rows.findIndex(r => r._rowIdx === sheetRowIdx);
+    let targetRow = null;
+    if (sheetRowIdx) {
+      targetRow = tableData.rows.find(r => r._rowIdx === sheetRowIdx);
     }
-    if (targetIdx === -1 && sheetRowIdx >= 2) {
-      targetIdx = sheetRowIdx - 2;
+    if (!targetRow && sheetRowIdx >= 2 && tableData.rows[sheetRowIdx - 2]) {
+      targetRow = tableData.rows[sheetRowIdx - 2];
     }
-
-    const targetRow = tableData.rows[targetIdx];
     if (!targetRow) return;
 
     const empName = String(targetRow['Employee Name'] || targetRow['Name'] || Object.values(targetRow)[0] || '').trim();
@@ -5084,10 +5082,17 @@ class SheetNavigator {
     rows.forEach((row, rowIdx) => {
       let sheetRowIdx = row._rowIdx;
       if (!sheetRowIdx && tableData.rawGrid) {
-        const itemVal = String(row['Serial #'] || row['Item #'] || row['Glove'] || row['Sleeve'] || row['Blanket'] || row['MACK'] || row['Name'] || row['Employee Name'] || row['Job Number'] || Object.values(row)[0] || '').trim().toLowerCase();
-        if (itemVal) {
-          const gIdx = tableData.rawGrid.findIndex((gr, idx) => idx > 0 && String(gr[0] || '').trim().toLowerCase() === itemVal);
+        if (this.currentSheetKey === 'expiring_certs') {
+          const empVal = String(row['Employee Name'] || row['Name'] || '').trim().toLowerCase();
+          const certVal = String(row['Item Type'] || row['Cert Type'] || '').trim().toLowerCase();
+          const gIdx = tableData.rawGrid.findIndex((gr, idx) => idx > 0 && String(gr[0] || '').trim().toLowerCase() === empVal && String(gr[1] || '').trim().toLowerCase() === certVal);
           if (gIdx !== -1) sheetRowIdx = gIdx + 1;
+        } else {
+          const itemVal = String(row['Serial #'] || row['Item #'] || row['Glove'] || row['Sleeve'] || row['Blanket'] || row['MACK'] || row['Name'] || row['Employee Name'] || row['Job Number'] || Object.values(row)[0] || '').trim().toLowerCase();
+          if (itemVal) {
+            const gIdx = tableData.rawGrid.findIndex((gr, idx) => idx > 0 && String(gr[0] || '').trim().toLowerCase() === itemVal);
+            if (gIdx !== -1) sheetRowIdx = gIdx + 1;
+          }
         }
       }
       if (!sheetRowIdx && tableData.rows) {
@@ -5402,8 +5407,12 @@ class SheetNavigator {
         }
 
         const isSmsCol = hLower.includes('sms');
-        const isEditable = !isPrimaryItemCol && !isEmployeeNameCol && !isSmsCol && !hLower.includes('change out') && !hLower.startsWith('skip ');
-        const itemIdentifier = String(row['Item #'] || row['HVT #'] || row['Phasing Set #'] || row['AED #'] || row['Glove'] || row['Sleeve'] || row['Blanket'] || row['MACK'] || row['Serial #'] || row['Name'] || row['Employee Name'] || row['Job Number'] || Object.values(row)[0] || '').trim();
+        let itemIdentifier = '';
+        if (this.currentSheetKey === 'expiring_certs') {
+          itemIdentifier = `${row['Employee Name'] || row['Name'] || ''} | ${row['Item Type'] || row['Cert Type'] || ''}`;
+        } else {
+          itemIdentifier = String(row['Item #'] || row['HVT #'] || row['Phasing Set #'] || row['AED #'] || row['Glove'] || row['Sleeve'] || row['Blanket'] || row['MACK'] || row['Serial #'] || row['Name'] || row['Employee Name'] || row['Job Number'] || Object.values(row)[0] || '').trim();
+        }
 
         html += `<td class="${isEditable ? 'editable' : ''}" 
                      contenteditable="${isEditable}" 
@@ -5568,18 +5577,41 @@ class SheetNavigator {
           let actualRowIdx = row;
 
           if (tableData) {
-            if (itemIdentifier && tableData.rows) {
-              tableRow = tableData.rows.find(r => {
-                const id = String(r['Serial #'] || r['Item #'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['MACK'] || r['Name'] || r['Employee Name'] || r['Job Number'] || Object.values(r)[0] || '').trim();
-                return id.toLowerCase() === itemIdentifier.toLowerCase();
-              });
+            // 1. Direct match by exact row index (fastest and most accurate for all sheets)
+            if (row && tableData.rows) {
+              tableRow = tableData.rows.find(r => r._rowIdx === row);
             }
-            if (itemIdentifier && tableData.rawGrid) {
-              const gIdx = tableData.rawGrid.findIndex((gr, idx) => idx > 0 && String(gr[0] || '').trim().toLowerCase() === itemIdentifier.toLowerCase());
-              if (gIdx !== -1) {
-                actualRowIdx = gIdx + 1;
+
+            // 2. For expiring_certs, if not found by _rowIdx, match by composite "Employee Name | Item Type"
+            if (!tableRow && this.currentSheetKey === 'expiring_certs' && tableData.rows && itemIdentifier) {
+              const parts = itemIdentifier.split('|').map(s => s.trim().toLowerCase());
+              if (parts.length === 2) {
+                tableRow = tableData.rows.find(r => {
+                  const rEmp = String(r['Employee Name'] || r['Name'] || '').trim().toLowerCase();
+                  const rType = String(r['Item Type'] || r['Cert Type'] || '').trim().toLowerCase();
+                  return rEmp === parts[0] && rType === parts[1];
+                });
+                if (tableRow && tableRow._rowIdx) actualRowIdx = tableRow._rowIdx;
               }
             }
+
+            // 3. For single-key sheets (inventory by item#, employees by name), use itemIdentifier fallback
+            const isMultiRowSheet = ['expiring_certs', 'training_tracking', 'safety_compliance', 'dot_drug_tests'].includes(this.currentSheetKey);
+            if (!tableRow && !isMultiRowSheet) {
+              if (itemIdentifier && tableData.rows) {
+                tableRow = tableData.rows.find(r => {
+                  const id = String(r['Serial #'] || r['Item #'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['MACK'] || r['Name'] || r['Employee Name'] || r['Job Number'] || Object.values(r)[0] || '').trim();
+                  return id.toLowerCase() === itemIdentifier.toLowerCase();
+                });
+              }
+              if (itemIdentifier && tableData.rawGrid) {
+                const gIdx = tableData.rawGrid.findIndex((gr, idx) => idx > 0 && String(gr[0] || '').trim().toLowerCase() === itemIdentifier.toLowerCase());
+                if (gIdx !== -1) {
+                  actualRowIdx = gIdx + 1;
+                }
+              }
+            }
+
             if (!tableRow && tableData.rows && tableData.rows[actualRowIdx - 2]) {
               tableRow = tableData.rows[actualRowIdx - 2];
             }
