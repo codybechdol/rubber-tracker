@@ -118,6 +118,72 @@ class TripPlannerApp {
     return `${table}|${emp}|${type}|${itm}`;
   }
 
+  /**
+   * Checks whether a picked swap is scheduled for a date in Trip Planner.
+   * Checks both explicit swap scheduling (this.scheduledSwaps) and planned location/crew trips (this.plannedTrips).
+   * Returns { dateKey, location, source } or null if not scheduled.
+   */
+  getSwapScheduleInfo(item, targetTodayKey = null) {
+    if (!item) return null;
+    const sKey = this.getSwapKey(item);
+
+    // 1. Explicit swap schedule (from drag & drop of swap/employee/location)
+    if (this.scheduledSwaps && this.scheduledSwaps[sKey]) {
+      const entry = this.scheduledSwaps[sKey];
+      const dateKey = typeof entry === 'object' ? entry.dateKey : entry;
+      const location = typeof entry === 'object' ? entry.location : (item.location || '');
+      if (dateKey) {
+        // Check if the scheduled trip on that dateKey still exists in plannedTrips
+        const tripsOnDate = this.getTripsForDate(dateKey);
+        const tripStillExists = tripsOnDate.length === 0 || tripsOnDate.some(t => 
+          !location || (t.location || '').toLowerCase() === location.toLowerCase()
+        );
+        if (tripStillExists) {
+          return { dateKey, location, source: 'explicit' };
+        } else {
+          delete this.scheduledSwaps[sKey];
+          this.saveScheduledSwaps();
+        }
+      }
+    }
+
+    // 2. Check planned trips across dates
+    if (this.plannedTrips) {
+      const itemLoc = this.cleanPhysicalLocation(item.location || '').toLowerCase();
+      const itemSig = this.getSignificantJobNumber(item.crewId || item.jobNum || '').toLowerCase();
+
+      const today = new Date();
+      const todayKey = targetTodayKey || `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+
+      // Sort dates so upcoming/today dates take precedence over past dates
+      const dates = Object.keys(this.plannedTrips).sort();
+      const upcomingDates = dates.filter(d => d >= todayKey);
+      const pastDates = dates.filter(d => d < todayKey).reverse();
+      const searchDates = [...upcomingDates, ...pastDates];
+
+      for (const dKey of searchDates) {
+        const trips = this.getTripsForDate(dKey);
+        for (const trip of trips) {
+          const tripLoc = this.cleanPhysicalLocation(trip.location || '').toLowerCase();
+          if (tripLoc && tripLoc === itemLoc) {
+            // Check crew if trip specifies a crew
+            if (trip.crew) {
+              const tripSig = this.getSignificantJobNumber(trip.crew).toLowerCase();
+              if ((tripSig && itemSig && tripSig === itemSig) || trip.crew.toLowerCase() === (item.crewId || '').toLowerCase()) {
+                return { dateKey: dKey, location: trip.location, source: 'plannedTrip' };
+              }
+            } else {
+              // Trip is for the entire location
+              return { dateKey: dKey, location: trip.location, source: 'plannedTrip' };
+            }
+          }
+        }
+      }
+    }
+
+    return null;
+  }
+
   loadDismissedMonthlyTrainings() {
     try {
       return JSON.parse(localStorage.getItem('TRIP_PLANNER_DISMISSED_TRAININGS') || '{}');
@@ -6425,37 +6491,21 @@ class TripPlannerApp {
 
     const data = this.getPickedSwapsData();
 
-    if (countBadge) {
-      countBadge.textContent = `${data.totalPicked} Picked`;
-    }
-    if (collapsedCountBadge) {
-      collapsedCountBadge.textContent = `${data.totalPicked}`;
-    }
-
     let items = data.items;
 
     // Filter out swaps that are scheduled for today or an upcoming day (scheduledDate >= todayKey)
-    // If the scheduled day has passed (scheduledDate < todayKey) and swap is not completed, it is kept in the list (added back)!
+    // Both explicit swap assignments (this.scheduledSwaps) and planned location/crew trips (this.plannedTrips) are checked.
+    // If the scheduled day has passed (scheduledDate < todayKey) and swap is not completed, it is kept in the list (added back as missed)!
     const today = new Date();
     const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
     items = items.filter(i => {
-      const sKey = this.getSwapKey(i);
-      const schedEntry = this.scheduledSwaps ? this.scheduledSwaps[sKey] : null;
-      if (!schedEntry) return true;
-      const schedDate = typeof schedEntry === 'object' ? schedEntry.dateKey : schedEntry;
+      const sched = this.getSwapScheduleInfo(i, todayKey);
+      if (!sched) return true;
+      const schedDate = sched.dateKey;
       if (!schedDate) return true;
 
-      // Check if the scheduled trip on that dateKey still exists in plannedTrips
-      const tripsOnDate = this.getTripsForDate(schedDate);
-      const tripStillExists = tripsOnDate.some(t => (t.location || '').toLowerCase() === (i.location || '').toLowerCase());
-      if (!tripStillExists) {
-        delete this.scheduledSwaps[sKey];
-        this.saveScheduledSwaps();
-        return true;
-      }
-
-      // If scheduled for today or upcoming date, remove from left list
+      // If scheduled for today or upcoming date, remove from left sidebar list
       if (schedDate >= todayKey) {
         return false;
       }
@@ -6505,7 +6555,7 @@ class TripPlannerApp {
       } else {
         list.innerHTML = `
           <div style="padding: 24px 14px; text-align: center; color: var(--text-muted); font-size: 11.5px; background: rgba(0,0,0,0.1); border-radius: 6px; border: 1px dashed var(--border-color);">
-            No uncompleted picked swaps for this filter.
+            All picked swaps scheduled for upcoming trips ✅
           </div>
         `;
       }
