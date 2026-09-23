@@ -1711,7 +1711,7 @@ class SheetNavigator {
               }
             }
 
-            const isReadOnly = colLower.includes('change out') || colLower.includes('days');
+            const isReadOnly = colLower.includes('change out') || colLower.includes('days') || window.currentRoleMode === 'view_only';
             isCellEditable = !isReadOnly;
             
             const isEmployeeCol = (c === 0 || colLower === 'employee');
@@ -1902,6 +1902,7 @@ class SheetNavigator {
     // Attach checkbox toggle handlers for swap reports
     container.querySelectorAll('[data-toggle-checkbox]').forEach(cb => {
       cb.addEventListener('click', async (e) => {
+        if (window.currentRoleMode === 'view_only') return;
         const span = e.currentTarget;
         const sheetName = span.dataset.sheet;
         const row = parseInt(span.dataset.toggleCheckbox, 10);
@@ -2816,6 +2817,8 @@ class SheetNavigator {
         card.style.background = '';
         card.style.boxShadow = '';
 
+        if (window.currentRoleMode === 'view_only') return;
+
         let data = null;
         try {
           const raw = e.dataTransfer.getData('application/json');
@@ -2854,6 +2857,8 @@ class SheetNavigator {
         e.preventDefault();
         card.style.borderColor = '';
         card.style.background = '';
+
+        if (window.currentRoleMode === 'view_only') return;
 
         let data = null;
         try {
@@ -5412,7 +5417,7 @@ class SheetNavigator {
         }
 
         const isSmsCol = hLower.includes('sms');
-        const isEditable = !isPrimaryItemCol && !isEmployeeNameCol && !isSmsCol && !hLower.includes('change out') && !hLower.startsWith('skip ');
+        const isEditable = !isPrimaryItemCol && !isEmployeeNameCol && !isSmsCol && !hLower.includes('change out') && !hLower.startsWith('skip ') && window.currentRoleMode !== 'view_only';
         let itemIdentifier = '';
         if (this.currentSheetKey === 'expiring_certs') {
           itemIdentifier = `${row['Employee Name'] || row['Name'] || ''} | ${row['Item Type'] || row['Cert Type'] || ''}`;
@@ -5429,7 +5434,7 @@ class SheetNavigator {
                      data-sheet="${this.escapeHtml(tableData.name)}">${customCellHtml !== null ? customCellHtml : this.escapeHtml(val)}</td>`;
       });
       if (this.currentSheetKey === 'expiring_certs') {
-        html += `<td style="text-align: center; width: 74px; white-space: nowrap;">
+        html += `<td class="admin-only-control" style="text-align: center; width: 74px; white-space: nowrap;">
           <button class="btn btn-secondary" style="padding: 2px 7px; font-size: 11px; color: #60a5fa; border-color: rgba(96, 165, 250, 0.35); background: rgba(96, 165, 250, 0.08); cursor: pointer; margin-right: 4px;" onclick="window.sheetNavigator.openCertEditModal(${sheetRowIdx})" title="Edit certification dates, provider & notes">✏️</button>
           <button class="btn btn-secondary" style="padding: 2px 7px; font-size: 11px; color: #f87171; border-color: rgba(239, 68, 68, 0.35); background: rgba(239, 68, 68, 0.08); cursor: pointer;" onclick="window.sheetNavigator.deleteCertRow(${sheetRowIdx})" title="Delete this certification record">🗑️</button>
         </td>`;
@@ -5472,6 +5477,7 @@ class SheetNavigator {
 
       // Quick calendar picker on double-click for date cells
       td.addEventListener('dblclick', () => {
+        if (window.currentRoleMode === 'view_only') return;
         if (header.includes('date') || header.includes('expiration') || header.includes('calibration')) {
           const targetCell = td;
           const currentText = targetCell.textContent.trim();
@@ -6503,6 +6509,7 @@ class SheetNavigator {
     // Attach checkbox toggle handlers
     container.querySelectorAll('[data-toggle-checkbox]').forEach(cb => {
       cb.addEventListener('click', async (e) => {
+        if (window.currentRoleMode === 'view_only') return;
         const span = e.currentTarget;
         const sheetName = span.dataset.sheet;
         const row = parseInt(span.dataset.toggleCheckbox, 10);

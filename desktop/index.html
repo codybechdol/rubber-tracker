@@ -25,8 +25,8 @@
     </div>
 
     <div class="header-actions">
-      <!-- Role Switcher (Admin vs Field Inspector) -->
-      <button class="btn btn-secondary" id="btn-role-mode-toggle" onclick="window.toggleAppRoleMode()" style="font-size: 11.5px; font-weight: 700; background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4); display: flex; align-items: center; gap: 4px;" title="Click to toggle between Admin and Field Inspector modes">
+      <!-- Role Switcher (Admin vs View Only) -->
+      <button class="btn btn-secondary" id="btn-role-mode-toggle" onclick="window.toggleAppRoleMode()" style="font-size: 11.5px; font-weight: 700; background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4); display: flex; align-items: center; gap: 4px;" title="Click to toggle between Admin and View Only modes">
         <span>👑</span> Admin Mode
       </button>
 
@@ -45,7 +45,7 @@
         <span id="sync-status-text">Checking status...</span>
       </div>
 
-      <button class="btn btn-secondary admin-only-control" onclick="window.syncEngine.importLocalSnapshotFile()" title="Import database snapshot from local JSON file">
+      <button class="btn btn-secondary" id="import-snapshot-btn" onclick="window.syncEngine.importLocalSnapshotFile()" title="Import database snapshot from local JSON file">
         📁 Import Snapshot
       </button>
 
@@ -53,7 +53,7 @@
         ⬇️ Download Snapshot
       </button>
 
-      <button class="btn btn-primary" id="push-changes-btn" onclick="window.syncEngine.pushChangesToGoogleSheets()" title="Push pending offline changes to Google Sheets">
+      <button class="btn btn-primary admin-only-control" id="push-changes-btn" onclick="window.syncEngine.pushChangesToGoogleSheets()" title="Push pending offline changes to Google Sheets">
         ⬆️ Push Changes to Sheets
       </button>
 
@@ -74,7 +74,7 @@
           <span style="font-size: 11px; font-weight: 700; color: #93c5fd; text-transform: uppercase;">Cloud Sync</span>
           <span class="status-dot" id="mobile-sync-dot" style="width: 8px; height: 8px; border-radius: 50%; background: #10b981;"></span>
         </div>
-        <button class="btn btn-primary" onclick="window.syncEngine.pushChangesToGoogleSheets(); window.toggleMobileSidebar();" style="width: 100%; justify-content: center; font-size: 12px; font-weight: 700; background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);">
+        <button class="btn btn-primary admin-only-control" onclick="window.syncEngine.pushChangesToGoogleSheets(); window.toggleMobileSidebar();" style="width: 100%; justify-content: center; font-size: 12px; font-weight: 700; background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);">
           ⬆️ Push Changes to Sheets
         </button>
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
@@ -164,25 +164,25 @@
             <span class="brand-badge" id="sheet-row-count">0 rows</span>
           </div>
           <div style="display: flex; align-items: center; gap: 8px; margin-left: auto;">
-            <button class="btn" id="btn-import-crews" style="display: none; background: linear-gradient(135deg, #10b981, #059669); color: white; padding: 6px 14px; font-size: 12px; font-weight: 700;" onclick="window.sheetNavigator.openCrewImport()">
+            <button class="btn admin-only-control" id="btn-import-crews" style="display: none; background: linear-gradient(135deg, #10b981, #059669); color: white; padding: 6px 14px; font-size: 12px; font-weight: 700;" onclick="window.sheetNavigator.openCrewImport()">
               👥 Import Crews
             </button>
-            <button class="btn btn-secondary" id="btn-fix-changeout-dates" style="display: none; padding: 6px 12px; font-size: 12px;" onclick="window.inventoryManager.recalculateAllChangeOutDates(window.sheetNavigator.currentSheetKey)">
+            <button class="btn btn-secondary admin-only-control" id="btn-fix-changeout-dates" style="display: none; padding: 6px 12px; font-size: 12px;" onclick="window.inventoryManager.recalculateAllChangeOutDates(window.sheetNavigator.currentSheetKey)">
               🔄 Fix Due Dates
             </button>
-            <button class="btn btn-secondary" id="btn-reconcile-history" style="display: none; padding: 6px 12px; font-size: 12px;" onclick="window.inventoryManager.reconcileInventoryWithHistory(window.sheetNavigator ? window.sheetNavigator.currentSheetKey : 'gloves')" title="Reconcile active inventory with latest History records">
+            <button class="btn btn-secondary admin-only-control" id="btn-reconcile-history" style="display: none; padding: 6px 12px; font-size: 12px;" onclick="window.inventoryManager.reconcileInventoryWithHistory(window.sheetNavigator ? window.sheetNavigator.currentSheetKey : 'gloves')" title="Reconcile active inventory with latest History records">
               🔄 Reconcile from History
             </button>
-            <button class="btn" id="btn-generate-swaps" style="display: none; background: linear-gradient(135deg, #0284c7, #0369a1); color: white; padding: 6px 14px; font-size: 12px;" onclick="window.swapEngine.generateAllSwaps()">
+            <button class="btn admin-only-control" id="btn-generate-swaps" style="display: none; background: linear-gradient(135deg, #0284c7, #0369a1); color: white; padding: 6px 14px; font-size: 12px;" onclick="window.swapEngine.generateAllSwaps()">
               ⚡ Generate Swaps
             </button>
-            <button class="btn" id="btn-new-item" style="display: none; background: #2563eb; color: white; padding: 6px 14px; font-size: 12px;" onclick="window.inventoryManager.showNewItemModal(window.sheetNavigator.currentSheetKey)">
+            <button class="btn admin-only-control" id="btn-new-item" style="display: none; background: #2563eb; color: white; padding: 6px 14px; font-size: 12px;" onclick="window.inventoryManager.showNewItemModal(window.sheetNavigator.currentSheetKey)">
               ➕ New Item
             </button>
-            <button class="btn" id="btn-new-employee" style="background: linear-gradient(135deg, #10b981, #059669); color: white; padding: 6px 14px; font-size: 12px; font-weight: 700; display: none; align-items: center; gap: 5px;" onclick="window.sheetNavigator.showNewEmployeeModal()" title="Add a new employee to the active Employees sheet">
+            <button class="btn admin-only-control" id="btn-new-employee" style="background: linear-gradient(135deg, #10b981, #059669); color: white; padding: 6px 14px; font-size: 12px; font-weight: 700; display: none; align-items: center; gap: 5px;" onclick="window.sheetNavigator.showNewEmployeeModal()" title="Add a new employee to the active Employees sheet">
               <span>👤</span> New Employee
             </button>
-            <button class="btn btn-secondary" id="btn-transfer-equipment-top" style="display: none; padding: 6px 12px; font-size: 12px; align-items: center; gap: 5px; border-color: #0284c7; color: #38bdf8;" onclick="window.inventoryManager.openTransferEquipmentModal()" title="Transfer truck & crew equipment (Blankets, MACKs, HV Testers, Phasing Sets, AED, Grounds, Hot Sticks) from outgoing to incoming Foreman">
+            <button class="btn btn-secondary admin-only-control" id="btn-transfer-equipment-top" style="display: none; padding: 6px 12px; font-size: 12px; align-items: center; gap: 5px; border-color: #0284c7; color: #38bdf8;" onclick="window.inventoryManager.openTransferEquipmentModal()" title="Transfer truck & crew equipment (Blankets, MACKs, HV Testers, Phasing Sets, AED, Grounds, Hot Sticks) from outgoing to incoming Foreman">
               <span>⚡</span> Transfer Equipment
             </button>
             <button class="btn btn-secondary" id="btn-manage-drug-tests" style="display: none; padding: 6px 12px; font-size: 12px; align-items: center; gap: 5px; border-color: #8b5cf6; color: #a78bfa;" onclick="window.sheetNavigator.openDrugTestingWorkspace()" title="Open DOT Drug Testing & Clinic Scheduling workspace">
@@ -191,7 +191,7 @@
             <button class="btn btn-secondary" id="btn-toggle-sheet-visuals" style="display: none; padding: 6px 12px; font-size: 12px; align-items: center; gap: 5px; border-color: #3b82f6; color: #93c5fd;" onclick="window.sheetNavigator.toggleVisualsDashboard()" title="Toggle Visual Analytics & Lifecycle Metrics Dashboard">
               <span>📊</span> Visual Analytics
             </button>
-            <button class="btn btn-secondary" id="btn-push-clean-sheet" style="display: none; padding: 6px 12px; font-size: 12px;" onclick="window.syncEngine.pushFullCleanTable(window.sheetNavigator.currentSheetKey)" title="Push this full clean table directly to Google Sheets">
+            <button class="btn btn-secondary admin-only-control" id="btn-push-clean-sheet" style="display: none; padding: 6px 12px; font-size: 12px;" onclick="window.syncEngine.pushFullCleanTable(window.sheetNavigator.currentSheetKey)" title="Push this full clean table directly to Google Sheets">
               📤 Sync Sheet to Google
             </button>
             <!-- Employee Page View Mode Switcher (Crew Cards vs Table View) -->
@@ -2441,39 +2441,63 @@
       document.querySelector('.app-sidebar')?.classList.toggle('mobile-open');
     }
 
-    // Role Mode Management (Admin Mode vs Field Inspector Mode)
+    // Role Mode Management (Admin Mode vs View Only Mode)
     function setAppRoleMode(mode) {
-      window.currentRoleMode = mode;
+      // Normalize 'inspector' to 'view_only' for seamless migration
+      const normMode = (mode === 'inspector' || mode === 'view_only' || mode === 'view-only') ? 'view_only' : 'admin';
+      window.currentRoleMode = normMode;
       try {
-        localStorage.setItem('sa_app_role_mode', mode);
+        localStorage.setItem('sa_app_role_mode', normMode);
       } catch (e) {}
 
       const btn = document.getElementById('btn-role-mode-toggle');
       const badge = document.getElementById('app-mode-badge');
 
-      if (mode === 'inspector') {
-        document.body.classList.add('inspector-mode');
+      if (normMode === 'view_only') {
+        document.body.classList.add('view-only-mode');
+        document.body.classList.add('inspector-mode'); // backward compatibility
         if (btn) {
-          btn.innerHTML = '<span>👷</span> Inspector Mode';
-          btn.style.background = 'rgba(16, 185, 129, 0.15)';
-          btn.style.color = '#34d399';
-          btn.style.borderColor = 'rgba(16, 185, 129, 0.4)';
+          btn.innerHTML = '<span>👁️</span> View Only';
+          btn.style.background = 'rgba(245, 158, 11, 0.15)';
+          btn.style.color = '#fbbf24';
+          btn.style.borderColor = 'rgba(245, 158, 11, 0.4)';
+          btn.title = 'Current Mode: View Only (Manual edits disabled). Click to switch to Admin Mode.';
         }
-        if (badge) badge.textContent = 'Field Inspector';
+        if (badge) {
+          badge.textContent = 'View Only';
+          badge.style.backgroundColor = 'rgba(245, 158, 11, 0.2)';
+          badge.style.color = '#fbbf24';
+          badge.style.borderColor = '#f59e0b';
+        }
       } else {
+        document.body.classList.remove('view-only-mode');
         document.body.classList.remove('inspector-mode');
         if (btn) {
           btn.innerHTML = '<span>👑</span> Admin Mode';
           btn.style.background = 'rgba(59, 130, 246, 0.15)';
           btn.style.color = '#93c5fd';
           btn.style.borderColor = 'rgba(59, 130, 246, 0.4)';
+          btn.title = 'Current Mode: Admin Mode (Full edits & push enabled). Click to switch to View Only mode.';
         }
-        if (badge) badge.textContent = 'Admin Edition';
+        if (badge) {
+          badge.textContent = 'Admin Edition';
+          badge.style.backgroundColor = '';
+          badge.style.color = '';
+          badge.style.borderColor = '';
+        }
+      }
+
+      // Automatically re-render active views so all edit controls & bindings update immediately
+      if (window.sheetNavigator && typeof window.sheetNavigator.renderCurrentSheet === 'function') {
+        window.sheetNavigator.renderCurrentSheet();
+      }
+      if (window.tripPlanner && typeof window.tripPlanner.renderPlanner === 'function') {
+        window.tripPlanner.renderPlanner();
       }
     }
 
     function toggleAppRoleMode() {
-      const nextMode = window.currentRoleMode === 'inspector' ? 'admin' : 'inspector';
+      const nextMode = window.currentRoleMode === 'view_only' ? 'admin' : 'view_only';
       setAppRoleMode(nextMode);
     }
 

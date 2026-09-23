@@ -1250,15 +1250,15 @@ class TaskManagerApp {
             </button>
           ` : ''}
           ${!isComplete ? `
-            <button class="btn" style="background-color: #10b981; color: #fff; padding: 4px 10px; font-size: 11px; font-weight: 700; border-radius: 4px; cursor: pointer;" onclick="window.taskManager.completeTask('${this.escapeHtml(task.id)}')">
+            <button class="btn admin-only-control" style="background-color: #10b981; color: #fff; padding: 4px 10px; font-size: 11px; font-weight: 700; border-radius: 4px; cursor: pointer;" onclick="window.taskManager.completeTask('${this.escapeHtml(task.id)}')">
               ✓ Mark Complete
             </button>
-            <button class="btn btn-secondary" style="color: #f87171; border: 1px solid rgba(239, 68, 68, 0.35); padding: 4px 8px; font-size: 11px; font-weight: 700; border-radius: 4px; cursor: pointer;" onclick="window.taskManager.deleteTask('${this.escapeHtml(task.id)}', '${this.escapeHtml(task.sourceSheet)}')">
+            <button class="btn btn-secondary admin-only-control" style="color: #f87171; border: 1px solid rgba(239, 68, 68, 0.35); padding: 4px 8px; font-size: 11px; font-weight: 700; border-radius: 4px; cursor: pointer;" onclick="window.taskManager.deleteTask('${this.escapeHtml(task.id)}', '${this.escapeHtml(task.sourceSheet)}')">
               🗑️ Delete
             </button>
           ` : `
             <span style="color: var(--text-muted); font-size: 11px;">✓ Completed</span>
-            <button class="btn btn-secondary" style="color: #94a3b8; border: 1px solid rgba(255, 255, 255, 0.1); padding: 2px 6px; font-size: 10px; border-radius: 4px; cursor: pointer;" onclick="window.taskManager.deleteTask('${this.escapeHtml(task.id)}', '${this.escapeHtml(task.sourceSheet)}')">
+            <button class="btn btn-secondary admin-only-control" style="color: #94a3b8; border: 1px solid rgba(255, 255, 255, 0.1); padding: 2px 6px; font-size: 10px; border-radius: 4px; cursor: pointer;" onclick="window.taskManager.deleteTask('${this.escapeHtml(task.id)}', '${this.escapeHtml(task.sourceSheet)}')">
               🗑️
             </button>
           `}
@@ -1269,6 +1269,10 @@ class TaskManagerApp {
   }
 
   async completeTask(taskId, forceDirect = false) {
+    if (window.currentRoleMode === 'view_only') {
+      if (typeof showToast === 'function') showToast('App is in View Only mode. Edits are disabled.', 'warning');
+      return;
+    }
     const allTasks = this.collectAllTasks();
     const task = allTasks.find(x => x.id === taskId);
 
@@ -1367,6 +1371,10 @@ class TaskManagerApp {
   }
 
   deleteTask(taskId, sourceSheet = '') {
+    if (window.currentRoleMode === 'view_only') {
+      if (typeof showToast === 'function') showToast('App is in View Only mode. Edits are disabled.', 'warning');
+      return;
+    }
     if (!window.confirm('Are you sure you want to delete this task? It will be removed from all task lists.')) {
       return;
     }

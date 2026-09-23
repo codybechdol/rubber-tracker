@@ -907,6 +907,10 @@ class DrugTestingEngine {
   }
 
   async markComplete(empName, dateVal = null) {
+    if (window.currentRoleMode === 'view_only') {
+      if (typeof showToast === 'function') showToast('App is in View Only mode. Edits are disabled.', 'warning');
+      return;
+    }
     const today = dateVal || new Date().toISOString().split('T')[0];
     const row = this.findTestRow(empName);
     if (row) {

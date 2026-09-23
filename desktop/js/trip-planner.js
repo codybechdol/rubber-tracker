@@ -2633,6 +2633,7 @@ class TripPlannerApp {
   }
 
   deleteManualTask(taskId) {
+    if (window.currentRoleMode === 'view_only') return;
     if (!this.manualTasks) this.manualTasks = this.loadManualTasks();
     this.manualTasks = this.manualTasks.filter(t => t.id !== taskId);
     this.saveManualTasks(this.manualTasks);
@@ -2640,6 +2641,7 @@ class TripPlannerApp {
   }
 
   openAddManualTaskModal(dateKey = '', displayDate = '', defaultCategory = 'cert_class') {
+    if (window.currentRoleMode === 'view_only') return;
     const modal = document.getElementById('manual-task-modal');
     if (!modal) return;
 
@@ -2709,6 +2711,7 @@ class TripPlannerApp {
   }
 
   openEditManualTaskModal(taskId) {
+    if (window.currentRoleMode === 'view_only') return;
     if (!this.manualTasks) this.manualTasks = this.loadManualTasks();
     const task = this.manualTasks.find(t => t.id === taskId);
     if (!task) return;
@@ -2942,6 +2945,7 @@ class TripPlannerApp {
   }
 
   addTrip(dateKey, location) {
+    if (window.currentRoleMode === 'view_only') return;
     if (!location) return;
     if (this.isDayHoliday(dateKey)) {
       const hName = this.getHolidayName(dateKey);
@@ -2974,6 +2978,10 @@ class TripPlannerApp {
   }
 
   handleSwapOrLocationDrop(dateKey, payload) {
+    if (window.currentRoleMode === 'view_only') {
+      this.showToast('⚠️ Scheduling is disabled in View Only mode.');
+      return;
+    }
     if (!payload) return;
     const location = payload.location;
     if (this.isDayHoliday(dateKey)) {
@@ -3023,6 +3031,7 @@ class TripPlannerApp {
   }
 
   async completeSwapDirectly(tableKey, rowIdx, empName, currentItem) {
+    if (window.currentRoleMode === 'view_only') return;
     if (!confirm(`Mark ${tableKey.includes('glove') ? 'glove' : 'sleeve'} swap delivered for ${empName}? This will update the Swaps sheet and transfer inventory.`)) {
       return;
     }
@@ -3393,7 +3402,7 @@ class TripPlannerApp {
       </div>
 
       <!-- Swap Completion Form Card -->
-      <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 8px; padding: 14px 18px; display: flex; flex-direction: column; gap: 10px;">
+      <div class="admin-only-control" style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 8px; padding: 14px 18px; display: flex; flex-direction: column; gap: 10px;">
         <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
           <div>
             <h4 style="margin: 0; font-size: 13.5px; font-weight: 800; color: #f8fafc; display: flex; align-items: center; gap: 6px;">
@@ -3427,13 +3436,13 @@ class TripPlannerApp {
     if (actionsEl) {
       if (!isAlreadyCompleted) {
         actionsEl.innerHTML = `
-          <button class="btn" style="background-color: #10b981; color: white; font-weight: 800; font-size: 13px; padding: 8px 18px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 6px; box-shadow: 0 2px 8px rgba(16, 185, 129, 0.4);" onclick="window.tripPlanner.executeCompleteSwapFromModal('${tableKey}', ${swRowIdx !== null ? swRowIdx : `'${this.escapeJs(empName)}'`}, '${this.escapeJs(empName)}', '${this.escapeJs(oldItemNum)}')">
+          <button class="btn admin-only-control" style="background-color: #10b981; color: white; font-weight: 800; font-size: 13px; padding: 8px 18px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 6px; box-shadow: 0 2px 8px rgba(16, 185, 129, 0.4);" onclick="window.tripPlanner.executeCompleteSwapFromModal('${tableKey}', ${swRowIdx !== null ? swRowIdx : `'${this.escapeJs(empName)}'`}, '${this.escapeJs(empName)}', '${this.escapeJs(oldItemNum)}')">
             <span>✓ Complete Swap & Update Inventory</span>
           </button>
         `;
       } else {
         actionsEl.innerHTML = `
-          <button class="btn btn-secondary" style="color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4); font-size: 12px; font-weight: 700; padding: 6px 14px; border-radius: 6px; cursor: pointer;" onclick="window.tripPlanner.revertSwapFromModal('${tableKey}', ${swRowIdx !== null ? swRowIdx : `'${this.escapeJs(empName)}'`}, '${this.escapeJs(empName)}', '${this.escapeJs(oldItemNum)}')">
+          <button class="btn btn-secondary admin-only-control" style="color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4); font-size: 12px; font-weight: 700; padding: 6px 14px; border-radius: 6px; cursor: pointer;" onclick="window.tripPlanner.revertSwapFromModal('${tableKey}', ${swRowIdx !== null ? swRowIdx : `'${this.escapeJs(empName)}'`}, '${this.escapeJs(empName)}', '${this.escapeJs(oldItemNum)}')">
             <span>↩ Revert Swap to Pending</span>
           </button>
         `;
@@ -3449,6 +3458,7 @@ class TripPlannerApp {
   }
 
   async executeCompleteSwapFromModal(tableKey, rowIdxOrEmp, empName, currentItem) {
+    if (window.currentRoleMode === 'view_only') return;
     const dateInput = document.getElementById('swap-completion-date');
     const dateVal = dateInput ? dateInput.value : '';
     if (!dateVal) {
@@ -3505,6 +3515,10 @@ class TripPlannerApp {
   }
 
   async revertSwapFromModal(tableKey, rowIdxOrEmp, empName, currentItem) {
+    if (window.currentRoleMode === 'view_only') {
+      if (typeof showToast === 'function') showToast('App is in View Only mode. Swaps cannot be reverted.', 'warning');
+      return;
+    }
     if (!confirm(`Revert swap for ${empName} back to pending/ready for delivery? This will restore the previous inventory assignments.`)) {
       return;
     }
@@ -3542,6 +3556,7 @@ class TripPlannerApp {
   }
 
   removeTrip(dateKey, locationToRemove = null) {
+    if (window.currentRoleMode === 'view_only') return;
     if (!locationToRemove) {
       delete this.plannedTrips[dateKey];
     } else {
@@ -3585,6 +3600,7 @@ class TripPlannerApp {
   }
 
   clearWeekTrips(weekDateKey) {
+    if (window.currentRoleMode === 'view_only') return;
     if (!confirm('🗑️ Clear all scheduled trips for this week?')) return;
     const baseDate = this.parseDate(weekDateKey);
     if (!baseDate) return;
@@ -5638,7 +5654,7 @@ class TripPlannerApp {
                     <button class="btn btn-secondary" style="padding: 1px 6px; font-size: 9.5px; color: #94a3b8; border-color: rgba(255, 255, 255, 0.2); background: rgba(255, 255, 255, 0.05); cursor: pointer;" onclick="event.stopPropagation(); window.tripPlanner.restoreDismissedMonthlyTrainings('${dateKey}')" title="Restore removed monthly trainings for this day">↩ Restore (${(this.dismissedMonthlyTrainings[dateKey] || []).length})</button>
                   ` : ''}
                   <button class="btn btn-secondary" style="padding: 1px 6px; font-size: 9.5px; color: #34d399; border-color: rgba(16, 185, 129, 0.35); background: rgba(16, 185, 129, 0.08); cursor: pointer;" onclick="event.stopPropagation(); window.tripPlanner.openComposeTrainingEmailModalForDate('${dateKey}')" title="Compose email for scheduled training classes on ${day.dayName}">📧 Email</button>
-                  <button class="btn btn-secondary" style="padding: 1px 6px; font-size: 9.5px; color: #34d399; border-color: rgba(16, 185, 129, 0.35); background: rgba(16, 185, 129, 0.08); cursor: pointer;" onclick="event.stopPropagation(); window.tripPlanner.openAddManualTaskModal('${dateKey}', '${this.escapeJs(day.dayName)}, ${this.escapeJs(day.formattedDate)}', 'cert_class')" title="Schedule Training Class on ${day.dayName}">+ Class</button>
+                  <button class="btn btn-secondary admin-only-control" style="padding: 1px 6px; font-size: 9.5px; color: #34d399; border-color: rgba(16, 185, 129, 0.35); background: rgba(16, 185, 129, 0.08); cursor: pointer;" onclick="event.stopPropagation(); window.tripPlanner.openAddManualTaskModal('${dateKey}', '${this.escapeJs(day.dayName)}, ${this.escapeJs(day.formattedDate)}', 'cert_class')" title="Schedule Training Class on ${day.dayName}">+ Class</button>
                 </div>
               </div>
               <div id="section-body-${dateKey}-training" style="display: ${isCollapsed ? 'none' : 'flex'}; flex-direction: column; gap: 5px; margin-top: 5px;">
@@ -5763,10 +5779,10 @@ class TripPlannerApp {
                           <button style="background: none; border: none; color: #34d399; cursor: pointer; padding: 1px 3px; font-size: 11.5px; line-height: 1; border-radius: 3px;" onmouseover="this.style.color='#10b981'" onmouseout="this.style.color='#34d399'" onclick="window.tripPlanner.openComposeTrainingEmailModal('${this.escapeHtml(mt.id)}')" title="Compose Email for this Class">
                             ✉️
                           </button>
-                          <button style="background: none; border: none; color: #64748b; cursor: pointer; padding: 1px 3px; font-size: 11px; line-height: 1; border-radius: 3px;" onmouseover="this.style.color='#60a5fa'" onmouseout="this.style.color='#64748b'" onclick="window.tripPlanner.openEditManualTaskModal('${this.escapeHtml(mt.id)}')" title="Edit Class">
+                          <button class="admin-only-control" style="background: none; border: none; color: #64748b; cursor: pointer; padding: 1px 3px; font-size: 11px; line-height: 1; border-radius: 3px;" onmouseover="this.style.color='#60a5fa'" onmouseout="this.style.color='#64748b'" onclick="window.tripPlanner.openEditManualTaskModal('${this.escapeHtml(mt.id)}')" title="Edit Class">
                             ✏️
                           </button>
-                          <button style="background: none; border: none; color: #64748b; cursor: pointer; padding: 1px 4px; font-size: 12px; line-height: 1; border-radius: 3px;" onmouseover="this.style.color='#f87171'" onmouseout="this.style.color='#64748b'" onclick="window.tripPlanner.deleteManualTask('${this.escapeHtml(mt.id)}')" title="Delete Class">
+                          <button class="admin-only-control" style="background: none; border: none; color: #64748b; cursor: pointer; padding: 1px 4px; font-size: 12px; line-height: 1; border-radius: 3px;" onmouseover="this.style.color='#f87171'" onmouseout="this.style.color='#64748b'" onclick="window.tripPlanner.deleteManualTask('${this.escapeHtml(mt.id)}')" title="Delete Class">
                             ✕
                           </button>
                         </div>
@@ -5859,7 +5875,7 @@ class TripPlannerApp {
                   <span id="section-chevron-${dateKey}-office" style="font-size: 8px; width: 10px; display: inline-block;">${isCollapsed ? '▶' : '▼'}</span>
                   <span>💼 Office Tasks (${pendingCount}/${personalTasks.length})</span>
                 </span>
-                <button class="btn btn-secondary" style="padding: 1px 6px; font-size: 9.5px; color: #93c5fd; border-color: rgba(59, 130, 246, 0.35); background: rgba(59, 130, 246, 0.08); cursor: pointer;" onclick="event.stopPropagation(); window.tripPlanner.openAddManualTaskModal('${dateKey}', '${this.escapeJs(day.dayName)}, ${this.escapeJs(day.formattedDate)}', 'personal_task')" title="Add Office Task">+ Task</button>
+                <button class="btn btn-secondary admin-only-control" style="padding: 1px 6px; font-size: 9.5px; color: #93c5fd; border-color: rgba(59, 130, 246, 0.35); background: rgba(59, 130, 246, 0.08); cursor: pointer;" onclick="event.stopPropagation(); window.tripPlanner.openAddManualTaskModal('${dateKey}', '${this.escapeJs(day.dayName)}, ${this.escapeJs(day.formattedDate)}', 'personal_task')" title="Add Office Task">+ Task</button>
               </div>
               <div id="section-body-${dateKey}-office" style="display: ${isCollapsed ? 'none' : 'flex'}; flex-direction: column; gap: 5px; margin-top: 5px;">
                 ${personalTasks.map((mt, taskIdx) => {
@@ -5908,10 +5924,10 @@ class TripPlannerApp {
                               ▼
                             </button>
                           ` : ''}
-                          <button style="background: none; border: none; color: #64748b; cursor: pointer; padding: 1px 3px; font-size: 11px; line-height: 1; border-radius: 3px;" onmouseover="this.style.color='#60a5fa'" onmouseout="this.style.color='#64748b'" onclick="window.tripPlanner.openEditManualTaskModal('${this.escapeHtml(mt.id)}')" title="Edit Task">
+                          <button class="admin-only-control" style="background: none; border: none; color: #64748b; cursor: pointer; padding: 1px 3px; font-size: 11px; line-height: 1; border-radius: 3px;" onmouseover="this.style.color='#60a5fa'" onmouseout="this.style.color='#64748b'" onclick="window.tripPlanner.openEditManualTaskModal('${this.escapeHtml(mt.id)}')" title="Edit Task">
                             ✏️
                           </button>
-                          <button style="background: none; border: none; color: #64748b; cursor: pointer; padding: 1px 4px; font-size: 12px; line-height: 1; border-radius: 3px;" onmouseover="this.style.color='#f87171'" onmouseout="this.style.color='#64748b'" onclick="window.tripPlanner.deleteManualTask('${this.escapeHtml(mt.id)}')" title="Delete Task">
+                          <button class="admin-only-control" style="background: none; border: none; color: #64748b; cursor: pointer; padding: 1px 4px; font-size: 12px; line-height: 1; border-radius: 3px;" onmouseover="this.style.color='#f87171'" onmouseout="this.style.color='#64748b'" onclick="window.tripPlanner.deleteManualTask('${this.escapeHtml(mt.id)}')" title="Delete Task">
                             ✕
                           </button>
                         </div>
@@ -6043,7 +6059,7 @@ class TripPlannerApp {
                       </div>
 
                       <div style="display: flex; justify-content: flex-end; margin-top: 4px;">
-                        <button class="btn btn-secondary" style="padding: 2px 7px; font-size: 9.5px; color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3);" onclick="window.tripPlanner.removeTrip('${dateKey}', '${this.escapeHtml(trip.location)}')">❌ Remove</button>
+                        <button class="btn btn-secondary admin-only-control" style="padding: 2px 7px; font-size: 9.5px; color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3);" onclick="window.tripPlanner.removeTrip('${dateKey}', '${this.escapeHtml(trip.location)}')">❌ Remove</button>
                       </div>
                     </div>
                   `;
@@ -6101,10 +6117,10 @@ class TripPlannerApp {
               ` : ''}
             </div>
             <div style="display: flex; align-items: center; gap: 4px;">
-              <button class="btn btn-secondary" style="padding: 1px 5px; font-size: 9px; line-height: 1.2; background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 3px; cursor: pointer;" onclick="window.tripPlanner.openAddManualTaskModal('${dateKey}', '${this.escapeJs(day.dayName)}, ${this.escapeJs(day.formattedDate)}', 'cert_class')" title="Schedule Training Class on ${day.dayName}">
+              <button class="btn btn-secondary admin-only-control" style="padding: 1px 5px; font-size: 9px; line-height: 1.2; background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 3px; cursor: pointer;" onclick="window.tripPlanner.openAddManualTaskModal('${dateKey}', '${this.escapeJs(day.dayName)}, ${this.escapeJs(day.formattedDate)}', 'cert_class')" title="Schedule Training Class on ${day.dayName}">
                 🎓 + Class
               </button>
-              <button class="btn btn-secondary" style="padding: 1px 5px; font-size: 9px; line-height: 1.2; background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 3px; cursor: pointer;" onclick="window.tripPlanner.openAddManualTaskModal('${dateKey}', '${this.escapeJs(day.dayName)}, ${this.escapeJs(day.formattedDate)}', 'personal_task')" title="Add Personal / Office Task on ${day.dayName}">
+              <button class="btn btn-secondary admin-only-control" style="padding: 1px 5px; font-size: 9px; line-height: 1.2; background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 3px; cursor: pointer;" onclick="window.tripPlanner.openAddManualTaskModal('${dateKey}', '${this.escapeJs(day.dayName)}, ${this.escapeJs(day.formattedDate)}', 'personal_task')" title="Add Personal / Office Task on ${day.dayName}">
                 💼 + Task
               </button>
               <span class="badge" style="background: ${isHoliday ? '#ca8a04' : (day.isWorkDay ? '#0284c7' : '#475569')}; color: #fff; font-size: 9.5px; padding: 2px 5px; border-radius: 4px;">

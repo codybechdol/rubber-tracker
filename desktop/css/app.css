@@ -898,19 +898,41 @@ body {
   100% { transform: translateY(-50px); opacity: 0.9; }
 }
 
-/* Field Inspector Mode */
+/* View Only Mode */
+body.view-only-mode .admin-only-control,
 body.inspector-mode .admin-only-control {
   display: none !important;
 }
 
-body.inspector-mode .app-header {
-  border-bottom: 2px solid #10b981;
+body.view-only-mode .app-header {
+  border-bottom: 2px solid #f59e0b;
 }
 
-body.inspector-mode .brand-badge {
-  background-color: rgba(16, 185, 129, 0.2);
-  color: #34d399;
-  border-color: #10b981;
+body.view-only-mode .brand-badge {
+  background-color: rgba(245, 158, 11, 0.2) !important;
+  color: #fbbf24 !important;
+  border-color: #f59e0b !important;
+}
+
+/* In View Only mode, disable pointer events on swap checkboxes and disable edit cursor on cells */
+body.view-only-mode [data-toggle-checkbox] {
+  cursor: default !important;
+  opacity: 0.85;
+}
+
+body.view-only-mode td.editable {
+  cursor: default !important;
+  user-select: text !important;
+}
+
+body.view-only-mode td.editable:hover,
+body.view-only-mode td.editable:focus {
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+body.view-only-mode .card-drop-zone {
+  pointer-events: none !important;
 }
 
 /* Mobile Bottom Navigation Bar */

@@ -313,6 +313,13 @@ class LocalDatabase {
   }
 
   async savePlannedTrips(trips) {
+    const isViewOnly = (typeof window !== 'undefined' && window.currentRoleMode === 'view_only') ||
+                       (typeof document !== 'undefined' && document.body && (document.body.classList.contains('view-only-mode') || document.body.classList.contains('inspector-mode')));
+    if (isViewOnly) {
+      console.warn('⚠️ Trip planning edit blocked: Safety Assistant is currently in View Only mode.');
+      return;
+    }
+
     if (!this.snapshot) this.snapshot = { configs: {}, tables: {} };
     if (!this.snapshot.configs) this.snapshot.configs = {};
     this.snapshot.configs.plannedTrips = trips;
@@ -2499,6 +2506,14 @@ class LocalDatabase {
 
   async addMutation(mutation) {
     if (!mutation) return null;
+
+    // Hard Guard: Disallow adding mutations in View Only mode
+    const isViewOnly = (typeof window !== 'undefined' && window.currentRoleMode === 'view_only') ||
+                       (typeof document !== 'undefined' && document.body && (document.body.classList.contains('view-only-mode') || document.body.classList.contains('inspector-mode')));
+    if (isViewOnly) {
+      console.warn('⚠️ Manual edit blocked: Safety Assistant is currently in View Only mode.', mutation);
+      return null;
+    }
 
     // Discard redundant cell edits where oldValue === value
     if (mutation.action === 'UPDATE_CELL') {

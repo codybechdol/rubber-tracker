@@ -444,6 +444,7 @@ class SMSDialogEngine {
    * Records that SMS notification was sent in IndexedDB / local database mutations
    */
   async recordSmsNotification() {
+    if (window.currentRoleMode === 'view_only') return;
     const ctx = this.currentContext;
     if (!ctx) return;
 
