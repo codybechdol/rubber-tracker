@@ -707,9 +707,12 @@ class LocalDatabase {
       });
     }
 
-    // 3. Header finding logic (guarded so it only runs if headers need re-indexing)
+    // 3. Header finding logic & Swap Table Row Reconstruction
     const isSwapTable = tableKey && (tableKey.endsWith('_swaps') || tableKey.includes('swap'));
     if (isSwapTable) {
+      if ((!table.rows || table.rows.length === 0) && table.rawGrid && table.rawGrid.length > 1) {
+        this.reconstructSwapRowsFromRawGrid(table, tableKey);
+      }
       table._headersNormalized = true;
     }
     if (!table._headersNormalized && !isSwapTable) {
@@ -813,6 +816,177 @@ class LocalDatabase {
     }
 
     return table;
+  }
+
+  /**
+   * Reconstructs swap report rows from rawGrid when table.rows is missing or empty.
+   * Extracts location, foreman, and class from headers/banners and parses employee data rows.
+   * Authoritatively syncs with snapshot.manualPicks / sa_manual_picks for picked states.
+   */
+  reconstructSwapRowsFromRawGrid(table, tableKey) {
+    if (!table || !table.rawGrid || !Array.isArray(table.rawGrid) || table.rawGrid.length <= 1) {
+      if (!table.rows) table.rows = [];
+      table.rowCount = table.rows.length;
+      return table.rows;
+    }
+
+    const grid = table.rawGrid;
+    const isGloves = tableKey.includes('glove');
+    const isSleeves = tableKey.includes('sleeve');
+    const isMack = tableKey.includes('mack');
+    const isBlanket = tableKey.includes('blanket');
+    const itemLabel = isGloves ? 'Glove' : isSleeves ? 'Sleeve' : isBlanket ? 'Blanket' : isMack ? 'MACK' : 'Item';
+
+    // Standard column detection
+    let curCol = 1;
+    let sizeCol = 2;
+    let dateAssignedCol = isMack ? 5 : 3;
+    let changeOutCol = isMack ? 6 : 4;
+    let daysLeftCol = isMack ? 7 : 5;
+    let pickCol = isMack ? 8 : 6;
+    let statCol = isMack ? 9 : 7;
+    let pickedCol = isMack ? 10 : 8;
+    let dateChangedCol = isMack ? 11 : 9;
+
+    // Detect if grid has a subheader row defining exact column layout
+    for (let r = 0; r < Math.min(grid.length, 12); r++) {
+      const row = grid[r];
+      if (!Array.isArray(row)) continue;
+      const r0 = String(row[0] || '').trim().toLowerCase();
+      const r1 = String(row[1] || '').trim().toLowerCase();
+      if (r0 === 'employee' || r1.includes('current') || r1.includes('serial')) {
+        const pIdx = row.findIndex(h => /pick\s*list/i.test(String(h || '')));
+        const sIdx = row.findIndex(h => /^status$/i.test(String(h || '').trim()));
+        const pcIdx = row.findIndex(h => /^picked$/i.test(String(h || '').trim()));
+        const dcIdx = row.findIndex(h => /date\s*changed/i.test(String(h || '')));
+        const cIdx = row.findIndex(h => /current|^serial\s*#/i.test(String(h || '')));
+        const zIdx = row.findIndex(h => /^size$/i.test(String(h || '').trim()));
+        const daIdx = row.findIndex(h => /date\s*assigned/i.test(String(h || '')));
+        const coIdx = row.findIndex(h => /change\s*out/i.test(String(h || '')));
+        const dlIdx = row.findIndex(h => /days\s*left/i.test(String(h || '')));
+
+        if (pIdx !== -1) pickCol = pIdx;
+        if (sIdx !== -1) statCol = sIdx;
+        if (pcIdx !== -1) pickedCol = pcIdx;
+        if (dcIdx !== -1) dateChangedCol = dcIdx;
+        if (cIdx !== -1) curCol = cIdx;
+        if (zIdx !== -1) sizeCol = zIdx;
+        if (daIdx !== -1) dateAssignedCol = daIdx;
+        if (coIdx !== -1) changeOutCol = coIdx;
+        if (dlIdx !== -1) daysLeftCol = dlIdx;
+        break;
+      }
+    }
+
+    const defaultHeaders = [
+      'Employee', `Current ${itemLabel} #`, 'Size', 'Date Assigned', 'Change Out Date', 'Days Left', 'Pick List Item #', 'Status', 'Picked', 'Date Changed'
+    ];
+
+    let curLoc = 'Helena';
+    let curForeman = '';
+    let curClass = isGloves ? '2' : '2';
+
+    // Read manual picks from snapshot or local storage for authoritative pick states
+    let manualPicks = {};
+    if (this.snapshot && this.snapshot.manualPicks && this.snapshot.manualPicks[tableKey]) {
+      manualPicks = this.snapshot.manualPicks[tableKey];
+    } else {
+      try {
+        const stored = localStorage.getItem('sa_manual_picks');
+        if (stored) {
+          const parsed = JSON.parse(stored);
+          if (parsed && parsed[tableKey]) manualPicks = parsed[tableKey];
+        }
+      } catch { /* ignore */ }
+    }
+
+    const rows = [];
+    grid.forEach((gr, idx) => {
+      if (idx === 0 || !Array.isArray(gr)) return;
+      const c0 = String(gr[0] || '').trim();
+      if (!c0) return;
+
+      // Location banners
+      if (c0.startsWith('🔍') || c0.startsWith('📍')) {
+        curLoc = c0.replace(/^[🔍📍\s]+/u, '').trim();
+        return;
+      }
+      // Foreman headers
+      if (c0.includes('👷') || c0.includes('👤') || c0.toLowerCase().startsWith('foreman:')) {
+        curForeman = c0.replace(/^[👷👤\s]+/u, '').replace(/^foreman:\s*/i, '').trim();
+        return;
+      }
+      // Class banners
+      if (/class\s*\d/i.test(c0)) {
+        const m = c0.match(/class\s*(\d)/i);
+        if (m) curClass = m[1];
+        return;
+      }
+      // Other non-employee rows
+      if (
+        /previous\s*employee/i.test(c0) ||
+        /needs\s*retest/i.test(c0) ||
+        /stage\s*\d/i.test(c0) ||
+        /no\s*swaps\s*due/i.test(c0) ||
+        c0.toLowerCase() === 'employee' ||
+        c0.toLowerCase().includes('status check')
+      ) {
+        return;
+      }
+
+      const curItem = String(gr[curCol] || '').trim();
+      let pickItem = String(gr[pickCol] || '').trim();
+      let stat = String(gr[statCol] || '').trim();
+      const pVal = String(gr[pickedCol] !== undefined ? gr[pickedCol] : '').trim().toUpperCase();
+      let isPicked = (pVal === 'TRUE' || pVal === '1' || gr[pickedCol] === true || stat.toLowerCase().includes('ready for delivery'));
+      const dateChanged = String(gr[dateChangedCol] || '').trim();
+
+      // Check manual picks overlay
+      const compKey = `${c0.toLowerCase()}|${curItem.toLowerCase()}`;
+      const simpKey = c0.toLowerCase();
+      const mpEntry = manualPicks[compKey] || (manualPicks[simpKey] && (!manualPicks[simpKey].currentItemNum || manualPicks[simpKey].currentItemNum.toLowerCase() === curItem.toLowerCase()) ? manualPicks[simpKey] : null);
+      if (mpEntry) {
+        if (mpEntry.pickListNum && mpEntry.pickListNum !== '—' && mpEntry.pickListNum !== '-') {
+          pickItem = mpEntry.pickListNum;
+        }
+        if (mpEntry.status) {
+          stat = mpEntry.status;
+        }
+        if (mpEntry.isPicked || String(mpEntry.status || '').toLowerCase().includes('ready for delivery')) {
+          isPicked = true;
+        }
+      }
+
+      const rowObj = {
+        _rowIdx: idx + 1,
+        'Employee': c0,
+        [`Current ${itemLabel} #`]: curItem,
+        'Current Item #': curItem,
+        'Size': String(gr[sizeCol] || '').trim(),
+        'Class': curClass,
+        'Date Assigned': String(gr[dateAssignedCol] || '').trim(),
+        'Change Out Date': String(gr[changeOutCol] || '').trim(),
+        'Days Left': gr[daysLeftCol] !== undefined ? gr[daysLeftCol] : '',
+        'Pick List Item #': pickItem,
+        [`Pick List ${itemLabel} #`]: pickItem,
+        'Status': stat || (isPicked ? 'Ready For Delivery 🚚' : 'In Stock ✅'),
+        'Picked': isPicked,
+        'Date Changed': dateChanged,
+        '_location': curLoc,
+        '_foreman': curForeman,
+        'Location': curLoc,
+        'Foreman': curForeman
+      };
+
+      rows.push(rowObj);
+    });
+
+    table.rows = rows;
+    table.rowCount = rows.length;
+    if (!table.headers || table.headers.length <= 1) {
+      table.headers = defaultHeaders;
+    }
+    return rows;
   }
 
   getOutbox() {

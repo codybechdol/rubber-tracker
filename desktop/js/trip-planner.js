@@ -6220,6 +6220,18 @@ class TripPlannerApp {
     const empTable = this.db.getTable('employees') || this.db.getTable('Employees');
     const jobTable = this.db.getTable('job_tracking') || this.db.getTable('Job Tracking');
 
+    // Auto-heal empty swap rows from rawGrid if needed
+    if (gloveSwapsTable && (!gloveSwapsTable.rows || gloveSwapsTable.rows.length === 0) && gloveSwapsTable.rawGrid && gloveSwapsTable.rawGrid.length > 1) {
+      if (this.db && typeof this.db.reconstructSwapRowsFromRawGrid === 'function') {
+        this.db.reconstructSwapRowsFromRawGrid(gloveSwapsTable, 'glove_swaps');
+      }
+    }
+    if (sleeveSwapsTable && (!sleeveSwapsTable.rows || sleeveSwapsTable.rows.length === 0) && sleeveSwapsTable.rawGrid && sleeveSwapsTable.rawGrid.length > 1) {
+      if (this.db && typeof this.db.reconstructSwapRowsFromRawGrid === 'function') {
+        this.db.reconstructSwapRowsFromRawGrid(sleeveSwapsTable, 'sleeve_swaps');
+      }
+    }
+
     // 1. Build employee info map: lowerName -> { name, location, jobNum, classification }
     const empMap = {};
     if (empTable && empTable.rows) {
@@ -6453,13 +6465,6 @@ class TripPlannerApp {
       return true;
     });
 
-    if (countBadge) {
-      countBadge.textContent = `${items.length} Picked`;
-    }
-    if (collapsedCountBadge) {
-      collapsedCountBadge.textContent = `${items.length}`;
-    }
-
     // Apply category filter (all, gloves, sleeves)
     if (this.swapsFilter === 'gloves') {
       items = items.filter(i => i.type === 'Glove');
@@ -6479,6 +6484,13 @@ class TripPlannerApp {
         const foremanMatch = (i.foreman || '').toLowerCase().includes(q);
         return empMatch || curMatch || pickMatch || locMatch || crewMatch || foremanMatch;
       });
+    }
+
+    if (countBadge) {
+      countBadge.textContent = `${items.length} Picked`;
+    }
+    if (collapsedCountBadge) {
+      collapsedCountBadge.textContent = `${items.length}`;
     }
 
     if (items.length === 0) {

@@ -130,6 +130,15 @@ function exportFullDatabaseSnapshot(tableKeysFilter) {
     var headerRowIdx = 0;
     if (cfg.key === 'training_tracking' && typeof findTrainingTrackingHeaderRow === 'function') {
       headerRowIdx = findTrainingTrackingHeaderRow(data);
+    } else if (cfg.key.indexOf('_swaps') !== -1) {
+      for (var hr = 0; hr < Math.min(data.length, 15); hr++) {
+        var c0 = String(data[hr][0] || '').trim();
+        var c1 = String(data[hr][1] || '').trim();
+        if (c0.indexOf('Employee') !== -1 || c1.indexOf('Current') !== -1 || c1.indexOf('Serial') !== -1) {
+          headerRowIdx = hr;
+          break;
+        }
+      }
     } else {
       var row0Count = data[0].filter(function(v) { return String(v || '').trim() !== ''; }).length;
       if (row0Count <= 2 && data.length > 1) {
@@ -149,6 +158,14 @@ function exportFullDatabaseSnapshot(tableKeysFilter) {
       var rowArray = data[r];
       var gridRow = [];
       var isDataRow = r > headerRowIdx;
+      if (isDataRow && cfg.key.indexOf('_swaps') !== -1) {
+        var firstCell = String(rowArray[0] || '').trim();
+        if (!firstCell || firstCell.indexOf('🔍') !== -1 || firstCell.indexOf('📍') !== -1 || 
+            firstCell.indexOf('👷') !== -1 || firstCell.indexOf('👤') !== -1 || 
+            /^(class\s*\d|stage\s*\d|previous\s*employee|needs\s*retest|no\s*swaps|employee)/i.test(firstCell)) {
+          isDataRow = false;
+        }
+      }
       var rowObj = isDataRow ? { _rowIdx: r + 1 } : null;
 
       for (var c = 0; c < lastCol; c++) {
