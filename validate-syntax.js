@@ -44,6 +44,37 @@ files.forEach(file => {
     // checkES6Syntax(file, lines); // Skipped: Project supports V8/ES6+ syntax on this branch
 });
 
+// Validate desktop files if desktop folder exists
+const DESKTOP_DIR = path.join(__dirname, 'desktop');
+if (fs.existsSync(DESKTOP_DIR)) {
+    const indexHtmlPath = path.join(DESKTOP_DIR, 'index.html');
+    if (fs.existsSync(indexHtmlPath)) {
+        const html = fs.readFileSync(indexHtmlPath, 'utf8');
+        const inlineScripts = [...html.matchAll(/<script(?![^>]*src)[^>]*>([\s\S]*?)<\/script>/gi)];
+        inlineScripts.forEach((m, idx) => {
+            try {
+                new Function(m[1]);
+            } catch (err) {
+                console.log(`❌ ERROR: desktop/index.html inline script ${idx}: ${err.message}`);
+                errorCount++;
+            }
+        });
+    }
+    const jsDir = path.join(DESKTOP_DIR, 'js');
+    if (fs.existsSync(jsDir)) {
+        const jsFiles = fs.readdirSync(jsDir).filter(f => f.endsWith('.js'));
+        const { execSync } = require('child_process');
+        jsFiles.forEach(f => {
+            try {
+                execSync(`node -c "${path.join(jsDir, f)}"`);
+            } catch (err) {
+                console.log(`❌ ERROR: desktop/js/${f} syntax check failed: ${err.message}`);
+                errorCount++;
+            }
+        });
+    }
+}
+
 console.log('\n========================================');
 if (errorCount > 0) {
     console.log(`❌ VALIDATION FAILED: ${errorCount} error(s), ${warningCount} warning(s)`);
