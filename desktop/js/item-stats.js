@@ -38,7 +38,13 @@ class ItemStatsEngine {
         let y = parseInt(parts[2], 10);
         if (y > 2100 && y >= 20200 && y <= 20300) y = Math.floor(y / 10);
         else if (y === 2032) y = 2022;
+        else if (y === 2002) y = 2022; // Common typo for 2022
+        else if (y >= 220 && y <= 230) y = 2000 + (y - 200); // 3-digit year typo (e.g. 223 -> 2023)
         else if (y < 100) y = y < 50 ? 2000 + y : 1900 + y;
+
+        // Since inventory tracking began in 2022, sanitize rogue pre-tracking/sentinel years (e.g. -1, 1999)
+        if (y < 2020) y = 2022;
+
         const dt = new Date(y, m, d, 12, 0, 0);
         return isNaN(dt.getTime()) ? null : dt;
       } else if (parts.length === 2) {
