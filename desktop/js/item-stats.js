@@ -146,14 +146,15 @@ class ItemStatsEngine {
 
     // 0. Brand New Purchase (Initial acquisition / On Shelf from new)
     if (
+      sAssigned === 'on shelf (new purchase)' ||
       sAssigned === 'new' ||
       sAssigned === 'newly purchased' ||
       sAssigned === 'brand new' ||
       sAssigned === 'new purchase' ||
       sAssigned === 'new item' ||
       sAssigned.startsWith('new (') ||
-      ((sNotes.includes('new purchase') || sNotes.includes('initial purchase') || sNotes.includes('newly purchased')) &&
-       (!sAssigned || sAssigned === 'on shelf' || sAssigned === 'in stock' || sStatus === 'in stock' || sStatus === 'on shelf'))
+      ((sNotes === 'new' || sNotes.startsWith('new,') || sNotes.startsWith('new -') || sNotes.startsWith('new |') || sNotes.includes('new purchase') || sNotes.includes('initial purchase') || sNotes.includes('newly purchased')) &&
+       (!sAssigned || sAssigned === 'on shelf' || sAssigned === 'in stock' || sStatus === 'in stock' || sStatus === 'on shelf' || sAssigned === 'on shelf (new purchase)'))
     ) {
       return {
         key: 'NEW_PURCHASE',
@@ -344,13 +345,20 @@ class ItemStatsEngine {
     // Check if earliest entry represents a known brand-new purchase
     const firstRawAssigned = String(sorted[0]['Assigned To'] || sorted[0]['Employee Name'] || sorted[0]['Employee'] || '').toLowerCase().trim();
     const firstRawNotes = String(sorted[0]['Notes'] || sorted[0]['Note'] || '').toLowerCase().trim();
-    const isPurchaseOrigin = firstRawAssigned === 'new' ||
+    const activeRowNotes = activeItemRow ? String(activeItemRow['Notes'] || '').toLowerCase().trim() : '';
+    const isPurchaseOrigin = firstRawAssigned === 'on shelf (new purchase)' ||
+                             firstRawAssigned === 'new' ||
                              firstRawAssigned === 'newly purchased' ||
                              firstRawAssigned === 'brand new' ||
                              firstRawAssigned === 'new purchase' ||
                              firstRawAssigned.startsWith('new (') ||
+                             firstRawNotes === 'new' ||
+                             firstRawNotes.startsWith('new,') ||
+                             firstRawNotes.startsWith('new -') ||
+                             firstRawNotes.startsWith('new |') ||
                              firstRawNotes.includes('new purchase') ||
-                             firstRawNotes.includes('initial purchase');
+                             firstRawNotes.includes('initial purchase') ||
+                             (firstRawAssigned === 'on shelf' && (activeRowNotes === 'new' || activeRowNotes.startsWith('new,')));
 
     let fieldDays = 0;
     let shelfDays = 0;
@@ -792,26 +800,54 @@ class ItemStatsEngine {
       }
     });
 
-    // 3. New Purchases tracking
+    // 3. New Purchases tracking (Current Year only, looking at item history for On Shelf (New Purchase) and New note)
+    const currentYear = new Date().getFullYear();
     const newPurchaseItems = new Set();
+    const activeItemNumbers = new Set(
+      mainRows.map(r => String(r['Glove'] || r['Sleeve'] || r['Blanket'] || r['MACK'] || r['Item #'] || r['Serial #'] || Object.values(r)[0] || '').trim().toLowerCase())
+    );
+
     histRows.forEach(r => {
-      const assigned = String(r['Assigned To'] || '').toLowerCase().trim();
-      const notes = String(r['Notes'] || '').toLowerCase().trim();
-      const num = String(r['Item #'] || '').trim();
-      if (
-        assigned === 'new' || assigned === 'newly purchased' || assigned === 'brand new' || assigned === 'new purchase' ||
-        assigned.startsWith('new (') ||
-        notes.includes('new purchase') || notes.includes('initial purchase') || notes.includes('newly purchased') ||
-        notes === 'new'
-      ) {
-        if (num) newPurchaseItems.add(num);
+      const dateStr = String(r['Date Assigned'] || r['Date'] || Object.values(r)[0] || '').trim();
+      const dObj = this.parseDate(dateStr);
+      if (!dObj || dObj.getFullYear() !== currentYear) return;
+
+      const assigned = String(r['Assigned To'] || '').trim().toLowerCase();
+      const notes = String(r['Notes'] || '').trim();
+      const notesLower = notes.toLowerCase();
+      const num = String(r['Item #'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['MACK'] || r['Model'] || r['Serial #'] || Object.values(r)[1] || Object.values(r)[0] || '').trim();
+      if (!num || !activeItemNumbers.has(num.toLowerCase())) return;
+
+      // Filter out false positives (e.g. employee names like Nathaniel Newman, reassignments, returns, or lab tests)
+      if (assigned.includes('newman') || notesLower.includes('newman')) return;
+      if (notesLower.includes('new assignment') || notesLower.includes('reassigned') || notesLower.includes('returned from')) return;
+      if (assigned.startsWith('packed for') || assigned === 'in testing') return;
+
+      // Primary requirement: Locate "On Shelf (New Purchase)" in history and "New" note in the last column
+      const isOnShelfNewPurchase = assigned === 'on shelf (new purchase)';
+      const hasNewNote = notesLower === 'new' || notesLower.startsWith('new,') || notesLower.startsWith('new -') || notesLower.startsWith('new |');
+
+      // Also support legacy patterns recorded in past 2026 logs:
+      const isLegacyNewPurchase = (assigned === 'new' || assigned === 'new purchase' || assigned === 'brand new' || assigned === 'newly purchased' || assigned.startsWith('new (')) ||
+                                  notesLower === 'initial purchase (on shelf)' ||
+                                  notesLower.includes('new purchase') ||
+                                  notesLower.includes('initial purchase');
+
+      if ((isOnShelfNewPurchase && (hasNewNote || !notes)) ||
+          (assigned === 'on shelf' && hasNewNote) ||
+          (isOnShelfNewPurchase && isLegacyNewPurchase) ||
+          (isLegacyNewPurchase && (hasNewNote || assigned === 'new' || assigned === 'on shelf'))) {
+        newPurchaseItems.add(num);
       }
     });
+
+    // Safety check: also count active items marked 'New' with a current-year date if history hasn't caught up
     mainRows.forEach(r => {
-      const assigned = String(r['Assigned To'] || '').toLowerCase().trim();
-      const notes = String(r['Notes'] || '').toLowerCase().trim();
-      const num = String(r['Glove'] || r['Sleeve'] || r['Item #'] || '').trim();
-      if (assigned === 'new' || assigned === 'new purchase' || notes.includes('new purchase') || notes.includes('initial purchase')) {
+      const notes = String(r['Notes'] || '').trim().toLowerCase();
+      const num = String(r['Glove'] || r['Sleeve'] || r['Blanket'] || r['MACK'] || r['Item #'] || Object.values(r)[0] || '').trim();
+      const dateStr = String(r['Date Assigned'] || r['Test Date'] || '').trim();
+      const dObj = this.parseDate(dateStr);
+      if (dObj && dObj.getFullYear() === currentYear && (notes === 'new' || notes.startsWith('new,'))) {
         if (num) newPurchaseItems.add(num);
       }
     });

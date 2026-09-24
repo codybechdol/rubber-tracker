@@ -674,44 +674,72 @@ class LocalDatabase {
             r['Notes'] = '';
           }
 
-          // Annual rollover for 'New' notes:
-          // Once the purchase year has completed, 'New' falls off so each year starts fresh.
-          if (r['Notes'] && /\bnew\b/i.test(r['Notes'])) {
-            const currentYear = new Date().getFullYear();
-            let itemYear = null;
-            const itemNum = String(r['Serial #'] || r['Item #'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['MACK'] || r['Model'] || Object.values(r)[0] || '').trim();
-            const histKey = tableKey + '_history';
-            const histTable = (this.snapshot && this.snapshot.tables) ? this.snapshot.tables[histKey] : null;
-            if (histTable && histTable.rows) {
-              const hRows = histTable.rows.filter(hr => {
-                const hn = String(hr['Item #'] || hr['Model'] || hr['Serial #'] || hr['Glove'] || hr['Sleeve'] || Object.values(hr)[1] || Object.values(hr)[0] || '').trim().toLowerCase();
-                return hn === itemNum.toLowerCase();
-              });
-              if (hRows.length > 0) {
-                let earliestTime = Infinity;
-                for (const hr of hRows) {
-                  const dStr = String(hr['Date Assigned'] || hr['Date'] || Object.values(hr)[0] || '').trim();
-                  const pd = new Date(dStr);
-                  if (!isNaN(pd.getTime()) && pd.getTime() < earliestTime) {
+          // Annual rollover & active 'New' note preservation for inventory items:
+          // 1. Items purchased in the current year must display 'New' in their active Notes column.
+          // 2. Once the purchase year has completed (itemYear < currentYear), 'New' falls off so each year starts fresh.
+          const currentYear = new Date().getFullYear();
+          let itemYear = null;
+          let isNewPurchaseThisYear = false;
+          const itemNum = String(r['Serial #'] || r['Item #'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['MACK'] || r['Model'] || Object.values(r)[0] || '').trim();
+          const histKey = tableKey + '_history';
+          const histTable = (this.snapshot && this.snapshot.tables) ? this.snapshot.tables[histKey] : null;
+
+          if (histTable && histTable.rows) {
+            const hRows = histTable.rows.filter(hr => {
+              const hn = String(hr['Item #'] || hr['Model'] || hr['Serial #'] || hr['Glove'] || hr['Sleeve'] || Object.values(hr)[1] || Object.values(hr)[0] || '').trim().toLowerCase();
+              return hn === itemNum.toLowerCase();
+            });
+            if (hRows.length > 0) {
+              let earliestTime = Infinity;
+              for (const hr of hRows) {
+                const dStr = String(hr['Date Assigned'] || hr['Date'] || Object.values(hr)[0] || '').trim();
+                const pd = new Date(dStr);
+                const assignedLower = String(hr['Assigned To'] || '').trim().toLowerCase();
+                const notesLower = String(hr['Notes'] || '').trim().toLowerCase();
+                const isPurchaseEntry = assignedLower === 'on shelf (new purchase)' ||
+                                        assignedLower === 'new' ||
+                                        assignedLower === 'new purchase' ||
+                                        assignedLower === 'brand new' ||
+                                        notesLower === 'new' ||
+                                        notesLower.startsWith('new,') ||
+                                        notesLower.startsWith('new -') ||
+                                        notesLower.includes('new purchase') ||
+                                        notesLower.includes('initial purchase');
+
+                if (!isNaN(pd.getTime())) {
+                  if (pd.getTime() < earliestTime) {
                     earliestTime = pd.getTime();
                     itemYear = pd.getFullYear();
+                  }
+                  if (isPurchaseEntry && pd.getFullYear() === currentYear) {
+                    isNewPurchaseThisYear = true;
                   }
                 }
               }
             }
-            if (!itemYear) {
-              const dateStr = String(r['Date Assigned'] || r['Test Date'] || r['Calibration Date'] || '').trim();
-              const pd = new Date(dateStr);
-              if (!isNaN(pd.getTime())) itemYear = pd.getFullYear();
-            }
-            if (itemYear && itemYear < currentYear) {
-              r['Notes'] = LocalDatabase.stripNewNote(r['Notes']);
+          }
+
+          if (!itemYear) {
+            const dateStr = String(r['Date Assigned'] || r['Test Date'] || r['Calibration Date'] || '').trim();
+            const pd = new Date(dateStr);
+            if (!isNaN(pd.getTime())) itemYear = pd.getFullYear();
+          }
+
+          if (isNewPurchaseThisYear) {
+            const curNotes = String(r['Notes'] || '').trim();
+            if (!curNotes) {
+              r['Notes'] = 'New';
+              this.syncRowToRawGrid(table, r);
+            } else if (!/\bnew\b/i.test(curNotes)) {
+              r['Notes'] = `New, ${curNotes}`;
               this.syncRowToRawGrid(table, r);
             }
+          } else if (itemYear && itemYear < currentYear && r['Notes'] && /\bnew\b/i.test(r['Notes'])) {
+            r['Notes'] = LocalDatabase.stripNewNote(r['Notes']);
+            this.syncRowToRawGrid(table, r);
           }
 
           // Specific healing for OH-105
-          const itemNum = String(r['Serial #'] || r['Item #'] || '').trim();
           if (itemNum === 'OH-105') {
             if (!r['Location'] || r['Location'] === 'Helena') r['Location'] = 'Hamilton';
             if (!r['Status'] || r['Status'] === 'On Shelf') r['Status'] = 'Assigned';
@@ -1220,8 +1248,10 @@ class LocalDatabase {
     });
 
     // Auto-record initial History entry if this is an inventory sheet
-    const histNote = originReason || rowObj['Notes'] || 'New Purchase';
-    await this.recordItemHistoryEvent(table.name, rowObj, histNote);
+    const histNote = (originReason === 'New Purchase' || (rowObj['Notes'] && String(rowObj['Notes']).trim() === 'New'))
+      ? 'New'
+      : (originReason || rowObj['Notes'] || 'New Purchase');
+    await this.recordItemHistoryEvent(table.name, rowObj, histNote, originReason);
 
     return rowObj;
   }
@@ -1332,7 +1362,7 @@ class LocalDatabase {
   /**
    * Records an item state transition event to the corresponding History table and syncs to Google Sheets
    */
-  async recordItemHistoryEvent(sheetName, itemRow, reasonNote = '') {
+  async recordItemHistoryEvent(sheetName, itemRow, reasonNote = '', originReason = '') {
     if (!itemRow || !this.snapshot || !this.snapshot.tables) return;
     const sNameLower = String(sheetName || '').toLowerCase().trim();
     const invMap = {
@@ -1368,10 +1398,28 @@ class LocalDatabase {
     }
     if (!itemNum) return;
 
-    const assignedTo = String(itemRow['Assigned To'] || itemRow['Status'] || 'On Shelf').trim();
+    let assignedTo = String(itemRow['Assigned To'] || itemRow['Status'] || 'On Shelf').trim();
     const cleanLoc = window.getPhysicalLocation ? window.getPhysicalLocation(itemRow['Location']) : itemRow['Location'];
     const location = String(cleanLoc || itemRow['Location'] || 'Helena').trim();
-    const notes = reasonNote || itemRow['Notes'] || '';
+    let notes = reasonNote || itemRow['Notes'] || '';
+
+    // Recognize New Purchase origin for history:
+    // When a new item is added with New Purchase, history should read "On Shelf (New Purchase)" in Assigned To, and "New" in Notes
+    const rowNotesLower = String(itemRow['Notes'] || '').trim().toLowerCase();
+    const isNewPurchase = originReason === 'New Purchase' ||
+                          reasonNote === 'New Purchase' ||
+                          assignedTo.toLowerCase() === 'on shelf (new purchase)' ||
+                          (assignedTo.toLowerCase() === 'on shelf' && (rowNotesLower === 'new' || rowNotesLower.startsWith('new,') || rowNotesLower.startsWith('new -')));
+
+    if (isNewPurchase) {
+      assignedTo = 'On Shelf (New Purchase)';
+      if (!notes || notes === 'New Purchase' || notes === 'On Shelf') {
+        notes = (itemRow['Notes'] && itemRow['Notes'] !== 'New Purchase') ? itemRow['Notes'] : 'New';
+      }
+      if (!/\bnew\b/i.test(notes)) {
+        notes = 'New';
+      }
+    }
 
     let latest = null;
     let lAssigned = '';

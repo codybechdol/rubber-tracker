@@ -21,6 +21,7 @@ class EmployeeNameResolver {
       { name: 'Packed For Delivery', label: 'Packed For Delivery (Truck)', icon: '🚚', location: "Cody's Truck", status: 'Packed For Delivery' },
       { name: 'Failed Rubber', label: 'Failed Rubber (Destroyed)', icon: '❌', location: 'Destroyed', status: 'Failed Rubber' },
       { name: 'Lost', label: 'Lost / Missing', icon: '❓', location: 'Lost', status: 'Lost' },
+      { name: 'On Shelf (New Purchase)', label: 'On Shelf (New Purchase)', icon: '✨', location: 'Helena', status: 'On Shelf' },
       { name: 'New', label: 'New Purchase (On Shelf)', icon: '✨', location: 'Helena', status: 'On Shelf' }
     ];
     this.init();

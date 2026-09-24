@@ -1098,15 +1098,10 @@ class InventoryManager {
     const userNotes = document.getElementById('f-notes') ? document.getElementById('f-notes').value.trim() : '';
     let notes = userNotes;
     if (originReason === 'New Purchase') {
-      const itemDateStr = rawDateAssigned || rawTestDate || rawCalDate || '';
-      const itemYear = itemDateStr ? new Date(itemDateStr).getFullYear() : new Date().getFullYear();
-      const currentYear = new Date().getFullYear();
-      if (!itemYear || itemYear >= currentYear) {
-        if (!userNotes) {
-          notes = 'New';
-        } else if (!/\bnew\b/i.test(userNotes)) {
-          notes = `New, ${userNotes}`;
-        }
+      if (!userNotes) {
+        notes = 'New';
+      } else if (!/\bnew\b/i.test(userNotes)) {
+        notes = `New, ${userNotes}`;
       }
     }
 

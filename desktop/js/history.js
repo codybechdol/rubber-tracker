@@ -222,7 +222,8 @@ class HistoryNavigator {
         if (itemNum && !existingItemNums.has(itemNum.toLowerCase())) {
           const arNotes = String(ar['Notes'] || '').trim();
           const arStatus = String(ar['Status'] || '').trim().toLowerCase();
-          const hasOriginNote = arNotes.toLowerCase().includes('new purchase') || arNotes.toLowerCase().includes('failed pair') || arNotes.toLowerCase().includes('item found');
+          const isNew = arNotes.toLowerCase() === 'new' || arNotes.toLowerCase().startsWith('new,') || arNotes.toLowerCase().includes('new purchase');
+          const hasOriginNote = isNew || arNotes.toLowerCase().includes('failed pair') || arNotes.toLowerCase().includes('item found');
           
           if (hasOriginNote && (arStatus === 'failed rubber' || arStatus === 'destroyed' || arStatus === 'lost' || arStatus === 'assigned' || arStatus === 'in testing' || arStatus === 'ready for delivery' || arStatus === 'ready for test')) {
             rows.push({
@@ -231,8 +232,8 @@ class HistoryNavigator {
               'Size': ar['Size'] || '',
               'Class': ar['Class'] || '',
               'Location': 'Helena',
-              'Assigned To': 'On Shelf',
-              'Notes': arNotes
+              'Assigned To': isNew ? 'On Shelf (New Purchase)' : 'On Shelf',
+              'Notes': isNew ? (arNotes || 'New') : arNotes
             });
             rows.push({
               'Date Assigned': ar['Date Assigned'] || new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' }),
@@ -250,8 +251,8 @@ class HistoryNavigator {
               'Size': ar['Size'] || '',
               'Class': ar['Class'] || '',
               'Location': ar['Location'] || 'Helena',
-              'Assigned To': ar['Assigned To'] || ar['Status'] || 'On Shelf',
-              'Notes': arNotes || 'Initial Inventory Status'
+              'Assigned To': isNew ? 'On Shelf (New Purchase)' : (ar['Assigned To'] || ar['Status'] || 'On Shelf'),
+              'Notes': isNew ? (arNotes || 'New') : (arNotes || 'Initial Inventory Status')
             });
           }
         }
@@ -500,9 +501,8 @@ class HistoryNavigator {
               html += `<td>${valStr ? `<span style="padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 500; display: inline-block; ${pillStyle}">${this.escapeHtml(valStr)}</span>` : ''}</td>`;
             } else if (hLower === 'item #' || hLower === 'serial #' || hLower === 'item') {
               html += `<td style="font-weight: 700; color: #60a5fa;">${this.escapeHtml(String(val))}</td>`;
-            } else if (hLower === 'assigned to' || hLower === 'employee name') {
-              if (valStr.toLowerCase() === 'new' || valStr.toLowerCase() === 'newly purchased' || valStr.toLowerCase() === 'brand new') {
-                html += `<td><span style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); padding: 2px 8px; border-radius: 6px; font-weight: 700; font-size: 11px; display: inline-flex; align-items: center; gap: 4px;"><span>✨</span> NEW (Purchased)</span></td>`;
+              if (valStr.toLowerCase() === 'new' || valStr.toLowerCase() === 'newly purchased' || valStr.toLowerCase() === 'brand new' || valStr.toLowerCase() === 'on shelf (new purchase)') {
+                html += `<td><span style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); padding: 2px 8px; border-radius: 6px; font-weight: 700; font-size: 11px; display: inline-flex; align-items: center; gap: 4px;"><span>✨</span> On Shelf (New Purchase)</span></td>`;
               } else {
                 html += `<td style="font-weight: 600; color: var(--text-primary);">${this.escapeHtml(String(val))}</td>`;
               }
@@ -589,8 +589,8 @@ class HistoryNavigator {
         } else if (hLower === 'item #' || hLower === 'serial #' || hLower === 'item') {
           html += `<td style="font-weight: 600; color: var(--text-primary);">${this.escapeHtml(String(val))}</td>`;
         } else if (hLower === 'assigned to' || hLower === 'employee name') {
-          if (valStr.toLowerCase() === 'new' || valStr.toLowerCase() === 'newly purchased' || valStr.toLowerCase() === 'brand new') {
-            html += `<td><span style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); padding: 2px 8px; border-radius: 6px; font-weight: 700; font-size: 11px; display: inline-flex; align-items: center; gap: 4px;"><span>✨</span> NEW (Purchased)</span></td>`;
+          if (valStr.toLowerCase() === 'new' || valStr.toLowerCase() === 'newly purchased' || valStr.toLowerCase() === 'brand new' || valStr.toLowerCase() === 'on shelf (new purchase)') {
+            html += `<td><span style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); padding: 2px 8px; border-radius: 6px; font-weight: 700; font-size: 11px; display: inline-flex; align-items: center; gap: 4px;"><span>✨</span> On Shelf (New Purchase)</span></td>`;
           } else {
             html += `<td style="font-weight: 500;">${this.escapeHtml(String(val))}</td>`;
           }
