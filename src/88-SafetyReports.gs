@@ -5864,11 +5864,18 @@ function addResolvedRowFormatting(sheet) {
 function clearSafetyBatchProperties() {
   try {
     var props = PropertiesService.getScriptProperties();
-    var allKeys = props.getKeys();
-    for (var i = 0; i < allKeys.length; i++) {
-      if (allKeys[i].indexOf('SAFETY_BATCH_') === 0) {
-        props.deleteProperty(allKeys[i]);
-      }
+    props.deleteProperty('SAFETY_BATCH_START');
+    props.deleteProperty('SAFETY_BATCH_TOTAL_THREADS');
+    props.deleteProperty('SAFETY_BATCH_DATE_FILTER');
+    props.deleteProperty('SAFETY_BATCH_REPORT_TYPE_FILTER');
+    var cache = CacheService.getScriptCache();
+    if (cache) {
+      cache.removeAll([
+        'SAFETY_BATCH_THREAD_IDS',
+        'SAFETY_BATCH_EMAIL_IDS',
+        'SAFETY_BATCH_CREWS',
+        'SAFETY_BATCH_EMP_DATA'
+      ]);
     }
   } catch (e) {
     Logger.log("Error clearing SAFETY_BATCH_ properties: " + e);
@@ -6247,10 +6254,11 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
   var allThreadIds = [];
 
   if (!isFirstBatch) {
-    // Continuation batch: load cached thread IDs to skip 10-15s of repeated Gmail searches
-    var cachedThreadIdsStr = (typeof getChunkedScriptProperty === 'function')
-      ? getChunkedScriptProperty('SAFETY_BATCH_THREAD_IDS')
-      : null;
+    // Continuation batch: load cached thread IDs from fast CacheService (<5ms)
+    var cachedThreadIdsStr = batchCache.get('SAFETY_BATCH_THREAD_IDS');
+    if (!cachedThreadIdsStr && typeof getChunkedScriptProperty === 'function') {
+      cachedThreadIdsStr = getChunkedScriptProperty('SAFETY_BATCH_THREAD_IDS');
+    }
     if (cachedThreadIdsStr) {
       try {
         allThreadIds = JSON.parse(cachedThreadIdsStr);
@@ -6297,10 +6305,11 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
       }
     }
 
-    // Cache thread IDs for continuation batches
-    if (allThreadIds.length > 0 && typeof setChunkedScriptProperty === 'function') {
+    // Cache thread IDs for continuation batches in fast CacheService (100KB limit, 10-min TTL)
+    if (allThreadIds.length > 0) {
       try {
-        setChunkedScriptProperty('SAFETY_BATCH_THREAD_IDS', JSON.stringify(allThreadIds));
+        var threadIdsJson = JSON.stringify(allThreadIds);
+        batchCache.put('SAFETY_BATCH_THREAD_IDS', threadIdsJson, 600);
         props.setProperty('SAFETY_BATCH_TOTAL_THREADS', String(allThreadIds.length));
       } catch (eCache) {
         Logger.log("Could not cache thread IDs: " + eCache);
@@ -6313,25 +6322,9 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
 
   if (totalThreadsCount === 0) {
     clearSafetyBatchProperties();
-    batchCache.removeAll(['SAFETY_BATCH_CREWS', 'SAFETY_BATCH_EMP_DATA', 'SAFETY_BATCH_EMAIL_IDS']);
-    if (typeof deleteChunkedScriptProperty === 'function') {
-      deleteChunkedScriptProperty('SAFETY_BATCH_EMAIL_IDS');
-      deleteChunkedScriptProperty('SAFETY_BATCH_THREAD_IDS');
-    }
 
     if (MAX_EXECUTION_MS <= 30000) {
-      Logger.log("No threads found in Web App mode, dispatching background post-processing trigger...");
-      try {
-        var cleanupProps = PropertiesService.getScriptProperties();
-        cleanupProps.setProperty('BG_POST_PROCESS_FILTER', reportTypeFilter || 'ALL');
-        ScriptApp.newTrigger('executeAsyncSafetyCompliancePostProcessing')
-          .timeBased()
-          .after(100)
-          .create();
-      } catch (eTrig) {
-        Logger.log("Background trigger dispatch error: " + eTrig);
-      }
-      return { complete: true, totalThreads: 0, message: "No new emails found - all already processed" };
+      return { complete: true, totalThreads: 0, threadsProcessed: 0, threadsRemaining: 0, processedThisBatch: 0, skippedThisBatch: 0, message: "No new emails found - all already processed" };
     }
 
     // Still run compliance calculation to ensure current/previous weeks are created
@@ -6382,13 +6375,11 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
   var existingEmailIds = {};
   var emailIdsLoadedFromCache = false;
 
-  // On continuation batches, try loading from chunked ScriptProperties or fast CacheService first (<20ms)
+  // On continuation batches, try loading from fast CacheService first (<5ms)
   if (!isFirstBatch) {
-    var cachedEmailIdsListStr = (typeof getChunkedScriptProperty === 'function')
-      ? getChunkedScriptProperty('SAFETY_BATCH_EMAIL_IDS')
-      : null;
-    if (!cachedEmailIdsListStr) {
-      cachedEmailIdsListStr = batchCache.get('SAFETY_BATCH_EMAIL_IDS');
+    var cachedEmailIdsListStr = batchCache.get('SAFETY_BATCH_EMAIL_IDS');
+    if (!cachedEmailIdsListStr && typeof getChunkedScriptProperty === 'function') {
+      cachedEmailIdsListStr = getChunkedScriptProperty('SAFETY_BATCH_EMAIL_IDS');
     }
     if (cachedEmailIdsListStr) {
       try {
@@ -6397,7 +6388,7 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
           existingEmailIds[emailIdList[ei]] = true;
         }
         emailIdsLoadedFromCache = true;
-        Logger.log("Loaded " + emailIdList.length + " email IDs from cache (chunked ScriptProperties/batchCache)");
+        Logger.log("Loaded " + emailIdList.length + " email IDs from cache");
       } catch(e) {
         emailIdsLoadedFromCache = false;
       }
@@ -6415,7 +6406,10 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
     // Load from JHA Log sheet (column F)
     var jhaLogSheet = getJHALogSheet();
     if (jhaLogSheet && jhaLogSheet.getLastRow() > 1) {
-      var jhaEmailIds = jhaLogSheet.getRange(2, 6, jhaLogSheet.getLastRow() - 1, 1).getValues();
+      var jhaLastRow = jhaLogSheet.getLastRow();
+      var jhaStartRow = (MAX_EXECUTION_MS <= 30000 || newOnlyMode) ? Math.max(2, jhaLastRow - 400) : 2;
+      var jhaRowCount = jhaLastRow - jhaStartRow + 1;
+      var jhaEmailIds = jhaLogSheet.getRange(jhaStartRow, 6, jhaRowCount, 1).getValues();
       for (var j = 0; j < jhaEmailIds.length; j++) {
         if (jhaEmailIds[j][0]) {
           existingEmailIds[String(jhaEmailIds[j][0]).split('_')[0]] = true; // base ID (strip _0, _1 suffixes)
@@ -6427,7 +6421,10 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
     // Load from Weekly Safety Log sheet (column F)
     var weeklyLogSheet = getWeeklySafetyLogSheet();
     if (weeklyLogSheet && weeklyLogSheet.getLastRow() > 1) {
-      var weeklyEmailIds = weeklyLogSheet.getRange(2, 6, weeklyLogSheet.getLastRow() - 1, 1).getValues();
+      var wLastRow = weeklyLogSheet.getLastRow();
+      var wStartRow = (MAX_EXECUTION_MS <= 30000 || newOnlyMode) ? Math.max(2, wLastRow - 200) : 2;
+      var wRowCount = wLastRow - wStartRow + 1;
+      var weeklyEmailIds = weeklyLogSheet.getRange(wStartRow, 6, wRowCount, 1).getValues();
       for (var k = 0; k < weeklyEmailIds.length; k++) {
         if (weeklyEmailIds[k][0]) {
           existingEmailIds[String(weeklyEmailIds[k][0])] = true;
@@ -6438,7 +6435,10 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
     // Load from Monthly Checklist Log sheet (column G)
     var monthlyLogSheet = getMonthlyChecklistLogSheet();
     if (monthlyLogSheet && monthlyLogSheet.getLastRow() > 1) {
-      var monthlyEmailIds = monthlyLogSheet.getRange(2, 7, monthlyLogSheet.getLastRow() - 1, 1).getValues();
+      var mLastRow = monthlyLogSheet.getLastRow();
+      var mStartRow = (MAX_EXECUTION_MS <= 30000 || newOnlyMode) ? Math.max(2, mLastRow - 150) : 2;
+      var mRowCount = mLastRow - mStartRow + 1;
+      var monthlyEmailIds = monthlyLogSheet.getRange(mStartRow, 7, mRowCount, 1).getValues();
       for (var m = 0; m < monthlyEmailIds.length; m++) {
         if (monthlyEmailIds[m][0]) {
           existingEmailIds[String(monthlyEmailIds[m][0])] = true;
@@ -6446,16 +6446,12 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
       }
     }
 
-    Logger.log("Pre-loaded " + Object.keys(existingEmailIds).length + " existing email IDs from log sheets (JHA, Weekly Safety, Monthly Checklist)");
+    Logger.log("Pre-loaded " + Object.keys(existingEmailIds).length + " existing email IDs from log sheets");
     try {
       var idListJson = JSON.stringify(Object.keys(existingEmailIds));
-      if (typeof setChunkedScriptProperty === 'function') {
-        setChunkedScriptProperty('SAFETY_BATCH_EMAIL_IDS', idListJson);
-      } else {
-        batchCache.put('SAFETY_BATCH_EMAIL_IDS', idListJson, 600);
-      }
+      batchCache.put('SAFETY_BATCH_EMAIL_IDS', idListJson, 600);
     } catch (eCache) {
-      Logger.log("Could not cache email IDs in storage: " + eCache);
+      Logger.log("Could not cache email IDs in batchCache: " + eCache);
     }
   }
 
@@ -6931,25 +6927,18 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
 
       Logger.log('Batch processed ' + processedCount + ' new email(s), skipped ' + skippedCount + '. Progress: ' + batchEnd + ' / ' + totalThreadsCount);
 
-      // Cache email IDs for next batch in fast storage
-      try {
-        var idListJson = JSON.stringify(Object.keys(existingEmailIds));
-        if (typeof setChunkedScriptProperty === 'function') {
-          setChunkedScriptProperty('SAFETY_BATCH_EMAIL_IDS', idListJson);
-        } else {
+      // Cache email IDs for next batch in fast storage if new logs were added
+      if (rowsCollector && rowsCollector.length > 0) {
+        try {
+          var idListJson = JSON.stringify(Object.keys(existingEmailIds));
           batchCache.put('SAFETY_BATCH_EMAIL_IDS', idListJson, 600);
-        }
-      } catch(e) {}
+        } catch(e) {}
+      }
 
       var lastProcessedTimestamp = getLastSafetyEmailProcessedTime(reportTypeFilter);
 
       if (isComplete) {
         clearSafetyBatchProperties();
-        batchCache.removeAll(['SAFETY_BATCH_CREWS', 'SAFETY_BATCH_EMP_DATA', 'SAFETY_BATCH_EMAIL_IDS']);
-        if (typeof deleteChunkedScriptProperty === 'function') {
-          deleteChunkedScriptProperty('SAFETY_BATCH_EMAIL_IDS');
-          deleteChunkedScriptProperty('SAFETY_BATCH_THREAD_IDS');
-        }
 
         var today = new Date();
         var dateStr = Utilities.formatDate(today, Session.getScriptTimeZone(), 'yyyy/MM/dd');

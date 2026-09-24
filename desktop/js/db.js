@@ -226,6 +226,12 @@ class LocalDatabase {
           localStorage.setItem('sa_trip_manual_tasks', JSON.stringify(snapshot.configs.manual_tasks));
         } catch { /* ignore */ }
       }
+      if (snapshot.configs.scheduled_swaps && typeof snapshot.configs.scheduled_swaps === 'object') {
+        try {
+          localStorage.setItem('sa_trip_scheduled_swaps', JSON.stringify(snapshot.configs.scheduled_swaps));
+          localStorage.setItem('TRIP_PLANNER_SCHEDULED_SWAPS', JSON.stringify(snapshot.configs.scheduled_swaps));
+        } catch { /* ignore */ }
+      }
       if (snapshot.configs.workSchedule) {
         try {
           localStorage.setItem('sa_work_schedule', snapshot.configs.workSchedule);
@@ -358,6 +364,42 @@ class LocalDatabase {
     await this.addMutation({
       action: 'SAVE_MANUAL_TASKS',
       manual_tasks: tasks
+    });
+  }
+
+  getScheduledSwaps() {
+    if (this.snapshot && this.snapshot.configs && this.snapshot.configs.scheduled_swaps && typeof this.snapshot.configs.scheduled_swaps === 'object') {
+      return this.snapshot.configs.scheduled_swaps;
+    }
+    const stored = localStorage.getItem('sa_trip_scheduled_swaps') || localStorage.getItem('TRIP_PLANNER_SCHEDULED_SWAPS');
+    if (stored) {
+      try {
+        const parsed = JSON.parse(stored);
+        if (parsed && typeof parsed === 'object') return parsed;
+      } catch { /* ignore */ }
+    }
+    return {};
+  }
+
+  async saveScheduledSwaps(swaps) {
+    const isViewOnly = (typeof window !== 'undefined' && window.currentRoleMode === 'view_only') ||
+                       (typeof document !== 'undefined' && document.body && (document.body.classList.contains('view-only-mode') || document.body.classList.contains('inspector-mode')));
+    if (isViewOnly) {
+      console.warn('⚠️ Scheduled swaps edit blocked: Safety Assistant is currently in View Only mode.');
+      return;
+    }
+
+    if (!this.snapshot) this.snapshot = { configs: {}, tables: {} };
+    if (!this.snapshot.configs) this.snapshot.configs = {};
+    this.snapshot.configs.scheduled_swaps = swaps;
+    try {
+      localStorage.setItem('sa_trip_scheduled_swaps', JSON.stringify(swaps));
+      localStorage.setItem('TRIP_PLANNER_SCHEDULED_SWAPS', JSON.stringify(swaps));
+    } catch { /* ignore */ }
+    await this.persistSnapshot(this.snapshot);
+    await this.addMutation({
+      action: 'SAVE_SCHEDULED_SWAPS',
+      scheduled_swaps: swaps
     });
   }
 
@@ -2638,6 +2680,11 @@ class LocalDatabase {
     if (mut.action === 'SAVE_MANUAL_TASKS') {
       if (!this.snapshot.configs) this.snapshot.configs = {};
       this.snapshot.configs.manual_tasks = mut.manual_tasks;
+      return;
+    }
+    if (mut.action === 'SAVE_SCHEDULED_SWAPS') {
+      if (!this.snapshot.configs) this.snapshot.configs = {};
+      this.snapshot.configs.scheduled_swaps = mut.scheduled_swaps;
       return;
     }
     if (mut.action === 'SET_HOLIDAYS') {

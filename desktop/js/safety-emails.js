@@ -1001,8 +1001,8 @@ class SafetyEmailsEngine {
         const payload = {
           action: 'processSafetyEmails',
           daysBack: daysBack,
-          // Safe batch sizes: 20 threads per batch in Fast Mode (~2-3s per cycle), 1 thread in Deep Scan (OCR)
-          batchSize: skipPdfExtraction ? 20 : 1,
+          // Safe batch sizes: 8 threads on batch 1 (accounts for initial search/setup), 15 threads on continuation batches, 1 thread in Deep Scan (OCR)
+          batchSize: skipPdfExtraction ? (batchIndex === 1 && !isPostProcessing ? 8 : 15) : 1,
           reportTypeFilter: reportTypeFilter,
           newOnlyMode: newOnlyMode,
           skipPdfExtraction: skipPdfExtraction,
@@ -1029,7 +1029,7 @@ class SafetyEmailsEngine {
                 console.warn('Switching to Fast Mode (skipPdfExtraction = true) for subsequent attempt to bypass heavy PDF OCR timeout.');
                 skipPdfExtraction = true;
                 payload.skipPdfExtraction = true;
-                payload.batchSize = 20;
+                payload.batchSize = 15;
               }
               const subEl = document.getElementById('proc-live-sub');
               if (subEl) subEl.textContent = `Server busy, retrying batch #${batchIndex} (attempt ${batchAttempts + 1}/3)...`;
@@ -1044,7 +1044,7 @@ class SafetyEmailsEngine {
                 console.warn('Switching to Fast Mode (skipPdfExtraction = true) for subsequent attempt to bypass heavy PDF OCR timeout.');
                 skipPdfExtraction = true;
                 payload.skipPdfExtraction = true;
-                payload.batchSize = 20;
+                payload.batchSize = 15;
               }
               const subEl = document.getElementById('proc-live-sub');
               if (subEl) subEl.textContent = `Server busy or proxy timeout, retrying batch #${batchIndex} (attempt ${batchAttempts + 1}/3)...`;

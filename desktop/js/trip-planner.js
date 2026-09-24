@@ -96,8 +96,14 @@ class TripPlannerApp {
   }
 
   loadScheduledSwaps() {
+    if (this.db && typeof this.db.getScheduledSwaps === 'function') {
+      const fromDb = this.db.getScheduledSwaps();
+      if (fromDb && typeof fromDb === 'object' && Object.keys(fromDb).length > 0) {
+        return fromDb;
+      }
+    }
     try {
-      return JSON.parse(localStorage.getItem('TRIP_PLANNER_SCHEDULED_SWAPS') || '{}');
+      return JSON.parse(localStorage.getItem('TRIP_PLANNER_SCHEDULED_SWAPS') || localStorage.getItem('sa_trip_scheduled_swaps') || '{}');
     } catch {
       return {};
     }
@@ -106,7 +112,11 @@ class TripPlannerApp {
   saveScheduledSwaps() {
     try {
       localStorage.setItem('TRIP_PLANNER_SCHEDULED_SWAPS', JSON.stringify(this.scheduledSwaps || {}));
+      localStorage.setItem('sa_trip_scheduled_swaps', JSON.stringify(this.scheduledSwaps || {}));
     } catch { /* ignore */ }
+    if (this.db && typeof this.db.saveScheduledSwaps === 'function') {
+      this.db.saveScheduledSwaps(this.scheduledSwaps);
+    }
   }
 
   getSwapKey(item) {
@@ -133,17 +143,7 @@ class TripPlannerApp {
       const dateKey = typeof entry === 'object' ? entry.dateKey : entry;
       const location = typeof entry === 'object' ? entry.location : (item.location || '');
       if (dateKey) {
-        // Check if the scheduled trip on that dateKey still exists in plannedTrips
-        const tripsOnDate = this.getTripsForDate(dateKey);
-        const tripStillExists = tripsOnDate.length === 0 || tripsOnDate.some(t => 
-          !location || (t.location || '').toLowerCase() === location.toLowerCase()
-        );
-        if (tripStillExists) {
-          return { dateKey, location, source: 'explicit' };
-        } else {
-          delete this.scheduledSwaps[sKey];
-          this.saveScheduledSwaps();
-        }
+        return { dateKey, location, source: 'explicit' };
       }
     }
 
@@ -2396,13 +2396,23 @@ class TripPlannerApp {
       });
       if (conf) {
         const isNonExp = !!conf.isIssuedDate || conf.termMonths === 0;
+        const aliases = [conf.key.toLowerCase(), (conf.label || '').toLowerCase()];
+        if (conf.key.toLowerCase().includes('trench')) {
+          aliases.push('trench', 'excavation', 'trenching', 'comp person');
+        } else if (conf.key.toLowerCase().includes('crane')) {
+          if (conf.key.toLowerCase().includes('eval')) aliases.push('crane eval', 'crane assessment');
+          else aliases.push('crane cert', 'ncco');
+        } else if (conf.key.toLowerCase().includes('forklift')) {
+          if (conf.key.toLowerCase().includes('operator')) aliases.push('forklift operator', 'operator safety');
+          else aliases.push('forklift');
+        }
         return [{
           key: conf.key || conf.name,
-          canonical: conf.label || conf.name || conf.key,
+          canonical: conf.key || conf.name,
           label: conf.label || conf.name || conf.key,
           isNonExp: isNonExp,
           months: isNonExp ? null : (conf.termMonths || 12),
-          aliases: [conf.key.toLowerCase(), (conf.label || '').toLowerCase()]
+          aliases: aliases
         }];
       }
     }
@@ -2412,24 +2422,25 @@ class TripPlannerApp {
 
     if (hasCpr && has1stAid) {
       return [
-        { key: 'cpr', canonical: 'CPR', label: 'CPR', isNonExp: false, months: 24, aliases: ['cpr'] },
-        { key: '1st aid', canonical: '1st Aid', label: '1st Aid', isNonExp: false, months: 24, aliases: ['1st aid', 'first aid'] }
+        { key: 'CPR', canonical: 'CPR', label: 'CPR', isNonExp: false, months: 24, aliases: ['cpr'] },
+        { key: '1st Aid', canonical: '1st Aid', label: '1st Aid', isNonExp: false, months: 24, aliases: ['1st aid', 'first aid'] }
       ];
     }
 
-    if (clean.includes('helicopter') || clean.includes('helo') || clean.includes('eica')) {
+    if (clean.includes('helicopter') || clean.includes('helo') || clean.includes('eica') || clean.includes('neca')) {
       return [{
-        key: 'eica',
-        canonical: 'EICA Basic Helicopter Line Construction Safety',
+        key: 'EICA Basic Helicopter Line Construction Safety',
+        canonical: 'NECA Basic Helicopter Line Construction Safety',
         label: 'Helicopter Line Construction Safety',
         isNonExp: true,
-        aliases: ['helicopter', 'helo', 'eica']
+        months: null,
+        aliases: ['helicopter', 'helo', 'eica', 'neca', 'neca basic helicopter line construction safety']
       }];
     }
 
     if (clean.includes('pole top') || clean.includes('poletop') || clean.includes('bucket rescue')) {
       return [{
-        key: 'pole top',
+        key: 'Pole Top Rescue',
         canonical: 'Pole Top Rescue',
         label: 'Pole Top Rescue',
         isNonExp: false,
@@ -2440,7 +2451,7 @@ class TripPlannerApp {
 
     if (clean.includes('cpr')) {
       return [{
-        key: 'cpr',
+        key: 'CPR',
         canonical: 'CPR',
         label: 'CPR',
         isNonExp: false,
@@ -2451,7 +2462,7 @@ class TripPlannerApp {
 
     if (clean.includes('1st aid') || clean.includes('first aid')) {
       return [{
-        key: '1st aid',
+        key: '1st Aid',
         canonical: '1st Aid',
         label: '1st Aid',
         isNonExp: false,
@@ -2463,28 +2474,29 @@ class TripPlannerApp {
     if (clean.includes('forklift')) {
       const isOp = clean.includes('safety') || clean.includes('operator') || clean.includes('eval');
       return [{
-        key: isOp ? 'forklift operator safety training' : 'forklift',
+        key: isOp ? 'Forklift Operator Safety Training' : 'Forklift',
         canonical: isOp ? 'Forklift Operator Safety Training' : 'Forklift',
         label: isOp ? 'Forklift Operator Safety Training' : 'Forklift',
         isNonExp: isOp,
         months: isOp ? null : 36,
-        aliases: ['forklift']
+        aliases: isOp ? ['forklift operator', 'operator safety'] : ['forklift']
       }];
     }
 
-    if (clean.includes('trench') || clean.includes('excavation')) {
+    if (clean.includes('trench') || clean.includes('excavation') || clean.includes('comp person')) {
       return [{
-        key: 'osha trench comp person',
+        key: 'OSHA Trench Comp Person',
         canonical: 'OSHA Trench Comp Person',
         label: 'OSHA Trench Competent Person',
         isNonExp: true,
-        aliases: ['trench', 'excavation']
+        months: null,
+        aliases: ['osha trench comp person', 'osha trench competent person', 'trench', 'excavation', 'trenching', 'comp person']
       }];
     }
 
     if (clean.includes('rigging') || clean.includes('signalperson') || clean.includes('spotter')) {
       return [{
-        key: 'rigging',
+        key: 'Rigging & Signaling/Signalperson & Spotter Cert',
         canonical: 'Rigging & Signaling/Signalperson & Spotter Cert',
         label: 'Rigging & Signaling',
         isNonExp: false,
@@ -2495,7 +2507,7 @@ class TripPlannerApp {
 
     if (clean.includes('harassment')) {
       return [{
-        key: 'harassment training',
+        key: 'Harassment Training',
         canonical: 'Harassment Training',
         label: 'Harassment Training',
         isNonExp: false,
@@ -2506,7 +2518,7 @@ class TripPlannerApp {
 
     if (clean.includes('dig safe') || clean.includes('digsafe') || clean.includes('811')) {
       return [{
-        key: 'dig safe',
+        key: 'Dig Safe',
         canonical: 'Dig Safe',
         label: 'Dig Safe (811)',
         isNonExp: false,
@@ -2515,53 +2527,57 @@ class TripPlannerApp {
       }];
     }
 
-    if (clean.includes('crane eval') || clean.includes('crane evaluation')) {
+    if (clean.includes('crane eval') || clean.includes('crane evaluation') || clean.includes('crane assessment')) {
       return [{
-        key: 'crane evaluation',
+        key: 'Crane Evaluation',
         canonical: 'Crane Evaluation',
         label: 'Crane Evaluation',
         isNonExp: true,
-        aliases: ['crane eval', 'crane evaluation']
+        months: null,
+        aliases: ['crane eval', 'crane evaluation', 'crane assessment']
       }];
     }
 
     if (clean.includes('crane')) {
       return [{
-        key: 'crane cert',
+        key: 'Crane Cert',
         canonical: 'Crane Cert',
         label: 'Crane Cert',
         isNonExp: false,
         months: 60,
-        aliases: ['crane cert', 'crane']
+        aliases: ['crane cert', 'crane', 'ncco']
       }];
     }
 
-    if (clean.includes('osha')) {
+    if (clean.includes('osha 1910') || clean.includes('osha 10') || clean.includes('osha 30') || clean.includes('osha')) {
       return [{
-        key: 'osha 1910',
+        key: 'OSHA 1910',
         canonical: 'OSHA 1910',
         label: 'OSHA 1910',
         isNonExp: true,
-        aliases: ['osha']
+        months: null,
+        aliases: ['osha 1910', 'osha 10', 'osha 30', '1910', 'et&d']
       }];
     }
 
     if (clean.includes('msha')) {
       return [{
-        key: 'msha',
+        key: 'MSHA',
         canonical: 'MSHA',
         label: 'MSHA',
         isNonExp: true,
+        months: null,
         aliases: ['msha']
       }];
     }
 
     if (clean.includes('bnsf')) {
       return [{
-        key: 'bnsf',
+        key: 'BNSF',
         canonical: 'BNSF',
         label: 'BNSF',
         isNonExp: true,
+        months: null,
         aliases: ['bnsf']
       }];
     }
@@ -2595,9 +2611,76 @@ class TripPlannerApp {
     const rc = String(rowCertType).toLowerCase().trim();
     const tc = String(certDef.canonical || '').toLowerCase().trim();
     const tk = String(certDef.key || '').toLowerCase().trim();
-    if (rc === tc || rc === tk) return true;
-    if (certDef.aliases && certDef.aliases.some(a => rc.includes(a))) return true;
-    return rc.includes(tk) || (tk && rc.includes(tk.split(' ')[0]));
+    const tl = String(certDef.label || '').toLowerCase().trim();
+
+    // Direct exact matches
+    if (rc === tc || rc === tk || rc === tl) return true;
+
+    const strip = s => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+    const cleanRc = strip(rc);
+    const cleanTc = strip(tc);
+    const cleanTk = strip(tk);
+    const cleanTl = strip(tl);
+    if (cleanRc && (cleanRc === cleanTc || cleanRc === cleanTk || cleanRc === cleanTl)) return true;
+
+    // Direct alias matches
+    if (certDef.aliases && Array.isArray(certDef.aliases)) {
+      for (const a of certDef.aliases) {
+        const al = String(a).toLowerCase().trim();
+        if (!al) continue;
+        if (rc === al || cleanRc === strip(al)) return true;
+      }
+    }
+
+    // Explicit domain-specific disambiguation to prevent cross-contamination
+    // 1. Trench vs OSHA 1910
+    const isDefTrench = tk.includes('trench') || tc.includes('trench') || tl.includes('trench');
+    const isRowTrench = rc.includes('trench') || rc.includes('excavat');
+    if (isDefTrench) return isRowTrench;
+    if (isRowTrench) return false;
+
+    const isDefOsha1910 = tk.includes('1910') || tc.includes('1910') || tl.includes('1910') || (tk === 'osha' && !isDefTrench);
+    const isRowOsha1910 = rc.includes('1910') || (rc.includes('osha') && !isRowTrench);
+    if (isDefOsha1910) return isRowOsha1910;
+
+    // 2. Crane Evaluation vs Crane Cert
+    const isDefCraneEval = tk.includes('eval') || tc.includes('eval') || tl.includes('eval');
+    const isRowCraneEval = rc.includes('eval');
+    if (isDefCraneEval) return isRowCraneEval && rc.includes('crane');
+    if (tk.includes('crane') || tc.includes('crane')) {
+      return rc.includes('crane') && !isRowCraneEval;
+    }
+
+    // 3. Forklift Operator Safety Training vs Forklift
+    const isDefForkliftOp = tk.includes('operator') || tc.includes('operator') || tl.includes('operator');
+    const isRowForkliftOp = rc.includes('operator') || rc.includes('safety training');
+    if (isDefForkliftOp) return isRowForkliftOp && rc.includes('forklift');
+    if (tk.includes('forklift') || tc.includes('forklift')) {
+      return rc.includes('forklift') && !isRowForkliftOp;
+    }
+
+    // 4. Helicopter (EICA / NECA)
+    if (tk.includes('helo') || tk.includes('helicopter') || tk.includes('eica') || tk.includes('neca')) {
+      return rc.includes('helicopter') || rc.includes('helo') || rc.includes('eica') || rc.includes('neca');
+    }
+
+    // 5. Pole Top Rescue
+    if (tk.includes('pole') || tk.includes('rescue')) {
+      return rc.includes('pole') || rc.includes('rescue');
+    }
+
+    // 6. 1st Aid vs CPR
+    if (tk.includes('aid') || tl.includes('aid')) {
+      return rc.includes('aid');
+    }
+    if (tk === 'cpr' || tl.includes('cpr')) {
+      return rc.includes('cpr');
+    }
+
+    if (tk.length >= 5 && rc.includes(tk)) return true;
+    if (tc.length >= 5 && rc.includes(tc)) return true;
+
+    return false;
   }
 
   showToast(msg, isError = false) {
@@ -2993,23 +3076,43 @@ class TripPlannerApp {
     if (payload.type === 'swap' && payload.swap) {
       const sKey = this.getSwapKey(payload.swap);
       if (sKey) {
-        this.scheduledSwaps[sKey] = { dateKey, location: location || payload.swap.location || '' };
+        this.scheduledSwaps[sKey] = {
+          dateKey,
+          location: location || payload.swap.location || '',
+          employeeName: payload.employeeName || payload.swap.employeeName || '',
+          crewId: payload.swap.crewId || payload.swap.jobNum || '',
+          type: payload.swap.type || 'Glove',
+          swap: payload.swap
+        };
         this.saveScheduledSwaps();
       }
-      if (location || payload.swap.location) {
-        this.addTrip(dateKey, location || payload.swap.location);
+      this.renderPlanner();
+      this.renderPickedSwapsList();
+      if (window.tripRouteMap) {
+        window.tripRouteMap.render();
       }
+      this.showToast(`🚚 Scheduled ${payload.swap.type || 'glove'} swap for ${payload.employeeName || payload.swap.employeeName || 'employee'} on ${dateKey}`);
     } else if (payload.type === 'employee' && Array.isArray(payload.swaps)) {
       payload.swaps.forEach(s => {
         const sKey = this.getSwapKey(s);
         if (sKey) {
-          this.scheduledSwaps[sKey] = { dateKey, location: location || s.location || '' };
+          this.scheduledSwaps[sKey] = {
+            dateKey,
+            location: location || s.location || '',
+            employeeName: payload.employeeName || s.employeeName || '',
+            crewId: s.crewId || s.jobNum || '',
+            type: s.type || 'Glove',
+            swap: s
+          };
         }
       });
       this.saveScheduledSwaps();
-      if (location) {
-        this.addTrip(dateKey, location);
+      this.renderPlanner();
+      this.renderPickedSwapsList();
+      if (window.tripRouteMap) {
+        window.tripRouteMap.render();
       }
+      this.showToast(`🚚 Scheduled ${payload.swaps.length} swap(s) for ${payload.employeeName || 'employee'} on ${dateKey}`);
     } else if (payload.type === 'location') {
       const pickedData = this.getPickedSwapsData();
       const locSwaps = (pickedData.items || []).filter(item => 
@@ -3018,7 +3121,14 @@ class TripPlannerApp {
       locSwaps.forEach(s => {
         const sKey = this.getSwapKey(s);
         if (sKey) {
-          this.scheduledSwaps[sKey] = { dateKey, location: location };
+          this.scheduledSwaps[sKey] = {
+            dateKey,
+            location: location,
+            employeeName: s.employeeName || '',
+            crewId: s.crewId || s.jobNum || '',
+            type: s.type || 'Glove',
+            swap: s
+          };
         }
       });
       this.saveScheduledSwaps();
@@ -3027,6 +3137,22 @@ class TripPlannerApp {
       }
     } else if (location) {
       this.addTrip(dateKey, location);
+    }
+  }
+
+  unscheduleSwap(sKey) {
+    if (window.currentRoleMode === 'view_only') return;
+    if (this.scheduledSwaps && this.scheduledSwaps[sKey]) {
+      const item = this.scheduledSwaps[sKey];
+      const emp = (item && item.employeeName) ? item.employeeName : 'item';
+      delete this.scheduledSwaps[sKey];
+      this.saveScheduledSwaps();
+      this.showToast(`↩ Unscheduled swap for ${emp}. Returned to sidebar list.`);
+      this.renderPlanner();
+      this.renderPickedSwapsList();
+      if (window.tripRouteMap) {
+        window.tripRouteMap.render();
+      }
     }
   }
 
@@ -5940,13 +6066,91 @@ class TripPlannerApp {
           `;
         }
 
-        // 4. Render Tasks (Sidebar Locations, Crews, & Equipment Swaps)
+        // 4. Gather scheduled individual swaps for this specific dateKey
+        const dayScheduledSwaps = [];
+        if (this.scheduledSwaps) {
+          Object.keys(this.scheduledSwaps).forEach(sKey => {
+            const entry = this.scheduledSwaps[sKey];
+            const sDate = typeof entry === 'object' ? entry.dateKey : entry;
+            if (sDate === dateKey) {
+              const item = (allPickedItems || []).find(p => this.getSwapKey(p) === sKey) || (entry && entry.swap ? entry.swap : null);
+              if (item) {
+                dayScheduledSwaps.push({ ...item, _sKey: sKey, _scheduledEntry: entry });
+              }
+            }
+          });
+        }
+
+        // Render Scheduled Swaps Section (individual glove/sleeve swaps added to this day)
+        let swapsHtml = '';
+        if (dayScheduledSwaps.length > 0) {
+          const isSwapsCollapsed = this.isSectionCollapsed(dateKey, 'swaps');
+          swapsHtml = `
+            <div class="day-section-collapsible swaps-day-section" style="margin-bottom: 8px;">
+              <div style="font-size: 10.5px; font-weight: 800; color: #34d399; display: flex; align-items: center; justify-content: space-between; padding: 4px 7px; background: rgba(16, 185, 129, 0.12); border-radius: 4px; border-left: 3px solid #10b981; cursor: pointer; user-select: none;" onclick="window.tripPlanner.toggleSectionCollapse('${dateKey}', 'swaps')" title="Click to collapse / expand Swaps">
+                <span style="display: flex; align-items: center; gap: 5px;">
+                  <span id="section-chevron-${dateKey}-swaps" style="font-size: 8px; width: 10px; display: inline-block;">${isSwapsCollapsed ? '▶' : '▼'}</span>
+                  <span>🚚 Picked Swaps Ready (${dayScheduledSwaps.length})</span>
+                </span>
+                <span style="font-size: 9px; color: #6ee7b7; opacity: 0.9;">PPE Swaps</span>
+              </div>
+              <div id="section-body-${dateKey}-swaps" style="display: ${isSwapsCollapsed ? 'none' : 'flex'}; flex-direction: column; gap: 5px; margin-top: 5px;">
+                ${dayScheduledSwaps.map(s => {
+                  const isGlove = (s.type || '').toLowerCase() === 'glove';
+                  const loc = s.location || '';
+                  return `
+                    <div class="scheduled-swap-card" draggable="true" data-skey="${this.escapeHtml(s._sKey)}" style="background: var(--bg-primary); border: 1px solid rgba(16, 185, 129, 0.35); border-left: 4px solid #10b981; border-radius: 6px; padding: 7px 9px; box-shadow: 0 1px 4px rgba(0,0,0,0.25); cursor: grab; transition: border-color 0.15s ease;" onmouseover="this.style.borderColor='#34d399'" onmouseout="this.style.borderColor='rgba(16, 185, 129, 0.35)'">
+                      <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 6px;">
+                        <div style="flex: 1; min-width: 0;">
+                          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 3px;">
+                            <span style="font-weight: 700; font-size: 12px; color: #f8fafc; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                              ${this.escapeHtml(s.employeeName)}
+                            </span>
+                            <div style="display: flex; gap: 4px; align-items: center;">
+                              ${s.classification ? `<span class="badge" style="background: rgba(148, 163, 184, 0.15); color: #94a3b8; font-size: 9px; padding: 1px 4px; border-radius: 3px;">${this.escapeHtml(s.classification)}</span>` : ''}
+                              ${loc ? `<span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; font-size: 9px; padding: 1px 4px; border-radius: 3px;">📍 ${this.escapeHtml(loc)}</span>` : ''}
+                            </div>
+                          </div>
+                          <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: #cbd5e1; margin-top: 4px; flex-wrap: wrap; gap: 4px;">
+                            <span class="badge" style="background: ${isGlove ? 'rgba(59, 130, 246, 0.18)' : 'rgba(168, 85, 247, 0.18)'}; color: ${isGlove ? '#93c5fd' : '#d8b4fe'}; border: 1px solid ${isGlove ? 'rgba(59, 130, 246, 0.35)' : 'rgba(168, 85, 247, 0.35)'}; font-size: 9.5px; font-weight: 700; padding: 1px 5px; border-radius: 3px;">
+                              ${isGlove ? '🧤 Glove' : '🧤 Sleeve'}${s.itemClass ? ` (CL ${this.escapeHtml(s.itemClass)})` : ''}
+                            </span>
+                            <span style="font-size: 11px; color: #e2e8f0;">
+                              Current: <strong style="color: #fca5a5;">${this.escapeHtml(s.currentItem || '—')}</strong>
+                              &nbsp;➔&nbsp;
+                              Pick: <strong style="color: #4ade80;">${this.escapeHtml(s.pickItem || '—')}</strong>
+                              ${s.size ? `<span style="color: #94a3b8; font-size: 9.5px;"> (${this.escapeHtml(s.size)})</span>` : ''}
+                            </span>
+                          </div>
+                          ${s.crewId ? `
+                            <div style="font-size: 10px; color: #94a3b8; margin-top: 3px; display: flex; align-items: center; gap: 5px;">
+                              <span style="color: #60a5fa;">👷 Crew ${this.escapeHtml(s.crewId)}</span>
+                              ${s.foreman ? `<span style="color: #64748b;">(${this.escapeHtml(s.foreman)})</span>` : ''}
+                            </div>
+                          ` : ''}
+                        </div>
+                        <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 6px; margin-left: 4px;">
+                          <button class="btn btn-primary" style="padding: 2px 7px; font-size: 9px; background: #10b981; border: none; font-weight: 700; cursor: pointer; border-radius: 3px; white-space: nowrap;" onclick="event.stopPropagation(); window.tripPlanner.openSwapDetailsModal(${JSON.stringify(s).replace(/"/g, '&quot;')}, '${this.escapeJs(s.crewId || '')}', '${this.escapeJs(loc)}')">
+                            🔍 Swap
+                          </button>
+                          <button class="admin-only-control" style="background: none; border: none; color: #64748b; cursor: pointer; padding: 1px 4px; font-size: 12px; line-height: 1; border-radius: 3px;" onmouseover="this.style.color='#f87171'" onmouseout="this.style.color='#64748b'" onclick="event.stopPropagation(); window.tripPlanner.unscheduleSwap('${this.escapeJs(s._sKey)}')" title="Remove swap from this day and return to sidebar">
+                            ✕
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            </div>
+          `;
+        }
+
+        // 5. Render Tasks (Sidebar Locations, Crews, & Full Field Trips)
         let tasksHtml = '';
         let totalCrewTasksCount = 0;
-        let dayPickedCount = 0;
+        let dayPickedCount = dayScheduledSwaps.length;
         trips.forEach(trip => {
-          const locPicked = (allPickedItems || []).filter(item => (item.location || '').toLowerCase() === trip.location.toLowerCase());
-          dayPickedCount += locPicked.length;
           const locInfo = locMap[trip.location] || null;
           if (locInfo && locInfo.activeCrews) {
             locInfo.activeCrews.forEach(c => {
@@ -5998,8 +6202,14 @@ class TripPlannerApp {
                               const sig = this.getSignificantJobNumber(c.crewId).toLowerCase();
                               const crewPickedSwaps = (allPickedItems || []).filter(item => {
                                 const itemSig = this.getSignificantJobNumber(item.crewId).toLowerCase();
-                                return (sig && itemSig && sig === itemSig) ||
+                                const crewMatches = (sig && itemSig && sig === itemSig) ||
                                   (item.crewId || '').toLowerCase() === String(c.crewId).toLowerCase();
+                                if (!crewMatches) return false;
+                                const sKey = this.getSwapKey(item);
+                                if (dayScheduledSwaps.some(ds => ds._sKey === sKey)) return false;
+                                const sched = this.getSwapScheduleInfo(item, dateKey);
+                                if (sched && sched.dateKey && sched.dateKey !== dateKey) return false;
+                                return true;
                               });
 
                               return `
@@ -6074,7 +6284,7 @@ class TripPlannerApp {
             </div>
           `;
         } else {
-          const hasOtherSections = (drugTests.length > 0) || (totalTrainings > 0) || (personalTasks.length > 0);
+          const hasOtherSections = (drugTests.length > 0) || (totalTrainings > 0) || (personalTasks.length > 0) || (dayScheduledSwaps.length > 0);
           tasksHtml = `
             <div class="tasks-drop-placeholder" style="margin-top: ${hasOtherSections ? '4px' : '20px'};">
               <div style="color: var(--text-muted); font-size: 11px; text-align: center; border: 1px dashed var(--border-color); border-radius: 6px; padding: ${hasOtherSections ? '8px 6px' : '14px 10px'};">
@@ -6084,7 +6294,7 @@ class TripPlannerApp {
           `;
         }
 
-        const cardsHtml = drugTestsHtml + trainingHtml + officeHtml + tasksHtml;
+        const cardsHtml = drugTestsHtml + trainingHtml + officeHtml + swapsHtml + tasksHtml;
 
         col.innerHTML = `
           <div class="day-header" style="background: ${isHoliday ? 'linear-gradient(90deg, #854d0e 0%, #1e293b 100%)' : (drugTests.length > 0 ? 'linear-gradient(90deg, rgba(88, 28, 135, 0.4) 0%, #1e293b 100%)' : '#1e293b')};">
@@ -6157,6 +6367,23 @@ class TripPlannerApp {
           if (location) {
             this.handleSwapOrLocationDrop(dateKey, { type: 'location', location: location });
           }
+        });
+
+        // Setup dragstart for scheduled swap cards so they can be moved between days
+        col.querySelectorAll('.scheduled-swap-card').forEach(scEl => {
+          scEl.addEventListener('dragstart', (e) => {
+            const sKey = scEl.getAttribute('data-skey');
+            const foundSwap = dayScheduledSwaps.find(s => s._sKey === sKey);
+            if (foundSwap) {
+              e.dataTransfer.setData('application/json', JSON.stringify({
+                type: 'swap',
+                location: foundSwap.location || '',
+                employeeName: foundSwap.employeeName || '',
+                swap: foundSwap
+              }));
+              e.dataTransfer.setData('text/plain', foundSwap.location || '');
+            }
+          });
         });
 
         grid.appendChild(col);

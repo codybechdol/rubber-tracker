@@ -851,6 +851,7 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
         'SCHEDULE_CREW_VISIT',
         'UNSCHEDULE_CREW_VISIT',
         'SAVE_PLANNED_TRIPS',
+        'SAVE_SCHEDULED_SWAPS',
         'SAVE_MANUAL_TASKS',
         'SAVE_TASK',
         'ADD_LOCATION_OVERRIDE',
@@ -1843,6 +1844,19 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
           }
           break;
 
+        case 'SAVE_SCHEDULED_SWAPS':
+          if (mut.scheduled_swaps) {
+            var swapsStr = typeof mut.scheduled_swaps === 'string' ? mut.scheduled_swaps : JSON.stringify(mut.scheduled_swaps);
+            if (typeof setChunkedScriptProperty === 'function') {
+              setChunkedScriptProperty('SCHEDULED_SWAPS', swapsStr);
+            } else {
+              PropertiesService.getScriptProperties().setProperty('SCHEDULED_SWAPS', swapsStr);
+            }
+            appliedCount++;
+            configsModified = true;
+          }
+          break;
+
         case 'SAVE_TASK':
           var taskMetaSheetSave = ss.getSheetByName('Task Metadata');
           if (taskMetaSheetSave && mut.taskId) {
@@ -2529,20 +2543,7 @@ function executeSyncApiProcessSafetyEmails(options) {
     try {
       if (typeof clearSafetyBatchProperties === 'function') {
         clearSafetyBatchProperties();
-      } else {
-        var scriptProps = PropertiesService.getScriptProperties();
-        var allKeys = scriptProps.getKeys();
-        for (var pki = 0; pki < allKeys.length; pki++) {
-          if (allKeys[pki].indexOf('SAFETY_BATCH_') === 0) {
-            scriptProps.deleteProperty(allKeys[pki]);
-          }
-        }
       }
-      if (typeof deleteChunkedScriptProperty === 'function') {
-        deleteChunkedScriptProperty('SAFETY_BATCH_THREAD_IDS');
-        deleteChunkedScriptProperty('SAFETY_BATCH_EMAIL_IDS');
-      }
-      CacheService.getScriptCache().removeAll(['SAFETY_BATCH_CREWS', 'SAFETY_BATCH_EMP_DATA', 'SAFETY_BATCH_EMAIL_IDS']);
     } catch (eReset) {
       Logger.log('executeSyncApiProcessSafetyEmails reset error: ' + eReset);
     }
@@ -2635,7 +2636,7 @@ function executeSyncApiProcessSafetyEmails(options) {
 
   var result = null;
   try {
-    result = processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction, endDate, reportTypeFilter, 20000);
+    result = processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction, endDate, reportTypeFilter, 15000);
   } catch (err) {
     Logger.log('executeSyncApiProcessSafetyEmails batch error: ' + err.toString());
     return {
@@ -2667,69 +2668,29 @@ function executeSyncApiProcessSafetyEmails(options) {
     };
   }
 
-  // If completed directly in single step:
-  var postResult = result;
-  if (result.totalThreads > 0) {
-    try {
-      var cleanupProps = PropertiesService.getScriptProperties();
-      cleanupProps.setProperty('BG_POST_PROCESS_FILTER', reportTypeFilter || 'ALL');
-      ScriptApp.newTrigger('executeAsyncSafetyCompliancePostProcessing')
-        .timeBased()
-        .after(100)
-        .create();
-      Logger.log("executeSyncApiProcessSafetyEmails: Dispatched background compliance post-processing trigger");
-    } catch (eTrig) {
-      Logger.log("executeSyncApiProcessSafetyEmails: Background trigger dispatch error: " + eTrig);
-    }
+  // If completed with no threads to process (e.g. no new emails found):
+  // Return immediately without running heavy compliance recalculations or snapshots
+  if (!result.totalThreads || result.totalThreads === 0) {
+    Logger.log('executeSyncApiProcessSafetyEmails: No new threads to process, returning completion immediately');
+    return {
+      status: 'ok',
+      success: true,
+      complete: true,
+      result: result,
+      updatedRows: [],
+      recentLogs: [],
+      snapshot: null
+    };
   }
 
-  // Synchronously recalculate compliance for previous and current week
-  var updatedRows = [];
-  try {
-    if (typeof executeSyncApiRecalculateCompliance === 'function') {
-      var recRes = executeSyncApiRecalculateCompliance({ targetWeek: 'both' });
-      if (recRes && recRes.updatedRows && recRes.updatedRows.length > 0) {
-        updatedRows = recRes.updatedRows;
-      }
-      if (recRes && recRes.recentLogs && recRes.recentLogs.length > 0) {
-        postResult.recentLogs = recRes.recentLogs;
-      }
-    }
-  } catch (eRec) {
-    Logger.log('executeSyncApiProcessSafetyEmails single-step recalc error: ' + eRec);
-  }
-
-  // Attach recent log entries if not already set
-  if (!postResult.recentLogs || postResult.recentLogs.length === 0) {
-    try {
-      postResult.recentLogs = getRecentSafetyLogs(100);
-    } catch (eLogs) {
-      Logger.log('getRecentSafetyLogs error: ' + eLogs);
-      postResult.recentLogs = [];
-    }
-  }
-
-  SpreadsheetApp.flush();
-
-  var freshSnapshot = null;
-  if (typeof exportFullDatabaseSnapshot === 'function') {
-    try {
-      // Lean snapshot: export compliance and equipment needs; recentLogs covers the log rows for the desktop viewer
-      var safetyTables = ['safety_compliance', 'safety_equipment_needs'];
-      freshSnapshot = exportFullDatabaseSnapshot(safetyTables);
-    } catch (eSnap) {
-      Logger.log('executeSyncApiProcessSafetyEmails snapshot error: ' + eSnap);
-    }
-  }
-
+  // If completed directly in single step with threads processed:
+  // Route through isPostProcessing so compliance recalculation runs cleanly in its own HTTP request
   return {
     status: 'ok',
     success: true,
-    complete: true,
-    result: postResult || result,
-    updatedRows: updatedRows,
-    recentLogs: postResult.recentLogs || [],
-    snapshot: freshSnapshot
+    complete: false,
+    isPostProcessing: true,
+    result: result
   };
 }
 

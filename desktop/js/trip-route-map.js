@@ -852,6 +852,25 @@ class TripRouteMap {
       }
     });
 
+    // Additional field locations from Scheduled Swaps
+    Object.values(scheduledSwaps).forEach(s => {
+      const sDate = typeof s === 'object' ? s.dateKey : s;
+      const sLoc = typeof s === 'object' ? String(s.location || '').trim() : '';
+      if (sDate === dateKey && sLoc) {
+        const lCase = sLoc.toLowerCase();
+        if (lCase === 'helena' || lCase === 'helena office' || lCase === 'helena base' || lCase === 'office') {
+          return;
+        }
+        if (!stopLocationItems.some(item => item.location.toLowerCase() === lCase)) {
+          stopLocationItems.push({
+            location: sLoc,
+            source: 'swap',
+            crewId: s.crewId || ''
+          });
+        }
+      }
+    });
+
     // Additional field locations from Manual Tasks (e.g. JM - Rubber Pick-Up/Drop-Off in Billings)
     manualTasks.forEach(m => {
       const loc = String(m.location || '').trim();
