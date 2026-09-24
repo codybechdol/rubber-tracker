@@ -53,7 +53,13 @@ class SheetNavigator {
       { key: 'hot_sticks', label: '🔴 Hot Sticks', icon: '🔴', isSwap: false },
       { key: 'hot_stick_swaps', label: '🔄 Hot Stick Swaps', icon: '🔄', isSwap: true },
       { key: 'dot_drug_tests', label: '🧪 DOT Drug Tests', icon: '🧪', isSwap: false },
-      { key: 'drug_test_clinics', label: '🏥 Drug Test Clinics', icon: '🏥', isSwap: false }
+      { key: 'drug_test_clinics', label: '🏥 Drug Test Clinics', icon: '🏥', isSwap: false },
+      { key: 'retired_equipment', label: '🗄️ Retired Equipment', icon: '🗄️', isSwap: false },
+      { key: 'trip_schedule', label: '📅 Trip Schedule', icon: '📅', isSwap: false },
+      { key: 'test_batches', label: '🔬 Test Batches', icon: '🔬', isSwap: false },
+      { key: 'field_gps_log', label: '📍 Field GPS Log', icon: '📍', isSwap: false },
+      { key: 'daily_accomplishments', label: '⏱️ Daily Accomplishments', icon: '⏱️', isSwap: false },
+      { key: 'system_config', label: '⚙️ System Config', icon: '⚙️', isSwap: false }
     ];
   }
 
@@ -1216,6 +1222,7 @@ class SheetNavigator {
     const btnGenSwaps = document.getElementById('btn-generate-swaps');
     const btnFixDates = document.getElementById('btn-fix-changeout-dates');
     const btnReconcileHist = document.getElementById('btn-reconcile-history');
+    const btnArchiveLost = document.getElementById('btn-archive-lost-failed');
     const btnImportCrews = document.getElementById('btn-import-crews');
     const btnTransferEquip = document.getElementById('btn-transfer-equipment-top');
     const btnManageDrug = document.getElementById('btn-manage-drug-tests');
@@ -1294,6 +1301,10 @@ class SheetNavigator {
 
     if (btnManageDrug) {
       btnManageDrug.style.display = isDrugTestSheet ? 'inline-flex' : 'none';
+    }
+
+    if (btnArchiveLost) {
+      btnArchiveLost.style.display = isInventorySheet ? 'inline-flex' : 'none';
     }
 
     // Toggle and render Visual Analytics for Gloves & Sleeves

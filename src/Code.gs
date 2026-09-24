@@ -35331,3 +35331,133 @@ function deleteDrugClinic(firmName) {
 
   return { success: false, error: 'Clinic not found' };
 }
+
+/**
+ * Sets up all 6 recommended companion database sheets in Google Sheets:
+ * 1. Retired Equipment
+ * 2. Trip Schedule
+ * 3. Testing Lab Batches
+ * 4. Field GPS Log
+ * 5. Daily Accomplishments
+ * 6. System Config
+ *
+ * Menu item: 🔧 Maintenance → 🏗️ Sheets Setup → ✨ Setup Recommended Companion Sheets
+ *
+ * @param {boolean} [silent=false]
+ * @returns {Array<string>} Names of created sheets
+ */
+function setupAllRecommendedSheets(silent) {
+  var ss = typeof getActiveSpreadsheetSafe === 'function' ? getActiveSpreadsheetSafe() : SpreadsheetApp.getActiveSpreadsheet();
+  var created = [];
+  if (typeof ensureRecommendedCompanionSheetsExist === 'function') {
+    created = ensureRecommendedCompanionSheetsExist(ss);
+  }
+
+  if (!silent) {
+    var ui = SpreadsheetApp.getUi();
+    if (created.length > 0) {
+      ui.alert('✨ Companion Sheets Created', 'Successfully created and formatted the following sheets:\n\n• ' + created.join('\n• ') + '\n\nAll sheets have been initialized with headers, styling, and default configurations.', ui.ButtonSet.OK);
+    } else {
+      ui.alert('ℹ️ Companion Sheets Verified', 'All recommended companion sheets are already present and configured in this spreadsheet:\n\n• Retired Equipment\n• Trip Schedule\n• Testing Lab Batches\n• Field GPS Log\n• Daily Accomplishments\n• System Config', ui.ButtonSet.OK);
+    }
+  }
+
+  return created;
+}
+
+/**
+ * Scans active inventory tabs (Gloves, Sleeves, Blankets, MACKs, HV Testers, Phasing Sets, AED, Grounds, Hot Sticks)
+ * for items marked Lost, Destroyed, Failed Rubber, or Scrapped, archives them to 'Retired Equipment',
+ * and safely removes them from active inventory sheets.
+ *
+ * @param {boolean} [silent=false]
+ * @returns {number} Number of items archived
+ */
+function archiveLostAndFailedItems(silent) {
+  var ss = typeof getActiveSpreadsheetSafe === 'function' ? getActiveSpreadsheetSafe() : SpreadsheetApp.getActiveSpreadsheet();
+  if (typeof ensureRecommendedCompanionSheetsExist === 'function') {
+    ensureRecommendedCompanionSheetsExist(ss);
+  }
+
+  var retSheet = ss.getSheetByName(typeof SHEET_RETIRED_EQUIPMENT !== 'undefined' ? SHEET_RETIRED_EQUIPMENT : 'Retired Equipment');
+  if (!retSheet) return 0;
+
+  var deadKeywords = ['lost', 'destroyed', 'failed rubber', 'scrapped', 'reclaimed', 'not repairable'];
+  var archivedCount = 0;
+
+  var invConfigs = [
+    { name: typeof SHEET_GLOVES !== 'undefined' ? SHEET_GLOVES : 'Gloves', cat: 'Gloves', isEsl: true },
+    { name: typeof SHEET_SLEEVES !== 'undefined' ? SHEET_SLEEVES : 'Sleeves', cat: 'Sleeves', isEsl: true },
+    { name: typeof SHEET_BLANKETS !== 'undefined' ? SHEET_BLANKETS : 'Blankets', cat: 'Blankets', isEsl: false },
+    { name: typeof SHEET_MACKS !== 'undefined' ? SHEET_MACKS : 'MACKs', cat: 'MACKs', isEsl: true },
+    { name: typeof SHEET_HV_TESTERS !== 'undefined' ? SHEET_HV_TESTERS : 'HV Testers', cat: 'HV Testers', isEsl: false },
+    { name: typeof SHEET_PHASING_SETS !== 'undefined' ? SHEET_PHASING_SETS : 'Phasing Sets', cat: 'Phasing Sets', isEsl: false },
+    { name: typeof SHEET_AED !== 'undefined' ? SHEET_AED : 'AED', cat: 'AED', isEsl: false },
+    { name: typeof SHEET_GROUNDS !== 'undefined' ? SHEET_GROUNDS : 'Grounds', cat: 'Grounds', isEsl: false },
+    { name: typeof SHEET_HOT_STICKS !== 'undefined' ? SHEET_HOT_STICKS : 'Hot Sticks', cat: 'Hot Sticks', isEsl: false }
+  ];
+
+  for (var i = 0; i < invConfigs.length; i++) {
+    var cfg = invConfigs[i];
+    var sheet = ss.getSheetByName(cfg.name);
+    if (!sheet || sheet.getLastRow() < 2) continue;
+
+    var data = sheet.getDataRange().getValues();
+    var headers = data[0].map(function(h) { return String(h || '').trim().toLowerCase(); });
+
+    var colItem = headers.indexOf('glove') !== -1 ? headers.indexOf('glove') : (headers.indexOf('sleeve') !== -1 ? headers.indexOf('sleeve') : (headers.indexOf('item #') !== -1 ? headers.indexOf('item #') : headers.indexOf('serial #')));
+    var colEsl = headers.indexOf('esl id');
+    var colSize = headers.indexOf('size');
+    var colClass = headers.indexOf('class');
+    if (colClass === -1) colClass = headers.indexOf('kv');
+    var colLoc = headers.indexOf('location');
+    var colStatus = headers.indexOf('status');
+    var colAssigned = headers.indexOf('assigned to');
+    var colNotes = headers.indexOf('notes');
+
+    var rowsToDelete = [];
+
+    for (var r = 1; r < data.length; r++) {
+      var row = data[r];
+      var locVal = colLoc !== -1 ? String(row[colLoc] || '').trim().toLowerCase() : '';
+      var statVal = colStatus !== -1 ? String(row[colStatus] || '').trim().toLowerCase() : '';
+      var asgnVal = colAssigned !== -1 ? String(row[colAssigned] || '').trim().toLowerCase() : '';
+
+      var isDead = deadKeywords.indexOf(locVal) !== -1 || deadKeywords.indexOf(statVal) !== -1 || (asgnVal === 'lost' || asgnVal === 'destroyed' || asgnVal === 'failed rubber');
+      if (isDead) {
+        var itm = colItem !== -1 ? row[colItem] : '';
+        var esl = colEsl !== -1 ? row[colEsl] : '';
+        var sz = colSize !== -1 ? row[colSize] : '';
+        var cl = colClass !== -1 ? row[colClass] : '';
+        var reason = statVal || locVal || asgnVal || 'Retired';
+        var lastAsgn = asgnVal !== 'lost' && asgnVal !== 'destroyed' ? row[colAssigned] : '';
+        var lastLoc = locVal !== 'lost' && locVal !== 'destroyed' ? row[colLoc] : '';
+        var notes = colNotes !== -1 ? row[colNotes] : '';
+
+        retSheet.appendRow([itm, esl, cfg.cat, cl, sz, new Date().toLocaleDateString('en-US'), reason, lastAsgn, lastLoc, '', notes]);
+        rowsToDelete.push(r + 1);
+        archivedCount++;
+      }
+    }
+
+    // Delete archived rows from bottom to top
+    for (var d = rowsToDelete.length - 1; d >= 0; d--) {
+      sheet.deleteRow(rowsToDelete[d]);
+    }
+  }
+
+  if (!silent) {
+    var ui = SpreadsheetApp.getUi();
+    ui.alert(
+      '🗄️ Archive Complete',
+      archivedCount > 0
+        ? 'Successfully moved ' + archivedCount + ' lost/failed items to "' + (typeof SHEET_RETIRED_EQUIPMENT !== 'undefined' ? SHEET_RETIRED_EQUIPMENT : 'Retired Equipment') + '".\n\nActive inventory sheets are now clean and accurate!'
+        : 'No lost or failed items were found in active inventory sheets.',
+      ui.ButtonSet.OK
+    );
+  }
+
+  logEvent('archiveLostAndFailedItems: Archived ' + archivedCount + ' items to Retired Equipment', 'INFO');
+  return archivedCount;
+}
+

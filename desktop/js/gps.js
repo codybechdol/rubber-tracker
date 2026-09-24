@@ -142,7 +142,9 @@ class GpsEngine {
       lng: coords ? coords.longitude : null
     };
 
-    if (this.db && this.db.addMutation) {
+    if (this.db && typeof this.db.logFieldCheckIn === 'function') {
+      await this.db.logFieldCheckIn(checkInRecord);
+    } else if (this.db && this.db.addMutation) {
       this.db.addMutation({
         action: 'FIELD_GPS_CHECK_IN',
         data: checkInRecord

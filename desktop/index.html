@@ -173,6 +173,9 @@
             <button class="btn btn-secondary admin-only-control" id="btn-reconcile-history" style="display: none; padding: 6px 12px; font-size: 12px;" onclick="window.inventoryManager.reconcileInventoryWithHistory(window.sheetNavigator ? window.sheetNavigator.currentSheetKey : 'gloves')" title="Reconcile active inventory with latest History records">
               🔄 Reconcile from History
             </button>
+            <button class="btn btn-secondary admin-only-control" id="btn-archive-lost-failed" style="display: none; padding: 6px 12px; font-size: 12px; align-items: center; gap: 5px; border-color: #64748b; color: #94a3b8;" onclick="window.inventoryManager.archiveLostAndFailedItemsUI()" title="Scan active inventory and move Lost, Destroyed, and Failed Rubber items to the 'Retired Equipment' archive tab">
+              <span>🗄️</span> Archive Lost Items
+            </button>
             <button class="btn btn-secondary" id="btn-history-issues" style="display: none; padding: 6px 12px; font-size: 12px; font-weight: 700; border-color: rgba(245, 158, 11, 0.5); color: #fbbf24; background: rgba(245, 158, 11, 0.15); align-items: center; gap: 5px;" onclick="window.historyIssuesEngine.openHistoryIssuesModal(window.sheetNavigator ? window.sheetNavigator.currentSheetKey : 'gloves')" title="View items with duplicate history records or discrepancies">
               <span>⚠️</span> History Issues
             </button>

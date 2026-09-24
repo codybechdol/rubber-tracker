@@ -655,10 +655,59 @@ class TimeBreakdownEngine {
     if (footer) {
       footer.innerHTML = `
         <button class="btn btn-secondary" onclick="window.timeBreakdownEngine.closeModal()">Close</button>
+        <button class="btn btn-primary" onclick="window.timeBreakdownEngine.saveToDatabase()" style="font-weight: 700; background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%); border: none; display: flex; align-items: center; gap: 6px; box-shadow: 0 2px 8px rgba(59, 130, 246, 0.4);">
+          <span>💾</span> Save Daily Log to Sheets
+        </button>
         <button class="btn btn-primary" onclick="window.timeBreakdownEngine.copyToClipboard()" style="font-weight: 700; background: linear-gradient(135deg, #10b981 0%, #059669 100%); border: none; display: flex; align-items: center; gap: 6px; box-shadow: 0 2px 8px rgba(16, 185, 129, 0.4);">
           <span>📋</span> Copy Breakdown to Clipboard
         </button>
       `;
+    }
+  }
+
+  async saveToDatabase() {
+    const textarea = document.getElementById('time-breakdown-output');
+    if (!textarea || !textarea.value) {
+      alert('⚠️ No daily accomplishment data to save.');
+      return;
+    }
+
+    const days = this.collectAccomplishments();
+    const activeDateKey = this.formatDateKey(this.startDate);
+    const day = days[activeDateKey] || (Object.values(days)[0] || {});
+
+    const visitedCrews = [];
+    const visitedCities = [];
+    let swapsCount = 0;
+    let trainingsCount = 0;
+
+    Object.values(day.locations || {}).forEach(loc => {
+      if (loc.name && !visitedCities.includes(loc.name)) visitedCities.push(loc.name);
+      (loc.crews || []).forEach(c => {
+        if (!visitedCrews.includes(c)) visitedCrews.push(c);
+      });
+      swapsCount += (loc.swaps || []).length;
+    });
+
+    trainingsCount = (day.trainings || []).length + (day.classes || []).length;
+
+    const record = {
+      date: activeDateKey,
+      user: 'Safety Coordinator',
+      crews: visitedCrews.join(', '),
+      route: visitedCities.join(' ➔ '),
+      driveTime: day.driveTimeFormatted || '',
+      swapsCount: swapsCount,
+      trainingsCount: trainingsCount,
+      summary: textarea.value,
+      loggedAt: new Date().toLocaleString('en-US', { timeZone: 'America/Denver' })
+    };
+
+    if (this.db && typeof this.db.saveDailyAccomplishment === 'function') {
+      await this.db.saveDailyAccomplishment(record);
+      alert(`✅ Daily Accomplishments for ${activeDateKey} saved to the database!\n\nIt has been recorded to "Daily Accomplishments" and queued for sync.`);
+    } else {
+      alert('❌ Local database is not available.');
     }
   }
 

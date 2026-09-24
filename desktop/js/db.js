@@ -337,6 +337,7 @@ class LocalDatabase {
       action: 'SAVE_PLANNED_TRIPS',
       trips: trips
     });
+    this.syncTripScheduleTable();
   }
 
   getManualTasks() {
@@ -365,6 +366,7 @@ class LocalDatabase {
       action: 'SAVE_MANUAL_TASKS',
       manual_tasks: tasks
     });
+    this.syncTripScheduleTable();
   }
 
   getScheduledSwaps() {
@@ -401,6 +403,420 @@ class LocalDatabase {
       action: 'SAVE_SCHEDULED_SWAPS',
       scheduled_swaps: swaps
     });
+    this.syncTripScheduleTable();
+  }
+
+  /**
+   * Synchronizes trip schedule and manual task calendar into the 'Trip Schedule' table.
+   */
+  syncTripScheduleTable() {
+    if (!this.snapshot || !this.snapshot.tables) return;
+    const trips = (this.snapshot.configs && this.snapshot.configs.plannedTrips) || {};
+    const swaps = (this.snapshot.configs && this.snapshot.configs.scheduled_swaps) || {};
+    const manualTasks = (this.snapshot.configs && this.snapshot.configs.manual_tasks) || [];
+
+    const headers = ['Trip ID', 'Date', 'Week Monday', 'Destination', 'Job Number', 'Crew / Lead', 'Task Type', 'Swaps Count', 'Status', 'Completed Date', 'Notes'];
+    const rows = [];
+
+    const getMonday = (dateStr) => {
+      const parts = String(dateStr).split('-');
+      if (parts.length < 3) return dateStr;
+      const d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10), 12, 0, 0);
+      const day = d.getDay();
+      const diff = (day === 0 ? -6 : 1) - day;
+      d.setDate(d.getDate() + diff);
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      return `${d.getFullYear()}-${mm}-${dd}`;
+    };
+
+    // 1. Process planned trips
+    Object.keys(trips).forEach(dateKey => {
+      const entries = Array.isArray(trips[dateKey]) ? trips[dateKey] : [trips[dateKey]];
+      entries.forEach((t, idx) => {
+        if (!t || !t.location) return;
+        const tripId = `TRIP-${dateKey}-${idx + 1}`;
+        const weekMon = getMonday(dateKey);
+
+        let swapsCount = 0;
+        Object.keys(swaps).forEach(sKey => {
+          const s = swaps[sKey];
+          if (s && (s.dateKey === dateKey || s.date === dateKey)) swapsCount++;
+        });
+
+        rows.push({
+          'Trip ID': tripId,
+          'Date': dateKey,
+          'Week Monday': weekMon,
+          'Destination': t.location || '',
+          'Job Number': t.crew || '',
+          'Crew / Lead': t.lead || t.foreman || '',
+          'Task Type': 'Field Crew Visit',
+          'Swaps Count': swapsCount,
+          'Status': t.completed ? 'Completed' : 'Scheduled',
+          'Completed Date': t.completedDate || '',
+          'Notes': t.notes || ''
+        });
+      });
+    });
+
+    // 2. Process manual tasks
+    manualTasks.forEach((m, idx) => {
+      const dateKey = m.date || m.dateKey;
+      if (!dateKey) return;
+      rows.push({
+        'Trip ID': m.id || `TASK-${dateKey}-${idx + 1}`,
+        'Date': dateKey,
+        'Week Monday': getMonday(dateKey),
+        'Destination': m.location || 'Helena Base',
+        'Job Number': m.crew || '',
+        'Crew / Lead': m.lead || '',
+        'Task Type': m.category || (m.certType ? 'Training Class' : 'Office Task'),
+        'Swaps Count': 0,
+        'Status': m.completed ? 'Completed' : 'Scheduled',
+        'Completed Date': m.completedDate || '',
+        'Notes': m.title || m.notes || ''
+      });
+    });
+
+    this.snapshot.tables.trip_schedule = {
+      name: 'Trip Schedule',
+      headers: headers,
+      rows: rows,
+      rowCount: rows.length,
+      maxRows: rows.length + 1,
+      maxCols: headers.length
+    };
+  }
+
+  /**
+   * Retires an inventory item from an active category and archives it to 'Retired Equipment'.
+   */
+  async retireEquipmentItem(categoryKey, itemIdentifier, reason = 'Retired', details = {}) {
+    if (!this.snapshot || !this.snapshot.tables) return false;
+    const catTable = this.snapshot.tables[categoryKey];
+    if (!catTable || !catTable.rows) return false;
+
+    const idClean = String(itemIdentifier || '').trim().toLowerCase();
+    const itemIndex = catTable.rows.findIndex(r => {
+      const num = String(r['Item #'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['MACK'] || r['Serial #'] || r['ESL ID'] || '').trim().toLowerCase();
+      return num === idClean;
+    });
+
+    if (itemIndex === -1) {
+      console.warn(`Item ${itemIdentifier} not found in ${categoryKey}`);
+      return false;
+    }
+
+    const itemRow = catTable.rows[itemIndex];
+    catTable.rows.splice(itemIndex, 1);
+    catTable.rowCount = catTable.rows.length;
+
+    if (!this.snapshot.tables.retired_equipment) {
+      this.snapshot.tables.retired_equipment = {
+        name: 'Retired Equipment',
+        headers: ['Item #', 'ESL ID / Serial #', 'Category', 'Class / KV', 'Size / Length', 'Date Retired', 'Reason', 'Last Assigned To', 'Last Location', 'Lab Ticket #', 'Notes'],
+        rows: []
+      };
+    }
+
+    const retTable = this.snapshot.tables.retired_equipment;
+    const retRow = {
+      'Item #': itemRow['Item #'] || itemRow['Glove'] || itemRow['Sleeve'] || itemRow['Blanket'] || itemRow['MACK'] || itemRow['Serial #'] || itemIdentifier,
+      'ESL ID / Serial #': itemRow['ESL ID'] || itemRow['Serial #'] || '',
+      'Category': categoryKey.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+      'Class / KV': itemRow['Class'] || itemRow['KV'] || '',
+      'Size / Length': itemRow['Size'] || itemRow['Length'] || '',
+      'Date Retired': details.dateRetired || new Date().toLocaleDateString('en-US'),
+      'Reason': reason || details.reason || 'Retired',
+      'Last Assigned To': itemRow['Assigned To'] || details.lastAssignedTo || '',
+      'Last Location': itemRow['Location'] || details.lastLocation || '',
+      'Lab Ticket #': details.labTicket || '',
+      'Notes': itemRow['Notes'] || details.notes || ''
+    };
+    retTable.rows.unshift(retRow);
+    retTable.rowCount = retTable.rows.length;
+
+    await this.persistSnapshot(this.snapshot);
+    await this.addMutation({
+      action: 'RETIRE_ITEM',
+      itemNum: itemIdentifier,
+      category: categoryKey,
+      reason: reason,
+      sourceSheet: catTable.name,
+      lastAssignedTo: retRow['Last Assigned To'],
+      lastLocation: retRow['Last Location'],
+      notes: retRow['Notes']
+    });
+
+    this.notify();
+    return true;
+  }
+
+  /**
+   * Scans active inventory tables for dead/lost items and archives them to 'Retired Equipment'.
+   */
+  async archiveLostAndFailedItemsLocal() {
+    if (!this.snapshot || !this.snapshot.tables) return 0;
+    const deadKeywords = ['lost', 'destroyed', 'failed rubber', 'scrapped', 'reclaimed', 'not repairable'];
+    const invCategories = ['gloves', 'sleeves', 'blankets', 'macks', 'hv_testers', 'phasing_sets', 'aed', 'grounds', 'hot_sticks'];
+
+    if (!this.snapshot.tables.retired_equipment) {
+      this.snapshot.tables.retired_equipment = {
+        name: 'Retired Equipment',
+        headers: ['Item #', 'ESL ID / Serial #', 'Category', 'Class / KV', 'Size / Length', 'Date Retired', 'Reason', 'Last Assigned To', 'Last Location', 'Lab Ticket #', 'Notes'],
+        rows: []
+      };
+    }
+    const retTable = this.snapshot.tables.retired_equipment;
+    let archivedCount = 0;
+
+    for (const catKey of invCategories) {
+      const tbl = this.snapshot.tables[catKey];
+      if (!tbl || !tbl.rows || tbl.rows.length === 0) continue;
+
+      const remainingRows = [];
+      for (const row of tbl.rows) {
+        const loc = String(row['Location'] || '').trim().toLowerCase();
+        const stat = String(row['Status'] || '').trim().toLowerCase();
+        const asgn = String(row['Assigned To'] || '').trim().toLowerCase();
+
+        const isDead = deadKeywords.includes(loc) || deadKeywords.includes(stat) || asgn === 'lost' || asgn === 'destroyed' || asgn === 'failed rubber';
+        if (isDead) {
+          const itemNum = row['Item #'] || row['Glove'] || row['Sleeve'] || row['Blanket'] || row['MACK'] || row['Serial #'] || '';
+          const esl = row['ESL ID'] || row['Serial #'] || '';
+          const sz = row['Size'] || row['Length'] || '';
+          const cl = row['Class'] || row['KV'] || '';
+          const reason = stat || loc || asgn || 'Retired';
+          const lastAsgn = asgn !== 'lost' && asgn !== 'destroyed' ? row['Assigned To'] : '';
+          const lastLoc = loc !== 'lost' && loc !== 'destroyed' ? row['Location'] : '';
+          const notes = row['Notes'] || '';
+
+          retTable.rows.unshift({
+            'Item #': itemNum,
+            'ESL ID / Serial #': esl,
+            'Category': catKey.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase()),
+            'Class / KV': cl,
+            'Size / Length': sz,
+            'Date Retired': new Date().toLocaleDateString('en-US'),
+            'Reason': reason,
+            'Last Assigned To': lastAsgn,
+            'Last Location': lastLoc,
+            'Lab Ticket #': '',
+            'Notes': notes
+          });
+
+          await this.addMutation({
+            action: 'RETIRE_ITEM',
+            itemNum: itemNum,
+            eslId: esl,
+            category: catKey,
+            reason: reason,
+            sourceSheet: tbl.name || catKey,
+            lastAssignedTo: lastAsgn,
+            lastLocation: lastLoc,
+            notes: notes
+          });
+
+          archivedCount++;
+        } else {
+          remainingRows.push(row);
+        }
+      }
+
+      tbl.rows = remainingRows;
+      tbl.rowCount = remainingRows.length;
+    }
+
+    if (archivedCount > 0) {
+      retTable.rowCount = retTable.rows.length;
+      await this.persistSnapshot(this.snapshot);
+      this.notify();
+    }
+
+    return archivedCount;
+  }
+
+  /**
+   * Appends a daily accomplishment summary into 'Daily Accomplishments'.
+   */
+  async saveDailyAccomplishment(record) {
+    if (!this.snapshot) this.snapshot = { configs: {}, tables: {} };
+    if (!this.snapshot.tables) this.snapshot.tables = {};
+
+    if (!this.snapshot.tables.daily_accomplishments) {
+      this.snapshot.tables.daily_accomplishments = {
+        name: 'Daily Accomplishments',
+        headers: ['Date', 'User / Coordinator', 'Crews Visited', 'Route / Cities', 'Drive Time', 'Swaps Completed', 'Trainings Conducted', 'Summary Text', 'Logged At'],
+        rows: []
+      };
+    }
+
+    const daTable = this.snapshot.tables.daily_accomplishments;
+    const row = {
+      'Date': record.date || new Date().toISOString().slice(0, 10),
+      'User / Coordinator': record.user || 'Safety Coordinator',
+      'Crews Visited': record.crews || '',
+      'Route / Cities': record.route || '',
+      'Drive Time': record.driveTime || '',
+      'Swaps Completed': record.swapsCount !== undefined ? record.swapsCount : '',
+      'Trainings Conducted': record.trainingsCount !== undefined ? record.trainingsCount : '',
+      'Summary Text': record.summary || '',
+      'Logged At': record.loggedAt || new Date().toLocaleString('en-US', { timeZone: 'America/Denver' })
+    };
+
+    daTable.rows.unshift(row);
+    daTable.rowCount = daTable.rows.length;
+
+    await this.persistSnapshot(this.snapshot);
+    await this.addMutation({
+      action: 'LOG_DAILY_ACCOMPLISHMENT',
+      data: row
+    });
+
+    this.notify();
+    return true;
+  }
+
+  /**
+   * Creates a new dielectric lab test batch in 'Testing Lab Batches'.
+   */
+  async createTestBatch(batchData) {
+    if (!this.snapshot) this.snapshot = { configs: {}, tables: {} };
+    if (!this.snapshot.tables) this.snapshot.tables = {};
+
+    if (!this.snapshot.tables.test_batches) {
+      this.snapshot.tables.test_batches = {
+        name: 'Testing Lab Batches',
+        headers: ['Batch ID', 'Testing Lab', 'Category', 'Date Shipped', 'Tracking Number', 'Expected Return Date', 'Date Received', 'Total Items Sent', 'Passed Count', 'Failed Count', 'Status', 'Cert Link / Notes'],
+        rows: []
+      };
+    }
+
+    const tbTable = this.snapshot.tables.test_batches;
+    const row = {
+      'Batch ID': batchData.batchId || ('LAB-' + new Date().toISOString().slice(0, 10) + '-' + Math.floor(100 + Math.random() * 900)),
+      'Testing Lab': batchData.labVendor || 'JM Test Systems',
+      'Category': batchData.category || 'Gloves',
+      'Date Shipped': batchData.dateShipped || new Date().toLocaleDateString('en-US'),
+      'Tracking Number': batchData.trackingNum || '',
+      'Expected Return Date': batchData.expectedReturn || '',
+      'Date Received': batchData.dateReceived || '',
+      'Total Items Sent': batchData.totalSent || 0,
+      'Passed Count': batchData.passedCount || 0,
+      'Failed Count': batchData.failedCount || 0,
+      'Status': batchData.status || 'Shipped',
+      'Cert Link / Notes': batchData.notes || ''
+    };
+
+    tbTable.rows.unshift(row);
+    tbTable.rowCount = tbTable.rows.length;
+
+    await this.persistSnapshot(this.snapshot);
+    await this.addMutation({
+      action: 'CREATE_TEST_BATCH',
+      data: row
+    });
+
+    this.notify();
+    return row;
+  }
+
+  /**
+   * Appends an immutable GPS check-in entry to 'Field GPS Log'.
+   */
+  async logFieldCheckIn(checkInRecord) {
+    if (!this.snapshot) this.snapshot = { configs: {}, tables: {} };
+    if (!this.snapshot.tables) this.snapshot.tables = {};
+
+    if (!this.snapshot.tables.field_gps_log) {
+      this.snapshot.tables.field_gps_log = {
+        name: 'Field GPS Log',
+        headers: ['Check-In ID', 'Timestamp', 'Job Number', 'Job / Crew Name', 'Nearest Montana Base', 'Distance (mi)', 'GPS Coordinates', 'Accuracy (m)', 'User / Inspector', 'Activity', 'Notes'],
+        rows: []
+      };
+    }
+
+    const gpsTable = this.snapshot.tables.field_gps_log;
+    const row = {
+      'Check-In ID': checkInRecord.checkInId || ('GPS-' + new Date().toISOString().slice(0, 10) + '-' + Math.floor(1000 + Math.random() * 9000)),
+      'Timestamp': checkInRecord.timestamp || new Date().toLocaleString('en-US', { timeZone: 'America/Denver' }),
+      'Job Number': checkInRecord.jobId || checkInRecord.jobNumber || '',
+      'Job / Crew Name': checkInRecord.jobName || '',
+      'Nearest Montana Base': checkInRecord.locationLabel || checkInRecord.nearestBase || 'Helena Base',
+      'Distance (mi)': checkInRecord.distanceMiles !== undefined ? checkInRecord.distanceMiles : '',
+      'GPS Coordinates': checkInRecord.gpsCoordinates || '',
+      'Accuracy (m)': checkInRecord.accuracyMeters !== undefined ? checkInRecord.accuracyMeters : '',
+      'User / Inspector': checkInRecord.user || checkInRecord.inspector || 'Safety Coordinator',
+      'Activity': checkInRecord.activity || 'Field Check-In',
+      'Notes': checkInRecord.notes || ''
+    };
+
+    gpsTable.rows.unshift(row);
+    gpsTable.rowCount = gpsTable.rows.length;
+
+    await this.persistSnapshot(this.snapshot);
+    await this.addMutation({
+      action: 'FIELD_GPS_CHECK_IN',
+      data: checkInRecord
+    });
+
+    this.notify();
+    return row;
+  }
+
+  getSystemConfig(key) {
+    if (!this.snapshot || !this.snapshot.tables || !this.snapshot.tables.system_config) {
+      return null;
+    }
+    const cfgTable = this.snapshot.tables.system_config;
+    const keyTarget = String(key || '').trim().toUpperCase();
+    const row = (cfgTable.rows || []).find(r => String(r['Config Key'] || '').trim().toUpperCase() === keyTarget);
+    return row ? row['Config Value'] : null;
+  }
+
+  async setSystemConfig(key, value, description = '') {
+    if (!this.snapshot) this.snapshot = { configs: {}, tables: {} };
+    if (!this.snapshot.tables) this.snapshot.tables = {};
+
+    if (!this.snapshot.tables.system_config) {
+      this.snapshot.tables.system_config = {
+        name: 'System Config',
+        headers: ['Config Key', 'Config Value', 'Description', 'Last Updated'],
+        rows: []
+      };
+    }
+
+    const cfgTable = this.snapshot.tables.system_config;
+    const keyTarget = String(key || '').trim().toUpperCase();
+    const valStr = typeof value === 'string' ? value : JSON.stringify(value);
+    const nowStr = new Date().toLocaleString('en-US', { timeZone: 'America/Denver' });
+
+    let existing = (cfgTable.rows || []).find(r => String(r['Config Key'] || '').trim().toUpperCase() === keyTarget);
+    if (existing) {
+      existing['Config Value'] = valStr;
+      if (description) existing['Description'] = description;
+      existing['Last Updated'] = nowStr;
+    } else {
+      cfgTable.rows.push({
+        'Config Key': keyTarget,
+        'Config Value': valStr,
+        'Description': description,
+        'Last Updated': nowStr
+      });
+    }
+
+    cfgTable.rowCount = cfgTable.rows.length;
+    await this.persistSnapshot(this.snapshot);
+    await this.addMutation({
+      action: 'UPDATE_SYSTEM_CONFIG',
+      key: keyTarget,
+      value: valStr,
+      description: description
+    });
+
+    this.notify();
+    return true;
   }
 
   getTable(tableKey) {

@@ -2333,6 +2333,36 @@ class InventoryManager {
       .replace(/"/g, '&quot;')
       .replace(/[\n\r]/g, ' ');
   }
+  /**
+   * UI workflow to scan active inventory and archive dead items to 'Retired Equipment'.
+   */
+  async archiveLostAndFailedItemsUI() {
+    const isConfirmed = confirm(
+      '🗄️ Archive Lost & Failed Items\n\n' +
+      'Would you like to scan all active inventory tables (Gloves, Sleeves, Blankets, MACKs, etc.) ' +
+      'and move all items marked "Lost", "Destroyed", or "Failed Rubber" to the "Retired Equipment" tab?\n\n' +
+      'This will remove them from active inventory so they no longer cause false Overdue warnings in Fleet Readiness.'
+    );
+
+    if (!isConfirmed) return;
+
+    try {
+      if (this.db && typeof this.db.archiveLostAndFailedItemsLocal === 'function') {
+        const count = await this.db.archiveLostAndFailedItemsLocal();
+        if (count > 0) {
+          alert(`✅ Successfully archived ${count} dead item(s) to "Retired Equipment"!\n\nActive inventory sheets are now clean and accurate. Click "Push Changes to Sheets" whenever you are ready to sync.`);
+        } else {
+          alert('ℹ️ No dead, lost, or failed items found in active inventory.');
+        }
+        if (window.sheetNavigator) {
+          window.sheetNavigator.renderCurrentSheet();
+        }
+      }
+    } catch (err) {
+      console.error('Error archiving lost/failed items:', err);
+      alert('❌ Failed to archive items: ' + (err.message || err));
+    }
+  }
 }
 
 window.inventoryManager = new InventoryManager(window.localDB);

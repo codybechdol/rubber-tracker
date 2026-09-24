@@ -23,8 +23,91 @@ var COLS_SAFE = (typeof COLS !== 'undefined' && COLS) ? COLS : {
   PHASING_SETS: { ITEM_NUM: 1, MODEL: 2, KV: 3, SERIAL_NUM: 4, CALIBRATION_DATE: 5, DATE_ASSIGNED: 6, LOCATION: 7, STATUS: 8, ASSIGNED_TO: 9, CHANGE_OUT_DATE: 10, PICKED_FOR: 11, NOTES: 12 },
   AED: { ITEM_NUM: 1, MODEL: 2, UNUSED_C: 3, PAD_EXPIRATION: 4, DATE_ASSIGNED: 5, LOCATION: 6, STATUS: 7, ASSIGNED_TO: 8, UNUSED_I: 9, PICKED_FOR: 10, NOTES: 11 },
   GROUNDS: { SERIAL_NUM: 1, TYPE: 2, SIZE: 3, KV: 4, LENGTH: 5, TEST_DATE: 6, DATE_ASSIGNED: 7, LOCATION: 8, STATUS: 9, ASSIGNED_TO: 10, CHANGE_OUT_DATE: 11, PICKED_FOR: 12, NOTES: 13 },
-  HOT_STICKS: { ITEM_NUM: 1, TYPE: 2, LENGTH: 3, TEST_DATE: 4, DATE_ASSIGNED: 5, LOCATION: 6, STATUS: 7, ASSIGNED_TO: 8, CHANGE_OUT_DATE: 9, PICKED_FOR: 10, NOTES: 11 }
+  HOT_STICKS: { ITEM_NUM: 1, TYPE: 2, LENGTH: 3, TEST_DATE: 4, DATE_ASSIGNED: 5, LOCATION: 6, STATUS: 7, ASSIGNED_TO: 8, CHANGE_OUT_DATE: 9, PICKED_FOR: 10, NOTES: 11 },
+  RETIRED_EQUIPMENT: { ITEM_NUM: 1, ESL_ID_SERIAL: 2, CATEGORY: 3, CLASS_KV: 4, SIZE_LENGTH: 5, DATE_RETIRED: 6, REASON: 7, LAST_ASSIGNED_TO: 8, LAST_LOCATION: 9, LAB_TICKET: 10, NOTES: 11 },
+  TRIP_SCHEDULE: { TRIP_ID: 1, DATE: 2, WEEK_MONDAY: 3, DESTINATION: 4, JOB_NUMBER: 5, CREW_LEAD: 6, TASK_TYPE: 7, SWAPS_COUNT: 8, STATUS: 9, COMPLETED_DATE: 10, NOTES: 11 },
+  TEST_BATCHES: { BATCH_ID: 1, LAB_VENDOR: 2, CATEGORY: 3, DATE_SHIPPED: 4, TRACKING_NUM: 5, EXPECTED_RETURN: 6, DATE_RECEIVED: 7, TOTAL_SENT: 8, PASSED_COUNT: 9, FAILED_COUNT: 10, STATUS: 11, NOTES: 12 },
+  FIELD_GPS_LOG: { CHECK_IN_ID: 1, TIMESTAMP: 2, JOB_NUMBER: 3, JOB_NAME: 4, NEAREST_BASE: 5, DISTANCE_MILES: 6, COORDINATES: 7, ACCURACY_METERS: 8, USER_NAME: 9, ACTIVITY: 10, NOTES: 11 },
+  DAILY_ACCOMPLISHMENTS: { DATE: 1, USER_NAME: 2, CREWS_VISITED: 3, ROUTE_CITIES: 4, DRIVE_TIME: 5, SWAPS_COMPLETED: 6, TRAININGS: 7, SUMMARY_TEXT: 8, LOGGED_AT: 9 },
+  SYSTEM_CONFIG: { CONFIG_KEY: 1, CONFIG_VALUE: 2, DESCRIPTION: 3, LAST_UPDATED: 4 }
 };
+
+/**
+ * Ensures all recommended companion database sheets exist in the spreadsheet.
+ * Automatically provisions headers, colors, formatting, frozen rows, and default config rows.
+ *
+ * @param {SpreadsheetApp.Spreadsheet} [ss] - Optional spreadsheet reference
+ * @return {Array<string>} Names of created sheets
+ */
+function ensureRecommendedCompanionSheetsExist(ss) {
+  if (!ss) ss = typeof getActiveSpreadsheetSafe === 'function' ? getActiveSpreadsheetSafe() : SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) return [];
+  var created = [];
+
+  var definitions = [
+    {
+      name: typeof SHEET_RETIRED_EQUIPMENT !== 'undefined' ? SHEET_RETIRED_EQUIPMENT : 'Retired Equipment',
+      headers: ['Item #', 'ESL ID / Serial #', 'Category', 'Class / KV', 'Size / Length', 'Date Retired', 'Reason', 'Last Assigned To', 'Last Location', 'Lab Ticket #', 'Notes'],
+      color: '#37474f'
+    },
+    {
+      name: typeof SHEET_TRIP_SCHEDULE !== 'undefined' ? SHEET_TRIP_SCHEDULE : 'Trip Schedule',
+      headers: ['Trip ID', 'Date', 'Week Monday', 'Destination', 'Job Number', 'Crew / Lead', 'Task Type', 'Swaps Count', 'Status', 'Completed Date', 'Notes'],
+      color: '#00695c'
+    },
+    {
+      name: typeof SHEET_TEST_BATCHES !== 'undefined' ? SHEET_TEST_BATCHES : 'Testing Lab Batches',
+      headers: ['Batch ID', 'Testing Lab', 'Category', 'Date Shipped', 'Tracking Number', 'Expected Return Date', 'Date Received', 'Total Items Sent', 'Passed Count', 'Failed Count', 'Status', 'Cert Link / Notes'],
+      color: '#283593'
+    },
+    {
+      name: typeof SHEET_FIELD_GPS_LOG !== 'undefined' ? SHEET_FIELD_GPS_LOG : 'Field GPS Log',
+      headers: ['Check-In ID', 'Timestamp', 'Job Number', 'Job / Crew Name', 'Nearest Montana Base', 'Distance (mi)', 'GPS Coordinates', 'Accuracy (m)', 'User / Inspector', 'Activity', 'Notes'],
+      color: '#2e7d32'
+    },
+    {
+      name: typeof SHEET_DAILY_ACCOMPLISHMENTS !== 'undefined' ? SHEET_DAILY_ACCOMPLISHMENTS : 'Daily Accomplishments',
+      headers: ['Date', 'User / Coordinator', 'Crews Visited', 'Route / Cities', 'Drive Time', 'Swaps Completed', 'Trainings Conducted', 'Summary Text', 'Logged At'],
+      color: '#e65100'
+    },
+    {
+      name: typeof SHEET_SYSTEM_CONFIG !== 'undefined' ? SHEET_SYSTEM_CONFIG : 'System Config',
+      headers: ['Config Key', 'Config Value', 'Description', 'Last Updated'],
+      color: '#212121',
+      defaultRows: [
+        ['WORK_SCHEDULE', 'Mon-Thu', 'Default field work schedule (Mon-Thu or Tue-Fri)', new Date().toLocaleDateString('en-US')],
+        ['HELENA_INTERVAL_MONTHS', '3', 'Standard swap interval for Helena crews (months)', new Date().toLocaleDateString('en-US')],
+        ['DEFAULT_INTERVAL_MONTHS', '6', 'Standard swap interval for non-Helena crews (months)', new Date().toLocaleDateString('en-US')],
+        ['BLANKET_TEST_INTERVAL_MONTHS', '12', 'Annual dielectric re-test interval for blankets', new Date().toLocaleDateString('en-US')],
+        ['MACK_TEST_INTERVAL_MONTHS', '12', 'Annual dielectric re-test interval for MACKs', new Date().toLocaleDateString('en-US')],
+        ['GROUNDS_TEST_INTERVAL_MONTHS', '12', 'Annual dielectric re-test interval for grounds', new Date().toLocaleDateString('en-US')],
+        ['HOT_STICKS_TEST_INTERVAL_MONTHS', '24', 'OSHA 1910.269 2-year dielectric re-test interval for hot sticks', new Date().toLocaleDateString('en-US')],
+        ['CALIBRATION_INTERVAL_YEARS', '10', '10-year calibration cycle for HV Testers and Phasing Sets', new Date().toLocaleDateString('en-US')]
+      ]
+    }
+  ];
+
+  for (var i = 0; i < definitions.length; i++) {
+    var def = definitions[i];
+    var sheet = ss.getSheetByName(def.name);
+    if (!sheet) {
+      sheet = ss.insertSheet(def.name);
+      created.push(def.name);
+      sheet.getRange(1, 1, 1, def.headers.length).setValues([def.headers])
+        .setBackground(def.color)
+        .setFontColor('#ffffff')
+        .setFontWeight('bold')
+        .setHorizontalAlignment('center');
+      sheet.setFrozenRows(1);
+
+      if (def.defaultRows && def.defaultRows.length > 0) {
+        sheet.getRange(2, 1, def.defaultRows.length, def.defaultRows[0].length).setValues(def.defaultRows);
+      }
+    }
+  }
+
+  return created;
+}
 
 /**
  * Exports a complete, structured snapshot of all database sheets and configurations.
@@ -53,6 +136,13 @@ function exportFullDatabaseSnapshot(tableKeysFilter) {
     var day = d.getDate();
     var yr = d.getFullYear();
     return (m < 10 ? '0' + m : m) + '/' + (day < 10 ? '0' + day : day) + '/' + yr;
+  }
+
+  // Auto-provision recommended companion sheets if missing
+  try {
+    ensureRecommendedCompanionSheetsExist(ss);
+  } catch (eEnsure) {
+    Logger.log('ensureRecommendedCompanionSheetsExist error: ' + eEnsure);
   }
 
   // List of all sheets to sync with their offline table keys
@@ -101,7 +191,13 @@ function exportFullDatabaseSnapshot(tableKeysFilter) {
     { key: 'vendors', name: 'Vendors' },
     { key: 'purchase_orders', name: 'Purchase Orders' },
     { key: 'dot_drug_tests', name: typeof SHEET_DRUG_TESTS !== 'undefined' ? SHEET_DRUG_TESTS : 'DOT Drug Tests' },
-    { key: 'drug_test_clinics', name: typeof SHEET_DRUG_CLINICS !== 'undefined' ? SHEET_DRUG_CLINICS : 'Drug Test Clinics' }
+    { key: 'drug_test_clinics', name: typeof SHEET_DRUG_CLINICS !== 'undefined' ? SHEET_DRUG_CLINICS : 'Drug Test Clinics' },
+    { key: 'retired_equipment', name: typeof SHEET_RETIRED_EQUIPMENT !== 'undefined' ? SHEET_RETIRED_EQUIPMENT : 'Retired Equipment' },
+    { key: 'trip_schedule', name: typeof SHEET_TRIP_SCHEDULE !== 'undefined' ? SHEET_TRIP_SCHEDULE : 'Trip Schedule' },
+    { key: 'test_batches', name: typeof SHEET_TEST_BATCHES !== 'undefined' ? SHEET_TEST_BATCHES : 'Testing Lab Batches' },
+    { key: 'field_gps_log', name: typeof SHEET_FIELD_GPS_LOG !== 'undefined' ? SHEET_FIELD_GPS_LOG : 'Field GPS Log' },
+    { key: 'daily_accomplishments', name: typeof SHEET_DAILY_ACCOMPLISHMENTS !== 'undefined' ? SHEET_DAILY_ACCOMPLISHMENTS : 'Daily Accomplishments' },
+    { key: 'system_config', name: typeof SHEET_SYSTEM_CONFIG !== 'undefined' ? SHEET_SYSTEM_CONFIG : 'System Config' }
   ];
 
   var tables = {};
@@ -859,7 +955,12 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
         'RECALCULATE_CHANGE_OUT_DATES',
         'FIELD_GPS_CHECK_IN',
         'FIELD_EQUIPMENT_SWAP',
-        'RECLAIM_ITEM'
+        'RECLAIM_ITEM',
+        'RETIRE_ITEM',
+        'LOG_DAILY_ACCOMPLISHMENT',
+        'UPDATE_SYSTEM_CONFIG',
+        'CREATE_TEST_BATCH',
+        'SYNC_TRIP_SCHEDULE'
       ];
 
       // If this is a table replacement mutation and the sheet doesn't exist yet, automatically create it
@@ -2338,6 +2439,21 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
         case 'FIELD_GPS_CHECK_IN':
           try {
             var checkIn = mut.data || {};
+            var gpsSheet = ss.getSheetByName(typeof SHEET_FIELD_GPS_LOG !== 'undefined' ? SHEET_FIELD_GPS_LOG : 'Field GPS Log');
+            if (gpsSheet) {
+              var cId = checkIn.checkInId || ('GPS-' + new Date().toISOString().slice(0, 10) + '-' + Math.floor(1000 + Math.random() * 9000));
+              var tStamp = checkIn.timestamp || new Date().toLocaleString('en-US', { timeZone: 'America/Denver' });
+              var jNum = checkIn.jobId || checkIn.jobNumber || '';
+              var jName = checkIn.jobName || '';
+              var nBase = checkIn.locationLabel || checkIn.nearestBase || 'Helena Base';
+              var dMiles = checkIn.distanceMiles !== undefined ? checkIn.distanceMiles : '';
+              var coords = checkIn.gpsCoordinates || (checkIn.lat && checkIn.lng ? (checkIn.lat + ', ' + checkIn.lng) : '');
+              var accM = checkIn.accuracyMeters !== undefined ? checkIn.accuracyMeters : '';
+              var uName = checkIn.user || checkIn.inspector || 'Safety Coordinator';
+              var act = checkIn.activity || 'Field Check-In';
+              var notes = checkIn.notes || '';
+              gpsSheet.appendRow([cId, tStamp, jNum, jName, nBase, dMiles, coords, accM, uName, act, notes]);
+            }
             logEvent('Field GPS Check-In: ' + (checkIn.locationLabel || '') + ' (' + (checkIn.gpsCoordinates || '') + ') for job ' + (checkIn.jobName || ''), 'INFO');
             appliedCount++;
           } catch (gpsErr) {
@@ -2345,8 +2461,120 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
           }
           break;
 
-        case 'FIELD_EQUIPMENT_SWAP':
+        case 'RETIRE_ITEM':
         case 'RECLAIM_ITEM':
+          try {
+            var retSheet = ss.getSheetByName(typeof SHEET_RETIRED_EQUIPMENT !== 'undefined' ? SHEET_RETIRED_EQUIPMENT : 'Retired Equipment');
+            if (retSheet) {
+              var itemNum = mut.itemNum || mut.item || '';
+              var eslOrSerial = mut.eslId || mut.serialNum || '';
+              var cat = mut.category || 'Gloves';
+              var clKv = mut.classVal || mut.kv || '';
+              var szLen = mut.size || mut.length || '';
+              var dRetired = mut.dateRetired || new Date().toLocaleDateString('en-US');
+              var reason = mut.reason || (mut.action === 'RECLAIM_ITEM' ? 'Reclaimed from Field' : 'Retired');
+              var lastAssigned = mut.lastAssignedTo || mut.assignedTo || '';
+              var lastLoc = mut.lastLocation || mut.location || '';
+              var labTkt = mut.labTicket || '';
+              var retNotes = mut.notes || '';
+              retSheet.appendRow([itemNum, eslOrSerial, cat, clKv, szLen, dRetired, reason, lastAssigned, lastLoc, labTkt, retNotes]);
+            }
+            // If sourceSheet and sourceItem or sourceRow provided, delete/clear that item from active inventory
+            if (mut.sourceSheet && (mut.sourceRow || mut.itemNum)) {
+              var srcSheet = ss.getSheetByName(mut.sourceSheet);
+              if (srcSheet) {
+                var sRow = mut.sourceRow;
+                if (!sRow && mut.itemNum) {
+                  sRow = getInvItemRowIndexFast(srcSheet, mut.sourceSheet, mut.itemNum);
+                }
+                if (sRow >= 2 && sRow <= srcSheet.getLastRow()) {
+                  srcSheet.deleteRow(sRow);
+                }
+              }
+            }
+            logEvent(mut.action + ': Item ' + (mut.itemNum || '') + ' Reason: ' + (mut.reason || ''), 'INFO');
+            appliedCount++;
+          } catch (eRet) {
+            Logger.log(mut.action + ' error: ' + eRet);
+          }
+          break;
+
+        case 'LOG_DAILY_ACCOMPLISHMENT':
+          try {
+            var daSheet = ss.getSheetByName(typeof SHEET_DAILY_ACCOMPLISHMENTS !== 'undefined' ? SHEET_DAILY_ACCOMPLISHMENTS : 'Daily Accomplishments');
+            if (daSheet) {
+              var daData = mut.data || {};
+              var dDate = daData.date || new Date().toISOString().slice(0, 10);
+              var dUser = daData.user || 'Safety Coordinator';
+              var dCrews = daData.crews || '';
+              var dRoute = daData.route || '';
+              var dDrive = daData.driveTime || '';
+              var dSwaps = daData.swapsCount !== undefined ? daData.swapsCount : '';
+              var dTrain = daData.trainingsCount !== undefined ? daData.trainingsCount : '';
+              var dSummary = daData.summary || '';
+              var dLogged = daData.loggedAt || new Date().toLocaleString('en-US', { timeZone: 'America/Denver' });
+              daSheet.appendRow([dDate, dUser, dCrews, dRoute, dDrive, dSwaps, dTrain, dSummary, dLogged]);
+            }
+            appliedCount++;
+          } catch (eDa) {
+            Logger.log('LOG_DAILY_ACCOMPLISHMENT error: ' + eDa);
+          }
+          break;
+
+        case 'UPDATE_SYSTEM_CONFIG':
+          try {
+            var cfgSheet = ss.getSheetByName(typeof SHEET_SYSTEM_CONFIG !== 'undefined' ? SHEET_SYSTEM_CONFIG : 'System Config');
+            if (cfgSheet && mut.key) {
+              var cfgData = cfgSheet.getDataRange().getValues();
+              var keyTarget = String(mut.key).trim().toUpperCase();
+              var valStr = typeof mut.value === 'string' ? mut.value : JSON.stringify(mut.value);
+              var desc = mut.description || '';
+              var nowStr = new Date().toLocaleString('en-US', { timeZone: 'America/Denver' });
+              var foundIdx = -1;
+              for (var ci = 1; ci < cfgData.length; ci++) {
+                if (String(cfgData[ci][0] || '').trim().toUpperCase() === keyTarget) {
+                  foundIdx = ci + 1;
+                  break;
+                }
+              }
+              if (foundIdx !== -1) {
+                cfgSheet.getRange(foundIdx, 2, 1, 3).setValues([[valStr, desc || cfgData[foundIdx - 1][2], nowStr]]);
+              } else {
+                cfgSheet.appendRow([keyTarget, valStr, desc, nowStr]);
+              }
+            }
+            appliedCount++;
+          } catch (eCfg) {
+            Logger.log('UPDATE_SYSTEM_CONFIG error: ' + eCfg);
+          }
+          break;
+
+        case 'CREATE_TEST_BATCH':
+          try {
+            var tbSheet = ss.getSheetByName(typeof SHEET_TEST_BATCHES !== 'undefined' ? SHEET_TEST_BATCHES : 'Testing Lab Batches');
+            if (tbSheet) {
+              var b = mut.data || {};
+              var bId = b.batchId || ('LAB-' + new Date().toISOString().slice(0, 10) + '-' + Math.floor(100 + Math.random() * 900));
+              var bLab = b.labVendor || 'JM Test Systems';
+              var bCat = b.category || 'Gloves';
+              var bShipped = b.dateShipped || new Date().toLocaleDateString('en-US');
+              var bTrack = b.trackingNum || '';
+              var bExp = b.expectedReturn || '';
+              var bRec = b.dateReceived || '';
+              var bTotal = b.totalSent || 0;
+              var bPass = b.passedCount || 0;
+              var bFail = b.failedCount || 0;
+              var bStat = b.status || 'Shipped';
+              var bNotes = b.notes || '';
+              tbSheet.appendRow([bId, bLab, bCat, bShipped, bTrack, bExp, bRec, bTotal, bPass, bFail, bStat, bNotes]);
+            }
+            appliedCount++;
+          } catch (eTb) {
+            Logger.log('CREATE_TEST_BATCH error: ' + eTb);
+          }
+          break;
+
+        case 'FIELD_EQUIPMENT_SWAP':
           try {
             logEvent(mut.action + ': Item ' + (mut.itemNum || '') + ' (' + (mut.gpsStamp || '') + ')', 'INFO');
             appliedCount++;

@@ -57,6 +57,14 @@ var SHEET_HOT_STICKS_HISTORY = 'Hot Sticks History';
 var SHEET_DRUG_TESTS = 'DOT Drug Tests';
 var SHEET_DRUG_CLINICS = 'Drug Test Clinics';
 
+// Recommended Companion Sheets (September 2026)
+var SHEET_RETIRED_EQUIPMENT = 'Retired Equipment';
+var SHEET_TRIP_SCHEDULE = 'Trip Schedule';
+var SHEET_TEST_BATCHES = 'Testing Lab Batches';
+var SHEET_FIELD_GPS_LOG = 'Field GPS Log';
+var SHEET_DAILY_ACCOMPLISHMENTS = 'Daily Accomplishments';
+var SHEET_SYSTEM_CONFIG = 'System Config';
+
 // =============================================================================
 // VISUAL CONSTANTS
 // =============================================================================
@@ -389,6 +397,88 @@ var COLS = {
     PAPERWORK_REQUIRED: 10,// J - Paperwork Required w/ Donor
     NOTES: 11,            // K - Special Instructions / Notes
     ACTIVE: 12            // L - Active (TRUE/FALSE)
+  },
+
+  // Retired Equipment Sheet (archived lost, destroyed, scrapped, or failed gear)
+  RETIRED_EQUIPMENT: {
+    ITEM_NUM: 1,        // A - Item # / ID
+    ESL_ID_SERIAL: 2,   // B - ESL ID / Serial #
+    CATEGORY: 3,        // C - Category (Gloves, Sleeves, Blankets, MACKs, HV Testers, Phasing Sets, AED, Grounds, Hot Sticks)
+    CLASS_KV: 4,        // D - Class / KV
+    SIZE_LENGTH: 5,     // E - Size / Length
+    DATE_RETIRED: 6,    // F - Date Retired / Disposed
+    REASON: 7,          // G - Reason (Failed Test, Lost in Field, Damaged, Max Lifespan, Scrapped, Reclaimed)
+    LAST_ASSIGNED_TO: 8,// H - Last Employee Assigned
+    LAST_LOCATION: 9,   // I - Last Known Location
+    LAB_TICKET: 10,     // J - Lab Ticket / Tracking #
+    NOTES: 11           // K - Notes
+  },
+
+  // Trip Schedule Sheet (persisted multi-week field visits and task plans)
+  TRIP_SCHEDULE: {
+    TRIP_ID: 1,         // A - Unique Trip ID (e.g. TRIP-2026-09-24-001)
+    DATE: 2,            // B - Scheduled Date (YYYY-MM-DD)
+    WEEK_MONDAY: 3,     // C - Week Monday (YYYY-MM-DD)
+    DESTINATION: 4,     // D - Destination / Hub / Town
+    JOB_NUMBER: 5,      // E - Job Number / Crew
+    CREW_LEAD: 6,       // F - Crew Foreman / Lead
+    TASK_TYPE: 7,       // G - Task Type (Rubber Swap, Field Inspection, CPR Training, Office/HQ, Tailgate)
+    SWAPS_COUNT: 8,     // H - Swaps Count
+    STATUS: 9,          // I - Scheduled, In Progress, Completed, Cancelled, Rescheduled
+    COMPLETED_DATE: 10, // J - Completed Timestamp / Date
+    NOTES: 11           // K - Notes / Details
+  },
+
+  // Testing Lab Batches Sheet (dielectric test & calibration batches shipped to labs)
+  TEST_BATCHES: {
+    BATCH_ID: 1,        // A - Batch ID (e.g. LAB-2026-09-001)
+    LAB_VENDOR: 2,      // B - Testing Lab / Vendor Name
+    CATEGORY: 3,        // C - Category (Gloves, Sleeves, Blankets, MACKs, Grounds, Hot Sticks)
+    DATE_SHIPPED: 4,    // D - Date Shipped
+    TRACKING_NUM: 5,    // E - Carrier & Tracking #
+    EXPECTED_RETURN: 6, // F - Expected Return Date
+    DATE_RECEIVED: 7,   // G - Date Received
+    TOTAL_SENT: 8,      // H - Total Items Sent
+    PASSED_COUNT: 9,    // I - Passed Count
+    FAILED_COUNT: 10,   // J - Failed Count
+    STATUS: 11,         // K - Packing, Shipped, At Lab, Received & Restocked
+    NOTES: 12           // L - Cert Link / Notes
+  },
+
+  // Field GPS Log Sheet (immutable audit trail of field swaps & safety visits)
+  FIELD_GPS_LOG: {
+    CHECK_IN_ID: 1,     // A - Check-In ID (e.g. GPS-2026-09-24-001)
+    TIMESTAMP: 2,       // B - Timestamp (ISO or MM/DD/YYYY HH:mm:ss)
+    JOB_NUMBER: 3,      // C - Job Number
+    JOB_NAME: 4,        // D - Job / Crew Name
+    NEAREST_BASE: 5,    // E - Nearest Montana Base
+    DISTANCE_MILES: 6,  // F - Distance (mi)
+    COORDINATES: 7,     // G - GPS Coordinates
+    ACCURACY_METERS: 8, // H - Accuracy (±m)
+    USER_NAME: 9,       // I - User / Inspector Name
+    ACTIVITY: 10,       // J - Activity (Glove Swap, Safety Audit, Tailgate, Check-In)
+    NOTES: 11           // K - Notes
+  },
+
+  // Daily Accomplishments Sheet (daily timesheet & visit breakdown)
+  DAILY_ACCOMPLISHMENTS: {
+    DATE: 1,            // A - Date (YYYY-MM-DD)
+    USER_NAME: 2,       // B - User / Coordinator Name
+    CREWS_VISITED: 3,   // C - Crews Visited
+    ROUTE_CITIES: 4,    // D - Route / Cities Visited
+    DRIVE_TIME: 5,      // E - Drive Time (hrs/mins)
+    SWAPS_COMPLETED: 6, // F - Swaps Completed Count
+    TRAININGS: 7,       // G - Trainings Delivered
+    SUMMARY_TEXT: 8,    // H - Formatted Summary Text
+    LOGGED_AT: 9        // I - Timestamp Logged
+  },
+
+  // System Config Sheet (transparent cloud key-value store for app settings)
+  SYSTEM_CONFIG: {
+    CONFIG_KEY: 1,      // A - Key (e.g. WORK_SCHEDULE, HOLIDAYS, AGING_RULES)
+    CONFIG_VALUE: 2,    // B - Value (JSON or string)
+    DESCRIPTION: 3,     // C - Description of setting
+    LAST_UPDATED: 4     // D - Timestamp
   }
 };
 
