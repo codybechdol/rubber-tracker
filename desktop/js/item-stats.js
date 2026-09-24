@@ -12,7 +12,18 @@ class ItemStatsEngine {
     this.currentActiveItemKey = null;
     this.currentActiveSheetKey = null;
     this._bookListenersInitialized = false;
+    this._fleetMetricsCache = {};
+    this._sectionItemsCache = {};
+    this._histIndexCache = {};
+    this._activeMapCache = {};
     this.initBookPagingListeners();
+  }
+
+  invalidateCache() {
+    this._fleetMetricsCache = {};
+    this._sectionItemsCache = {};
+    this._histIndexCache = {};
+    this._activeMapCache = {};
   }
 
   parseDate(val) {
@@ -728,11 +739,16 @@ class ItemStatsEngine {
    * @param {string} sheetKey - 'gloves' or 'sleeves'
    * @returns {Object} Calculated metrics
    */
-  computeFleetVisualMetrics(sheetKey = 'gloves') {
+  computeFleetVisualMetrics(sheetKey = 'gloves', forceRefresh = false) {
     sheetKey = (sheetKey || 'gloves').toLowerCase();
     const isGloves = sheetKey.includes('glove');
     const cleanKey = isGloves ? 'gloves' : 'sleeves';
     const histKey = cleanKey + '_history';
+
+    if (!this._fleetMetricsCache) this._fleetMetricsCache = {};
+    if (!forceRefresh && this._fleetMetricsCache[cleanKey]) {
+      return this._fleetMetricsCache[cleanKey];
+    }
 
     const mainTable = this.db.getTable(cleanKey);
     const histTable = this.db.getTable(histKey);
@@ -968,6 +984,9 @@ class ItemStatsEngine {
         overdue: statusOverdue
       }
     };
+    if (!this._fleetMetricsCache) this._fleetMetricsCache = {};
+    this._fleetMetricsCache[cleanKey] = result;
+    return result;
   }
 
   /**
@@ -1412,6 +1431,11 @@ class ItemStatsEngine {
       }
     }
 
+    if (!this._sectionItemsCache) this._sectionItemsCache = {};
+    if (this._sectionItemsCache[activeSheetKey] && this._sectionItemsCache[activeSheetKey].length > 0) {
+      return this._sectionItemsCache[activeSheetKey];
+    }
+
     const activeTable = this.db ? this.db.getTable(activeSheetKey) : null;
     const histTable = this.db ? this.db.getTable(activeSheetKey + '_history') : null;
 
@@ -1472,6 +1496,9 @@ class ItemStatsEngine {
 
     // Natural alphanumeric sorting (e.g. 1001, 1002 ... 1030, 1031, 1032 ...)
     items.sort((a, b) => a.localeCompare(b, undefined, { numeric: true, sensitivity: 'base' }));
+
+    if (!this._sectionItemsCache) this._sectionItemsCache = {};
+    this._sectionItemsCache[activeSheetKey] = items;
 
     return items;
   }
@@ -1638,35 +1665,81 @@ class ItemStatsEngine {
     const numKey = parseInt(cleanItemKey, 10);
     const isPureNumKey = !isNaN(numKey) && String(numKey) === cleanItemKey;
 
-    const rows = histTable ? (histTable.rows || []) : [];
-
-    let groupRows = rows.filter(r => {
-      for (const k in r) {
-        const kl = k.toLowerCase();
-        if (
-          kl.includes('item') ||
-          kl.includes('glove') ||
-          kl.includes('sleeve') ||
-          kl.includes('blanket') ||
-          kl.includes('mack') ||
-          kl.includes('serial') ||
-          kl.includes('esl') ||
-          kl === 'id'
-        ) {
-          const val = String(r[k] || '').trim();
-          if (!val) continue;
-          if (val.toLowerCase() === cleanItemKey.toLowerCase()) return true;
-          if (isPureNumKey) {
-            const rNum = parseInt(val, 10);
-            if (!isNaN(rNum) && String(rNum) === val && rNum === numKey) return true;
-          }
+    // Fast indexed Map lookup for history rows
+    if (!this._histIndexCache) this._histIndexCache = {};
+    if (!this._histIndexCache[histKey] && histTable && histTable.rows) {
+      const idx = new Map();
+      const headers = histTable.headers || [];
+      const itemH = headers.find(h => /^(item|serial|glove|sleeve|blanket|mack|model|esl)/i.test(h)) || 'Item #';
+      for (let i = 0; i < histTable.rows.length; i++) {
+        const r = histTable.rows[i];
+        const val = String(r[itemH] || r['Item #'] || r['Serial #'] || Object.values(r)[0] || '').trim();
+        if (val) {
+          const norm = val.toLowerCase();
+          if (!idx.has(norm)) idx.set(norm, []);
+          idx.get(norm).push(r);
         }
       }
-      return false;
-    });
+      this._histIndexCache[histKey] = idx;
+    }
+
+    let groupRows = [];
+    if (this._histIndexCache && this._histIndexCache[histKey]) {
+      const match = this._histIndexCache[histKey].get(cleanItemKey.toLowerCase());
+      if (match) groupRows = [...match];
+    }
+
+    // Fallback if not found by fast index
+    if (groupRows.length === 0 && histTable && histTable.rows) {
+      const rows = histTable.rows;
+      groupRows = rows.filter(r => {
+        for (const k in r) {
+          const kl = k.toLowerCase();
+          if (
+            kl.includes('item') ||
+            kl.includes('glove') ||
+            kl.includes('sleeve') ||
+            kl.includes('blanket') ||
+            kl.includes('mack') ||
+            kl.includes('serial') ||
+            kl.includes('esl') ||
+            kl === 'id'
+          ) {
+            const val = String(r[k] || '').trim();
+            if (!val) continue;
+            if (val.toLowerCase() === cleanItemKey.toLowerCase()) return true;
+            if (isPureNumKey) {
+              const rNum = parseInt(val, 10);
+              if (!isNaN(rNum) && String(rNum) === val && rNum === numKey) return true;
+            }
+          }
+        }
+        return false;
+      });
+    }
+
+    // Fast indexed Map lookup for active record
+    if (!this._activeMapCache) this._activeMapCache = {};
+    if (!this._activeMapCache[activeKey] && activeTable && activeTable.rows) {
+      const actIdx = new Map();
+      const actHeaders = activeTable.headers || [];
+      const actItemH = actHeaders.find(h => /^(item|serial|glove|sleeve|blanket|mack|model|esl)/i.test(h)) || 'Item #';
+      for (let i = 0; i < activeTable.rows.length; i++) {
+        const r = activeTable.rows[i];
+        const val = String(r[actItemH] || r['Item #'] || r['Serial #'] || Object.values(r)[0] || '').trim();
+        if (val) {
+          actIdx.set(val.toLowerCase(), r);
+        }
+      }
+      this._activeMapCache[activeKey] = actIdx;
+    }
 
     let foundActive = null;
-    if (activeTable && activeTable.rows) {
+    if (this._activeMapCache && this._activeMapCache[activeKey]) {
+      foundActive = this._activeMapCache[activeKey].get(cleanItemKey.toLowerCase()) || null;
+    }
+
+    if (!foundActive && activeTable && activeTable.rows) {
       foundActive = activeTable.rows.find(r => {
         for (const k in r) {
           const kl = k.toLowerCase();
@@ -2569,8 +2642,17 @@ class ItemStatsEngine {
       } else if (window.showToast) {
         window.showToast(`✅ Cleaned ${res.removedCount} duplicate history ${res.removedCount === 1 ? 'record' : 'records'} for #${cleanItemKey}!`);
       }
+      this.invalidateCache();
       this.openDossierModal(cleanItemKey, sheetKey);
+      if (window.historyIssuesEngine) {
+        window.historyIssuesEngine.invalidateCache(sheetKey);
+        window.historyIssuesEngine.updateTabBadges();
+      }
+      if (window.sheetNavigator) {
+        window.sheetNavigator.renderTabsBar();
+      }
       if (window.historyNavigator) {
+        window.historyNavigator.renderTabsBar();
         window.historyNavigator.renderCurrentHistory();
       }
     } else {

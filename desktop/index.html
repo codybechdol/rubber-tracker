@@ -173,6 +173,9 @@
             <button class="btn btn-secondary admin-only-control" id="btn-reconcile-history" style="display: none; padding: 6px 12px; font-size: 12px;" onclick="window.inventoryManager.reconcileInventoryWithHistory(window.sheetNavigator ? window.sheetNavigator.currentSheetKey : 'gloves')" title="Reconcile active inventory with latest History records">
               🔄 Reconcile from History
             </button>
+            <button class="btn btn-secondary" id="btn-history-issues" style="display: none; padding: 6px 12px; font-size: 12px; font-weight: 700; border-color: rgba(245, 158, 11, 0.5); color: #fbbf24; background: rgba(245, 158, 11, 0.15); align-items: center; gap: 5px;" onclick="window.historyIssuesEngine.openHistoryIssuesModal(window.sheetNavigator ? window.sheetNavigator.currentSheetKey : 'gloves')" title="View items with duplicate history records or discrepancies">
+              <span>⚠️</span> History Issues
+            </button>
             <button class="btn admin-only-control" id="btn-generate-swaps" style="display: none; background: linear-gradient(135deg, #0284c7, #0369a1); color: white; padding: 6px 14px; font-size: 12px;" onclick="window.swapEngine.generateAllSwaps()">
               ⚡ Generate Swaps
             </button>
@@ -238,6 +241,9 @@
 
         <!-- Interactive Visual Analytics Panel for Gloves and Sleeves -->
         <div id="inventory-visuals-panel" class="inventory-visuals-container" style="display: none;"></div>
+
+        <!-- Equipment History Issues Alert Banner -->
+        <div id="history-issues-banner-container" style="display: none;"></div>
 
         <div class="grid-wrapper" id="sheet-grid-container"></div>
       </section>
@@ -326,6 +332,9 @@
           </div>
           <input type="text" id="history-search-input" class="sheet-search" placeholder="Filter history records...">
           <div style="display: flex; align-items: center; gap: 8px; margin-left: auto;">
+            <button class="btn btn-secondary" id="btn-history-issues-hist" style="display: none; font-size: 12px; padding: 6px 12px; font-weight: 700; color: #fbbf24; border-color: rgba(245, 158, 11, 0.5); background: rgba(245, 158, 11, 0.15); align-items: center; gap: 5px;" onclick="window.historyIssuesEngine.openHistoryIssuesModal(window.historyNavigator ? window.historyNavigator.currentSheetKey : 'gloves')" title="View items with duplicate history records or discrepancies">
+              <span>⚠️</span> View Issues
+            </button>
             <button class="btn btn-secondary" id="btn-clean-history-duplicates" style="font-size: 12px; padding: 6px 12px; color: #f59e0b; border-color: rgba(245, 158, 11, 0.4);" onclick="window.historyNavigator.cleanCurrentHistoryDuplicates()" title="Remove duplicate history entries for this equipment history sheet (same holder and date)">
               🧹 Clean Sheet Duplicates
             </button>
@@ -2380,6 +2389,7 @@
   <script src="js/time-breakdown.js?v=20260901_25"></script>
   <script src="js/sheets.js?v=20260909_52"></script>
   <script src="js/history.js?v=20260901_25"></script>
+  <script src="js/history-issues.js?v=20260924_01"></script>
   <script src="js/previous-employees.js?v=20260914_2"></script>
   <script src="js/tasks.js?v=20260901_25"></script>
   <script src="js/trip-planner.js?v=20260903_34"></script>
@@ -2393,6 +2403,12 @@
   <script>
     // Navigation routing for desktop & mobile
     function navigateToView(viewId) {
+      const viewEl = document.getElementById(viewId);
+      if (viewEl && viewEl.classList.contains('active')) {
+        document.querySelector('.app-sidebar')?.classList.remove('mobile-open');
+        return;
+      }
+
       document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
       document.querySelectorAll('.mobile-nav-btn').forEach(n => n.classList.remove('active'));
       document.querySelectorAll('.view-container').forEach(v => v.classList.remove('active'));
@@ -2584,6 +2600,7 @@
       if (window.crewImportEngine) window.crewImportEngine.init();
       window.sheetNavigator.init();
       window.historyNavigator.init();
+      if (window.historyIssuesEngine) window.historyIssuesEngine.init();
       window.taskManager.init();
       window.tripPlanner.init();
       window.tripRouteMap = new TripRouteMap(window.localDB, window.tripPlanner);

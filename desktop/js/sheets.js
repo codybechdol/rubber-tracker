@@ -242,15 +242,64 @@ class SheetNavigator {
     );
   }
 
-  renderTabsBar() {
+  renderTabsBar(force = false) {
     const bar = document.getElementById('sheet-tabs-bar');
     if (!bar) return;
+
+    // Fast-path: If buttons are already built, just update active states and badges without destroying DOM
+    if (!force && bar.children.length === this.sheetList.length) {
+      for (let i = 0; i < bar.children.length; i++) {
+        const btn = bar.children[i];
+        const sheetKey = btn.dataset.sheetKey;
+        btn.classList.toggle('active', sheetKey === this.currentSheetKey);
+
+        // Update badge if historyIssuesEngine is active
+        if (window.historyIssuesEngine) {
+          const issueCount = window.historyIssuesEngine.getEquipmentItemCount(sheetKey);
+          let badge = btn.querySelector('.tab-history-issues-badge');
+          if (issueCount > 0) {
+            if (!badge) {
+              badge = document.createElement('span');
+              badge.className = 'tab-history-issues-badge';
+              badge.onclick = (e) => {
+                e.stopPropagation();
+                window.historyIssuesEngine.openHistoryIssuesModal(sheetKey);
+              };
+              btn.appendChild(badge);
+            }
+            badge.title = `${issueCount} items with history discrepancies (Click to inspect)`;
+            badge.innerHTML = `⚠️ ${issueCount}`;
+          } else if (badge) {
+            badge.remove();
+          }
+        }
+      }
+      return;
+    }
+
     bar.innerHTML = '';
 
     this.sheetList.forEach(sheet => {
       const btn = document.createElement('button');
       btn.className = 'sheet-tab-btn' + (sheet.key === this.currentSheetKey ? ' active' : '');
+      btn.dataset.sheetKey = sheet.key;
       btn.innerHTML = `<span>${sheet.icon}</span> ${sheet.label.replace(/^.*? /, '')}`;
+
+      if (window.historyIssuesEngine) {
+        const issueCount = window.historyIssuesEngine.getEquipmentItemCount(sheet.key);
+        if (issueCount > 0) {
+          const badge = document.createElement('span');
+          badge.className = 'tab-history-issues-badge';
+          badge.title = `${issueCount} ${sheet.label} with history discrepancies (Click to inspect)`;
+          badge.innerHTML = `⚠️ ${issueCount}`;
+          badge.onclick = (e) => {
+            e.stopPropagation();
+            window.historyIssuesEngine.openHistoryIssuesModal(sheet.key);
+          };
+          btn.appendChild(badge);
+        }
+      }
+
       btn.onclick = () => {
         this.currentSheetKey = sheet.key;
         this.filterSize = 'all';
@@ -1253,6 +1302,11 @@ class SheetNavigator {
 
     // Update dynamic multi-filter bar for inventory sheets
     this.updateFilterBar(tableData, isInventorySheet);
+
+    // Update Equipment History Issues Toolbar Button & Alert Banner
+    if (window.historyIssuesEngine) {
+      window.historyIssuesEngine.updateActiveSheetUI(this.currentSheetKey);
+    }
 
     if (!tableData || (!tableData.rows?.length && !tableData.rawGrid?.length)) {
       container.innerHTML = `

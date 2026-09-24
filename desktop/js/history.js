@@ -33,15 +33,64 @@ class HistoryNavigator {
     this.renderCurrentHistory();
   }
 
-  renderTabsBar() {
+  renderTabsBar(force = false) {
     const bar = document.getElementById('history-tabs-bar');
     if (!bar) return;
+
+    // Fast-path: If buttons are already built, just update active states and badges without destroying DOM
+    if (!force && bar.children.length === this.sheetList.length) {
+      for (let i = 0; i < bar.children.length; i++) {
+        const btn = bar.children[i];
+        const sheetKey = btn.dataset.sheetKey;
+        btn.classList.toggle('active', sheetKey === this.currentSheetKey);
+
+        // Update badge if historyIssuesEngine is active
+        if (window.historyIssuesEngine) {
+          const issueCount = window.historyIssuesEngine.getEquipmentItemCount(sheetKey);
+          let badge = btn.querySelector('.tab-history-issues-badge');
+          if (issueCount > 0) {
+            if (!badge) {
+              badge = document.createElement('span');
+              badge.className = 'tab-history-issues-badge';
+              badge.onclick = (e) => {
+                e.stopPropagation();
+                window.historyIssuesEngine.openHistoryIssuesModal(sheetKey);
+              };
+              btn.appendChild(badge);
+            }
+            badge.title = `${issueCount} items with history discrepancies (Click to inspect)`;
+            badge.innerHTML = `⚠️ ${issueCount}`;
+          } else if (badge) {
+            badge.remove();
+          }
+        }
+      }
+      return;
+    }
+
     bar.innerHTML = '';
 
     this.sheetList.forEach(sheet => {
       const btn = document.createElement('button');
       btn.className = 'sheet-tab-btn' + (sheet.key === this.currentSheetKey ? ' active' : '');
+      btn.dataset.sheetKey = sheet.key;
       btn.innerHTML = `<span>${sheet.icon}</span> ${sheet.label.replace(/^.*? /, '')}`;
+
+      if (window.historyIssuesEngine) {
+        const issueCount = window.historyIssuesEngine.getEquipmentItemCount(sheet.key);
+        if (issueCount > 0) {
+          const badge = document.createElement('span');
+          badge.className = 'tab-history-issues-badge';
+          badge.title = `${issueCount} items with history discrepancies (Click to inspect)`;
+          badge.innerHTML = `⚠️ ${issueCount}`;
+          badge.onclick = (e) => {
+            e.stopPropagation();
+            window.historyIssuesEngine.openHistoryIssuesModal(sheet.key);
+          };
+          btn.appendChild(badge);
+        }
+      }
+
       btn.onclick = () => {
         this.currentSheetKey = sheet.key;
         this.sortCol = null;
@@ -195,6 +244,10 @@ class HistoryNavigator {
     const tableData = this.db.getTable(this.currentSheetKey);
     const sheetMeta = this.sheetList.find(s => s.key === this.currentSheetKey);
     if (title && sheetMeta) title.textContent = sheetMeta.label;
+
+    if (window.historyIssuesEngine) {
+      window.historyIssuesEngine.updateActiveSheetUI(this.currentSheetKey);
+    }
 
     if (!tableData || (!tableData.rows?.length && !tableData.rawGrid?.length)) {
       container.innerHTML = `
@@ -660,9 +713,13 @@ class HistoryNavigator {
 
     const res = await this.db.cleanDuplicateHistoryRows(this.currentSheetKey);
     if (res.removedCount > 0) {
+      if (window.historyIssuesEngine) {
+        window.historyIssuesEngine.invalidateCache(this.currentSheetKey);
+      }
       if (window.showToast) {
         window.showToast(`✅ Cleaned ${res.removedCount} duplicate history ${res.removedCount === 1 ? 'record' : 'records'} from ${label}!`);
       }
+      this.renderTabsBar();
       this.renderCurrentHistory();
     } else {
       if (window.showToast) {
@@ -681,6 +738,9 @@ class HistoryNavigator {
 
     const res = await this.db.cleanAllHistoryDuplicates();
     if (res.totalRemoved > 0) {
+      if (window.historyIssuesEngine) {
+        window.historyIssuesEngine.invalidateCache();
+      }
       const details = Object.entries(res.tableBreakdown)
         .map(([k, count]) => `• ${k.replace('_history', '').toUpperCase()}: ${count}`)
         .join('\n');
@@ -688,6 +748,7 @@ class HistoryNavigator {
       if (window.showToast) {
         window.showToast(`✅ Cleaned ${res.totalRemoved} duplicate history records!`);
       }
+      this.renderTabsBar();
       this.renderCurrentHistory();
     } else {
       alert(`ℹ️ No duplicate history records were found across any history tables.`);

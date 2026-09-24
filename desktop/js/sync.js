@@ -1508,6 +1508,13 @@ class SyncEngine {
         if (window.safetyComplianceEngine && typeof window.safetyComplianceEngine.renderSafetyLogs === 'function') {
           window.safetyComplianceEngine.renderSafetyLogs();
         }
+        if (window.historyIssuesEngine) {
+          window.historyIssuesEngine.invalidateCache();
+          window.historyIssuesEngine.updateTabBadges();
+        }
+        if (window.itemStatsEngine) {
+          window.itemStatsEngine.invalidateCache();
+        }
 
         this.updateStatusUI('synced', `Synced in ${durationFormatted}`);
         this.renderModalChanges([], `✅ Latest database snapshot successfully downloaded and loaded in ${durationFormatted}!`, 'success', false);
@@ -1597,6 +1604,13 @@ class SyncEngine {
             await this.db.setSnapshot(data);
             if (window.sheetNavigator) window.sheetNavigator.renderActiveView();
             if (window.historyNavigator) window.historyNavigator.renderCurrentHistory();
+            if (window.historyIssuesEngine) {
+              window.historyIssuesEngine.invalidateCache();
+              window.historyIssuesEngine.updateTabBadges();
+            }
+            if (window.itemStatsEngine) {
+              window.itemStatsEngine.invalidateCache();
+            }
             if (window.tripPlanner) window.tripPlanner.renderPlanner();
             if (window.taskManager) window.taskManager.renderTasks();
             this.updateStatusUI('synced', `Loaded ${file.name}`);
