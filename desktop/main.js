@@ -43,6 +43,14 @@ function createWindow() {
     }
   });
 
+  // Forward renderer console logs to terminal for fast debugging
+  mainWindow.webContents.on('console-message', (event, level, message, line, sourceId) => {
+    const src = sourceId ? path.basename(sourceId) : 'renderer';
+    if (level >= 2) {
+      console.warn(`[Renderer Warn/Err ${level}] ${message} (${src}:${line})`);
+    }
+  });
+
   // Remove default menu for sleek app interface
   mainWindow.setMenuBarVisibility(false);
 }

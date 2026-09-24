@@ -2503,12 +2503,15 @@
         }
       }
 
-      // Automatically re-render active views so all edit controls & bindings update immediately
-      if (window.sheetNavigator && typeof window.sheetNavigator.renderCurrentSheet === 'function') {
-        window.sheetNavigator.renderCurrentSheet();
-      }
-      if (window.tripPlanner && typeof window.tripPlanner.renderPlanner === 'function') {
-        window.tripPlanner.renderPlanner();
+      // Automatically re-render active views only if app has completed initial setup
+      if (window._appInitialized) {
+        if (window.sheetNavigator && typeof window.sheetNavigator.renderActiveView === 'function') {
+          try {
+            window.sheetNavigator.renderActiveView();
+          } catch (e) {
+            console.warn('Error re-rendering active view on role mode switch:', e);
+          }
+        }
       }
     }
 
@@ -2533,7 +2536,8 @@
     }
 
     function saveSyncSettings() {
-      const url = document.getElementById('sync-url-input').value;
+      const syncInput = document.getElementById('sync-url-input');
+      const url = syncInput ? syncInput.value : '';
       window.syncEngine.setSyncUrl(url);
       window.syncEngine.testConnection().then(res => {
         if (res.success) {
@@ -2547,72 +2551,93 @@
 
     // App Initialization
     window.addEventListener('DOMContentLoaded', async () => {
-      // Service Worker handling: Register on Web/PWA (http/https), unregister on Desktop (file://)
-      if ('serviceWorker' in navigator) {
-        if (window.location.protocol.startsWith('http')) {
-          navigator.serviceWorker.register('./sw.js').then((reg) => {
-            try { reg.update(); } catch (e) {}
-          }).catch(err => {
-            console.warn('Service Worker registration warning:', err);
-          });
-          navigator.serviceWorker.addEventListener('controllerchange', () => {
-            console.log('🔄 New service worker activated, reloading for latest updates...');
-            window.location.reload();
-          });
-        } else {
-          navigator.serviceWorker.getRegistrations().then(regs => {
-            for (const reg of regs) reg.unregister();
-          }).catch(() => {});
-        }
-      }
-
-      // Initialize Role Mode
-      let savedRole = 'admin';
       try {
-        savedRole = localStorage.getItem('sa_app_role_mode') || 'admin';
-      } catch (e) {}
-      setAppRoleMode(savedRole);
+        // Service Worker handling: Register on Web/PWA (http/https), unregister on Desktop (file://)
+        if ('serviceWorker' in navigator) {
+          if (window.location.protocol.startsWith('http')) {
+            navigator.serviceWorker.register('./sw.js').then((reg) => {
+              try { reg.update(); } catch (e) {}
+            }).catch(err => {
+              console.warn('Service Worker registration warning:', err);
+            });
+            navigator.serviceWorker.addEventListener('controllerchange', () => {
+              console.log('🔄 New service worker activated, reloading for latest updates...');
+              window.location.reload();
+            });
+          } else {
+            navigator.serviceWorker.getRegistrations().then(regs => {
+              for (const reg of regs) reg.unregister();
+            }).catch(() => {});
+          }
+        }
 
-      document.getElementById('sync-url-input').value = window.syncEngine.getSyncUrl();
-      const snapshot = await window.localDB.init();
-      window.employeeResolver = new EmployeeNameResolver(window.localDB);
+        // Initialize Role Mode (without premature rendering)
+        let savedRole = 'admin';
+        try {
+          savedRole = localStorage.getItem('sa_app_role_mode') || 'admin';
+        } catch (e) {}
+        setAppRoleMode(savedRole);
 
-      window.gpsEngine = new GpsEngine(window.localDB);
-      window.cameraScanner = new CameraScannerEngine(window.localDB);
+        const syncInput = document.getElementById('sync-url-input');
+        if (syncInput && window.syncEngine) {
+          syncInput.value = window.syncEngine.getSyncUrl();
+        }
 
-      window.procurementEngine = new ProcurementEngine(window.localDB);
-      window.procurementEngine.init();
+        const snapshot = await window.localDB.init();
+        window.employeeResolver = new EmployeeNameResolver(window.localDB);
 
-      window.inventoryAging = new InventoryAgingEngine(window.localDB);
-      window.inventoryAging.init();
+        window.gpsEngine = new GpsEngine(window.localDB);
+        window.cameraScanner = new CameraScannerEngine(window.localDB);
 
-      window.safetyComplianceEngine = new SafetyEmailsEngine(window.localDB);
-      window.safetyComplianceEngine.init();
+        window.procurementEngine = new ProcurementEngine(window.localDB);
+        window.procurementEngine.init();
 
-      window.certsConfigEngine = new CertsConfigEngine(window.localDB);
-      window.cprRosterEngine = new CprRosterEngine(window.localDB);
-      window.certsImportEngine = new CertsImportEngine(window.localDB);
-      window.timeBreakdownEngine = new TimeBreakdownEngine(window.localDB);
-      window.drugTestingEngine = new DrugTestingEngine(window.localDB);
-      window.drugTestingEngine.init();
+        window.inventoryAging = new InventoryAgingEngine(window.localDB);
+        window.inventoryAging.init();
 
-      if (window.inventoryManager) window.inventoryManager.init();
-      if (window.crewImportEngine) window.crewImportEngine.init();
-      window.sheetNavigator.init();
-      window.historyNavigator.init();
-      if (window.historyIssuesEngine) window.historyIssuesEngine.init();
-      window.taskManager.init();
-      window.tripPlanner.init();
-      window.tripRouteMap = new TripRouteMap(window.localDB, window.tripPlanner);
-      window.tripRouteMap.init();
-      window.lookupApp.init();
-      if (window.employeeProfileEngine) window.employeeProfileEngine.init();
-      if (window.smsDialogEngine) window.smsDialogEngine.init();
+        window.safetyComplianceEngine = new SafetyEmailsEngine(window.localDB);
+        window.safetyComplianceEngine.init();
 
-      if (snapshot) {
-        window.syncEngine.updateStatusUI('synced', `Snapshot Loaded (${new Date(snapshot.exportedAt).toLocaleDateString()})`);
-      } else {
-        window.syncEngine.updateStatusUI('offline', 'No data loaded (Import or Sync)');
+        window.certsConfigEngine = new CertsConfigEngine(window.localDB);
+        window.cprRosterEngine = new CprRosterEngine(window.localDB);
+        window.certsImportEngine = new CertsImportEngine(window.localDB);
+        window.timeBreakdownEngine = new TimeBreakdownEngine(window.localDB);
+        window.drugTestingEngine = new DrugTestingEngine(window.localDB);
+        window.drugTestingEngine.init();
+
+        if (window.inventoryManager) window.inventoryManager.init();
+        if (window.crewImportEngine) window.crewImportEngine.init();
+        window.sheetNavigator.init();
+        window.historyNavigator.init();
+        if (window.historyIssuesEngine) window.historyIssuesEngine.init();
+        window.taskManager.init();
+        window.tripPlanner.init();
+        window.tripRouteMap = new TripRouteMap(window.localDB, window.tripPlanner);
+        window.tripRouteMap.init();
+        window.lookupApp.init();
+        if (window.employeeProfileEngine) window.employeeProfileEngine.init();
+        if (window.smsDialogEngine) window.smsDialogEngine.init();
+
+        if (snapshot) {
+          window.syncEngine.updateStatusUI('synced', `Snapshot Loaded (${new Date(snapshot.exportedAt).toLocaleDateString()})`);
+        } else {
+          window.syncEngine.updateStatusUI('offline', 'No data loaded (Import or Sync)');
+        }
+
+        window._appInitialized = true;
+      } catch (fatalErr) {
+        console.error('Fatal initialization error:', fatalErr);
+        if (window.syncEngine && typeof window.syncEngine.updateStatusUI === 'function') {
+          window.syncEngine.updateStatusUI('offline', 'Init Error (Check Console)');
+        }
+        try {
+          if (window.sheetNavigator) {
+            window.sheetNavigator.init();
+          }
+        } catch (recoverErr) {
+          console.error('Recovery init failed:', recoverErr);
+        }
+        window._appInitialized = true;
       }
     });
   </script>

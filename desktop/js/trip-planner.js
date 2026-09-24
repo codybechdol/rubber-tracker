@@ -6345,29 +6345,31 @@ class TripPlannerApp {
 
         // Setup drop zone
         const dropZone = col.querySelector('.card-drop-zone');
-        dropZone.addEventListener('dragover', (e) => {
-          e.preventDefault();
-          dropZone.style.backgroundColor = 'rgba(59, 130, 246, 0.15)';
-        });
-        dropZone.addEventListener('dragleave', () => {
-          dropZone.style.backgroundColor = '';
-        });
-        dropZone.addEventListener('drop', (e) => {
-          e.preventDefault();
-          dropZone.style.backgroundColor = '';
-          const rawData = e.dataTransfer.getData('application/json');
-          if (rawData) {
-            try {
-              const payload = JSON.parse(rawData);
-              this.handleSwapOrLocationDrop(dateKey, payload);
-              return;
-            } catch { /* fallback to text/plain */ }
-          }
-          const location = e.dataTransfer.getData('text/plain');
-          if (location) {
-            this.handleSwapOrLocationDrop(dateKey, { type: 'location', location: location });
-          }
-        });
+        if (dropZone) {
+          dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            dropZone.style.backgroundColor = 'rgba(59, 130, 246, 0.15)';
+          });
+          dropZone.addEventListener('dragleave', () => {
+            dropZone.style.backgroundColor = '';
+          });
+          dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            dropZone.style.backgroundColor = '';
+            const rawData = e.dataTransfer.getData('application/json');
+            if (rawData) {
+              try {
+                const payload = JSON.parse(rawData);
+                this.handleSwapOrLocationDrop(dateKey, payload);
+                return;
+              } catch { /* fallback to text/plain */ }
+            }
+            const location = e.dataTransfer.getData('text/plain');
+            if (location) {
+              this.handleSwapOrLocationDrop(dateKey, { type: 'location', location: location });
+            }
+          });
+        }
 
         // Setup dragstart for scheduled swap cards so they can be moved between days
         col.querySelectorAll('.scheduled-swap-card').forEach(scEl => {
