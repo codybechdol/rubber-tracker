@@ -960,7 +960,8 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
         'LOG_DAILY_ACCOMPLISHMENT',
         'UPDATE_SYSTEM_CONFIG',
         'CREATE_TEST_BATCH',
-        'SYNC_TRIP_SCHEDULE'
+        'SYNC_TRIP_SCHEDULE',
+        'CLEAN_HISTORY_DUPLICATES'
       ];
 
       // If this is a table replacement mutation and the sheet doesn't exist yet, automatically create it
@@ -2372,18 +2373,46 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
                 });
               });
 
+              // Ensure rectangular grid with exact targetCols
+              for (var r = 0; r < formattedGrid.length; r++) {
+                if (!Array.isArray(formattedGrid[r])) {
+                  formattedGrid[r] = [];
+                }
+                while (formattedGrid[r].length < targetCols) {
+                  formattedGrid[r].push('');
+                }
+                if (formattedGrid[r].length > targetCols) {
+                  formattedGrid[r] = formattedGrid[r].slice(0, targetCols);
+                }
+              }
+
               var currentLastRow = sheet.getLastRow();
               try {
-                sheet.getRange(1, 1, Math.max(targetRows, sheet.getMaxRows()), Math.max(targetCols, sheet.getMaxColumns())).clearDataValidations();
+                sheet.getRange(1, 1, Math.min(targetRows, sheet.getMaxRows()), targetCols).clearDataValidations();
               } catch (cdvErr) {}
               try {
                 sheet.getRange(1, 1, targetRows, targetCols).setValues(formattedGrid);
               } catch (setValErr) {
-                Logger.log('REPLACE_TABLE_DATA setValues error, falling back to safeWriteRowToTable: ' + setValErr);
-                for (var fRow = 1; fRow < formattedGrid.length; fRow++) {
-                  if (typeof safeWriteRowToTable === 'function') {
-                    safeWriteRowToTable(sheet, fRow + 1, formattedGrid[fRow], sheetHeaders);
+                Logger.log('REPLACE_TABLE_DATA setValues error, attempting chunked fallback: ' + setValErr);
+                var batchSize = 250;
+                var batchFailed = false;
+                for (var bStart = 0; bStart < targetRows; bStart += batchSize) {
+                  var bCount = Math.min(batchSize, targetRows - bStart);
+                  var chunk = formattedGrid.slice(bStart, bStart + bCount);
+                  try {
+                    sheet.getRange(bStart + 1, 1, bCount, targetCols).setValues(chunk);
+                  } catch (chkErr) {
+                    Logger.log('Chunk ' + (bStart + 1) + '-' + (bStart + bCount) + ' failed: ' + chkErr);
+                    batchFailed = true;
+                    if (targetRows <= 100 && typeof safeWriteRowToTable === 'function') {
+                      for (var fRow = bStart; fRow < bStart + bCount; fRow++) {
+                        if (fRow > 0) safeWriteRowToTable(sheet, fRow + 1, formattedGrid[fRow], sheetHeaders);
+                      }
+                    }
                   }
+                }
+                if (batchFailed && targetRows > 100) {
+                  throw new Error('REPLACE_TABLE_DATA failed to write large table (' + targetRows + ' rows): ' + setValErr.toString());
                 }
               }
               if (currentLastRow > targetRows) {
@@ -2580,6 +2609,38 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
             appliedCount++;
           } catch (eFld) {
             Logger.log(mut.action + ' error: ' + eFld);
+          }
+          break;
+
+        case 'CLEAN_HISTORY_DUPLICATES':
+          try {
+            var targetSheetName = mut.sheetName || 'Gloves History';
+            var sheetsToClean = [];
+            if (targetSheetName.toUpperCase() === 'ALL') {
+              sheetsToClean = [
+                'Gloves History', 'Sleeves History', 'Blankets History', 'MACKs History',
+                'HV Testers History', 'Phasing Sets History', 'AED History', 'Grounds History', 'Hot Sticks History'
+              ];
+            } else {
+              sheetsToClean = [targetSheetName];
+            }
+
+            for (var scIdx = 0; scIdx < sheetsToClean.length; scIdx++) {
+              var sName = sheetsToClean[scIdx];
+              var targetSh = ss.getSheetByName(sName);
+              if (!targetSh && typeof getSheetCaseInsensitive === 'function') targetSh = getSheetCaseInsensitive(sName);
+              if (targetSh) {
+                var cleanRes = cleanHistoryDuplicatesInSheet(targetSh, sName);
+                if (cleanRes && cleanRes.removedCount > 0) {
+                  sheetsModified[sName] = true;
+                  Logger.log('CLEAN_HISTORY_DUPLICATES: Cleaned ' + cleanRes.removedCount + ' duplicate/future rows from ' + sName);
+                }
+              }
+            }
+            appliedCount++;
+          } catch (eCln) {
+            Logger.log('CLEAN_HISTORY_DUPLICATES error: ' + eCln);
+            errors.push('CLEAN_HISTORY_DUPLICATES error: ' + eCln.toString());
           }
           break;
 
@@ -3389,4 +3450,359 @@ function menuExportSyncSnapshot() {
   } catch (e) {
     ui.alert('❌ Error', 'Error creating sync snapshot: ' + e.toString(), ui.ButtonSet.OK);
   }
+}
+
+/**
+ * Automatically cleans duplicate, redundant, and future-dated history rows
+ * in an equipment history sheet (e.g. 'Gloves History', 'HV Testers History', etc.).
+ *
+ * @param {Sheet} sheet - Google Spreadsheet sheet object
+ * @param {string} [sheetName] - Name of sheet
+ * @return {{ removedCount: number, originalCount: number, cleanCount: number }}
+ */
+function cleanHistoryDuplicatesInSheet(sheet, sheetName) {
+  if (!sheet) return { removedCount: 0, originalCount: 0, cleanCount: 0 };
+  var lastRow = sheet.getLastRow();
+  var lastCol = sheet.getLastColumn();
+  if (lastRow <= 1) return { removedCount: 0, originalCount: 0, cleanCount: 0 };
+
+  var data = sheet.getRange(1, 1, lastRow, lastCol).getValues();
+  var headers = data[0];
+
+  var itemColIdx = -1;
+  var dateColIdx = -1;
+  var assignedColIdx = -1;
+  var locColIdx = -1;
+  var notesColIdx = -1;
+
+  for (var c = 0; c < headers.length; c++) {
+    var h = String(headers[c] || '').toLowerCase().trim();
+    if (/^(item(\s*#)?|serial(\s*#)?|glove|sleeve|blanket|mack|hv\s*tester|phasing|model)/i.test(h) && itemColIdx === -1) itemColIdx = c;
+    if (/^(date(\s*assigned)?|action\s*date|^date$)/i.test(h) && dateColIdx === -1) dateColIdx = c;
+    if (/^(assigned\s*to|employee(\s*name)?|employee|holder)/i.test(h) && assignedColIdx === -1) assignedColIdx = c;
+    if (/^location$/i.test(h) && locColIdx === -1) locColIdx = c;
+    if (/^(notes?|comment)/i.test(h) && notesColIdx === -1) notesColIdx = c;
+  }
+
+  if (itemColIdx === -1 || dateColIdx === -1) {
+    Logger.log('cleanHistoryDuplicatesInSheet: Missing itemColIdx or dateColIdx in ' + sheet.getName());
+    return { removedCount: 0, originalCount: lastRow - 1, cleanCount: lastRow - 1 };
+  }
+
+  function normDateStr(val) {
+    if (!val) return '';
+    if (val instanceof Date) {
+      var m = val.getMonth() + 1;
+      var d = val.getDate();
+      var y = val.getFullYear();
+      return y + '-' + (m < 10 ? '0' + m : m) + '-' + (d < 10 ? '0' + d : d);
+    }
+    var s = String(val).trim();
+    if (s.indexOf('/') !== -1) {
+      var parts = s.split('/');
+      if (parts.length === 3) {
+        var pm = parts[0].length === 1 ? '0' + parts[0] : parts[0];
+        var pd = parts[1].length === 1 ? '0' + parts[1] : parts[1];
+        var py = parts[2];
+        var pyNum = parseInt(py, 10);
+        if (pyNum > 2100 && pyNum >= 20200 && pyNum <= 20300) py = String(Math.floor(pyNum / 10));
+        else if (pyNum === 2032) py = '2022';
+        else if (py.length === 2) py = '20' + py;
+        return py + '-' + pm + '-' + pd;
+      }
+    } else if (s.indexOf('-') !== -1) {
+      var parts2 = s.split('-');
+      if (parts2.length === 3) {
+        var py2 = parts2[0];
+        var py2Num = parseInt(py2, 10);
+        if (py2Num > 2100 && py2Num >= 20200 && py2Num <= 20300) py2 = String(Math.floor(py2Num / 10));
+        else if (py2Num === 2032) py2 = '2022';
+        return py2 + '-' + (parts2[1].length === 1 ? '0' + parts2[1] : parts2[1]) + '-' + (parts2[2].length === 1 ? '0' + parts2[2] : parts2[2]);
+      }
+    }
+    return s;
+  }
+
+  function normItem(val) {
+    var s = String(val === undefined || val === null ? '' : val).trim();
+    if (/^\d+$/.test(s)) return String(parseInt(s, 10));
+    return s.toLowerCase();
+  }
+
+  function parseRowTime(val) {
+    if (!val) return 0;
+    if (val instanceof Date) return val.getTime();
+    var s = String(val).trim();
+    if (s.indexOf('/') !== -1) {
+      var parts = s.split('/');
+      if (parts.length === 3) {
+        var m = parseInt(parts[0], 10) - 1;
+        var d = parseInt(parts[1], 10);
+        var y = parseInt(parts[2], 10);
+        if (y > 2100 && y >= 20200 && y <= 20300) y = Math.floor(y / 10);
+        else if (y === 2032) y = 2022;
+        else if (y < 100) y = y < 50 ? 2000 + y : 1900 + y;
+        var dt = new Date(y, m, d, 12, 0, 0);
+        return isNaN(dt.getTime()) ? 0 : dt.getTime();
+      }
+    }
+    var dt2 = new Date(s);
+    return isNaN(dt2.getTime()) ? 0 : dt2.getTime();
+  }
+
+  var nowBuffer = new Date().getTime() + 86400000; // 1 day buffer for timezones
+  var seenGroups = {};
+  var pass1Rows = [];
+  var removedCount = 0;
+
+  for (var r = 1; r < data.length; r++) {
+    var row = data[r];
+    var itemRaw = row[itemColIdx];
+    var itemNorm = normItem(itemRaw);
+    if (!itemNorm) continue; // skip completely empty rows
+
+    var dateVal = row[dateColIdx];
+    var rowTime = parseRowTime(dateVal);
+
+    // 1. Purge future dates (e.g. 10/29/2026 In Testing)
+    if (rowTime > nowBuffer) {
+      removedCount++;
+      continue;
+    }
+
+    // Repair year typo in cell if detected
+    var dateStr = String(dateVal || '');
+    if (dateStr.indexOf('20026') !== -1 || dateStr.indexOf('2032') !== -1) {
+      row[dateColIdx] = dateStr.replace('20026', '2026').replace('2032', '2022');
+    }
+
+    var dateNorm = normDateStr(row[dateColIdx]);
+    var assignedRaw = assignedColIdx !== -1 ? String(row[assignedColIdx] || '').trim().toLowerCase() : '';
+    var dedupKey = itemNorm + '::' + dateNorm + '::' + assignedRaw;
+
+    if (seenGroups[dedupKey]) {
+      removedCount++;
+      var master = seenGroups[dedupKey];
+
+      // Merge Notes
+      if (notesColIdx !== -1) {
+        var mNotes = String(master[notesColIdx] || '').trim();
+        var dNotes = String(row[notesColIdx] || '').trim();
+        if (!mNotes && dNotes) {
+          master[notesColIdx] = dNotes;
+        } else if (mNotes && dNotes && mNotes.toLowerCase() !== dNotes.toLowerCase()) {
+          if (mNotes.toLowerCase().indexOf(dNotes.toLowerCase()) === -1) {
+            master[notesColIdx] = mNotes + ' | ' + dNotes;
+          }
+        }
+      }
+
+      // Merge Location
+      if (locColIdx !== -1) {
+        var mLoc = String(master[locColIdx] || '').trim();
+        var dLoc = String(row[locColIdx] || '').trim();
+        if ((!mLoc || mLoc.toLowerCase() === 'helena') && dLoc && dLoc.toLowerCase() !== 'helena') {
+          master[locColIdx] = dLoc;
+        }
+      }
+    } else {
+      seenGroups[dedupKey] = row;
+      pass1Rows.push(row);
+    }
+  }
+
+  // 2. Consecutive same-holder collapse
+  var statePrecedence = {
+    'new_purchase': 1, 'new': 1,
+    'on shelf': 2, 'shelf': 2, 'storage': 2, 'in stock': 2,
+    'packed for delivery': 3,
+    'field': 4,
+    'packed for testing': 5,
+    'in testing': 6, 'testing': 6,
+    'lost': 7,
+    'failed rubber': 8, 'destroyed': 8
+  };
+
+  function getRank(assigned) {
+    var a = String(assigned || '').toLowerCase().trim();
+    if (statePrecedence[a] !== undefined) return statePrecedence[a];
+    if (a.indexOf('fail') !== -1 || a.indexOf('destroy') !== -1) return 8;
+    if (a.indexOf('lost') !== -1) return 7;
+    if (a.indexOf('test') !== -1) return 6;
+    if (a.indexOf('packed') !== -1 && a.indexOf('test') !== -1) return 5;
+    if (a.indexOf('packed') !== -1 && a.indexOf('deliv') !== -1) return 3;
+    if (a.indexOf('shelf') !== -1 || a.indexOf('stock') !== -1 || a.indexOf('stor') !== -1) return 2;
+    return 4; // Field assignment
+  }
+
+  var itemGroups = {};
+  for (var i = 0; i < pass1Rows.length; i++) {
+    var pRow = pass1Rows[i];
+    var itNorm = normItem(pRow[itemColIdx]);
+    if (!itemGroups[itNorm]) itemGroups[itNorm] = [];
+    itemGroups[itNorm].push(pRow);
+  }
+
+  var finalCleanRows = [];
+  var itemKeys = Object.keys(itemGroups);
+  for (var k = 0; k < itemKeys.length; k++) {
+    var gRows = itemGroups[itemKeys[k]];
+    if (gRows.length <= 1) {
+      for (var gr = 0; gr < gRows.length; gr++) finalCleanRows.push(gRows[gr]);
+      continue;
+    }
+
+    // 1. Identify dates where active employee field assignments exist
+    var empAssignmentDates = {};
+    for (var er = 0; er < gRows.length; er++) {
+      var aVal = assignedColIdx !== -1 ? gRows[er][assignedColIdx] : '';
+      if (getRank(aVal) === 4) {
+        var dStr = normDateStr(gRows[er][dateColIdx]);
+        if (dStr) empAssignmentDates[dStr] = true;
+      }
+    }
+
+    // 2. Discard 0-day intermediate shelf records on dates where employee assignment occurred
+    var noInter = [];
+    for (var nr = 0; nr < gRows.length; nr++) {
+      if (nr === 0) {
+        noInter.push(gRows[nr]);
+        continue;
+      }
+      var aVal2 = assignedColIdx !== -1 ? gRows[nr][assignedColIdx] : '';
+      if (getRank(aVal2) === 2) {
+        var dStr2 = normDateStr(gRows[nr][dateColIdx]);
+        if (dStr2 && empAssignmentDates[dStr2]) {
+          removedCount++;
+          continue;
+        }
+      }
+      noInter.push(gRows[nr]);
+    }
+
+    // 3. Sort chronologically
+    noInter.sort(function(a, b) {
+      var tA = parseRowTime(a[dateColIdx]);
+      var tB = parseRowTime(b[dateColIdx]);
+      if (tA !== tB) return tA - tB;
+      var aValA = assignedColIdx !== -1 ? a[assignedColIdx] : '';
+      var aValB = assignedColIdx !== -1 ? b[assignedColIdx] : '';
+      return getRank(aValA) - getRank(aValB);
+    });
+
+    // 4. Consecutive same-holder collapse
+    var collapsed = [];
+    for (var g = 0; g < noInter.length; g++) {
+      var cur = noInter[g];
+      var curAssigned = assignedColIdx !== -1 ? String(cur[assignedColIdx] || '').trim().toLowerCase() : '';
+
+      if (collapsed.length > 0) {
+        var prev = collapsed[collapsed.length - 1];
+        var prevAssigned = assignedColIdx !== -1 ? String(prev[assignedColIdx] || '').trim().toLowerCase() : '';
+        var prevRank = getRank(prevAssigned);
+        var curRank = getRank(curAssigned);
+
+        var isSameHolder = curAssigned && prevAssigned && curAssigned === prevAssigned;
+        var isBothShelf = prevRank === 2 && curRank === 2;
+
+        if (isSameHolder || isBothShelf) {
+          removedCount++;
+          // Update prev to the later date
+          var curDate = cur[dateColIdx];
+          if (curDate) prev[dateColIdx] = curDate;
+
+          // Merge notes
+          if (notesColIdx !== -1) {
+            var pNotes = String(prev[notesColIdx] || '').trim();
+            var cNotes = String(cur[notesColIdx] || '').trim();
+            if (!pNotes && cNotes) {
+              prev[notesColIdx] = cNotes;
+            } else if (pNotes && cNotes && pNotes.toLowerCase().indexOf(cNotes.toLowerCase()) === -1) {
+              prev[notesColIdx] = pNotes + ' | ' + cNotes;
+            }
+          }
+
+          // Merge location
+          if (locColIdx !== -1) {
+            var pLoc = String(prev[locColIdx] || '').trim();
+            var cLoc = String(cur[locColIdx] || '').trim();
+            if ((!pLoc || pLoc.toLowerCase() === 'helena') && cLoc && cLoc.toLowerCase() !== 'helena') {
+              prev[locColIdx] = cLoc;
+            }
+          }
+          continue; // Collapsed!
+        }
+      }
+      collapsed.push(cur);
+    }
+
+    for (var cIdx = 0; cIdx < collapsed.length; cIdx++) {
+      finalCleanRows.push(collapsed[cIdx]);
+    }
+  }
+
+  // If duplicate/future rows were removed, write back to Google Sheets!
+  if (removedCount > 0) {
+    var outGrid = [headers];
+    for (var f = 0; f < finalCleanRows.length; f++) {
+      outGrid.push(finalCleanRows[f]);
+    }
+
+    // Clear old data and write clean grid
+    sheet.clearContents();
+    sheet.getRange(1, 1, outGrid.length, outGrid[0].length).setValues(outGrid);
+    Logger.log('cleanHistoryDuplicatesInSheet: Cleaned ' + removedCount + ' rows from ' + sheet.getName() + '. Final row count: ' + outGrid.length);
+  }
+
+  return {
+    removedCount: removedCount,
+    originalCount: data.length - 1,
+    cleanCount: finalCleanRows.length
+  };
+}
+
+/**
+ * Server-side function to clean all equipment history sheets in Google Sheets,
+ * and update the Google Drive offline sync snapshot.
+ */
+function cleanAllEquipmentHistoryDuplicatesServer() {
+  var ss = typeof getActiveSpreadsheetSafe === 'function' ? getActiveSpreadsheetSafe() : SpreadsheetApp.getActiveSpreadsheet();
+  var sheets = [
+    'Gloves History', 'Sleeves History', 'Blankets History', 'MACKs History',
+    'HV Testers History', 'Phasing Sets History', 'AED History', 'Grounds History', 'Hot Sticks History'
+  ];
+  var totalCleaned = 0;
+  var sheetsMod = {};
+  var breakdown = {};
+
+  for (var i = 0; i < sheets.length; i++) {
+    var sName = sheets[i];
+    var sh = ss.getSheetByName(sName);
+    if (!sh && typeof getSheetCaseInsensitive === 'function') sh = getSheetCaseInsensitive(sName);
+    if (sh) {
+      var res = cleanHistoryDuplicatesInSheet(sh, sName);
+      if (res && res.removedCount > 0) {
+        totalCleaned += res.removedCount;
+        sheetsMod[sName] = true;
+        breakdown[sName] = res.removedCount;
+      }
+    }
+  }
+
+  if (totalCleaned > 0) {
+    try {
+      if (typeof patchSyncSnapshotInDrive === 'function') {
+        patchSyncSnapshotInDrive(sheetsMod);
+      }
+    } catch (pErr) {
+      Logger.log('cleanAllEquipmentHistoryDuplicatesServer patch error: ' + pErr);
+    }
+  }
+
+  return {
+    success: true,
+    totalCleaned: totalCleaned,
+    breakdown: breakdown,
+    sheetsModified: Object.keys(sheetsMod)
+  };
 }

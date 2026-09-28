@@ -169,7 +169,8 @@ function _buildGloveManagerMenu() {
           .addItem('🔍 Diagnose Compliance', 'diagnoseSafetyCompliance')
           .addItem('🔍 Audit CreditedTo Values', 'auditCreditedToAccuracy')
           .addItem('🗑️ Clear Background Triggers', 'clearAllBackgroundTriggers')
-          .addItem('🔄 Reset Stuck Background Statuses', 'menuResetBackgroundStatuses')))
+          .addItem('🔄 Reset Stuck Background Statuses', 'menuResetBackgroundStatuses')
+          .addItem('🧹 Clean Equipment History Duplicates', 'menuCleanEquipmentHistoryDuplicates')))
 
       .addSeparator()
       .addItem('Close & Save History', 'closeAndSaveHistory')

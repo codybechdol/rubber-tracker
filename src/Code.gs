@@ -35461,3 +35461,38 @@ function archiveLostAndFailedItems(silent) {
   return archivedCount;
 }
 
+/**
+ * Menu command to clean duplicate, redundant, and future-dated records from
+ * all equipment history sheets and update the Google Drive sync snapshot.
+ */
+function menuCleanEquipmentHistoryDuplicates() {
+  var ui = SpreadsheetApp.getUi();
+  var confirm = ui.alert(
+    '🧹 Clean Equipment History Duplicates',
+    'This will scan all Equipment History sheets in Google Sheets (Gloves, Sleeves, Blankets, HV Testers, etc.)\n' +
+    'and remove duplicate entries, future-dated anomalies, and merge redundant notes.\n\n' +
+    'The Google Drive offline sync snapshot will be automatically updated with the clean data.\n\n' +
+    'Proceed?',
+    ui.ButtonSet.YES_NO
+  );
+
+  if (confirm !== ui.Button.YES) return;
+
+  var res = cleanAllEquipmentHistoryDuplicatesServer();
+  if (res && res.totalCleaned > 0) {
+    var breakdownStr = Object.keys(res.breakdown || {})
+      .map(function(k) { return '• ' + k + ': ' + res.breakdown[k] + ' removed'; })
+      .join('\n');
+    ui.alert(
+      '✅ History Cleanup Complete',
+      'Cleaned ' + res.totalCleaned + ' duplicate/future records across ' + res.sheetsModified.length + ' sheet(s):\n\n' +
+      breakdownStr + '\n\n' +
+      'Google Drive snapshot updated! Devices downloading the snapshot will now have 0 discrepancies.',
+      ui.ButtonSet.OK
+    );
+  } else {
+    ui.alert('ℹ️ All History Sheets Clean', 'No duplicate or future-dated records found in Equipment History sheets.', ui.ButtonSet.OK);
+  }
+}
+
+

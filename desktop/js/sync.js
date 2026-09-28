@@ -870,12 +870,22 @@ class SyncEngine {
         }
         let chunk = currentOutbox.slice(i, i + chunkSize);
 
-        // Sanitize: never allow a header-only rawGrid to wipe out valid row objects
-        chunk.forEach(m => {
-          if (m.rawGrid && Array.isArray(m.rawGrid) && m.rawGrid.length <= 1) {
-            delete m.rawGrid;
+        // Sanitize: never allow a header-only rawGrid to wipe out valid row objects;
+        // Also strip duplicate 'rows' when 'rawGrid' has complete data to cut network payload by ~60%
+        const sanitizedChunk = chunk.map(m => {
+          const mCopy = { ...m };
+          if (mCopy.rawGrid && Array.isArray(mCopy.rawGrid)) {
+            if (mCopy.rawGrid.length <= 1) {
+              delete mCopy.rawGrid;
+            } else if (mCopy.rows && Array.isArray(mCopy.rows)) {
+              delete mCopy.rows; // Server uses rawGrid; dropping duplicate row objects avoids duplicate payload
+            }
           }
+          return mCopy;
         });
+
+        const isHeavyChunk = chunk.some(isHeavyMutation);
+        const batchTimeoutMs = isHeavyChunk ? 120000 : 60000;
 
         currentBatchText = `Pushing batch ${batchNum} (${Math.min(i + chunk.length, totalCount)}/${totalCount} changes)...`;
         const subTitleEl = document.getElementById('sync-modal-subtitle');
@@ -893,12 +903,12 @@ class SyncEngine {
           try {
             pushResult = await this.executeNetworkRequest(this.syncUrl, 'POST', {
               action: 'applyMutations',
-              mutations: chunk,
+              mutations: sanitizedChunk,
               detectConflicts: false,
               force: true,
               skipPostProcessing: true,
               returnSnapshot: false
-            }, 60000);
+            }, batchTimeoutMs);
             if (pushResult && (pushResult.success === true || (pushResult.status === 'ok' && pushResult.appliedCount !== undefined))) {
               break;
             }

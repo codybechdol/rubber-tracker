@@ -2223,6 +2223,10 @@ class CrewImportEngine {
 
       const empName = (explicitPrimary || occurrences[0]).emp.name;
       const cleanEmpName = this.cleanNameForMatch(empName);
+
+      // Match against Employees table in local DB
+      const existing = this.findMatchingEmployee(empName, activeEmps);
+
       let primaryJob = primaryOcc.emp.fullJobNumber;
       let primaryLoc = primaryOcc.crew.location;
       const rosterExplicitClass = ((explicitPrimary || occurrences[0]).emp.classification || '').trim();
@@ -2235,9 +2239,6 @@ class CrewImportEngine {
         this.cleanNameForMatch(q.rosterName) === nameKey ||
         Boolean(this.findMatchingEmployee(empName, [{ 'Employee Name': q.name }, { 'Employee Name': q.rosterName }]))
       ));
-
-      // Match against Employees table in local DB
-      const existing = this.findMatchingEmployee(empName, activeEmps);
 
       const existingLoc = existing ? (this.getEmpRowLocation(existing) || '').toLowerCase() : '';
       const existingStatus = existing ? String(existing['Status'] || '').toLowerCase() : '';
