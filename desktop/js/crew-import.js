@@ -1092,6 +1092,26 @@ class CrewImportEngine {
           }
         }
 
+        // 1.5 If multiple occurrences have notes, check if one matches the employee's existing base location/job in the DB
+        if (primaryIdx === -1 && this.db) {
+          const empTable = this.db.getTable('employees');
+          if (empTable && empTable.rows) {
+            const matchedEmp = this.findMatchingEmployee(occurrences[0].emp.name, empTable.rows);
+            if (matchedEmp) {
+              const currentLoc = (this.getEmpRowLocation(matchedEmp) || '').toLowerCase();
+              const currentJob = (this.getEmpRowJobNumber(matchedEmp) || '').toLowerCase();
+              const baseMatchIdx = occurrences.findIndex(occ => {
+                const cLoc = (occ.crew.location || '').toLowerCase();
+                const cJob = (occ.crew.jobNumber || '').toLowerCase();
+                return (currentLoc && cLoc && currentLoc === cLoc) || (currentJob && cJob && currentJob.startsWith(cJob));
+              });
+              if (baseMatchIdx !== -1) {
+                primaryIdx = baseMatchIdx;
+              }
+            }
+          }
+        }
+
         // 2. If neither or all have notes, check schedule type (Primary schedule e.g. Mon-Thu/Tue-Fri wins over Split/Secondary)
         if (primaryIdx === -1) {
           const primarySchedOcc = occurrences.find(occ => occ.crew.scheduleType === 'Primary');
@@ -1154,6 +1174,8 @@ class CrewImportEngine {
         } else {
           single.emp.isPrimary = true;
           single.emp.isSecondary = false;
+          single.emp.otherJobNumber = '';
+          single.emp.otherFullJobNumber = '';
         }
       }
     }
@@ -1171,6 +1193,7 @@ class CrewImportEngine {
     });
 
     this.savePrimaryJobSelection(employeeName, targetJobNumber);
+    this.computedDeltas = null;
     this.render();
   }
 
@@ -1246,21 +1269,30 @@ class CrewImportEngine {
       const isQuit = Boolean(item.isQuit);
       const isFullWeekNote = lowerNote.includes('off wk') || 
                              lowerNote.includes('off week') || 
+                             lowerNote.includes('off wks') ||
                              lowerNote.includes('all week') || 
                              lowerNote.includes('whole week') || 
+                             lowerNote.includes('entire week') || 
+                             lowerNote.includes('full week') || 
                              lowerNote.includes('vacation') || 
                              lowerNote.includes('wedding') || 
                              lowerNote.includes('delegate') || 
-                             lowerNote.includes('convention');
+                             lowerNote.includes('convention') ||
+                             lowerNote.includes('paternity') ||
+                             lowerNote.includes('maternity') ||
+                             lowerNote.includes('fmla');
 
-      const isPartialDay = /\b(mon|tue|wed|thu|fri|sat|sun)\w*\b.*?\bonly\b/i.test(lowerNote);
+      const isExplicitDayOff = /\b(?:off|covering|filling\s*in)?\s*(?:mon|monday|tue|tues|tuesday|wed|wednesday|thu|thur|thurs|thursday|fri|friday|sat|saturday|sun|sunday)\b/i.test(lowerNote);
+      const isPartialKeyword = /\b(?:1\/2\s*day|half\s*day|partial|morning|afternoon|appt|appointment|dentist|doctor|interview|mslcat|class|training)\b/i.test(lowerNote);
+      const isDateSpecific = /\b\d{1,2}[-/]\d{1,2}\b/.test(lowerNote);
 
-      if (!isQuit && !isFullWeekNote && isPartialDay) {
-        // Partial day absence (e.g. off Tuesday for MSLCAT interviews) - do not auto-remove from crew
+      const isPartialAbsence = !isQuit && !isFullWeekNote && (isExplicitDayOff || isPartialKeyword || isDateSpecific);
+
+      // If it's not a quit, not a full-week absence, and not a partial absence, do not auto-remove
+      if (!isQuit && !isFullWeekNote && !isPartialAbsence) {
         continue;
       }
 
-      // If it IS a full week absence or quit:
       for (const crew of this.parsedCrews) {
         if (crew.excluded) continue;
         const matchingEmpIndex = crew.employees.findIndex(e => {
@@ -1270,6 +1302,29 @@ class CrewImportEngine {
 
         if (matchingEmpIndex !== -1) {
           const matchingEmp = crew.employees[matchingEmpIndex];
+          const empCellNote = String(matchingEmp.notes || '').toLowerCase();
+          const crewSchedLabel = String(crew.scheduleLabel || '').toLowerCase();
+          const isWeekendOrSecondaryCrew = crew.scheduleType === 'Secondary' || 
+                                           crewSchedLabel.includes('fri & sat') || 
+                                           crewSchedLabel.includes('fri-sat') || 
+                                           crewSchedLabel.includes('sat & sun') || 
+                                           crewSchedLabel.includes('weekend');
+
+          // If this is a partial absence (e.g. off 9-29 Tues, off 9-30 Wed & 10-1 Thurs):
+          if (isPartialAbsence) {
+            // Check if this crew is a secondary weekend crew (e.g. 040-26 Fri-Sat)
+            if (isWeekendOrSecondaryCrew && !empCellNote.includes('only') && !empCellNote.includes('fri') && !empCellNote.includes('sat')) {
+              // Employee has time off during the week and should not work the secondary weekend crew.
+              // Proceed to auto-remove from this secondary weekend crew.
+            } else {
+              // On primary/regular crew or where employee has explicit partial note (e.g. 018-26 Mon only, 022-26 off Wed & Thurs):
+              // DO NOT auto-remove! The employee is actively working on this crew!
+              if (!matchingEmp.notes) {
+                matchingEmp.notes = rawNote;
+              }
+              continue;
+            }
+          }
 
           // If it's a quit: check if this is a scheduled departure (last day this week or upcoming)
           const isUpcoming = /upcoming/i.test(item.header || '');
@@ -1306,6 +1361,8 @@ class CrewImportEngine {
             crewJobNumber: crew.jobNumber,
             crewLocation: crew.location,
             reason: rawNote,
+            isPartial: isPartialAbsence,
+            isWeekendSecondary: isWeekendOrSecondaryCrew,
             removedEmp: { ...matchingEmp },
             crewIndex: this.parsedCrews.indexOf(crew)
           });
@@ -2334,6 +2391,46 @@ class CrewImportEngine {
           changed = true;
         }
 
+        // 5. Weekly Schedule & Partial Absence Notes
+        let employeeScheduleNote = '';
+        if (occurrences.length > 1) {
+          // Multi-crew split week (e.g. Jackson Eads)
+          const occNotes = occurrences.map(o => {
+            const cleanN = String(o.emp.notes || '').trim();
+            return cleanN ? `${cleanN} on ${o.crew.jobNumber}` : `Job ${o.crew.jobNumber}`;
+          });
+          employeeScheduleNote = occNotes.join(', ');
+          const matchingTO = (this.specialCircumstances?.timeOffCurrentWeek || []).find(to => {
+            return this.cleanNameForMatch(to.name) === cleanDbName ||
+                   this.cleanNameForMatch(to.name) === cleanEmpName ||
+                   Boolean(this.findMatchingEmployee(dbName, [{ 'Employee Name': to.name }]));
+          });
+          if (matchingTO && (matchingTO.note || matchingTO.rawText)) {
+            const toNote = matchingTO.note || matchingTO.rawText;
+            employeeScheduleNote += ` (Off: ${toNote})`;
+          }
+        } else {
+          // Single crew: check if there is a partial note or time off (e.g. Robin Bagley)
+          const singleOcc = occurrences[0];
+          const cellNote = String(singleOcc.emp.notes || '').trim();
+          const matchingTO = (this.specialCircumstances?.timeOffCurrentWeek || []).find(to => {
+            return this.cleanNameForMatch(to.name) === cleanDbName ||
+                   this.cleanNameForMatch(to.name) === cleanEmpName ||
+                   Boolean(this.findMatchingEmployee(dbName, [{ 'Employee Name': to.name }]));
+          });
+          if (matchingTO && (matchingTO.note || matchingTO.rawText)) {
+            employeeScheduleNote = matchingTO.note || matchingTO.rawText;
+          } else if (cellNote) {
+            employeeScheduleNote = cellNote;
+          }
+        }
+
+        if (employeeScheduleNote) {
+          changeItem.scheduleNote = employeeScheduleNote;
+          changeItem.changes.push(`Schedule: ${employeeScheduleNote}`);
+          changed = true;
+        }
+
         if (changed) {
           matchedEmployeeChanges.push(changeItem);
         }
@@ -2841,6 +2938,10 @@ class CrewImportEngine {
           if (change.newSecondaryJobNumber !== undefined && secKey) {
             row[secKey] = change.newSecondaryJobNumber;
             updatedFields[secKey] = change.newSecondaryJobNumber;
+          }
+          if (change.scheduleNote && notesKey) {
+            row[notesKey] = change.scheduleNote;
+            updatedFields[notesKey] = change.scheduleNote;
           }
 
           this.syncRowToRawGrid(empTable, row);
@@ -4011,7 +4112,7 @@ class CrewImportEngine {
                     </div>
                     <div style="font-size: 12px; color: #cbd5e1; margin-top: 2px;">
                       ${this.resolvedRosterConflicts.map(c => `
-                        <strong>${this.escapeHtml(c.employeeName)}</strong> was automatically removed from <strong>Job ${this.escapeHtml(c.crewJobNumber)}</strong> (${this.escapeHtml(c.crewLocation)}) because they are off for the full week: <em style="color: #94a3b8;">"${this.escapeHtml(c.reason)}"</em>. Foreman updated.
+                        <strong>${this.escapeHtml(c.employeeName)}</strong> was automatically removed from <strong>Job ${this.escapeHtml(c.crewJobNumber)}</strong> (${this.escapeHtml(c.crewLocation)})${c.isPartial ? ` (Secondary Weekend Crew) due to scheduled time off this week: <em style="color: #94a3b8;">"${this.escapeHtml(c.reason)}"</em>.` : ` because they are off for the full week: <em style="color: #94a3b8;">"${this.escapeHtml(c.reason)}"</em>.`} Foreman updated.
                       `).join('<br>')}
                     </div>
                   </div>
@@ -4689,7 +4790,7 @@ class CrewImportEngine {
         <!-- Conflict Auto-Resolution Notice (if an employee was auto-removed from this crew) -->
         ${(this.resolvedRosterConflicts || []).some(c => c.crewJobNumber === crew.jobNumber) ? `
           <div style="background: rgba(245, 158, 11, 0.12); border-left: 3px solid #f59e0b; padding: 4px 8px; border-radius: 4px; font-size: 11px; color: #fbbf24; margin-bottom: 8px;">
-            <span>⚡ Auto-removed: <strong>${this.escapeHtml((this.resolvedRosterConflicts || []).filter(c => c.crewJobNumber === crew.jobNumber).map(c => c.employeeName).join(', '))}</strong> (Off Full Week)</span>
+            <span>⚡ Auto-removed: <strong>${this.escapeHtml((this.resolvedRosterConflicts || []).filter(c => c.crewJobNumber === crew.jobNumber).map(c => c.employeeName).join(', '))}</strong> (${(this.resolvedRosterConflicts || []).some(c => c.crewJobNumber === crew.jobNumber && c.isPartial) ? 'Time Off this week' : 'Off Full Week'})</span>
           </div>
         ` : ''}
 
