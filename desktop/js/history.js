@@ -251,10 +251,18 @@ class HistoryNavigator {
 
     if (!tableData || (!tableData.rows?.length && !tableData.rawGrid?.length)) {
       container.innerHTML = `
-        <div style="padding: 40px; text-align: center; color: var(--text-muted);">
+        <div style="padding: 36px 20px; text-align: center; max-width: 540px; margin: 30px auto; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 12px;">
           <div style="font-size: 36px; margin-bottom: 12px;">📜</div>
-          <div style="font-size: 16px; font-weight: 600; margin-bottom: 6px;">No history records found</div>
-          <div style="font-size: 13px;">Click <strong>🔄 Sync with Google Sheets</strong> or <strong>📁 Import Snapshot</strong> to load history data.</div>
+          <div style="font-size: 16px; font-weight: 700; margin-bottom: 8px; color: var(--text-primary);">No history records loaded</div>
+          <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 20px;">Download the latest database or import a snapshot to view history archives.</p>
+          <div style="display: flex; flex-direction: column; gap: 10px;">
+            <button class="btn btn-primary" onclick="window.syncEngine.downloadLatestSnapshot()" style="padding: 12px; font-size: 13px; font-weight: 700; background: linear-gradient(135deg, #2563eb, #1d4ed8); border: none; border-radius: 6px; color: white;">
+              ⬇️ Download Database from Google Sheets
+            </button>
+            <button class="btn btn-secondary" onclick="window.syncEngine.importLocalSnapshotFile()" style="padding: 12px; font-size: 13px;">
+              📁 Import Snapshot File
+            </button>
+          </div>
         </div>
       `;
       if (countBadge) countBadge.textContent = '0 rows';

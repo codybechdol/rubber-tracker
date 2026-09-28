@@ -1040,11 +1040,22 @@ body.view-only-mode .card-drop-zone {
   .header-actions {
     gap: 6px;
     justify-content: flex-start;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    touch-action: pan-x;
+    padding: 4px 2px;
   }
 
   .header-actions .btn {
     padding: 6px 10px;
     font-size: 11.5px;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  #btn-role-mode-toggle,
+  #backup-drive-btn {
+    display: none !important;
   }
 }
 
@@ -1072,6 +1083,16 @@ body.view-only-mode .card-drop-zone {
 
   .admin-only-control {
     display: none;
+  }
+
+  #import-snapshot-btn {
+    padding: 5px 8px !important;
+    font-size: 11px !important;
+  }
+
+  #download-snapshot-btn {
+    padding: 5px 8px !important;
+    font-size: 11px !important;
   }
 }
 

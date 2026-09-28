@@ -1568,12 +1568,21 @@ class SyncEngine {
       return { success: false };
     }
 
-    // Web & Mobile File Picker Fallback
+    // Web & Mobile File Picker (Uses permanent DOM input if present for iOS Safari compatibility)
     return new Promise((resolve) => {
-      const fileInput = document.createElement('input');
-      fileInput.type = 'file';
-      // Do not set accept on iOS/mobile: iOS UIDocumentPicker greys out files with unrecognized UTIs if accept is specified.
-      fileInput.style.display = 'none';
+      let fileInput = document.getElementById('global-snapshot-file-picker');
+      let createdDynamically = false;
+
+      if (!fileInput) {
+        fileInput = document.createElement('input');
+        fileInput.type = 'file';
+        fileInput.id = 'global-snapshot-file-picker';
+        fileInput.style.display = 'none';
+        document.body.appendChild(fileInput);
+        createdDynamically = true;
+      }
+
+      fileInput.value = ''; // Reset so the same file can be picked again
 
       fileInput.onchange = async (e) => {
         const file = e.target.files && e.target.files[0];
@@ -1624,11 +1633,12 @@ class SyncEngine {
           alert('❌ Could not parse JSON file: ' + err.message);
           resolve({ success: false, error: err.message });
         } finally {
-          fileInput.remove();
+          if (createdDynamically && fileInput.parentNode) {
+            fileInput.remove();
+          }
         }
       };
 
-      document.body.appendChild(fileInput);
       fileInput.click();
     });
   }

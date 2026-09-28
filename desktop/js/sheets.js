@@ -1321,10 +1321,23 @@ class SheetNavigator {
 
     if (!tableData || (!tableData.rows?.length && !tableData.rawGrid?.length)) {
       container.innerHTML = `
-        <div style="padding: 40px; text-align: center; color: var(--text-muted);">
-          <div style="font-size: 32px; margin-bottom: 12px;">📂</div>
-          <h3 style="color: var(--text-primary); font-size: 16px;">No data loaded for this sheet</h3>
-          <p style="margin-top: 8px; font-size: 13px;">Click <strong>"Sync with Google Sheets"</strong> or <strong>"Import Snapshot"</strong> to load your data.</p>
+        <div class="empty-sheet-container" style="padding: 36px 20px; text-align: center; max-width: 580px; margin: 30px auto; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 14px; box-shadow: 0 10px 30px rgba(0,0,0,0.3);">
+          <div style="font-size: 42px; margin-bottom: 12px;">🛡️</div>
+          <h3 style="color: var(--text-primary); font-size: 18px; font-weight: 700; margin-bottom: 8px;">No Database Loaded on this Device</h3>
+          <p style="color: var(--text-secondary); font-size: 13.5px; line-height: 1.5; margin-bottom: 22px;">
+            Your phone or tablet is ready! Download the complete live database directly from Google Sheets over the cloud, or import a snapshot file.
+          </p>
+          <div style="display: flex; flex-direction: column; gap: 12px; align-items: stretch;">
+            <button class="btn btn-primary" onclick="window.syncEngine.downloadLatestSnapshot()" style="padding: 14px 18px; font-size: 14px; font-weight: 700; background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); border: none; border-radius: 8px; display: flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 4px 14px rgba(37, 99, 235, 0.4); cursor: pointer; color: #ffffff;">
+              <span style="font-size: 18px;">⬇️</span> Download Database from Google Sheets (1-Click)
+            </button>
+            <button class="btn btn-secondary" onclick="window.syncEngine.importLocalSnapshotFile()" style="padding: 13px 18px; font-size: 14px; font-weight: 600; background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary); display: flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer;">
+              <span style="font-size: 18px;">📁</span> Import Snapshot File (from Google Drive / Local)
+            </button>
+          </div>
+          <div style="margin-top: 18px; font-size: 11.5px; color: var(--text-muted); display: flex; align-items: center; justify-content: center; gap: 6px;">
+            <span>💡</span> "Download Database" connects securely to Google Sheets and gets the full system in seconds.
+          </div>
         </div>
       `;
       if (countBadge) countBadge.textContent = '0 rows';
@@ -4326,10 +4339,20 @@ class SheetNavigator {
     if (!headers.length && !rows.length) {
       const sheetName = tableData.name || (this.currentSheetKey === 'safety_compliance' ? 'Safety Compliance' : (this.currentSheetKey === 'expiring_certs' ? 'Expiring Certs' : (this.currentSheetKey === 'training_tracking' ? 'Training Tracking' : 'this sheet')));
       container.innerHTML = `
-        <div style="padding: 40px; text-align: center; color: var(--text-muted);">
-          <div style="font-size: 32px; margin-bottom: 12px;">📂</div>
-          <h3 style="color: var(--text-primary); font-size: 16px;">No records loaded for ${this.escapeHtml(sheetName)}</h3>
-          <p style="margin-top: 8px; font-size: 13px;">Click <strong>"Sync with Google Sheets"</strong> or <strong>"Import Snapshot"</strong> in the top right to download or load your data.</p>
+        <div class="empty-sheet-container" style="padding: 36px 20px; text-align: center; max-width: 580px; margin: 30px auto; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 14px; box-shadow: 0 10px 30px rgba(0,0,0,0.3);">
+          <div style="font-size: 42px; margin-bottom: 12px;">🛡️</div>
+          <h3 style="color: var(--text-primary); font-size: 18px; font-weight: 700; margin-bottom: 8px;">No records loaded for ${this.escapeHtml(sheetName)}</h3>
+          <p style="color: var(--text-secondary); font-size: 13.5px; line-height: 1.5; margin-bottom: 22px;">
+            Download the live database from Google Sheets or import a snapshot file to view your data.
+          </p>
+          <div style="display: flex; flex-direction: column; gap: 12px; align-items: stretch;">
+            <button class="btn btn-primary" onclick="window.syncEngine.downloadLatestSnapshot()" style="padding: 14px 18px; font-size: 14px; font-weight: 700; background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); border: none; border-radius: 8px; display: flex; align-items: center; justify-content: center; gap: 8px; box-shadow: 0 4px 14px rgba(37, 99, 235, 0.4); cursor: pointer; color: #ffffff;">
+              <span style="font-size: 18px;">⬇️</span> Download Database from Google Sheets (1-Click)
+            </button>
+            <button class="btn btn-secondary" onclick="window.syncEngine.importLocalSnapshotFile()" style="padding: 13px 18px; font-size: 14px; font-weight: 600; background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary); display: flex; align-items: center; justify-content: center; gap: 8px; cursor: pointer;">
+              <span style="font-size: 18px;">📁</span> Import Snapshot File (from Google Drive / Local)
+            </button>
+          </div>
         </div>
       `;
       if (countBadge) countBadge.textContent = '0 rows';

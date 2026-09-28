@@ -3,7 +3,7 @@
  * Provides offline caching, network-first strategy, and background sync support.
  */
 
-const CACHE_NAME = 'safety-assistant-v79';
+const CACHE_NAME = 'safety-assistant-v80';
 const ASSETS_TO_CACHE = [
   './',
   './index.html',
@@ -16,16 +16,18 @@ const ASSETS_TO_CACHE = [
   './js/inventory.js',
   './js/swaps.js',
   './js/crew-import.js',
+  './js/employee-resolver.js',
   './js/item-stats.js',
   './js/sms-dialog.js',
   './js/employee-profile.js',
   './js/safety-emails.js',
-  './js/cpr-roster.js',
   './js/certs-config.js',
+  './js/cpr-roster.js',
   './js/certs-import.js',
   './js/time-breakdown.js',
   './js/sheets.js',
   './js/history.js',
+  './js/history-issues.js',
   './js/previous-employees.js',
   './js/tasks.js',
   './js/trip-planner.js',
@@ -85,7 +87,7 @@ self.addEventListener('fetch', (event) => {
       }
       return networkResponse;
     }).catch(() => {
-      return caches.match(event.request).then((cachedResponse) => {
+      return caches.match(event.request, { ignoreSearch: true }).then((cachedResponse) => {
         if (cachedResponse) return cachedResponse;
         if (event.request.headers.get('accept') && event.request.headers.get('accept').includes('text/html')) {
           return caches.match('./index.html').then((indexFallback) => {

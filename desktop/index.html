@@ -71,23 +71,23 @@
       <!-- Mobile Quick Sync Panel -->
       <div class="mobile-sync-card" style="margin: 10px 12px 14px 12px; background: rgba(15, 23, 42, 0.75); border: 1px solid rgba(59, 130, 246, 0.35); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; gap: 8px;">
         <div style="display: flex; justify-content: space-between; align-items: center;">
-          <span style="font-size: 11px; font-weight: 700; color: #93c5fd; text-transform: uppercase;">Cloud Sync</span>
+          <span style="font-size: 11px; font-weight: 700; color: #93c5fd; text-transform: uppercase;">Cloud Database & Sync</span>
           <span class="status-dot" id="mobile-sync-dot" style="width: 8px; height: 8px; border-radius: 50%; background: #10b981;"></span>
         </div>
-        <button class="btn btn-primary admin-only-control" onclick="window.syncEngine.pushChangesToGoogleSheets(); window.toggleMobileSidebar();" style="width: 100%; justify-content: center; font-size: 12px; font-weight: 700; background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);">
-          ⬆️ Push Changes to Sheets
+        <button class="btn btn-primary" onclick="window.syncEngine.downloadLatestSnapshot(); window.toggleMobileSidebar();" style="width: 100%; justify-content: center; font-size: 12px; font-weight: 700; background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);">
+          ⬇️ Download Database
+        </button>
+        <button class="btn btn-secondary" onclick="window.syncEngine.importLocalSnapshotFile(); window.toggleMobileSidebar();" style="width: 100%; justify-content: center; font-size: 12px; font-weight: 600; border-color: rgba(52, 211, 153, 0.4); color: #34d399;">
+          📁 Import Snapshot File
         </button>
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
-          <button class="btn btn-secondary" onclick="window.syncEngine.downloadLatestSnapshot(); window.toggleMobileSidebar();" style="justify-content: center; font-size: 11px; padding: 5px 2px;">
-            ⬇️ Download
+          <button class="btn btn-secondary admin-only-control" onclick="window.syncEngine.pushChangesToGoogleSheets(); window.toggleMobileSidebar();" style="justify-content: center; font-size: 11px; padding: 5px 2px; color: #fde047;">
+            ⬆️ Push
           </button>
-          <button class="btn btn-secondary" onclick="window.syncEngine.syncWithGoogleSheets(); window.toggleMobileSidebar();" style="justify-content: center; font-size: 11px; padding: 5px 2px; color: #34d399;">
-            🔄 Fast Sync
+          <button class="btn btn-secondary" onclick="window.syncEngine.createGoogleDriveBackup(); window.toggleMobileSidebar();" style="justify-content: center; font-size: 11px; padding: 5px 2px; color: #60a5fa;" title="Create Google Drive backup">
+            💾 Backup
           </button>
         </div>
-        <button class="btn btn-secondary" onclick="window.syncEngine.createGoogleDriveBackup(); window.toggleMobileSidebar();" style="width: 100%; justify-content: center; font-size: 11px; padding: 5px 2px; color: #60a5fa; border-color: rgba(59, 130, 246, 0.4);" title="Create Google Drive backup">
-          💾 Backup to Drive
-        </button>
       </div>
 
       <div class="nav-group">
@@ -837,7 +837,8 @@
             </p>
             <div style="display: flex; gap: 10px; flex-wrap: wrap;">
               <button class="btn btn-secondary" onclick="window.localDB.clear(); location.reload();">🗑️ Clear Offline Cache</button>
-              <button class="btn btn-secondary" onclick="window.syncEngine.downloadLatestSnapshot()">⬇️ Download Fresh Snapshot</button>
+              <button class="btn btn-primary" onclick="window.syncEngine.downloadLatestSnapshot()">⬇️ Download Fresh Snapshot</button>
+              <button class="btn btn-secondary" style="border-color: #34d399; color: #34d399;" onclick="window.syncEngine.importLocalSnapshotFile()">📁 Import Snapshot File</button>
               <button class="btn btn-primary" onclick="window.syncEngine.pushChangesToGoogleSheets()">⬆️ Push Offline Changes</button>
               <button class="btn btn-secondary" style="border-color: #10b981; color: #34d399;" onclick="window.syncEngine.forcePushChangesToGoogleSheets()" title="Push all offline changes to Google Sheets, overriding any detected conflicts">⚡ Force Push (Overwrite Conflicts)</button>
               <button class="btn btn-secondary" style="border-color: #f59e0b; color: #fbbf24;" onclick="window.syncEngine.pushAllCleanData()" title="Directly overwrite Google Sheets Employees and Job Tracking with your clean, organized local data">🧹 Overwrite Sheets with Clean Local Tables</button>
@@ -2370,6 +2371,9 @@
       <span class="mobile-nav-label">Push Sync</span>
     </div>
   </nav>
+
+  <!-- Permanent File Input for Mobile & Desktop Snapshot Imports -->
+  <input type="file" id="global-snapshot-file-picker" style="display: none;" accept=".json,application/json,text/plain,*/*">
 
   <!-- SheetJS for client-side Excel Parsing -->
   <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>

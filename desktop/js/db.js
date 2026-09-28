@@ -14,18 +14,51 @@ class SnapshotStorage {
   static async open() {
     if (typeof window === 'undefined' || !window.indexedDB) return null;
     return new Promise((resolve) => {
+      let isDone = false;
+      const timeoutId = setTimeout(() => {
+        if (!isDone) {
+          isDone = true;
+          console.warn('SnapshotStorage.open timed out after 1500ms');
+          resolve(null);
+        }
+      }, 1500);
+
       try {
         const req = window.indexedDB.open(SnapshotStorage.DB_NAME, SnapshotStorage.DB_VERSION);
+        req.onblocked = () => {
+          if (!isDone) {
+            isDone = true;
+            clearTimeout(timeoutId);
+            console.warn('SnapshotStorage.open blocked by other tab or connection');
+            resolve(null);
+          }
+        };
         req.onupgradeneeded = (e) => {
           const db = e.target.result;
           if (!db.objectStoreNames.contains(SnapshotStorage.STORE_NAME)) {
             db.createObjectStore(SnapshotStorage.STORE_NAME);
           }
         };
-        req.onsuccess = (e) => resolve(e.target.result);
-        req.onerror = () => resolve(null);
+        req.onsuccess = (e) => {
+          if (!isDone) {
+            isDone = true;
+            clearTimeout(timeoutId);
+            resolve(e.target.result);
+          }
+        };
+        req.onerror = () => {
+          if (!isDone) {
+            isDone = true;
+            clearTimeout(timeoutId);
+            resolve(null);
+          }
+        };
       } catch {
-        resolve(null);
+        if (!isDone) {
+          isDone = true;
+          clearTimeout(timeoutId);
+          resolve(null);
+        }
       }
     });
   }
@@ -34,14 +67,53 @@ class SnapshotStorage {
     const db = await SnapshotStorage.open();
     if (!db) return null;
     return new Promise((resolve) => {
+      let isDone = false;
+      const timeoutId = setTimeout(() => {
+        if (!isDone) {
+          isDone = true;
+          console.warn(`SnapshotStorage.get('${key}') timed out after 1500ms`);
+          resolve(null);
+        }
+      }, 1500);
+
       try {
         const tx = db.transaction(SnapshotStorage.STORE_NAME, 'readonly');
         const store = tx.objectStore(SnapshotStorage.STORE_NAME);
         const req = store.get(key);
-        req.onsuccess = () => resolve(req.result);
-        req.onerror = () => resolve(null);
+        req.onsuccess = () => {
+          if (!isDone) {
+            isDone = true;
+            clearTimeout(timeoutId);
+            resolve(req.result);
+          }
+        };
+        req.onerror = () => {
+          if (!isDone) {
+            isDone = true;
+            clearTimeout(timeoutId);
+            resolve(null);
+          }
+        };
+        tx.onerror = () => {
+          if (!isDone) {
+            isDone = true;
+            clearTimeout(timeoutId);
+            resolve(null);
+          }
+        };
+        tx.onabort = () => {
+          if (!isDone) {
+            isDone = true;
+            clearTimeout(timeoutId);
+            resolve(null);
+          }
+        };
       } catch {
-        resolve(null);
+        if (!isDone) {
+          isDone = true;
+          clearTimeout(timeoutId);
+          resolve(null);
+        }
       }
     });
   }
@@ -50,14 +122,53 @@ class SnapshotStorage {
     const db = await SnapshotStorage.open();
     if (!db) return false;
     return new Promise((resolve) => {
+      let isDone = false;
+      const timeoutId = setTimeout(() => {
+        if (!isDone) {
+          isDone = true;
+          console.warn(`SnapshotStorage.set('${key}') timed out after 2500ms`);
+          resolve(false);
+        }
+      }, 2500);
+
       try {
         const tx = db.transaction(SnapshotStorage.STORE_NAME, 'readwrite');
         const store = tx.objectStore(SnapshotStorage.STORE_NAME);
         const req = store.put(value, key);
-        req.onsuccess = () => resolve(true);
-        req.onerror = () => resolve(false);
+        req.onsuccess = () => {
+          if (!isDone) {
+            isDone = true;
+            clearTimeout(timeoutId);
+            resolve(true);
+          }
+        };
+        req.onerror = () => {
+          if (!isDone) {
+            isDone = true;
+            clearTimeout(timeoutId);
+            resolve(false);
+          }
+        };
+        tx.onerror = () => {
+          if (!isDone) {
+            isDone = true;
+            clearTimeout(timeoutId);
+            resolve(false);
+          }
+        };
+        tx.onabort = () => {
+          if (!isDone) {
+            isDone = true;
+            clearTimeout(timeoutId);
+            resolve(false);
+          }
+        };
       } catch {
-        resolve(false);
+        if (!isDone) {
+          isDone = true;
+          clearTimeout(timeoutId);
+          resolve(false);
+        }
       }
     });
   }
@@ -66,14 +177,45 @@ class SnapshotStorage {
     const db = await SnapshotStorage.open();
     if (!db) return false;
     return new Promise((resolve) => {
+      let isDone = false;
+      const timeoutId = setTimeout(() => {
+        if (!isDone) {
+          isDone = true;
+          resolve(false);
+        }
+      }, 1500);
+
       try {
         const tx = db.transaction(SnapshotStorage.STORE_NAME, 'readwrite');
         const store = tx.objectStore(SnapshotStorage.STORE_NAME);
         const req = store.delete(key);
-        req.onsuccess = () => resolve(true);
-        req.onerror = () => resolve(false);
+        req.onsuccess = () => {
+          if (!isDone) {
+            isDone = true;
+            clearTimeout(timeoutId);
+            resolve(true);
+          }
+        };
+        req.onerror = () => {
+          if (!isDone) {
+            isDone = true;
+            clearTimeout(timeoutId);
+            resolve(false);
+          }
+        };
+        tx.onerror = () => {
+          if (!isDone) {
+            isDone = true;
+            clearTimeout(timeoutId);
+            resolve(false);
+          }
+        };
       } catch {
-        resolve(false);
+        if (!isDone) {
+          isDone = true;
+          clearTimeout(timeoutId);
+          resolve(false);
+        }
       }
     });
   }
@@ -144,7 +286,6 @@ class LocalDatabase {
 
     if (this.snapshot) {
       this.normalizeSnapshot(this.snapshot);
-      await this.persistSnapshot(this.snapshot);
     }
 
     this.notify();
