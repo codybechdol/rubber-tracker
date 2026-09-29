@@ -1814,6 +1814,622 @@ class EmployeeProfileEngine {
   }
 
   /**
+   * Helper to retrieve consistent item identifier
+   */
+  getItemIdentifier(item) {
+    if (!item) return '—';
+    return String(item['Glove'] || item['Sleeve'] || item['Item #'] || item['Item'] || item['ESL ID'] || Object.values(item)[0] || '—').trim();
+  }
+
+  /**
+   * Renders the progressive Rubber PPE Compliance & Quick Assign section for tracked classifications
+   * Rules:
+   * - SUP, GF, F, JRY: Require Gloves & Sleeves
+   * - AP 1-3: Require Gloves ONLY (Sleeves NOT required)
+   * - AP 4-7: Require Gloves & Sleeves
+   * Workflow Layers:
+   * - Layer 1: Missing Size -> Prompt for size inline, save to Contact & Details
+   * - Layer 2: Size on record -> Scan on-shelf inventory; show 1-click Quick Assign
+   * - Layer 3: Out of stock -> Prompt to add to Purchase Needs workspace & POs
+   */
+  renderRubberPpeComplianceSection(data) {
+    if (!data) return '';
+    const classMeta = (window.ppeTrackingEngine && typeof window.ppeTrackingEngine.parseTrackedClassification === 'function')
+      ? window.ppeTrackingEngine.parseTrackedClassification(data.role)
+      : null;
+
+    const allEq = data.assignedEquipment || [];
+    const hasGloves = allEq.some(e => e.eqKey === 'gloves');
+    const hasSleeves = allEq.some(e => e.eqKey === 'sleeves');
+
+    // 1. Fully equipped with both Gloves & Sleeves (applies to JRY, Supervision, AP 4-7, etc.)
+    if (hasGloves && hasSleeves) {
+      const codeLabel = classMeta ? classMeta.code : (data.role || 'Equipped');
+      const ruleText = classMeta ? classMeta.ruleSummary : 'Rubber Gloves and Sleeves are both assigned and active.';
+      return `
+        <div class="ppe-profile-compliance-card" style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; padding: 12px 16px; margin-bottom: 18px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span style="font-size: 20px;">🛡️</span>
+            <div>
+              <div style="font-size: 13px; font-weight: 700; color: #6ee7b7; display: flex; align-items: center; gap: 6px;">
+                <span>✓ Rubber PPE Compliant</span>
+                <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; font-size: 10px; padding: 1px 6px; border-radius: 4px;">
+                  ${this.escapeHtml(codeLabel)}
+                </span>
+              </div>
+              <div style="font-size: 11.5px; color: #a7f3d0; margin-top: 2px;">
+                ${this.escapeHtml(ruleText)}
+              </div>
+            </div>
+          </div>
+          <div style="display: flex; gap: 6px; font-size: 11px; flex-wrap: wrap;">
+            <span style="background: rgba(16, 185, 129, 0.15); color: #6ee7b7; padding: 2px 8px; border-radius: 4px; border: 1px solid rgba(16, 185, 129, 0.25);">🧤 Gloves Assigned (Size ${this.escapeHtml(data.gloveSize || 'Std')})</span>
+            <span style="background: rgba(16, 185, 129, 0.15); color: #6ee7b7; padding: 2px 8px; border-radius: 4px; border: 1px solid rgba(16, 185, 129, 0.25);">🦾 Sleeves Assigned (Size ${this.escapeHtml(data.sleeveSize || 'Std')})</span>
+          </div>
+        </div>
+      `;
+    }
+
+    // 2. Tracked AP 1-3: Gloves only required and assigned
+    if (classMeta && !classMeta.needsSleeves && hasGloves) {
+      return `
+        <div class="ppe-profile-compliance-card" style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; padding: 12px 16px; margin-bottom: 18px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span style="font-size: 20px;">🛡️</span>
+            <div>
+              <div style="font-size: 13px; font-weight: 700; color: #6ee7b7; display: flex; align-items: center; gap: 6px;">
+                <span>✓ Rubber PPE Compliant</span>
+                <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; font-size: 10px; padding: 1px 6px; border-radius: 4px;">
+                  ${this.escapeHtml(classMeta.code)}
+                </span>
+              </div>
+              <div style="font-size: 11.5px; color: #a7f3d0; margin-top: 2px;">
+                ${this.escapeHtml(classMeta.ruleSummary)} · Required equipment active.
+              </div>
+            </div>
+          </div>
+          <div style="display: flex; gap: 6px; font-size: 11px; flex-wrap: wrap;">
+            <span style="background: rgba(16, 185, 129, 0.15); color: #6ee7b7; padding: 2px 8px; border-radius: 4px; border: 1px solid rgba(16, 185, 129, 0.25);">🧤 Gloves Assigned (Size ${this.escapeHtml(data.gloveSize || 'Std')})</span>
+          </div>
+        </div>
+      `;
+    }
+
+    // If classification is not tracked for mandatory PPE (e.g. Office, non-lineman), do not show missing warnings
+    if (!classMeta) return '';
+
+    const needsGloves = !!classMeta.needsGloves;
+    const needsSleeves = !!classMeta.needsSleeves;
+
+    const missingGloves = needsGloves && !hasGloves;
+    const missingSleeves = needsSleeves && !hasSleeves;
+
+    if (!missingGloves && !missingSleeves) {
+      return '';
+    }
+
+    let html = `<div class="ppe-compliance-action-section" style="margin-bottom: 20px; display: flex; flex-direction: column; gap: 14px;">`;
+    if (missingGloves) {
+      html += this.renderPpeItemProgressiveWorkflow(data, classMeta, 'gloves');
+    }
+    if (missingSleeves) {
+      html += this.renderPpeItemProgressiveWorkflow(data, classMeta, 'sleeves');
+    }
+    html += `</div>`;
+    return html;
+  }
+
+  /**
+   * Renders the 3-layer progressive workflow card for gloves or sleeves
+   */
+  renderPpeItemProgressiveWorkflow(data, classMeta, itemType) {
+    const isGlove = itemType === 'gloves';
+    const label = isGlove ? 'Rubber Gloves' : 'Rubber Sleeves';
+    const icon = isGlove ? '🧤' : '🦾';
+    const curSize = String(isGlove ? (data.gloveSize || '') : (data.sleeveSize || '')).trim();
+    const invKey = isGlove ? 'gloves' : 'sleeves';
+    const swapKey = isGlove ? 'glove_swaps' : 'sleeve_swaps';
+    const themeColor = isGlove ? '#38bdf8' : '#c084fc';
+    const themeBg = isGlove ? 'rgba(14, 165, 233, 0.08)' : 'rgba(168, 85, 247, 0.08)';
+    const themeBorder = isGlove ? 'rgba(56, 189, 248, 0.35)' : 'rgba(168, 85, 247, 0.35)';
+    const themePillBg = isGlove ? 'rgba(14, 165, 233, 0.18)' : 'rgba(168, 85, 247, 0.18)';
+    const themeBadgeColor = isGlove ? '#38bdf8' : '#d8b4fe';
+    const sizes = isGlove
+      ? ['8', '8.5', '9', '9.5', '10', '10.5', '11', '11.5', '12']
+      : ['Regular', 'Large', 'X-Large'];
+
+    const hasSize = curSize && curSize !== 'N/A' && curSize !== '—' && curSize !== '-' && curSize.toLowerCase() !== 'null' && curSize.toLowerCase() !== 'undefined';
+
+    // LAYER 1: If no size assigned, prompt for size inline and save to Contact & Details
+    if (!hasSize) {
+      return `
+        <div style="background: ${themeBg}; border: 1px solid ${themeBorder}; border-radius: 8px; padding: 16px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 8px;">
+            <div style="font-size: 14px; font-weight: 800; color: #f8fafc; display: flex; align-items: center; gap: 8px;">
+              <span>${icon}</span>
+              <span>${label} Required for <span style="color: ${themeColor};">${this.escapeHtml(classMeta.code)}</span></span>
+            </div>
+            <span class="badge" style="background: rgba(239, 68, 68, 0.2); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.4); font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 4px;">
+              ⚠️ Step 1: Assign Size
+            </span>
+          </div>
+
+          <div style="font-size: 12.5px; color: #cbd5e1; margin-bottom: 12px; line-height: 1.5;">
+            Classification <strong>${this.escapeHtml(classMeta.code)}</strong> requires ${label.toLowerCase()}, but no size is currently recorded for <strong>${this.escapeHtml(data.displayName)}</strong>. Select their size below to log it to their <strong>Contact & Details</strong> section and search on-shelf inventory:
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <label for="profile-assign-${itemType}-size-select" style="font-size: 12px; font-weight: 700; color: #94a3b8;">Select ${isGlove ? 'Glove' : 'Sleeve'} Size:</label>
+              <select id="profile-assign-${itemType}-size-select" class="form-control" style="font-size: 13px; font-weight: 700; padding: 6px 12px; background: var(--bg-primary); border: 1px solid ${themeBorder}; border-radius: 6px; color: #fff; min-width: 140px;">
+                <option value="" disabled selected>-- Choose Size --</option>
+                ${sizes.map(s => `<option value="${s}">Size ${s}</option>`).join('')}
+              </select>
+            </div>
+            <button type="button" class="btn btn-primary" style="padding: 7px 18px; font-size: 12.5px; font-weight: 700; display: inline-flex; align-items: center; gap: 6px; background: #2563eb; border: none; box-shadow: 0 2px 6px rgba(37, 99, 235, 0.3);"
+                    onclick="window.employeeProfileEngine.savePpeSizeAndContinue('${this.escapeJs(data.displayName)}', '${itemType}')">
+              <span>💾</span> Save Size & Check Inventory
+            </button>
+          </div>
+        </div>
+      `;
+    }
+
+    // LAYER 2 & 3: Size is assigned! Query on-shelf inventory for matching size
+    const snap = this.db.getSnapshot();
+    const invTable = snap?.tables?.[invKey];
+    const allRows = invTable?.rows || [];
+
+    const NON_ASSIGNED_STATUSES = new Set(['on shelf', 'shelf', 'unassigned', '']);
+    const onShelfItems = allRows.filter(r => {
+      const status = String(r['Status'] || '').trim().toLowerCase();
+      const assignedTo = String(r['Assigned To'] || r['Holder'] || '').trim().toLowerCase();
+      return NON_ASSIGNED_STATUSES.has(status) || NON_ASSIGNED_STATUSES.has(assignedTo);
+    });
+
+    // Items with matching size
+    const matchingShelfItems = onShelfItems.filter(r => {
+      const s = String(r['Size'] || '').trim().toLowerCase();
+      return s === curSize.toLowerCase();
+    });
+
+    // LAYER 2: Matching item(s) found on shelf -> Display Quick Assign
+    if (matchingShelfItems.length > 0) {
+      return `
+        <div style="background: ${themeBg}; border: 1px solid ${themeBorder}; border-radius: 8px; padding: 16px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 8px;">
+            <div style="font-size: 14px; font-weight: 800; color: #f8fafc; display: flex; align-items: center; gap: 8px;">
+              <span>${icon}</span>
+              <span>${label} Ready for Assignment</span>
+              <span class="badge" style="background: ${themePillBg}; color: ${themeBadgeColor}; border: 1px solid ${themeBorder}; font-size: 11px; padding: 2px 8px; border-radius: 4px;">
+                Size ${this.escapeHtml(curSize)}
+              </span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 4px;">
+                ✅ ${matchingShelfItems.length} On Shelf
+              </span>
+              <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 11px;" onclick="window.employeeProfileEngine.promptChangePpeSize('${this.escapeJs(data.displayName)}', '${itemType}', '${this.escapeJs(curSize)}')">
+                ✏️ Change Size
+              </button>
+            </div>
+          </div>
+
+          <div style="font-size: 12.5px; color: #cbd5e1; margin-bottom: 12px;">
+            Size <strong>${this.escapeHtml(curSize)}</strong> is logged in <strong>Contact & Details</strong>. Found <strong>${matchingShelfItems.length}</strong> matching item(s) currently <strong>On Shelf</strong> ready for 1-click assignment:
+          </div>
+
+          <div style="overflow-x: auto; max-height: 240px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 6px;">
+            <table class="data-table" style="width: 100%; font-size: 12px; border-collapse: collapse;">
+              <thead>
+                <tr style="background: var(--bg-tertiary); position: sticky; top: 0; z-index: 2;">
+                  <th style="padding: 6px 10px; text-align: left;">Item #</th>
+                  <th style="padding: 6px 10px; text-align: center;">ESL ID</th>
+                  <th style="padding: 6px 10px; text-align: center;">Class</th>
+                  <th style="padding: 6px 10px; text-align: center;">Test Date</th>
+                  <th style="padding: 6px 10px; text-align: center;">Location</th>
+                  <th style="padding: 6px 10px; text-align: right;">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${matchingShelfItems.map(item => {
+                  const itNum = this.getItemIdentifier(item);
+                  const eslId = String(item['ESL ID'] || '—').trim();
+                  const itemClass = String(item['Class'] || (isGlove ? '0' : '2')).trim();
+                  const testDate = String(item['Test Date'] || '—').trim();
+                  const loc = String(item['Location'] || data.location || 'Helena').trim();
+                  return `
+                    <tr style="border-bottom: 1px solid rgba(255,255,255,0.05); background: rgba(255,255,255,0.01);">
+                      <td style="padding: 6px 10px; font-weight: 700; color: #60a5fa;">#${this.escapeHtml(itNum)}</td>
+                      <td style="padding: 6px 10px; text-align: center; color: #94a3b8; font-family: monospace;">${this.escapeHtml(eslId)}</td>
+                      <td style="padding: 6px 10px; text-align: center; color: #cbd5e1;">Cl ${this.escapeHtml(itemClass)}</td>
+                      <td style="padding: 6px 10px; text-align: center; color: #cbd5e1;">${this.escapeHtml(testDate)}</td>
+                      <td style="padding: 6px 10px; text-align: center; color: #94a3b8;">${this.escapeHtml(loc)}</td>
+                      <td style="padding: 6px 10px; text-align: right;">
+                        <button type="button" class="btn btn-primary" style="padding: 3px 12px; font-size: 11.5px; font-weight: 700; display: inline-flex; align-items: center; gap: 4px;"
+                                onclick="window.employeeProfileEngine.assignPpeItemFromProfile('${this.escapeJs(itNum)}', '${invKey}', '${this.escapeJs(data.displayName)}', '${this.escapeJs(data.location || 'Helena')}')">
+                          <span>➕ Quick Assign</span>
+                        </button>
+                      </td>
+                    </tr>
+                  `;
+                }).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    }
+
+    // LAYER 3: Out of Stock on shelf -> Ask to add to Purchase Needs section
+    const swapTable = snap?.tables?.[swapKey];
+    const swapRows = swapTable?.rows || [];
+    const alreadyInNeeds = swapRows.some(r => {
+      const rEmp = String(r['Employee'] || r['Employee Name'] || '').trim();
+      const rStatus = String(r['Status'] || '').trim().toLowerCase();
+      return this.isNameMatch(rEmp, data.displayName) && (rStatus.includes('need to purchase') || rStatus.includes('purchase'));
+    });
+
+    return `
+      <div style="background: ${themeBg}; border: 1px solid ${themeBorder}; border-radius: 8px; padding: 16px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 8px;">
+          <div style="font-size: 14px; font-weight: 800; color: #f8fafc; display: flex; align-items: center; gap: 8px;">
+            <span>${icon}</span>
+            <span>${label} Out of Stock</span>
+            <span class="badge" style="background: ${themePillBg}; color: ${themeBadgeColor}; border: 1px solid ${themeBorder}; font-size: 11px; padding: 2px 8px; border-radius: 4px;">
+              Size ${this.escapeHtml(curSize)}
+            </span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span class="badge" style="background: rgba(239, 68, 68, 0.2); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.4); font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 4px;">
+              ⚠️ 0 Available On Shelf
+            </span>
+            <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 11px;" onclick="window.employeeProfileEngine.promptChangePpeSize('${this.escapeJs(data.displayName)}', '${itemType}', '${this.escapeJs(curSize)}')">
+              ✏️ Change Size
+            </button>
+          </div>
+        </div>
+
+        <div style="font-size: 12.5px; color: #cbd5e1; margin-bottom: 12px; line-height: 1.5;">
+          Size <strong>${this.escapeHtml(curSize)}</strong> is logged in <strong>Contact & Details</strong>, but <strong>no Size ${this.escapeHtml(curSize)} ${label.toLowerCase()} are currently On Shelf</strong> in inventory.
+        </div>
+
+        ${alreadyInNeeds ? `
+          <div style="background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 6px; padding: 10px 14px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <span style="font-size: 16px;">🛒</span>
+              <span style="font-size: 12.5px; font-weight: 700; color: #6ee7b7;">
+                Queued in Purchase Needs: Size ${this.escapeHtml(curSize)} ${label} for ${this.escapeHtml(data.displayName)} is on the Purchase Orders list.
+              </span>
+            </div>
+            <button class="btn btn-secondary" style="font-size: 11.5px; padding: 4px 10px; border-color: #10b981; color: #6ee7b7; display: inline-flex; align-items: center; gap: 4px;"
+                    onclick="if(window.sheetNavigator){window.sheetNavigator.switchView('procurement-view');} window.employeeProfileEngine.closeProfileModal();">
+              <span>📋</span> Open Purchase Orders
+            </button>
+          </div>
+        ` : `
+          <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+            <button type="button" class="btn btn-warning" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color: #fff; border: none; padding: 7px 18px; font-size: 12.5px; font-weight: 700; display: inline-flex; align-items: center; gap: 6px; box-shadow: 0 2px 6px rgba(245, 158, 11, 0.3);"
+                    onclick="window.employeeProfileEngine.addToPurchaseNeedsFromProfile('${this.escapeJs(data.displayName)}', '${itemType}', '${this.escapeJs(curSize)}')">
+              <span>🛒</span> Add to Purchase Needs (Size ${this.escapeHtml(curSize)})
+            </button>
+            <span style="font-size: 11.5px; color: var(--text-muted);">
+              Queues this item in Purchase Needs to generate a PO for your vendor.
+            </span>
+          </div>
+        `}
+      </div>
+    `;
+  }
+
+  /**
+   * Layer 1 Action: Saves PPE size to Employees table (Contact & Details), updates memory, and refreshes
+   */
+  async savePpeSizeAndContinue(displayName, itemType, selectedSize = null) {
+    if (!displayName) return;
+    const isGlove = itemType === 'gloves';
+    let size = selectedSize;
+    if (!size) {
+      const selectEl = document.getElementById(`profile-assign-${itemType}-size-select`);
+      size = selectEl ? selectEl.value.trim() : '';
+    }
+    if (!size) {
+      alert(`Please select a ${isGlove ? 'glove' : 'sleeve'} size from the dropdown.`);
+      return;
+    }
+
+    const empTable = this.db.getTable('employees');
+    if (!empTable || !empTable.rows) {
+      alert('Employees sheet not available.');
+      return;
+    }
+
+    const row = empTable.rows.find(r => this.isNameMatch(r['Employee Name'] || r['Name'] || '', displayName));
+    if (!row) {
+      alert(`Could not find record for "${displayName}" in Employees sheet.`);
+      return;
+    }
+
+    const headers = empTable.headers || [];
+    const getFieldKey = (target) => headers.find(h => h.toLowerCase().trim() === target.toLowerCase().trim()) || target;
+    const targetKey = getFieldKey(isGlove ? 'Glove Size' : 'Sleeve Size');
+
+    row[targetKey] = size;
+
+    if (window.sheetNavigator && typeof window.sheetNavigator.syncRowToRawGrid === 'function') {
+      window.sheetNavigator.syncRowToRawGrid(empTable, row);
+    }
+
+    const empRowIdx = row._rowIdx || (empTable.rows.indexOf(row) + 2);
+    await this.db.addMutation({
+      action: 'UPDATE_ROW',
+      sheetName: empTable.name,
+      tableKey: 'employees',
+      employeeName: displayName,
+      row: empRowIdx,
+      itemIdentifier: displayName,
+      updatedFields: { [targetKey]: size }
+    });
+
+    const snap = this.db.getSnapshot();
+    if (snap && typeof this.db.persistSnapshot === 'function') {
+      await this.db.persistSnapshot(snap);
+    }
+
+    // Update in-memory profile data
+    if (this.currentEmployeeData && this.isNameMatch(this.currentEmployeeData.displayName, displayName)) {
+      if (isGlove) {
+        this.currentEmployeeData.gloveSize = size;
+      } else {
+        this.currentEmployeeData.sleeveSize = size;
+      }
+    }
+
+    if (typeof window.showToast === 'function') {
+      window.showToast(`Saved ${isGlove ? 'Glove' : 'Sleeve'} Size ${size} to Contact & Details for ${displayName}`, 'success');
+    }
+
+    // Refresh profile modal
+    const modalBody = document.getElementById('employee-profile-modal-body');
+    if (modalBody) {
+      this.renderModalContent(modalBody);
+    }
+
+    // Update PPE audit data and crew card
+    if (window.ppeTrackingEngine) {
+      window.ppeTrackingEngine.compileAuditData();
+      window.ppeTrackingEngine.updateToolbarBadge();
+    }
+    if (window.sheetNavigator && typeof window.sheetNavigator.renderCurrentSheet === 'function') {
+      window.sheetNavigator.renderCurrentSheet();
+    }
+  }
+
+  /**
+   * Prompts user to change their recorded PPE size
+   */
+  promptChangePpeSize(displayName, itemType, currentSize) {
+    const isGlove = itemType === 'gloves';
+    const sizes = isGlove
+      ? ['8', '8.5', '9', '9.5', '10', '10.5', '11', '11.5', '12']
+      : ['Regular', 'Large', 'X-Large'];
+
+    const newSize = prompt(`Change ${isGlove ? 'Rubber Glove' : 'Rubber Sleeve'} Size for ${displayName}:\nOptions: ${sizes.join(', ')}`, currentSize || '');
+    if (newSize === null) return;
+    const trimmed = newSize.trim();
+    if (!trimmed) return;
+    this.savePpeSizeAndContinue(displayName, itemType, trimmed);
+  }
+
+  /**
+   * Layer 2 Action: 1-click assigns on-shelf PPE gear to employee with date, location, and Change Out Date calculation
+   */
+  async assignPpeItemFromProfile(itemIdentifier, invKey, displayName, defaultLocation) {
+    if (!itemIdentifier || !displayName) return;
+
+    let assignDetails = null;
+    if (window.sheetNavigator && typeof window.sheetNavigator.promptAssignItemDetails === 'function') {
+      assignDetails = await window.sheetNavigator.promptAssignItemDetails(itemIdentifier, displayName, defaultLocation);
+    } else {
+      const today = new Date();
+      const todayFormatted = `${String(today.getMonth() + 1).padStart(2, '0')}/${String(today.getDate()).padStart(2, '0')}/${today.getFullYear()}`;
+      assignDetails = { dateAssigned: todayFormatted, location: defaultLocation || 'Helena' };
+    }
+
+    if (!assignDetails) return; // User cancelled prompt
+
+    const chosenDate = assignDetails.dateAssigned;
+    const chosenLoc = assignDetails.location || defaultLocation || 'Helena';
+
+    const snap = this.db.getSnapshot();
+    const table = snap?.tables?.[invKey];
+    if (!table || !table.rows) return;
+
+    const targetRow = table.rows.find(r => this.getItemIdentifier(r) === itemIdentifier);
+    if (!targetRow) {
+      alert(`⚠️ Item #${itemIdentifier} could not be located in ${invKey} table.`);
+      return;
+    }
+
+    const headers = table.headers || Object.keys(targetRow);
+    const assignedCol = headers.find(h => /^(assigned\s*to|holder|assigned)$/i.test(h)) || 'Assigned To';
+    const statusCol = headers.find(h => /^status$/i.test(h)) || 'Status';
+    const locCol = headers.find(h => /^location$/i.test(h)) || 'Location';
+    const dateAssignedCol = headers.find(h => /^(date\s*assigned|date)$/i.test(h)) || 'Date Assigned';
+    const chgOutCol = headers.find(h => /^(change\s*out\s*date|changeout\s*date)$/i.test(h)) || 'Change Out Date';
+    const pickedCol = headers.find(h => /^picked\s*for$/i.test(h)) || 'Picked For';
+    const testDateCol = headers.find(h => /^test\s*date$/i.test(h)) || 'Test Date';
+
+    targetRow[assignedCol] = displayName;
+    targetRow[statusCol] = 'Assigned';
+    targetRow[locCol] = chosenLoc;
+    targetRow[dateAssignedCol] = chosenDate;
+    if (pickedCol) targetRow[pickedCol] = '';
+
+    // Calculate Change Out Date
+    const testDateVal = testDateCol ? (targetRow[testDateCol] || '') : '';
+    if (window.inventoryManager && typeof window.inventoryManager.calculateChangeOutDate === 'function') {
+      const calc = window.inventoryManager.calculateChangeOutDate(
+        chosenDate || testDateVal,
+        chosenLoc,
+        displayName,
+        invKey,
+        { testDate: testDateVal }
+      );
+      if (calc && calc !== 'N/A' && chgOutCol) {
+        targetRow[chgOutCol] = calc;
+      }
+    }
+
+    // Queue mutations
+    if (typeof this.db.queueMutation === 'function') {
+      const actualRowIdx = targetRow._rowIdx || 2;
+      const getColNum = (hName) => (headers.indexOf(hName) + 1);
+
+      await this.db.queueMutation({ type: 'UPDATE_CELL', sheet: table.name || invKey, row: actualRowIdx, col: getColNum(assignedCol), value: displayName });
+      await this.db.queueMutation({ type: 'UPDATE_CELL', sheet: table.name || invKey, row: actualRowIdx, col: getColNum(statusCol), value: 'Assigned' });
+      await this.db.queueMutation({ type: 'UPDATE_CELL', sheet: table.name || invKey, row: actualRowIdx, col: getColNum(locCol), value: chosenLoc });
+      await this.db.queueMutation({ type: 'UPDATE_CELL', sheet: table.name || invKey, row: actualRowIdx, col: getColNum(dateAssignedCol), value: chosenDate });
+      if (pickedCol) await this.db.queueMutation({ type: 'UPDATE_CELL', sheet: table.name || invKey, row: actualRowIdx, col: getColNum(pickedCol), value: '' });
+      if (chgOutCol && targetRow[chgOutCol]) {
+        await this.db.queueMutation({ type: 'UPDATE_CELL', sheet: table.name || invKey, row: actualRowIdx, col: getColNum(chgOutCol), value: targetRow[chgOutCol] });
+      }
+    }
+
+    // Record history event
+    if (typeof this.db.recordItemHistoryEvent === 'function') {
+      try {
+        await this.db.recordItemHistoryEvent(table.name || invKey, targetRow, `Assigned to ${displayName}`);
+      } catch (e) {
+        console.warn('History recording note:', e);
+      }
+    }
+
+    // Persist snapshot
+    if (typeof this.db.persistSnapshot === 'function') {
+      await this.db.persistSnapshot(snap);
+    }
+
+    if (typeof window.showToast === 'function') {
+      window.showToast(`Assigned ${invKey === 'gloves' ? 'Glove' : 'Sleeve'} #${itemIdentifier} to ${displayName}`, 'success');
+    }
+
+    // Refresh profile modal
+    this.openProfileModal(displayName, 'equipment');
+
+    // Update PPE audit data & toolbar badge
+    if (window.ppeTrackingEngine) {
+      window.ppeTrackingEngine.compileAuditData();
+      window.ppeTrackingEngine.updateToolbarBadge();
+    }
+
+    // Update current sheet view
+    if (window.sheetNavigator && typeof window.sheetNavigator.renderCurrentSheet === 'function') {
+      window.sheetNavigator.renderCurrentSheet();
+    }
+  }
+
+  /**
+   * Layer 3 Action: Adds item to Purchase Needs in swap sheet & procurement engine
+   */
+  async addToPurchaseNeedsFromProfile(displayName, itemType, size) {
+    if (!displayName || !size) return;
+    const isGlove = itemType === 'gloves';
+    const swapKey = isGlove ? 'glove_swaps' : 'sleeve_swaps';
+    const snap = this.db.getSnapshot();
+    if (!snap || !snap.tables) return;
+
+    const swapTable = snap.tables[swapKey];
+    if (swapTable && swapTable.rows) {
+      const headers = swapTable.headers || [
+        'Employee', 'Current Item', 'Size', 'Date Assigned', 'Change Out Date',
+        'Days Left', 'Pick List Item #', 'Status', 'Picked', 'Date Changed'
+      ];
+
+      // Check if employee already has a row in this swap table
+      let existingRow = swapTable.rows.find(r => this.isNameMatch(r['Employee'] || r['Employee Name'] || '', displayName));
+
+      if (existingRow) {
+        existingRow['Size'] = size;
+        existingRow['Status'] = 'Need to Purchase ❌';
+        existingRow['Pick List Item #'] = '—';
+        if (typeof this.db.queueMutation === 'function') {
+          const actualRowIdx = existingRow._rowIdx || (swapTable.rows.indexOf(existingRow) + 2);
+          const getColNum = (hName) => (headers.findIndex(h => h.toLowerCase() === hName.toLowerCase()) + 1);
+          await this.db.queueMutation({ type: 'UPDATE_CELL', sheet: swapTable.name || swapKey, row: actualRowIdx, col: getColNum('Status'), value: 'Need to Purchase ❌' });
+          await this.db.queueMutation({ type: 'UPDATE_CELL', sheet: swapTable.name || swapKey, row: actualRowIdx, col: getColNum('Pick List Item #'), value: '—' });
+          await this.db.queueMutation({ type: 'UPDATE_CELL', sheet: swapTable.name || swapKey, row: actualRowIdx, col: getColNum('Size'), value: size });
+        }
+      } else {
+        const newRow = {};
+        headers.forEach((h, idx) => {
+          if (idx === 0) newRow[h] = displayName;
+          else if (idx === 1) newRow[h] = '—';
+          else if (idx === 2) newRow[h] = size;
+          else if (idx === 3) newRow[h] = 'N/A';
+          else if (idx === 4) newRow[h] = 'N/A';
+          else if (idx === 5) newRow[h] = '0';
+          else if (idx === 6) newRow[h] = '—';
+          else if (idx === 7) newRow[h] = 'Need to Purchase ❌';
+          else if (idx === 8) newRow[h] = 'FALSE';
+          else if (idx === 9) newRow[h] = '—';
+          else newRow[h] = '';
+        });
+        swapTable.rows.push(newRow);
+        if (Array.isArray(swapTable.rawGrid)) {
+          swapTable.rawGrid.push(Object.values(newRow));
+        }
+
+        if (typeof this.db.queueMutation === 'function') {
+          await this.db.queueMutation({
+            type: 'ADD_ROW',
+            sheet: swapTable.name || swapKey,
+            row: swapTable.rows.length + 1,
+            data: newRow
+          });
+        }
+      }
+    }
+
+    // Also record in safety_equipment_needs if table exists
+    const needsTable = snap.tables['safety_equipment_needs'];
+    if (needsTable && needsTable.rows) {
+      const today = new Date();
+      const todayFormatted = `${String(today.getMonth() + 1).padStart(2, '0')}/${String(today.getDate()).padStart(2, '0')}/${today.getFullYear()}`;
+      const needsRow = {
+        'Employee': displayName,
+        'Item Type': isGlove ? 'Rubber Gloves' : 'Rubber Sleeves',
+        'Size': size,
+        'Class': isGlove ? 'Class 0' : 'Class 2',
+        'Status': 'Pending Purchase',
+        'Date Requested': todayFormatted,
+        'Notes': `Added from Employee Profile for ${displayName}`
+      };
+      needsTable.rows.push(needsRow);
+    }
+
+    // Persist snapshot
+    if (typeof this.db.persistSnapshot === 'function') {
+      await this.db.persistSnapshot(snap);
+    }
+
+    // Reload procurement engine
+    if (window.procurementEngine && typeof window.procurementEngine.loadData === 'function') {
+      window.procurementEngine.loadData();
+    }
+
+    if (typeof window.showToast === 'function') {
+      window.showToast(`Added Size ${size} ${isGlove ? 'Gloves' : 'Sleeves'} for ${displayName} to Purchase Needs`, 'success');
+    }
+
+    // Re-render profile modal body to update card state
+    const modalBody = document.getElementById('employee-profile-modal-body');
+    if (modalBody) {
+      this.renderModalContent(modalBody);
+    }
+  }
+
+  /**
    * Renders the current selected tab body
    */
   renderActiveTabContent() {
@@ -1827,8 +2443,20 @@ class EmployeeProfileEngine {
     if (this.currentActiveTab === 'equipment') {
       const allEq = data.assignedEquipment || [];
       const allHist = data.equipmentHistory || [];
+      const ppeSectionHtml = this.renderRubberPpeComplianceSection(data);
 
       if (allEq.length === 0 && allHist.length === 0) {
+        if (ppeSectionHtml) {
+          return `
+            ${ppeSectionHtml}
+            <div style="padding: 30px; text-align: center; color: var(--text-muted); background: var(--bg-primary); border-radius: 8px; border: 1px dashed var(--border-color); margin-top: 16px;">
+              <div style="font-size: 28px; margin-bottom: 8px;">📦</div>
+              <h4 style="color: var(--text-primary); font-size: 14px; margin-bottom: 4px;">No Other Equipment Records Found</h4>
+              <p style="font-size: 12.5px; margin: 0;">This employee does not currently have blankets, MACKs, grounds, hot sticks, testers, or AEDs checked out.</p>
+            </div>
+          `;
+        }
+
         return `
           <div style="padding: 40px; text-align: center; color: var(--text-muted); background: var(--bg-primary); border-radius: 8px; border: 1px dashed var(--border-color);">
             <div style="font-size: 32px; margin-bottom: 10px;">📦</div>
@@ -1890,6 +2518,7 @@ class EmployeeProfileEngine {
       const showActiveEqCol = this.currentEquipmentFilter === 'all';
 
       let html = `
+        ${ppeSectionHtml}
         <!-- Equipment Category Sub-Tabs -->
         <div style="display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 16px; padding: 6px; background: var(--bg-primary); border-radius: 8px; border: 1px solid var(--border-color);">
           ${categories.map(cat => {

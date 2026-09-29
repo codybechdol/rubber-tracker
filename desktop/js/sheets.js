@@ -1227,6 +1227,7 @@ class SheetNavigator {
     const btnTransferEquip = document.getElementById('btn-transfer-equipment-top');
     const btnManageDrug = document.getElementById('btn-manage-drug-tests');
     const btnPushClean = document.getElementById('btn-push-clean-sheet');
+    const btnPpeTracking = document.getElementById('btn-ppe-tracking');
 
     const INVENTORY_KEYS = [
       'gloves', 'sleeves', 'blankets', 'macks',
@@ -1305,6 +1306,13 @@ class SheetNavigator {
 
     if (btnArchiveLost) {
       btnArchiveLost.style.display = isInventorySheet ? 'inline-flex' : 'none';
+    }
+
+    if (btnPpeTracking) {
+      btnPpeTracking.style.display = (isEmployeeOrJobSheet || isInventorySheet || this.currentSheetKey === 'gloves' || this.currentSheetKey === 'sleeves') ? 'inline-flex' : 'none';
+      if (window.ppeTrackingEngine) {
+        window.ppeTrackingEngine.updateToolbarBadge();
+      }
     }
 
     // Toggle and render Visual Analytics for Gloves & Sleeves
@@ -2352,7 +2360,7 @@ class SheetNavigator {
     })).filter(a => a.name);
 
     // Helper for rendering a single employee row inside a card
-    const renderMemberRow = (e, isLead = false, baseJob = '', _isSecondaryCard = false) => {
+    const renderMemberRow = (e, isLead = false, baseJob = '') => {
       return `
         <div class="crew-member-row"
              draggable="true"
@@ -2384,6 +2392,7 @@ class SheetNavigator {
               ${isLead ? '<span title="Crew Foreman / Lead" style="margin-right: 2px;">👑</span>' : ''}
               <span>${this.escapeHtml(e.name)}</span>
             </a>
+            ${window.ppeTrackingEngine ? window.ppeTrackingEngine.getMemberRowBadge(e.name, e.classification) : ''}
             ${e.isSecondaryMember && e.primaryJobNumber ? `
               <span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); font-size: 9.5px; font-weight: 700; padding: 1px 5px; border-radius: 3px;" title="Primary Job: ${this.escapeHtml(e.primaryJobNumber)}">
                 ⚡ 1st: ${this.escapeHtml(e.primaryJobNumber)}
@@ -2461,6 +2470,7 @@ class SheetNavigator {
                      title="Open Employee Profile for ${this.escapeHtml(e.name)}">
                     ${this.escapeHtml(e.name)}
                   </a>
+                  ${window.ppeTrackingEngine ? window.ppeTrackingEngine.getMemberRowBadge(e.name, e.classification) : ''}
                   <span class="badge" style="background: rgba(255,255,255,0.05); color: var(--text-muted); font-size: 10px; padding: 1px 5px; border-radius: 4px;">
                     📍 ${this.escapeHtml(e.location)}
                   </span>
@@ -5321,7 +5331,9 @@ class SheetNavigator {
           const vStr = String(val).trim();
           if (vStr === '✅' || vStr === '✅L' || vStr.startsWith('✅')) {
             const isLate = vStr.includes('L');
-            customCellHtml = `<span style="font-size: 14px; display: inline-flex; align-items: center; justify-content: center; gap: 2px;" title="${isLate ? 'Completed Late (Received after deadline)' : 'Submitted on time'}">✅${isLate ? '<span style="font-size: 9.5px; font-weight: 800; color: #f59e0b;">L</span>' : ''}</span>`;
+            const jobVal = String(row['Job Number'] || row['Job #'] || row['Crew'] || '').trim();
+            const weekVal = String(row['Week Start'] || row['Week'] || '').trim();
+            customCellHtml = `<span style="font-size: 14px; display: inline-flex; align-items: center; justify-content: center; gap: 2px; cursor: pointer;" title="${isLate ? 'Completed Late (Received after deadline)' : 'Submitted on time'} · Click to view PDF document" onclick="event.stopPropagation(); if (window.safetyComplianceEngine) window.safetyComplianceEngine.openPdfForComplianceCell('${this.escapeJs(jobVal)}', '${this.escapeJs(h)}', '${this.escapeJs(weekVal)}');">✅${isLate ? '<span style="font-size: 9.5px; font-weight: 800; color: #f59e0b;">L</span>' : ''}</span>`;
           } else if (vStr === '❌' || vStr.startsWith('❌')) {
             const letter = vStr.replace('❌', '').trim();
             const badgeColor = letter === 'A' ? '#38bdf8' : (letter === 'W' ? '#fbbf24' : (letter === 'D' ? '#ef4444' : '#c084fc'));

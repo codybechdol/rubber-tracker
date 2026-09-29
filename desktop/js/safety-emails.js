@@ -15,6 +15,8 @@ class SafetyEmailsEngine {
     this.activeSortOption = 'date_desc';
     this.searchQuery = '';
     this.pdfCache = new Map();
+    window.safetyComplianceEngine = this;
+    window.safetyEmailsEngine = this;
   }
 
   init() {
@@ -387,7 +389,7 @@ class SafetyEmailsEngine {
             <th>Foreman</th>
             <th style="width: 80px;">Credited</th>
             <th style="width: 75px;">Status</th>
-            <th style="width: 160px; text-align: center;">Actions</th>
+            <th style="width: 175px; text-align: center;">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -395,6 +397,7 @@ class SafetyEmailsEngine {
             const typeClass = log.type === 'JHA' ? 'jha' : (log.type === 'Weekly Safety Meeting' ? 'weekly' : (log.type === 'Monthly Checklist' ? 'monthly' : 'equipment'));
             const typeLabel = log.type === 'JHA' ? '📋 JHA' : (log.type === 'Weekly Safety Meeting' ? '🗣️ Meeting' : (log.type === 'Monthly Checklist' ? '🚛 Checklist' : '⚠️ Issue'));
             const statusColor = log.status === 'Credited' ? '#34d399' : (log.status === 'Unknown Job' ? '#f59e0b' : '#94a3b8');
+            const logIdentifier = this.escapeHtml(log.id || (log.sheetName + '_' + log.rowIndex));
 
             return `
               <tr>
@@ -412,12 +415,17 @@ class SafetyEmailsEngine {
                   </span>
                 </td>
                 <td style="text-align: center;">
-                  <button class="btn btn-secondary" style="font-size: 10.5px; padding: 3px 7px; margin-right: 4px;" onclick="window.safetyEmailsEngine.openEditLogModal('${log.type}', '${this.escapeHtml(log.rowId || '')}')">
-                    ✏️ Edit
-                  </button>
-                  <button class="btn btn-secondary" style="font-size: 10.5px; padding: 3px 7px; color: #f87171;" onclick="window.safetyEmailsEngine.deleteLogEntry('${log.type}', '${this.escapeHtml(log.rowId || '')}')">
-                    🗑️
-                  </button>
+                  <div style="display: inline-flex; align-items: center; justify-content: center; gap: 5px;">
+                    <button class="btn-pdf-link" onclick="window.safetyComplianceEngine.openPdfViewer('${logIdentifier}')" title="Preview original attached PDF document directly in the app">
+                      📄 View PDF
+                    </button>
+                    <button class="btn-edit-log-row" onclick="window.safetyComplianceEngine.openEditLogModal('${logIdentifier}')" title="Edit log info (fix typos)">
+                      ✏️ Edit
+                    </button>
+                    <button class="btn-delete-log-row" onclick="window.safetyComplianceEngine.deleteLogEntry('${logIdentifier}')" title="Delete log record">
+                      🗑️
+                    </button>
+                  </div>
                 </td>
               </tr>
             `;
@@ -1634,6 +1642,10 @@ class SafetyEmailsEngine {
           resJson = await response.json();
         }
 
+        if (resJson && resJson.result && !resJson.base64) {
+          resJson = resJson.result;
+        }
+
         if (!resJson || !resJson.success || !resJson.base64) {
           throw new Error((resJson && resJson.error) || 'Failed to extract PDF attachment.');
         }
@@ -1720,6 +1732,63 @@ class SafetyEmailsEngine {
   closePdfModal() {
     const modal = document.getElementById('safety-pdf-modal');
     if (modal) modal.style.display = 'none';
+  }
+
+  /**
+   * Quick-opens the attached PDF for a cell clicked in the Safety Compliance tracker sheet.
+   */
+  openPdfForComplianceCell(jobNum, colHeader, weekStart) {
+    if (!this.currentLogs || this.currentLogs.length === 0) {
+      this.currentLogs = this.extractLogsFromLocalDB();
+    }
+    const cleanJob = String(jobNum || '').trim();
+    const cleanWeek = String(weekStart || '').trim();
+    const hLower = String(colHeader || '').toLowerCase();
+
+    let targetType = 'JHA';
+    if (hLower.includes('meeting')) {
+      targetType = 'Weekly Safety Meeting';
+    } else if (hLower.includes('checklist')) {
+      targetType = 'Monthly Checklist';
+    }
+
+    // Try to extract date from column header e.g. "Tue (09/29)" or "(09/29/2026)"
+    const dateMatch = String(colHeader).match(/(\d{1,2}\/\d{1,2}(?:\/\d{2,4})?)/);
+    const dateSubstr = dateMatch ? dateMatch[1] : '';
+
+    const match = (this.currentLogs || []).find(l => {
+      const jobMatches = (l.jobNumber === cleanJob) || (l.creditedTo === cleanJob);
+      if (!jobMatches) return false;
+
+      if (targetType === 'Weekly Safety Meeting') {
+        const isWeekly = l.type === 'Weekly Safety Meeting' || l.sheetName === 'Weekly Safety Log';
+        if (!isWeekly) return false;
+        if (cleanWeek && l.date) return l.date.includes(cleanWeek) || cleanWeek.includes(l.date);
+        return true;
+      }
+      if (targetType === 'Monthly Checklist') {
+        return l.type === 'Monthly Checklist' || l.sheetName === 'Monthly Checklist Log';
+      }
+
+      // For JHA:
+      if (l.type !== 'JHA' && l.sheetName !== 'JHA Log') return false;
+      if (dateSubstr) {
+        if (l.date && l.date.includes(dateSubstr)) return true;
+        if (l.dateReceived && l.dateReceived.includes(dateSubstr)) return true;
+      }
+      return true;
+    });
+
+    if (match) {
+      this.openPdfViewer(match.id);
+    } else {
+      this.openSafetyLogsModal();
+      if (cleanJob) {
+        this.onSearchInput(cleanJob);
+        const searchBox = document.getElementById('safety-log-search');
+        if (searchBox) searchBox.value = cleanJob;
+      }
+    }
   }
 
   /**
@@ -1862,6 +1931,66 @@ class SafetyEmailsEngine {
     if (container) {
       container.innerHTML = this.renderLogsTableHtml();
       this.updateLogCountIndicator();
+    }
+  }
+
+  /**
+   * Deletes a safety log entry from local DB and queues a DELETE_ROW mutation to Google Sheets.
+   */
+  async deleteLogEntry(logId) {
+    const log = (this.currentLogs || []).find(l => (l.id === logId || (l.sheetName + '_' + l.rowIndex) === logId));
+    if (!log) {
+      alert('Log record not found.');
+      return;
+    }
+
+    const confirmDelete = confirm(`Are you sure you want to delete this log entry?\n\nType: ${log.type || log.sheetName}\nForeman: ${log.foreman || 'UNKNOWN'}\nJob: ${log.jobNumber || 'N/A'}\nDate: ${log.date || 'N/A'}\n\nThis will remove the record and queue synchronization to Google Sheets.`);
+    if (!confirmDelete) return;
+
+    // Queue mutation to sync back to Google Sheets
+    if (window.syncEngine && log.sheetName && log.rowIndex > 1) {
+      window.syncEngine.addMutation({
+        action: 'DELETE_ROW',
+        sheetName: log.sheetName,
+        row: log.rowIndex
+      });
+    }
+
+    // Remove from localDB snapshot
+    if (window.localDB && window.localDB.snapshot && window.localDB.snapshot.tables) {
+      const snap = window.localDB.snapshot;
+      let tblKey = '';
+      if (log.sheetName === 'JHA Log') tblKey = 'jha_log';
+      else if (log.sheetName === 'Weekly Safety Log') tblKey = 'weekly_safety_log';
+      else if (log.sheetName === 'Monthly Checklist Log') tblKey = 'monthly_checklist_log';
+
+      if (tblKey && snap.tables[tblKey] && snap.tables[tblKey].rows) {
+        const rows = snap.tables[tblKey].rows;
+        const idx = rows.findIndex(r => (r._rowIdx === log.rowIndex) || (log.emailId && (r['Email ID'] === log.emailId || r.email_id === log.emailId)));
+        if (idx !== -1) {
+          rows.splice(idx, 1);
+          rows.forEach((r, i) => { r._rowIdx = i + 2; });
+        }
+      }
+      if (typeof window.localDB.persistSnapshot === 'function') {
+        window.localDB.persistSnapshot(snap);
+      }
+    }
+
+    // Remove from in-memory currentLogs
+    const logIdx = (this.currentLogs || []).indexOf(log);
+    if (logIdx !== -1) {
+      this.currentLogs.splice(logIdx, 1);
+    }
+
+    // Re-render table
+    const container = document.getElementById('safety-logs-table-container');
+    if (container) {
+      container.innerHTML = this.renderLogsTableHtml();
+      this.updateLogCountIndicator();
+    }
+    if (typeof window.showToast === 'function') {
+      window.showToast('🗑️ Safety log entry deleted.', 'info');
     }
   }
 
@@ -2090,3 +2219,6 @@ class SafetyEmailsEngine {
 
 // Attach globally
 window.SafetyEmailsEngine = SafetyEmailsEngine;
+if (window.safetyComplianceEngine) {
+  window.safetyEmailsEngine = window.safetyComplianceEngine;
+}
