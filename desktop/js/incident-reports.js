@@ -201,23 +201,44 @@ class IncidentReportsEngine {
       let unitNum = String(row['Unit #'] || '').trim();
       let ticketNum = String(row['Ticket #'] || '').trim();
 
-      // Clean up any legacy parsing artifact where Unit # was stored as "Ticket"
+      // Clean up legacy parsing artifact where Unit # was stored as "Ticket"
       if (unitNum.toLowerCase() === 'ticket') {
         unitNum = '';
       }
-      // If ticketNum started with unitNum e.g. "5008 510 B394955 E" and unitNum was empty, separate them
+
+      // If ticketNum contains unitNum + citation e.g. "5008 510 B394955 E", split them
       if (!unitNum && ticketNum) {
         const uMatch = ticketNum.match(/^(\d{3,5})\s+(.+)$/);
         if (uMatch) {
           unitNum = uMatch[1];
           ticketNum = uMatch[2];
+        } else if (/^\d{1,5}$/.test(ticketNum) && !/^R/i.test(ticketNum)) {
+          // Pure 1-5 digit number (like 550, 5008, 104) is a vehicle / fleet Unit #, NOT a ticket!
+          unitNum = ticketNum;
+          ticketNum = '';
         }
       }
+
+      // If unitNum and ticketNum are identical, ticket is empty
+      if (unitNum && ticketNum && unitNum === ticketNum) {
+        ticketNum = '';
+      }
+
       // If unitNum looks like an 811 Dig ticket (starts with R followed by digits) and ticketNum is empty, swap
       if (unitNum && /^R\d{5,}/i.test(unitNum) && !ticketNum) {
         ticketNum = unitNum;
         unitNum = '';
       }
+
+      // Clean up leaked form field labels from explanation
+      let explanation = String(row['Brief Explanation'] || row['Explanation'] || '').trim();
+      explanation = explanation
+        .replace(/Address of Incident\s*:\s*[^\n\r"']+/gi, '')
+        .replace(/Incident Type\s*:\s*[^\n\r"']+/gi, '')
+        .replace(/Date of Incident\s*:\s*[^\n\r"']+/gi, '')
+        .replace(/Involved Employee\(s\)\s*Name\s*:\s*[^\n\r"']+/gi, '')
+        .replace(/\s+/g, ' ')
+        .trim();
 
       const displayTime = this.formatDisplayTime(row['Time']);
       const displayDate = this.formatDisplayDate(rawDate);
@@ -245,7 +266,7 @@ class IncidentReportsEngine {
         addressLocation: String(row['Address / Location'] || row['Location'] || '').trim(),
         unitNumber: unitNum,
         ticketNumber: ticketNum,
-        explanation: String(row['Brief Explanation'] || row['Explanation'] || '').trim(),
+        explanation: explanation,
         avoidableActions: String(row['Avoidable / Prevention'] || row['Avoidable'] || '').trim(),
         photoCount: parseInt(row['Photo Count'] || 0, 10),
         pdfFilename: String(row['PDF Filename'] || 'Incident_Report.pdf').trim(),
@@ -730,7 +751,8 @@ class IncidentReportsEngine {
 
       const payload = {
         action: 'scanIncidentEmails',
-        daysBack: 365
+        daysBack: 365,
+        rescan: true
       };
 
       let result = null;
