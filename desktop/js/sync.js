@@ -170,10 +170,13 @@ class SyncEngine {
 
   formatMutation(mut) {
     if (!mut) return { title: 'Unknown Change', desc: '', icon: '✏️', sheet: 'System', time: '' };
+    const action = mut.action || mut.type || '';
+    const sheet = mut.sheetName || mut.sheet || 'Sheet';
+    const rowData = mut.rowData || mut.data || {};
     const timeStr = mut.timestamp ? new Date(mut.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : '';
-    const sheet = mut.sheetName || 'Sheet';
     const tableKey = mut.tableKey || (this.db && typeof this.db.getTableKeyForSheet === 'function' ? this.db.getTableKeyForSheet(sheet) : sheet.toLowerCase().replace(/\s+/g, '_'));
     const eqIcon = this.getEquipmentIcon(sheet, tableKey);
+    const isSwapSheet = sheet.toLowerCase().includes('swap') || tableKey.includes('swap');
 
     const isEquipmentSheet = [
       'gloves', 'sleeves', 'blankets', 'macks', 'hv_testers', 'phasing_sets', 'aed', 'grounds', 'hot_sticks',
@@ -190,7 +193,6 @@ class SyncEngine {
     let itemNumber = (!isEmployeeSheet && !isJobTrackingSheet) ? (mut.itemNumber || mut.itemNum || mut.serialNum || mut.itemIdentifier || mut.serial || '') : (mut.itemNumber || mut.itemNum || mut.serialNum || '');
     let certName = mut.certName || mut.certType || mut.itemType || '';
     let fieldHeader = mut.header || mut.colName || (mut.col ? `Column ${mut.col}` : 'Field');
-    let rowData = mut.rowData || {};
 
     const table = this.db && typeof this.db.getTable === 'function' ? this.db.getTable(tableKey) : null;
     let targetRow = null;
@@ -242,7 +244,7 @@ class SyncEngine {
     const oldVal = mut.oldValue !== undefined && mut.oldValue !== null && String(mut.oldValue).trim() !== '' ? `"${mut.oldValue}"` : '(Empty)';
     const newVal = mut.value !== undefined && mut.value !== null && String(mut.value).trim() !== '' ? `"${mut.value}"` : '(Empty)';
 
-    if (mut.action === 'UPDATE_CELL') {
+    if (action === 'UPDATE_CELL') {
       let title = '';
       let desc = '';
 
@@ -284,7 +286,7 @@ class SyncEngine {
       };
     }
 
-    if (mut.action === 'UPDATE_ROW') {
+    if (action === 'UPDATE_ROW') {
       let title = '';
       let desc = '';
 
@@ -316,7 +318,7 @@ class SyncEngine {
       };
     }
 
-    if (mut.action === 'DELETE_ROW') {
+    if (action === 'DELETE_ROW') {
       const itemLabel = itemNumber ? `Item #${itemNumber}` : `Row ${row}`;
       return {
         icon: '🗑️',
@@ -327,7 +329,7 @@ class SyncEngine {
       };
     }
 
-    if (mut.action === 'ADD_ROW') {
+    if (action === 'ADD_ROW') {
       let title = 'Add New Record';
       let desc = '';
       const isHistorySheet = sheet.toLowerCase().includes('history') || sheet.toLowerCase().includes('_history');
@@ -350,6 +352,12 @@ class SyncEngine {
           title = `📜 Added Row to ${sheet}`;
           desc = Object.entries(rowData).slice(0, 3).map(([k, v]) => `${k}: <strong>${v}</strong>`).join(' • ');
         }
+      } else if (isSwapSheet) {
+        const emp = employeeName || rowData['Employee'] || rowData['Employee Name'] || 'Worker';
+        const pStatus = rowData['Status'] || 'Queued';
+        const pSize = rowData['Size'] || 'N/A';
+        title = `${eqIcon} ${sheet}: 👤 ${emp} • ${pStatus}`;
+        desc = `Queued <strong>Size ${pSize}</strong> • Status: <strong style="color: #f59e0b;">${pStatus}</strong>`;
       } else if (employeeName && certName) {
         const expDate = rowData['Expiration Date'] || rowData['Date Acquired'] || mut.value || '';
         title = `✨ New Cert: 👤 ${employeeName} — 📜 ${certName}`;
@@ -366,7 +374,7 @@ class SyncEngine {
       }
 
       return {
-        icon: isHistorySheet ? '📜' : '➕',
+        icon: isHistorySheet ? '📜' : (isSwapSheet ? eqIcon : '➕'),
         sheet: sheet,
         title: title,
         desc: desc,
@@ -374,7 +382,7 @@ class SyncEngine {
       };
     }
     
-    if (mut.action === 'UPDATE_JOB_TRACKING') {
+    if (action === 'UPDATE_JOB_TRACKING') {
       return {
         icon: '📋',
         sheet: 'Job Tracking',
@@ -384,7 +392,7 @@ class SyncEngine {
       };
     }
 
-    if (mut.action === 'SCHEDULE_CREW_VISIT') {
+    if (action === 'SCHEDULE_CREW_VISIT') {
       return {
         icon: '🗺️',
         sheet: 'Trip Planner',
@@ -394,7 +402,7 @@ class SyncEngine {
       };
     }
 
-    if (mut.action === 'UNSCHEDULE_CREW_VISIT') {
+    if (action === 'UNSCHEDULE_CREW_VISIT') {
       return {
         icon: '🗑️',
         sheet: 'Trip Planner',
@@ -404,7 +412,7 @@ class SyncEngine {
       };
     }
 
-    if (mut.action === 'SAVE_TASK') {
+    if (action === 'SAVE_TASK') {
       return {
         icon: '📅',
         sheet: 'Tasks & Calendar',
@@ -414,7 +422,7 @@ class SyncEngine {
       };
     }
 
-    if (mut.action === 'SAVE_PLANNED_TRIPS') {
+    if (action === 'SAVE_PLANNED_TRIPS') {
       const dayCount = mut.trips ? Object.keys(mut.trips).length : 0;
       return {
         icon: '🗺️',
@@ -425,7 +433,7 @@ class SyncEngine {
       };
     }
 
-    if (mut.action === 'SAVE_MANUAL_TASKS') {
+    if (action === 'SAVE_MANUAL_TASKS') {
       const taskCount = Array.isArray(mut.manual_tasks) ? mut.manual_tasks.length : 0;
       return {
         icon: '🎓',
@@ -436,7 +444,7 @@ class SyncEngine {
       };
     }
 
-    if (mut.action === 'SET_TRIP_SCHEDULE') {
+    if (action === 'SET_TRIP_SCHEDULE') {
       return {
         icon: '🗓️',
         sheet: 'Trip Planner',
@@ -446,7 +454,7 @@ class SyncEngine {
       };
     }
 
-    if (mut.action === 'SET_HOLIDAYS') {
+    if (action === 'SET_HOLIDAYS') {
       return {
         icon: '🏖️',
         sheet: 'Trip Planner',
@@ -456,7 +464,7 @@ class SyncEngine {
       };
     }
 
-    if (mut.action === 'ADD_LOCATION_OVERRIDE') {
+    if (action === 'ADD_LOCATION_OVERRIDE') {
       return {
         icon: '📍',
         sheet: 'Trip Planner',
@@ -466,7 +474,7 @@ class SyncEngine {
       };
     }
 
-    if (mut.action === 'IMPORT_HISTORY_LOG') {
+    if (action === 'IMPORT_HISTORY_LOG') {
       return {
         icon: '📥',
         sheet: `${mut.equipmentType || 'Equipment'} History`,
@@ -476,7 +484,7 @@ class SyncEngine {
       };
     }
 
-    if (mut.action === 'REPLACE_SWAP_TABLE' || mut.action === 'REPLACE_TABLE_DATA' || mut.action === 'SYNC_FULL_TABLE') {
+    if (action === 'REPLACE_SWAP_TABLE' || action === 'REPLACE_TABLE_DATA' || action === 'SYNC_FULL_TABLE') {
       const gridRows = mut.rawGrid ? (mut.rawGrid.length - 1) : ((mut.rows && mut.rows.length) || 0);
       const isSwapSheet = sheet.toLowerCase().includes('swap');
       
@@ -503,8 +511,8 @@ class SyncEngine {
 
     return {
       icon: eqIcon,
-      sheet: mut.sheetName || 'System',
-      title: mut.action || 'Change',
+      sheet: sheet || 'System',
+      title: action || 'Change',
       desc: JSON.stringify(mut).substring(0, 80),
       time: timeStr
     };
@@ -872,8 +880,12 @@ class SyncEngine {
 
         // Sanitize: never allow a header-only rawGrid to wipe out valid row objects;
         // Also strip duplicate 'rows' when 'rawGrid' has complete data to cut network payload by ~60%
-        const sanitizedChunk = chunk.map(m => {
+        const sanitizeChunk = (items) => items.map(m => {
           const mCopy = { ...m };
+          if (!mCopy.action && mCopy.type) mCopy.action = mCopy.type;
+          if (!mCopy.sheetName && mCopy.sheet) mCopy.sheetName = mCopy.sheet;
+          if (!mCopy.tableKey && mCopy.sheetName && this.db) mCopy.tableKey = this.db.getTableKeyForSheet(mCopy.sheetName);
+          if (!mCopy.rowData && mCopy.data) mCopy.rowData = mCopy.data;
           if (mCopy.rawGrid && Array.isArray(mCopy.rawGrid)) {
             if (mCopy.rawGrid.length <= 1) {
               delete mCopy.rawGrid;
@@ -883,6 +895,7 @@ class SyncEngine {
           }
           return mCopy;
         });
+        let sanitizedChunk = sanitizeChunk(chunk);
 
         const isHeavyChunk = chunk.some(isHeavyMutation);
         const batchTimeoutMs = isHeavyChunk ? 120000 : 60000;
@@ -916,6 +929,7 @@ class SyncEngine {
             if (pushResult && pushResult.errors && pushResult.errors.length > 0 && chunk.length > 1) {
               console.warn(`[Sync] Batch ${batchNum} returned server errors with ${chunk.length} items, shrinking to 1 item to isolate...`, pushResult.errors);
               chunk = [currentOutbox[i]];
+              sanitizedChunk = sanitizeChunk(chunk);
               continue;
             }
           } catch (pushErr) {
@@ -923,6 +937,7 @@ class SyncEngine {
             // If batch has multiple items and failed, immediately shrink chunk to 1 item to isolate the failure and ensure progress
             if (chunk.length > 1) {
               chunk = [currentOutbox[i]];
+              sanitizedChunk = sanitizeChunk(chunk);
               console.warn(`[Sync] Batch ${batchNum} failed with ${chunkSize} items, shrinking to 1 item and retrying immediately...`, pushErr);
               continue;
             }

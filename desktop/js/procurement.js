@@ -124,10 +124,12 @@ class ProcurementEngine {
       const rawRows = table.rawGrid || table.rows || [];
       if (!rawRows.length) return;
 
-      let currentClass = 'Class 0';
-      if (s.type === 'Sleeves') currentClass = 'Class 2';
-      else if (s.type === 'Blankets') currentClass = 'Class 4';
-      else if (s.type === 'MACKs') currentClass = 'Class 4';
+      let defaultClass = 'Class 2';
+      if (s.type === 'Gloves') defaultClass = 'Class 2';
+      else if (s.type === 'Sleeves') defaultClass = 'Class 2';
+      else if (s.type === 'Blankets') defaultClass = 'Class 4';
+      else if (s.type === 'MACKs') defaultClass = 'Class 4';
+      let currentClass = defaultClass;
 
       rawRows.forEach((row) => {
         let emp = '';
@@ -135,6 +137,8 @@ class ProcurementEngine {
         let pickItem = '';
         let status = '';
         let daysLeft = 30;
+        let rowClass = currentClass;
+        let isImmediateRow = false;
 
         if (Array.isArray(row)) {
           const firstCell = String(row[0] || '').trim();
@@ -155,6 +159,16 @@ class ProcurementEngine {
           if (!isNaN(daysVal)) daysLeft = daysVal;
           pickItem = String(row[6] || '').trim();
           status = String(row[7] || '').trim();
+
+          // Check if Class was stored explicitly in row array
+          if (row[10] && String(row[10]).toLowerCase().includes('class')) {
+            rowClass = String(row[10]).trim();
+          } else {
+            rowClass = currentClass;
+          }
+          if (String(row[11] || '').toLowerCase() === 'immediate' || daysVal <= 0) {
+            isImmediateRow = true;
+          }
         } else if (typeof row === 'object' && row !== null) {
           emp = String(row['Employee'] || row['Employee Name'] || row['Assigned To'] || '').trim();
           size = String(row['Size'] || '—').trim();
@@ -162,7 +176,15 @@ class ProcurementEngine {
           if (!isNaN(daysVal)) daysLeft = daysVal;
           pickItem = String(row['Pick List Item #'] || row['Pick Item #'] || '').trim();
           status = String(row['Status'] || row['Pick List Status'] || '').trim();
-          if (row['Class'] || row['KV']) currentClass = String(row['Class'] || row['KV']);
+          if (row['Class'] || row['KV']) {
+            const cStr = String(row['Class'] || row['KV']).trim();
+            rowClass = cStr.toLowerCase().startsWith('class') ? cStr : `Class ${cStr}`;
+          } else {
+            rowClass = currentClass;
+          }
+          if (String(row['Urgency'] || '').toLowerCase() === 'immediate' || daysLeft <= 0) {
+            isImmediateRow = true;
+          }
         }
 
         const statLower = status.toLowerCase();
@@ -175,18 +197,19 @@ class ProcurementEngine {
 
         if (!isNeedToPurchase || !emp) return;
 
-        const aggKey = `${s.type}|${size}|${currentClass}`;
+        const aggKey = `${s.type}|${size}|${rowClass}`;
 
         if (!aggregated[aggKey]) {
           aggregated[aggKey] = {
             itemType: s.type,
             typeLabel: s.label,
             size: size,
-            classVal: currentClass,
+            classVal: rowClass,
             quantity: 0,
             employees: [],
             sizeUpCount: 0,
             minDaysLeft: daysLeft,
+            isImmediate: isImmediateRow,
             selected: true,
             price: 0,
             partNumber: ''
@@ -195,6 +218,7 @@ class ProcurementEngine {
 
         aggregated[aggKey].quantity += 1;
         if (isSizeUp) aggregated[aggKey].sizeUpCount += 1;
+        if (isImmediateRow) aggregated[aggKey].isImmediate = true;
         const empLabel = isSizeUp ? `${emp} (Size Up Picked)` : emp;
         if (emp && !aggregated[aggKey].employees.includes(empLabel)) {
           aggregated[aggKey].employees.push(empLabel);
@@ -210,7 +234,11 @@ class ProcurementEngine {
       let priorityEmoji = '🟢';
       let timeframe = 'Consider / Future';
 
-      if (item.minDaysLeft <= 14) {
+      if (item.isImmediate || item.minDaysLeft <= 0) {
+        priority = 'HIGH';
+        priorityEmoji = '🔴';
+        timeframe = 'Immediate';
+      } else if (item.minDaysLeft <= 14) {
         priority = 'HIGH';
         priorityEmoji = '🔴';
         timeframe = 'Immediate (< 14d)';

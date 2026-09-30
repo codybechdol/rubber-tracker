@@ -3154,6 +3154,12 @@ class LocalDatabase {
   async addMutation(mutation) {
     if (!mutation) return null;
 
+    // Normalize property aliases for full cross-system compatibility
+    if (!mutation.action && mutation.type) mutation.action = mutation.type;
+    if (!mutation.sheetName && mutation.sheet) mutation.sheetName = mutation.sheet;
+    if (!mutation.tableKey && mutation.sheetName) mutation.tableKey = this.getTableKeyForSheet(mutation.sheetName);
+    if (!mutation.rowData && mutation.data) mutation.rowData = mutation.data;
+
     // Hard Guard: Disallow adding mutations in View Only mode
     const isViewOnly = (typeof window !== 'undefined' && window.currentRoleMode === 'view_only') ||
                        (typeof document !== 'undefined' && document.body && (document.body.classList.contains('view-only-mode') || document.body.classList.contains('inspector-mode')));

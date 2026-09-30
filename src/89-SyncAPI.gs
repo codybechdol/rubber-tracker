@@ -936,7 +936,10 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
   for (var m = 0; m < mutations.length; m++) {
     var mut = mutations[m];
     try {
-      var sheetName = mut.sheetName || '';
+      mut.action = mut.action || mut.type || '';
+      mut.sheetName = mut.sheetName || mut.sheet || '';
+      mut.rowData = mut.rowData || mut.data || null;
+      var sheetName = mut.sheetName;
       var sheet = sheetName ? getSheetCaseInsensitive(sheetName) : null;
       var actionsWithoutSheet = [
         'DELETE_TASK',

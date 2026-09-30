@@ -1920,6 +1920,118 @@ class EmployeeProfileEngine {
   }
 
   /**
+   * Retrieves the employee's preferred voltage class for gloves or sleeves (defaults to Class 2)
+   */
+  getPreferredPpeClass(displayName, itemType) {
+    const isGlove = itemType === 'gloves';
+    const snap = this.db?.getSnapshot?.();
+
+    // 1. Check existing swap row for an explicitly recorded Class
+    const swapKey = isGlove ? 'glove_swaps' : 'sleeve_swaps';
+    const swapTable = snap?.tables?.[swapKey];
+    if (swapTable && swapTable.rows) {
+      const row = swapTable.rows.find(r => this.isNameMatch(r['Employee'] || r['Employee Name'] || '', displayName));
+      if (row && (row['Class'] || row['KV'])) {
+        const cStr = String(row['Class'] || row['KV']).trim();
+        if (cStr) {
+          return cStr.toLowerCase().startsWith('class') ? cStr : `Class ${cStr}`;
+        }
+      }
+    }
+
+    // 2. Check localStorage saved preferences
+    try {
+      const stored = localStorage.getItem('sa_emp_preferred_classes');
+      if (stored) {
+        const prefMap = JSON.parse(stored);
+        const key = `${displayName.trim().toLowerCase()}_${itemType}`;
+        if (prefMap[key]) return prefMap[key];
+      }
+    } catch (e) {
+      // ignore
+    }
+
+    // 3. Check any active or history inventory item for this employee
+    const invKey = isGlove ? 'gloves' : 'sleeves';
+    const invTable = snap?.tables?.[invKey];
+    if (invTable && invTable.rows) {
+      const held = invTable.rows.find(r => this.isNameMatch(r['Assigned To'] || r['Holder'] || '', displayName));
+      if (held && held['Class']) {
+        const cStr = String(held['Class']).trim();
+        if (cStr) return cStr.toLowerCase().startsWith('class') ? cStr : `Class ${cStr}`;
+      }
+    }
+
+    // 4. Default: Class 2 is standard lineworker safety class for both gloves and sleeves
+    return 'Class 2';
+  }
+
+  /**
+   * Saves employee preferred voltage class
+   */
+  setPreferredPpeClass(displayName, itemType, classVal) {
+    if (!displayName || !classVal) return;
+    const norm = classVal.toLowerCase().startsWith('class') ? classVal : `Class ${classVal}`;
+    try {
+      const stored = localStorage.getItem('sa_emp_preferred_classes');
+      const prefMap = stored ? JSON.parse(stored) : {};
+      const key = `${displayName.trim().toLowerCase()}_${itemType}`;
+      prefMap[key] = norm;
+      localStorage.setItem('sa_emp_preferred_classes', JSON.stringify(prefMap));
+    } catch (e) {
+      console.warn('Could not save PPE class preference:', e);
+    }
+  }
+
+  /**
+   * Updates voltage class on the fly from the profile card (persisting to swap queue & snapshot)
+   */
+  async setPurchaseNeedClass(displayName, itemType, newClass) {
+    if (!displayName || !newClass) return;
+    const isGlove = itemType === 'gloves';
+    const normClass = newClass.toLowerCase().startsWith('class') ? newClass : `Class ${newClass}`;
+    this.setPreferredPpeClass(displayName, itemType, normClass);
+
+    const swapKey = isGlove ? 'glove_swaps' : 'sleeve_swaps';
+    const snap = this.db.getSnapshot();
+    if (snap && snap.tables) {
+      const swapTable = snap.tables[swapKey];
+      if (swapTable && swapTable.rows) {
+        const row = swapTable.rows.find(r => this.isNameMatch(r['Employee'] || r['Employee Name'] || '', displayName));
+        if (row) {
+          row['Class'] = normClass;
+          row['Urgency'] = 'Immediate';
+          row['Days Left'] = 0;
+        }
+      }
+      const needsTable = snap.tables['safety_equipment_needs'];
+      if (needsTable && needsTable.rows) {
+        const nRow = needsTable.rows.find(r => this.isNameMatch(r['Employee'] || '', displayName) && (isGlove ? (r['Item Type'] || '').includes('Glove') : (r['Item Type'] || '').includes('Sleeve')));
+        if (nRow) {
+          nRow['Class'] = normClass;
+          nRow['Urgency'] = 'Immediate';
+        }
+      }
+      if (typeof this.db.persistSnapshot === 'function') {
+        await this.db.persistSnapshot(snap);
+      }
+    }
+
+    if (window.procurementEngine && typeof window.procurementEngine.loadData === 'function') {
+      window.procurementEngine.loadData();
+    }
+
+    if (typeof window.showToast === 'function') {
+      window.showToast(`Updated ${isGlove ? 'Glove' : 'Sleeve'} preference to ${normClass} (Urgency: Immediate)`, 'info');
+    }
+
+    const modalBody = document.getElementById('employee-profile-modal-body');
+    if (modalBody) {
+      this.renderModalContent(modalBody);
+    }
+  }
+
+  /**
    * Renders the 3-layer progressive workflow card for gloves or sleeves
    */
   renderPpeItemProgressiveWorkflow(data, classMeta, itemType) {
@@ -1927,6 +2039,7 @@ class EmployeeProfileEngine {
     const label = isGlove ? 'Rubber Gloves' : 'Rubber Sleeves';
     const icon = isGlove ? '🧤' : '🦾';
     const curSize = String(isGlove ? (data.gloveSize || '') : (data.sleeveSize || '')).trim();
+    let curClass = this.getPreferredPpeClass(data.displayName, itemType);
     const invKey = isGlove ? 'gloves' : 'sleeves';
     const swapKey = isGlove ? 'glove_swaps' : 'sleeve_swaps';
     const themeColor = isGlove ? '#38bdf8' : '#c084fc';
@@ -1937,6 +2050,7 @@ class EmployeeProfileEngine {
     const sizes = isGlove
       ? ['8', '8.5', '9', '9.5', '10', '10.5', '11', '11.5', '12']
       : ['Regular', 'Large', 'X-Large'];
+    const classOptions = isGlove ? ['Class 0', 'Class 2', 'Class 3'] : ['Class 2', 'Class 3'];
 
     const hasSize = curSize && curSize !== 'N/A' && curSize !== '—' && curSize !== '-' && curSize.toLowerCase() !== 'null' && curSize.toLowerCase() !== 'undefined';
 
@@ -1950,25 +2064,31 @@ class EmployeeProfileEngine {
               <span>${label} Required for <span style="color: ${themeColor};">${this.escapeHtml(classMeta.code)}</span></span>
             </div>
             <span class="badge" style="background: rgba(239, 68, 68, 0.2); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.4); font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 4px;">
-              ⚠️ Step 1: Assign Size
+              ⚠️ Step 1: Assign Size & Class
             </span>
           </div>
 
           <div style="font-size: 12.5px; color: #cbd5e1; margin-bottom: 12px; line-height: 1.5;">
-            Classification <strong>${this.escapeHtml(classMeta.code)}</strong> requires ${label.toLowerCase()}, but no size is currently recorded for <strong>${this.escapeHtml(data.displayName)}</strong>. Select their size below to log it to their <strong>Contact & Details</strong> section and search on-shelf inventory:
+            Classification <strong>${this.escapeHtml(classMeta.code)}</strong> requires ${label.toLowerCase()}, but no size is currently recorded for <strong>${this.escapeHtml(data.displayName)}</strong>. Select their size and voltage class below to log to their <strong>Contact & Details</strong> section and check on-shelf inventory:
           </div>
 
-          <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+          <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
             <div style="display: flex; align-items: center; gap: 6px;">
-              <label for="profile-assign-${itemType}-size-select" style="font-size: 12px; font-weight: 700; color: #94a3b8;">Select ${isGlove ? 'Glove' : 'Sleeve'} Size:</label>
-              <select id="profile-assign-${itemType}-size-select" class="form-control" style="font-size: 13px; font-weight: 700; padding: 6px 12px; background: var(--bg-primary); border: 1px solid ${themeBorder}; border-radius: 6px; color: #fff; min-width: 140px;">
-                <option value="" disabled selected>-- Choose Size --</option>
+              <label for="profile-assign-${itemType}-size-select" style="font-size: 12px; font-weight: 700; color: #94a3b8;">Size:</label>
+              <select id="profile-assign-${itemType}-size-select" class="form-control" style="font-size: 13px; font-weight: 700; padding: 6px 12px; background: var(--bg-primary); border: 1px solid ${themeBorder}; border-radius: 6px; color: #fff; min-width: 120px;">
+                <option value="" disabled selected>-- Size --</option>
                 ${sizes.map(s => `<option value="${s}">Size ${s}</option>`).join('')}
+              </select>
+            </div>
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <label for="profile-assign-${itemType}-class-select" style="font-size: 12px; font-weight: 700; color: #94a3b8;">Class:</label>
+              <select id="profile-assign-${itemType}-class-select" class="form-control" style="font-size: 13px; font-weight: 700; padding: 6px 12px; background: var(--bg-primary); border: 1px solid ${themeBorder}; border-radius: 6px; color: #fff; min-width: 150px;">
+                ${classOptions.map(c => `<option value="${c}" ${c === curClass ? 'selected' : ''}>${c}${c === 'Class 2' ? ' (17kV Standard)' : c === 'Class 0' ? ' (1kV)' : ' (26.5kV)'}</option>`).join('')}
               </select>
             </div>
             <button type="button" class="btn btn-primary" style="padding: 7px 18px; font-size: 12.5px; font-weight: 700; display: inline-flex; align-items: center; gap: 6px; background: #2563eb; border: none; box-shadow: 0 2px 6px rgba(37, 99, 235, 0.3);"
                     onclick="window.employeeProfileEngine.savePpeSizeAndContinue('${this.escapeJs(data.displayName)}', '${itemType}')">
-              <span>💾</span> Save Size & Check Inventory
+              <span>💾</span> Save & Check Inventory
             </button>
           </div>
         </div>
@@ -2002,7 +2122,7 @@ class EmployeeProfileEngine {
               <span>${icon}</span>
               <span>${label} Ready for Assignment</span>
               <span class="badge" style="background: ${themePillBg}; color: ${themeBadgeColor}; border: 1px solid ${themeBorder}; font-size: 11px; padding: 2px 8px; border-radius: 4px;">
-                Size ${this.escapeHtml(curSize)}
+                Size ${this.escapeHtml(curSize)} · ${this.escapeHtml(curClass)}
               </span>
             </div>
             <div style="display: flex; align-items: center; gap: 8px;">
@@ -2035,7 +2155,7 @@ class EmployeeProfileEngine {
                 ${matchingShelfItems.map(item => {
                   const itNum = this.getItemIdentifier(item);
                   const eslId = String(item['ESL ID'] || '—').trim();
-                  const itemClass = String(item['Class'] || (isGlove ? '0' : '2')).trim();
+                  const itemClass = String(item['Class'] || (isGlove ? '2' : '2')).trim();
                   const testDate = String(item['Test Date'] || '—').trim();
                   const loc = String(item['Location'] || data.location || 'Helena').trim();
                   return `
@@ -2064,20 +2184,31 @@ class EmployeeProfileEngine {
     // LAYER 3: Out of Stock on shelf -> Ask to add to Purchase Needs section
     const swapTable = snap?.tables?.[swapKey];
     const swapRows = swapTable?.rows || [];
-    const alreadyInNeeds = swapRows.some(r => {
+    const swapRow = swapRows.find(r => {
       const rEmp = String(r['Employee'] || r['Employee Name'] || '').trim();
       const rStatus = String(r['Status'] || '').trim().toLowerCase();
       return this.isNameMatch(rEmp, data.displayName) && (rStatus.includes('need to purchase') || rStatus.includes('purchase'));
     });
+    const alreadyInNeeds = !!swapRow;
+    if (swapRow && (swapRow['Class'] || swapRow['KV'])) {
+      const cStr = String(swapRow['Class'] || swapRow['KV']).trim();
+      if (cStr) curClass = cStr.toLowerCase().startsWith('class') ? cStr : `Class ${cStr}`;
+    }
 
     return `
       <div style="background: ${themeBg}; border: 1px solid ${themeBorder}; border-radius: 8px; padding: 16px;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 8px;">
-          <div style="font-size: 14px; font-weight: 800; color: #f8fafc; display: flex; align-items: center; gap: 8px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 8px;">
+          <div style="font-size: 14px; font-weight: 800; color: #f8fafc; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
             <span>${icon}</span>
             <span>${label} Out of Stock</span>
             <span class="badge" style="background: ${themePillBg}; color: ${themeBadgeColor}; border: 1px solid ${themeBorder}; font-size: 11px; padding: 2px 8px; border-radius: 4px;">
               Size ${this.escapeHtml(curSize)}
+            </span>
+            <span class="badge" style="background: rgba(14, 165, 233, 0.18); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.35); font-size: 11px; padding: 2px 8px; border-radius: 4px;">
+              ${this.escapeHtml(curClass)}
+            </span>
+            <span class="badge" style="background: rgba(239, 68, 68, 0.25); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.5); font-size: 11px; font-weight: 800; padding: 2px 8px; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px;">
+              🚨 Urgency: Immediate
             </span>
           </div>
           <div style="display: flex; align-items: center; gap: 8px;">
@@ -2090,32 +2221,67 @@ class EmployeeProfileEngine {
           </div>
         </div>
 
+        <!-- Class Selector & Urgency Banner -->
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; padding: 8px 12px; background: rgba(0,0,0,0.22); border-radius: 6px; border: 1px solid rgba(255,255,255,0.06); flex-wrap: wrap;">
+          <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+            <span style="font-size: 12px; font-weight: 700; color: #94a3b8;">Voltage Class:</span>
+            <div style="display: inline-flex; gap: 5px;">
+              ${classOptions.map(cOpt => {
+                const isSel = (cOpt.toLowerCase() === curClass.toLowerCase());
+                return `
+                  <button type="button" class="btn" style="padding: 3px 10px; font-size: 11.5px; font-weight: 700; border-radius: 4px; cursor: pointer; transition: all 0.15s ease; ${isSel ? 'background: #0284c7; color: #fff; border: 1px solid #38bdf8; box-shadow: 0 0 6px rgba(56, 189, 248, 0.4);' : 'background: rgba(255,255,255,0.05); color: #94a3b8; border: 1px solid rgba(255,255,255,0.1);'}"
+                          onclick="window.employeeProfileEngine.setPurchaseNeedClass('${this.escapeJs(data.displayName)}', '${itemType}', '${cOpt}')">
+                    ${cOpt === 'Class 2' ? '⭐ Class 2 (17kV Standard)' : cOpt === 'Class 0' ? 'Class 0 (1kV)' : 'Class 3 (26.5kV)'}
+                  </button>
+                `;
+              }).join('')}
+            </div>
+          </div>
+          <div style="font-size: 11px; color: #fca5a5; font-weight: 700; display: flex; align-items: center; gap: 4px;">
+            <span>🚨 Urgency: Immediate</span>
+            <span style="color: #64748b; font-weight: 400;">(Active worker missing PPE)</span>
+          </div>
+        </div>
+
         <div style="font-size: 12.5px; color: #cbd5e1; margin-bottom: 12px; line-height: 1.5;">
-          Size <strong>${this.escapeHtml(curSize)}</strong> is logged in <strong>Contact & Details</strong>, but <strong>no Size ${this.escapeHtml(curSize)} ${label.toLowerCase()} are currently On Shelf</strong> in inventory.
+          Size <strong>${this.escapeHtml(curSize)}</strong> (<strong>${this.escapeHtml(curClass)}</strong>) is logged in <strong>Contact & Details</strong>, but <strong>no Size ${this.escapeHtml(curSize)} ${this.escapeHtml(curClass)} ${label.toLowerCase()} are currently On Shelf</strong> in inventory.
         </div>
 
         ${alreadyInNeeds ? `
-          <div style="background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 6px; padding: 10px 14px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
-            <div style="display: flex; align-items: center; gap: 8px;">
-              <span style="font-size: 16px;">🛒</span>
-              <span style="font-size: 12.5px; font-weight: 700; color: #6ee7b7;">
-                Queued in Purchase Needs: Size ${this.escapeHtml(curSize)} ${label} for ${this.escapeHtml(data.displayName)} is on the Purchase Orders list.
-              </span>
+          <div style="background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 6px; padding: 12px 14px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <span style="font-size: 20px;">🛒</span>
+              <div>
+                <div style="font-size: 13px; font-weight: 800; color: #6ee7b7; display: flex; align-items: center; gap: 8px;">
+                  <span>Queued in Purchase Needs: Size ${this.escapeHtml(curSize)} · ${this.escapeHtml(curClass)} ${label}</span>
+                  <span class="badge" style="background: rgba(239, 68, 68, 0.25); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.4); font-size: 10.5px; font-weight: 800; padding: 1px 6px; border-radius: 3px;">
+                    🔴 Urgency: Immediate
+                  </span>
+                </div>
+                <div style="font-size: 11.5px; color: #94a3b8; margin-top: 2px;">
+                  Listed on Purchase Orders with 0 days remaining (Urgency: Immediate) for ${this.escapeHtml(data.displayName)}.
+                </div>
+              </div>
             </div>
-            <button class="btn btn-secondary" style="font-size: 11.5px; padding: 4px 10px; border-color: #10b981; color: #6ee7b7; display: inline-flex; align-items: center; gap: 4px;"
+            <button class="btn btn-secondary" style="font-size: 11.5px; padding: 5px 12px; border-color: #10b981; color: #6ee7b7; display: inline-flex; align-items: center; gap: 4px;"
                     onclick="if(window.sheetNavigator){window.sheetNavigator.switchView('procurement-view');} window.employeeProfileEngine.closeProfileModal();">
               <span>📋</span> Open Purchase Orders
             </button>
           </div>
         ` : `
-          <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-            <button type="button" class="btn btn-warning" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color: #fff; border: none; padding: 7px 18px; font-size: 12.5px; font-weight: 700; display: inline-flex; align-items: center; gap: 6px; box-shadow: 0 2px 6px rgba(245, 158, 11, 0.3);"
-                    onclick="window.employeeProfileEngine.addToPurchaseNeedsFromProfile('${this.escapeJs(data.displayName)}', '${itemType}', '${this.escapeJs(curSize)}')">
-              <span>🛒</span> Add to Purchase Needs (Size ${this.escapeHtml(curSize)})
+          <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+            <button type="button" class="btn btn-warning" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color: #fff; border: none; padding: 8px 20px; font-size: 13px; font-weight: 800; display: inline-flex; align-items: center; gap: 7px; box-shadow: 0 2px 8px rgba(245, 158, 11, 0.35); cursor: pointer;"
+                    onclick="window.employeeProfileEngine.addToPurchaseNeedsFromProfile('${this.escapeJs(data.displayName)}', '${itemType}', '${this.escapeJs(curSize)}', '${this.escapeJs(curClass)}')">
+              <span>🛒</span> Add to Purchase Needs (Size ${this.escapeHtml(curSize)} · ${this.escapeHtml(curClass)})
             </button>
-            <span style="font-size: 11.5px; color: var(--text-muted);">
-              Queues this item in Purchase Needs to generate a PO for your vendor.
-            </span>
+            <div style="display: flex; flex-direction: column;">
+              <span style="font-size: 12px; font-weight: 700; color: #fca5a5; display: flex; align-items: center; gap: 4px;">
+                <span>🚨</span> Urgency: Immediate
+              </span>
+              <span style="font-size: 11px; color: var(--text-muted);">
+                Queues in Purchase Needs with 0 days remaining for urgent vendor PO.
+              </span>
+            </div>
           </div>
         `}
       </div>
@@ -2123,9 +2289,9 @@ class EmployeeProfileEngine {
   }
 
   /**
-   * Layer 1 Action: Saves PPE size to Employees table (Contact & Details), updates memory, and refreshes
+   * Layer 1 Action: Saves PPE size & voltage class to Employees table (Contact & Details), updates memory, and refreshes
    */
-  async savePpeSizeAndContinue(displayName, itemType, selectedSize = null) {
+  async savePpeSizeAndContinue(displayName, itemType, selectedSize = null, selectedClass = null) {
     if (!displayName) return;
     const isGlove = itemType === 'gloves';
     let size = selectedSize;
@@ -2136,6 +2302,17 @@ class EmployeeProfileEngine {
     if (!size) {
       alert(`Please select a ${isGlove ? 'glove' : 'sleeve'} size from the dropdown.`);
       return;
+    }
+
+    let classVal = selectedClass;
+    if (!classVal) {
+      const classSelectEl = document.getElementById(`profile-assign-${itemType}-class-select`);
+      if (classSelectEl && classSelectEl.value) {
+        classVal = classSelectEl.value.trim();
+      }
+    }
+    if (classVal) {
+      this.setPreferredPpeClass(displayName, itemType, classVal);
     }
 
     const empTable = this.db.getTable('employees');
@@ -2208,17 +2385,18 @@ class EmployeeProfileEngine {
   /**
    * Prompts user to change their recorded PPE size
    */
-  promptChangePpeSize(displayName, itemType, currentSize) {
+  promptChangePpeSize(displayName, itemType, currentSize, currentClass = null) {
     const isGlove = itemType === 'gloves';
     const sizes = isGlove
       ? ['8', '8.5', '9', '9.5', '10', '10.5', '11', '11.5', '12']
       : ['Regular', 'Large', 'X-Large'];
+    const curClass = currentClass || this.getPreferredPpeClass(displayName, itemType);
 
-    const newSize = prompt(`Change ${isGlove ? 'Rubber Glove' : 'Rubber Sleeve'} Size for ${displayName}:\nOptions: ${sizes.join(', ')}`, currentSize || '');
+    const newSize = prompt(`Change ${isGlove ? 'Rubber Glove' : 'Rubber Sleeve'} Size for ${displayName}:\nOptions: ${sizes.join(', ')}\n(Current: Size ${currentSize || 'None'})`, currentSize || '');
     if (newSize === null) return;
     const trimmed = newSize.trim();
     if (!trimmed) return;
-    this.savePpeSizeAndContinue(displayName, itemType, trimmed);
+    this.savePpeSizeAndContinue(displayName, itemType, trimmed, curClass);
   }
 
   /**
@@ -2282,17 +2460,19 @@ class EmployeeProfileEngine {
     }
 
     // Queue mutations
-    if (typeof this.db.queueMutation === 'function') {
+    const fn = (typeof this.db.addMutation === 'function') ? this.db.addMutation.bind(this.db) : (typeof this.db.queueMutation === 'function' ? this.db.queueMutation.bind(this.db) : null);
+    if (fn) {
       const actualRowIdx = targetRow._rowIdx || 2;
       const getColNum = (hName) => (headers.indexOf(hName) + 1);
+      const sName = table.name || (invKey === 'gloves' ? 'Gloves' : 'Sleeves');
 
-      await this.db.queueMutation({ type: 'UPDATE_CELL', sheet: table.name || invKey, row: actualRowIdx, col: getColNum(assignedCol), value: displayName });
-      await this.db.queueMutation({ type: 'UPDATE_CELL', sheet: table.name || invKey, row: actualRowIdx, col: getColNum(statusCol), value: 'Assigned' });
-      await this.db.queueMutation({ type: 'UPDATE_CELL', sheet: table.name || invKey, row: actualRowIdx, col: getColNum(locCol), value: chosenLoc });
-      await this.db.queueMutation({ type: 'UPDATE_CELL', sheet: table.name || invKey, row: actualRowIdx, col: getColNum(dateAssignedCol), value: chosenDate });
-      if (pickedCol) await this.db.queueMutation({ type: 'UPDATE_CELL', sheet: table.name || invKey, row: actualRowIdx, col: getColNum(pickedCol), value: '' });
+      await fn({ action: 'UPDATE_CELL', sheetName: sName, tableKey: invKey, row: actualRowIdx, col: getColNum(assignedCol), header: assignedCol, value: displayName });
+      await fn({ action: 'UPDATE_CELL', sheetName: sName, tableKey: invKey, row: actualRowIdx, col: getColNum(statusCol), header: statusCol, value: 'Assigned' });
+      await fn({ action: 'UPDATE_CELL', sheetName: sName, tableKey: invKey, row: actualRowIdx, col: getColNum(locCol), header: locCol, value: chosenLoc });
+      await fn({ action: 'UPDATE_CELL', sheetName: sName, tableKey: invKey, row: actualRowIdx, col: getColNum(dateAssignedCol), header: dateAssignedCol, value: chosenDate });
+      if (pickedCol) await fn({ action: 'UPDATE_CELL', sheetName: sName, tableKey: invKey, row: actualRowIdx, col: getColNum(pickedCol), header: pickedCol, value: '' });
       if (chgOutCol && targetRow[chgOutCol]) {
-        await this.db.queueMutation({ type: 'UPDATE_CELL', sheet: table.name || invKey, row: actualRowIdx, col: getColNum(chgOutCol), value: targetRow[chgOutCol] });
+        await fn({ action: 'UPDATE_CELL', sheetName: sName, tableKey: invKey, row: actualRowIdx, col: getColNum(chgOutCol), header: chgOutCol, value: targetRow[chgOutCol] });
       }
     }
 
@@ -2330,12 +2510,16 @@ class EmployeeProfileEngine {
   }
 
   /**
-   * Layer 3 Action: Adds item to Purchase Needs in swap sheet & procurement engine
+   * Layer 3 Action: Adds item to Purchase Needs in swap sheet & procurement engine with Voltage Class and Immediate Urgency
    */
-  async addToPurchaseNeedsFromProfile(displayName, itemType, size) {
+  async addToPurchaseNeedsFromProfile(displayName, itemType, size, selectedClass = null) {
     if (!displayName || !size) return;
     const isGlove = itemType === 'gloves';
     const swapKey = isGlove ? 'glove_swaps' : 'sleeve_swaps';
+    const swapSheetName = isGlove ? 'Glove Swaps' : 'Sleeve Swaps';
+    const chosenClass = selectedClass || this.getPreferredPpeClass(displayName, itemType);
+    this.setPreferredPpeClass(displayName, itemType, chosenClass);
+
     const snap = this.db.getSnapshot();
     if (!snap || !snap.tables) return;
 
@@ -2346,19 +2530,33 @@ class EmployeeProfileEngine {
         'Days Left', 'Pick List Item #', 'Status', 'Picked', 'Date Changed'
       ];
 
+      if (!headers.includes('Class')) headers.push('Class');
+      if (!headers.includes('Urgency')) headers.push('Urgency');
+
       // Check if employee already has a row in this swap table
       let existingRow = swapTable.rows.find(r => this.isNameMatch(r['Employee'] || r['Employee Name'] || '', displayName));
 
+      const fn = (typeof this.db.addMutation === 'function') ? this.db.addMutation.bind(this.db) : (typeof this.db.queueMutation === 'function' ? this.db.queueMutation.bind(this.db) : null);
+
       if (existingRow) {
         existingRow['Size'] = size;
+        existingRow['Class'] = chosenClass;
         existingRow['Status'] = 'Need to Purchase ❌';
         existingRow['Pick List Item #'] = '—';
-        if (typeof this.db.queueMutation === 'function') {
+        existingRow['Urgency'] = 'Immediate';
+        existingRow['Days Left'] = 0;
+
+        if (fn) {
           const actualRowIdx = existingRow._rowIdx || (swapTable.rows.indexOf(existingRow) + 2);
-          const getColNum = (hName) => (headers.findIndex(h => h.toLowerCase() === hName.toLowerCase()) + 1);
-          await this.db.queueMutation({ type: 'UPDATE_CELL', sheet: swapTable.name || swapKey, row: actualRowIdx, col: getColNum('Status'), value: 'Need to Purchase ❌' });
-          await this.db.queueMutation({ type: 'UPDATE_CELL', sheet: swapTable.name || swapKey, row: actualRowIdx, col: getColNum('Pick List Item #'), value: '—' });
-          await this.db.queueMutation({ type: 'UPDATE_CELL', sheet: swapTable.name || swapKey, row: actualRowIdx, col: getColNum('Size'), value: size });
+          const getColNum = (hName) => {
+            const idx = headers.findIndex(h => h.toLowerCase() === hName.toLowerCase());
+            return idx !== -1 ? idx + 1 : headers.length;
+          };
+          const sName = swapTable.name || swapSheetName;
+          await fn({ action: 'UPDATE_CELL', sheetName: sName, tableKey: swapKey, row: actualRowIdx, col: getColNum('Status'), header: 'Status', value: 'Need to Purchase ❌' });
+          await fn({ action: 'UPDATE_CELL', sheetName: sName, tableKey: swapKey, row: actualRowIdx, col: getColNum('Pick List Item #'), header: 'Pick List Item #', value: '—' });
+          await fn({ action: 'UPDATE_CELL', sheetName: sName, tableKey: swapKey, row: actualRowIdx, col: getColNum('Size'), header: 'Size', value: size });
+          await fn({ action: 'UPDATE_CELL', sheetName: sName, tableKey: swapKey, row: actualRowIdx, col: getColNum('Days Left'), header: 'Days Left', value: 0 });
         }
       } else {
         const newRow = {};
@@ -2368,23 +2566,29 @@ class EmployeeProfileEngine {
           else if (idx === 2) newRow[h] = size;
           else if (idx === 3) newRow[h] = 'N/A';
           else if (idx === 4) newRow[h] = 'N/A';
-          else if (idx === 5) newRow[h] = '0';
+          else if (idx === 5) newRow[h] = 0;
           else if (idx === 6) newRow[h] = '—';
           else if (idx === 7) newRow[h] = 'Need to Purchase ❌';
           else if (idx === 8) newRow[h] = 'FALSE';
           else if (idx === 9) newRow[h] = '—';
           else newRow[h] = '';
         });
+        newRow['Class'] = chosenClass;
+        newRow['Urgency'] = 'Immediate';
+        newRow['Days Left'] = 0;
+
         swapTable.rows.push(newRow);
         if (Array.isArray(swapTable.rawGrid)) {
           swapTable.rawGrid.push(Object.values(newRow));
         }
 
-        if (typeof this.db.queueMutation === 'function') {
-          await this.db.queueMutation({
-            type: 'ADD_ROW',
-            sheet: swapTable.name || swapKey,
+        if (fn) {
+          await fn({
+            action: 'ADD_ROW',
+            sheetName: swapTable.name || swapSheetName,
+            tableKey: swapKey,
             row: swapTable.rows.length + 1,
+            rowData: newRow,
             data: newRow
           });
         }
@@ -2396,16 +2600,25 @@ class EmployeeProfileEngine {
     if (needsTable && needsTable.rows) {
       const today = new Date();
       const todayFormatted = `${String(today.getMonth() + 1).padStart(2, '0')}/${String(today.getDate()).padStart(2, '0')}/${today.getFullYear()}`;
-      const needsRow = {
-        'Employee': displayName,
-        'Item Type': isGlove ? 'Rubber Gloves' : 'Rubber Sleeves',
-        'Size': size,
-        'Class': isGlove ? 'Class 0' : 'Class 2',
-        'Status': 'Pending Purchase',
-        'Date Requested': todayFormatted,
-        'Notes': `Added from Employee Profile for ${displayName}`
-      };
-      needsTable.rows.push(needsRow);
+      let existingNeed = needsTable.rows.find(r => this.isNameMatch(r['Employee'] || '', displayName) && (isGlove ? (r['Item Type'] || '').includes('Glove') : (r['Item Type'] || '').includes('Sleeve')));
+      if (existingNeed) {
+        existingNeed['Size'] = size;
+        existingNeed['Class'] = chosenClass;
+        existingNeed['Urgency'] = 'Immediate';
+        existingNeed['Status'] = 'Pending Purchase';
+      } else {
+        const needsRow = {
+          'Employee': displayName,
+          'Item Type': isGlove ? 'Rubber Gloves' : 'Rubber Sleeves',
+          'Size': size,
+          'Class': chosenClass,
+          'Urgency': 'Immediate',
+          'Status': 'Pending Purchase',
+          'Date Requested': todayFormatted,
+          'Notes': `Added from Employee Profile for ${displayName} (Urgency: Immediate)`
+        };
+        needsTable.rows.push(needsRow);
+      }
     }
 
     // Persist snapshot
@@ -2419,7 +2632,7 @@ class EmployeeProfileEngine {
     }
 
     if (typeof window.showToast === 'function') {
-      window.showToast(`Added Size ${size} ${isGlove ? 'Gloves' : 'Sleeves'} for ${displayName} to Purchase Needs`, 'success');
+      window.showToast(`Added Size ${size} (${chosenClass}) ${isGlove ? 'Gloves' : 'Sleeves'} for ${displayName} to Purchase Needs (Urgency: Immediate)`, 'success');
     }
 
     // Re-render profile modal body to update card state
