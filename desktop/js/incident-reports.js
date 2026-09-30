@@ -113,6 +113,47 @@ class IncidentReportsEngine {
   }
 
   /**
+   * Formats raw time string cleanly, stripping out base 1899-12-30 serialization artifacts
+   */
+  formatDisplayTime(rawTime) {
+    if (!rawTime) return '';
+    const str = String(rawTime).trim();
+    if (!str || str.toLowerCase() === 'undefined' || str.toLowerCase() === 'null') return '';
+
+    // If it's a serial date with 1899 or ISO string
+    if (str.includes('1899-12-30') || str.includes('T')) {
+      const d = new Date(str);
+      if (!isNaN(d.getTime())) {
+        return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+      }
+    }
+
+    // Clean up any ? from OCR e.g. "3:50?PM" -> "3:50 PM"
+    return str.replace(/\?/g, ' ').replace(/\s+/g, ' ').trim();
+  }
+
+  /**
+   * Formats raw date string into clean MM/DD/YYYY format
+   */
+  formatDisplayDate(rawDate) {
+    if (!rawDate) return '';
+    const str = String(rawDate).trim();
+    if (!str || str.toLowerCase() === 'undefined') return '';
+
+    // If ISO date string e.g. "2026-09-29T06:00:00.000Z"
+    if (str.includes('T') || str.includes('-')) {
+      const d = this.parseDate(str);
+      if (d && !isNaN(d.getTime())) {
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const dd = String(d.getDate()).padStart(2, '0');
+        const yy = d.getFullYear();
+        return `${mm}/${dd}/${yy}`;
+      }
+    }
+    return str;
+  }
+
+  /**
    * Loads all incident reports from the local database snapshot
    */
   loadIncidents() {
@@ -157,14 +198,40 @@ class IncidentReportsEngine {
       const rawType = String(row['Incident Type'] || 'General Incident').trim();
       const tags = this.splitIncidentTags(rawType);
 
+      let unitNum = String(row['Unit #'] || '').trim();
+      let ticketNum = String(row['Ticket #'] || '').trim();
+
+      // Clean up any legacy parsing artifact where Unit # was stored as "Ticket"
+      if (unitNum.toLowerCase() === 'ticket') {
+        unitNum = '';
+      }
+      // If ticketNum started with unitNum e.g. "5008 510 B394955 E" and unitNum was empty, separate them
+      if (!unitNum && ticketNum) {
+        const uMatch = ticketNum.match(/^(\d{3,5})\s+(.+)$/);
+        if (uMatch) {
+          unitNum = uMatch[1];
+          ticketNum = uMatch[2];
+        }
+      }
+      // If unitNum looks like an 811 Dig ticket (starts with R followed by digits) and ticketNum is empty, swap
+      if (unitNum && /^R\d{5,}/i.test(unitNum) && !ticketNum) {
+        ticketNum = unitNum;
+        unitNum = '';
+      }
+
+      const displayTime = this.formatDisplayTime(row['Time']);
+      const displayDate = this.formatDisplayDate(rawDate);
+
       return {
         id: row.id || `inc_${idx}_${row['Email ID'] || idx}`,
         rowIndex: row._rowIdx || idx + 2,
         emailId: String(row['Email ID'] || '').trim(),
         dateReceived: String(row['Date Received'] || '').trim(),
         dateOfIncident: rawDate,
+        displayDate: displayDate,
         dateObj: dObj,
         time: String(row['Time'] || '').trim(),
+        displayTime: displayTime,
         year: year,
         quarter: quarterKey,
         yearQuarter: yearQuarter,
@@ -176,8 +243,8 @@ class IncidentReportsEngine {
         incidentType: rawType,
         tags: tags,
         addressLocation: String(row['Address / Location'] || row['Location'] || '').trim(),
-        unitNumber: String(row['Unit #'] || '').trim(),
-        ticketNumber: String(row['Ticket #'] || '').trim(),
+        unitNumber: unitNum,
+        ticketNumber: ticketNum,
         explanation: String(row['Brief Explanation'] || row['Explanation'] || '').trim(),
         avoidableActions: String(row['Avoidable / Prevention'] || row['Avoidable'] || '').trim(),
         photoCount: parseInt(row['Photo Count'] || 0, 10),
@@ -450,7 +517,7 @@ class IncidentReportsEngine {
           <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
             <!-- Date & Time badge -->
             <span style="background: rgba(148, 163, 184, 0.12); color: #e2e8f0; border: 1px solid rgba(148, 163, 184, 0.25); font-size: 12.5px; font-weight: 800; padding: 3px 10px; border-radius: 6px; display: inline-flex; align-items: center; gap: 5px;">
-              <span>🗓️</span> ${this.escapeHtml(inc.dateOfIncident)} ${inc.time ? `• ⏰ ${this.escapeHtml(inc.time)}` : ''}
+              <span>🗓️</span> ${this.escapeHtml(inc.displayDate || inc.dateOfIncident)} ${inc.displayTime ? `• ⏰ ${this.escapeHtml(inc.displayTime)}` : ''}
             </span>
 
             <!-- Job Number Badge -->
@@ -497,13 +564,13 @@ class IncidentReportsEngine {
         ${(inc.unitNumber || inc.ticketNumber || inc.addressLocation) ? `
           <div style="display: flex; align-items: center; gap: 14px; flex-wrap: wrap; font-size: 12px; color: #94a3b8; background: rgba(15, 23, 42, 0.4); border: 1px solid rgba(148, 163, 184, 0.1); border-radius: 6px; padding: 6px 12px; margin-bottom: 12px;">
             ${inc.addressLocation ? `
-              <div><strong>Address / Location:</strong> <span style="color: #e2e8f0;">${this.escapeHtml(inc.addressLocation)}</span></div>
+              <div><strong>📍 Location:</strong> <span style="color: #e2e8f0;">${this.escapeHtml(inc.addressLocation)}</span></div>
             ` : ''}
             ${inc.unitNumber ? `
-              <div><strong>Unit #:</strong> <span style="color: #60a5fa; font-weight: 700;">${this.escapeHtml(inc.unitNumber)}</span></div>
+              <div><strong>🚛 Unit #:</strong> <span style="color: #60a5fa; font-weight: 700;">${this.escapeHtml(inc.unitNumber)}</span></div>
             ` : ''}
             ${inc.ticketNumber ? `
-              <div><strong>Ticket #:</strong> <span style="color: #f59e0b; font-weight: 700;">${this.escapeHtml(inc.ticketNumber)}</span></div>
+              <div><strong>${/^R\d{5,}/i.test(inc.ticketNumber) || (inc.incidentType && inc.incidentType.toLowerCase().includes('utility')) ? '🚧 811 Dig Ticket #:' : '📄 Ticket / Citation #:'}</strong> <span style="color: #f59e0b; font-weight: 700;">${this.escapeHtml(inc.ticketNumber)}</span></div>
             ` : ''}
           </div>
         ` : ''}
@@ -723,15 +790,16 @@ class IncidentReportsEngine {
     }
 
     const modal = document.getElementById('safety-pdf-modal');
-    const titleEl = document.getElementById('safety-pdf-title');
-    const subtitleEl = document.getElementById('safety-pdf-subtitle');
-    const body = document.getElementById('safety-pdf-body');
-    const downloadBtn = document.getElementById('safety-pdf-download');
-    const popoutBtn = document.getElementById('safety-pdf-popout');
-    const gmailBtn = document.getElementById('safety-pdf-gmail');
+    const titleEl = document.getElementById('safety-pdf-modal-title') || document.getElementById('safety-pdf-title');
+    const subtitleEl = document.getElementById('safety-pdf-modal-subtitle') || document.getElementById('safety-pdf-subtitle');
+    const body = document.getElementById('safety-pdf-modal-body') || document.getElementById('safety-pdf-body');
+    const downloadBtn = document.getElementById('safety-pdf-btn-download') || document.getElementById('safety-pdf-download');
+    const popoutBtn = document.getElementById('safety-pdf-btn-newtab') || document.getElementById('safety-pdf-popout');
+    const gmailBtn = document.getElementById('safety-pdf-btn-gmail') || document.getElementById('safety-pdf-gmail');
 
     if (!modal || !body) return;
 
+    modal.classList.remove('hidden');
     modal.style.display = 'flex';
     if (titleEl) titleEl.textContent = `Incident Report Form`;
     if (subtitleEl) subtitleEl.textContent = pdfFilename || 'Incident_Report.pdf';
@@ -841,6 +909,17 @@ class IncidentReportsEngine {
           </button>
         </div>
       `;
+    }
+  }
+
+  /**
+   * Closes the PDF viewer modal
+   */
+  closePdfModal() {
+    const modal = document.getElementById('safety-pdf-modal');
+    if (modal) {
+      modal.style.display = 'none';
+      modal.classList.add('hidden');
     }
   }
 

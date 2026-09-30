@@ -1869,7 +1869,7 @@
           <a id="safety-pdf-btn-gmail" href="#" target="_blank" class="btn btn-secondary" style="font-size: 11px; padding: 4px 10px; display: inline-flex; align-items: center; gap: 4px; text-decoration: none;" title="Open email thread in Gmail">
             ✉️ Open in Gmail
           </a>
-          <button class="btn btn-secondary" style="padding: 3px 8px; font-size: 13px; background: rgba(255,255,255,0.1); border: none; color: white; cursor: pointer;" onclick="window.safetyComplianceEngine.closePdfModal()">✕</button>
+          <button class="btn btn-secondary" style="padding: 3px 8px; font-size: 13px; background: rgba(255,255,255,0.1); border: none; color: white; cursor: pointer;" onclick="if (window.incidentReportsEngine && window.incidentReportsEngine.closePdfModal) window.incidentReportsEngine.closePdfModal(); else if (window.safetyComplianceEngine && window.safetyComplianceEngine.closePdfModal) window.safetyComplianceEngine.closePdfModal(); else { var m = document.getElementById('safety-pdf-modal'); if (m) { m.style.display='none'; m.classList.add('hidden'); } }">✕</button>
         </div>
       </div>
       <div class="modal-body" id="safety-pdf-modal-body" style="flex: 1; padding: 0; position: relative; background: #1e293b; overflow: hidden; display: flex; align-items: center; justify-content: center;">

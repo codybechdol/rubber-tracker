@@ -162,6 +162,17 @@ function exportFullDatabaseSnapshot(tableKeysFilter) {
     return (m < 10 ? '0' + m : m) + '/' + (day < 10 ? '0' + day : day) + '/' + yr;
   }
 
+  function fastTimeString(d) {
+    if (!(d instanceof Date) || isNaN(d.getTime())) return '';
+    var hrs = d.getHours();
+    var mins = d.getMinutes();
+    var ampm = hrs >= 12 ? 'PM' : 'AM';
+    hrs = hrs % 12;
+    hrs = hrs ? hrs : 12;
+    var strMins = mins < 10 ? '0' + mins : mins;
+    return hrs + ':' + strMins + ' ' + ampm;
+  }
+
   // Auto-provision recommended companion sheets if missing
   try {
     ensureRecommendedCompanionSheetsExist(ss);
@@ -294,7 +305,11 @@ function exportFullDatabaseSnapshot(tableKeysFilter) {
         var formattedStr = '';
 
         if (rawVal instanceof Date) {
-          formattedStr = fastDateString(rawVal);
+          if (rawVal.getFullYear() === 1899 || (headers[c] && String(headers[c]).toLowerCase() === 'time')) {
+            formattedStr = fastTimeString(rawVal);
+          } else {
+            formattedStr = fastDateString(rawVal);
+          }
         } else if (rawVal === null || rawVal === undefined) {
           formattedStr = '';
         } else {
@@ -3991,6 +4006,11 @@ function scanIncidentReportEmails(options) {
     // Build set of existing Email IDs to prevent duplicates
     var existingIds = {};
     var lastRow = sheet.getLastRow();
+    if (options.rescan === true && lastRow > 1) {
+      sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn()).clearContent();
+      lastRow = 1;
+    }
+
     if (lastRow > 1) {
       var emailIdCol = (typeof COLS !== 'undefined' && COLS.INCIDENT_REPORTS) ? COLS.INCIDENT_REPORTS.EMAIL_ID : 15;
       var existingVals = sheet.getRange(2, emailIdCol, lastRow - 1, 1).getValues();
@@ -4147,7 +4167,9 @@ function scanIncidentReportEmails(options) {
 
           // Time
           var tMatch = fullContent.match(/Time\s*:\s*([0-9:apmAPM\?\s]+?)(?=\s*(?:Job\s*#|Date|$))/i);
-          if (tMatch) parsed.timeOfIncident = tMatch[1].replace(/\?/g, '').trim();
+          if (tMatch) {
+            parsed.timeOfIncident = tMatch[1].replace(/\?/g, ' ').replace(/\s+/g, ' ').trim();
+          }
 
           // Job Number
           var jMatch = fullContent.match(/Job\s*#\s*:\s*(?:Job\s*#?)?([0-9]{2,3}-[0-9]{2}(?:\.[0-9]+)?)/i);
@@ -4164,7 +4186,15 @@ function scanIncidentReportEmails(options) {
 
           // Explain Incident
           var expMatch = fullContent.match(/Explain Incident\s*:\s*([\s\S]+?)(?=\s*(?:Description for other|Were there any defective|Was the incident caused|Could this incident|Were witnesses|List any unsafe|Unit\s*#|$))/i);
-          if (expMatch) parsed.explanation = expMatch[1].replace(/\s+/g, ' ').trim();
+          if (expMatch) {
+            parsed.explanation = expMatch[1]
+              .replace(/Address of Incident\s*:\s*[^\n\r]+/gi, '')
+              .replace(/Incident Type\s*:\s*[^\n\r]+/gi, '')
+              .replace(/Date of Incident\s*:\s*[^\n\r]+/gi, '')
+              .replace(/Involved Employee\(s\)\s*Name\s*:\s*[^\n\r]+/gi, '')
+              .replace(/\s+/g, ' ')
+              .trim();
+          }
 
           // Avoidable
           var avoidMatch = fullContent.match(/Could this incident have been avoided\?\s*([\s\S]+?)(?=\s*(?:Were witnesses|List any unsafe|Unit\s*#|Ticket\s*#|$))/i);
@@ -4180,13 +4210,50 @@ function scanIncidentReportEmails(options) {
           var addrMatch = fullContent.match(/Address of Incident\s*:\s*([^\n\r]+?)(?=\s*(?:Description|Were|Was|Unit|$))/i);
           if (addrMatch) parsed.addressLocation = addrMatch[1].trim();
 
-          // Unit #
-          var uMatch = fullContent.match(/Unit\s*#\s*[:\s]*([A-Za-z0-9\-_]+)/i);
-          if (uMatch) parsed.unitNumber = uMatch[1].trim();
+          // Unit # and Ticket # grid parsing (2-column table on form)
+          var gridTabMatch = fullContent.match(/Unit\s*#\s*[\t ]+Ticket\s*#\s*[\r\n]+([^\t\r\n]+)[\t ]+([^\r\n]+)/i);
+          if (gridTabMatch) {
+            parsed.unitNumber = (gridTabMatch[1] || '').trim();
+            parsed.ticketNumber = (gridTabMatch[2] || '').trim();
+          } else {
+            var gridLineMatch = fullContent.match(/Unit\s*#\s*[\r\n]+\s*Ticket\s*#\s*[\r\n]+\s*([^\r\n]+)(?:[\r\n]+\s*([^\r\n]+))?/i);
+            if (gridLineMatch) {
+              var v1 = (gridLineMatch[1] || '').trim();
+              var v2 = (gridLineMatch[2] || '').trim();
+              if (!/^(employee|witness|supervisor|date)/i.test(v1)) parsed.unitNumber = v1;
+              if (!/^(employee|witness|supervisor|date)/i.test(v2)) parsed.ticketNumber = v2;
+            }
+          }
 
-          // Ticket #
-          var tickMatch = fullContent.match(/Ticket\s*#\s*[:\s]*([A-Za-z0-9\s\-_]+?)(?=\s*(?:Employee Name|Witness Name|Supervisor Name|$))/i);
-          if (tickMatch) parsed.ticketNumber = tickMatch[1].trim();
+          // Fallbacks if grid wasn't matched
+          if (!parsed.unitNumber) {
+            var uMatch = fullContent.match(/Unit\s*#\s*[:\t ]*([A-Za-z0-9\-_]+(?:\s+[A-Za-z0-9\-_]+)*)(?=\s*(?:Ticket|Address|Employee|$))/i);
+            if (uMatch && uMatch[1].trim().toLowerCase() !== 'ticket') {
+              parsed.unitNumber = uMatch[1].trim();
+            }
+          }
+          if (!parsed.ticketNumber) {
+            var tMatch = fullContent.match(/Ticket\s*#\s*[:\t ]*([A-Za-z0-9\-_]+(?:\s+[A-Za-z0-9\-_]+)*)(?=\s*(?:Employee Name|Witness Name|Supervisor Name|$))/i);
+            if (tMatch && tMatch[1].trim().toLowerCase() !== 'unit') {
+              parsed.ticketNumber = tMatch[1].trim();
+            }
+          }
+
+          // Discard "Ticket" if unitNumber is accidentally "Ticket"
+          if (parsed.unitNumber && parsed.unitNumber.toLowerCase() === 'ticket') {
+            parsed.unitNumber = '';
+          }
+
+          // If unitNumber looks like an 811 dig ticket (e.g. starts with R or 811 ticket format) and ticketNumber is empty, swap
+          if (parsed.unitNumber && /^R\d{5,}/i.test(parsed.unitNumber) && !parsed.ticketNumber) {
+            parsed.ticketNumber = parsed.unitNumber;
+            parsed.unitNumber = '';
+          }
+
+          // If ticketNumber starts with unitNumber, strip unitNumber
+          if (parsed.unitNumber && parsed.ticketNumber && parsed.ticketNumber.startsWith(parsed.unitNumber)) {
+            parsed.ticketNumber = parsed.ticketNumber.replace(parsed.unitNumber, '').trim();
+          }
 
           // Supervisor / Foreman Name from PDF
           var supMatch = fullContent.match(/Supervisor Name\s*:\s*([A-Za-z\s]+?)(?=\s*(?:Date|$))/i);
@@ -4238,7 +4305,7 @@ function scanIncidentReportEmails(options) {
         var rowVals = [
           Utilities.formatDate(receivedDate, 'GMT-0600', 'yyyy-MM-dd HH:mm:ss'),
           parsed.dateOfIncident,
-          parsed.timeOfIncident,
+          parsed.timeOfIncident ? ("'" + parsed.timeOfIncident) : '',
           quarterKey,
           parsed.jobNumber,
           parsed.foreman,
