@@ -1533,6 +1533,9 @@ class SyncEngine {
         if (window.safetyComplianceEngine && typeof window.safetyComplianceEngine.renderSafetyLogs === 'function') {
           window.safetyComplianceEngine.renderSafetyLogs();
         }
+        if (window.incidentReportsEngine && typeof window.incidentReportsEngine.render === 'function') {
+          window.incidentReportsEngine.render();
+        }
         if (window.historyIssuesEngine) {
           window.historyIssuesEngine.invalidateCache();
           window.historyIssuesEngine.updateTabBadges();

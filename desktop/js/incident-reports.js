@@ -197,6 +197,12 @@ class IncidentReportsEngine {
 
     const allIncidents = this.loadIncidents();
 
+    // Auto-fetch from Google Sheets on initial load if local database has 0 reports
+    if (allIncidents.length === 0 && !this._initialFetchAttempted) {
+      this._initialFetchAttempted = true;
+      setTimeout(() => this.refresh(true), 50);
+    }
+
     // Collect available years
     const yearSet = new Set();
     allIncidents.forEach(inc => {
@@ -583,6 +589,56 @@ class IncidentReportsEngine {
   }
 
   /**
+   * Refreshes the incident reports table from the cloud database
+   */
+  async refresh(silent = false) {
+    const btn = document.getElementById('btn-refresh-incidents');
+    if (btn && !silent) {
+      btn.disabled = true;
+      btn.innerHTML = `<span>⏳</span> Refreshing...`;
+    }
+
+    try {
+      const syncUrl = window.syncEngine ? window.syncEngine.getSyncUrl() : '';
+      if (!syncUrl) {
+        throw new Error('Sync URL not configured.');
+      }
+
+      let freshSnapshot = null;
+      if (window.syncEngine && typeof window.syncEngine.executeNetworkRequest === 'function') {
+        freshSnapshot = await window.syncEngine.executeNetworkRequest(`${syncUrl}?action=getSnapshot&tables=incident_reports`, 'GET', null, 30000);
+      } else {
+        const resp = await fetch(`${syncUrl}?action=getSnapshot&tables=incident_reports`);
+        freshSnapshot = await resp.json();
+      }
+
+      if (freshSnapshot && freshSnapshot.tables && freshSnapshot.tables['incident_reports']) {
+        if (!this.db.snapshot) this.db.snapshot = { tables: {} };
+        if (!this.db.snapshot.tables) this.db.snapshot.tables = {};
+        this.db.snapshot.tables['incident_reports'] = freshSnapshot.tables['incident_reports'];
+        if (typeof this.db.persistSnapshot === 'function') {
+          await this.db.persistSnapshot(this.db.snapshot);
+        }
+        const rowCount = freshSnapshot.tables['incident_reports'].rowCount || (freshSnapshot.tables['incident_reports'].rows && freshSnapshot.tables['incident_reports'].rows.length) || 0;
+        if (!silent && typeof window.showToast === 'function') {
+          window.showToast(`Loaded ${rowCount} incident report${rowCount === 1 ? '' : 's'} from cloud database.`, 'success');
+        }
+      }
+    } catch (err) {
+      console.warn('IncidentReportsEngine refresh error:', err);
+      if (!silent && typeof window.showToast === 'function') {
+        window.showToast(`Refresh error: ${err.message}`, 'error');
+      }
+    } finally {
+      if (btn) {
+        btn.disabled = false;
+        btn.innerHTML = `<span>🔄</span> Refresh`;
+      }
+      this.render();
+    }
+  }
+
+  /**
    * Scans Gmail for new incident reports from mptablets@mountainpower.com
    */
   async scanEmails() {
@@ -624,13 +680,20 @@ class IncidentReportsEngine {
 
       if (result && result.success) {
         const count = result.newCount || 0;
-        if (typeof window.showToast === 'function') {
-          window.showToast(count > 0 ? `Successfully logged ${count} new incident report${count === 1 ? '' : 's'}!` : 'Scan complete. All incident reports are up to date.', 'success');
+        const total = result.totalInSheet || 0;
+
+        // Immediately update local database with the fresh table from Google Sheets
+        if (result.table && result.table.rows) {
+          if (!this.db.snapshot) this.db.snapshot = { tables: {} };
+          if (!this.db.snapshot.tables) this.db.snapshot.tables = {};
+          this.db.snapshot.tables['incident_reports'] = result.table;
+          if (typeof this.db.persistSnapshot === 'function') {
+            await this.db.persistSnapshot(this.db.snapshot);
+          }
         }
 
-        // Pull updated snapshot from Google Sheets to ensure local DB has the new rows
-        if (window.syncEngine && typeof window.syncEngine.pullLatestSnapshot === 'function') {
-          await window.syncEngine.pullLatestSnapshot(['incident_reports']);
+        if (typeof window.showToast === 'function') {
+          window.showToast(count > 0 ? `Successfully logged ${count} new incident report${count === 1 ? '' : 's'} (${total} total in database)!` : `Scan complete. ${total} total incident report${total === 1 ? '' : 's'} up to date.`, 'success');
         }
       } else {
         throw new Error((result && result.error) || 'Failed to scan incident emails.');

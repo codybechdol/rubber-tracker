@@ -292,7 +292,7 @@
             <span class="brand-badge" id="incident-reports-row-count">0 reports</span>
           </div>
           <div style="display: flex; align-items: center; gap: 8px;">
-            <button class="btn btn-secondary" id="btn-refresh-incidents" style="font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 6px;" onclick="window.incidentReportsEngine.render()" title="Refresh view">
+            <button class="btn btn-secondary" id="btn-refresh-incidents" style="font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 6px;" onclick="window.incidentReportsEngine.refresh()" title="Refresh view">
               <span>🔄</span> Refresh
             </button>
             <button class="btn btn-primary" id="btn-scan-incident-emails" style="font-size: 12px; font-weight: 700; background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%); border: none; display: flex; align-items: center; gap: 6px; box-shadow: 0 2px 6px rgba(239, 68, 68, 0.3);" onclick="window.incidentReportsEngine.scanEmails()">

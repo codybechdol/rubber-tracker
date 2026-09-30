@@ -4019,15 +4019,53 @@ function scanIncidentReportEmails(options) {
       }
     }
 
-    // Search query in Gmail
-    var daysBack = options.daysBack || 365;
-    var query = 'from:mptablets@mountainpower.com subject:"Incident Report"';
-    var maxThreads = options.maxThreads || 50;
+    // Build Employee -> Job Number map from Employees sheet
+    var empJobMap = {};
+    var empSheet = ss.getSheetByName(typeof SHEET_EMPLOYEES !== 'undefined' ? SHEET_EMPLOYEES : 'Employees');
+    if (empSheet && empSheet.getLastRow() > 1) {
+      var empData = empSheet.getDataRange().getValues();
+      var empHeaders = empData[0].map(function(h) { return String(h || '').trim().toLowerCase(); });
+      var colEmpName = empHeaders.indexOf('name');
+      var colEmpJob = empHeaders.indexOf('job number');
+      if (colEmpJob === -1) colEmpJob = empHeaders.indexOf('job #');
+      for (var ep = 1; ep < empData.length; ep++) {
+        var eName = String(empData[ep][colEmpName] || '').trim().toLowerCase();
+        var eJob = String(empData[ep][colEmpJob] || '').trim().replace(/^job\s*#?\s*/i, '');
+        if (eName && eJob) {
+          empJobMap[eName] = eJob;
+          var noZ = eJob.replace(/^0+/, '');
+          if (noZ) empJobMap[eName] = noZ;
+        }
+      }
+    }
 
-    var threads = GmailApp.search(query, 0, maxThreads);
-    if (!threads || threads.length === 0) {
-      // Try fallback query without quotes
-      threads = GmailApp.search('from:mptablets@mountainpower.com "Incident Report"', 0, maxThreads);
+    // Multi-query search in Gmail to guarantee all incident report emails are found
+    var maxThreads = options.maxThreads || 150;
+    var searchQueries = [
+      'label:incident-reports',
+      'subject:"Incident Report"',
+      'from:mptablets@mountainpower.com subject:"Incident Report"',
+      'from:mptablets@mountainpower.com "Incident Report"'
+    ];
+
+    var threadsMap = {};
+    var threads = [];
+
+    for (var q = 0; q < searchQueries.length; q++) {
+      try {
+        var found = GmailApp.search(searchQueries[q], 0, maxThreads);
+        if (found && found.length > 0) {
+          for (var f = 0; f < found.length; f++) {
+            var tid = found[f].getId();
+            if (!threadsMap[tid]) {
+              threadsMap[tid] = true;
+              threads.push(found[f]);
+            }
+          }
+        }
+      } catch (qErr) {
+        Logger.log('Search error for query "' + searchQueries[q] + '": ' + qErr);
+      }
     }
 
     var newCount = 0;
@@ -4047,6 +4085,11 @@ function scanIncidentReportEmails(options) {
         }
 
         var subject = msg.getSubject() || '';
+        // Skip messages that do not contain Incident Report in subject or thread
+        if (subject.toLowerCase().indexOf('incident report') === -1 && subject.toLowerCase().indexOf('incident') === -1) {
+          continue;
+        }
+
         var receivedDate = msg.getDate();
         var attachments = msg.getAttachments();
 
@@ -4078,6 +4121,12 @@ function scanIncidentReportEmails(options) {
           avoidableActions: '',
           pdfFilename: pdfAtt ? pdfAtt.getName() : ''
         };
+
+        // Extract employee from subject if possible
+        var sEmpMatch = subject.match(/Incident Report\s+([^(\-]+?)(?:\s*\(|\s*-|$)/i);
+        if (sEmpMatch && sEmpMatch[1].trim()) {
+          parsed.involvedEmployees = sEmpMatch[1].trim();
+        }
 
         // Attempt text extraction from PDF
         var pdfText = '';
@@ -4121,13 +4170,10 @@ function scanIncidentReportEmails(options) {
           var avoidMatch = fullContent.match(/Could this incident have been avoided\?\s*([\s\S]+?)(?=\s*(?:Were witnesses|List any unsafe|Unit\s*#|Ticket\s*#|$))/i);
           if (avoidMatch) parsed.avoidableActions = avoidMatch[1].replace(/\s+/g, ' ').trim();
 
-          // Involved Employees
+          // Involved Employees from PDF
           var empMatch = fullContent.match(/Involved Employee\(s\)\s*Name\s*:\s*([^\n\r]+?)(?=\s*(?:Address|Time|Date|$))/i);
-          if (empMatch) {
+          if (empMatch && empMatch[1].trim()) {
             parsed.involvedEmployees = empMatch[1].trim();
-          } else {
-            var sEmpMatch = subject.match(/Incident Report\s+([A-Za-z\s,]+?)(?:\s*\(|-|$)/i);
-            if (sEmpMatch) parsed.involvedEmployees = sEmpMatch[1].trim();
           }
 
           // Address
@@ -4147,7 +4193,24 @@ function scanIncidentReportEmails(options) {
           if (supMatch && supMatch[1].trim()) parsed.foreman = supMatch[1].trim();
         }
 
-        // Cross-reference Foreman with Job Tracking if supervisor name is missing/blank
+        // Cross-reference Job Number from Employee name if job # missing
+        if (!parsed.jobNumber && parsed.involvedEmployees) {
+          var cleanEmp = parsed.involvedEmployees.toLowerCase().trim();
+          if (empJobMap[cleanEmp]) {
+            parsed.jobNumber = empJobMap[cleanEmp];
+          } else {
+            // Check first name match in employee list
+            var fName = cleanEmp.split(/[\s,]+/)[0];
+            for (var ek in empJobMap) {
+              if (ek.indexOf(fName) !== -1) {
+                parsed.jobNumber = empJobMap[ek];
+                break;
+              }
+            }
+          }
+        }
+
+        // Cross-reference Foreman with Job Tracking
         if (!parsed.foreman && parsed.jobNumber) {
           var cleanJob = parsed.jobNumber.replace(/^0+/, '');
           if (foremanByJob[parsed.jobNumber]) {
@@ -4204,14 +4267,33 @@ function scanIncidentReportEmails(options) {
       Logger.log('scanIncidentReportEmails: Added ' + newRows.length + ' incident reports to ' + sheetName);
     }
 
+    // Build complete table object to return to caller for instant local DB update
+    var fullData = sheet.getDataRange().getValues();
+    var tableHeaders = fullData[0];
+    var tableRows = [];
+    for (var r = 1; r < fullData.length; r++) {
+      var rObj = { _rowIdx: r + 1 };
+      for (var c = 0; c < tableHeaders.length; c++) {
+        rObj[tableHeaders[c]] = fullData[r][c];
+      }
+      tableRows.push(rObj);
+    }
+
     return {
       success: true,
       newCount: newCount,
       skippedCount: skippedCount,
-      totalInSheet: sheet.getLastRow() - 1
+      totalInSheet: sheet.getLastRow() - 1,
+      table: {
+        name: sheetName,
+        headers: tableHeaders,
+        rows: tableRows,
+        rowCount: tableRows.length
+      }
     };
   } catch (err) {
     Logger.log('scanIncidentReportEmails error: ' + err);
     return { success: false, error: err.toString() };
   }
 }
+
