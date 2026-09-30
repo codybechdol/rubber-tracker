@@ -4250,21 +4250,22 @@ function scanIncidentReportEmails(options) {
             parsed.unitNumber = '';
           }
 
-          // If ticketNumber is a pure 1-5 digit number (e.g. 550, 5008) and unitNumber is empty, it's the Unit #
-          if (!parsed.unitNumber && parsed.ticketNumber && /^\d{1,5}$/.test(parsed.ticketNumber) && !/^R/i.test(parsed.ticketNumber)) {
-            parsed.unitNumber = parsed.ticketNumber;
-            parsed.ticketNumber = '';
+          // If unitNumber is empty and ticketNumber was matched
+          if (!parsed.unitNumber && parsed.ticketNumber) {
+            var twoParts = parsed.ticketNumber.match(/^([A-Za-z0-9\-_]+(?:\s+[A-Za-z]+)?)\s+([A-Za-z0-9\-_]+(?:\s+[A-Za-z0-9\-_]+)*)$/);
+            if (twoParts && !parsed.ticketNumber.startsWith('547 LT')) {
+              parsed.unitNumber = twoParts[1].trim();
+              parsed.ticketNumber = twoParts[2].trim();
+            } else if (!/^26\d{6,7}$/.test(parsed.ticketNumber)) {
+              // If not a Montana 811 Dig Ticket (26XXXXXX), it was written in the Unit # column (e.g. R237174, 550, 547 LT, 676, 2087)
+              parsed.unitNumber = parsed.ticketNumber;
+              parsed.ticketNumber = '';
+            }
           }
 
           // If unitNumber and ticketNumber are identical, ticket is empty
           if (parsed.unitNumber && parsed.ticketNumber && parsed.unitNumber === parsed.ticketNumber) {
             parsed.ticketNumber = '';
-          }
-
-          // If unitNumber looks like an 811 dig ticket (e.g. starts with R or 811 ticket format) and ticketNumber is empty, swap
-          if (parsed.unitNumber && /^R\d{5,}/i.test(parsed.unitNumber) && !parsed.ticketNumber) {
-            parsed.ticketNumber = parsed.unitNumber;
-            parsed.unitNumber = '';
           }
 
           // If ticketNumber starts with unitNumber, strip unitNumber

@@ -206,14 +206,20 @@ class IncidentReportsEngine {
         unitNum = '';
       }
 
-      // If ticketNum contains unitNum + citation e.g. "5008 510 B394955 E", split them
+      // If unitNum is empty and ticketNum has content (from the legacy sheet scan)
       if (!unitNum && ticketNum) {
-        const uMatch = ticketNum.match(/^(\d{3,5})\s+(.+)$/);
-        if (uMatch) {
-          unitNum = uMatch[1];
-          ticketNum = uMatch[2];
-        } else if (/^\d{1,5}$/.test(ticketNum) && !/^R/i.test(ticketNum)) {
-          // Pure 1-5 digit number (like 550, 5008, 104) is a vehicle / fleet Unit #, NOT a ticket!
+        // Check if ticketNum contains two tokens: Unit # followed by Ticket #
+        // e.g. "5008 510 B394955 E" -> unit: "5008", ticket: "510 B394955 E"
+        // e.g. "22G1598 26313614" -> unit: "22G1598", ticket: "26313614"
+        // e.g. "02726 26123824" -> unit: "02726", ticket: "26123824"
+        // e.g. "R593224 26114052" -> unit: "R593224", ticket: "26114052"
+        // e.g. "237828 26101420" -> unit: "237828", ticket: "26101420"
+        const twoParts = ticketNum.match(/^([A-Za-z0-9\-_]+(?:\s+[A-Za-z]+)?)\s+([A-Za-z0-9\-_]+(?:\s+[A-Za-z0-9\-_]+)*)$/);
+        if (twoParts && !ticketNum.startsWith('547 LT')) {
+          unitNum = twoParts[1].trim();
+          ticketNum = twoParts[2].trim();
+        } else if (!/^26\d{6,7}$/.test(ticketNum)) {
+          // If not a Montana 811 Dig Ticket (26XXXXXX), it was written in the Unit # column (e.g. R237174, 550, 547 LT, 676, 2087)
           unitNum = ticketNum;
           ticketNum = '';
         }
@@ -222,12 +228,6 @@ class IncidentReportsEngine {
       // If unitNum and ticketNum are identical, ticket is empty
       if (unitNum && ticketNum && unitNum === ticketNum) {
         ticketNum = '';
-      }
-
-      // If unitNum looks like an 811 Dig ticket (starts with R followed by digits) and ticketNum is empty, swap
-      if (unitNum && /^R\d{5,}/i.test(unitNum) && !ticketNum) {
-        ticketNum = unitNum;
-        unitNum = '';
       }
 
       // Clean up leaked form field labels from explanation
@@ -591,7 +591,7 @@ class IncidentReportsEngine {
               <div><strong>🚛 Unit #:</strong> <span style="color: #60a5fa; font-weight: 700;">${this.escapeHtml(inc.unitNumber)}</span></div>
             ` : ''}
             ${inc.ticketNumber ? `
-              <div><strong>${/^R\d{5,}/i.test(inc.ticketNumber) || (inc.incidentType && inc.incidentType.toLowerCase().includes('utility')) ? '🚧 811 Dig Ticket #:' : '📄 Ticket / Citation #:'}</strong> <span style="color: #f59e0b; font-weight: 700;">${this.escapeHtml(inc.ticketNumber)}</span></div>
+              <div><strong>${/^26\d{6,}/i.test(inc.ticketNumber) || (inc.incidentType && /dig|utility|excavat/i.test(inc.incidentType)) ? '🚧 811 Dig Ticket #:' : '📄 Ticket / Citation #:'}</strong> <span style="color: #f59e0b; font-weight: 700;">${this.escapeHtml(inc.ticketNumber)}</span></div>
             ` : ''}
           </div>
         ` : ''}
