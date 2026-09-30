@@ -936,12 +936,40 @@ class IncidentReportsEngine {
     if (!modal) return;
 
     modal.style.display = 'flex';
+    this.lightboxState = {
+      isOpen: true,
+      emailId: emailId,
+      incidentId: incidentId,
+      photos: [],
+      currentIndex: 0
+    };
+
+    // Bind keyboard navigation
+    if (this._lightboxKeyHandler) {
+      document.removeEventListener('keydown', this._lightboxKeyHandler);
+    }
+    this._lightboxKeyHandler = (e) => {
+      if (!this.lightboxState || !this.lightboxState.isOpen) return;
+      if (e.key === 'ArrowLeft') this.prevLightboxPhoto();
+      else if (e.key === 'ArrowRight') this.nextLightboxPhoto();
+      else if (e.key === 'Escape') this.closeLightbox();
+    };
+    document.addEventListener('keydown', this._lightboxKeyHandler);
+
+    const titleEl = document.getElementById('incident-lightbox-title');
+    const counterEl = document.getElementById('incident-lightbox-counter');
     const content = document.getElementById('incident-lightbox-content');
+    const strip = document.getElementById('incident-lightbox-thumbnail-strip');
+
+    if (titleEl) titleEl.textContent = 'Incident Photos';
+    if (counterEl) counterEl.textContent = 'Inspecting email attachments...';
+    if (strip) strip.innerHTML = '';
     if (content) {
       content.innerHTML = `
         <div style="padding: 60px; text-align: center; color: #94a3b8;">
-          <div style="font-size: 36px; margin-bottom: 10px;">⏳</div>
-          <div style="font-size: 15px; font-weight: 700; color: #f1f5f9;">Loading incident photos from Gmail...</div>
+          <div style="font-size: 36px; margin-bottom: 12px;">📷</div>
+          <div style="font-size: 15px; font-weight: 700; color: #f1f5f9;">Loading photo attachments from Gmail...</div>
+          <div style="font-size: 12px; color: #64748b; margin-top: 6px;">Contacting Google Apps Script backend</div>
         </div>
       `;
     }
@@ -950,36 +978,38 @@ class IncidentReportsEngine {
       const syncUrl = window.syncEngine ? window.syncEngine.getSyncUrl() : '';
       let photos = [];
 
-      // Check cache for photos with base64
-      if (this.attachmentsCache.has(emailId) && this.attachmentsCache.get(emailId).fullPhotos) {
-        photos = this.attachmentsCache.get(emailId).fullPhotos;
+      // Check if we already inspected this email
+      if (this.attachmentsCache.has(emailId) && Array.isArray(this.attachmentsCache.get(emailId).photos)) {
+        photos = this.attachmentsCache.get(emailId).photos;
       } else {
         const payload = {
           action: 'getIncidentEmailAttachments',
           emailId: emailId,
-          includePhotos: true
+          includePhotos: false,
+          includePdf: false
         };
 
         let resJson = null;
         if (window.syncEngine && typeof window.syncEngine.executeNetworkRequest === 'function') {
-          resJson = await window.syncEngine.executeNetworkRequest(syncUrl, 'POST', payload, 90000);
+          resJson = await window.syncEngine.executeNetworkRequest(syncUrl, 'POST', payload, 30000);
         } else {
-          const resp = await fetch(`${syncUrl}?action=getIncidentEmailAttachments&emailId=${encodeURIComponent(emailId)}&includePhotos=true`);
+          const resp = await fetch(`${syncUrl}?action=getIncidentEmailAttachments&emailId=${encodeURIComponent(emailId)}&includePhotos=false&includePdf=false`);
           resJson = await resp.json();
         }
 
-        if (resJson && resJson.success && resJson.photos) {
+        if (resJson && resJson.success && Array.isArray(resJson.photos)) {
           photos = resJson.photos;
           if (!this.attachmentsCache.has(emailId)) {
             this.attachmentsCache.set(emailId, {});
           }
-          this.attachmentsCache.get(emailId).fullPhotos = photos;
+          this.attachmentsCache.get(emailId).photos = photos;
         } else {
-          throw new Error((resJson && resJson.error) || 'Failed to extract attached photos.');
+          throw new Error((resJson && resJson.error) || 'Failed to inspect email attachments.');
         }
       }
 
       if (!photos || photos.length === 0) {
+        if (counterEl) counterEl.textContent = '0 Photos';
         if (content) {
           content.innerHTML = `
             <div style="padding: 60px; text-align: center; color: #94a3b8;">
@@ -992,21 +1022,18 @@ class IncidentReportsEngine {
         return;
       }
 
-      this.lightboxState = {
-        isOpen: true,
-        emailId: emailId,
-        photos: photos,
-        currentIndex: 0
-      };
-
-      this.renderLightboxCurrentPhoto();
+      this.lightboxState.photos = photos;
+      this.renderLightboxThumbnailStrip();
+      await this.loadAndDisplayPhoto(0);
     } catch (err) {
+      if (counterEl) counterEl.textContent = 'Error';
       if (content) {
         content.innerHTML = `
           <div style="padding: 40px; text-align: center; color: #f87171;">
             <div style="font-size: 32px; margin-bottom: 10px;">⚠️</div>
             <div style="font-size: 15px; font-weight: 700; margin-bottom: 6px;">Could not load photos</div>
-            <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 16px;">${this.escapeHtml(err.message || 'Unknown error')}</div>
+            <div style="font-size: 12px; color: #94a3b8; margin-bottom: 16px;">${this.escapeHtml(err.message || 'Unknown error')}</div>
+            <button class="btn btn-secondary" onclick="window.incidentReportsEngine.openPhotosLightbox('${emailId}', '${incidentId || ''}')" style="font-size: 12px; padding: 6px 14px;">🔄 Retry</button>
           </div>
         `;
       }
@@ -1014,67 +1041,270 @@ class IncidentReportsEngine {
   }
 
   /**
-   * Renders the active photo in the lightbox modal
+   * Renders the thumbnail strip at the bottom of the lightbox
    */
-  renderLightboxCurrentPhoto() {
-    const { photos, currentIndex } = this.lightboxState;
-    if (!photos || photos.length === 0) return;
+  renderLightboxThumbnailStrip() {
+    const strip = document.getElementById('incident-lightbox-thumbnail-strip');
+    if (!strip || !this.lightboxState || !this.lightboxState.photos) return;
 
-    const curPhoto = photos[currentIndex];
+    const { photos, currentIndex } = this.lightboxState;
+    strip.innerHTML = photos.map((p, idx) => {
+      const isCur = idx === currentIndex;
+      const hasLoaded = !!p.base64;
+      return `
+        <div id="lightbox-thumb-${idx}" onclick="window.incidentReportsEngine.setLightboxIndex(${idx})" style="
+          width: 52px; height: 52px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center;
+          background: ${isCur ? '#1e293b' : '#090d16'};
+          border: 2px solid ${isCur ? '#38bdf8' : 'rgba(255,255,255,0.18)'};
+          box-shadow: ${isCur ? '0 0 12px rgba(56,189,248,0.5)' : 'none'};
+          overflow: hidden; flex-shrink: 0; position: relative; user-select: none; transition: all 0.15s ease;
+        " title="${this.escapeHtml(p.filename || ('Photo #' + (idx + 1)))}">
+          ${hasLoaded
+            ? `<img src="data:${p.contentType || 'image/jpeg'};base64,${p.base64}" style="width: 100%; height: 100%; object-fit: cover;" />`
+            : `<span style="font-size: 12px; font-weight: 700; color: ${isCur ? '#38bdf8' : '#64748b'};">#${idx + 1}</span>`
+          }
+        </div>
+      `;
+    }).join('');
+  }
+
+  /**
+   * Updates a single thumbnail element in the strip once its photo data has loaded
+   */
+  updateThumbnail(idx) {
+    const thumbEl = document.getElementById(`lightbox-thumb-${idx}`);
+    if (!thumbEl || !this.lightboxState || !this.lightboxState.photos) return;
+    const p = this.lightboxState.photos[idx];
+    if (p && p.base64) {
+      thumbEl.innerHTML = `<img src="data:${p.contentType || 'image/jpeg'};base64,${p.base64}" style="width: 100%; height: 100%; object-fit: cover;" />`;
+    }
+  }
+
+  /**
+   * Loads and displays photo at the specified index
+   */
+  async loadAndDisplayPhoto(index) {
+    if (!this.lightboxState || !this.lightboxState.photos || this.lightboxState.photos.length === 0) return;
+    if (index < 0 || index >= this.lightboxState.photos.length) return;
+
+    this.lightboxState.currentIndex = index;
+    const { photos, emailId } = this.lightboxState;
+    const curPhoto = photos[index];
+
     const content = document.getElementById('incident-lightbox-content');
     const counterEl = document.getElementById('incident-lightbox-counter');
     const titleEl = document.getElementById('incident-lightbox-title');
 
     if (counterEl) {
-      counterEl.textContent = `Photo ${currentIndex + 1} of ${photos.length}`;
+      counterEl.textContent = `Photo ${index + 1} of ${photos.length}`;
     }
     if (titleEl) {
-      titleEl.textContent = curPhoto.filename || `Incident Photo #${currentIndex + 1}`;
+      titleEl.textContent = curPhoto.filename || `Incident Photo #${index + 1}`;
     }
 
-    const srcUrl = `data:${curPhoto.contentType || 'image/jpeg'};base64,${curPhoto.base64}`;
+    // Highlight active thumbnail in strip
+    photos.forEach((_, idx) => {
+      const tEl = document.getElementById(`lightbox-thumb-${idx}`);
+      if (tEl) {
+        const isCur = idx === index;
+        tEl.style.border = isCur ? '2px solid #38bdf8' : '2px solid rgba(255,255,255,0.18)';
+        tEl.style.boxShadow = isCur ? '0 0 12px rgba(56,189,248,0.5)' : 'none';
+        tEl.style.background = isCur ? '#1e293b' : '#090d16';
+        if (isCur) {
+          tEl.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+        }
+      }
+    });
 
+    // If already downloaded and cached, render immediately
+    if (curPhoto.base64) {
+      const srcUrl = `data:${curPhoto.contentType || 'image/jpeg'};base64,${curPhoto.base64}`;
+      if (content) {
+        content.innerHTML = `
+          <div style="position: relative; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;">
+            <img src="${srcUrl}" alt="Incident Photo" style="max-width: 100%; max-height: 75vh; object-fit: contain; border-radius: 6px; box-shadow: 0 4px 25px rgba(0,0,0,0.6);" />
+          </div>
+        `;
+      }
+      this.prefetchPhoto(index + 1);
+      return;
+    }
+
+    // Display loading spinner for this specific photo
+    const kbSize = curPhoto.sizeBytes ? Math.round(curPhoto.sizeBytes / 1024) + ' KB' : '';
     if (content) {
       content.innerHTML = `
-        <div style="position: relative; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;">
-          <img src="${srcUrl}" alt="Incident Photo" style="max-width: 100%; max-height: 75vh; object-fit: contain; border-radius: 6px; box-shadow: 0 4px 20px rgba(0,0,0,0.5);" />
+        <div style="padding: 40px; text-align: center; color: #94a3b8;">
+          <div style="width: 42px; height: 42px; border: 3px solid rgba(56,189,248,0.2); border-top-color: #38bdf8; border-radius: 50%; animation: spin 0.8s linear infinite; margin: 0 auto 16px;"></div>
+          <div style="font-size: 15px; font-weight: 700; color: #f1f5f9;">Loading Photo ${index + 1} of ${photos.length}...</div>
+          <div style="font-size: 12px; color: #64748b; margin-top: 6px;">${this.escapeHtml(curPhoto.filename || '')} ${kbSize ? '• ' + kbSize : ''}</div>
         </div>
       `;
     }
 
-    // Thumbnail strip below main image
-    const strip = document.getElementById('incident-lightbox-thumbnail-strip');
-    if (strip) {
-      strip.innerHTML = photos.map((p, idx) => {
-        const isCur = idx === currentIndex;
-        const thumbSrc = `data:${p.contentType || 'image/jpeg'};base64,${p.base64}`;
-        return `
-          <img src="${thumbSrc}" onclick="window.incidentReportsEngine.setLightboxIndex(${idx})" style="width: 56px; height: 56px; object-fit: cover; border-radius: 4px; cursor: pointer; border: 2px solid ${isCur ? '#3b82f6' : 'rgba(255,255,255,0.2)'}; opacity: ${isCur ? 1 : 0.6}; transition: all 0.15s ease;" />
-        `;
-      }).join('');
+    try {
+      const syncUrl = window.syncEngine ? window.syncEngine.getSyncUrl() : '';
+      const payload = {
+        action: 'getIncidentEmailAttachments',
+        emailId: emailId,
+        photoIndex: index
+      };
+
+      let resJson = null;
+      if (window.syncEngine && typeof window.syncEngine.executeNetworkRequest === 'function') {
+        resJson = await window.syncEngine.executeNetworkRequest(syncUrl, 'POST', payload, 45000);
+      } else {
+        const resp = await fetch(`${syncUrl}?action=getIncidentEmailAttachments&emailId=${encodeURIComponent(emailId)}&photoIndex=${index}`);
+        resJson = await resp.json();
+      }
+
+      if (resJson && resJson.success && resJson.photo && resJson.photo.base64) {
+        curPhoto.base64 = resJson.photo.base64;
+        curPhoto.contentType = resJson.photo.contentType || 'image/jpeg';
+        this.updateThumbnail(index);
+
+        // Only render if user is still on this photo
+        if (this.lightboxState && this.lightboxState.isOpen && this.lightboxState.currentIndex === index) {
+          const srcUrl = `data:${curPhoto.contentType};base64,${curPhoto.base64}`;
+          if (content) {
+            content.innerHTML = `
+              <div style="position: relative; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;">
+                <img src="${srcUrl}" alt="Incident Photo" style="max-width: 100%; max-height: 75vh; object-fit: contain; border-radius: 6px; box-shadow: 0 4px 25px rgba(0,0,0,0.6);" />
+              </div>
+            `;
+          }
+        }
+
+        // Prefetch next photo in background for instant viewing
+        this.prefetchPhoto(index + 1);
+      } else {
+        throw new Error((resJson && resJson.error) || 'Failed to download photo from Gmail.');
+      }
+    } catch (err) {
+      if (this.lightboxState && this.lightboxState.isOpen && this.lightboxState.currentIndex === index) {
+        if (content) {
+          content.innerHTML = `
+            <div style="padding: 30px; text-align: center; color: #f87171;">
+              <div style="font-size: 28px; margin-bottom: 8px;">⚠️</div>
+              <div style="font-size: 14px; font-weight: 700; margin-bottom: 4px;">Failed to load photo #${index + 1}</div>
+              <div style="font-size: 12px; color: #94a3b8; margin-bottom: 14px;">${this.escapeHtml(err.message || 'Unknown error')}</div>
+              <button class="btn btn-secondary" onclick="window.incidentReportsEngine.loadAndDisplayPhoto(${index})" style="font-size: 12px; padding: 6px 14px;">🔄 Retry Photo</button>
+            </div>
+          `;
+        }
+      }
     }
+  }
+
+  /**
+   * Prefetches the photo at target index silently in the background
+   */
+  prefetchPhoto(index) {
+    if (!this.lightboxState || !this.lightboxState.photos) return;
+    if (index < 0 || index >= this.lightboxState.photos.length) return;
+    const target = this.lightboxState.photos[index];
+    if (!target || target.base64 || target._isPrefetching) return;
+
+    target._isPrefetching = true;
+    const syncUrl = window.syncEngine ? window.syncEngine.getSyncUrl() : '';
+    const payload = {
+      action: 'getIncidentEmailAttachments',
+      emailId: this.lightboxState.emailId,
+      photoIndex: index
+    };
+
+    const reqPromise = (window.syncEngine && typeof window.syncEngine.executeNetworkRequest === 'function')
+      ? window.syncEngine.executeNetworkRequest(syncUrl, 'POST', payload, 45000)
+      : fetch(`${syncUrl}?action=getIncidentEmailAttachments&emailId=${encodeURIComponent(this.lightboxState.emailId)}&photoIndex=${index}`).then(r => r.json());
+
+    reqPromise.then(res => {
+      if (res && res.success && res.photo && res.photo.base64) {
+        target.base64 = res.photo.base64;
+        target.contentType = res.photo.contentType || 'image/jpeg';
+        this.updateThumbnail(index);
+      }
+    }).catch(() => {}).finally(() => {
+      target._isPrefetching = false;
+    });
   }
 
   setLightboxIndex(newIdx) {
     if (!this.lightboxState.photos || this.lightboxState.photos.length === 0) return;
     if (newIdx < 0) newIdx = this.lightboxState.photos.length - 1;
     if (newIdx >= this.lightboxState.photos.length) newIdx = 0;
-    this.lightboxState.currentIndex = newIdx;
-    this.renderLightboxCurrentPhoto();
+    this.loadAndDisplayPhoto(newIdx);
   }
 
   prevLightboxPhoto() {
+    if (!this.lightboxState.photos) return;
     this.setLightboxIndex(this.lightboxState.currentIndex - 1);
   }
 
   nextLightboxPhoto() {
+    if (!this.lightboxState.photos) return;
     this.setLightboxIndex(this.lightboxState.currentIndex + 1);
   }
 
   closeLightbox() {
     const modal = document.getElementById('incident-photos-lightbox-modal');
     if (modal) modal.style.display = 'none';
-    this.lightboxState.isOpen = false;
+    if (this.lightboxState) this.lightboxState.isOpen = false;
+    if (this._lightboxKeyHandler) {
+      document.removeEventListener('keydown', this._lightboxKeyHandler);
+      this._lightboxKeyHandler = null;
+    }
+  }
+
+  /**
+   * Downloads the currently viewed photo
+   */
+  downloadCurrentPhoto() {
+    if (!this.lightboxState || !this.lightboxState.photos) return;
+    const cur = this.lightboxState.photos[this.lightboxState.currentIndex];
+    if (!cur || !cur.base64) {
+      alert('Photo is still downloading or not available.');
+      return;
+    }
+    const a = document.createElement('a');
+    a.href = `data:${cur.contentType || 'image/jpeg'};base64,${cur.base64}`;
+    a.download = cur.filename || `incident_photo_${this.lightboxState.currentIndex + 1}.jpg`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }
+
+  /**
+   * Opens the currently viewed photo in a full-size tab or window
+   */
+  popoutCurrentPhoto() {
+    if (!this.lightboxState || !this.lightboxState.photos) return;
+    const cur = this.lightboxState.photos[this.lightboxState.currentIndex];
+    if (!cur || !cur.base64) {
+      alert('Photo is still downloading or not available.');
+      return;
+    }
+    const dataUrl = `data:${cur.contentType || 'image/jpeg'};base64,${cur.base64}`;
+    const win = window.open('');
+    if (win) {
+      win.document.write(`
+        <!DOCTYPE html>
+        <html>
+        <head><title>${this.escapeHtml(cur.filename || 'Incident Photo')}</title></head>
+        <body style="margin: 0; background: #0b0f19; display: flex; align-items: center; justify-content: center; height: 100vh;">
+          <img src="${dataUrl}" style="max-width: 100%; max-height: 100%; object-fit: contain;" />
+        </body>
+        </html>
+      `);
+      win.document.close();
+    }
+  }
+
+  /**
+   * Opens the current photo's email in Gmail Web
+   */
+  openCurrentPhotoInGmail() {
+    if (!this.lightboxState || !this.lightboxState.emailId) return;
+    this.openEmailInGmail(this.lightboxState.emailId);
   }
 
   /**

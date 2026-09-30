@@ -33861,7 +33861,7 @@ function doGet(e) {
       var incEmailId = e.parameter.emailId || '';
       var incSubj = e.parameter.subject || '';
       var photoIdx = e.parameter.photoIndex;
-      var incOptions = { photoIndex: photoIdx, includePhotos: e.parameter.includePhotos === 'true' };
+      var incOptions = { photoIndex: photoIdx, includePhotos: e.parameter.includePhotos === 'true', includePdf: e.parameter.includePdf !== 'false' };
       var incRes = (typeof getIncidentEmailAttachments === 'function')
         ? getIncidentEmailAttachments(incEmailId, incSubj, incOptions)
         : { success: false, error: 'getIncidentEmailAttachments function not found in backend' };

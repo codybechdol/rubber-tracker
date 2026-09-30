@@ -3952,13 +3952,19 @@ function getIncidentEmailAttachments(emailId, subject, options) {
       photos: []
     };
 
-    if (pdfAttachment) {
+    if (pdfAttachment && options.includePdf !== false) {
       var pdfBytes = pdfAttachment.getBytes();
       result.pdf = {
         filename: pdfAttachment.getName(),
         sizeBytes: pdfBytes.length,
         contentType: 'application/pdf',
         base64: Utilities.base64Encode(pdfBytes)
+      };
+    } else if (pdfAttachment) {
+      result.pdf = {
+        filename: pdfAttachment.getName(),
+        sizeBytes: pdfAttachment.getSize(),
+        contentType: 'application/pdf'
       };
     }
 
