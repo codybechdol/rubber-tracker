@@ -1667,7 +1667,9 @@ class LocalDatabase {
       'dot drug tests': 'dot_drug_tests',
       'dot_drug_tests': 'dot_drug_tests',
       'drug test clinics': 'drug_test_clinics',
-      'drug_test_clinics': 'drug_test_clinics'
+      'drug_test_clinics': 'drug_test_clinics',
+      'incident reports': 'incident_reports',
+      'incident_reports': 'incident_reports'
     };
     if (map[clean]) return map[clean];
 
@@ -1732,7 +1734,9 @@ class LocalDatabase {
       'dot_drug_tests': 'DOT Drug Tests',
       'dot drug tests': 'DOT Drug Tests',
       'drug_test_clinics': 'Drug Test Clinics',
-      'drug test clinics': 'Drug Test Clinics'
+      'drug test clinics': 'Drug Test Clinics',
+      'incident_reports': 'Incident Reports',
+      'incident reports': 'Incident Reports'
     };
     if (map[clean]) return map[clean];
     if (this.snapshot && this.snapshot.tables && this.snapshot.tables[clean]) {

@@ -33857,6 +33857,22 @@ function doGet(e) {
         : { success: false, error: 'getSafetyEmailPdf function not found in backend' };
       return ContentService.createTextOutput(JSON.stringify(pdfRes))
         .setMimeType(ContentService.MimeType.JSON);
+    } else if (action === 'getIncidentEmailAttachments') {
+      var incEmailId = e.parameter.emailId || '';
+      var incSubj = e.parameter.subject || '';
+      var photoIdx = e.parameter.photoIndex;
+      var incOptions = { photoIndex: photoIdx, includePhotos: e.parameter.includePhotos === 'true' };
+      var incRes = (typeof getIncidentEmailAttachments === 'function')
+        ? getIncidentEmailAttachments(incEmailId, incSubj, incOptions)
+        : { success: false, error: 'getIncidentEmailAttachments function not found in backend' };
+      return ContentService.createTextOutput(JSON.stringify(incRes))
+        .setMimeType(ContentService.MimeType.JSON);
+    } else if (action === 'scanIncidentEmails') {
+      var scanRes = (typeof scanIncidentReportEmails === 'function')
+        ? scanIncidentReportEmails({ daysBack: parseInt(e.parameter.daysBack || '365', 10) })
+        : { success: false, error: 'scanIncidentReportEmails function not found in backend' };
+      return ContentService.createTextOutput(JSON.stringify(scanRes))
+        .setMimeType(ContentService.MimeType.JSON);
     } else if (action === 'getSafetyEmailsStatus') {
       var statusRes = (typeof getSafetyEmailsStatus === 'function')
         ? getSafetyEmailsStatus()
@@ -34017,6 +34033,22 @@ function doPost(e) {
         ? getSafetyEmailPdf(payload.emailId, payload.subject)
         : { success: false, error: 'getSafetyEmailPdf function not found in backend' };
       return ContentService.createTextOutput(JSON.stringify(pdfResult))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    if (action === 'getIncidentEmailAttachments') {
+      var incAttResult = (typeof getIncidentEmailAttachments === 'function')
+        ? getIncidentEmailAttachments(payload.emailId, payload.subject, payload)
+        : { success: false, error: 'getIncidentEmailAttachments function not found in backend' };
+      return ContentService.createTextOutput(JSON.stringify(incAttResult))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    if (action === 'scanIncidentEmails') {
+      var scanIncResult = (typeof scanIncidentReportEmails === 'function')
+        ? scanIncidentReportEmails(payload)
+        : { success: false, error: 'scanIncidentReportEmails function not found in backend' };
+      return ContentService.createTextOutput(JSON.stringify(scanIncResult))
         .setMimeType(ContentService.MimeType.JSON);
     }
 

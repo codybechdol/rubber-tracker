@@ -64,6 +64,7 @@ var SHEET_TEST_BATCHES = 'Testing Lab Batches';
 var SHEET_FIELD_GPS_LOG = 'Field GPS Log';
 var SHEET_DAILY_ACCOMPLISHMENTS = 'Daily Accomplishments';
 var SHEET_SYSTEM_CONFIG = 'System Config';
+var SHEET_INCIDENT_REPORTS = 'Incident Reports';
 
 // =============================================================================
 // VISUAL CONSTANTS
@@ -479,6 +480,28 @@ var COLS = {
     CONFIG_VALUE: 2,    // B - Value (JSON or string)
     DESCRIPTION: 3,     // C - Description of setting
     LAST_UPDATED: 4     // D - Timestamp
+  },
+
+  // Incident Reports Sheet (September 2026)
+  INCIDENT_REPORTS: {
+    DATE_RECEIVED: 1,      // A - Timestamp email received in Gmail
+    DATE_OF_INCIDENT: 2,   // B - Date of Incident
+    TIME: 3,               // C - Time of Incident
+    QUARTER: 4,            // D - Yearly Quarter (e.g. 2026-Q3)
+    JOB_NUMBER: 5,         // E - Job #
+    FOREMAN: 6,            // F - Foreman / Supervisor
+    INVOLVED_EMPLOYEES: 7, // G - Involved Employee(s)
+    INCIDENT_TYPES: 8,     // H - Incident Type tags
+    ADDRESS_LOCATION: 9,   // I - Address / Highway / Location
+    UNIT_NUMBER: 10,       // J - Truck / Unit #
+    TICKET_NUMBER: 11,     // K - Ticket / 811 locate #
+    EXPLANATION: 12,       // L - Narrative explanation
+    AVOIDABLE_ACTIONS: 13, // M - Avoidable / Corrective notes
+    PHOTO_COUNT: 14,       // N - Attached photos count
+    EMAIL_ID: 15,          // O - Gmail Message / Thread ID
+    PDF_FILENAME: 16,      // P - Attached PDF Filename
+    STATUS: 17,            // Q - Review Status
+    NOTES: 18              // R - Coordinator Notes
   }
 };
 
