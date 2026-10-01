@@ -2553,6 +2553,22 @@ body.view-only-mode .card-drop-zone {
   pointer-events: auto;
 }
 
+.ai-provider-tab {
+  transition: all 0.15s ease;
+}
+
+.ai-provider-tab:hover {
+  background: rgba(255, 255, 255, 0.1) !important;
+  color: #fff !important;
+}
+
+.ai-provider-tab.active {
+  border-color: #3b82f6 !important;
+  background: rgba(59, 130, 246, 0.22) !important;
+  box-shadow: 0 0 12px rgba(59, 130, 246, 0.35) !important;
+  color: #93c5fd !important;
+}
+
 .ai-copilot-drawer {
   position: fixed;
   top: 0;

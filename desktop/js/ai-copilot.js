@@ -1,6 +1,6 @@
 /**
  * ai-copilot.js - Safety Assistant AI Copilot
- * Integrates OpenAI (ChatGPT) directly into the Safety Assistant Desktop App
+ * Supports Google Gemini (100% Free Tier via Google AI Studio) & OpenAI (ChatGPT Platform)
  * Equipped with function calling to query local databases, inspect PPE,
  * check safety compliance, lookup employees, and control app navigation.
  */
@@ -8,8 +8,21 @@
 class AICopilotEngine {
   constructor(db) {
     this.db = db;
-    this.apiKey = localStorage.getItem('sa_openai_api_key') || '';
-    this.model = localStorage.getItem('sa_copilot_model') || 'gpt-4o-mini';
+
+    // Load provider and keys
+    this.provider = localStorage.getItem('sa_ai_provider') || 'google';
+    this.googleApiKey = localStorage.getItem('sa_google_api_key') || '';
+    this.openaiApiKey = localStorage.getItem('sa_openai_api_key') || '';
+
+    // Auto-migrate legacy key if it starts with AIza
+    if (!this.googleApiKey && this.openaiApiKey && this.openaiApiKey.startsWith('AIza')) {
+      this.googleApiKey = this.openaiApiKey;
+      localStorage.setItem('sa_google_api_key', this.googleApiKey);
+    }
+
+    this.model = localStorage.getItem('sa_copilot_model') || (this.provider === 'google' ? 'gemini-1.5-flash' : 'gpt-4o-mini');
+    this.apiKey = this.provider === 'google' ? this.googleApiKey : this.openaiApiKey;
+
     this.messages = [];
     this.isOpen = false;
     this.isProcessing = false;
@@ -131,7 +144,7 @@ class AICopilotEngine {
     }, 150);
 
     // If no API key configured, prompt gently
-    if (!this.apiKey) {
+    if (!this.getActiveApiKey()) {
       this.showNoApiKeyNotice();
     }
   }
@@ -148,10 +161,15 @@ class AICopilotEngine {
     }
   }
 
+  getActiveApiKey() {
+    return this.provider === 'google' ? this.googleApiKey : this.openaiApiKey;
+  }
+
   updateModelBadge() {
     const badge = document.getElementById('ai-copilot-model-badge');
     if (badge) {
-      badge.textContent = this.model;
+      const providerIcon = this.provider === 'google' ? '🔵 Google' : '🟢 OpenAI';
+      badge.textContent = `${providerIcon} • ${this.model}`;
     }
   }
 
@@ -160,23 +178,104 @@ class AICopilotEngine {
   // =========================================================================
   openSettingsModal() {
     const modal = document.getElementById('ai-copilot-settings-modal');
-    const keyInput = document.getElementById('ai-copilot-api-key-input');
-    const modelSelect = document.getElementById('ai-copilot-model-select');
-    const statusMsg = document.getElementById('ai-copilot-settings-status');
-
-    if (keyInput) keyInput.value = this.apiKey;
-    if (modelSelect) modelSelect.value = this.model;
-    if (statusMsg) {
-      statusMsg.textContent = '';
-      statusMsg.style.display = 'none';
-    }
-
+    this.renderSettingsModalContent(this.provider);
     if (modal) modal.style.display = 'flex';
   }
 
   closeSettingsModal() {
     const modal = document.getElementById('ai-copilot-settings-modal');
     if (modal) modal.style.display = 'none';
+  }
+
+  setSettingsProvider(provider) {
+    this.renderSettingsModalContent(provider);
+  }
+
+  renderSettingsModalContent(provider) {
+    const activeProvider = provider || this.provider;
+    const key = activeProvider === 'google' ? this.googleApiKey : this.openaiApiKey;
+    const defaultModel = activeProvider === 'google' ? 'gemini-1.5-flash' : 'gpt-4o-mini';
+    const currentModel = (this.provider === activeProvider && this.model) ? this.model : defaultModel;
+
+    const googleBtn = document.getElementById('ai-provider-btn-google');
+    const openaiBtn = document.getElementById('ai-provider-btn-openai');
+    if (googleBtn && openaiBtn) {
+      if (activeProvider === 'google') {
+        googleBtn.className = 'ai-provider-tab active';
+        openaiBtn.className = 'ai-provider-tab';
+      } else {
+        googleBtn.className = 'ai-provider-tab';
+        openaiBtn.className = 'ai-provider-tab active';
+      }
+    }
+
+    const keyLabel = document.getElementById('ai-copilot-key-label');
+    const keyInput = document.getElementById('ai-copilot-api-key-input');
+    const keyLink = document.getElementById('ai-copilot-key-link');
+    const modelSelect = document.getElementById('ai-copilot-model-select');
+    const providerInfo = document.getElementById('ai-copilot-provider-info');
+    const statusMsg = document.getElementById('ai-copilot-settings-status');
+
+    if (statusMsg) {
+      statusMsg.textContent = '';
+      statusMsg.style.display = 'none';
+    }
+
+    if (keyLabel) {
+      keyLabel.innerHTML = activeProvider === 'google'
+        ? 'Google Gemini API Key <span style="color: #34d399; font-size: 11px; font-weight: normal; margin-left: 6px;">(100% Free Tier Available)</span>'
+        : 'OpenAI API Key <span style="color: #f87171; font-size: 11px; font-weight: normal; margin-left: 6px;">(Requires Prepaid API Credits)</span>';
+    }
+
+    if (keyInput) {
+      keyInput.value = key;
+      keyInput.placeholder = activeProvider === 'google' ? 'AIzaSy... (Paste Google AI Studio Key)' : 'sk-proj-... (Paste OpenAI Key)';
+    }
+
+    if (keyLink) {
+      if (activeProvider === 'google') {
+        keyLink.href = 'https://aistudio.google.com/app/apikey';
+        keyLink.textContent = 'Get Free Google Key (1-Click) ↗';
+      } else {
+        keyLink.href = 'https://platform.openai.com/api-keys';
+        keyLink.textContent = 'Get OpenAI Key ↗';
+      }
+    }
+
+    if (modelSelect) {
+      if (activeProvider === 'google') {
+        modelSelect.innerHTML = `
+          <option value="gemini-1.5-flash">gemini-1.5-flash (Fastest, High Intelligence & 100% Free — Recommended)</option>
+          <option value="gemini-2.0-flash">gemini-2.0-flash (Latest Next-Gen Gemini, 100% Free)</option>
+          <option value="gemini-1.5-pro">gemini-1.5-pro (Deep Reasoning & Analysis, 100% Free)</option>
+        `;
+      } else {
+        modelSelect.innerHTML = `
+          <option value="gpt-4o-mini">gpt-4o-mini (Fastest, Smart & Most Cost-Effective — Recommended)</option>
+          <option value="gpt-4o">gpt-4o (High Intelligence Multimodal)</option>
+          <option value="gpt-4-turbo">gpt-4-turbo (Legacy High Capacity)</option>
+        `;
+      }
+      modelSelect.value = currentModel;
+    }
+
+    if (providerInfo) {
+      if (activeProvider === 'google') {
+        providerInfo.innerHTML = `
+          <div style="font-size: 11.5px; font-weight: 700; color: #34d399; margin-bottom: 4px;">🎉 Google AI Studio Free Tier:</div>
+          <div style="font-size: 11.5px; color: #cbd5e1; line-height: 1.5;">
+            Google offers <strong>15 requests per minute and 1 million tokens per minute completely free</strong> for personal & team development. No credit card required.
+          </div>
+        `;
+      } else {
+        providerInfo.innerHTML = `
+          <div style="font-size: 11.5px; font-weight: 700; color: #93c5fd; margin-bottom: 4px;">ℹ️ OpenAI Platform Note:</div>
+          <div style="font-size: 11.5px; color: #cbd5e1; line-height: 1.5;">
+            OpenAI requires adding a prepaid credit balance (minimum $5) at <a href="https://platform.openai.com/settings/organization/billing" target="_blank" style="color: #60a5fa;">platform.openai.com billing</a> to use developer APIs.
+          </div>
+        `;
+      }
+    }
   }
 
   toggleKeyVisibility() {
@@ -192,16 +291,21 @@ class AICopilotEngine {
     }
   }
 
-  async testConnection(testKey, testModel) {
-    const key = (testKey || this.apiKey || '').trim();
-    const model = testModel || this.model || 'gpt-4o-mini';
+  async testConnection(provider, testKey, testModel) {
+    const p = provider || this.provider;
+    const key = (testKey || (p === 'google' ? this.googleApiKey : this.openaiApiKey) || '').trim();
+    const model = testModel || (p === 'google' ? 'gemini-1.5-flash' : 'gpt-4o-mini');
 
     if (!key) {
-      return { success: false, message: 'Please enter an OpenAI API key first.' };
+      return { success: false, message: `Please enter your ${p === 'google' ? 'Google Gemini' : 'OpenAI'} API key first.` };
     }
 
+    const endpoint = p === 'google'
+      ? 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'
+      : 'https://api.openai.com/v1/chat/completions';
+
     try {
-      const res = await fetch('https://api.openai.com/v1/chat/completions', {
+      const res = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -216,11 +320,17 @@ class AICopilotEngine {
 
       if (!res.ok) {
         const errJson = await res.json().catch(() => ({}));
-        const errMsg = (errJson && errJson.error && errJson.error.message) ? errJson.error.message : `HTTP error ${res.status}`;
+        let errMsg = `HTTP error ${res.status}`;
+        if (Array.isArray(errJson) && errJson[0]?.error?.message) {
+          errMsg = errJson[0].error.message;
+        } else if (errJson && errJson.error && errJson.error.message) {
+          errMsg = errJson.error.message;
+        }
         return { success: false, message: errMsg };
       }
 
-      return { success: true, message: 'Connection verified! Your API key is active and ready.' };
+      const pLabel = p === 'google' ? 'Google Gemini' : 'OpenAI';
+      return { success: true, message: `Connected successfully to ${pLabel} (${model})! Ready to assist.` };
     } catch (err) {
       return { success: false, message: `Network request failed: ${err.message}` };
     }
@@ -232,15 +342,26 @@ class AICopilotEngine {
     const statusMsg = document.getElementById('ai-copilot-settings-status');
 
     const key = keyInput ? keyInput.value.trim() : '';
-    const model = modelSelect ? modelSelect.value : 'gpt-4o-mini';
+
+    // Auto-detect provider if key has known prefix
+    let targetProvider = this.provider;
+    const activeTab = document.querySelector('.ai-provider-tab.active');
+    if (activeTab && activeTab.dataset.provider) {
+      targetProvider = activeTab.dataset.provider;
+    }
+
+    if (key.startsWith('AIza')) targetProvider = 'google';
+    if (key.startsWith('sk-')) targetProvider = 'openai';
+
+    const model = modelSelect ? modelSelect.value : (targetProvider === 'google' ? 'gemini-1.5-flash' : 'gpt-4o-mini');
 
     if (statusMsg) {
       statusMsg.style.display = 'block';
       statusMsg.style.color = '#93c5fd';
-      statusMsg.textContent = '⏳ Testing connection with OpenAI...';
+      statusMsg.textContent = `⏳ Testing connection with ${targetProvider === 'google' ? 'Google Gemini' : 'OpenAI'}...`;
     }
 
-    const testRes = await this.testConnection(key, model);
+    const testRes = await this.testConnection(targetProvider, key, model);
     if (!testRes.success) {
       if (statusMsg) {
         statusMsg.style.color = '#f87171';
@@ -250,9 +371,17 @@ class AICopilotEngine {
     }
 
     // Save
-    this.apiKey = key;
+    this.provider = targetProvider;
     this.model = model;
-    localStorage.setItem('sa_openai_api_key', key);
+    if (targetProvider === 'google') {
+      this.googleApiKey = key;
+      localStorage.setItem('sa_google_api_key', key);
+    } else {
+      this.openaiApiKey = key;
+      localStorage.setItem('sa_openai_api_key', key);
+    }
+    this.apiKey = key;
+    localStorage.setItem('sa_ai_provider', targetProvider);
     localStorage.setItem('sa_copilot_model', model);
     this.updateModelBadge();
 
@@ -277,25 +406,24 @@ class AICopilotEngine {
     const container = document.getElementById('ai-copilot-messages');
     if (!container) return;
 
-    // Check if notice already present
     if (document.getElementById('ai-no-key-banner')) return;
 
     const banner = document.createElement('div');
     banner.id = 'ai-no-key-banner';
     banner.className = 'ai-copilot-notice-box';
     banner.innerHTML = `
-      <div style="font-weight: 700; color: #fbbf24; font-size: 13.5px; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
-        <span>🔑</span> OpenAI API Key Required
+      <div style="font-weight: 700; color: #34d399; font-size: 13.5px; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">
+        <span>✨</span> Connect Free Google Gemini or OpenAI
       </div>
       <p style="font-size: 12px; color: #cbd5e1; margin-bottom: 12px; line-height: 1.5;">
-        To activate Safety Assistant Copilot, link your OpenAI API key from your OpenAI platform account.
+        Activate Safety Assistant Copilot using a <strong>100% free Google Gemini API key</strong> (no credit card required) or your OpenAI platform key.
       </p>
       <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-        <button class="btn btn-primary" onclick="window.aiCopilotEngine.openSettingsModal()" style="font-size: 11.5px; padding: 6px 12px; font-weight: 700;">
+        <button class="btn btn-primary" onclick="window.aiCopilotEngine.openSettingsModal()" style="font-size: 11.5px; padding: 6px 12px; font-weight: 700; background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);">
           ⚙️ Enter API Key
         </button>
-        <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" class="btn btn-secondary" style="font-size: 11.5px; padding: 6px 12px; color: #93c5fd; text-decoration: none; display: inline-flex; align-items: center; gap: 4px;">
-          <span>🔗</span> Get API Key
+        <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" class="btn btn-secondary" style="font-size: 11.5px; padding: 6px 12px; color: #34d399; border-color: rgba(52, 211, 153, 0.4); text-decoration: none; display: inline-flex; align-items: center; gap: 4px;">
+          <span>🔗</span> Get Free Google Key ↗
         </a>
       </div>
     `;
@@ -583,7 +711,6 @@ class AICopilotEngine {
     const empTable = this.db.getTable('employees');
     const rows = empTable.rows || [];
 
-    // Find best match
     const matches = rows.filter(r => {
       const name = String(r['Employee Name'] || r['Name'] || '').toLowerCase();
       return name.includes(query);
@@ -596,7 +723,6 @@ class AICopilotEngine {
     const emp = matches[0];
     const empName = emp['Employee Name'] || emp['Name'];
 
-    // Cross-reference all PPE tables
     const assignedEquipment = [];
     const ppeCategories = [
       { key: 'gloves', label: 'Gloves', itemCol: 'Item #' },
@@ -775,7 +901,6 @@ class AICopilotEngine {
       });
     });
 
-    // Sort by days remaining ascending (overdue first)
     dueItems.sort((a, b) => a.daysRemaining - b.daysRemaining);
 
     return {
@@ -813,7 +938,6 @@ class AICopilotEngine {
 
     const detailedCrews = crews.map(c => {
       const jNum = String(c['Job Number'] || '').trim();
-      // Find employees on this job
       const members = (empTable.rows || []).filter(e => String(e['Job Number'] || '').trim() === jNum).map(e => ({
         name: e['Employee Name'] || e['Name'],
         role: e['Trade Classification'] || e['Classification'] || '',
@@ -935,6 +1059,7 @@ class AICopilotEngine {
       activeEmployeesCount: (empTable.rows || []).length,
       totalGlovesCount: (glovesTable.rows || []).length,
       totalSleevesCount: (sleevesTable.rows || []).length,
+      copilotProvider: this.provider,
       copilotModel: this.model
     };
   }
@@ -967,22 +1092,21 @@ class AICopilotEngine {
   }
 
   // =========================================================================
-  // Send Message & OpenAI Chat Completion Loop
+  // Send Message & Chat Completion Loop
   // =========================================================================
   async sendMessage(userInput) {
     const text = String(userInput || '').trim();
     if (!text || this.isProcessing) return;
 
-    if (!this.apiKey) {
+    const activeKey = this.getActiveApiKey();
+    if (!activeKey) {
       this.openSettingsModal();
       return;
     }
 
-    // Clear input
     const inputEl = document.getElementById('ai-copilot-input');
     if (inputEl) inputEl.value = '';
 
-    // Append user message
     this.messages.push({
       role: 'user',
       content: text
@@ -993,6 +1117,10 @@ class AICopilotEngine {
     this.isProcessing = true;
     this.renderTypingIndicator(true, 'Thinking...');
 
+    const endpoint = this.provider === 'google'
+      ? 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'
+      : 'https://api.openai.com/v1/chat/completions';
+
     try {
       let turns = 0;
       const maxTurns = 6;
@@ -1000,7 +1128,6 @@ class AICopilotEngine {
       while (turns < maxTurns) {
         turns++;
 
-        // Prepare messages payload with system prompt
         const payloadMessages = [
           {
             role: 'system',
@@ -1018,11 +1145,11 @@ GUIDELINES:
           ...this.messages
         ];
 
-        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        const response = await fetch(endpoint, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'Authorization': `Bearer ${this.apiKey}`
+            'Authorization': `Bearer ${activeKey}`
           },
           body: JSON.stringify({
             model: this.model,
@@ -1035,19 +1162,21 @@ GUIDELINES:
 
         if (!response.ok) {
           const errData = await response.json().catch(() => ({}));
-          const errMsg = (errData && errData.error && errData.error.message)
-            ? errData.error.message
-            : `OpenAI API returned error code ${response.status}`;
+          let errMsg = `API returned error code ${response.status}`;
+          if (Array.isArray(errData) && errData[0]?.error?.message) {
+            errMsg = errData[0].error.message;
+          } else if (errData && errData.error && errData.error.message) {
+            errMsg = errData.error.message;
+          }
           throw new Error(errMsg);
         }
 
         const data = await response.json();
         const choice = data.choices && data.choices[0];
-        if (!choice) throw new Error('No response choices received from OpenAI.');
+        if (!choice) throw new Error('No response choices received from AI service.');
 
         const message = choice.message;
 
-        // If the model wants to call tools
         if (message.tool_calls && message.tool_calls.length > 0) {
           this.messages.push(message);
 
@@ -1063,24 +1192,22 @@ GUIDELINES:
               content: JSON.stringify(result)
             });
           }
-          // Loop again to give tool results back to OpenAI
         } else {
-          // Final assistant message
           this.messages.push(message);
           break;
         }
       }
 
-      // Persist session history
       try {
         sessionStorage.setItem('sa_copilot_session_history', JSON.stringify(this.messages.slice(-20)));
       } catch { /* ignore */ }
 
     } catch (err) {
       console.error('AI Copilot error:', err);
+      const pLabel = this.provider === 'google' ? 'Google Gemini' : 'OpenAI';
       this.messages.push({
         role: 'assistant',
-        content: `⚠️ **Error communicating with OpenAI:** ${err.message}\n\n*Check your API key in Copilot Settings (⚙️) or verify your account balance at platform.openai.com.*`
+        content: `⚠️ **Error communicating with ${pLabel}:** ${err.message}\n\n*Check your API key in Copilot Settings (⚙️) or verify your key at ${this.provider === 'google' ? 'aistudio.google.com' : 'platform.openai.com'}.*`
       });
     } finally {
       this.isProcessing = false;
@@ -1094,7 +1221,6 @@ GUIDELINES:
   // UI Rendering & Markdown Parsing
   // =========================================================================
   renderDrawer() {
-    // Inject backdrop
     let backdrop = document.getElementById('ai-copilot-backdrop');
     if (!backdrop) {
       backdrop = document.createElement('div');
@@ -1104,7 +1230,6 @@ GUIDELINES:
       document.body.appendChild(backdrop);
     }
 
-    // Inject drawer container
     let drawer = document.getElementById('ai-copilot-drawer');
     if (!drawer) {
       drawer = document.createElement('div');
@@ -1122,8 +1247,8 @@ GUIDELINES:
               Safety Assistant Copilot
             </div>
             <div style="display: flex; align-items: center; gap: 6px; margin-top: 1px;">
-              <span class="ai-model-badge" id="ai-copilot-model-badge" onclick="window.aiCopilotEngine.openSettingsModal()" title="Click to change model or settings">
-                ${this.model}
+              <span class="ai-model-badge" id="ai-copilot-model-badge" onclick="window.aiCopilotEngine.openSettingsModal()" title="Click to change AI provider, model, or key">
+                ${this.provider === 'google' ? '🔵 Google' : '🟢 OpenAI'} • ${this.model}
               </span>
               <span style="font-size: 10px; color: #94a3b8;">• Online Local Link</span>
             </div>
@@ -1189,7 +1314,6 @@ GUIDELINES:
       </div>
     `;
 
-    // Inject Settings Modal
     this.renderSettingsModal();
     this.renderMessages();
   }
@@ -1206,25 +1330,55 @@ GUIDELINES:
     }
 
     modal.innerHTML = `
-      <div class="modal-dialog" style="max-width: 520px; width: 92vw; background: #0f172a; border: 1px solid rgba(168, 85, 247, 0.4); border-radius: 12px; box-shadow: 0 10px 40px rgba(0,0,0,0.8); overflow: hidden;">
-        <div class="modal-header" style="background: linear-gradient(135deg, rgba(147, 51, 234, 0.2) 0%, rgba(30, 41, 59, 0.7) 100%); padding: 16px 20px; border-bottom: 1px solid rgba(255,255,255,0.1); display: flex; justify-content: space-between; align-items: center;">
+      <div class="modal-dialog" style="max-width: 540px; width: 92vw; background: #0f172a; border: 1px solid rgba(168, 85, 247, 0.4); border-radius: 12px; box-shadow: 0 10px 40px rgba(0,0,0,0.8); overflow: hidden;">
+        <div class="modal-header" style="background: linear-gradient(135deg, rgba(147, 51, 234, 0.25) 0%, rgba(30, 41, 59, 0.8) 100%); padding: 16px 20px; border-bottom: 1px solid rgba(255,255,255,0.1); display: flex; justify-content: space-between; align-items: center;">
           <div style="font-weight: 800; font-size: 15px; color: #fff; display: flex; align-items: center; gap: 8px;">
-            <span>✨</span> OpenAI Copilot Settings
+            <span>✨</span> AI Copilot Settings & Model
           </div>
           <button class="btn-close" onclick="window.aiCopilotEngine.closeSettingsModal()" style="background: none; border: none; font-size: 18px; color: #94a3b8; cursor: pointer;">✕</button>
         </div>
 
         <div style="padding: 20px;">
+          <!-- Provider Selector Tabs -->
+          <div style="margin-bottom: 18px;">
+            <label style="display: block; font-size: 12px; font-weight: 700; color: #e2e8f0; margin-bottom: 8px;">
+              Select AI Engine / Provider
+            </label>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+              <button
+                type="button"
+                id="ai-provider-btn-google"
+                class="ai-provider-tab ${this.provider === 'google' ? 'active' : ''}"
+                data-provider="google"
+                onclick="window.aiCopilotEngine.setSettingsProvider('google')"
+                style="padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(59, 130, 246, 0.3); background: rgba(30, 41, 59, 0.6); color: #fff; font-size: 12.5px; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 8px; justify-content: center; transition: all 0.15s ease;"
+              >
+                <span>🔵</span> Google Gemini (Free)
+              </button>
+              <button
+                type="button"
+                id="ai-provider-btn-openai"
+                class="ai-provider-tab ${this.provider === 'openai' ? 'active' : ''}"
+                data-provider="openai"
+                onclick="window.aiCopilotEngine.setSettingsProvider('openai')"
+                style="padding: 10px 14px; border-radius: 8px; border: 1px solid rgba(16, 185, 129, 0.3); background: rgba(30, 41, 59, 0.6); color: #fff; font-size: 12.5px; font-weight: 700; cursor: pointer; display: flex; align-items: center; gap: 8px; justify-content: center; transition: all 0.15s ease;"
+              >
+                <span>🟢</span> OpenAI (ChatGPT)
+              </button>
+            </div>
+          </div>
+
+          <!-- API Key Input -->
           <div style="margin-bottom: 16px;">
-            <label style="display: block; font-size: 12px; font-weight: 700; color: #e2e8f0; margin-bottom: 6px;">
-              OpenAI API Key <span style="color: #f87171;">*</span>
+            <label id="ai-copilot-key-label" style="display: block; font-size: 12px; font-weight: 700; color: #e2e8f0; margin-bottom: 6px;">
+              Google Gemini API Key <span style="color: #34d399; font-size: 11px; font-weight: normal; margin-left: 6px;">(100% Free Tier Available)</span>
             </label>
             <div style="display: flex; gap: 6px;">
               <input
                 type="password"
                 id="ai-copilot-api-key-input"
                 class="form-control"
-                placeholder="sk-proj-..."
+                placeholder="AIzaSy... (Paste Google AI Studio Key)"
                 style="flex: 1; padding: 9px 12px; font-size: 13px; background: #1e293b; border: 1px solid #334155; border-radius: 6px; color: #fff; outline: none; font-family: monospace;"
               />
               <button
@@ -1239,11 +1393,14 @@ GUIDELINES:
               </button>
             </div>
             <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 6px;">
-              <span style="font-size: 11px; color: #94a3b8;">Stored securely only in your local browser/app storage.</span>
-              <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener noreferrer" style="font-size: 11px; color: #60a5fa; text-decoration: none;">Get Key ↗</a>
+              <span style="font-size: 11px; color: #94a3b8;">Stored only in your offline local app storage.</span>
+              <a id="ai-copilot-key-link" href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" style="font-size: 11px; color: #34d399; text-decoration: none; font-weight: 600;">
+                Get Free Google Key (1-Click) ↗
+              </a>
             </div>
           </div>
 
+          <!-- Model Dropdown -->
           <div style="margin-bottom: 18px;">
             <label style="display: block; font-size: 12px; font-weight: 700; color: #e2e8f0; margin-bottom: 6px;">
               AI Model
@@ -1255,30 +1412,32 @@ GUIDELINES:
               aria-label="Select AI Model"
               style="width: 100%; padding: 9px 12px; font-size: 13px; background: #1e293b; border: 1px solid #334155; border-radius: 6px; color: #fff; outline: none; cursor: pointer;"
             >
-              <option value="gpt-4o-mini">gpt-4o-mini (Fastest, Smart & Most Cost-Effective — Recommended)</option>
-              <option value="gpt-4o">gpt-4o (High Intelligence Multimodal)</option>
-              <option value="gpt-4-turbo">gpt-4-turbo (Legacy High Capacity)</option>
+              <option value="gemini-1.5-flash">gemini-1.5-flash (Fastest, High Intelligence & 100% Free — Recommended)</option>
+              <option value="gemini-2.0-flash">gemini-2.0-flash (Latest Next-Gen Gemini, 100% Free)</option>
+              <option value="gemini-1.5-pro">gemini-1.5-pro (Deep Reasoning & Analysis, 100% Free)</option>
             </select>
           </div>
 
           <div id="ai-copilot-settings-status" style="font-size: 12px; font-weight: 600; margin-bottom: 14px; display: none;"></div>
 
-          <div style="background: rgba(30, 41, 59, 0.6); border: 1px solid rgba(255,255,255,0.06); border-radius: 8px; padding: 12px; margin-bottom: 18px;">
-            <div style="font-size: 11.5px; font-weight: 700; color: #93c5fd; margin-bottom: 4px;">💡 How Copilot Works in Safety Assistant:</div>
+          <div id="ai-copilot-provider-info" style="background: rgba(30, 41, 59, 0.6); border: 1px solid rgba(255,255,255,0.06); border-radius: 8px; padding: 12px; margin-bottom: 18px;">
+            <div style="font-size: 11.5px; font-weight: 700; color: #34d399; margin-bottom: 4px;">🎉 Google AI Studio Free Tier:</div>
             <div style="font-size: 11.5px; color: #cbd5e1; line-height: 1.5;">
-              Safety Assistant Copilot communicates with OpenAI via Function Calling. Your private database records are queried locally in your app on demand when you ask questions.
+              Google offers <strong>15 requests per minute and 1 million tokens per minute completely free</strong> for personal & team development. No credit card required.
             </div>
           </div>
 
           <div style="display: flex; justify-content: flex-end; gap: 8px;">
             <button type="button" class="btn btn-secondary" onclick="window.aiCopilotEngine.closeSettingsModal()">Cancel</button>
-            <button type="button" class="btn btn-primary" onclick="window.aiCopilotEngine.handleSaveSettings()" style="background: linear-gradient(135deg, #9333ea 0%, #4f46e5 100%); border: none; font-weight: 700;">
+            <button type="button" class="btn btn-primary" onclick="window.aiCopilotEngine.handleSaveSettings()" style="background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); border: none; font-weight: 700;">
               💾 Test & Save Key
             </button>
           </div>
         </div>
       </div>
     `;
+
+    this.renderSettingsModalContent(this.provider);
   }
 
   setupListeners() {
@@ -1291,17 +1450,14 @@ GUIDELINES:
         }
       });
 
-      // Auto-grow textarea
       input.addEventListener('input', () => {
         input.style.height = 'auto';
         input.style.height = Math.min(input.scrollHeight, 120) + 'px';
       });
     }
 
-    // Global keyboard shortcut: Ctrl+K or Cmd+K to toggle Copilot
     document.addEventListener('keydown', (e) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
-        // Only if not in a modal or input
         const tag = document.activeElement ? document.activeElement.tagName.toLowerCase() : '';
         if (tag !== 'input' && tag !== 'textarea') {
           e.preventDefault();
@@ -1367,16 +1523,16 @@ GUIDELINES:
           </div>
         </div>
       `;
-      if (!this.apiKey) {
+      if (!this.getActiveApiKey()) {
         this.showNoApiKeyNotice();
       }
       return;
     }
 
     let html = '';
-    this.messages.forEach((msg, idx) => {
+    this.messages.forEach((msg) => {
       if (msg.role === 'system') return;
-      if (msg.role === 'tool') return; // Tool outputs are shown inside assistant or hidden
+      if (msg.role === 'tool') return;
 
       const isUser = msg.role === 'user';
       const content = msg.content || '';
@@ -1390,8 +1546,6 @@ GUIDELINES:
           </div>
         `;
       } else {
-        // Assistant message
-        // If message called tools, render tool pills
         let toolPills = '';
         if (msg.tool_calls && msg.tool_calls.length > 0) {
           toolPills = msg.tool_calls.map(tc => {
@@ -1426,41 +1580,29 @@ GUIDELINES:
     }
   }
 
-  // =========================================================================
-  // Safe Markdown Formatter
-  // =========================================================================
   formatMarkdown(raw) {
     if (!raw) return '';
 
     let text = this.escapeHtml(raw);
 
-    // Code blocks ```...```
     text = text.replace(/```([\s\S]*?)```/g, (match, code) => {
       return `<pre class="ai-code-block"><code>${code.trim()}</code></pre>`;
     });
 
-    // Inline code `...`
     text = text.replace(/`([^`]+)`/g, '<code class="ai-inline-code">$1</code>');
-
-    // Bold **text**
     text = text.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-
-    // Italic *text*
     text = text.replace(/\*([^*]+)\*/g, '<em>$1</em>');
-
-    // Markdown headers ### Header
     text = text.replace(/^### (.*$)/gim, '<div class="ai-md-h3">$1</div>');
     text = text.replace(/^## (.*$)/gim, '<div class="ai-md-h2">$1</div>');
     text = text.replace(/^# (.*$)/gim, '<div class="ai-md-h1">$1</div>');
 
-    // Markdown Tables
     text = text.replace(/((?:\|[^\n]+\|\r?\n)+)/g, (tableText) => {
       const rows = tableText.trim().split(/\r?\n/).map(r => r.trim()).filter(Boolean);
       if (rows.length < 2) return tableText;
 
       let tableHtml = '<div class="ai-table-wrap"><table class="ai-md-table">';
       rows.forEach((row, rIdx) => {
-        if (row.match(/^\|(?:\s*:?-+:?\s*\|)+$/)) return; // separator row
+        if (row.match(/^\|(?:\s*:?-+:?\s*\|)+$/)) return;
 
         const cells = row.split('|').slice(1, -1).map(c => c.trim());
         tableHtml += '<tr>';
@@ -1477,13 +1619,8 @@ GUIDELINES:
       return tableHtml;
     });
 
-    // Bullet points
     text = text.replace(/^\s*[-*]\s+(.*$)/gim, '<div class="ai-bullet">• $1</div>');
-
-    // Numbered lists
     text = text.replace(/^\s*(\d+)\.\s+(.*$)/gim, '<div class="ai-num-item"><strong>$1.</strong> $2</div>');
-
-    // Line breaks (convert remaining newlines)
     text = text.replace(/\n\n+/g, '<div class="ai-gap"></div>');
     text = text.replace(/\n/g, '<br/>');
 
