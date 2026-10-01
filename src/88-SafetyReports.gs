@@ -15922,17 +15922,30 @@ function getCustomJobForemanMappings() {
     return _customMappingsCache;
   }
   var props = PropertiesService.getScriptProperties();
+  var map = {};
   var saved = props.getProperty('CUSTOM_JOB_FOREMAN_MAPPINGS');
   if (saved) {
     try {
-      _customMappingsCache = JSON.parse(saved);
-      return _customMappingsCache;
+      map = JSON.parse(saved);
     } catch (e) {
       Logger.log('Error parsing custom job mappings: ' + e);
-      return {};
     }
   }
-  return {};
+  var fySaved = props.getProperty('FY_TRANSITION_ALIAS_MAP');
+  if (fySaved) {
+    try {
+      var fyMap = JSON.parse(fySaved);
+      for (var k in fyMap) {
+        if (!map[k]) {
+          map[k] = fyMap[k];
+        }
+      }
+    } catch (eFy) {
+      Logger.log('Error parsing FY transition alias map: ' + eFy);
+    }
+  }
+  _customMappingsCache = map;
+  return _customMappingsCache;
 }
 
 /**

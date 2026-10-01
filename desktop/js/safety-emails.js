@@ -1435,6 +1435,35 @@ class SafetyEmailsEngine {
       'Date Received', 'Date Created', 'Job Number', 'Foreman', 'Equipment Number', 'Email Subject', 'Email ID', 'Status', 'Credited To', 'Notes'
     ]);
 
+    let aliasMap = {};
+    try {
+      aliasMap = JSON.parse(localStorage.getItem('FY_TRANSITION_ALIAS_MAP') || '{}');
+      if (snap.configs && snap.configs['FY_TRANSITION_ALIAS_MAP']) {
+        aliasMap = Object.assign({}, snap.configs['FY_TRANSITION_ALIAS_MAP'], aliasMap);
+      }
+    } catch (e) {}
+
+    const resolveJobAlias = (jobNum, currentCreditedTo, currentStatus, notes) => {
+      const raw = String(jobNum || '').trim();
+      const base = raw.split('.')[0].trim();
+      let cred = String(currentCreditedTo || '').trim();
+      let status = String(currentStatus || 'Credited').trim();
+      let newNotes = String(notes || '').trim();
+
+      if (aliasMap[raw] || aliasMap[base]) {
+        const target = aliasMap[raw] || aliasMap[base];
+        if (!cred || cred === raw || cred === base) {
+          cred = target;
+          if (status === 'Unknown Job') status = 'Credited';
+          const tag = `[FY Transition: credited to ${target}]`;
+          if (!newNotes.includes(tag)) {
+            newNotes = newNotes ? `${newNotes} ${tag}` : tag;
+          }
+        }
+      }
+      return { creditedTo: cred, status: status, notes: newNotes };
+    };
+
     recentLogs.forEach(log => {
       const emailId = String(log.emailId || '').trim();
       const sheetName = log.sheetName;
@@ -1442,6 +1471,7 @@ class SafetyEmailsEngine {
       if (sheetName === 'JHA Log' || log.type === 'JHA') {
         const exists = jhaTbl.rows.some(r => String(r['Email ID'] || r.email_id || '').trim() === emailId);
         if (!exists) {
+          const resolved = resolveJobAlias(log.jobNumber, log.creditedTo, log.status, log.notes);
           jhaTbl.rows.push({
             'Date Received': log.dateReceived || '',
             'Date Created': log.date || '',
@@ -1450,15 +1480,16 @@ class SafetyEmailsEngine {
             'Email Subject': log.subject || '',
             'Email ID': emailId,
             'Source': log.source || '',
-            'Status': log.status || 'Credited',
-            'Credited To': log.creditedTo || '',
-            'Notes': log.notes || ''
+            'Status': resolved.status,
+            'Credited To': resolved.creditedTo,
+            'Notes': resolved.notes
           });
           modified = true;
         }
       } else if (sheetName === 'Weekly Safety Log' || log.type === 'Weekly Safety Meeting') {
         const exists = weeklyTbl.rows.some(r => String(r['Email ID'] || r.email_id || '').trim() === emailId);
         if (!exists) {
+          const resolved = resolveJobAlias(log.jobNumber, log.creditedTo, log.status, log.notes);
           weeklyTbl.rows.push({
             'Date Received': log.dateReceived || '',
             'Week Of': log.date || '',
@@ -1466,15 +1497,16 @@ class SafetyEmailsEngine {
             'Foreman': log.foreman || '',
             'Email Subject': log.subject || '',
             'Email ID': emailId,
-            'Status': log.status || 'Credited',
-            'Credited To': log.creditedTo || '',
-            'Notes': log.notes || ''
+            'Status': resolved.status,
+            'Credited To': resolved.creditedTo,
+            'Notes': resolved.notes
           });
           modified = true;
         }
       } else if (sheetName === 'Monthly Checklist Log' || log.type === 'Monthly Checklist') {
         const exists = monthlyTbl.rows.some(r => String(r['Email ID'] || r.email_id || '').trim() === emailId);
         if (!exists) {
+          const resolved = resolveJobAlias(log.jobNumber, log.creditedTo, log.status, log.notes);
           monthlyTbl.rows.push({
             'Date Received': log.dateReceived || '',
             'Date Created': log.date || '',
@@ -1483,9 +1515,9 @@ class SafetyEmailsEngine {
             'Equipment Number': log.equipmentNumber || '',
             'Email Subject': log.subject || '',
             'Email ID': emailId,
-            'Status': log.status || 'Credited',
-            'Credited To': log.creditedTo || '',
-            'Notes': log.notes || ''
+            'Status': resolved.status,
+            'Credited To': resolved.creditedTo,
+            'Notes': resolved.notes
           });
           modified = true;
         }

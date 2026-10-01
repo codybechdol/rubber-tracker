@@ -2615,6 +2615,13 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
                 cfgSheet.appendRow([keyTarget, valStr, desc, nowStr]);
               }
             }
+            if (keyTarget === 'FY_TRANSITION_ALIAS_MAP') {
+              try {
+                PropertiesService.getScriptProperties().setProperty('FY_TRANSITION_ALIAS_MAP', valStr);
+              } catch (eProp) {
+                Logger.log('Error setting FY_TRANSITION_ALIAS_MAP property: ' + eProp);
+              }
+            }
             appliedCount++;
           } catch (eCfg) {
             Logger.log('UPDATE_SYSTEM_CONFIG error: ' + eCfg);

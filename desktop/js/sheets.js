@@ -1228,6 +1228,7 @@ class SheetNavigator {
     const btnManageDrug = document.getElementById('btn-manage-drug-tests');
     const btnPushClean = document.getElementById('btn-push-clean-sheet');
     const btnPpeTracking = document.getElementById('btn-ppe-tracking');
+    const btnFiscalYear = document.getElementById('btn-fiscal-year-transition');
 
     const INVENTORY_KEYS = [
       'gloves', 'sleeves', 'blankets', 'macks',
@@ -1264,6 +1265,10 @@ class SheetNavigator {
 
     if (btnNewEmployee) {
       btnNewEmployee.style.display = isEmployeeOrJobSheet ? 'inline-flex' : 'none';
+    }
+
+    if (btnFiscalYear) {
+      btnFiscalYear.style.display = isEmployeeOrJobSheet ? 'inline-flex' : 'none';
     }
 
     if (btnTransferEquip) {

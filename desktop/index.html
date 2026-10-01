@@ -200,6 +200,9 @@
             <button class="btn admin-only-control" id="btn-new-employee" style="background: linear-gradient(135deg, #10b981, #059669); color: white; padding: 6px 14px; font-size: 12px; font-weight: 700; display: none; align-items: center; gap: 5px;" onclick="window.sheetNavigator.showNewEmployeeModal()" title="Add a new employee to the active Employees sheet">
               <span>👤</span> New Employee
             </button>
+            <button class="btn btn-secondary admin-only-control" id="btn-fiscal-year-transition" style="display: none; padding: 6px 12px; font-size: 12px; font-weight: 700; align-items: center; gap: 6px; border-color: rgba(245, 158, 11, 0.45); color: #fbbf24; background: rgba(245, 158, 11, 0.12);" onclick="window.fiscalYearEngine.openModal()" title="Start Annual Fiscal Year Job Number Transition (October 1st)">
+              <span>📅</span> FY Transition
+            </button>
             <button class="btn btn-secondary admin-only-control" id="btn-transfer-equipment-top" style="display: none; padding: 6px 12px; font-size: 12px; align-items: center; gap: 5px; border-color: #0284c7; color: #38bdf8;" onclick="window.inventoryManager.openTransferEquipmentModal()" title="Transfer truck & crew equipment (Blankets, MACKs, HV Testers, Phasing Sets, AED, Grounds, Hot Sticks) from outgoing to incoming Foreman">
               <span>⚡</span> Transfer Equipment
             </button>
@@ -2601,6 +2604,7 @@
   <script src="js/ppe-tracking.js?v=20260929_01"></script>
   <script src="js/incident-reports.js?v=20260930_01"></script>
   <script src="js/weekly-summary.js?v=20260930_01"></script>
+  <script src="js/fiscal-year.js?v=20261001_01"></script>
 
   <script>
     // Navigation routing for desktop & mobile
@@ -2833,6 +2837,9 @@
         }
         window.weeklySummaryEngine = new WeeklySummaryEngine(window.localDB);
         window.weeklySummaryEngine.init();
+
+        window.fiscalYearEngine = new FiscalYearEngine(window.localDB);
+        window.fiscalYearEngine.init();
 
         if (snapshot) {
           window.syncEngine.updateStatusUI('synced', `Snapshot Loaded (${new Date(snapshot.exportedAt).toLocaleDateString()})`);
