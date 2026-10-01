@@ -21,12 +21,12 @@ class AICopilotEngine {
     }
 
     let savedModel = localStorage.getItem('sa_copilot_model');
-    // Auto-migrate retired Gemini 1.5 / 2.0 models to 3.8-flash
-    if (savedModel && (savedModel.includes('1.5') || savedModel.includes('2.0'))) {
-      savedModel = 'gemini-3.8-flash';
+    // Auto-migrate retired or congested models to gemini-3.7-flash
+    if (!savedModel || savedModel.includes('1.5') || savedModel.includes('2.0') || savedModel === 'gemini-3.8-flash') {
+      savedModel = 'gemini-3.7-flash';
       localStorage.setItem('sa_copilot_model', savedModel);
     }
-    this.model = savedModel || (this.provider === 'google' ? 'gemini-3.8-flash' : 'gpt-4o-mini');
+    this.model = savedModel || (this.provider === 'google' ? 'gemini-3.7-flash' : 'gpt-4o-mini');
     this.apiKey = this.provider === 'google' ? this.googleApiKey : this.openaiApiKey;
 
     this.messages = [];
@@ -197,8 +197,8 @@ class AICopilotEngine {
   renderSettingsModalContent(provider) {
     const activeProvider = provider || this.provider;
     const key = activeProvider === 'google' ? this.googleApiKey : this.openaiApiKey;
-    const defaultModel = activeProvider === 'google' ? 'gemini-3.8-flash' : 'gpt-4o-mini';
-    const currentModel = (this.provider === activeProvider && this.model && !this.model.includes('1.5') && !this.model.includes('2.0')) ? this.model : defaultModel;
+    const defaultModel = activeProvider === 'google' ? 'gemini-3.7-flash' : 'gpt-4o-mini';
+    const currentModel = (this.provider === activeProvider && this.model && !this.model.includes('1.5') && !this.model.includes('2.0') && this.model !== 'gemini-3.8-flash') ? this.model : defaultModel;
 
     const googleBtn = document.getElementById('ai-provider-btn-google');
     const openaiBtn = document.getElementById('ai-provider-btn-openai');
@@ -248,9 +248,9 @@ class AICopilotEngine {
     if (modelSelect) {
       if (activeProvider === 'google') {
         modelSelect.innerHTML = `
-          <option value="gemini-3.8-flash">gemini-3.8-flash (Latest Workhorse, High Intelligence & 100% Free — Recommended)</option>
-          <option value="gemini-3.8-flash-lite">gemini-3.8-flash-lite (Ultralight, High Throughput, 100% Free)</option>
-          <option value="gemini-3.7-flash">gemini-3.7-flash (Multi-step Reasoning & Coding, 100% Free)</option>
+          <option value="gemini-3.7-flash">gemini-3.7-flash (Most Reliable & Stable, 100% Free — Recommended)</option>
+          <option value="gemini-3.8-flash">gemini-3.8-flash (Latest Frontier Flash, 100% Free)</option>
+          <option value="gemini-3.5-flash">gemini-3.5-flash (Fast & Lightweight, 100% Free)</option>
         `;
       } else {
         modelSelect.innerHTML = `
@@ -300,7 +300,7 @@ class AICopilotEngine {
   async testConnection(provider, testKey, testModel) {
     const p = provider || this.provider;
     const key = (testKey || (p === 'google' ? this.googleApiKey : this.openaiApiKey) || '').trim();
-    const model = testModel || (p === 'google' ? 'gemini-3.8-flash' : 'gpt-4o-mini');
+    const model = testModel || (p === 'google' ? 'gemini-3.7-flash' : 'gpt-4o-mini');
 
     if (!key) {
       return { success: false, message: `Please enter your ${p === 'google' ? 'Google Gemini' : 'OpenAI'} API key first.` };
@@ -309,57 +309,55 @@ class AICopilotEngine {
     if (p === 'google') {
       // Test native Google Gemini generateContent endpoint
       try {
-        // Try query parameter first (standard API key format AIzaSy...)
-        let res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            contents: [{ parts: [{ text: 'Respond with the single word "Ready"' }] }],
-            generationConfig: { maxOutputTokens: 10 }
-          })
-        });
-
-        // If 401 unauthenticated, try Bearer header (for AQ.* tokens)
-        if (res.status === 401) {
-          res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
+        let res;
+        for (let attempt = 0; attempt < 2; attempt++) {
+          res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`, {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
-              'Authorization': `Bearer ${key}`
+              'x-goog-api-key': key
             },
             body: JSON.stringify({
               contents: [{ parts: [{ text: 'Respond with the single word "Ready"' }] }],
               generationConfig: { maxOutputTokens: 10 }
             })
           });
+          if (res.status !== 503) break;
+          await new Promise(r => setTimeout(r, 1200));
         }
 
         const data = await res.json().catch(() => ({}));
         if (!res.ok) {
           const errMsg = data?.error?.message || `HTTP error ${res.status}`;
           const errDetails = JSON.stringify(data?.error?.details || []);
+          if (res.status === 503 || errMsg.includes('experiencing high demand')) {
+            return {
+              success: false,
+              message: 'Google is experiencing a temporary spike in demand on this model. Please select "gemini-3.7-flash" from the model dropdown and try again.'
+            };
+          }
           if (errDetails.includes('API_KEY_SERVICE_BLOCKED') || errMsg.includes('API_KEY_SERVICE_BLOCKED')) {
             return {
               success: false,
-              message: 'This Google Cloud project has Generative Language blocked. In Google AI Studio, click "Create API key in NEW project" to create an unrestricted AIzaSy key.'
+              message: 'This Google Cloud project has Generative Language blocked. In Google AI Studio, click "+ Create project" and generate a key in that clean project.'
             };
           }
           if (errDetails.includes('ACCESS_TOKEN_TYPE_UNSUPPORTED') || errMsg.includes('ACCESS_TOKEN_TYPE_UNSUPPORTED')) {
             return {
               success: false,
-              message: 'This key requires OAuth. In Google AI Studio, click "Create API key in NEW project" to generate a standard AIzaSy key.'
+              message: 'Invalid key credentials. Please verify your API key in Google AI Studio.'
             };
           }
           if (errMsg.includes('prepayment credits') || errMsg.includes('billing#prepay')) {
             return {
               success: false,
-              message: 'This key belongs to a project with Google Cloud billing attached, which disables the Free Tier. To use the 100% Free Tier without paying, create an API key in a project with NO billing linked (click "Create API key in NEW project" in AI Studio).'
+              message: 'This key belongs to a project with Google Cloud billing attached, which disables the Free Tier. In Google AI Studio, click "+ Create project" and generate a key in that unbilled project.'
             };
           }
           if (errMsg.includes('is no longer available') || errMsg.includes('not found for API version')) {
             return {
               success: false,
-              message: `${errMsg} (Tip: Select gemini-3.8-flash from the AI Model dropdown).`
+              message: `${errMsg} (Tip: Select gemini-3.7-flash from the AI Model dropdown).`
             };
           }
           return { success: false, message: errMsg };
@@ -1299,12 +1297,13 @@ GUIDELINES:
         }
       });
 
-      let headers = { 'Content-Type': 'application/json' };
-      let url = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${encodeURIComponent(apiKey)}`;
-      if (apiKey.startsWith('AQ.')) {
-        url = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent`;
-        headers['Authorization'] = `Bearer ${apiKey}`;
-      }
+      let headers = {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': apiKey
+      };
+      let activeModel = this.model;
+      let url = `https://generativelanguage.googleapis.com/v1beta/models/${activeModel}:generateContent?key=${encodeURIComponent(apiKey)}`;
+
       let response = await fetch(url, {
         method: 'POST',
         headers: headers,
@@ -1316,9 +1315,11 @@ GUIDELINES:
         })
       });
 
-      if (response.status === 401 && !headers['Authorization']) {
-        headers['Authorization'] = `Bearer ${apiKey}`;
-        url = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent`;
+      // If 503 (high demand spike on 3.8-flash), auto-retry with reliable 3.7-flash
+      if (response.status === 503) {
+        await new Promise(r => setTimeout(r, 1200));
+        activeModel = 'gemini-3.7-flash';
+        url = `https://generativelanguage.googleapis.com/v1beta/models/${activeModel}:generateContent?key=${encodeURIComponent(apiKey)}`;
         response = await fetch(url, {
           method: 'POST',
           headers: headers,
@@ -1333,7 +1334,11 @@ GUIDELINES:
 
       const data = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error(data?.error?.message || `Google API returned error code ${response.status}`);
+        const errMsg = data?.error?.message || `Google API returned error code ${response.status}`;
+        if (response.status === 503 || errMsg.includes('experiencing high demand')) {
+          throw new Error('Google is experiencing high demand on free tier servers. Please try sending your message again in a moment.');
+        }
+        throw new Error(errMsg);
       }
 
       const candidate = data.candidates && data.candidates[0];
@@ -1651,9 +1656,9 @@ GUIDELINES:
               aria-label="Select AI Model"
               style="width: 100%; padding: 9px 12px; font-size: 13px; background: #1e293b; border: 1px solid #334155; border-radius: 6px; color: #fff; outline: none; cursor: pointer;"
             >
-              <option value="gemini-3.8-flash">gemini-3.8-flash (Latest Workhorse, High Intelligence & 100% Free — Recommended)</option>
-              <option value="gemini-3.8-flash-lite">gemini-3.8-flash-lite (Ultralight, High Throughput, 100% Free)</option>
-              <option value="gemini-3.7-flash">gemini-3.7-flash (Multi-step Reasoning & Coding, 100% Free)</option>
+              <option value="gemini-3.7-flash">gemini-3.7-flash (Most Reliable & Stable, 100% Free — Recommended)</option>
+              <option value="gemini-3.8-flash">gemini-3.8-flash (Latest Frontier Flash, 100% Free)</option>
+              <option value="gemini-3.5-flash">gemini-3.5-flash (Fast & Lightweight, 100% Free)</option>
             </select>
           </div>
 
