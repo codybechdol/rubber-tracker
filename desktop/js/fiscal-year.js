@@ -265,10 +265,6 @@ class FiscalYearEngine {
                 <span>Log FISCAL_YEAR_TRANSITION lifecycle records in Employee History</span>
               </label>
               <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
-                <input type="checkbox" id="fy-opt-inventory" checked>
-                <span>Reset completed-year "New" tags across PPE inventory for clean FY budget</span>
-              </label>
-              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
                 <input type="checkbox" id="fy-opt-alias" checked>
                 <span>Activate October Email Transition Alias Map (credits -${this.currentFY} emails to -${this.newFY})</span>
               </label>
@@ -466,7 +462,6 @@ class FiscalYearEngine {
       const optEmployees = options.optEmployees ?? document.getElementById('fy-opt-employees')?.checked ?? true;
       const optJobTracking = options.optJobTracking ?? document.getElementById('fy-opt-jobtracking')?.checked ?? true;
       const optHistory = options.optHistory ?? document.getElementById('fy-opt-history')?.checked ?? true;
-      const optInventory = options.optInventory ?? document.getElementById('fy-opt-inventory')?.checked ?? true;
       const optAlias = options.optAlias ?? document.getElementById('fy-opt-alias')?.checked ?? true;
       const optTraining = options.optTraining ?? document.getElementById('fy-opt-training')?.checked ?? true;
 
@@ -492,7 +487,6 @@ class FiscalYearEngine {
       let updatedEmployeesCount = 0;
       let updatedJobsCount = 0;
       let historyLogsCount = 0;
-      let inventoryNotesCleared = 0;
       let trainingRowsUpdated = 0;
 
       // 2. Update Employees Table
@@ -611,40 +605,7 @@ class FiscalYearEngine {
         }
       }
 
-      // 6. Reset completed-year "New" tags across all inventory categories
-      if (optInventory) {
-        const invKeys = ['gloves', 'sleeves', 'blankets', 'macks', 'hv_testers', 'phasing_sets', 'aed', 'grounds', 'hot_sticks'];
-        invKeys.forEach(k => {
-          const tbl = snap.tables[k];
-          if (tbl && tbl.rows) {
-            const notesCol = tbl.headers.find(h => /^notes$/i.test(h.trim())) || 'Notes';
-            tbl.rows.forEach(r => {
-              const note = String(r[notesCol] || '').trim();
-              if (/\bnew\b/i.test(note)) {
-                const cleaned = note
-                  .replace(/(^|\s*[,;]\s*)\bnew\b(\s*[,;]\s*|$)/gi, (m, p1, p2) => (p1 && p2 && p1.includes(',') ? ', ' : ''))
-                  .trim()
-                  .replace(/^[,;]\s*/, '')
-                  .replace(/\s*[,;]$/, '')
-                  .trim();
-                if (cleaned !== note) {
-                  r[notesCol] = cleaned;
-                  inventoryNotesCleared++;
-                }
-              }
-            });
-
-            if (tbl.rawGrid && tbl.headers) {
-              tbl.rawGrid = [tbl.headers];
-              tbl.rows.forEach(r => {
-                tbl.rawGrid.push(tbl.headers.map(h => r[h] !== undefined ? r[h] : ''));
-              });
-            }
-          }
-        });
-      }
-
-      // 7. Store October Email Alias Map in localStorage and database config
+      // 6. Store October Email Alias Map in localStorage and database config
       if (optAlias) {
         try {
           const existingAlias = JSON.parse(localStorage.getItem('FY_TRANSITION_ALIAS_MAP') || '{}');
@@ -734,7 +695,6 @@ class FiscalYearEngine {
         updatedEmployeesCount,
         updatedJobsCount,
         historyLogsCount,
-        inventoryNotesCleared,
         trainingRowsUpdated,
         transitionMap
       });
@@ -778,7 +738,6 @@ class FiscalYearEngine {
           <div>📋 <strong>Jobs Migrated:</strong> <span style="color: #a855f7; font-weight: 700;">${stats.updatedJobsCount}</span></div>
           <div>📜 <strong>History Logs Appended:</strong> <span style="color: #34d399; font-weight: 700;">${stats.historyLogsCount}</span></div>
           <div>🎓 <strong>Training Rows Updated:</strong> <span style="color: #fbbf24; font-weight: 700;">${stats.trainingRowsUpdated}</span></div>
-          <div style="grid-column: span 2;">🧤 <strong>Inventory "New" Tags Cleared:</strong> <span style="color: #38bdf8; font-weight: 700;">${stats.inventoryNotesCleared}</span></div>
         </div>
 
         <div style="background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 8px; padding: 12px 14px; font-size: 12px; color: #93c5fd; line-height: 1.4; margin-bottom: 20px;">
