@@ -350,6 +350,12 @@ class AICopilotEngine {
               message: 'This key requires OAuth. In Google AI Studio, click "Create API key in NEW project" to generate a standard AIzaSy key.'
             };
           }
+          if (errMsg.includes('prepayment credits') || errMsg.includes('billing#prepay')) {
+            return {
+              success: false,
+              message: 'This key belongs to a project with Google Cloud billing attached, which disables the Free Tier. To use the 100% Free Tier without paying, create an API key in a project with NO billing linked (click "Create API key in NEW project" in AI Studio).'
+            };
+          }
           if (errMsg.includes('is no longer available') || errMsg.includes('not found for API version')) {
             return {
               success: false,
