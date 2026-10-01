@@ -696,6 +696,16 @@ class FiscalYearEngine {
             console.warn('Could not queue UPDATE_SYSTEM_CONFIG mutation for aliases:', eAliasMut);
           }
         }
+        try {
+          await this.db.addMutation({
+            action: 'UPDATE_SYSTEM_CONFIG',
+            key: 'CURRENT_FISCAL_YEAR',
+            value: this.newFY,
+            description: 'Active Fiscal Year Suffix'
+          });
+        } catch (eFYSuffix) {
+          console.warn('Could not queue UPDATE_SYSTEM_CONFIG for CURRENT_FISCAL_YEAR:', eFYSuffix);
+        }
       }
 
       // 10. Persist Local Snapshot to disk

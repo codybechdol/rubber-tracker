@@ -2621,6 +2621,12 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
               } catch (eProp) {
                 Logger.log('Error setting FY_TRANSITION_ALIAS_MAP property: ' + eProp);
               }
+            } else if (keyTarget === 'CURRENT_FISCAL_YEAR') {
+              try {
+                PropertiesService.getScriptProperties().setProperty('CURRENT_FISCAL_YEAR', valStr);
+              } catch (eProp) {
+                Logger.log('Error setting CURRENT_FISCAL_YEAR property: ' + eProp);
+              }
             }
             appliedCount++;
           } catch (eCfg) {

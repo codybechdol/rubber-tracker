@@ -37,6 +37,13 @@
 <body>
   <h2><i class="bi bi-calendar3"></i> Fiscal Year Configuration</h2>
 
+  <div class="alert alert-warning mb-4" style="border-left: 5px solid #f59e0b; background: #fffbeb;">
+    <h5 class="text-dark"><i class="bi bi-shield-exclamation text-warning"></i> Transition Moved to Desktop App</h5>
+    <p class="mb-0 text-dark">
+      To maintain database synchronization and preserve Job Tracking schedules, foremen, and email credit continuity, the <strong>Annual Fiscal Year Transition must be executed from the Safety Assistant Desktop App</strong> (navigate to 👥 Employees or 📋 Job Tracking &rarr; click <code>📅 FY Transition</code>). Direct transition execution from Google Sheets is blocked.
+    </p>
+  </div>
+
   <!-- Current Settings -->
   <div class="config-section">
     <div class="section-title"><i class="bi bi-gear"></i> Fiscal Year Settings</div>
@@ -116,10 +123,10 @@
       </label>
     </div>
 
-    <button class="btn btn-success" id="btnApply" onclick="applyTransition()" disabled>
-      <i class="bi bi-arrow-right-circle"></i> Apply Fiscal Year Transition
+    <button class="btn btn-secondary" id="btnApply" onclick="applyTransition()" disabled style="opacity: 0.6; cursor: not-allowed;">
+      <i class="bi bi-lock-fill"></i> Execute in Desktop App
     </button>
-    <span id="applyStatus" class="ms-3 text-muted"></span>
+    <span id="applyStatus" class="ms-3 text-muted">Use Desktop App 📅 FY Transition</span>
   </div>
 
   <script>
@@ -316,23 +323,8 @@
       document.getElementById('btnApply').disabled = true;
       document.getElementById('applyStatus').textContent = 'Applying transition...';
 
-      google.script.run
-        .withSuccessHandler(function(result) {
-          document.getElementById('applyStatus').textContent = '';
-          if (result.success) {
-            alert(result.message);
-            loadCrews(); // Refresh the list
-          } else {
-            alert('Error: ' + result.message);
-          }
-          document.getElementById('btnApply').disabled = false;
-        })
-        .withFailureHandler(function(error) {
-          document.getElementById('applyStatus').textContent = '';
-          alert('Error: ' + error);
-          document.getElementById('btnApply').disabled = false;
-        })
-        .applyFiscalYearTransition(currentFYVal, newFYVal, crewsToTransition);
+      alert('⚠️ Fiscal Year Transition must be performed from the Safety Assistant Desktop App to prevent data desynchronization with Job Tracking, offline storage, and email compliance.\n\nPlease open the Desktop App and click "📅 FY Transition" in the Employees or Job Tracking toolbar.');
+      return;
     }
 
     // Re-render when fiscal year inputs change

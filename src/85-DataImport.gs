@@ -3586,14 +3586,20 @@ function showImportDialog() {
 // ============================================================================
 
 /**
- * Shows the Fiscal Year Configuration dialog.
- * Menu item: Glove Manager → Utilities → Fiscal Year Config
+ * Shows the Fiscal Year Configuration notice.
+ * Menu item: Review & Schedule → Maintenance → Sheets Setup → 📅 Fiscal Year Config
  */
 function showFiscalYearConfig() {
-  var html = HtmlService.createHtmlOutputFromFile('FiscalYearConfig')
-    .setWidth(700)
-    .setHeight(750);
-  SpreadsheetApp.getUi().showModalDialog(html, 'Fiscal Year Configuration');
+  var ui = SpreadsheetApp.getUi();
+  ui.alert(
+    '📅 Fiscal Year Transition Has Moved to Desktop App',
+    'To protect database integrity and ensure seamless synchronization across Employees, Job Tracking, Training, and October Safety Email crediting, the Annual Fiscal Year Transition is now performed exclusively from the Safety Assistant Desktop App:\n\n' +
+    '1. Open the Safety Assistant Desktop App\n' +
+    '2. Go to 👥 Employees or 📋 Job Tracking\n' +
+    '3. Click the 📅 FY Transition button in the top toolbar\n\n' +
+    'Direct execution from Google Sheets is disabled to prevent database desynchronization.',
+    ui.ButtonSet.OK
+  );
 }
 
 /**
@@ -3708,182 +3714,15 @@ function getCrewsForFiscalYearTransition() {
  * @return {Object} Result with success status and message
  */
 function applyFiscalYearTransition(oldFY, newFY, crewsToTransition) {
-  Logger.log('=== applyFiscalYearTransition START ===');
-  Logger.log('Old FY: ' + oldFY + ', New FY: ' + newFY);
-  Logger.log('Crews to transition: ' + crewsToTransition.join(', '));
-
-  if (!oldFY || !newFY || !crewsToTransition || crewsToTransition.length === 0) {
-    return { success: false, message: 'Invalid parameters' };
-  }
-
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
-  var employeesSheet = ss.getSheetByName(SHEET_EMPLOYEES);
-
-  if (!employeesSheet) {
-    return { success: false, message: 'Employees sheet not found' };
-  }
-
-  var data = employeesSheet.getDataRange().getValues();
-  var headers = data[0];
-
-  // Find job number column
-  var jobNumCol = -1;
-  var nameCol = 0;
-
-  for (var h = 0; h < headers.length; h++) {
-    var header = String(headers[h]).toLowerCase().trim();
-    if (header === 'job number') jobNumCol = h;
-  }
-
-  if (jobNumCol === -1) {
-    return { success: false, message: 'Job Number column not found' };
-  }
-
-  // Build set of base job numbers to transition for faster lookup
-  var transitionSet = {};
-  for (var c = 0; c < crewsToTransition.length; c++) {
-    transitionSet[crewsToTransition[c]] = true;
-  }
-
-  var updatedCount = 0;
-  var updatedEmployees = [];
-  var timezone = ss.getSpreadsheetTimeZone();
-  var todayStr = Utilities.formatDate(new Date(), timezone, 'MM/dd/yyyy');
-
-  // Process each employee
-  for (var i = 1; i < data.length; i++) {
-    var jobNum = String(data[i][jobNumCol] || '').trim();
-    var empName = String(data[i][nameCol] || '').trim();
-
-    if (!jobNum) continue;
-
-    // Extract base crew number
-    var baseJobNum = jobNum.split('.')[0];
-
-    // Check if this crew should transition
-    if (!transitionSet[baseJobNum]) continue;
-
-    // Replace old FY suffix with new one
-    // e.g., "013-26.1" -> "013-27.1"
-    var newJobNum = jobNum.replace('-' + oldFY, '-' + newFY);
-
-    if (newJobNum !== jobNum) {
-      // Update the cell
-      employeesSheet.getRange(i + 1, jobNumCol + 1).setValue(newJobNum);
-      updatedCount++;
-      updatedEmployees.push({
-        name: empName,
-        oldJobNum: jobNum,
-        newJobNum: newJobNum
-      });
-    }
-  }
-
-  // Log to Employee History
-  var historySheet = ss.getSheetByName('Employee History');
-  if (historySheet && updatedEmployees.length > 0) {
-    for (var e = 0; e < updatedEmployees.length; e++) {
-      var emp = updatedEmployees[e];
-      var historyRow = [
-        todayStr,                                // Date
-        emp.name,                                // Employee Name
-        'FISCAL_YEAR_TRANSITION',                // Event Type
-        '',                                      // Location (unchanged)
-        emp.newJobNum,                           // Job Number (new)
-        '',                                      // Hire Date
-        '',                                      // Last Day
-        '',                                      // Last Day Reason
-        '',                                      // Rehire Date
-        'Fiscal Year Transition: ' + emp.oldJobNum + ' → ' + emp.newJobNum,  // Notes
-        '',                                      // Phone Number
-        '',                                      // Email Address
-        '',                                      // Glove Size
-        ''                                       // Sleeve Size
-      ];
-      historySheet.appendRow(historyRow);
-    }
-  }
-
-  // Also update Training Tracking if it exists
-  var trainingSheet = ss.getSheetByName('Training Tracking');
-  var trainingUpdated = 0;
-  if (trainingSheet && trainingSheet.getLastRow() > 2) {
-    var trainingData = trainingSheet.getDataRange().getValues();
-    var headerIdx = findTrainingTrackingHeaderRow(trainingData);
-    var headers = trainingData[headerIdx];
-    var cols = getTrainingTrackingColIndices(headers);
-    var trainingCrewCol = cols.crew;
-
-    for (var t = headerIdx + 1; t < trainingData.length; t++) {
-      var trainCrew = String(trainingData[t][trainingCrewCol] || '').trim();
-      if (transitionSet[trainCrew]) {
-        var newTrainCrew = trainCrew.replace('-' + oldFY, '-' + newFY);
-        if (newTrainCrew !== trainCrew) {
-          trainingSheet.getRange(t + 1, trainingCrewCol + 1).setValue(newTrainCrew);
-          trainingUpdated++;
-        }
-      }
-    }
-  }
-
-  // Also clear completed year "New" notes from inventory so the new year starts fresh
-  var invSheets = [
-    typeof SHEET_GLOVES !== 'undefined' ? SHEET_GLOVES : 'Gloves',
-    typeof SHEET_SLEEVES !== 'undefined' ? SHEET_SLEEVES : 'Sleeves',
-    typeof SHEET_BLANKETS !== 'undefined' ? SHEET_BLANKETS : 'Blankets',
-    typeof SHEET_MACKS !== 'undefined' ? SHEET_MACKS : 'MACKs',
-    typeof SHEET_HV_TESTERS !== 'undefined' ? SHEET_HV_TESTERS : 'HV Testers',
-    typeof SHEET_PHASING_SETS !== 'undefined' ? SHEET_PHASING_SETS : 'Phasing Sets',
-    typeof SHEET_AED !== 'undefined' ? SHEET_AED : 'AED',
-    typeof SHEET_GROUNDS !== 'undefined' ? SHEET_GROUNDS : 'Grounds',
-    typeof SHEET_HOT_STICKS !== 'undefined' ? SHEET_HOT_STICKS : 'Hot Sticks'
-  ];
-  var newNotesCleared = 0;
-  for (var sIdx = 0; sIdx < invSheets.length; sIdx++) {
-    var invSheet = ss.getSheetByName(invSheets[sIdx]);
-    if (!invSheet || invSheet.getLastRow() < 2) continue;
-    var invData = invSheet.getDataRange().getValues();
-    var invHeaders = invData[0];
-    var notesCol = invHeaders.indexOf('Notes') + 1;
-    if (notesCol === 0) continue;
-    for (var r = 1; r < invData.length; r++) {
-      var noteVal = String(invData[r][notesCol - 1] || '').trim();
-      if (/\bnew\b/i.test(noteVal)) {
-        var cleanedNote = noteVal
-          .replace(/(^|\s*[,;]\s*)\bnew\b(\s*[,;]\s*|$)/gi, function(match, p1, p2) {
-            if (p1 && p2 && p1.indexOf(',') !== -1 && p2.indexOf(',') !== -1) return ', ';
-            if (p1 && p2 && p1.indexOf(';') !== -1 && p2.indexOf(';') !== -1) return '; ';
-            return '';
-          })
-          .trim()
-          .replace(/^[,;]\s*/, '')
-          .replace(/\s*[,;]$/, '')
-          .trim();
-        if (cleanedNote !== noteVal) {
-          invSheet.getRange(r + 1, notesCol).setValue(cleanedNote);
-          newNotesCleared++;
-        }
-      }
-    }
-  }
-  if (newNotesCleared > 0) {
-    Logger.log('applyFiscalYearTransition: Cleared ' + newNotesCleared + ' completed year "New" notes across inventory');
-  }
-
-  Logger.log('=== applyFiscalYearTransition END ===');
-  Logger.log('Updated ' + updatedCount + ' employees, ' + trainingUpdated + ' training rows, ' + newNotesCleared + ' inventory notes');
-
-  logEvent('Fiscal Year Transition: -' + oldFY + ' to -' + newFY + ', ' + updatedCount + ' employees updated');
-
-  var message = '✅ Fiscal Year Transition Complete!\n\n';
-  message += '📝 Updated ' + updatedCount + ' employee job number(s)\n';
-  message += '📋 Updated ' + trainingUpdated + ' training tracking row(s)\n';
-  if (newNotesCleared > 0) {
-    message += '🧤 Reset ' + newNotesCleared + ' inventory "New" note(s) for fresh year\n';
-  }
-  message += '📋 Logged ' + updatedEmployees.length + ' history entries';
-
-  return { success: true, message: message };
+  Logger.log('applyFiscalYearTransition: BLOCKED - Must be executed via Safety Assistant Desktop App');
+  var msg = '⚠️ Fiscal Year Transition must be performed from the Safety Assistant Desktop App to prevent data desynchronization with Job Tracking, offline storage, and email compliance.\n\nPlease open the Desktop App and click "📅 FY Transition" in the Employees or Job Tracking toolbar.';
+  try {
+    SpreadsheetApp.getUi().alert('⚠️ Transition Blocked', msg, SpreadsheetApp.getUi().ButtonSet.OK);
+  } catch (e) {}
+  return {
+    success: false,
+    message: msg
+  };
 }
 
 // ============================================================================
