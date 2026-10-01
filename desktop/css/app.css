@@ -1062,7 +1062,6 @@ body.view-only-mode .card-drop-zone {
     gap: 6px;
     justify-content: flex-start;
     overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
     touch-action: pan-x;
     padding: 4px 2px;
   }
@@ -2413,6 +2412,7 @@ body.view-only-mode .card-drop-zone {
 .ppe-stat-card {
   position: relative;
   overflow: hidden;
+  -webkit-user-select: none;
   user-select: none;
 }
 
@@ -2435,6 +2435,7 @@ body.view-only-mode .card-drop-zone {
   font-weight: 600;
   cursor: pointer;
   transition: all 0.15s ease;
+  -webkit-user-select: none;
   user-select: none;
 }
 
