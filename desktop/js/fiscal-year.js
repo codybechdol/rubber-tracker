@@ -98,6 +98,15 @@ class FiscalYearEngine {
       const jobName = String(r['Job Name'] || '').trim();
 
       const emps = crewEmployees.get(base) || [];
+      const statusLower = status.toLowerCase();
+
+      // Exclude completed or closed jobs that have no active employees
+      if ((statusLower === 'completed' || statusLower === 'closed') && emps.length === 0) {
+        return;
+      }
+
+      const isCompleted = (statusLower === 'completed' || statusLower === 'closed');
+      const defaultAction = isCompleted ? 'complete' : 'transition';
 
       crewMap.set(base, {
         baseJob: base,
@@ -107,7 +116,7 @@ class FiscalYearEngine {
         jobName: jobName,
         employeeCount: emps.length,
         employees: emps,
-        action: 'transition', // 'transition' | 'custom' | 'stay' | 'complete'
+        action: defaultAction, // 'transition' | 'custom' | 'stay' | 'complete'
         suggestedJob: base.endsWith(`-${curFY}`) ? base.replace(new RegExp(`-${curFY}$`), `-${targetFY}`) : base,
         targetJob: base.endsWith(`-${curFY}`) ? base.replace(new RegExp(`-${curFY}$`), `-${targetFY}`) : base,
         inJobTracking: true
