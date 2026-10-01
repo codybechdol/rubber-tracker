@@ -95,6 +95,9 @@
         <div class="nav-item active" data-view="sheets-view">
           <span class="nav-item-icon">📦</span> Active Inventory & Swaps
         </div>
+        <div class="nav-item" data-view="weekly-summary-view">
+          <span class="nav-item-icon">📊</span> Weekly Summary & Briefing
+        </div>
         <div class="nav-item" data-view="crew-import-view">
           <span class="nav-item-icon">👥</span> Crew Import (Excel)
         </div>
@@ -282,6 +285,31 @@
           </div>
         </div>
         <div class="grid-wrapper" id="safety-compliance-grid-container"></div>
+      </section>
+
+      <!-- View: Weekly Summary & Monday Briefing Workspace -->
+      <section id="weekly-summary-view" class="view-container">
+        <div class="sheet-toolbar">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <h2 style="font-size: 16px;">📊 Weekly Summary & Briefing</h2>
+            <span class="brand-badge" id="weekly-summary-badge" style="background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4);">Current Week</span>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <button class="btn btn-secondary" style="font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 6px;" onclick="window.weeklySummaryEngine.copyEmailHtml()" title="Copy email HTML to clipboard">
+              <span>📋</span> Copy HTML
+            </button>
+            <button class="btn btn-secondary" style="font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 6px;" onclick="window.weeklySummaryEngine.openInGmail()" title="Draft email in Gmail">
+              <span>📧</span> Gmail
+            </button>
+            <button class="btn btn-secondary" style="font-size: 12px; font-weight: 600; display: flex; align-items: center; gap: 6px;" onclick="window.weeklySummaryEngine.printSummary()" title="Print summary / PDF">
+              <span>🖨️</span> Print / PDF
+            </button>
+            <button class="btn btn-primary" style="font-size: 12px; font-weight: 700; background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); display: flex; align-items: center; gap: 6px;" onclick="window.weeklySummaryEngine.render()" title="Refresh summary">
+              <span>🔄</span> Refresh
+            </button>
+          </div>
+        </div>
+        <div class="grid-wrapper" id="weekly-summary-content" style="overflow-y: auto; height: calc(100% - 50px); padding: 0;"></div>
       </section>
 
       <!-- View: Incident Reports Workspace -->
@@ -2532,6 +2560,7 @@
   <script src="js/drug-testing.js?v=20260902_1"></script>
   <script src="js/ppe-tracking.js?v=20260929_01"></script>
   <script src="js/incident-reports.js?v=20260930_01"></script>
+  <script src="js/weekly-summary.js?v=20260930_01"></script>
 
   <script>
     // Navigation routing for desktop & mobile
@@ -2576,6 +2605,7 @@
       if (viewId === 'procurement-view') window.procurementEngine.loadData();
       if (viewId === 'aging-view') window.inventoryAging.loadData();
       if (viewId === 'incident-reports-view' && window.incidentReportsEngine) window.incidentReportsEngine.render();
+      if (viewId === 'weekly-summary-view' && window.weeklySummaryEngine) window.weeklySummaryEngine.render();
     }
 
     document.querySelectorAll('.nav-item').forEach(item => {
@@ -2760,6 +2790,8 @@
           window.ppeTrackingEngine = new RubberPpeTrackingEngine(window.localDB);
           window.ppeTrackingEngine.init();
         }
+        window.weeklySummaryEngine = new WeeklySummaryEngine(window.localDB);
+        window.weeklySummaryEngine.init();
 
         if (snapshot) {
           window.syncEngine.updateStatusUI('synced', `Snapshot Loaded (${new Date(snapshot.exportedAt).toLocaleDateString()})`);

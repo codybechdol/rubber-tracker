@@ -322,3 +322,31 @@ ipcMain.handle('save-pdf-to-file', async (event, { base64Data, defaultFilename }
   }
 });
 
+ipcMain.handle('save-html-to-pdf', async (event, { htmlContent, defaultFilename }) => {
+  try {
+    const { filePath, canceled } = await dialog.showSaveDialog(mainWindow, {
+      title: 'Archive Safety Summary PDF',
+      defaultPath: defaultFilename || `Safety_Assistant_Weekly_Summary_${new Date().toISOString().split('T')[0]}.pdf`,
+      filters: [{ name: 'PDF Document', extensions: ['pdf'] }]
+    });
+    if (canceled || !filePath) return { success: false, canceled: true };
+
+    const printWin = new BrowserWindow({
+      show: false,
+      webPreferences: { nodeIntegration: false, contextIsolation: true }
+    });
+    await printWin.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(htmlContent)}`);
+    const pdfBuffer = await printWin.webContents.printToPDF({
+      printBackground: true,
+      pageSize: 'Letter',
+      margins: { top: 0.4, bottom: 0.4, left: 0.4, right: 0.4 }
+    });
+    printWin.close();
+    fs.writeFileSync(filePath, pdfBuffer);
+    return { success: true, filePath };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+

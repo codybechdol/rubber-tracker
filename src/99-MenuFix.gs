@@ -63,14 +63,7 @@ function _buildGloveManagerMenu() {
         .addItem('⚙️ Schedule Config', 'showToDoConfig')
         .addItem('📝 Daily Accomplishments', 'showTimeBreakdownDialog')
         .addSeparator()
-        .addItem('🧪 DOT Drug Testing', 'showDrugTestingDialog')
-        .addSeparator()
-        .addSubMenu(ui.createMenu('📧 Weekly Email Reports')
-          .addItem('⏰ Schedule Weekly Auto-Send...', 'showScheduleWeeklyEmailDialog')
-          .addItem('⚙️ Configure Recipients & Sections', 'setupEmailReportConfig')
-          .addItem('👁️ Preview My Report', 'previewEmailReport')
-          .addItem('📤 Send Report Now', 'sendEmailReport')
-          .addItem('🛑 Cancel Scheduled Auto-Send', 'removeEmailTrigger')))
+        .addItem('🧪 DOT Drug Testing', 'showDrugTestingDialog'))
 
       // === STEP 5: SAVE & BACKUP ===
       .addSubMenu(ui.createMenu('💾 Save & Backup')

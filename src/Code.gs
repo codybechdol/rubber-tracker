@@ -8273,6 +8273,7 @@ function syncEmployeeLocationsFromJobTracking() {
 function onOpen() {
   try { ensurePickedForColumn(); } catch(e) { Logger.log("ensurePickedForColumn error: " + e.message); }
   try { clearAllBackgroundStatuses(); } catch(e) { Logger.log("clearAllBackgroundStatuses onOpen error: " + e.message); }
+  try { disableAndRemoveWeeklyEmailTriggers(true); } catch(e) { Logger.log("cleanupWeeklyEmailTriggers onOpen error: " + e); }
   try {
     _buildGloveManagerMenu();
   } catch(e) {
