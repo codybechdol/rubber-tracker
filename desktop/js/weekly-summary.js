@@ -1176,11 +1176,312 @@ class WeeklySummaryEngine {
   }
 
   /**
+   * Generates the inner HTML for a single crew's 1-page Tailgate Briefing Sheet.
+   */
+  generateTailgateSheetHtml(crew, data) {
+    // 1. Crew PPE Swaps
+    const crewSwaps = [...data.swaps.overdue, ...data.swaps.dueThisWeek].filter(
+      s => s.crew === crew.job || (s.location && crew.loc && s.location.toLowerCase().includes(crew.loc.toLowerCase()))
+    );
+
+    // 2. Crew Expiring Certs
+    const crewCerts = [...data.certs.urgent, ...data.certs.upcoming].filter(c => c.crew === crew.job);
+
+    // 3. Crew Members Roster
+    const members = (data.crewMembersMap && data.crewMembersMap.get(crew.job)) || [];
+
+    return `
+      <!-- Header -->
+      <div style="border: 2px solid #000; padding: 12px 16px; margin-bottom: 14px; display: flex; justify-content: space-between; align-items: center; background: #fff;">
+        <div>
+          <div style="font-size: 16px; font-weight: 900; letter-spacing: -0.5px; color: #000;">MOUNTAIN POWER · SAFETY TAILGATE BRIEFING</div>
+          <div style="font-size: 13px; font-weight: 700; margin-top: 3px; color: #000;">
+            CREW ${this.escapeHtml(crew.job)} · FOREMAN: ${this.escapeHtml(crew.foreman).toUpperCase()} (${this.escapeHtml(crew.loc)})
+          </div>
+        </div>
+        <div style="text-align: right; font-size: 12px; font-weight: 700; color: #000;">
+          WEEK: ${this.escapeHtml(data.weekRangeStr)}<br>
+          <span style="font-size: 10px; font-weight: 500; color: #475569;">Safety Assistant Field Edition</span>
+        </div>
+      </div>
+
+      <!-- Section 1: Crew Compliance -->
+      <div style="font-size: 12.5px; font-weight: 800; text-transform: uppercase; border-bottom: 2px solid #000; padding-bottom: 3px; margin: 12px 0 8px 0; color: #000;">
+        1. Crew Safety Compliance Tracker
+      </div>
+      <table style="width: 100%; border-collapse: collapse; font-size: 11px; margin-bottom: 10px; color: #000;">
+        <thead>
+          <tr style="background: #f1f5f9;">
+            <th style="border: 1px solid #000; padding: 5px 8px; text-align: center; font-weight: 800;">Monday JHA</th>
+            <th style="border: 1px solid #000; padding: 5px 8px; text-align: center; font-weight: 800;">Tuesday JHA</th>
+            <th style="border: 1px solid #000; padding: 5px 8px; text-align: center; font-weight: 800;">Wednesday JHA</th>
+            <th style="border: 1px solid #000; padding: 5px 8px; text-align: center; font-weight: 800;">Thursday JHA</th>
+            <th style="border: 1px solid #000; padding: 5px 8px; text-align: center; font-weight: 800;">Weekly Safety Mtg</th>
+            <th style="border: 1px solid #000; padding: 5px 8px; text-align: center; font-weight: 800;">Monthly Inspection</th>
+            <th style="border: 1px solid #000; padding: 5px 8px; text-align: right; font-weight: 800;">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td style="border: 1px solid #000; padding: 5px 8px; text-align: center; font-weight: 700;">${crew.mon}</td>
+            <td style="border: 1px solid #000; padding: 5px 8px; text-align: center; font-weight: 700;">${crew.tue}</td>
+            <td style="border: 1px solid #000; padding: 5px 8px; text-align: center; font-weight: 700;">${crew.wed}</td>
+            <td style="border: 1px solid #000; padding: 5px 8px; text-align: center; font-weight: 700;">${crew.thu}</td>
+            <td style="border: 1px solid #000; padding: 5px 8px; text-align: center; font-weight: 700;">${crew.meeting}</td>
+            <td style="border: 1px solid #000; padding: 5px 8px; text-align: center; font-weight: 700;">${crew.checklist}</td>
+            <td style="border: 1px solid #000; padding: 5px 8px; text-align: right; font-weight: 800;">${this.escapeHtml(crew.status)}</td>
+          </tr>
+        </tbody>
+      </table>
+
+      <!-- Section 2: PPE & Equipment Swaps -->
+      <div style="font-size: 12.5px; font-weight: 800; text-transform: uppercase; border-bottom: 2px solid #000; padding-bottom: 3px; margin: 12px 0 8px 0; color: #000;">
+        2. PPE & Equipment Change-Outs Due (${crewSwaps.length})
+      </div>
+      ${crewSwaps.length === 0 ? `
+        <div style="font-size: 11px; padding: 6px 10px; border: 1px solid #000; margin-bottom: 10px; font-weight: 600; background: #f8fafc; color: #000;">
+          ✓ All electrical PPE (gloves, sleeves, blankets, MACKs, grounds, hot sticks) are current for this crew.
+        </div>
+      ` : `
+        <table style="width: 100%; border-collapse: collapse; font-size: 11px; margin-bottom: 10px; color: #000;">
+          <thead>
+            <tr style="background: #f1f5f9;">
+              <th style="border: 1px solid #000; padding: 5px 8px; font-weight: 800;">Type</th>
+              <th style="border: 1px solid #000; padding: 5px 8px; font-weight: 800;">Assigned Employee</th>
+              <th style="border: 1px solid #000; padding: 5px 8px; font-weight: 800;">Current Item #</th>
+              <th style="border: 1px solid #000; padding: 5px 8px; font-weight: 800;">Size / Class</th>
+              <th style="border: 1px solid #000; padding: 5px 8px; font-weight: 800;">Change-Out Date</th>
+              <th style="border: 1px solid #000; padding: 5px 8px; font-weight: 800;">Replacement Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${crewSwaps.map(s => `
+              <tr>
+                <td style="border: 1px solid #000; padding: 5px 8px; font-weight: 700;">${this.escapeHtml(s.categoryLabel)}</td>
+                <td style="border: 1px solid #000; padding: 5px 8px; font-weight: 800;">${this.escapeHtml(s.employee)}</td>
+                <td style="border: 1px solid #000; padding: 5px 8px; font-family: monospace;">${this.escapeHtml(s.currentItem)}</td>
+                <td style="border: 1px solid #000; padding: 5px 8px;">${this.escapeHtml(s.size)}</td>
+                <td style="border: 1px solid #000; padding: 5px 8px; font-weight: 800; color: ${s.isOverdue ? '#b91c1c' : '#000'};">${this.escapeHtml(s.dueDate)} ${s.isOverdue ? '(OVERDUE)' : ''}</td>
+                <td style="border: 1px solid #000; padding: 5px 8px;">${s.pickItem ? `✅ Replacement Picked: ${this.escapeHtml(s.pickItem)}` : '⚠️ Needed from Stock'}</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `}
+
+      <!-- Section 3: Expiring Certifications -->
+      <div style="font-size: 12.5px; font-weight: 800; text-transform: uppercase; border-bottom: 2px solid #000; padding-bottom: 3px; margin: 12px 0 8px 0; color: #000;">
+        3. Crew Member Certifications Expiring &lt; 60 Days (${crewCerts.length})
+      </div>
+      ${crewCerts.length === 0 ? `
+        <div style="font-size: 11px; padding: 6px 10px; border: 1px solid #000; margin-bottom: 10px; font-weight: 600; background: #f8fafc; color: #000;">
+          ✓ All crew member credentials (CPR, First Aid, OSHA 10/30, Crane, Diggers) are up to date.
+        </div>
+      ` : `
+        <table style="width: 100%; border-collapse: collapse; font-size: 11px; margin-bottom: 10px; color: #000;">
+          <thead>
+            <tr style="background: #f1f5f9;">
+              <th style="border: 1px solid #000; padding: 5px 8px; font-weight: 800;">Crew Member</th>
+              <th style="border: 1px solid #000; padding: 5px 8px; font-weight: 800;">Certification</th>
+              <th style="border: 1px solid #000; padding: 5px 8px; font-weight: 800;">Expiration Date</th>
+              <th style="border: 1px solid #000; padding: 5px 8px; text-align: right; font-weight: 800;">Days Remaining</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${crewCerts.map(c => `
+              <tr>
+                <td style="border: 1px solid #000; padding: 5px 8px; font-weight: 800;">${this.escapeHtml(c.employee)}</td>
+                <td style="border: 1px solid #000; padding: 5px 8px;">${this.escapeHtml(c.cert)}</td>
+                <td style="border: 1px solid #000; padding: 5px 8px; font-weight: 700;">${this.escapeHtml(c.expirationDate)}</td>
+                <td style="border: 1px solid #000; padding: 5px 8px; text-align: right; font-weight: 800; color: ${c.diffDays <= 30 ? '#b91c1c' : '#000'};">${c.diffDays} Days</td>
+              </tr>
+            `).join('')}
+          </tbody>
+        </table>
+      `}
+
+      <!-- Section 4: Tailgate Topic & Attendance Sign-Off -->
+      <div style="font-size: 12.5px; font-weight: 800; text-transform: uppercase; border-bottom: 2px solid #000; padding-bottom: 3px; margin: 12px 0 8px 0; color: #000;">
+        4. Safety Tailgate Meeting Sign-Off & Attendance
+      </div>
+      <div style="border: 1px solid #000; padding: 8px 10px; margin-bottom: 10px; min-height: 48px; font-size: 11px; background: #fff; color: #000;">
+        <strong>Topic / Hazard Discussion Notes:</strong>
+      </div>
+
+      <table style="width: 100%; border-collapse: collapse; font-size: 11px; margin-bottom: 10px; color: #000;">
+        <thead>
+          <tr style="background: #f1f5f9;">
+            <th style="border: 1px solid #000; padding: 5px 8px; width: 35%; font-weight: 800;">Employee Name</th>
+            <th style="border: 1px solid #000; padding: 5px 8px; width: 25%; font-weight: 800;">Classification</th>
+            <th style="border: 1px solid #000; padding: 5px 8px; width: 25%; font-weight: 800;">Signature</th>
+            <th style="border: 1px solid #000; padding: 5px 8px; width: 15%; font-weight: 800;">Date</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${members.length > 0 ? members.map(m => `
+            <tr style="height: 28px;">
+              <td style="border: 1px solid #000; padding: 5px 8px; font-weight: 700;">${this.escapeHtml(m.name)}</td>
+              <td style="border: 1px solid #000; padding: 5px 8px;">${this.escapeHtml(m.title || 'Lineman / Operator')}</td>
+              <td style="border: 1px solid #000; padding: 5px 8px;"></td>
+              <td style="border: 1px solid #000; padding: 5px 8px;"></td>
+            </tr>
+          `).join('') : `
+            <tr style="height: 28px;"><td style="border: 1px solid #000; padding: 5px 8px;">${this.escapeHtml(crew.foreman)}</td><td style="border: 1px solid #000; padding: 5px 8px;">Foreman</td><td style="border: 1px solid #000; padding: 5px 8px;"></td><td style="border: 1px solid #000; padding: 5px 8px;"></td></tr>
+            <tr style="height: 28px;"><td style="border: 1px solid #000; padding: 5px 8px;"></td><td style="border: 1px solid #000; padding: 5px 8px;">Lineman</td><td style="border: 1px solid #000; padding: 5px 8px;"></td><td style="border: 1px solid #000; padding: 5px 8px;"></td></tr>
+            <tr style="height: 28px;"><td style="border: 1px solid #000; padding: 5px 8px;"></td><td style="border: 1px solid #000; padding: 5px 8px;">Apprentice</td><td style="border: 1px solid #000; padding: 5px 8px;"></td><td style="border: 1px solid #000; padding: 5px 8px;"></td></tr>
+            <tr style="height: 28px;"><td style="border: 1px solid #000; padding: 5px 8px;"></td><td style="border: 1px solid #000; padding: 5px 8px;">Groundman</td><td style="border: 1px solid #000; padding: 5px 8px;"></td><td style="border: 1px solid #000; padding: 5px 8px;"></td></tr>
+          `}
+        </tbody>
+      </table>
+
+      <div style="margin-top: 14px; padding-top: 8px; font-size: 10px; color: #475569; display: flex; justify-content: space-between; border-top: 1px solid #cbd5e1;">
+        <span>Foreman Sign-off: _______________________________</span>
+        <span>Date: _______________</span>
+        <span>Safety Assistant Field Edition</span>
+      </div>
+    `;
+  }
+
+  /**
+   * Generates the complete HTML document containing tailgate sheets for the specified crews.
+   */
+  generateTailgateFullHtml(crewsToPrint, data, isPrint = false) {
+    return `
+      <!DOCTYPE html>
+      <html lang="en">
+      <head>
+        <meta charset="utf-8">
+        <title>Mountain Power — Safety Tailgate Briefing Packets</title>
+        <style>
+          * { box-sizing: border-box; }
+          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 20px; color: #000; background: #fff; }
+          .tailgate-sheet { page-break-after: always; padding: 10px 0; min-height: 98vh; display: flex; flex-direction: column; }
+          .tailgate-sheet:last-child { page-break-after: auto; }
+          @media print {
+            body { padding: 0 !important; }
+            .tailgate-sheet { page-break-after: always !important; }
+          }
+        </style>
+      </head>
+      <body>
+        ${crewsToPrint.map(crew => `
+          <div class="tailgate-sheet">
+            ${this.generateTailgateSheetHtml(crew, data)}
+          </div>
+        `).join('')}
+        ${isPrint ? `
+          <script>
+            window.onload = function() {
+              window.print();
+            };
+          </script>
+        ` : ''}
+      </body>
+      </html>
+    `;
+  }
+
+  /**
+   * Dedicated Workspace renderer for the full Tailgate Generator view.
+   */
+  renderTailgateWorkspace(targetScope = null) {
+    const container = document.getElementById('tailgate-workspace-content');
+    if (!container) return;
+
+    const data = this.cachedData || this.collectWeeklyData();
+    this.cachedData = data;
+    const activeCrews = data.compliance.crews || [];
+
+    // Populate or sync the workspace crew selector
+    const select = document.getElementById('tailgate-workspace-crew-select');
+    if (select) {
+      const currentVal = targetScope !== null ? targetScope : (select.value || 'all');
+      select.innerHTML = `
+        <option value="all" ${currentVal === 'all' ? 'selected' : ''}>📦 All Active Crews (${activeCrews.length} Packets — 1 Page Per Crew)</option>
+        ${activeCrews.map(c => `
+          <option value="${this.escapeHtml(c.job)}" ${currentVal === c.job ? 'selected' : ''}>
+            Crew ${this.escapeHtml(c.job)} — Foreman ${this.escapeHtml(c.foreman)} (${this.escapeHtml(c.loc)})
+          </option>
+        `).join('')}
+      `;
+      targetScope = select.value;
+    } else if (targetScope === null) {
+      targetScope = 'all';
+    }
+
+    const crewsToDisplay = targetScope === 'all' ? activeCrews : activeCrews.filter(c => c.job === targetScope);
+
+    // Update badge
+    const badge = document.getElementById('tailgate-badge');
+    if (badge) {
+      badge.textContent = targetScope === 'all' ? `${activeCrews.length} Packets` : `Crew ${targetScope}`;
+    }
+
+    if (crewsToDisplay.length === 0) {
+      container.innerHTML = `
+        <div style="text-align: center; padding: 60px 20px; color: #94a3b8;">
+          <div style="font-size: 40px; margin-bottom: 12px;">👷</div>
+          <h3 style="font-size: 16px; color: #f8fafc; margin-bottom: 8px;">No Active Crews Found</h3>
+          <p style="font-size: 13px; max-width: 450px; margin: 0 auto;">
+            Ensure crew assignments are imported and active in Job Tracking to generate customized Foreman Tailgate packets.
+          </p>
+        </div>
+      `;
+      return;
+    }
+
+    // Render briefing sheet preview container
+    let html = `
+      <div style="max-width: 900px; margin: 0 auto; display: flex; flex-direction: column; gap: 20px;">
+        
+        <!-- Live Workspace Header Banner -->
+        <div style="background: rgba(30, 41, 59, 0.7); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 8px; padding: 14px 18px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+          <div>
+            <div style="font-size: 13px; font-weight: 700; color: #fbbf24; display: flex; align-items: center; gap: 6px;">
+              <span>👷</span> Live Tailgate Packet Preview
+            </div>
+            <div style="font-size: 11.5px; color: #94a3b8; margin-top: 2px;">
+              Showing ${crewsToDisplay.length} of ${activeCrews.length} crew packet(s) · Formatted with CSS page breaks for 1-page per crew printing.
+            </div>
+          </div>
+          <div style="display: flex; gap: 8px;">
+            <button class="btn btn-secondary" onclick="window.weeklySummaryEngine.archiveTailgatePdf()" style="font-size: 12px; font-weight: 600; border-color: #3b82f6; color: #93c5fd;">
+              💾 Save PDF
+            </button>
+            <button class="btn btn-primary" onclick="window.weeklySummaryEngine.printTailgateSheets()" style="font-size: 12px; font-weight: 700; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color: #000; border: none;">
+              🖨️ Print Sheets
+            </button>
+          </div>
+        </div>
+
+        <!-- Rendered Sheet Pages (White Paper Appearance on Dark Canvas) -->
+        <div style="display: flex; flex-direction: column; gap: 24px;">
+          ${crewsToDisplay.map(crew => `
+            <div style="background: #ffffff; color: #000000; border-radius: 6px; box-shadow: 0 8px 30px rgba(0,0,0,0.5); padding: 32px 36px; border: 1px solid #e2e8f0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+              ${this.generateTailgateSheetHtml(crew, data)}
+            </div>
+          `).join('')}
+        </div>
+
+      </div>
+    `;
+
+    container.innerHTML = html;
+  }
+
+  onTailgateCrewChange(scope) {
+    this.renderTailgateWorkspace(scope);
+  }
+
+  /**
    * Generates and prints the Foreman Tailgate Packet.
    */
   printTailgateSheets() {
-    const select = document.getElementById('tailgate-crew-select');
-    const targetScope = select ? select.value : 'all';
+    const modalSelect = document.getElementById('tailgate-crew-select');
+    const workspaceSelect = document.getElementById('tailgate-workspace-crew-select');
+    const targetScope = (modalSelect && modalSelect.offsetParent !== null)
+      ? modalSelect.value
+      : (workspaceSelect ? workspaceSelect.value : (modalSelect ? modalSelect.value : 'all'));
 
     const data = this.cachedData || this.collectWeeklyData();
     const activeCrews = data.compliance.crews || [];
@@ -1197,197 +1498,7 @@ class WeeklySummaryEngine {
       return;
     }
 
-    let sheetsHtml = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Mountain Power — Safety Tailgate Briefing Packets</title>
-        <style>
-          * { box-sizing: border-box; }
-          body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; margin: 0; padding: 20px; color: #000; background: #fff; }
-          .tailgate-sheet { page-break-after: always; padding: 10px 0; min-height: 98vh; display: flex; flex-direction: column; }
-          .tailgate-sheet:last-child { page-break-after: auto; }
-          .header-box { border: 2px solid #000; padding: 12px 16px; margin-bottom: 14px; display: flex; justify-content: space-between; align-items: center; }
-          .section-title { font-size: 13px; font-weight: 800; text-transform: uppercase; border-bottom: 2px solid #000; padding-bottom: 3px; margin: 14px 0 8px 0; }
-          table { width: 100%; border-collapse: collapse; font-size: 11px; margin-bottom: 10px; }
-          th, td { border: 1px solid #000; padding: 5px 8px; text-align: left; }
-          th { background: #f1f5f9; font-weight: 800; }
-          @media print {
-            body { padding: 0 !important; }
-            .tailgate-sheet { page-break-after: always !important; }
-          }
-        </style>
-      </head>
-      <body>
-    `;
-
-    crewsToPrint.forEach(crew => {
-      // 1. Crew PPE Swaps
-      const crewSwaps = [...data.swaps.overdue, ...data.swaps.dueThisWeek].filter(s => s.crew === crew.job || s.location.toLowerCase().includes(crew.loc.toLowerCase()));
-
-      // 2. Crew Expiring Certs
-      const crewCerts = [...data.certs.urgent, ...data.certs.upcoming].filter(c => c.crew === crew.job);
-
-      // 3. Crew Members Roster
-      const members = data.crewMembersMap.get(crew.job) || [];
-
-      sheetsHtml += `
-        <div class="tailgate-sheet">
-          
-          <!-- Header -->
-          <div class="header-box">
-            <div>
-              <div style="font-size: 16px; font-weight: 900; letter-spacing: -0.5px;">MOUNTAIN POWER · SAFETY TAILGATE BRIEFING</div>
-              <div style="font-size: 13px; font-weight: 700; margin-top: 3px;">
-                CREW ${this.escapeHtml(crew.job)} · FOREMAN: ${this.escapeHtml(crew.foreman).toUpperCase()} (${this.escapeHtml(crew.loc)})
-              </div>
-            </div>
-            <div style="text-align: right; font-size: 12px; font-weight: 700;">
-              WEEK: ${this.escapeHtml(data.weekRangeStr)}<br>
-              <span style="font-size: 10px; font-weight: 500;">Safety Assistant Field Edition</span>
-            </div>
-          </div>
-
-          <!-- Section 1: Crew Compliance -->
-          <div class="section-title">1. Crew Safety Compliance Tracker</div>
-          <table>
-            <thead>
-              <tr>
-                <th style="text-align: center;">Monday JHA</th>
-                <th style="text-align: center;">Tuesday JHA</th>
-                <th style="text-align: center;">Wednesday JHA</th>
-                <th style="text-align: center;">Thursday JHA</th>
-                <th style="text-align: center;">Weekly Safety Mtg</th>
-                <th style="text-align: center;">Monthly Inspection</th>
-                <th style="text-align: right;">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td style="text-align: center; font-weight: 700;">${crew.mon}</td>
-                <td style="text-align: center; font-weight: 700;">${crew.tue}</td>
-                <td style="text-align: center; font-weight: 700;">${crew.wed}</td>
-                <td style="text-align: center; font-weight: 700;">${crew.thu}</td>
-                <td style="text-align: center; font-weight: 700;">${crew.meeting}</td>
-                <td style="text-align: center; font-weight: 700;">${crew.checklist}</td>
-                <td style="text-align: right; font-weight: 800;">${this.escapeHtml(crew.status)}</td>
-              </tr>
-            </tbody>
-          </table>
-
-          <!-- Section 2: PPE & Equipment Swaps -->
-          <div class="section-title">2. PPE & Equipment Change-Outs Due (${crewSwaps.length})</div>
-          ${crewSwaps.length === 0 ? `
-            <div style="font-size: 11px; padding: 6px; border: 1px solid #000; margin-bottom: 10px; font-weight: 600;">
-              ✓ All electrical PPE (gloves, sleeves, blankets, MACKs, grounds, hot sticks) are current for this crew.
-            </div>
-          ` : `
-            <table>
-              <thead>
-                <tr>
-                  <th>Type</th>
-                  <th>Assigned Employee</th>
-                  <th>Current Item #</th>
-                  <th>Size / Class</th>
-                  <th>Change-Out Date</th>
-                  <th>Replacement Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${crewSwaps.map(s => `
-                  <tr>
-                    <td style="font-weight: 700;">${this.escapeHtml(s.categoryLabel)}</td>
-                    <td style="font-weight: 800;">${this.escapeHtml(s.employee)}</td>
-                    <td style="font-family: monospace;">${this.escapeHtml(s.currentItem)}</td>
-                    <td>${this.escapeHtml(s.size)}</td>
-                    <td style="font-weight: 800; color: ${s.isOverdue ? '#b91c1c' : '#000'};">${this.escapeHtml(s.dueDate)} ${s.isOverdue ? '(OVERDUE)' : ''}</td>
-                    <td>${s.pickItem ? `✅ Replacement Picked: ${this.escapeHtml(s.pickItem)}` : '⚠️ Needed from Stock'}</td>
-                  </tr>
-                `).join('')}
-              </tbody>
-            </table>
-          `}
-
-          <!-- Section 3: Expiring Certifications -->
-          <div class="section-title">3. Crew Member Certifications Expiring &lt; 60 Days (${crewCerts.length})</div>
-          ${crewCerts.length === 0 ? `
-            <div style="font-size: 11px; padding: 6px; border: 1px solid #000; margin-bottom: 10px; font-weight: 600;">
-              ✓ All crew member credentials (CPR, First Aid, OSHA 10/30, Crane, Diggers) are up to date.
-            </div>
-          ` : `
-            <table>
-              <thead>
-                <tr>
-                  <th>Crew Member</th>
-                  <th>Certification</th>
-                  <th>Expiration Date</th>
-                  <th style="text-align: right;">Days Remaining</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${crewCerts.map(c => `
-                  <tr>
-                    <td style="font-weight: 800;">${this.escapeHtml(c.employee)}</td>
-                    <td>${this.escapeHtml(c.cert)}</td>
-                    <td style="font-weight: 700;">${this.escapeHtml(c.expirationDate)}</td>
-                    <td style="text-align: right; font-weight: 800; color: ${c.diffDays <= 30 ? '#b91c1c' : '#000'};">${c.diffDays} Days</td>
-                  </tr>
-                `).join('')}
-              </tbody>
-            </table>
-          `}
-
-          <!-- Section 4: Tailgate Topic & Attendance Sign-Off -->
-          <div class="section-title">4. Safety Tailgate Meeting Sign-Off & Attendance</div>
-          <div style="border: 1px solid #000; padding: 8px; margin-bottom: 10px; min-height: 45px; font-size: 11px;">
-            <strong>Topic / Hazard Discussion Notes:</strong>
-          </div>
-
-          <table>
-            <thead>
-              <tr>
-                <th style="width: 35%;">Employee Name</th>
-                <th style="width: 25%;">Classification</th>
-                <th style="width: 25%;">Signature</th>
-                <th style="width: 15%;">Date</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${members.length > 0 ? members.map(m => `
-                <tr style="height: 28px;">
-                  <td style="font-weight: 700;">${this.escapeHtml(m.name)}</td>
-                  <td>${this.escapeHtml(m.title || 'Lineman / Operator')}</td>
-                  <td></td>
-                  <td></td>
-                </tr>
-              `).join('') : `
-                <tr style="height: 28px;"><td>${this.escapeHtml(crew.foreman)}</td><td>Foreman</td><td></td><td></td></tr>
-                <tr style="height: 28px;"><td></td><td>Lineman</td><td></td><td></td></tr>
-                <tr style="height: 28px;"><td></td><td>Apprentice</td><td></td><td></td></tr>
-                <tr style="height: 28px;"><td></td><td>Groundman</td><td></td><td></td></tr>
-              `}
-            </tbody>
-          </table>
-
-          <div style="margin-top: auto; padding-top: 10px; font-size: 10px; color: #475569; display: flex; justify-content: space-between; border-top: 1px solid #cbd5e1;">
-            <span>Foreman Sign-off: _______________________________</span>
-            <span>Date: _______________</span>
-            <span>Safety Assistant Field Edition</span>
-          </div>
-
-        </div>
-      `;
-    });
-
-    sheetsHtml += `
-        <script>
-          window.onload = function() {
-            window.print();
-          };
-        </script>
-      </body>
-      </html>
-    `;
+    const sheetsHtml = this.generateTailgateFullHtml(crewsToPrint, data, true);
 
     printWin.document.open();
     printWin.document.write(sheetsHtml);
@@ -1395,6 +1506,48 @@ class WeeklySummaryEngine {
 
     const m = document.getElementById('tailgate-sheets-modal');
     if (m) m.remove();
+  }
+
+  /**
+   * Automatically archives the Foreman Tailgate sheets as a PDF using Electron printToPDF.
+   */
+  async archiveTailgatePdf() {
+    const modalSelect = document.getElementById('tailgate-crew-select');
+    const workspaceSelect = document.getElementById('tailgate-workspace-crew-select');
+    const targetScope = (modalSelect && modalSelect.offsetParent !== null)
+      ? modalSelect.value
+      : (workspaceSelect ? workspaceSelect.value : (modalSelect ? modalSelect.value : 'all'));
+
+    const data = this.cachedData || this.collectWeeklyData();
+    const activeCrews = data.compliance.crews || [];
+    const crewsToPrint = targetScope === 'all' ? activeCrews : activeCrews.filter(c => c.job === targetScope);
+
+    if (crewsToPrint.length === 0) {
+      alert('⚠️ No crews selected for archiving.');
+      return;
+    }
+
+    const html = this.generateTailgateFullHtml(crewsToPrint, data, false);
+    const dateStr = data.today.toISOString().split('T')[0];
+    const defaultFilename = targetScope === 'all'
+      ? `Foreman_Tailgate_Packets_All_Crews_${dateStr}.pdf`
+      : `Foreman_Tailgate_Crew_${targetScope.replace(/[^a-zA-Z0-9_-]/g, '_')}_${dateStr}.pdf`;
+
+    if (window.desktopAPI && typeof window.desktopAPI.saveHtmlToPdf === 'function') {
+      try {
+        const res = await window.desktopAPI.saveHtmlToPdf(html, defaultFilename);
+        if (res.canceled) return;
+        if (res.success) {
+          alert(`✅ Foreman Tailgate PDF archived successfully!\n\nSaved to: ${res.filePath}`);
+        } else {
+          alert(`⚠️ PDF Archival failed: ${res.error || 'Unknown error'}`);
+        }
+      } catch (err) {
+        alert('⚠️ PDF Archival error: ' + err.message);
+      }
+    } else {
+      this.printTailgateSheets();
+    }
   }
 
   /**
