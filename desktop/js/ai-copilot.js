@@ -1,6 +1,6 @@
 /**
  * ai-copilot.js - Safety Assistant AI Copilot
- * Supports Google Gemini (100% Free Tier via Google AI Studio) & OpenAI (ChatGPT Platform)
+ * Native Google Gemini (100% Free Tier via Google AI Studio) & OpenAI (ChatGPT Platform)
  * Equipped with function calling to query local databases, inspect PPE,
  * check safety compliance, lookup employees, and control app navigation.
  */
@@ -134,16 +134,13 @@ class AICopilotEngine {
     if (drawer) drawer.classList.add('open');
     if (backdrop) backdrop.classList.add('open');
 
-    // Scroll to bottom
     this.scrollToBottom();
 
-    // Auto-focus input
     setTimeout(() => {
       const inputEl = document.getElementById('ai-copilot-input');
       if (inputEl) inputEl.focus();
     }, 150);
 
-    // If no API key configured, prompt gently
     if (!this.getActiveApiKey()) {
       this.showNoApiKeyNotice();
     }
@@ -248,6 +245,7 @@ class AICopilotEngine {
           <option value="gemini-1.5-flash">gemini-1.5-flash (Fastest, High Intelligence & 100% Free — Recommended)</option>
           <option value="gemini-2.0-flash">gemini-2.0-flash (Latest Next-Gen Gemini, 100% Free)</option>
           <option value="gemini-1.5-pro">gemini-1.5-pro (Deep Reasoning & Analysis, 100% Free)</option>
+          <option value="gemini-1.5-flash-8b">gemini-1.5-flash-8b (Ultralight & Fast, 100% Free)</option>
         `;
       } else {
         modelSelect.innerHTML = `
@@ -300,39 +298,54 @@ class AICopilotEngine {
       return { success: false, message: `Please enter your ${p === 'google' ? 'Google Gemini' : 'OpenAI'} API key first.` };
     }
 
-    const endpoint = p === 'google'
-      ? 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'
-      : 'https://api.openai.com/v1/chat/completions';
+    if (p === 'google') {
+      // Test native Google Gemini generateContent endpoint
+      try {
+        const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${encodeURIComponent(key)}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            contents: [{ parts: [{ text: 'Respond with the single word "Ready"' }] }],
+            generationConfig: { maxOutputTokens: 10 }
+          })
+        });
 
-    try {
-      const res = await fetch(endpoint, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${key}`
-        },
-        body: JSON.stringify({
-          model: model,
-          messages: [{ role: 'user', content: 'Respond with the single word "Ready"' }],
-          max_tokens: 5
-        })
-      });
-
-      if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        let errMsg = `HTTP error ${res.status}`;
-        if (Array.isArray(errJson) && errJson[0]?.error?.message) {
-          errMsg = errJson[0].error.message;
-        } else if (errJson && errJson.error && errJson.error.message) {
-          errMsg = errJson.error.message;
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const errMsg = data?.error?.message || `HTTP error ${res.status}`;
+          return { success: false, message: errMsg };
         }
-        return { success: false, message: errMsg };
-      }
 
-      const pLabel = p === 'google' ? 'Google Gemini' : 'OpenAI';
-      return { success: true, message: `Connected successfully to ${pLabel} (${model})! Ready to assist.` };
-    } catch (err) {
-      return { success: false, message: `Network request failed: ${err.message}` };
+        return { success: true, message: `Connected successfully to Google Gemini (${model})! Ready to assist.` };
+      } catch (err) {
+        return { success: false, message: `Network request failed: ${err.message}` };
+      }
+    } else {
+      // Test OpenAI chat/completions endpoint
+      try {
+        const res = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${key}`
+          },
+          body: JSON.stringify({
+            model: model,
+            messages: [{ role: 'user', content: 'Respond with the single word "Ready"' }],
+            max_tokens: 5
+          })
+        });
+
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          const errMsg = data?.error?.message || `HTTP error ${res.status}`;
+          return { success: false, message: errMsg };
+        }
+
+        return { success: true, message: `Connected successfully to OpenAI (${model})! Ready to assist.` };
+      } catch (err) {
+        return { success: false, message: `Network request failed: ${err.message}` };
+      }
     }
   }
 
@@ -343,7 +356,6 @@ class AICopilotEngine {
 
     const key = keyInput ? keyInput.value.trim() : '';
 
-    // Auto-detect provider if key has known prefix
     let targetProvider = this.provider;
     const activeTab = document.querySelector('.ai-provider-tab.active');
     if (activeTab && activeTab.dataset.provider) {
@@ -662,6 +674,26 @@ class AICopilotEngine {
         }
       }
     ];
+  }
+
+  convertSchemaForGemini(schema) {
+    if (!schema || typeof schema !== 'object') return schema;
+    const res = {};
+    for (const k of Object.keys(schema)) {
+      if (k === 'type' && typeof schema[k] === 'string') {
+        res[k] = schema[k].toUpperCase();
+      } else if (k === 'properties' && typeof schema[k] === 'object') {
+        res[k] = {};
+        for (const p of Object.keys(schema[k])) {
+          res[k][p] = this.convertSchemaForGemini(schema[k][p]);
+        }
+      } else if (k === 'items' && typeof schema[k] === 'object') {
+        res[k] = this.convertSchemaForGemini(schema[k]);
+      } else {
+        res[k] = schema[k];
+      }
+    }
+    return res;
   }
 
   async executeToolCall(toolCall) {
@@ -1092,7 +1124,7 @@ class AICopilotEngine {
   }
 
   // =========================================================================
-  // Send Message & Chat Completion Loop
+  // Send Message & AI Execution (Native Gemini & OpenAI Support)
   // =========================================================================
   async sendMessage(userInput) {
     const text = String(userInput || '').trim();
@@ -1117,85 +1149,11 @@ class AICopilotEngine {
     this.isProcessing = true;
     this.renderTypingIndicator(true, 'Thinking...');
 
-    const endpoint = this.provider === 'google'
-      ? 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions'
-      : 'https://api.openai.com/v1/chat/completions';
-
     try {
-      let turns = 0;
-      const maxTurns = 6;
-
-      while (turns < maxTurns) {
-        turns++;
-
-        const payloadMessages = [
-          {
-            role: 'system',
-            content: `You are Safety Assistant Copilot, an expert AI partner inside the Safety Assistant Desktop App for electrical utility PPE and crew safety compliance.
-You have real-time programmatic tools to query local inventory (Gloves, Sleeves, Blankets, MACKs, HV Testers, Phasing Sets, AED, Grounds, Hot Sticks), look up employees, inspect safety compliance, and control the app screen.
-
-GUIDELINES:
-1. Always be professional, direct, accurate, and concise. Highlight critical safety items (e.g. overdue equipment, missing safety meetings).
-2. Use appropriate emojis for clarity (🧤 Gloves, 🦺 Sleeves, 🧱 Blankets, ⚡ High Voltage, ⚠️ Warning/Overdue, ✅ Good/Complete, 📅 Schedule).
-3. Format output with clean Markdown tables, bold text, and bullet points for readability.
-4. When asked about an employee or specific items, ALWAYS call the corresponding tool (e.g. lookup_employee, search_inventory, get_due_swaps) to get the ground-truth data from the local database before responding.
-5. If the user asks to filter, navigate, or view something on screen, execute the navigation or filter tool so their screen updates automatically!
-6. Keep responses focused on what the user asked without unnecessary boilerplate.`
-          },
-          ...this.messages
-        ];
-
-        const response = await fetch(endpoint, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${activeKey}`
-          },
-          body: JSON.stringify({
-            model: this.model,
-            messages: payloadMessages,
-            tools: this.getToolsDefinition(),
-            tool_choice: 'auto',
-            temperature: 0.2
-          })
-        });
-
-        if (!response.ok) {
-          const errData = await response.json().catch(() => ({}));
-          let errMsg = `API returned error code ${response.status}`;
-          if (Array.isArray(errData) && errData[0]?.error?.message) {
-            errMsg = errData[0].error.message;
-          } else if (errData && errData.error && errData.error.message) {
-            errMsg = errData.error.message;
-          }
-          throw new Error(errMsg);
-        }
-
-        const data = await response.json();
-        const choice = data.choices && data.choices[0];
-        if (!choice) throw new Error('No response choices received from AI service.');
-
-        const message = choice.message;
-
-        if (message.tool_calls && message.tool_calls.length > 0) {
-          this.messages.push(message);
-
-          for (const tc of message.tool_calls) {
-            const toolName = tc.function.name;
-            this.renderTypingIndicator(true, `Querying ${toolName.replace(/_/g, ' ')}...`);
-
-            const result = await this.executeToolCall(tc);
-
-            this.messages.push({
-              role: 'tool',
-              tool_call_id: tc.id,
-              content: JSON.stringify(result)
-            });
-          }
-        } else {
-          this.messages.push(message);
-          break;
-        }
+      if (this.provider === 'google') {
+        await this.executeGoogleGeminiLoop(activeKey);
+      } else {
+        await this.executeOpenAILoop(activeKey);
       }
 
       try {
@@ -1214,6 +1172,218 @@ GUIDELINES:
       this.renderTypingIndicator(false);
       this.renderMessages();
       this.scrollToBottom();
+    }
+  }
+
+  // --- Native Google Gemini Loop ---
+  async executeGoogleGeminiLoop(apiKey) {
+    let turns = 0;
+    const maxTurns = 6;
+
+    const systemText = `You are Safety Assistant Copilot, an expert AI partner inside the Safety Assistant Desktop App for electrical utility PPE and crew safety compliance.
+You have real-time programmatic tools to query local inventory (Gloves, Sleeves, Blankets, MACKs, HV Testers, Phasing Sets, AED, Grounds, Hot Sticks), look up employees, inspect safety compliance, and control the app screen.
+
+GUIDELINES:
+1. Always be professional, direct, accurate, and concise. Highlight critical safety items (e.g. overdue equipment, missing safety meetings).
+2. Use appropriate emojis for clarity (🧤 Gloves, 🦺 Sleeves, 🧱 Blankets, ⚡ High Voltage, ⚠️ Warning/Overdue, ✅ Good/Complete, 📅 Schedule).
+3. Format output with clean Markdown tables, bold text, and bullet points for readability.
+4. When asked about an employee or specific items, ALWAYS call the corresponding tool (e.g. lookup_employee, search_inventory, get_due_swaps) to get the ground-truth data from the local database before responding.
+5. If the user asks to filter, navigate, or view something on screen, execute the navigation or filter tool so their screen updates automatically!
+6. Keep responses focused on what the user asked without unnecessary boilerplate.`;
+
+    const systemInstruction = {
+      parts: [{ text: systemText }]
+    };
+
+    const tools = [
+      {
+        functionDeclarations: this.getToolsDefinition().map(t => ({
+          name: t.function.name,
+          description: t.function.description,
+          parameters: this.convertSchemaForGemini(t.function.parameters)
+        }))
+      }
+    ];
+
+    while (turns < maxTurns) {
+      turns++;
+
+      // Construct Gemini contents array
+      const contents = [];
+      this.messages.forEach(msg => {
+        if (msg.role === 'system') return;
+        if (msg.role === 'user') {
+          contents.push({
+            role: 'user',
+            parts: [{ text: msg.content }]
+          });
+        } else if (msg.role === 'assistant') {
+          const parts = [];
+          if (msg.content) parts.push({ text: msg.content });
+          if (msg.tool_calls && msg.tool_calls.length > 0) {
+            msg.tool_calls.forEach(tc => {
+              let args = {};
+              try { args = JSON.parse(tc.function.arguments); } catch {}
+              parts.push({
+                functionCall: {
+                  name: tc.function.name,
+                  args: args
+                }
+              });
+            });
+          }
+          if (parts.length > 0) {
+            contents.push({ role: 'model', parts });
+          }
+        } else if (msg.role === 'tool') {
+          let resultObj = {};
+          try { resultObj = JSON.parse(msg.content); } catch { resultObj = { result: msg.content }; }
+          contents.push({
+            role: 'function',
+            parts: [{
+              functionResponse: {
+                name: msg.name || 'tool_response',
+                response: { output: resultObj }
+              }
+            }]
+          });
+        }
+      });
+
+      const url = `https://generativelanguage.googleapis.com/v1beta/models/${this.model}:generateContent?key=${encodeURIComponent(apiKey)}`;
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          systemInstruction,
+          contents,
+          tools,
+          generationConfig: { temperature: 0.2 }
+        })
+      });
+
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(data?.error?.message || `Google API returned error code ${response.status}`);
+      }
+
+      const candidate = data.candidates && data.candidates[0];
+      if (!candidate) throw new Error('No candidate content received from Google Gemini.');
+
+      const parts = candidate.content?.parts || [];
+      const textParts = parts.filter(p => p.text).map(p => p.text).join('\n');
+      const functionCallParts = parts.filter(p => p.functionCall);
+
+      if (functionCallParts.length > 0) {
+        const toolCalls = functionCallParts.map((fcp, i) => ({
+          id: `call_${Date.now()}_${i}`,
+          function: {
+            name: fcp.functionCall.name,
+            arguments: JSON.stringify(fcp.functionCall.args || {})
+          }
+        }));
+
+        this.messages.push({
+          role: 'assistant',
+          content: textParts,
+          tool_calls: toolCalls
+        });
+
+        for (const tc of toolCalls) {
+          this.renderTypingIndicator(true, `Querying ${tc.function.name.replace(/_/g, ' ')}...`);
+          const result = await this.executeToolCall(tc);
+          this.messages.push({
+            role: 'tool',
+            name: tc.function.name,
+            tool_call_id: tc.id,
+            content: JSON.stringify(result)
+          });
+        }
+      } else {
+        this.messages.push({
+          role: 'assistant',
+          content: textParts
+        });
+        break;
+      }
+    }
+  }
+
+  // --- OpenAI Loop ---
+  async executeOpenAILoop(apiKey) {
+    let turns = 0;
+    const maxTurns = 6;
+
+    while (turns < maxTurns) {
+      turns++;
+
+      const payloadMessages = [
+        {
+          role: 'system',
+          content: `You are Safety Assistant Copilot, an expert AI partner inside the Safety Assistant Desktop App for electrical utility PPE and crew safety compliance.
+You have real-time programmatic tools to query local inventory (Gloves, Sleeves, Blankets, MACKs, HV Testers, Phasing Sets, AED, Grounds, Hot Sticks), look up employees, inspect safety compliance, and control the app screen.
+
+GUIDELINES:
+1. Always be professional, direct, accurate, and concise. Highlight critical safety items (e.g. overdue equipment, missing safety meetings).
+2. Use appropriate emojis for clarity (🧤 Gloves, 🦺 Sleeves, 🧱 Blankets, ⚡ High Voltage, ⚠️ Warning/Overdue, ✅ Good/Complete, 📅 Schedule).
+3. Format output with clean Markdown tables, bold text, and bullet points for readability.
+4. When asked about an employee or specific items, ALWAYS call the corresponding tool (e.g. lookup_employee, search_inventory, get_due_swaps) to get the ground-truth data from the local database before responding.
+5. If the user asks to filter, navigate, or view something on screen, execute the navigation or filter tool so their screen updates automatically!
+6. Keep responses focused on what the user asked without unnecessary boilerplate.`
+        },
+        ...this.messages
+      ];
+
+      const response = await fetch('https://api.openai.com/v1/chat/completions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${apiKey}`
+        },
+        body: JSON.stringify({
+          model: this.model,
+          messages: payloadMessages,
+          tools: this.getToolsDefinition(),
+          tool_choice: 'auto',
+          temperature: 0.2
+        })
+      });
+
+      if (!response.ok) {
+        const errData = await response.json().catch(() => ({}));
+        let errMsg = `OpenAI API returned error code ${response.status}`;
+        if (errData && errData.error && errData.error.message) {
+          errMsg = errData.error.message;
+        }
+        throw new Error(errMsg);
+      }
+
+      const data = await response.json();
+      const choice = data.choices && data.choices[0];
+      if (!choice) throw new Error('No response choices received from OpenAI.');
+
+      const message = choice.message;
+
+      if (message.tool_calls && message.tool_calls.length > 0) {
+        this.messages.push(message);
+
+        for (const tc of message.tool_calls) {
+          const toolName = tc.function.name;
+          this.renderTypingIndicator(true, `Querying ${toolName.replace(/_/g, ' ')}...`);
+
+          const result = await this.executeToolCall(tc);
+
+          this.messages.push({
+            role: 'tool',
+            name: tc.function.name,
+            tool_call_id: tc.id,
+            content: JSON.stringify(result)
+          });
+        }
+      } else {
+        this.messages.push(message);
+        break;
+      }
     }
   }
 
@@ -1415,6 +1585,7 @@ GUIDELINES:
               <option value="gemini-1.5-flash">gemini-1.5-flash (Fastest, High Intelligence & 100% Free — Recommended)</option>
               <option value="gemini-2.0-flash">gemini-2.0-flash (Latest Next-Gen Gemini, 100% Free)</option>
               <option value="gemini-1.5-pro">gemini-1.5-pro (Deep Reasoning & Analysis, 100% Free)</option>
+              <option value="gemini-1.5-flash-8b">gemini-1.5-flash-8b (Ultralight & Fast, 100% Free)</option>
             </select>
           </div>
 
