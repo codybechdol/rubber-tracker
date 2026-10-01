@@ -1268,7 +1268,7 @@ class SheetNavigator {
     }
 
     if (btnFiscalYear) {
-      btnFiscalYear.style.display = isEmployeeOrJobSheet ? 'inline-flex' : 'none';
+      btnFiscalYear.style.display = 'inline-flex';
     }
 
     if (btnTransferEquip) {

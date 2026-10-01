@@ -10,7 +10,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="stylesheet" href="css/leaflet.css">
-  <link rel="stylesheet" href="css/app.css?v=20260918_04">
+  <link rel="stylesheet" href="css/app.css?v=20261001_03">
 </head>
 <body>
 
@@ -149,6 +149,9 @@
         <div class="nav-item" data-action="open-ppe-tracker" onclick="if(window.ppeTrackingEngine){window.ppeTrackingEngine.openModal();}">
           <span class="nav-item-icon">🧤</span> Rubber PPE Tracker
         </div>
+        <div class="nav-item" id="nav-item-fiscal-year" data-action="open-fiscal-year-transition" onclick="if(window.fiscalYearEngine){window.fiscalYearEngine.openModal();}">
+          <span class="nav-item-icon">📅</span> FY Transition
+        </div>
       </div>
 
       <div class="nav-group">
@@ -200,7 +203,7 @@
             <button class="btn admin-only-control" id="btn-new-employee" style="background: linear-gradient(135deg, #10b981, #059669); color: white; padding: 6px 14px; font-size: 12px; font-weight: 700; display: none; align-items: center; gap: 5px;" onclick="window.sheetNavigator.showNewEmployeeModal()" title="Add a new employee to the active Employees sheet">
               <span>👤</span> New Employee
             </button>
-            <button class="btn btn-secondary admin-only-control" id="btn-fiscal-year-transition" style="display: none; padding: 6px 12px; font-size: 12px; font-weight: 700; align-items: center; gap: 6px; border-color: rgba(245, 158, 11, 0.45); color: #fbbf24; background: rgba(245, 158, 11, 0.12);" onclick="window.fiscalYearEngine.openModal()" title="Start Annual Fiscal Year Job Number Transition (October 1st)">
+            <button class="btn btn-secondary" id="btn-fiscal-year-transition" style="display: none; padding: 6px 14px; font-size: 12px; font-weight: 700; align-items: center; gap: 6px; border-color: rgba(245, 158, 11, 0.6); color: #fbbf24; background: rgba(245, 158, 11, 0.15);" onclick="window.fiscalYearEngine.openModal()" title="Start Annual Fiscal Year Job Number Transition (October 1st)">
               <span>📅</span> FY Transition
             </button>
             <button class="btn btn-secondary admin-only-control" id="btn-transfer-equipment-top" style="display: none; padding: 6px 12px; font-size: 12px; align-items: center; gap: 5px; border-color: #0284c7; color: #38bdf8;" onclick="window.inventoryManager.openTransferEquipmentModal()" title="Transfer truck & crew equipment (Blankets, MACKs, HV Testers, Phasing Sets, AED, Grounds, Hot Sticks) from outgoing to incoming Foreman">
@@ -2584,12 +2587,12 @@
   <script src="js/item-stats.js?v=20260909_52"></script>
   <script src="js/sms-dialog.js?v=20260901_25"></script>
   <script src="js/employee-profile.js?v=20260901_25"></script>
-  <script src="js/safety-emails.js?v=20260909_45"></script>
+  <script src="js/safety-emails.js?v=20261001_03"></script>
   <script src="js/certs-config.js?v=20260901_25"></script>
   <script src="js/cpr-roster.js?v=20260901_25"></script>
   <script src="js/certs-import.js?v=20260901_25"></script>
   <script src="js/time-breakdown.js?v=20260901_25"></script>
-  <script src="js/sheets.js?v=20260909_52"></script>
+  <script src="js/sheets.js?v=20261001_03"></script>
   <script src="js/history.js?v=20260901_25"></script>
   <script src="js/history-issues.js?v=20260924_01"></script>
   <script src="js/previous-employees.js?v=20260914_2"></script>
@@ -2604,7 +2607,7 @@
   <script src="js/ppe-tracking.js?v=20260929_01"></script>
   <script src="js/incident-reports.js?v=20260930_01"></script>
   <script src="js/weekly-summary.js?v=20260930_01"></script>
-  <script src="js/fiscal-year.js?v=20261001_01"></script>
+  <script src="js/fiscal-year.js?v=20261001_03"></script>
 
   <script>
     // Navigation routing for desktop & mobile
