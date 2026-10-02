@@ -39,7 +39,26 @@ class AICopilotEngine {
     try {
       const saved = sessionStorage.getItem('sa_copilot_session_history');
       if (saved) {
-        this.messages = JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          this.messages = parsed.map((msg, mIdx) => {
+            if (msg.role === 'assistant' && msg.tool_calls && Array.isArray(msg.tool_calls)) {
+              return {
+                role: 'assistant',
+                content: msg.content || null,
+                tool_calls: msg.tool_calls.map((tc, idx) => ({
+                  id: tc.id || `call_${Date.now()}_${mIdx}_${idx}`,
+                  type: 'function',
+                  function: {
+                    name: tc.function?.name || 'tool',
+                    arguments: typeof tc.function?.arguments === 'string' ? tc.function.arguments : JSON.stringify(tc.function?.arguments || {})
+                  }
+                }))
+              };
+            }
+            return msg;
+          });
+        }
       }
     } catch {
       this.messages = [];
@@ -1297,7 +1316,7 @@ GUIDELINES:
           let resultObj = {};
           try { resultObj = JSON.parse(msg.content); } catch { resultObj = { result: msg.content }; }
           contents.push({
-            role: 'function',
+            role: 'user',
             parts: [{
               functionResponse: {
                 name: msg.name || 'tool_response',
@@ -1362,6 +1381,7 @@ GUIDELINES:
       if (functionCallParts.length > 0) {
         const toolCalls = functionCallParts.map((fcp, i) => ({
           id: `call_${Date.now()}_${i}`,
+          type: 'function',
           function: {
             name: fcp.functionCall.name,
             arguments: JSON.stringify(fcp.functionCall.args || {})
@@ -1416,7 +1436,34 @@ GUIDELINES:
 5. If the user asks to filter, navigate, or view something on screen, execute the navigation or filter tool so their screen updates automatically!
 6. Keep responses focused on what the user asked without unnecessary boilerplate.`
         },
-        ...this.messages
+        ...this.messages.map((msg, mIdx) => {
+          if (msg.role === 'assistant') {
+            const clean = {
+              role: 'assistant',
+              content: msg.content || null
+            };
+            if (msg.tool_calls && Array.isArray(msg.tool_calls) && msg.tool_calls.length > 0) {
+              clean.tool_calls = msg.tool_calls.map((tc, idx) => ({
+                id: tc.id || `call_${Date.now()}_${mIdx}_${idx}`,
+                type: 'function',
+                function: {
+                  name: tc.function?.name || 'tool',
+                  arguments: typeof tc.function?.arguments === 'string' ? tc.function.arguments : JSON.stringify(tc.function?.arguments || {})
+                }
+              }));
+            }
+            return clean;
+          }
+          if (msg.role === 'tool') {
+            return {
+              role: 'tool',
+              name: msg.name,
+              tool_call_id: msg.tool_call_id || `call_${Date.now()}_${mIdx}`,
+              content: typeof msg.content === 'string' ? msg.content : JSON.stringify(msg.content)
+            };
+          }
+          return { role: msg.role, content: msg.content };
+        })
       ];
 
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -1450,6 +1497,14 @@ GUIDELINES:
       const message = choice.message;
 
       if (message.tool_calls && message.tool_calls.length > 0) {
+        message.tool_calls = message.tool_calls.map((tc, idx) => ({
+          id: tc.id || `call_${Date.now()}_${idx}`,
+          type: 'function',
+          function: {
+            name: tc.function.name,
+            arguments: typeof tc.function.arguments === 'string' ? tc.function.arguments : JSON.stringify(tc.function.arguments || {})
+          }
+        }));
         this.messages.push(message);
 
         for (const tc of message.tool_calls) {
