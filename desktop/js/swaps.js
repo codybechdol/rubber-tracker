@@ -2490,6 +2490,27 @@ class SwapGenerationEngine {
         this.syncRowToRawGrid(swapTable, row);
         await this.queueRowMutations(swapSheetKey, row, ['Date Changed', 'Status', 'Days Left']);
       }
+
+      // Auto-prune from Trip Planner scheduledSwaps if present
+      if (typeof window !== 'undefined' && window.tripPlanner && window.tripPlanner.scheduledSwaps) {
+        const targetEmp = (empName || '').trim().toLowerCase();
+        const targetOld = (oldItemNum || '').trim().toLowerCase();
+        const targetPick = (pickNum || '').trim().toLowerCase();
+        let changed = false;
+        Object.keys(window.tripPlanner.scheduledSwaps).forEach(k => {
+          const kLower = k.toLowerCase();
+          if (kLower.includes(targetEmp) && (!targetOld || kLower.includes(targetOld) || !targetPick || kLower.includes(targetPick))) {
+            delete window.tripPlanner.scheduledSwaps[k];
+            changed = true;
+          }
+        });
+        if (changed) {
+          window.tripPlanner.saveScheduledSwaps();
+          if (typeof window.tripPlanner.renderPlanner === 'function') {
+            window.tripPlanner.renderPlanner();
+          }
+        }
+      }
     } else {
       // STAGE 4: Date Changed removed -> Revert to Stage 2 (Ready For Delivery)
       if (row) {

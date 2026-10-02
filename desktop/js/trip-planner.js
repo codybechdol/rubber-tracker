@@ -184,6 +184,69 @@ class TripPlannerApp {
     return null;
   }
 
+  isSwapAlreadyCompleted(item) {
+    if (!item) return false;
+    const tableKey = item.tableKey || (String(item.type || '').toLowerCase().includes('sleeve') ? 'sleeve_swaps' : 'glove_swaps');
+    const invKey = tableKey.includes('sleeve') ? 'sleeves' :
+                   tableKey.includes('blanket') ? 'blankets' :
+                   tableKey.includes('mack') ? 'macks' : 'gloves';
+
+    const empName = String(item.employeeName || item.employee || '').trim().toLowerCase();
+    const oldItm = String(item.currentItem || '').trim();
+    const pickItm = String(item.pickItem || '').trim();
+
+    // 1. Check swap sheet for date changed or delivered status
+    const swTable = this.db ? this.db.getTable(tableKey) : null;
+    if (swTable && swTable.rows) {
+      const swRow = swTable.rows.find(r => {
+        const rEmp = String(r['Employee'] || r['Crew Lead / Employee'] || '').trim().toLowerCase();
+        const rOld = String(r['Current Glove #'] || r['Current Sleeve #'] || r['Current Item #'] || '').trim();
+        const empMatch = rEmp === empName || (window.employeeResolver && typeof window.employeeResolver.areSameEmployee === 'function' && window.employeeResolver.areSameEmployee(rEmp, empName));
+        return empMatch && (!oldItm || rOld === oldItm);
+      });
+      if (swRow) {
+        const dateChanged = String(swRow['Date Changed'] || swRow['Delivered Date'] || '').trim();
+        const status = String(swRow['Status'] || '').toLowerCase();
+        if (dateChanged || status.includes('delivered')) return true;
+      }
+    }
+
+    // 2. Check inventory table: is old item already in Cody's Truck / Ready For Test / Packed For Testing?
+    const invTable = this.db ? this.db.getTable(invKey) : null;
+    if (invTable && invTable.rows && oldItm) {
+      const oldRow = invTable.rows.find(it => {
+        const num = String(it['Item #'] || it['Glove'] || it['Sleeve'] || it['Serial #'] || '').trim();
+        return num === oldItm;
+      });
+      if (oldRow) {
+        const loc = String(oldRow['Location'] || '').toLowerCase();
+        const st = String(oldRow['Status'] || '').toLowerCase();
+        const asg = String(oldRow['Assigned To'] || '').toLowerCase();
+        if (loc.includes('truck') && (st.includes('ready for test') || asg.includes('packed for test') || st.includes('in testing'))) {
+          return true;
+        }
+      }
+    }
+
+    // 3. Check replacement item: is it already assigned to the employee in inventory?
+    if (invTable && invTable.rows && pickItm && empName) {
+      const newRow = invTable.rows.find(it => {
+        const num = String(it['Item #'] || it['Glove'] || it['Sleeve'] || it['Serial #'] || '').trim();
+        return num === pickItm;
+      });
+      if (newRow) {
+        const asg = String(newRow['Assigned To'] || '').trim().toLowerCase();
+        const st = String(newRow['Status'] || '').toLowerCase();
+        const isMatch = asg === empName || (window.employeeResolver && typeof window.employeeResolver.areSameEmployee === 'function' && window.employeeResolver.areSameEmployee(asg, empName));
+        if (isMatch && st.includes('assigned')) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
   loadDismissedMonthlyTrainings() {
     try {
       return JSON.parse(localStorage.getItem('TRIP_PLANNER_DISMISSED_TRAININGS') || '{}');
@@ -3178,13 +3241,18 @@ class TripPlannerApp {
     const swTable = this.db ? this.db.getTable(tableKey) : null;
     let swRow = null;
     if (swTable && swTable.rows) {
-      if (typeof rowIdx === 'number' && swTable.rows[rowIdx]) {
+      const isMatch = (r) => {
+        if (!r) return false;
+        const emp = String(r['Employee'] || r['Employee Name'] || '').trim().toLowerCase();
+        return emp === (empName || '').toLowerCase() || (window.employeeResolver && typeof window.employeeResolver.areSameEmployee === 'function' && window.employeeResolver.areSameEmployee(emp, empName));
+      };
+      if (typeof rowIdx === 'number' && swTable.rows[rowIdx] && isMatch(swTable.rows[rowIdx])) {
         swRow = swTable.rows[rowIdx];
       } else {
         swRow = swTable.rows.find(r => {
-          const emp = String(r['Employee'] || r['Employee Name'] || '').trim().toLowerCase();
+          if (!isMatch(r)) return false;
           const itm = String(r['Current Glove #'] || r['Current Sleeve #'] || r['Current Item #'] || '').trim().toLowerCase();
-          return emp === (empName || '').toLowerCase() && (!currentItem || itm === (currentItem || '').toLowerCase());
+          return !currentItem || itm === (currentItem || '').toLowerCase();
         });
       }
     }
@@ -3272,24 +3340,44 @@ class TripPlannerApp {
                      tableKey.includes('mack') ? '⚡' :
                      tableKey.includes('aed') ? '❤️' : '🧰';
 
-    // 3. Locate Swap Row in swapTable
+    // 3. Locate Swap Row in swapTable (strictly verify employee match to prevent row-index shift mismatches)
     const swTable = this.db ? this.db.getTable(tableKey) : null;
     let swRow = null;
     let swRowIdx = target.swapRowIdx || (typeof target.rowIdx === 'number' ? target.rowIdx : null);
 
+    const isRowMatchForEmp = (r) => {
+      if (!r) return false;
+      const rEmp = String(r['Employee'] || r['Crew Lead / Employee'] || r['Assigned To'] || r['Worker'] || '').trim().toLowerCase();
+      if (!rEmp || !empName) return false;
+      if (rEmp === empName.toLowerCase()) return true;
+      if (window.employeeResolver && typeof window.employeeResolver.areSameEmployee === 'function') {
+        return window.employeeResolver.areSameEmployee(rEmp, empName);
+      }
+      return false;
+    };
+
+    const curItmClean = String(target.currentItem || '').trim().toLowerCase();
+    const pickItmClean = String(target.pickItem || target.pickListItem || '').trim().toLowerCase();
+
     if (swTable && swTable.rows) {
-      if (typeof swRowIdx === 'number' && swTable.rows[swRowIdx]) {
+      if (typeof swRowIdx === 'number' && swTable.rows[swRowIdx] && isRowMatchForEmp(swTable.rows[swRowIdx])) {
         swRow = swTable.rows[swRowIdx];
       } else {
-        const curItmClean = String(target.currentItem || '').trim().toLowerCase();
+        swRowIdx = null;
         swRow = swTable.rows.find(r => {
-          const rEmp = String(r['Employee'] || r['Crew Lead / Employee'] || r['Assigned To'] || '').trim().toLowerCase();
+          if (!isRowMatchForEmp(r)) return false;
           const rOld = String(r['Current Glove #'] || r['Current Sleeve #'] || r['Current Blanket #'] || r['Current MACK #'] || r['Current Item #'] || r['Item #'] || '').trim().toLowerCase();
-          const empMatch = rEmp === empName.toLowerCase();
-          if (curItmClean) {
-            return empMatch && (rOld === curItmClean || rOld.includes(curItmClean) || curItmClean.includes(rOld));
+          const rPick = String(r['Pick List Glove #'] || r['Pick List Sleeve #'] || r['Pick List Blanket #'] || r['Pick List MACK #'] || r['Pick List Item #'] || r['Pick List'] || '').trim().toLowerCase();
+          if (curItmClean && pickItmClean) {
+            return (rOld === curItmClean || rOld.includes(curItmClean)) || (rPick === pickItmClean || rPick.includes(pickItmClean));
           }
-          return empMatch;
+          if (curItmClean) {
+            return rOld === curItmClean || rOld.includes(curItmClean) || curItmClean.includes(rOld);
+          }
+          if (pickItmClean) {
+            return rPick === pickItmClean || rPick.includes(pickItmClean) || pickItmClean.includes(rPick);
+          }
+          return true;
         });
         if (swRow && swTable.rows) {
           swRowIdx = swTable.rows.indexOf(swRow);
@@ -3297,15 +3385,17 @@ class TripPlannerApp {
       }
     }
 
-    // 4. Extract Item Identifiers & Status from swRow and target
+    // 4. Extract Item Identifiers & Status (target from card is authoritative ground truth)
     const oldItemNum = String(
+      target.currentItem ||
       (swRow && (swRow['Current Glove #'] || swRow['Current Sleeve #'] || swRow['Current Blanket #'] || swRow['Current MACK #'] || swRow['Current Item #'] || swRow['Item #'])) ||
-      target.currentItem || ''
+      ''
     ).trim();
 
     const pickItemNum = String(
+      target.pickItem || target.pickListItem ||
       (swRow && (swRow['Pick List Item #'] || swRow['Pick List Glove #'] || swRow['Pick List Sleeve #'] || swRow['Pick List Blanket #'] || swRow['Pick List MACK #'] || swRow['Pick List'] || swRow['Item #'])) ||
-      target.pickItem || target.pickListItem || ''
+      ''
     ).trim();
 
     const swStatus = String(
@@ -3391,6 +3481,16 @@ class TripPlannerApp {
     const oldTestDate = oldRow ? String(oldRow['Test Date'] || oldRow['Calibration Date'] || '—').trim() : '—';
     const oldDateAssigned = oldRow ? String(oldRow['Date Assigned'] || '—').trim() : '—';
     const oldStatus = oldRow ? String(oldRow['Status'] || 'Assigned').trim() : 'Assigned';
+
+    // Also check if old item in inventory is already transferred to Cody's Truck / Ready For Test
+    if (!isAlreadyCompleted && oldRow) {
+      const oldLoc = String(oldRow['Location'] || '').toLowerCase();
+      const oldSt = String(oldRow['Status'] || '').toLowerCase();
+      const oldAssigned = String(oldRow['Assigned To'] || '').toLowerCase();
+      if ((oldLoc.includes('truck') && oldSt.includes('ready for test')) || oldAssigned.includes('packed for test')) {
+        isAlreadyCompleted = true;
+      }
+    }
 
     // Calculated fields for new replacement item
     const newEsl = newRow ? String(newRow['ESL ID'] || '—').trim() : '—';
@@ -3580,6 +3680,9 @@ class TripPlannerApp {
         `;
       } else {
         actionsEl.innerHTML = `
+          <button class="btn btn-primary" style="background-color: #3b82f6; color: white; font-weight: 700; font-size: 12px; padding: 6px 14px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 5px;" onclick="window.tripPlanner.dismissCompletedSwap('${tableKey}', '${this.escapeJs(empName)}', '${this.escapeJs(oldItemNum)}');">
+            <span>✓ Dismiss from Schedule</span>
+          </button>
           <button class="btn btn-secondary admin-only-control" style="color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4); font-size: 12px; font-weight: 700; padding: 6px 14px; border-radius: 6px; cursor: pointer;" onclick="window.tripPlanner.revertSwapFromModal('${tableKey}', ${swRowIdx !== null ? swRowIdx : `'${this.escapeJs(empName)}'`}, '${this.escapeJs(empName)}', '${this.escapeJs(oldItemNum)}')">
             <span>↩ Revert Swap to Pending</span>
           </button>
@@ -3593,6 +3696,28 @@ class TripPlannerApp {
   closeSwapDetailsModal() {
     const modal = document.getElementById('swap-details-modal');
     if (modal) modal.classList.remove('active');
+  }
+
+  dismissCompletedSwap(tableKey, empName, oldItemNum) {
+    if (this.scheduledSwaps) {
+      const targetEmp = (empName || '').trim().toLowerCase();
+      const targetItm = (oldItemNum || '').trim().toLowerCase();
+      let changed = false;
+      Object.keys(this.scheduledSwaps).forEach(k => {
+        const kLower = k.toLowerCase();
+        if (kLower.includes(targetEmp) && (!targetItm || kLower.includes(targetItm))) {
+          delete this.scheduledSwaps[k];
+          changed = true;
+        }
+      });
+      if (changed) {
+        this.saveScheduledSwaps();
+      }
+    }
+    this.closeSwapDetailsModal();
+    this.showToast(`Dismissed completed swap for ${empName} from schedule.`);
+    this.renderPlanner();
+    this.renderPickedSwapsList();
   }
 
   async executeCompleteSwapFromModal(tableKey, rowIdxOrEmp, empName, currentItem) {
@@ -3610,13 +3735,18 @@ class TripPlannerApp {
     const swTable = this.db ? this.db.getTable(tableKey) : null;
     let swRow = null;
     if (swTable && swTable.rows) {
-      if (typeof rowIdxOrEmp === 'number' && swTable.rows[rowIdxOrEmp]) {
+      const isMatchForEmp = (r) => {
+        if (!r) return false;
+        const emp = String(r['Employee'] || r['Crew Lead / Employee'] || '').trim().toLowerCase();
+        return emp === (empName || '').toLowerCase() || (window.employeeResolver && typeof window.employeeResolver.areSameEmployee === 'function' && window.employeeResolver.areSameEmployee(emp, empName));
+      };
+      if (typeof rowIdxOrEmp === 'number' && swTable.rows[rowIdxOrEmp] && isMatchForEmp(swTable.rows[rowIdxOrEmp])) {
         swRow = swTable.rows[rowIdxOrEmp];
       } else {
         swRow = swTable.rows.find(r => {
-          const emp = String(r['Employee'] || r['Crew Lead / Employee'] || '').trim().toLowerCase();
+          if (!isMatchForEmp(r)) return false;
           const itm = String(r['Current Glove #'] || r['Current Sleeve #'] || r['Current Blanket #'] || r['Current Item #'] || '').trim().toLowerCase();
-          return emp === (empName || '').toLowerCase() && (!currentItem || itm === (currentItem || '').toLowerCase());
+          return !currentItem || itm === (currentItem || '').toLowerCase();
         });
       }
     }
@@ -3664,13 +3794,18 @@ class TripPlannerApp {
     const swTable = this.db ? this.db.getTable(tableKey) : null;
     let swRow = null;
     if (swTable && swTable.rows) {
-      if (typeof rowIdxOrEmp === 'number' && swTable.rows[rowIdxOrEmp]) {
+      const isMatchForEmp = (r) => {
+        if (!r) return false;
+        const emp = String(r['Employee'] || r['Crew Lead / Employee'] || '').trim().toLowerCase();
+        return emp === (empName || '').toLowerCase() || (window.employeeResolver && typeof window.employeeResolver.areSameEmployee === 'function' && window.employeeResolver.areSameEmployee(emp, empName));
+      };
+      if (typeof rowIdxOrEmp === 'number' && swTable.rows[rowIdxOrEmp] && isMatchForEmp(swTable.rows[rowIdxOrEmp])) {
         swRow = swTable.rows[rowIdxOrEmp];
       } else {
         swRow = swTable.rows.find(r => {
-          const emp = String(r['Employee'] || r['Crew Lead / Employee'] || '').trim().toLowerCase();
+          if (!isMatchForEmp(r)) return false;
           const itm = String(r['Current Glove #'] || r['Current Sleeve #'] || r['Current Blanket #'] || r['Current Item #'] || '').trim().toLowerCase();
-          return emp === (empName || '').toLowerCase() && (!currentItem || itm === (currentItem || '').toLowerCase());
+          return !currentItem || itm === (currentItem || '').toLowerCase();
         });
       }
     }
@@ -6083,16 +6218,25 @@ class TripPlannerApp {
         // 4. Gather scheduled individual swaps for this specific dateKey
         const dayScheduledSwaps = [];
         if (this.scheduledSwaps) {
+          const toDeleteKeys = [];
           Object.keys(this.scheduledSwaps).forEach(sKey => {
             const entry = this.scheduledSwaps[sKey];
             const sDate = typeof entry === 'object' ? entry.dateKey : entry;
             if (sDate === dateKey) {
               const item = (allPickedItems || []).find(p => this.getSwapKey(p) === sKey) || (entry && entry.swap ? entry.swap : null);
               if (item) {
+                if (this.isSwapAlreadyCompleted(item)) {
+                  toDeleteKeys.push(sKey);
+                  return;
+                }
                 dayScheduledSwaps.push({ ...item, _sKey: sKey, _scheduledEntry: entry });
               }
             }
           });
+          if (toDeleteKeys.length > 0) {
+            toDeleteKeys.forEach(k => delete this.scheduledSwaps[k]);
+            this.saveScheduledSwaps();
+          }
         }
 
         // Render Scheduled Swaps Section (individual glove/sleeve swaps added to this day)
@@ -6598,8 +6742,11 @@ class TripPlannerApp {
     // Helper to check if a row is picked
     const isRowPicked = (row, tableKey) => {
       if (!row) return false;
-      if (row['Picked'] === true || String(row['Picked']).toLowerCase() === 'true') return true;
+      const dateChanged = String(row['Date Changed'] || row['Delivered Date'] || '').trim();
       const status = String(row['Status'] || '').toLowerCase();
+      if (dateChanged || status.includes('delivered')) return false;
+
+      if (row['Picked'] === true || String(row['Picked']).toLowerCase() === 'true') return true;
       if (status.includes('ready for delivery')) return true;
       const emp = String(row['Employee'] || row['Employee Name'] || row['Name'] || '').toLowerCase();
       const item = String(row['Current Glove #'] || row['Current Sleeve #'] || row['Current Item #'] || '').toLowerCase();
@@ -6617,6 +6764,7 @@ class TripPlannerApp {
     };
 
     // 3. Scan Glove Swaps
+    const glovesInvTable = this.db ? this.db.getTable('gloves') : null;
     if (gloveSwapsTable && gloveSwapsTable.rows) {
       gloveSwapsTable.rows.forEach((r, idx) => {
         if (!isRowPicked(r, 'glove_swaps')) return;
@@ -6624,6 +6772,17 @@ class TripPlannerApp {
         if (!empName) return;
 
         const currentItem = String(r['Current Glove #'] || r['Current Item #'] || r['Current Item'] || '').trim();
+        if (currentItem && glovesInvTable && glovesInvTable.rows) {
+          const itRow = glovesInvTable.rows.find(it => String(it['Item #'] || '').trim() === currentItem);
+          if (itRow) {
+            const itLoc = String(itRow['Location'] || '').toLowerCase();
+            const itSt = String(itRow['Status'] || '').toLowerCase();
+            const itAsg = String(itRow['Assigned To'] || '').toLowerCase();
+            if (itLoc.includes('truck') && (itSt.includes('ready for test') || itAsg.includes('packed for test'))) {
+              return; // Already turned in and swapped
+            }
+          }
+        }
         const pickItem = String(r['Pick List Glove #'] || r['Pick List Item #'] || r['Pick List Item'] || '').trim();
         const size = String(r['Size'] || '').trim();
         const itemClass = String(r['Class'] || '').trim();
@@ -6670,6 +6829,7 @@ class TripPlannerApp {
     }
 
     // 4. Scan Sleeve Swaps
+    const sleevesInvTable = this.db ? this.db.getTable('sleeves') : null;
     if (sleeveSwapsTable && sleeveSwapsTable.rows) {
       sleeveSwapsTable.rows.forEach((r, idx) => {
         if (!isRowPicked(r, 'sleeve_swaps')) return;
@@ -6677,6 +6837,17 @@ class TripPlannerApp {
         if (!empName) return;
 
         const currentItem = String(r['Current Sleeve #'] || r['Current Item #'] || r['Current Item'] || '').trim();
+        if (currentItem && sleevesInvTable && sleevesInvTable.rows) {
+          const itRow = sleevesInvTable.rows.find(it => String(it['Item #'] || '').trim() === currentItem);
+          if (itRow) {
+            const itLoc = String(itRow['Location'] || '').toLowerCase();
+            const itSt = String(itRow['Status'] || '').toLowerCase();
+            const itAsg = String(itRow['Assigned To'] || '').toLowerCase();
+            if (itLoc.includes('truck') && (itSt.includes('ready for test') || itAsg.includes('packed for test'))) {
+              return; // Already turned in and swapped
+            }
+          }
+        }
         const pickItem = String(r['Pick List Sleeve #'] || r['Pick List Item #'] || r['Pick List Item'] || '').trim();
         const size = String(r['Size'] || '').trim();
         const itemClass = String(r['Class'] || '').trim();
