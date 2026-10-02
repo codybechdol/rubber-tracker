@@ -2491,7 +2491,7 @@ class SwapGenerationEngine {
         await this.queueRowMutations(swapSheetKey, row, ['Date Changed', 'Status', 'Days Left']);
       }
 
-      // Auto-prune from Trip Planner scheduledSwaps if present
+      // Auto-update Trip Planner scheduledSwaps if present (mark as completed instead of deleting)
       if (typeof window !== 'undefined' && window.tripPlanner && window.tripPlanner.scheduledSwaps) {
         const targetEmp = (empName || '').trim().toLowerCase();
         const targetOld = (oldItemNum || '').trim().toLowerCase();
@@ -2500,8 +2500,11 @@ class SwapGenerationEngine {
         Object.keys(window.tripPlanner.scheduledSwaps).forEach(k => {
           const kLower = k.toLowerCase();
           if (kLower.includes(targetEmp) && (!targetOld || kLower.includes(targetOld) || !targetPick || kLower.includes(targetPick))) {
-            delete window.tripPlanner.scheduledSwaps[k];
-            changed = true;
+            if (typeof window.tripPlanner.scheduledSwaps[k] === 'object') {
+              window.tripPlanner.scheduledSwaps[k].completed = true;
+              window.tripPlanner.scheduledSwaps[k].completedDate = dateFormatted;
+              changed = true;
+            }
           }
         });
         if (changed) {
@@ -2570,6 +2573,30 @@ class SwapGenerationEngine {
       if (row) {
         this.syncRowToRawGrid(swapTable, row);
         await this.queueRowMutations(swapSheetKey, row, ['Date Changed', 'Status', 'Days Left']);
+      }
+
+      // Revert Trip Planner scheduledSwaps if present back to pending
+      if (typeof window !== 'undefined' && window.tripPlanner && window.tripPlanner.scheduledSwaps) {
+        const targetEmp = (empName || '').trim().toLowerCase();
+        const targetOld = (oldItemNum || '').trim().toLowerCase();
+        const targetPick = (pickNum || '').trim().toLowerCase();
+        let changed = false;
+        Object.keys(window.tripPlanner.scheduledSwaps).forEach(k => {
+          const kLower = k.toLowerCase();
+          if (kLower.includes(targetEmp) && (!targetOld || kLower.includes(targetOld) || !targetPick || kLower.includes(targetPick))) {
+            if (typeof window.tripPlanner.scheduledSwaps[k] === 'object') {
+              window.tripPlanner.scheduledSwaps[k].completed = false;
+              window.tripPlanner.scheduledSwaps[k].completedDate = '';
+              changed = true;
+            }
+          }
+        });
+        if (changed) {
+          window.tripPlanner.saveScheduledSwaps();
+          if (typeof window.tripPlanner.renderPlanner === 'function') {
+            window.tripPlanner.renderPlanner();
+          }
+        }
       }
     }
 

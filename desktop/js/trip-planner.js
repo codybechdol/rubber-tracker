@@ -65,6 +65,7 @@ class TripPlannerApp {
     this.swapsFilter = 'all'; // 'all', 'gloves', 'sleeves'
     this.swapsSearchTerm = '';
     this.dismissedMonthlyTrainings = this.loadDismissedMonthlyTrainings();
+    this.dismissedSwaps = this.loadDismissedSwaps();
     this.scheduledSwaps = this.loadScheduledSwaps();
     this.activeTab = 'board'; // 'board' or 'map'
   }
@@ -184,8 +185,41 @@ class TripPlannerApp {
     return null;
   }
 
-  isSwapAlreadyCompleted(item) {
-    if (!item) return false;
+  loadDismissedSwaps() {
+    try {
+      return JSON.parse(localStorage.getItem('TRIP_PLANNER_DISMISSED_SWAPS') || '{}');
+    } catch {
+      return {};
+    }
+  }
+
+  saveDismissedSwaps() {
+    try {
+      localStorage.setItem('TRIP_PLANNER_DISMISSED_SWAPS', JSON.stringify(this.dismissedSwaps || {}));
+    } catch {}
+  }
+
+  isSwapDismissed(sKey) {
+    if (!this.dismissedSwaps) this.dismissedSwaps = this.loadDismissedSwaps();
+    return !!(sKey && this.dismissedSwaps[sKey]);
+  }
+
+  dismissSwap(sKey, empName) {
+    if (!this.dismissedSwaps) this.dismissedSwaps = this.loadDismissedSwaps();
+    if (sKey) this.dismissedSwaps[sKey] = true;
+    this.saveDismissedSwaps();
+
+    if (this.scheduledSwaps && this.scheduledSwaps[sKey]) {
+      delete this.scheduledSwaps[sKey];
+      this.saveScheduledSwaps();
+    }
+    this.showToast(`Dismissed completed swap for ${empName || 'employee'} from this day.`);
+    this.renderPlanner();
+    this.renderPickedSwapsList();
+  }
+
+  getSwapCompletionInfo(item) {
+    if (!item) return { isCompleted: false, date: '' };
     const tableKey = item.tableKey || (String(item.type || '').toLowerCase().includes('sleeve') ? 'sleeve_swaps' : 'glove_swaps');
     const invKey = tableKey.includes('sleeve') ? 'sleeves' :
                    tableKey.includes('blanket') ? 'blankets' :
@@ -200,14 +234,16 @@ class TripPlannerApp {
     if (swTable && swTable.rows) {
       const swRow = swTable.rows.find(r => {
         const rEmp = String(r['Employee'] || r['Crew Lead / Employee'] || '').trim().toLowerCase();
-        const rOld = String(r['Current Glove #'] || r['Current Sleeve #'] || r['Current Item #'] || '').trim();
+        const rOld = String(r['Current Glove #'] || r['Current Sleeve #'] || r['Current Blanket #'] || r['Current MACK #'] || r['Current Item #'] || '').trim();
         const empMatch = rEmp === empName || (window.employeeResolver && typeof window.employeeResolver.areSameEmployee === 'function' && window.employeeResolver.areSameEmployee(rEmp, empName));
         return empMatch && (!oldItm || rOld === oldItm);
       });
       if (swRow) {
         const dateChanged = String(swRow['Date Changed'] || swRow['Delivered Date'] || '').trim();
         const status = String(swRow['Status'] || '').toLowerCase();
-        if (dateChanged || status.includes('delivered')) return true;
+        if (dateChanged || status.includes('delivered')) {
+          return { isCompleted: true, date: dateChanged || '', row: swRow };
+        }
       }
     }
 
@@ -215,7 +251,7 @@ class TripPlannerApp {
     const invTable = this.db ? this.db.getTable(invKey) : null;
     if (invTable && invTable.rows && oldItm) {
       const oldRow = invTable.rows.find(it => {
-        const num = String(it['Item #'] || it['Glove'] || it['Sleeve'] || it['Serial #'] || '').trim();
+        const num = String(it['Item #'] || it['Glove'] || it['Sleeve'] || it['Blanket'] || it['MACK'] || it['Serial #'] || '').trim();
         return num === oldItm;
       });
       if (oldRow) {
@@ -223,7 +259,8 @@ class TripPlannerApp {
         const st = String(oldRow['Status'] || '').toLowerCase();
         const asg = String(oldRow['Assigned To'] || '').toLowerCase();
         if (loc.includes('truck') && (st.includes('ready for test') || asg.includes('packed for test') || st.includes('in testing'))) {
-          return true;
+          const dtAssigned = String(oldRow['Date Assigned'] || '').trim();
+          return { isCompleted: true, date: dtAssigned || '', invRow: oldRow };
         }
       }
     }
@@ -231,7 +268,7 @@ class TripPlannerApp {
     // 3. Check replacement item: is it already assigned to the employee in inventory?
     if (invTable && invTable.rows && pickItm && empName) {
       const newRow = invTable.rows.find(it => {
-        const num = String(it['Item #'] || it['Glove'] || it['Sleeve'] || it['Serial #'] || '').trim();
+        const num = String(it['Item #'] || it['Glove'] || it['Sleeve'] || it['Blanket'] || it['MACK'] || it['Serial #'] || '').trim();
         return num === pickItm;
       });
       if (newRow) {
@@ -239,12 +276,149 @@ class TripPlannerApp {
         const st = String(newRow['Status'] || '').toLowerCase();
         const isMatch = asg === empName || (window.employeeResolver && typeof window.employeeResolver.areSameEmployee === 'function' && window.employeeResolver.areSameEmployee(asg, empName));
         if (isMatch && st.includes('assigned')) {
-          return true;
+          const dtAssigned = String(newRow['Date Assigned'] || '').trim();
+          return { isCompleted: true, date: dtAssigned || '', invRow: newRow };
         }
       }
     }
 
-    return false;
+    return { isCompleted: false, date: '' };
+  }
+
+  isSwapAlreadyCompleted(item) {
+    return this.getSwapCompletionInfo(item).isCompleted;
+  }
+
+  getCompletedSwapsForDate(dateKey) {
+    const results = [];
+    if (!this.db || !dateKey) return results;
+
+    const swapDef = [
+      { key: 'glove_swaps', invKey: 'gloves', type: 'Glove' },
+      { key: 'sleeve_swaps', invKey: 'sleeves', type: 'Sleeve' }
+    ];
+
+    const empTable = this.db.getTable('employees') || this.db.getTable('Employees');
+    const jobTable = this.db.getTable('job_tracking') || this.db.getTable('Job Tracking');
+
+    const empMap = {};
+    if (empTable && empTable.rows) {
+      empTable.rows.forEach(r => {
+        const name = String(r['Employee Name'] || r['Name'] || r['Employee'] || Object.values(r)[0] || '').trim();
+        if (name) {
+          empMap[name.toLowerCase()] = {
+            location: String(r['Location'] || '').trim(),
+            jobNum: String(r['Job Number'] || r['Job #'] || '').trim(),
+            classification: String(r['Job Classification'] || r['Classification'] || '').trim()
+          };
+        }
+      });
+    }
+
+    const crewMap = {};
+    if (jobTable && jobTable.rows) {
+      jobTable.rows.forEach(r => {
+        const rawCrewId = String(r['Job Number'] || r['Crew'] || r['Job #'] || '').trim();
+        const crewId = this.getSignificantJobNumber(rawCrewId);
+        if (crewId && !crewMap[crewId]) {
+          crewMap[crewId] = {
+            foreman: String(r['Foreman'] || r['Crew Lead'] || r['Lead'] || '').trim(),
+            jobName: String(r['Job Name'] || '').trim(),
+            location: this.cleanPhysicalLocation(String(r['Location'] || '').trim())
+          };
+        }
+      });
+    }
+
+    swapDef.forEach(tDef => {
+      const swTable = this.db.getTable(tDef.key);
+      const invTable = this.db.getTable(tDef.invKey);
+      if (!swTable || !swTable.rows) return;
+
+      swTable.rows.forEach((r, idx) => {
+        const empName = String(r['Employee'] || r['Employee Name'] || r['Name'] || '').trim();
+        if (!empName) return;
+
+        const currentItem = String(r['Current Glove #'] || r['Current Sleeve #'] || r['Current Item #'] || r['Current Item'] || '').trim();
+        const pickItem = String(r['Pick List Glove #'] || r['Pick List Sleeve #'] || r['Pick List Item #'] || r['Pick List Item'] || '').trim();
+        const rawDateChanged = String(r['Date Changed'] || r['Delivered Date'] || '').trim();
+
+        let matchDateKey = '';
+        let completedDateFormatted = '';
+
+        if (rawDateChanged) {
+          const dObj = this.parseDate(rawDateChanged);
+          if (dObj) {
+            matchDateKey = `${dObj.getFullYear()}-${String(dObj.getMonth() + 1).padStart(2, '0')}-${String(dObj.getDate()).padStart(2, '0')}`;
+            completedDateFormatted = `${String(dObj.getMonth() + 1).padStart(2, '0')}/${String(dObj.getDate()).padStart(2, '0')}/${dObj.getFullYear()}`;
+          }
+        }
+
+        // If Date Changed wasn't populated in swap sheet, check turned-in date in inventory
+        if (!matchDateKey && currentItem && invTable && invTable.rows) {
+          const itRow = invTable.rows.find(it => String(it['Item #'] || '').trim() === currentItem);
+          if (itRow) {
+            const itLoc = String(itRow['Location'] || '').toLowerCase();
+            const itSt = String(itRow['Status'] || '').toLowerCase();
+            const itAsg = String(itRow['Assigned To'] || '').toLowerCase();
+            if (itLoc.includes('truck') && (itSt.includes('ready for test') || itAsg.includes('packed for test'))) {
+              const dtAssigned = String(itRow['Date Assigned'] || '').trim();
+              if (dtAssigned) {
+                const dObj = this.parseDate(dtAssigned);
+                if (dObj) {
+                  matchDateKey = `${dObj.getFullYear()}-${String(dObj.getMonth() + 1).padStart(2, '0')}-${String(dObj.getDate()).padStart(2, '0')}`;
+                  completedDateFormatted = `${String(dObj.getMonth() + 1).padStart(2, '0')}/${String(dObj.getDate()).padStart(2, '0')}/${dObj.getFullYear()}`;
+                }
+              }
+            }
+          }
+        }
+
+        if (matchDateKey && matchDateKey === dateKey) {
+          const sKey = `comp_${tDef.key}_${empName.toLowerCase()}_${currentItem}_${dateKey}`;
+          if (this.isSwapDismissed(sKey)) return;
+
+          const empInfo = empMap[empName.toLowerCase()] || {};
+          let rawLoc = r._location || empInfo.location || '';
+          let rawJob = empInfo.jobNum || '';
+          const classification = empInfo.classification || '';
+          const crewId = this.getSignificantJobNumber(rawJob) || rawJob || 'Unassigned';
+          const crewInfo = crewMap[crewId] || {};
+
+          let location = 'Helena';
+          if (rawLoc && !this.isStatusLocation(rawLoc)) {
+            location = this.cleanPhysicalLocation(rawLoc);
+          } else if (crewInfo.location && !this.isStatusLocation(crewInfo.location)) {
+            location = crewInfo.location;
+          } else if (rawLoc) {
+            location = this.cleanPhysicalLocation(rawLoc);
+          }
+
+          results.push({
+            type: tDef.type,
+            employeeName: empName,
+            currentItem: currentItem,
+            pickItem: pickItem,
+            size: String(r['Size'] || '').trim(),
+            itemClass: String(r['Class'] || '').trim(),
+            status: 'Delivered ✅',
+            tableKey: tDef.key,
+            rowIdx: idx,
+            location: location,
+            crewId: crewId,
+            foreman: crewInfo.foreman || r._foreman || '',
+            jobName: crewInfo.jobName || '',
+            classification: classification,
+            jobNum: rawJob,
+            isCompleted: true,
+            completedDate: completedDateFormatted,
+            _sKey: sKey
+          });
+        }
+      });
+    });
+
+    return results;
   }
 
   loadDismissedMonthlyTrainings() {
@@ -3217,6 +3391,16 @@ class TripPlannerApp {
 
   unscheduleSwap(sKey) {
     if (window.currentRoleMode === 'view_only') return;
+    const isCompKey = sKey && sKey.startsWith('comp_');
+    const entry = this.scheduledSwaps ? this.scheduledSwaps[sKey] : null;
+    const isCompleted = isCompKey || (entry && (entry.completed || (entry.swap && this.isSwapAlreadyCompleted(entry.swap))));
+
+    if (isCompleted || isCompKey) {
+      const emp = (entry && entry.employeeName) ? entry.employeeName : 'employee';
+      this.dismissSwap(sKey, emp);
+      return;
+    }
+
     if (this.scheduledSwaps && this.scheduledSwaps[sKey]) {
       const item = this.scheduledSwaps[sKey];
       const emp = (item && item.employeeName) ? item.employeeName : 'item';
@@ -3262,16 +3446,22 @@ class TripPlannerApp {
       await sm.handleDateChangedEdit(tableKey, swRow, todayStr);
     }
 
-    // Clean up from scheduledSwaps
+    // Update scheduledSwaps to marked completed instead of deleting
     if (this.scheduledSwaps) {
       const targetEmp = (empName || '').trim().toLowerCase();
       const targetItm = (currentItem || '').trim().toLowerCase();
+      let changed = false;
       Object.keys(this.scheduledSwaps).forEach(k => {
-        if (k.includes(targetEmp) && (!targetItm || k.includes(targetItm))) {
-          delete this.scheduledSwaps[k];
+        const kLower = k.toLowerCase();
+        if (kLower.includes(targetEmp) && (!targetItm || kLower.includes(targetItm))) {
+          if (typeof this.scheduledSwaps[k] === 'object') {
+            this.scheduledSwaps[k].completed = true;
+            this.scheduledSwaps[k].completedDate = todayStr;
+            changed = true;
+          }
         }
       });
-      this.saveScheduledSwaps();
+      if (changed) this.saveScheduledSwaps();
     }
 
     this.showToast(`✅ Swap marked delivered for ${empName}. Inventory updated.`);
@@ -3648,12 +3838,12 @@ class TripPlannerApp {
               <span>${isAlreadyCompleted ? 'Swap Completed & Delivered' : 'Complete Swap & Deliver Equipment'}</span>
             </h4>
             <p style="margin: 2px 0 0 0; font-size: 11.5px; color: var(--text-secondary);">
-              ${isAlreadyCompleted ? `Delivered on ${this.escapeHtml(dateChangedVal)}. Old item sent to Cody's Truck; new item assigned to employee.` : `Entering a date marks the swap Delivered ✅, reassigns old item ${oldItemNum || ''} to Cody's Truck (Ready For Test), and assigns ${pickItemNum || ''} to ${empName}.`}
+              ${isAlreadyCompleted ? `Delivered${(dateChangedVal || oldDateAssigned || (target && target.completedDate)) ? ` on ${this.escapeHtml(dateChangedVal || oldDateAssigned || target.completedDate)}` : ''}. Old item sent to Cody's Truck; new item assigned to employee.` : `Entering a date marks the swap Delivered ✅, reassigns old item ${oldItemNum || ''} to Cody's Truck (Ready For Test), and assigns ${pickItemNum || ''} to ${empName}.`}
             </p>
           </div>
           ${isAlreadyCompleted ? `
             <span class="badge" style="background: #10b981; color: #fff; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 4px;">
-              ✓ Delivered on ${this.escapeHtml(dateChangedVal)}
+              ✓ Delivered${(dateChangedVal || oldDateAssigned || (target && target.completedDate)) ? ` on ${this.escapeHtml(dateChangedVal || oldDateAssigned || target.completedDate)}` : ' ✅'}
             </span>
           ` : ''}
         </div>
@@ -3699,9 +3889,9 @@ class TripPlannerApp {
   }
 
   dismissCompletedSwap(tableKey, empName, oldItemNum) {
+    const targetEmp = (empName || '').trim().toLowerCase();
+    const targetItm = (oldItemNum || '').trim().toLowerCase();
     if (this.scheduledSwaps) {
-      const targetEmp = (empName || '').trim().toLowerCase();
-      const targetItm = (oldItemNum || '').trim().toLowerCase();
       let changed = false;
       Object.keys(this.scheduledSwaps).forEach(k => {
         const kLower = k.toLowerCase();
@@ -3714,6 +3904,13 @@ class TripPlannerApp {
         this.saveScheduledSwaps();
       }
     }
+    if (!this.dismissedSwaps) this.dismissedSwaps = this.loadDismissedSwaps();
+    Object.keys(this.scheduledSwaps || {}).forEach(k => {
+      if (k.toLowerCase().includes(targetEmp)) this.dismissedSwaps[k] = true;
+    });
+    this.dismissedSwaps[`comp_${tableKey}_${targetEmp}_${targetItm}`] = true;
+    this.saveDismissedSwaps();
+
     this.closeSwapDetailsModal();
     this.showToast(`Dismissed completed swap for ${empName} from schedule.`);
     this.renderPlanner();
@@ -3758,16 +3955,22 @@ class TripPlannerApp {
       await sm.handleDateChangedEdit(tableKey, rowIdxOrEmp, dateFormatted);
     }
 
-    // Clean up from scheduledSwaps
+    // Update scheduledSwaps to marked completed instead of deleting
     if (this.scheduledSwaps) {
       const targetEmp = (empName || '').trim().toLowerCase();
       const targetItm = (currentItem || '').trim().toLowerCase();
+      let changed = false;
       Object.keys(this.scheduledSwaps).forEach(k => {
-        if (k.includes(targetEmp) && (!targetItm || k.includes(targetItm))) {
-          delete this.scheduledSwaps[k];
+        const kLower = k.toLowerCase();
+        if (kLower.includes(targetEmp) && (!targetItm || kLower.includes(targetItm))) {
+          if (typeof this.scheduledSwaps[k] === 'object') {
+            this.scheduledSwaps[k].completed = true;
+            this.scheduledSwaps[k].completedDate = dateFormatted;
+            changed = true;
+          }
         }
       });
-      this.saveScheduledSwaps();
+      if (changed) this.saveScheduledSwaps();
     }
 
     this.closeSwapDetailsModal();
@@ -3815,6 +4018,24 @@ class TripPlannerApp {
       await sm.handleDateChangedEdit(tableKey, swRow, '');
     } else if (sm && typeof sm.handleDateChangedEdit === 'function') {
       await sm.handleDateChangedEdit(tableKey, rowIdxOrEmp, '');
+    }
+
+    // Revert scheduledSwaps back to pending
+    if (this.scheduledSwaps) {
+      const targetEmp = (empName || '').trim().toLowerCase();
+      const targetItm = (currentItem || '').trim().toLowerCase();
+      let changed = false;
+      Object.keys(this.scheduledSwaps).forEach(k => {
+        const kLower = k.toLowerCase();
+        if (kLower.includes(targetEmp) && (!targetItm || kLower.includes(targetItm))) {
+          if (typeof this.scheduledSwaps[k] === 'object') {
+            this.scheduledSwaps[k].completed = false;
+            this.scheduledSwaps[k].completedDate = '';
+            changed = true;
+          }
+        }
+      });
+      if (changed) this.saveScheduledSwaps();
     }
 
     this.closeSwapDetailsModal();
@@ -6218,80 +6439,124 @@ class TripPlannerApp {
         // 4. Gather scheduled individual swaps for this specific dateKey
         const dayScheduledSwaps = [];
         if (this.scheduledSwaps) {
-          const toDeleteKeys = [];
           Object.keys(this.scheduledSwaps).forEach(sKey => {
             const entry = this.scheduledSwaps[sKey];
             const sDate = typeof entry === 'object' ? entry.dateKey : entry;
             if (sDate === dateKey) {
               const item = (allPickedItems || []).find(p => this.getSwapKey(p) === sKey) || (entry && entry.swap ? entry.swap : null);
               if (item) {
-                if (this.isSwapAlreadyCompleted(item)) {
-                  toDeleteKeys.push(sKey);
-                  return;
-                }
-                dayScheduledSwaps.push({ ...item, _sKey: sKey, _scheduledEntry: entry });
+                if (this.isSwapDismissed(sKey)) return;
+                const compInfo = this.getSwapCompletionInfo(item);
+                const isDone = compInfo.isCompleted || !!(entry && entry.completed);
+                const compDate = compInfo.date || (entry && entry.completedDate) || '';
+                dayScheduledSwaps.push({
+                  ...item,
+                  _sKey: sKey,
+                  _scheduledEntry: entry,
+                  isCompleted: isDone,
+                  completedDate: compDate
+                });
               }
             }
           });
-          if (toDeleteKeys.length > 0) {
-            toDeleteKeys.forEach(k => delete this.scheduledSwaps[k]);
-            this.saveScheduledSwaps();
-          }
         }
+
+        // Also gather any swaps completed on this dateKey that aren't already in dayScheduledSwaps
+        const completedOnDate = this.getCompletedSwapsForDate(dateKey);
+        completedOnDate.forEach(cs => {
+          if (this.isSwapDismissed(cs._sKey)) return;
+          const already = dayScheduledSwaps.some(ds => {
+            const empMatch = (ds.employeeName || '').toLowerCase() === (cs.employeeName || '').toLowerCase() ||
+              (window.employeeResolver && typeof window.employeeResolver.areSameEmployee === 'function' && window.employeeResolver.areSameEmployee(ds.employeeName, cs.employeeName));
+            const itmMatch = (!ds.currentItem || !cs.currentItem || String(ds.currentItem).trim() === String(cs.currentItem).trim()) ||
+              (!ds.pickItem || !cs.pickItem || String(ds.pickItem).trim() === String(cs.pickItem).trim());
+            return empMatch && itmMatch;
+          });
+          if (!already) {
+            dayScheduledSwaps.push(cs);
+          }
+        });
 
         // Render Scheduled Swaps Section (individual glove/sleeve swaps added to this day)
         let swapsHtml = '';
         if (dayScheduledSwaps.length > 0) {
           const isSwapsCollapsed = this.isSectionCollapsed(dateKey, 'swaps');
+          const pendingSwapsCount = dayScheduledSwaps.filter(s => !s.isCompleted).length;
+          const totalSwapsCount = dayScheduledSwaps.length;
+          const completedSwapsCount = totalSwapsCount - pendingSwapsCount;
+
           swapsHtml = `
             <div class="day-section-collapsible swaps-day-section" style="margin-bottom: 8px;">
               <div style="font-size: 10.5px; font-weight: 800; color: #34d399; display: flex; align-items: center; justify-content: space-between; padding: 4px 7px; background: rgba(16, 185, 129, 0.12); border-radius: 4px; border-left: 3px solid #10b981; cursor: pointer; user-select: none;" onclick="window.tripPlanner.toggleSectionCollapse('${dateKey}', 'swaps')" title="Click to collapse / expand Swaps">
                 <span style="display: flex; align-items: center; gap: 5px;">
                   <span id="section-chevron-${dateKey}-swaps" style="font-size: 8px; width: 10px; display: inline-block;">${isSwapsCollapsed ? '▶' : '▼'}</span>
-                  <span>🚚 Picked Swaps Ready (${dayScheduledSwaps.length})</span>
+                  <span>🚚 ${completedSwapsCount > 0 ? `Picked Swaps (${pendingSwapsCount}/${totalSwapsCount})` : `Picked Swaps Ready (${totalSwapsCount})`}</span>
                 </span>
-                <span style="font-size: 9px; color: #6ee7b7; opacity: 0.9;">PPE Swaps</span>
+                <span style="font-size: 9px; color: #6ee7b7; opacity: 0.9;">${completedSwapsCount > 0 && pendingSwapsCount === 0 ? '✓ All Completed' : (completedSwapsCount > 0 ? `${completedSwapsCount} Done · PPE Swaps` : 'PPE Swaps')}</span>
               </div>
               <div id="section-body-${dateKey}-swaps" style="display: ${isSwapsCollapsed ? 'none' : 'flex'}; flex-direction: column; gap: 5px; margin-top: 5px;">
                 ${dayScheduledSwaps.map(s => {
                   const isGlove = (s.type || '').toLowerCase() === 'glove';
                   const loc = s.location || '';
+                  const isDone = !!s.isCompleted;
                   return `
-                    <div class="scheduled-swap-card" draggable="true" data-skey="${this.escapeHtml(s._sKey)}" style="background: var(--bg-primary); border: 1px solid rgba(16, 185, 129, 0.35); border-left: 4px solid #10b981; border-radius: 6px; padding: 7px 9px; box-shadow: 0 1px 4px rgba(0,0,0,0.25); cursor: grab; transition: border-color 0.15s ease;" onmouseover="this.style.borderColor='#34d399'" onmouseout="this.style.borderColor='rgba(16, 185, 129, 0.35)'">
+                    <div class="scheduled-swap-card ${isDone ? 'completed-swap-card' : ''}" draggable="${!isDone}" data-skey="${this.escapeHtml(s._sKey)}" style="background: var(--bg-primary); border: 1px solid ${isDone ? 'rgba(16, 185, 129, 0.25)' : 'rgba(16, 185, 129, 0.35)'}; border-left: 4px solid #10b981; border-radius: 6px; padding: 7px 9px; box-shadow: 0 1px 4px rgba(0,0,0,0.25); cursor: ${isDone ? 'default' : 'grab'}; opacity: ${isDone ? '0.72' : '1'}; transition: all 0.15s ease;" onmouseover="this.style.borderColor='#34d399'" onmouseout="this.style.borderColor='${isDone ? 'rgba(16, 185, 129, 0.25)' : 'rgba(16, 185, 129, 0.35)'}'">
                       <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 6px;">
-                        <div style="flex: 1; min-width: 0;">
-                          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 3px;">
-                            <span style="font-weight: 700; font-size: 12px; color: #f8fafc; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                              ${this.escapeHtml(s.employeeName)}
-                            </span>
-                            <div style="display: flex; gap: 4px; align-items: center;">
-                              ${s.classification ? `<span class="badge" style="background: rgba(148, 163, 184, 0.15); color: #94a3b8; font-size: 9px; padding: 1px 4px; border-radius: 3px;">${this.escapeHtml(s.classification)}</span>` : ''}
-                              ${loc ? `<span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; font-size: 9px; padding: 1px 4px; border-radius: 3px;">📍 ${this.escapeHtml(loc)}</span>` : ''}
+                        <div style="display: flex; align-items: flex-start; gap: 7px; flex: 1; min-width: 0;">
+                          <input type="checkbox" ${isDone ? 'checked' : ''} style="cursor: pointer; margin-top: 3px; accent-color: #10b981; width: 14px; height: 14px;" title="${isDone ? 'Swap completed (click to view / revert)' : 'Click to view / complete swap'}" onclick="event.stopPropagation(); window.tripPlanner.openSwapDetailsModal(${JSON.stringify(s).replace(/"/g, '&quot;')}, '${this.escapeJs(s.crewId || '')}', '${this.escapeJs(loc)}')">
+                          <div style="flex: 1; min-width: 0;">
+                            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 3px;">
+                              <span style="font-weight: 700; font-size: 12px; color: ${isDone ? '#94a3b8' : '#f8fafc'}; text-decoration: ${isDone ? 'line-through' : 'none'}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                ${this.escapeHtml(s.employeeName)}
+                              </span>
+                              <div style="display: flex; gap: 4px; align-items: center;">
+                                ${s.classification ? `<span class="badge" style="background: rgba(148, 163, 184, 0.15); color: #94a3b8; font-size: 9px; padding: 1px 4px; border-radius: 3px;">${this.escapeHtml(s.classification)}</span>` : ''}
+                                ${loc ? `<span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; font-size: 9px; padding: 1px 4px; border-radius: 3px;">📍 ${this.escapeHtml(loc)}</span>` : ''}
+                              </div>
                             </div>
-                          </div>
-                          <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: #cbd5e1; margin-top: 4px; flex-wrap: wrap; gap: 4px;">
-                            <span class="badge" style="background: ${isGlove ? 'rgba(59, 130, 246, 0.18)' : 'rgba(168, 85, 247, 0.18)'}; color: ${isGlove ? '#93c5fd' : '#d8b4fe'}; border: 1px solid ${isGlove ? 'rgba(59, 130, 246, 0.35)' : 'rgba(168, 85, 247, 0.35)'}; font-size: 9.5px; font-weight: 700; padding: 1px 5px; border-radius: 3px;">
-                              ${isGlove ? '🧤 Glove' : '🧤 Sleeve'}${s.itemClass ? ` (CL ${this.escapeHtml(s.itemClass)})` : ''}
-                            </span>
-                            <span style="font-size: 11px; color: #e2e8f0;">
-                              Current: <strong style="color: #fca5a5;">${this.escapeHtml(s.currentItem || '—')}</strong>
-                              &nbsp;➔&nbsp;
-                              Pick: <strong style="color: #4ade80;">${this.escapeHtml(s.pickItem || '—')}</strong>
-                              ${s.size ? `<span style="color: #94a3b8; font-size: 9.5px;"> (${this.escapeHtml(s.size)})</span>` : ''}
-                            </span>
-                          </div>
-                          ${s.crewId ? `
-                            <div style="font-size: 10px; color: #94a3b8; margin-top: 3px; display: flex; align-items: center; gap: 5px;">
-                              <span style="color: #60a5fa;">👷 Crew ${this.escapeHtml(s.crewId)}</span>
-                              ${s.foreman ? `<span style="color: #64748b;">(${this.escapeHtml(s.foreman)})</span>` : ''}
+                            <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: #cbd5e1; margin-top: 4px; flex-wrap: wrap; gap: 4px;">
+                              <div style="display: flex; align-items: center; gap: 4px; flex-wrap: wrap;">
+                                <span class="badge" style="background: ${isGlove ? 'rgba(59, 130, 246, 0.18)' : 'rgba(168, 85, 247, 0.18)'}; color: ${isGlove ? '#93c5fd' : '#d8b4fe'}; border: 1px solid ${isGlove ? 'rgba(59, 130, 246, 0.35)' : 'rgba(168, 85, 247, 0.35)'}; font-size: 9.5px; font-weight: 700; padding: 1px 5px; border-radius: 3px;">
+                                  ${isGlove ? '🧤 Glove' : '🧤 Sleeve'}${s.itemClass ? ` (CL ${this.escapeHtml(s.itemClass)})` : ''}
+                                </span>
+                                ${isDone ? `
+                                  <span class="badge" style="background: rgba(16, 185, 129, 0.25); color: #a7f3d0; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 9px; font-weight: 800; padding: 1px 5px; border-radius: 3px;">
+                                    ✅ Completed${s.completedDate ? ` (${this.escapeHtml(s.completedDate)})` : ''}
+                                  </span>
+                                ` : ''}
+                              </div>
+                              <span style="font-size: 11px; color: #e2e8f0;">
+                                ${isDone ? `
+                                  Returned: <strong style="color: #94a3b8; text-decoration: line-through;">${this.escapeHtml(s.currentItem || '—')}</strong>
+                                  &nbsp;➔&nbsp;
+                                  Assigned: <strong style="color: #4ade80;">${this.escapeHtml(s.pickItem || '—')}</strong>
+                                ` : `
+                                  Current: <strong style="color: #fca5a5;">${this.escapeHtml(s.currentItem || '—')}</strong>
+                                  &nbsp;➔&nbsp;
+                                  Pick: <strong style="color: #4ade80;">${this.escapeHtml(s.pickItem || '—')}</strong>
+                                `}
+                                ${s.size ? `<span style="color: #94a3b8; font-size: 9.5px;"> (${this.escapeHtml(s.size)})</span>` : ''}
+                              </span>
                             </div>
-                          ` : ''}
+                            ${s.crewId ? `
+                              <div style="font-size: 10px; color: #94a3b8; margin-top: 3px; display: flex; align-items: center; gap: 5px;">
+                                <span style="color: #60a5fa;">👷 Crew ${this.escapeHtml(s.crewId)}</span>
+                                ${s.foreman ? `<span style="color: #64748b;">(${this.escapeHtml(s.foreman)})</span>` : ''}
+                              </div>
+                            ` : ''}
+                          </div>
                         </div>
                         <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 6px; margin-left: 4px;">
-                          <button class="btn btn-primary" style="padding: 2px 7px; font-size: 9px; background: #10b981; border: none; font-weight: 700; cursor: pointer; border-radius: 3px; white-space: nowrap;" onclick="event.stopPropagation(); window.tripPlanner.openSwapDetailsModal(${JSON.stringify(s).replace(/"/g, '&quot;')}, '${this.escapeJs(s.crewId || '')}', '${this.escapeJs(loc)}')">
-                            🔍 Swap
-                          </button>
-                          <button class="admin-only-control" style="background: none; border: none; color: #64748b; cursor: pointer; padding: 1px 4px; font-size: 12px; line-height: 1; border-radius: 3px;" onmouseover="this.style.color='#f87171'" onmouseout="this.style.color='#64748b'" onclick="event.stopPropagation(); window.tripPlanner.unscheduleSwap('${this.escapeJs(s._sKey)}')" title="Remove swap from this day and return to sidebar">
+                          ${!isDone ? `
+                            <button class="btn btn-primary" style="padding: 2px 7px; font-size: 9px; background: #10b981; border: none; font-weight: 700; cursor: pointer; border-radius: 3px; white-space: nowrap;" onclick="event.stopPropagation(); window.tripPlanner.openSwapDetailsModal(${JSON.stringify(s).replace(/"/g, '&quot;')}, '${this.escapeJs(s.crewId || '')}', '${this.escapeJs(loc)}')">
+                              🔍 Swap
+                            </button>
+                          ` : `
+                            <button class="btn btn-secondary" style="padding: 2px 6px; font-size: 9px; color: #a7f3d0; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.35); font-weight: 700; cursor: pointer; border-radius: 3px; white-space: nowrap;" onclick="event.stopPropagation(); window.tripPlanner.openSwapDetailsModal(${JSON.stringify(s).replace(/"/g, '&quot;')}, '${this.escapeJs(s.crewId || '')}', '${this.escapeJs(loc)}')">
+                              ✓ Done
+                            </button>
+                          `}
+                          <button class="admin-only-control" style="background: none; border: none; color: #64748b; cursor: pointer; padding: 1px 4px; font-size: 12px; line-height: 1; border-radius: 3px;" onmouseover="this.style.color='#f87171'" onmouseout="this.style.color='#64748b'" onclick="event.stopPropagation(); window.tripPlanner.unscheduleSwap('${this.escapeJs(s._sKey)}')" title="${isDone ? 'Remove completed swap from this day' : 'Remove swap from this day and return to sidebar'}">
                             ✕
                           </button>
                         </div>
@@ -7822,15 +8087,33 @@ class TripPlannerApp {
   }
 
   parseDate(str) {
-    if (!str || str === 'N/A') return new Date();
-    if (str.includes('-')) {
-      const parts = str.split('-');
+    if (!str || str === 'N/A' || str === '—' || str === '-') return null;
+    if (typeof str !== 'string') {
+      const d = new Date(str);
+      return isNaN(d.getTime()) ? null : d;
+    }
+    const clean = str.trim();
+    if (!clean) return null;
+    if (clean.includes('-')) {
+      const parts = clean.split('-');
       if (parts.length === 3) {
-        return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10), 12, 0, 0);
+        const d = new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10), 12, 0, 0);
+        return isNaN(d.getTime()) ? null : d;
       }
     }
-    const d = new Date(str);
-    return isNaN(d.getTime()) ? new Date() : d;
+    if (clean.includes('/')) {
+      const parts = clean.split('/');
+      if (parts.length === 3) {
+        const m = parseInt(parts[0], 10);
+        const day = parseInt(parts[1], 10);
+        let y = parseInt(parts[2], 10);
+        if (y < 100) y += 2000;
+        const d = new Date(y, m - 1, day, 12, 0, 0);
+        return isNaN(d.getTime()) ? null : d;
+      }
+    }
+    const d = new Date(clean);
+    return isNaN(d.getTime()) ? null : d;
   }
 }
 
