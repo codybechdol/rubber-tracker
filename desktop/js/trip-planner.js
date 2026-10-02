@@ -223,11 +223,41 @@ class TripPlannerApp {
     const tableKey = item.tableKey || (String(item.type || '').toLowerCase().includes('sleeve') ? 'sleeve_swaps' : 'glove_swaps');
     const invKey = tableKey.includes('sleeve') ? 'sleeves' :
                    tableKey.includes('blanket') ? 'blankets' :
-                   tableKey.includes('mack') ? 'macks' : 'gloves';
+                   tableKey.includes('mack') ? 'macks' :
+                   tableKey.includes('hv_tester') ? 'hv_testers' :
+                   tableKey.includes('phasing_set') ? 'phasing_sets' :
+                   tableKey.includes('aed') ? 'aed' :
+                   tableKey.includes('ground') ? 'grounds' :
+                   tableKey.includes('hot_stick') ? 'hot_sticks' : 'gloves';
 
     const empName = String(item.employeeName || item.employee || '').trim().toLowerCase();
     const oldItm = String(item.currentItem || '').trim();
     const pickItm = String(item.pickItem || '').trim();
+
+    // 0. Check manual picks registry (desktop app real-time delivered status)
+    if (this.db) {
+      const mpRegistry = {};
+      if (typeof this.db.getManualPicks === 'function') {
+        Object.assign(mpRegistry, this.db.getManualPicks(tableKey) || {});
+      }
+      if (this.db.snapshot && this.db.snapshot.manualPicks && this.db.snapshot.manualPicks[tableKey]) {
+        Object.assign(mpRegistry, this.db.snapshot.manualPicks[tableKey]);
+      }
+      for (const mpKey of Object.keys(mpRegistry)) {
+        const entry = mpRegistry[mpKey];
+        if (entry && String(entry.status || '').includes('Delivered')) {
+          const entryEmp = String(entry.empName || '').trim().toLowerCase();
+          const entryCur = String(entry.currentItemNum || '').trim();
+          const entryPick = String(entry.pickListNum || '').trim();
+          const empMatch = entryEmp === empName || (window.employeeResolver && typeof window.employeeResolver.areSameEmployee === 'function' && window.employeeResolver.areSameEmployee(entryEmp, empName));
+          const itmMatch = (!oldItm || entryCur === oldItm) && (!pickItm || entryPick === pickItm);
+          if (empMatch && itmMatch) {
+            const rawDate = entry.timestamp ? entry.timestamp.substring(0, 10) : '';
+            return { isCompleted: true, date: rawDate, manualPick: entry };
+          }
+        }
+      }
+    }
 
     // 1. Check swap sheet for date changed or delivered status
     const swTable = this.db ? this.db.getTable(tableKey) : null;
@@ -289,13 +319,34 @@ class TripPlannerApp {
     return this.getSwapCompletionInfo(item).isCompleted;
   }
 
+  formatDisplayDate(dateStr) {
+    if (!dateStr) return '';
+    const s = String(dateStr).trim();
+    if (s.includes('/')) return s;
+    const d = this.parseDate(s);
+    if (!d) return s;
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${mm}/${dd}/${d.getFullYear()}`;
+  }
+
   getCompletedSwapsForDate(dateKey) {
     const results = [];
     if (!this.db || !dateKey) return results;
 
-    const swapDef = [
-      { key: 'glove_swaps', invKey: 'gloves', type: 'Glove' },
-      { key: 'sleeve_swaps', invKey: 'sleeves', type: 'Sleeve' }
+    const targetDateKey = this.normalizeDateKey(dateKey);
+    if (!targetDateKey) return results;
+
+    const swapSheets = [
+      { sw: 'glove_swaps', inv: 'gloves', label: 'Glove' },
+      { sw: 'sleeve_swaps', inv: 'sleeves', label: 'Sleeve' },
+      { sw: 'blanket_swaps', inv: 'blankets', label: 'Blanket' },
+      { sw: 'mack_swaps', inv: 'macks', label: 'MACK' },
+      { sw: 'hv_tester_swaps', inv: 'hv_testers', label: 'HV Tester' },
+      { sw: 'phasing_set_swaps', inv: 'phasing_sets', label: 'Phasing Set' },
+      { sw: 'aed_swaps', inv: 'aed', label: 'AED' },
+      { sw: 'ground_swaps', inv: 'grounds', label: 'Ground' },
+      { sw: 'hot_stick_swaps', inv: 'hot_sticks', label: 'Hot Stick' }
     ];
 
     const empTable = this.db.getTable('employees') || this.db.getTable('Employees');
@@ -307,6 +358,7 @@ class TripPlannerApp {
         const name = String(r['Employee Name'] || r['Name'] || r['Employee'] || Object.values(r)[0] || '').trim();
         if (name) {
           empMap[name.toLowerCase()] = {
+            name: name,
             location: String(r['Location'] || '').trim(),
             jobNum: String(r['Job Number'] || r['Job #'] || '').trim(),
             classification: String(r['Job Classification'] || r['Classification'] || '').trim()
@@ -330,92 +382,198 @@ class TripPlannerApp {
       });
     }
 
-    swapDef.forEach(tDef => {
-      const swTable = this.db.getTable(tDef.key);
-      const invTable = this.db.getTable(tDef.invKey);
-      if (!swTable || !swTable.rows) return;
+    const invLookup = {};
+    const invTables = ['gloves', 'sleeves', 'blankets', 'macks', 'hv_testers', 'phasing_sets', 'aed', 'grounds', 'hot_sticks'];
+    invTables.forEach(tblKey => {
+      invLookup[tblKey] = {};
+      const tbl = this.db.getTable(tblKey);
+      if (tbl && tbl.rows) {
+        tbl.rows.forEach(r => {
+          const num = String(r['Glove'] || r['Sleeve'] || r['Blanket'] || r['MACK'] || r['Item #'] || r['Item'] || r['Serial #'] || r['ESL ID'] || '').trim();
+          if (num) invLookup[tblKey][num] = r;
+        });
+      }
+    });
 
-      swTable.rows.forEach((r, idx) => {
-        const empName = String(r['Employee'] || r['Employee Name'] || r['Name'] || '').trim();
-        if (!empName) return;
+    const seenSwapKeys = new Set();
 
-        const currentItem = String(r['Current Glove #'] || r['Current Sleeve #'] || r['Current Item #'] || r['Current Item'] || '').trim();
-        const pickItem = String(r['Pick List Glove #'] || r['Pick List Sleeve #'] || r['Pick List Item #'] || r['Pick List Item'] || '').trim();
-        const rawDateChanged = String(r['Date Changed'] || r['Delivered Date'] || '').trim();
+    swapSheets.forEach(cfg => {
+      // A. Manual picks registry (contains real-time delivered swaps in desktop app)
+      const mpRegistry = {};
+      if (typeof this.db.getManualPicks === 'function') {
+        Object.assign(mpRegistry, this.db.getManualPicks(cfg.sw) || {});
+      }
+      if (this.db.snapshot && this.db.snapshot.manualPicks && this.db.snapshot.manualPicks[cfg.sw]) {
+        Object.assign(mpRegistry, this.db.snapshot.manualPicks[cfg.sw]);
+      }
 
-        let matchDateKey = '';
-        let completedDateFormatted = '';
+      Object.keys(mpRegistry).forEach(mpKey => {
+        if (!mpKey.includes('|')) return;
+        const entry = mpRegistry[mpKey];
+        if (entry && String(entry.status || '').includes('Delivered')) {
+          const empClean = String(entry.empName || '').trim();
+          const empInfo = empMap[empClean.toLowerCase()] || {};
+          const invTable = invLookup[cfg.inv] || {};
+          const newInvItem = invTable[entry.pickListNum] || {};
 
-        if (rawDateChanged) {
-          const dObj = this.parseDate(rawDateChanged);
-          if (dObj) {
-            matchDateKey = `${dObj.getFullYear()}-${String(dObj.getMonth() + 1).padStart(2, '0')}-${String(dObj.getDate()).padStart(2, '0')}`;
-            completedDateFormatted = `${String(dObj.getMonth() + 1).padStart(2, '0')}/${String(dObj.getDate()).padStart(2, '0')}/${dObj.getFullYear()}`;
-          }
-        }
+          let rawDate = newInvItem['Date Assigned'] || (entry.timestamp ? entry.timestamp.substring(0, 10) : '');
+          const dKey = this.normalizeDateKey(rawDate);
+          if (dKey === targetDateKey) {
+            const dedupe = `${cfg.label}_${empClean}_${entry.pickListNum}_${entry.currentItemNum}`.toLowerCase();
+            if (!seenSwapKeys.has(dedupe)) {
+              seenSwapKeys.add(dedupe);
 
-        // If Date Changed wasn't populated in swap sheet, check turned-in date in inventory
-        if (!matchDateKey && currentItem && invTable && invTable.rows) {
-          const itRow = invTable.rows.find(it => String(it['Item #'] || '').trim() === currentItem);
-          if (itRow) {
-            const itLoc = String(itRow['Location'] || '').toLowerCase();
-            const itSt = String(itRow['Status'] || '').toLowerCase();
-            const itAsg = String(itRow['Assigned To'] || '').toLowerCase();
-            if (itLoc.includes('truck') && (itSt.includes('ready for test') || itAsg.includes('packed for test'))) {
-              const dtAssigned = String(itRow['Date Assigned'] || '').trim();
-              if (dtAssigned) {
-                const dObj = this.parseDate(dtAssigned);
-                if (dObj) {
-                  matchDateKey = `${dObj.getFullYear()}-${String(dObj.getMonth() + 1).padStart(2, '0')}-${String(dObj.getDate()).padStart(2, '0')}`;
-                  completedDateFormatted = `${String(dObj.getMonth() + 1).padStart(2, '0')}/${String(dObj.getDate()).padStart(2, '0')}/${dObj.getFullYear()}`;
-                }
+              let rawLoc = newInvItem['Location'] || empInfo.location || '';
+              let rawJob = empInfo.jobNum || '';
+              const classification = empInfo.classification || '';
+              const crewId = this.getSignificantJobNumber(rawJob) || rawJob || 'Unassigned';
+              const crewInfo = crewMap[crewId] || {};
+
+              let location = 'Helena';
+              if (rawLoc && !this.isStatusLocation(rawLoc)) {
+                location = this.cleanPhysicalLocation(rawLoc);
+              } else if (crewInfo.location && !this.isStatusLocation(crewInfo.location)) {
+                location = crewInfo.location;
+              } else if (rawLoc) {
+                location = this.cleanPhysicalLocation(rawLoc);
+              }
+
+              const sKey = this.getSwapKey({
+                tableKey: cfg.sw,
+                employeeName: empClean,
+                type: cfg.label,
+                currentItem: entry.currentItemNum || '',
+                pickItem: entry.pickListNum || ''
+              });
+
+              if (!this.isSwapDismissed(sKey) && !this.isSwapDismissed(`comp_${cfg.sw}_${empClean.toLowerCase()}_${entry.currentItemNum}_${targetDateKey}`)) {
+                results.push({
+                  type: cfg.label,
+                  employeeName: empClean,
+                  currentItem: entry.currentItemNum || '',
+                  pickItem: entry.pickListNum || '',
+                  size: newInvItem['Size'] || '',
+                  itemClass: newInvItem['Class'] || '',
+                  kv: newInvItem['KV'] || '',
+                  model: newInvItem['Model'] || '',
+                  length: newInvItem['Length'] || '',
+                  status: 'Delivered ✅',
+                  tableKey: cfg.sw,
+                  invKey: cfg.inv,
+                  location: location,
+                  crewId: crewId,
+                  foreman: crewInfo.foreman || '',
+                  jobName: crewInfo.jobName || '',
+                  classification: classification,
+                  jobNum: rawJob,
+                  isCompleted: true,
+                  completedDate: this.formatDisplayDate(rawDate),
+                  _sKey: sKey
+                });
               }
             }
           }
         }
+      });
 
-        if (matchDateKey && matchDateKey === dateKey) {
-          const sKey = `comp_${tDef.key}_${empName.toLowerCase()}_${currentItem}_${dateKey}`;
-          if (this.isSwapDismissed(sKey)) return;
+      // B. Swap sheet rows (for swaps tracked directly in table rows)
+      const swTable = this.db.getTable(cfg.sw);
+      if (swTable && swTable.rows) {
+        swTable.rows.forEach((r, idx) => {
+          const empClean = String(r['Employee'] || r['Employee Name'] || r['Assigned To'] || r['Name'] || '').trim();
+          if (!empClean) return;
 
-          const empInfo = empMap[empName.toLowerCase()] || {};
-          let rawLoc = r._location || empInfo.location || '';
-          let rawJob = empInfo.jobNum || '';
-          const classification = empInfo.classification || '';
-          const crewId = this.getSignificantJobNumber(rawJob) || rawJob || 'Unassigned';
-          const crewInfo = crewMap[crewId] || {};
+          const oldItem = String(r['Current Glove #'] || r['Current Sleeve #'] || r['Current Blanket #'] || r['Current MACK #'] || r['Current Item #'] || r['Current Item'] || r['Item #'] || '').trim();
+          const newItem = String(r['Pick List Glove #'] || r['Pick List Sleeve #'] || r['Pick List Blanket #'] || r['Pick List MACK #'] || r['Pick List Item #'] || r['Pick List Item'] || '').trim();
+          const status = String(r['Status'] || r['Stage'] || '').toLowerCase();
+          const dateChanged = String(r['Date Changed'] || r['Delivered Date'] || r['Completed Date'] || '').trim();
 
-          let location = 'Helena';
-          if (rawLoc && !this.isStatusLocation(rawLoc)) {
-            location = this.cleanPhysicalLocation(rawLoc);
-          } else if (crewInfo.location && !this.isStatusLocation(crewInfo.location)) {
-            location = crewInfo.location;
-          } else if (rawLoc) {
-            location = this.cleanPhysicalLocation(rawLoc);
+          let rawDate = '';
+          if (dateChanged || status.includes('delivered') || status === 'complete' || status === 'resolved') {
+            rawDate = dateChanged || r['Stage 3 Date'] || r['Stage 2 Date'] || r['Date'];
           }
 
-          results.push({
-            type: tDef.type,
-            employeeName: empName,
-            currentItem: currentItem,
-            pickItem: pickItem,
-            size: String(r['Size'] || '').trim(),
-            itemClass: String(r['Class'] || '').trim(),
-            status: 'Delivered ✅',
-            tableKey: tDef.key,
-            rowIdx: idx,
-            location: location,
-            crewId: crewId,
-            foreman: crewInfo.foreman || r._foreman || '',
-            jobName: crewInfo.jobName || '',
-            classification: classification,
-            jobNum: rawJob,
-            isCompleted: true,
-            completedDate: completedDateFormatted,
-            _sKey: sKey
-          });
-        }
-      });
+          // Fallback check in inventory table for turned-in date
+          if (!rawDate && oldItem && invLookup[cfg.inv] && invLookup[cfg.inv][oldItem]) {
+            const oldItRow = invLookup[cfg.inv][oldItem];
+            const itLoc = String(oldItRow['Location'] || '').toLowerCase();
+            const itSt = String(oldItRow['Status'] || '').toLowerCase();
+            const itAsg = String(oldItRow['Assigned To'] || '').toLowerCase();
+            if (itLoc.includes('truck') && (itSt.includes('ready for test') || itAsg.includes('packed for test') || itSt.includes('in testing'))) {
+              rawDate = String(oldItRow['Date Assigned'] || '').trim();
+            }
+          }
+
+          // Fallback check in inventory table for newly assigned date
+          if (!rawDate && newItem && invLookup[cfg.inv] && invLookup[cfg.inv][newItem]) {
+            const newItRow = invLookup[cfg.inv][newItem];
+            const itSt = String(newItRow['Status'] || '').toLowerCase();
+            const itAsg = String(newItRow['Assigned To'] || '').toLowerCase();
+            if (itSt.includes('assigned') && (itAsg === empClean.toLowerCase() || (window.employeeResolver && window.employeeResolver.areSameEmployee(itAsg, empClean)))) {
+              rawDate = String(newItRow['Date Assigned'] || '').trim();
+            }
+          }
+
+          const dKey = this.normalizeDateKey(rawDate);
+          if (dKey === targetDateKey) {
+            const dedupe = `${cfg.label}_${empClean}_${newItem}_${oldItem}`.toLowerCase();
+            if (!seenSwapKeys.has(dedupe)) {
+              seenSwapKeys.add(dedupe);
+
+              const empInfo = empMap[empClean.toLowerCase()] || {};
+              let rawLoc = r._location || empInfo.location || '';
+              let rawJob = empInfo.jobNum || '';
+              const classification = empInfo.classification || '';
+              const crewId = this.getSignificantJobNumber(rawJob) || rawJob || 'Unassigned';
+              const crewInfo = crewMap[crewId] || {};
+
+              let location = 'Helena';
+              if (rawLoc && !this.isStatusLocation(rawLoc)) {
+                location = this.cleanPhysicalLocation(rawLoc);
+              } else if (crewInfo.location && !this.isStatusLocation(crewInfo.location)) {
+                location = crewInfo.location;
+              } else if (rawLoc) {
+                location = this.cleanPhysicalLocation(rawLoc);
+              }
+
+              const sKey = this.getSwapKey({
+                tableKey: cfg.sw,
+                employeeName: empClean,
+                type: cfg.label,
+                currentItem: oldItem,
+                pickItem: newItem
+              });
+
+              if (!this.isSwapDismissed(sKey) && !this.isSwapDismissed(`comp_${cfg.sw}_${empClean.toLowerCase()}_${oldItem}_${targetDateKey}`)) {
+                results.push({
+                  type: cfg.label,
+                  employeeName: empClean,
+                  currentItem: oldItem,
+                  pickItem: newItem,
+                  size: String(r['Size'] || '').trim(),
+                  itemClass: String(r['Class'] || r['KV'] || '').trim(),
+                  kv: String(r['KV'] || '').trim(),
+                  model: String(r['Model'] || '').trim(),
+                  length: String(r['Length'] || '').trim(),
+                  status: 'Delivered ✅',
+                  tableKey: cfg.sw,
+                  invKey: cfg.inv,
+                  rowIdx: idx,
+                  location: location,
+                  crewId: crewId,
+                  foreman: crewInfo.foreman || r._foreman || '',
+                  jobName: crewInfo.jobName || '',
+                  classification: classification,
+                  jobNum: rawJob,
+                  isCompleted: true,
+                  completedDate: this.formatDisplayDate(rawDate),
+                  _sKey: sKey
+                });
+              }
+            }
+          }
+        });
+      }
     });
 
     return results;
@@ -3391,12 +3549,13 @@ class TripPlannerApp {
 
   unscheduleSwap(sKey) {
     if (window.currentRoleMode === 'view_only') return;
-    const isCompKey = sKey && sKey.startsWith('comp_');
+    const isCompKey = sKey && (sKey.startsWith('comp_') || sKey.includes('comp_'));
     const entry = this.scheduledSwaps ? this.scheduledSwaps[sKey] : null;
-    const isCompleted = isCompKey || (entry && (entry.completed || (entry.swap && this.isSwapAlreadyCompleted(entry.swap))));
+    const isCompleted = isCompKey || !entry || (entry && (entry.completed || (entry.swap && this.isSwapAlreadyCompleted(entry.swap))));
 
-    if (isCompleted || isCompKey) {
-      const emp = (entry && entry.employeeName) ? entry.employeeName : 'employee';
+    if (isCompleted) {
+      const parts = String(sKey).split('|');
+      const emp = (entry && (entry.employeeName || (entry.swap && entry.swap.employeeName))) ? (entry.employeeName || entry.swap.employeeName) : (parts.length > 1 ? parts[1] : 'employee');
       this.dismissSwap(sKey, emp);
       return;
     }
@@ -6635,6 +6794,14 @@ class TripPlannerApp {
                                 return true;
                               });
 
+                              const crewCompletedSwaps = dayScheduledSwaps.filter(ds => {
+                                if (!ds.isCompleted) return false;
+                                const itemSig = this.getSignificantJobNumber(ds.crewId || ds.jobNum).toLowerCase();
+                                const crewMatches = (sig && itemSig && sig === itemSig) ||
+                                  String(ds.crewId || ds.jobNum || '').toLowerCase() === String(c.crewId).toLowerCase();
+                                return crewMatches;
+                              });
+
                               return `
                                 <div class="crew-task-box" onclick="window.tripPlanner.openCrewTasksModal('${this.escapeHtml(c.crewId)}', '${this.escapeHtml(trip.location)}', 'All', '${dateKey}')" title="Click to view all tasks for Crew ${this.escapeHtml(c.crewId)}">
                                   <div style="font-size: 11px; color: #cbd5e1; display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
@@ -6678,6 +6845,25 @@ class TripPlannerApp {
                                           <button class="btn btn-primary" style="padding: 1px 6px; font-size: 8.5px; background: #10b981; border: none; font-weight: 700; cursor: pointer; border-radius: 3px; white-space: nowrap;" onclick="event.stopPropagation(); window.tripPlanner.openSwapDetailsModal(${JSON.stringify(ps).replace(/"/g, '&quot;')}, '${this.escapeJs(c.crewId)}', '${this.escapeJs(trip.location)}')" title="View swap details & complete swap">
                                             🔍 Swap
                                           </button>
+                                        </div>
+                                      `).join('')}
+                                    </div>
+                                  ` : ''}
+
+                                  ${crewCompletedSwaps.length > 0 ? `
+                                    <div style="margin-top: 5px; padding: 4px 6px; background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 4px;">
+                                      <div style="font-size: 9.5px; font-weight: 800; color: #34d399; display: flex; align-items: center; justify-content: space-between; margin-bottom: 2px;">
+                                        <span>✅ Completed Swaps (${crewCompletedSwaps.length})</span>
+                                      </div>
+                                      ${crewCompletedSwaps.map(cs => `
+                                        <div style="font-size: 9.5px; color: #cbd5e1; display: flex; justify-content: space-between; align-items: center; margin-top: 3px; gap: 4px; cursor: pointer; padding: 2px 4px; border-radius: 3px; transition: background 0.15s;" onmouseover="this.style.background='rgba(255,255,255,0.08)'" onmouseout="this.style.background='transparent'" onclick="event.stopPropagation(); window.tripPlanner.openSwapDetailsModal(${JSON.stringify(cs).replace(/"/g, '&quot;')}, '${this.escapeJs(c.crewId)}', '${this.escapeJs(trip.location)}')" title="Click to view completed swap details">
+                                          <span style="flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                            <strong style="color: #94a3b8; text-decoration: line-through;">${this.escapeHtml(cs.employeeName)}</strong>: ${cs.type === 'Glove' ? '🧤 Glove' : (cs.type === 'Sleeve' ? '🧤 Sleeve' : this.escapeHtml(cs.type))} <span style="color: #94a3b8; text-decoration: line-through;">#${this.escapeHtml(cs.currentItem || '—')}</span> ➔ <strong style="color: #4ade80;">#${this.escapeHtml(cs.pickItem || '—')}</strong>
+                                            ${cs.size ? `<span style="color: #94a3b8; font-size: 9px;"> (${this.escapeHtml(cs.size)})</span>` : ''}
+                                          </span>
+                                          <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #a7f3d0; font-size: 8.5px; font-weight: 700; padding: 1px 4px; border-radius: 3px; white-space: nowrap;">
+                                            ✓ Done
+                                          </span>
                                         </div>
                                       `).join('')}
                                     </div>
@@ -6739,8 +6925,8 @@ class TripPlannerApp {
                 </span>
               ` : ''}
               ${dayPickedCount > 0 ? `
-                <span class="badge" style="background: rgba(16, 185, 129, 0.25); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 9px; padding: 1px 4px; border-radius: 3px;" title="${dayPickedCount} Picked Swap(s) Ready for Delivery">
-                  🚚 ${dayPickedCount} Picked
+                <span class="badge" style="background: rgba(16, 185, 129, 0.25); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 9px; padding: 1px 4px; border-radius: 3px;" title="${dayPickedCount} Swap(s) Scheduled / Completed (${dayScheduledSwaps.filter(s => s.isCompleted).length} Completed)">
+                  🚚 ${dayScheduledSwaps.filter(s => !s.isCompleted).length > 0 ? `${dayScheduledSwaps.filter(s => !s.isCompleted).length} Picked` : `✓ ${dayPickedCount}`}
                 </span>
               ` : ''}
               ${totalCrewTasksCount > 0 ? `
