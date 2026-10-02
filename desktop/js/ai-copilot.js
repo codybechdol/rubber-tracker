@@ -813,25 +813,251 @@ class AICopilotEngine {
 
   // --- Tool Implementations ---
 
-  toolLookupEmployee(args) {
-    const query = String(args.name || '').trim().toLowerCase();
-    if (!query) return { error: 'Please specify an employee name to look up.' };
+  _ensureEmployeeResolver() {
+    if (!window.employeeResolver && typeof EmployeeNameResolver !== 'undefined') {
+      try {
+        window.employeeResolver = new EmployeeNameResolver(this.db);
+      } catch (e) {
+        console.warn('[Copilot] Could not initialize EmployeeNameResolver:', e);
+      }
+    }
+    return window.employeeResolver || null;
+  }
+
+  findEmployeeMatches(rawQuery) {
+    const qStr = String(rawQuery || '').trim();
+    if (!qStr) return [];
 
     const empTable = this.db.getTable('employees');
-    const rows = empTable.rows || [];
+    const rows = empTable ? (empTable.rows || []) : [];
+    if (!rows.length) return [];
 
-    const matches = rows.filter(r => {
-      const name = String(r['Employee Name'] || r['Name'] || '').toLowerCase();
-      return name.includes(query);
+    const resolver = this._ensureEmployeeResolver();
+    const qLower = qStr.toLowerCase();
+    const qClean = qLower.replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+    const qTokens = qClean.split(/\s+/).filter(Boolean);
+
+    // 1. Try resolver first
+    let resolverCanonical = '';
+    if (resolver && typeof resolver.resolve === 'function') {
+      try {
+        const res = resolver.resolve(qStr);
+        if (res && res.match && !res.isStatus && res.canonicalName) {
+          resolverCanonical = res.canonicalName.trim().toLowerCase();
+        }
+      } catch (e) {
+        console.warn('[Copilot] Resolver error:', e);
+      }
+    }
+
+    const areFirstNamesEquiv = (fn1, fn2) => {
+      if (!fn1 || !fn2) return false;
+      const f1 = fn1.toLowerCase().trim();
+      const f2 = fn2.toLowerCase().trim();
+      if (f1 === f2) return true;
+      if (typeof EmployeeNameResolver !== 'undefined' && EmployeeNameResolver.NICKNAME_MAP) {
+        const nicks = EmployeeNameResolver.NICKNAME_MAP.get(f1);
+        if (nicks && nicks.includes(f2)) return true;
+      }
+      if (f1.length >= 3 && f2.length >= 4 && (f2.startsWith(f1) || f1.startsWith(f2))) return true;
+      return false;
+    };
+
+    const getRowAliases = (r) => {
+      const aliases = [];
+      for (const [k, v] of Object.entries(r)) {
+        if (/^(alt(ernat(e|ive))?(\s*names?)?|also\s*known\s*as|aka|aliases?)$/i.test(k.trim()) && v) {
+          String(v).split(/[|,;/]+/).forEach(s => {
+            const clean = s.trim();
+            if (clean && !aliases.includes(clean)) aliases.push(clean);
+          });
+        }
+      }
+      return aliases;
+    };
+
+    const scoredMatches = [];
+
+    rows.forEach(r => {
+      const canonical = String(r['Employee Name'] || r['Name'] || '').trim();
+      if (!canonical) return;
+
+      const canonLower = canonical.toLowerCase();
+      const aliases = getRowAliases(r);
+      const allNames = [canonical, ...aliases];
+      const jNum = String(r['Job Number'] || '').trim().toLowerCase();
+
+      let score = 0;
+
+      // 1. Exact match on canonical or resolver canonical
+      if (canonLower === qLower || (resolverCanonical && canonLower === resolverCanonical)) {
+        score = Math.max(score, 100);
+      }
+
+      // 2. Exact match on an alias
+      for (const a of aliases) {
+        if (a.toLowerCase() === qLower) {
+          score = Math.max(score, 95);
+        }
+      }
+
+      // 3. Tokenized first + last match with nickname equivalence
+      if (qTokens.length >= 2) {
+        for (const nameCandidate of allNames) {
+          const cTokens = nameCandidate.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
+          if (cTokens.length >= 2) {
+            const candLast = cTokens[cTokens.length - 1];
+            const qLast = qTokens[qTokens.length - 1];
+            if (candLast === qLast) {
+              const candFirst = cTokens[0];
+              const qFirst = qTokens[0];
+              if (candFirst === qFirst) {
+                score = Math.max(score, 90);
+              } else if (areFirstNamesEquiv(qFirst, candFirst)) {
+                score = Math.max(score, 88);
+              }
+            }
+            // Reversed tokens: "Sugrue, Chris"
+            const qRevFirst = qTokens[qTokens.length - 1];
+            const qRevLast = qTokens[0];
+            if (candLast === qRevLast && (candFirst === qRevFirst || areFirstNamesEquiv(qRevFirst, candFirst))) {
+              score = Math.max(score, 87);
+            }
+          }
+        }
+      }
+
+      // 4. Substring match
+      if (canonLower.includes(qLower) || (qLower.length >= 4 && canonLower && qLower.includes(canonLower))) {
+        score = Math.max(score, 70);
+      }
+      for (const a of aliases) {
+        if (a.toLowerCase().includes(qLower) || (qLower.length >= 4 && qLower.includes(a.toLowerCase()))) {
+          score = Math.max(score, 65);
+        }
+      }
+
+      // 5. Job number match (e.g. 023-27.1 or 023-27)
+      if (jNum && (jNum === qLower || jNum.startsWith(qLower + '.'))) {
+        score = Math.max(score, 60);
+      }
+
+      // 6. Single word query matching last name
+      if (qTokens.length === 1 && qTokens[0].length >= 3) {
+        const cTokens = canonLower.replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
+        if (cTokens.length >= 2 && cTokens[cTokens.length - 1] === qTokens[0]) {
+          score = Math.max(score, 50);
+        } else if (cTokens.length >= 1 && areFirstNamesEquiv(qTokens[0], cTokens[0])) {
+          score = Math.max(score, 45);
+        }
+      }
+
+      if (score > 0) {
+        scoredMatches.push({ row: r, score, canonical, aliases });
+      }
     });
 
+    // 7. Check Job Tracking foreman if no strong match found
+    if (!scoredMatches.some(m => m.score >= 80)) {
+      const jtTable = this.db.getTable('job_tracking');
+      const jtRows = jtTable ? (jtTable.rows || []) : [];
+      for (const job of jtRows) {
+        const foreman = String(job['Foreman / Lead'] || job['Lead'] || job['Foreman'] || '').trim();
+        if (!foreman) continue;
+        const fLower = foreman.toLowerCase();
+        const baseJob = String(job['Job Number'] || '').trim();
+
+        let isForemanMatch = fLower === qLower || fLower.includes(qLower);
+        if (!isForemanMatch && qTokens.length >= 2) {
+          const fTokens = fLower.replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
+          if (fTokens.length >= 2 && fTokens[fTokens.length - 1] === qTokens[qTokens.length - 1]) {
+            if (fTokens[0] === qTokens[0] || areFirstNamesEquiv(qTokens[0], fTokens[0])) {
+              isForemanMatch = true;
+            }
+          }
+        }
+
+        if (isForemanMatch && baseJob) {
+          const crewMembers = rows.filter(r => {
+            const ej = String(r['Job Number'] || '').trim();
+            return ej === baseJob || ej.startsWith(baseJob + '.');
+          });
+          const formEmp = crewMembers.find(r => {
+            const role = String(r['Classification'] || r['Trade Classification'] || '').trim().toUpperCase();
+            return role === 'F' || role.includes('FOREMAN');
+          }) || crewMembers.find(r => String(r['Job Number'] || '').trim() === `${baseJob}.1`) || crewMembers[0];
+
+          if (formEmp) {
+            const already = scoredMatches.find(m => m.row === formEmp);
+            if (already) {
+              already.score = Math.max(already.score, 85);
+            } else {
+              scoredMatches.push({
+                row: formEmp,
+                score: 85,
+                canonical: formEmp['Employee Name'] || formEmp['Name'],
+                aliases: getRowAliases(formEmp)
+              });
+            }
+          }
+        }
+      }
+    }
+
+    scoredMatches.sort((a, b) => b.score - a.score);
+    return scoredMatches.map(m => m.row);
+  }
+
+  toolLookupEmployee(args) {
+    const rawQuery = String(args.name || '').trim();
+    if (!rawQuery) return { error: 'Please specify an employee name to look up.' };
+
+    const matches = this.findEmployeeMatches(rawQuery);
     if (matches.length === 0) {
-      return { found: false, message: `No active employees found matching "${args.name}".` };
+      return { found: false, message: `No active employees found matching "${rawQuery}".` };
     }
 
     const emp = matches[0];
     const empName = emp['Employee Name'] || emp['Name'];
 
+    // Collect all candidate alias spellings and names for equipment matching
+    const candidateNames = new Set();
+    const addCand = (n) => {
+      if (!n) return;
+      const s = String(n).trim().toLowerCase();
+      if (s) candidateNames.add(s);
+    };
+
+    addCand(empName);
+    addCand(rawQuery);
+
+    // Look for all alias fields
+    for (const [k, v] of Object.entries(emp)) {
+      if (/^(alt(ernat(e|ive))?(\s*names?)?|also\s*known\s*as|aka|aliases?)$/i.test(k.trim()) && v) {
+        String(v).split(/[|,;/]+/).forEach(s => addCand(s));
+      }
+    }
+
+    // Add first-name nickname variations & initials
+    const empParts = empName.toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
+    if (empParts.length >= 2) {
+      const first = empParts[0];
+      const last = empParts[empParts.length - 1];
+      addCand(`${first.charAt(0)}. ${last}`);
+      addCand(`${first.charAt(0)} ${last}`);
+      addCand(`${last}, ${first}`);
+
+      if (typeof EmployeeNameResolver !== 'undefined' && EmployeeNameResolver.NICKNAME_MAP) {
+        const nicks = EmployeeNameResolver.NICKNAME_MAP.get(first) || [];
+        nicks.forEach(nick => {
+          addCand(`${nick} ${last}`);
+          addCand(`${nick.charAt(0)}. ${last}`);
+          addCand(`${last}, ${nick}`);
+        });
+      }
+    }
+
+    const resolver = this._ensureEmployeeResolver();
     const assignedEquipment = [];
     const ppeCategories = [
       { key: 'gloves', label: 'Gloves', itemCol: 'Item #' },
@@ -849,8 +1075,31 @@ class AICopilotEngine {
       const tbl = this.db.getTable(cat.key);
       if (!tbl || !tbl.rows) return;
       tbl.rows.forEach(item => {
-        const assignedTo = String(item['Assigned To'] || '').trim().toLowerCase();
-        if (assignedTo === empName.toLowerCase()) {
+        const assignedToRaw = String(item['Assigned To'] || '').trim();
+        if (!assignedToRaw) return;
+        const assignedToLower = assignedToRaw.toLowerCase();
+
+        let isMatch = candidateNames.has(assignedToLower);
+
+        if (!isMatch && resolver && typeof resolver.areSameEmployee === 'function') {
+          isMatch = resolver.areSameEmployee(assignedToRaw, empName);
+        }
+
+        if (!isMatch && empParts.length >= 2) {
+          const itemParts = assignedToLower.replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
+          if (itemParts.length >= 2 && itemParts[itemParts.length - 1] === empParts[empParts.length - 1]) {
+            const itemFirst = itemParts[0];
+            const empFirst = empParts[0];
+            if (itemFirst === empFirst || itemFirst === empFirst.charAt(0)) {
+              isMatch = true;
+            } else if (typeof EmployeeNameResolver !== 'undefined' && EmployeeNameResolver.NICKNAME_MAP) {
+              const nicks = EmployeeNameResolver.NICKNAME_MAP.get(empFirst) || [];
+              if (nicks.includes(itemFirst)) isMatch = true;
+            }
+          }
+        }
+
+        if (isMatch) {
           assignedEquipment.push({
             type: cat.label,
             itemNum: item[cat.itemCol] || item['Item #'] || item['Serial #'] || 'N/A',
@@ -866,10 +1115,15 @@ class AICopilotEngine {
       });
     });
 
+    const alternateNamesArr = Array.from(candidateNames)
+      .filter(n => n !== empName.toLowerCase() && !n.includes('.') && !n.includes(','));
+
     return {
       found: true,
       employee: {
         name: empName,
+        canonicalName: empName,
+        alternateNames: alternateNamesArr.length > 0 ? alternateNamesArr : undefined,
         location: emp['Location'] || 'Unknown',
         jobNumber: emp['Job Number'] || 'N/A',
         tradeClassification: emp['Trade Classification'] || emp['Classification'] || 'N/A',
@@ -881,7 +1135,7 @@ class AICopilotEngine {
       },
       assignedEquipmentCount: assignedEquipment.length,
       assignedEquipment: assignedEquipment,
-      allMatches: matches.length > 1 ? matches.map(m => m['Employee Name']) : undefined
+      allMatches: matches.length > 1 ? matches.map(m => m['Employee Name'] || m['Name']) : undefined
     };
   }
 
@@ -919,9 +1173,17 @@ class AICopilotEngine {
         if (classFilter && !rowClass.includes(classFilter)) return;
 
         if (query) {
+          let matchAssigned = assignedTo.includes(query);
+          if (!matchAssigned && query.length >= 3) {
+            const resolver = this._ensureEmployeeResolver();
+            if (resolver && typeof resolver.areSameEmployee === 'function') {
+              matchAssigned = resolver.areSameEmployee(assignedTo, query);
+            }
+          }
           const matchQuery = itemNum.includes(query) ||
             eslId.includes(query) ||
             assignedTo.includes(query) ||
+            matchAssigned ||
             notes.includes(query);
           if (!matchQuery) return;
         }
@@ -1047,8 +1309,12 @@ class AICopilotEngine {
 
     const detailedCrews = crews.map(c => {
       const jNum = String(c['Job Number'] || '').trim();
-      const members = (empTable.rows || []).filter(e => String(e['Job Number'] || '').trim() === jNum).map(e => ({
+      const members = (empTable.rows || []).filter(e => {
+        const ej = String(e['Job Number'] || '').trim();
+        return ej === jNum || ej.startsWith(jNum + '.');
+      }).map(e => ({
         name: e['Employee Name'] || e['Name'],
+        jobNumber: e['Job Number'] || '',
         role: e['Trade Classification'] || e['Classification'] || '',
         location: e['Location'] || ''
       }));
@@ -1145,11 +1411,18 @@ class AICopilotEngine {
   }
 
   toolOpenEmployeeProfile(args) {
-    const name = args.employee_name;
+    const rawName = args.employee_name;
     const tab = args.tab || 'equipment';
+
+    let targetName = rawName;
+    const matches = this.findEmployeeMatches(rawName);
+    if (matches && matches.length > 0) {
+      targetName = matches[0]['Employee Name'] || matches[0]['Name'] || rawName;
+    }
+
     if (window.employeeProfileEngine && typeof window.employeeProfileEngine.openProfileModal === 'function') {
-      window.employeeProfileEngine.openProfileModal(name, tab);
-      return { success: true, message: `Opened Profile Dossier modal for ${name} on tab "${tab}".` };
+      window.employeeProfileEngine.openProfileModal(targetName, tab);
+      return { success: true, message: `Opened Profile Dossier modal for ${targetName} on tab "${tab}".` };
     }
     return { success: false, message: 'Employee Profile modal engine not initialized.' };
   }

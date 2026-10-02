@@ -152,6 +152,22 @@ class EmployeeNameResolver {
         }
       });
 
+      // First name nickname expansion (e.g. Christian -> Chris, Michael -> Mike, Robert -> Bob)
+      const firstLower = first.toLowerCase();
+      const nicks = EmployeeNameResolver.NICKNAME_MAP.get(firstLower);
+      if (nicks && nicks.length > 0) {
+        nicks.forEach(nick => {
+          const nickForm = `${nick} ${last}`.toLowerCase();
+          if (!this.indexMap.has(nickForm)) {
+            this.indexMap.set(nickForm, { employee: empObj, preferredName: clean });
+          }
+          const nickInit = `${nick.charAt(0)}. ${last}`.toLowerCase();
+          if (!this.indexMap.has(nickInit)) {
+            this.indexMap.set(nickInit, { employee: empObj, preferredName: clean });
+          }
+        });
+      }
+
       // Handle hyphenated last names like "Miller-Johnson"
       if (last.includes('-')) {
         const lastParts = last.split('-');
@@ -360,11 +376,19 @@ class EmployeeNameResolver {
 
     if (!inTokens.length || !tgTokens.length) return false;
 
-    // Direct First + Last matching for compound/middle names:
+    // Direct First + Last matching for compound/middle names or nicknames:
     // e.g. input ["jimmy", "bailey"] matches target ["jimmy", "james", "bailey"]
+    // or input ["chris", "sugrue"] matches target ["christian", "sugrue"]
     if (inTokens.length === 2 && tgTokens.length >= 2) {
-      if (inTokens[0] === tgTokens[0] && inTokens[1] === tgTokens[tgTokens.length - 1]) {
-        return true;
+      const inLast = inTokens[1];
+      const tgLast = tgTokens[tgTokens.length - 1];
+      if (inLast === tgLast) {
+        const inFirst = inTokens[0];
+        const tgFirst = tgTokens[0];
+        if (inFirst === tgFirst) return true;
+        const nicks = EmployeeNameResolver.NICKNAME_MAP.get(inFirst);
+        if (nicks && nicks.includes(tgFirst)) return true;
+        if (inFirst.length >= 3 && tgFirst.length >= 4 && (tgFirst.startsWith(inFirst) || inFirst.startsWith(tgFirst))) return true;
       }
     }
 
@@ -533,6 +557,74 @@ class EmployeeNameResolver {
     }
 
     return results.slice(0, limit);
+  }
+
+  static get NICKNAME_MAP() {
+    if (this._nicknameMap) return this._nicknameMap;
+    const groups = [
+      ['christian', 'christopher', 'chris'],
+      ['michael', 'mike', 'mikey'],
+      ['david', 'dave', 'davey'],
+      ['william', 'bill', 'billy', 'will', 'willy', 'liam'],
+      ['robert', 'rob', 'robby', 'bobby', 'bob'],
+      ['richard', 'rick', 'ricky', 'dick', 'rich'],
+      ['james', 'jim', 'jimmy'],
+      ['john', 'jon', 'johnny', 'jonny', 'jonathan'],
+      ['joseph', 'joe', 'joey'],
+      ['thomas', 'tom', 'tommy'],
+      ['charles', 'charlie', 'chuck'],
+      ['daniel', 'dan', 'danny'],
+      ['matthew', 'matt'],
+      ['anthony', 'tony'],
+      ['donald', 'don', 'donny'],
+      ['steven', 'stephen', 'steve'],
+      ['andrew', 'andy', 'drew'],
+      ['joshua', 'josh'],
+      ['kenneth', 'ken', 'kenny'],
+      ['brian', 'bryan'],
+      ['edward', 'ed', 'eddie', 'ted', 'teddy'],
+      ['ronald', 'ron', 'ronny'],
+      ['timothy', 'tim', 'timmy'],
+      ['jeffrey', 'jeff', 'geoffrey', 'geoff'],
+      ['jacob', 'jake'],
+      ['nicholas', 'nick', 'nicolas'],
+      ['eric', 'erik'],
+      ['larry', 'lawrence'],
+      ['benjamin', 'ben', 'benny'],
+      ['samuel', 'sam', 'sammy'],
+      ['gregory', 'greg'],
+      ['alexander', 'alex', 'alec'],
+      ['patrick', 'pat'],
+      ['frank', 'frankie', 'francis'],
+      ['raymond', 'ray'],
+      ['jack', 'jackson'],
+      ['dennis', 'denny'],
+      ['jerry', 'gerald'],
+      ['tyler', 'ty'],
+      ['aaron', 'aron'],
+      ['nathan', 'nate', 'nathaniel'],
+      ['douglas', 'doug'],
+      ['peter', 'pete'],
+      ['cody', 'kody', 'codie'],
+      ['cory', 'kory', 'corey'],
+      ['dustin', 'dusty'],
+      ['mitchell', 'mitch'],
+      ['cameron', 'cam'],
+      ['bradley', 'brad'],
+      ['clifford', 'clifton', 'cliff', 'clif'],
+      ['phillip', 'philip', 'phil'],
+      ['terry', 'terrence'],
+      ['zakary', 'zachary', 'zackary', 'zack', 'zach', 'zac']
+    ];
+    const map = new Map();
+    groups.forEach(grp => {
+      grp.forEach(name => {
+        const others = grp.filter(n => n !== name);
+        map.set(name, others);
+      });
+    });
+    this._nicknameMap = map;
+    return this._nicknameMap;
   }
 }
 
