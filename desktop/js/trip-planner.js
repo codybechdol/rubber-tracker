@@ -291,12 +291,24 @@ class TripPlannerApp {
     this.setupSwapsSearchListeners();
     this.updateSidebarsCollapseUI();
     this.populateWeekDropdown();
-    this.setWeeksToShow(this.weeksToShow || 8);
+
+    const plannerView = document.getElementById('trip-planner-view');
+    if (plannerView && plannerView.classList.contains('active')) {
+      this.setWeeksToShow(this.weeksToShow || 8, true);
+    } else {
+      this.setWeeksToShow(this.weeksToShow || 8, false);
+      this._plannerDirty = true;
+    }
 
     if (this.db && typeof this.db.subscribe === 'function') {
       this.db.subscribe(() => {
         this.loadSavedTrips();
-        this.renderPlanner();
+        const pView = document.getElementById('trip-planner-view');
+        if (pView && pView.classList.contains('active')) {
+          this.renderPlanner();
+        } else {
+          this._plannerDirty = true;
+        }
       });
     }
   }
@@ -5176,7 +5188,7 @@ class TripPlannerApp {
     }, 4000);
   }
 
-  setWeeksToShow(weeks) {
+  setWeeksToShow(weeks, render = true) {
     this.weeksToShow = parseInt(weeks, 10) || 8;
     try {
       localStorage.setItem('sa_trip_planner_weeks', this.weeksToShow);
@@ -5188,7 +5200,9 @@ class TripPlannerApp {
         else btn.classList.remove('active');
       }
     });
-    this.renderPlanner();
+    if (render) {
+      this.renderPlanner();
+    }
   }
 
   prevWeek() {

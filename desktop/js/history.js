@@ -30,7 +30,10 @@ class HistoryNavigator {
   init() {
     this.renderTabsBar();
     this.setupSearch();
-    this.renderCurrentHistory();
+    const historyView = document.getElementById('history-view');
+    if (historyView && historyView.classList.contains('active')) {
+      this.renderCurrentHistory();
+    }
   }
 
   renderTabsBar(force = false) {

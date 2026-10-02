@@ -1221,6 +1221,38 @@ class LocalDatabase {
       const isInv = ['gloves', 'sleeves', 'blankets', 'macks', 'hv_testers', 'phasing_sets', 'aed', 'grounds', 'hot_sticks'].includes(tableKey);
       const empTable = (isInv && this.snapshot && this.snapshot.tables) ? this.snapshot.tables['employees'] : null;
 
+      // Pre-index history table for O(1) item lookups instead of scanning thousands of rows per item
+      let histByItem = null;
+      if (isInv && this.snapshot && this.snapshot.tables) {
+        const histKey = tableKey + '_history';
+        const histTable = this.snapshot.tables[histKey];
+        if (histTable && histTable.rows && histTable.rows.length > 0) {
+          histByItem = new Map();
+          for (let i = 0; i < histTable.rows.length; i++) {
+            const hr = histTable.rows[i];
+            const hn = String(hr['Item #'] || hr['Model'] || hr['Serial #'] || hr['Glove'] || hr['Sleeve'] || Object.values(hr)[1] || Object.values(hr)[0] || '').trim().toLowerCase();
+            if (!hn) continue;
+            let list = histByItem.get(hn);
+            if (!list) {
+              list = [];
+              histByItem.set(hn, list);
+            }
+            list.push(hr);
+          }
+        }
+      }
+
+      // Pre-index employees by lowercase name for O(1) location auto-healing
+      let empByName = null;
+      if (empTable && empTable.rows && empTable.rows.length > 0) {
+        empByName = new Map();
+        for (let i = 0; i < empTable.rows.length; i++) {
+          const er = empTable.rows[i];
+          const en = String(er['Name'] || er['Employee'] || er['Employee Name'] || Object.values(er)[0] || '').trim().toLowerCase();
+          if (en && !empByName.has(en)) empByName.set(en, er);
+        }
+      }
+
       table.rows.forEach(r => {
         if (isInv) {
           if (r['Status'] === 'In Stock') {
@@ -1238,39 +1270,33 @@ class LocalDatabase {
           let itemYear = null;
           let isNewPurchaseThisYear = false;
           const itemNum = String(r['Serial #'] || r['Item #'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['MACK'] || r['Model'] || Object.values(r)[0] || '').trim();
-          const histKey = tableKey + '_history';
-          const histTable = (this.snapshot && this.snapshot.tables) ? this.snapshot.tables[histKey] : null;
 
-          if (histTable && histTable.rows) {
-            const hRows = histTable.rows.filter(hr => {
-              const hn = String(hr['Item #'] || hr['Model'] || hr['Serial #'] || hr['Glove'] || hr['Sleeve'] || Object.values(hr)[1] || Object.values(hr)[0] || '').trim().toLowerCase();
-              return hn === itemNum.toLowerCase();
-            });
-            if (hRows.length > 0) {
-              let earliestTime = Infinity;
-              for (const hr of hRows) {
-                const dStr = String(hr['Date Assigned'] || hr['Date'] || Object.values(hr)[0] || '').trim();
-                const pd = new Date(dStr);
-                const assignedLower = String(hr['Assigned To'] || '').trim().toLowerCase();
-                const notesLower = String(hr['Notes'] || '').trim().toLowerCase();
-                const isPurchaseEntry = assignedLower === 'on shelf (new purchase)' ||
-                                        assignedLower === 'new' ||
-                                        assignedLower === 'new purchase' ||
-                                        assignedLower === 'brand new' ||
-                                        notesLower === 'new' ||
-                                        notesLower.startsWith('new,') ||
-                                        notesLower.startsWith('new -') ||
-                                        notesLower.includes('new purchase') ||
-                                        notesLower.includes('initial purchase');
+          const hRows = (histByItem && itemNum) ? (histByItem.get(itemNum.toLowerCase()) || []) : [];
+          if (hRows.length > 0) {
+            let earliestTime = Infinity;
+            for (let i = 0; i < hRows.length; i++) {
+              const hr = hRows[i];
+              const dStr = String(hr['Date Assigned'] || hr['Date'] || Object.values(hr)[0] || '').trim();
+              const pd = new Date(dStr);
+              const assignedLower = String(hr['Assigned To'] || '').trim().toLowerCase();
+              const notesLower = String(hr['Notes'] || '').trim().toLowerCase();
+              const isPurchaseEntry = assignedLower === 'on shelf (new purchase)' ||
+                                      assignedLower === 'new' ||
+                                      assignedLower === 'new purchase' ||
+                                      assignedLower === 'brand new' ||
+                                      notesLower === 'new' ||
+                                      notesLower.startsWith('new,') ||
+                                      notesLower.startsWith('new -') ||
+                                      notesLower.includes('new purchase') ||
+                                      notesLower.includes('initial purchase');
 
-                if (!isNaN(pd.getTime())) {
-                  if (pd.getTime() < earliestTime) {
-                    earliestTime = pd.getTime();
-                    itemYear = pd.getFullYear();
-                  }
-                  if (isPurchaseEntry && pd.getFullYear() === currentYear) {
-                    isNewPurchaseThisYear = true;
-                  }
+              if (!isNaN(pd.getTime())) {
+                if (pd.getTime() < earliestTime) {
+                  earliestTime = pd.getTime();
+                  itemYear = pd.getFullYear();
+                }
+                if (isPurchaseEntry && pd.getFullYear() === currentYear) {
+                  isNewPurchaseThisYear = true;
                 }
               }
             }
@@ -1311,11 +1337,8 @@ class LocalDatabase {
               r['Status'] = 'Assigned';
             }
             if (!r['Location'] || r['Location'] === 'Helena') {
-              if (empTable && empTable.rows) {
-                const match = empTable.rows.find(er => {
-                  const en = String(er['Name'] || er['Employee'] || er['Employee Name'] || Object.values(er)[0] || '').trim().toLowerCase();
-                  return en === assignedTo.toLowerCase();
-                });
+              if (empByName) {
+                const match = empByName.get(assignedTo.toLowerCase());
                 if (match) {
                   const rawLoc = String(match['Location'] || '').trim();
                   const cleanLoc = rawLoc.replace(/\s*\([^)]*\)/g, '').trim();

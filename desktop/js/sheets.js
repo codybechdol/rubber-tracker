@@ -384,8 +384,10 @@ class SheetNavigator {
     if (this._hasRunVacationRepair) return;
     this._hasRunVacationRepair = true;
     try {
+      if (localStorage.getItem('sa_vacation_repair_done_v2')) return;
       if (window.crewImportEngine && typeof window.crewImportEngine.repairVacationAndLeaveJobNumbers === 'function') {
         const res = await window.crewImportEngine.repairVacationAndLeaveJobNumbers();
+        localStorage.setItem('sa_vacation_repair_done_v2', 'true');
         if (res && res.repairedCount > 0) {
           console.log(`[VacationRepair] Repaired ${res.repairedCount} employee record(s). Refreshing sheets.`);
           this.renderCurrentSheet();

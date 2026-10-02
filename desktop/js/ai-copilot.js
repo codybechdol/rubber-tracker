@@ -47,7 +47,6 @@ class AICopilotEngine {
   }
 
   init() {
-    this.initSpeechRecognition();
     this.renderDrawer();
     this.setupListeners();
     this.updateModelBadge();
@@ -57,6 +56,7 @@ class AICopilotEngine {
   // Speech Recognition (Voice Input)
   // =========================================================================
   initSpeechRecognition() {
+    if (this.speechRecognition) return this.speechRecognition;
     const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (SpeechRec) {
       try {
@@ -83,19 +83,30 @@ class AICopilotEngine {
         this.speechRecognition.onend = () => {
           this.setListening(false);
         };
+        return this.speechRecognition;
       } catch (e) {
         console.warn('Could not initialize speech recognition:', e);
+        this.speechRecognition = null;
+        return null;
       }
     }
+    return null;
   }
 
   toggleVoiceInput() {
     if (!this.speechRecognition) {
-      alert('Speech recognition is not supported in this browser environment.');
+      this.initSpeechRecognition();
+    }
+    if (!this.speechRecognition) {
+      alert('Speech recognition is not supported in this browser or tablet environment.');
       return;
     }
     if (this.isListening) {
-      this.speechRecognition.stop();
+      try {
+        this.speechRecognition.stop();
+      } catch (e) {
+        console.warn('Speech recognition stop warning:', e);
+      }
       this.setListening(false);
     } else {
       try {

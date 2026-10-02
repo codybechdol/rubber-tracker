@@ -21,9 +21,15 @@ class InventoryManager {
   init() {
     this.createModalHtml();
     this.bindEvents();
-    setTimeout(() => {
-      this.syncInventoryLocations(true);
-    }, 600);
+    if (typeof window !== 'undefined' && 'requestIdleCallback' in window) {
+      window.requestIdleCallback(() => {
+        this.syncInventoryLocations(true);
+      }, { timeout: 6000 });
+    } else {
+      setTimeout(() => {
+        this.syncInventoryLocations(true);
+      }, 4000);
+    }
   }
 
   /**

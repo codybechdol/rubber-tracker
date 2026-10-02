@@ -13,7 +13,10 @@ class TaskManagerApp {
 
   init() {
     this.setupSearchListeners();
-    this.renderTasks();
+    const tasksView = document.getElementById('tasks-view');
+    if (tasksView && tasksView.classList.contains('active')) {
+      this.renderTasks();
+    }
   }
 
   setupSearchListeners() {

@@ -10,7 +10,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="stylesheet" href="css/leaflet.css">
-  <link rel="stylesheet" href="css/app.css?v=20261001_03">
+  <link rel="stylesheet" href="css/app.css?v=20261002_01">
 </head>
 <body>
 
@@ -2599,12 +2599,12 @@
   <!-- SheetJS for client-side Excel Parsing -->
   <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
 
-  <script src="js/db.js?v=20260903_36"></script>
+  <script src="js/db.js?v=20261002_01"></script>
   <script src="js/sync.js?v=20260909_53"></script>
   <script src="js/gps.js?v=20260918_01"></script>
   <script src="js/scanner.js?v=20260901_25"></script>
   <script src="js/employee-resolver.js?v=20260909_50"></script>
-  <script src="js/inventory.js?v=20260909_50"></script>
+  <script src="js/inventory.js?v=20261002_01"></script>
   <script src="js/swaps.js?v=20260901_25"></script>
   <script src="js/crew-import.js?v=20260901_25"></script>
   <script src="js/item-stats.js?v=20260909_52"></script>
@@ -2615,12 +2615,12 @@
   <script src="js/cpr-roster.js?v=20260901_25"></script>
   <script src="js/certs-import.js?v=20260901_25"></script>
   <script src="js/time-breakdown.js?v=20260901_25"></script>
-  <script src="js/sheets.js?v=20261001_03"></script>
-  <script src="js/history.js?v=20260901_25"></script>
+  <script src="js/sheets.js?v=20261002_01"></script>
+  <script src="js/history.js?v=20261002_01"></script>
   <script src="js/history-issues.js?v=20260924_01"></script>
   <script src="js/previous-employees.js?v=20260914_2"></script>
-  <script src="js/tasks.js?v=20260901_25"></script>
-  <script src="js/trip-planner.js?v=20260903_34"></script>
+  <script src="js/tasks.js?v=20261002_01"></script>
+  <script src="js/trip-planner.js?v=20261002_01"></script>
   <script src="js/vendor/leaflet.js"></script>
   <script src="js/trip-route-map.js?v=20260918_07"></script>
   <script src="js/lookup.js?v=20260901_25"></script>
@@ -2631,7 +2631,7 @@
   <script src="js/incident-reports.js?v=20260930_01"></script>
   <script src="js/weekly-summary.js?v=20260930_01"></script>
   <script src="js/fiscal-year.js?v=20261001_04"></script>
-  <script src="js/ai-copilot.js?v=20261001_01"></script>
+  <script src="js/ai-copilot.js?v=20261002_01"></script>
 
   <script>
     // Navigation routing for desktop & mobile
@@ -2793,12 +2793,15 @@
         // Service Worker handling: Register on Web/PWA (http/https), unregister on Desktop (file://)
         if ('serviceWorker' in navigator) {
           if (window.location.protocol.startsWith('http')) {
+            let refreshing = false;
             navigator.serviceWorker.register('./sw.js').then((reg) => {
               try { reg.update(); } catch (e) {}
             }).catch(err => {
               console.warn('Service Worker registration warning:', err);
             });
             navigator.serviceWorker.addEventListener('controllerchange', () => {
+              if (refreshing) return;
+              refreshing = true;
               console.log('🔄 New service worker activated, reloading for latest updates...');
               window.location.reload();
             });
