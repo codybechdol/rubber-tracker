@@ -749,6 +749,61 @@ class AICopilotEngine {
             properties: {}
           }
         }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'add_trip_planner_task',
+          description: 'Add a new manual task, reminder, action item, or note to the Trip Planner calendar for a specific date (defaults to today).',
+          parameters: {
+            type: 'object',
+            properties: {
+              title: {
+                type: 'string',
+                description: 'The short descriptive title of the task (e.g. "Collect missing employee phone numbers")'
+              },
+              date: {
+                type: 'string',
+                description: 'The target date in YYYY-MM-DD format (e.g. "2026-10-05" or "today")'
+              },
+              location: {
+                type: 'string',
+                description: 'City/location or dock (e.g. "Helena", "Missoula", "Helena Office")'
+              },
+              notes: {
+                type: 'string',
+                description: 'Detailed description, checklist, or employee list for the task'
+              },
+              priority: {
+                type: 'string',
+                enum: ['Low', 'Normal', 'High', 'Urgent'],
+                description: 'Task priority level'
+              },
+              assigned_employees: {
+                type: 'array',
+                items: { type: 'string' },
+                description: 'List of employee names involved'
+              }
+            },
+            required: ['title']
+          }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'get_trip_planner_tasks',
+          description: 'Retrieve manual tasks and scheduled items from the Trip Planner calendar for a specific date.',
+          parameters: {
+            type: 'object',
+            properties: {
+              date: {
+                type: 'string',
+                description: 'Date in YYYY-MM-DD format (e.g. "2026-10-05" or "today")'
+              }
+            }
+          }
+        }
       }
     ];
   }
@@ -802,6 +857,10 @@ class AICopilotEngine {
           return this.toolOpenEmployeeProfile(args);
         case 'get_system_status':
           return this.toolGetSystemStatus(args);
+        case 'add_trip_planner_task':
+          return await this.toolAddTripPlannerTask(args);
+        case 'get_trip_planner_tasks':
+          return this.toolGetTripPlannerTasks(args);
         default:
           return { error: `Tool "${fnName}" is not implemented.` };
       }
@@ -1446,6 +1505,105 @@ class AICopilotEngine {
     };
   }
 
+  async toolAddTripPlannerTask(args) {
+    let dateKey = String(args.date || '').trim();
+    const today = new Date().toISOString().split('T')[0];
+    if (!dateKey || dateKey.toLowerCase() === 'today') {
+      dateKey = today;
+    } else if (dateKey.toLowerCase() === 'tomorrow') {
+      const tomorrow = new Date();
+      tomorrow.setDate(tomorrow.getDate() + 1);
+      dateKey = tomorrow.toISOString().split('T')[0];
+    }
+
+    const title = String(args.title || 'New Task').trim();
+    const location = String(args.location || 'Helena Office').trim();
+    const notes = String(args.notes || '').trim();
+    const priority = String(args.priority || 'Normal').trim();
+    const assignedEmployees = Array.isArray(args.assigned_employees) ? args.assigned_employees : [];
+
+    let newTask;
+    if (window.tripPlanner && typeof window.tripPlanner.addManualTask === 'function') {
+      newTask = window.tripPlanner.addManualTask(dateKey, {
+        title,
+        location,
+        notes,
+        priority,
+        assignedEmployees,
+        taskCategory: 'personal_task'
+      });
+    } else {
+      const tasks = this.db.getManualTasks() || [];
+      newTask = {
+        id: 'mt_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+        taskCategory: 'personal_task',
+        title: title,
+        certType: '',
+        crewIds: [],
+        crewId: '',
+        assignedEmployees: assignedEmployees,
+        employee: '',
+        instructor: 'Cody Bechdol (Self)',
+        assignedTo: 'Myself',
+        dateKey: dateKey,
+        date: dateKey,
+        location: location,
+        time: '',
+        priority: priority,
+        notes: notes,
+        status: 'Pending',
+        createdAt: new Date().toISOString(),
+        completedAt: null
+      };
+      tasks.push(newTask);
+      await this.db.saveManualTasks(tasks);
+      if (window.tripPlanner) {
+        window.tripPlanner.manualTasks = tasks;
+        if (typeof window.tripPlanner.renderPlanner === 'function') {
+          window.tripPlanner.renderPlanner();
+        }
+      }
+    }
+
+    return {
+      success: true,
+      message: `Task "${title}" successfully added to Trip Planner for ${dateKey}.`,
+      task: {
+        id: newTask.id,
+        title: newTask.title,
+        date: newTask.dateKey || newTask.date,
+        location: newTask.location,
+        priority: newTask.priority,
+        notes: newTask.notes
+      }
+    };
+  }
+
+  toolGetTripPlannerTasks(args) {
+    let dateKey = String(args.date || '').trim();
+    const today = new Date().toISOString().split('T')[0];
+    if (!dateKey || dateKey.toLowerCase() === 'today') {
+      dateKey = today;
+    }
+
+    const tasks = this.db.getManualTasks() || [];
+    const matched = tasks.filter(t => (t.dateKey === dateKey || t.date === dateKey));
+
+    return {
+      date: dateKey,
+      total_tasks: matched.length,
+      tasks: matched.map(t => ({
+        id: t.id,
+        title: t.title,
+        location: t.location,
+        priority: t.priority,
+        status: t.status,
+        notes: t.notes,
+        assigned_employees: t.assignedEmployees || []
+      }))
+    };
+  }
+
   parseDate(val) {
     if (!val) return null;
     if (val instanceof Date) return isNaN(val.getTime()) ? null : val;
@@ -1531,7 +1689,7 @@ class AICopilotEngine {
     const maxTurns = 6;
 
     const systemText = `You are Safety Assistant Copilot, an expert AI partner inside the Safety Assistant Desktop App for electrical utility PPE and crew safety compliance.
-You have real-time programmatic tools to query local inventory (Gloves, Sleeves, Blankets, MACKs, HV Testers, Phasing Sets, AED, Grounds, Hot Sticks), look up employees, inspect safety compliance, and control the app screen.
+You have real-time programmatic tools to query local inventory (Gloves, Sleeves, Blankets, MACKs, HV Testers, Phasing Sets, AED, Grounds, Hot Sticks), look up employees, inspect safety compliance, manage Trip Planner tasks/reminders (add_trip_planner_task, get_trip_planner_tasks), and control the app screen.
 
 GUIDELINES:
 1. Always be professional, direct, accurate, and concise. Highlight critical safety items (e.g. overdue equipment, missing safety meetings).
@@ -1539,7 +1697,8 @@ GUIDELINES:
 3. Format output with clean Markdown tables, bold text, and bullet points for readability.
 4. When asked about an employee or specific items, ALWAYS call the corresponding tool (e.g. lookup_employee, search_inventory, get_due_swaps) to get the ground-truth data from the local database before responding.
 5. If the user asks to filter, navigate, or view something on screen, execute the navigation or filter tool so their screen updates automatically!
-6. Keep responses focused on what the user asked without unnecessary boilerplate.`;
+6. When the user asks you to add a task, reminder, action item, or note to the Trip Planner calendar, ALWAYS call the add_trip_planner_task tool so it actually gets created on their calendar.
+7. Keep responses focused on what the user asked without unnecessary boilerplate.`;
 
     const systemInstruction = {
       parts: [{ text: systemText }]
@@ -1699,7 +1858,7 @@ GUIDELINES:
         {
           role: 'system',
           content: `You are Safety Assistant Copilot, an expert AI partner inside the Safety Assistant Desktop App for electrical utility PPE and crew safety compliance.
-You have real-time programmatic tools to query local inventory (Gloves, Sleeves, Blankets, MACKs, HV Testers, Phasing Sets, AED, Grounds, Hot Sticks), look up employees, inspect safety compliance, and control the app screen.
+You have real-time programmatic tools to query local inventory (Gloves, Sleeves, Blankets, MACKs, HV Testers, Phasing Sets, AED, Grounds, Hot Sticks), look up employees, inspect safety compliance, manage Trip Planner tasks/reminders (add_trip_planner_task, get_trip_planner_tasks), and control the app screen.
 
 GUIDELINES:
 1. Always be professional, direct, accurate, and concise. Highlight critical safety items (e.g. overdue equipment, missing safety meetings).
@@ -1707,7 +1866,8 @@ GUIDELINES:
 3. Format output with clean Markdown tables, bold text, and bullet points for readability.
 4. When asked about an employee or specific items, ALWAYS call the corresponding tool (e.g. lookup_employee, search_inventory, get_due_swaps) to get the ground-truth data from the local database before responding.
 5. If the user asks to filter, navigate, or view something on screen, execute the navigation or filter tool so their screen updates automatically!
-6. Keep responses focused on what the user asked without unnecessary boilerplate.`
+6. When the user asks you to add a task, reminder, action item, or note to the Trip Planner calendar, ALWAYS call the add_trip_planner_task tool so it actually gets created on their calendar.
+7. Keep responses focused on what the user asked without unnecessary boilerplate.`
         },
         ...this.messages.map((msg, mIdx) => {
           if (msg.role === 'assistant') {

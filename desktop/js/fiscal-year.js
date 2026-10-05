@@ -223,6 +223,12 @@ class FiscalYearEngine {
               <button class="btn btn-secondary" onclick="window.fiscalYearEngine.setAllActions('stay')" style="font-size: 11.5px; padding: 4px 10px;">
                 ⏸️ Keep All on -${this.currentFY}
               </button>
+              <button class="btn btn-secondary" onclick="window.fiscalYearEngine.promptRemapJob()" style="font-size: 11.5px; padding: 4px 10px; border-color: #a855f7; color: #c084fc;">
+                ✏️ Remap Job #
+              </button>
+              <button class="btn btn-secondary" onclick="window.fiscalYearEngine.repairReportedFYDiscrepancies()" style="font-size: 11.5px; padding: 4px 10px; border-color: #10b981; color: #34d399;" title="Quickly fix Anaconda 042->007, Kalispell 059->008, and Missoula 048-26">
+                ⚡ Quick Fix Reported (042➔007, 059➔008)
+              </button>
             </div>
             <input type="text" id="fy-filter-input" placeholder="Filter crews by job #, foreman, or location..." style="background: var(--bg-secondary, #0f172a); border: 1px solid var(--border-color, #334155); border-radius: 6px; padding: 6px 12px; color: #f8fafc; font-size: 12px; width: 300px; outline: none;" oninput="window.fiscalYearEngine.filterTable(this.value)">
           </div>
@@ -755,6 +761,208 @@ class FiscalYearEngine {
     `;
 
     document.body.appendChild(modal);
+  }
+
+  async promptRemapJob() {
+    const fromJob = prompt('Enter Current Job Number to remap (e.g. 042-27):');
+    if (!fromJob) return;
+    const toJob = prompt(`Enter New Job Number to replace ${fromJob.trim()} (e.g. 007-27):`);
+    if (!toJob) return;
+
+    if (confirm(`Remap ${fromJob.trim()} ➔ ${toJob.trim()} across Job Tracking and Employees?`)) {
+      try {
+        const res = await this.remapJobNumber(fromJob.trim(), toJob.trim());
+        alert(`✅ Remapped successfully!\n• Job Tracking updated: ${res.jtUpdated ? 'Yes' : 'No'}\n• Employees updated: ${res.empsUpdated}`);
+        this.openModal();
+      } catch (err) {
+        alert('⚠️ Remap failed: ' + err.message);
+      }
+    }
+  }
+
+  /**
+   * Remaps an old/incorrect job number to a new job number across Job Tracking,
+   * Employees, and system configs, queuing the necessary mutations for Google Sheets sync.
+   * @param {string} fromJob - e.g. '042-27'
+   * @param {string} toJob - e.g. '007-27'
+   * @param {Object} options - optional overrides (jobName, etc.)
+   */
+  async remapJobNumber(fromJob, toJob, options = {}) {
+    const snap = this.db?.snapshot;
+    if (!snap?.tables) throw new Error('Database snapshot is not loaded.');
+
+    const empTable = snap.tables['employees'] || snap.tables['Employees'];
+    const jtTable = snap.tables['job_tracking'] || snap.tables['Job Tracking'];
+    if (!empTable || !jtTable) throw new Error('Employees or Job Tracking table missing.');
+
+    const fromBase = String(fromJob || '').trim();
+    const toBase = String(toJob || '').trim();
+    if (!fromBase || !toBase || fromBase === toBase) {
+      console.warn(`remapJobNumber: Invalid job numbers (${fromBase} -> ${toBase})`);
+      return { success: false, empsUpdated: 0, jtUpdated: false };
+    }
+
+    let empsUpdated = 0;
+    let jtUpdated = false;
+
+    // 1. Update Job Tracking row
+    const jtJobCol = jtTable.headers.find(h => /^job\s*number$/i.test(h.trim())) || 'Job Number';
+    const jtJobColIdx = jtTable.headers.indexOf(jtJobCol) + 1;
+
+    for (const r of jtTable.rows) {
+      const cur = String(r[jtJobCol] || '').trim();
+      if (cur === fromBase) {
+        const oldVal = cur;
+        r[jtJobCol] = toBase;
+        jtUpdated = true;
+        if (options.jobName && r['Job Name'] !== undefined) {
+          r['Job Name'] = options.jobName;
+        }
+
+        // Queue mutation for Job Tracking
+        if (typeof this.db.addMutation === 'function') {
+          await this.db.addMutation({
+            action: 'UPDATE_CELL',
+            sheetName: jtTable.name || 'Job Tracking',
+            tableKey: 'job_tracking',
+            row: r._rowIdx,
+            col: jtJobColIdx,
+            header: jtJobCol,
+            itemIdentifier: fromBase,
+            oldValue: oldVal,
+            value: toBase
+          });
+        }
+      }
+    }
+
+    // Rebuild rawGrid for Job Tracking
+    if (jtTable.rawGrid && jtTable.headers) {
+      jtTable.rawGrid = [jtTable.headers];
+      jtTable.rows.forEach(r => {
+        jtTable.rawGrid.push(jtTable.headers.map(h => r[h] !== undefined ? r[h] : ''));
+      });
+      jtTable.maxRows = jtTable.rawGrid.length;
+    }
+
+    // 2. Update Employees
+    const empJobCol = empTable.headers.find(h => /^job\s*number$/i.test(h.trim())) || 'Job Number';
+    const empJobColIdx = empTable.headers.indexOf(empJobCol) + 1;
+
+    for (const r of empTable.rows) {
+      const cur = String(r[empJobCol] || '').trim();
+      if (!cur) continue;
+      const base = cur.split('.')[0];
+      const suffixMatch = cur.match(/\.\d+$/);
+      const suffix = suffixMatch ? suffixMatch[0] : '';
+
+      if (base === fromBase) {
+        const newFullJob = `${toBase}${suffix}`;
+        const empName = String(r['Employee Name'] || r['Name'] || '').trim();
+        const oldFullJob = cur;
+
+        r[empJobCol] = newFullJob;
+        empsUpdated++;
+
+        // Queue UPDATE_CELL mutation for this employee
+        if (typeof this.db.addMutation === 'function') {
+          await this.db.addMutation({
+            action: 'UPDATE_CELL',
+            sheetName: empTable.name || 'Employees',
+            tableKey: 'employees',
+            row: r._rowIdx,
+            col: empJobColIdx,
+            header: empJobCol,
+            itemIdentifier: empName,
+            oldValue: oldFullJob,
+            value: newFullJob
+          });
+        }
+      }
+    }
+
+    // Rebuild rawGrid for Employees
+    if (empTable.rawGrid && empTable.headers) {
+      empTable.rawGrid = [empTable.headers];
+      empTable.rows.forEach(r => {
+        empTable.rawGrid.push(empTable.headers.map(h => r[h] !== undefined ? r[h] : ''));
+      });
+      empTable.maxRows = empTable.rawGrid.length;
+    }
+
+    // 3. Update FY_TRANSITION_ALIAS_MAP in configs and localStorage
+    try {
+      const aliasMap = JSON.parse(localStorage.getItem('FY_TRANSITION_ALIAS_MAP') || '{}');
+      for (const [k, v] of Object.entries(aliasMap)) {
+        if (v === fromBase) {
+          aliasMap[k] = toBase;
+        }
+      }
+      aliasMap[fromBase] = toBase;
+      localStorage.setItem('FY_TRANSITION_ALIAS_MAP', JSON.stringify(aliasMap));
+      if (!snap.configs) snap.configs = {};
+      snap.configs['FY_TRANSITION_ALIAS_MAP'] = aliasMap;
+
+      if (typeof this.db.addMutation === 'function') {
+        await this.db.addMutation({
+          action: 'UPDATE_SYSTEM_CONFIG',
+          key: 'FY_TRANSITION_ALIAS_MAP',
+          value: aliasMap,
+          description: `FY Alias Map: Remapped ${fromBase} to ${toBase}`
+        });
+      }
+    } catch (eAlias) {
+      console.warn('Could not update FY alias map:', eAlias);
+    }
+
+    // 4. Persist Local Snapshot to disk / storage
+    if (typeof this.db.setSnapshot === 'function') {
+      await this.db.setSnapshot(snap);
+    } else if (typeof this.db.persistSnapshot === 'function') {
+      await this.db.persistSnapshot(snap);
+    } else if (window.desktopAPI?.saveLocalSnapshot) {
+      await window.desktopAPI.saveLocalSnapshot(snap);
+    }
+
+    // 5. Trigger sheet re-render if active
+    if (window.sheetNavigator) {
+      window.sheetNavigator.renderCurrentSheet();
+    }
+
+    return { success: true, jtUpdated, empsUpdated };
+  }
+
+  /**
+   * Specifically repairs the FY27 transition discrepancies:
+   * - Anaconda: 042-27 ➔ 007-27 (Job Tracking row + Taylor Goff crew)
+   * - Kalispell: 059-27 ➔ 008-27 (Job Tracking row; employees already on 008-27)
+   * - Missoula: confirms 048-26 is active on Job Tracking
+   */
+  async repairReportedFYDiscrepancies() {
+    console.log('🔧 Starting repair of FY discrepancies...');
+    const res1 = await this.remapJobNumber('042-27', '007-27', { jobName: 'Anaconda City Sub Dock' });
+    const res2 = await this.remapJobNumber('059-27', '008-27', { jobName: 'Kalispell Gas Dock' });
+
+    // Clean up 048 in alias map if pointing to 048-27
+    try {
+      const aliasMap = JSON.parse(localStorage.getItem('FY_TRANSITION_ALIAS_MAP') || '{}');
+      if (aliasMap['048-26'] && aliasMap['048-26'] === '048-27') {
+        delete aliasMap['048-26'];
+        localStorage.setItem('FY_TRANSITION_ALIAS_MAP', JSON.stringify(aliasMap));
+        if (this.db?.snapshot?.configs) {
+          this.db.snapshot.configs['FY_TRANSITION_ALIAS_MAP'] = aliasMap;
+        }
+      }
+    } catch (e) {
+      console.warn('Could not clean 048 alias:', e);
+    }
+
+    if (window.sheetNavigator) {
+      window.sheetNavigator.renderCurrentSheet();
+    }
+
+    alert('✅ FY Discrepancies Repaired Successfully!\n\n• Anaconda: 042-27 ➔ 007-27 (Job Tracking & 4 employees)\n• Kalispell: 059-27 ➔ 008-27 (Job Tracking)\n• Missoula: 048-26 confirmed active\n\nYou can now re-run Crew Import cleanly.');
+    return { res1, res2 };
   }
 
   escapeHtml(str) {
