@@ -1298,6 +1298,20 @@ class RubberPpeTrackingEngine {
       await this.db.persistSnapshot(snap);
     }
 
+    // Sync to Trip Planner as a completed task & notify Daily Accomplishments
+    try {
+      await this.recordAssignmentToTripPlanner({
+        empName,
+        sheetKey,
+        itemIdentifier,
+        chosenDate,
+        chosenLoc,
+        targetRow
+      });
+    } catch (err) {
+      console.warn('Trip planner recording note:', err);
+    }
+
     this.closeQuickAssignModal();
 
     // Re-render modal and update toolbar badge
@@ -1309,6 +1323,137 @@ class RubberPpeTrackingEngine {
     // If sheets view is open, refresh view
     if (window.sheetNavigator && typeof window.sheetNavigator.renderCurrentSheet === 'function') {
       window.sheetNavigator.renderCurrentSheet();
+    }
+  }
+
+  /**
+   * Records an assigned PPE item (glove or sleeve) as a completed task in the Trip Planner
+   * so it appears on the Trip Planner schedule and is included in the Daily Accomplishments breakdown.
+   */
+  async recordAssignmentToTripPlanner({ empName, sheetKey, itemIdentifier, chosenDate, chosenLoc, targetRow }) {
+    if (!empName || !sheetKey || !itemIdentifier) return;
+
+    let dateKey = '';
+    if (chosenDate) {
+      const isoMatch = String(chosenDate).match(/^(\d{4})-(\d{2})-(\d{2})/);
+      const usMatch = String(chosenDate).match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+      if (isoMatch) {
+        dateKey = `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+      } else if (usMatch) {
+        dateKey = `${usMatch[3]}-${usMatch[1].padStart(2, '0')}-${usMatch[2].padStart(2, '0')}`;
+      }
+    }
+    if (!dateKey) {
+      const today = new Date();
+      dateKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+    }
+
+    const snap = (this.db && typeof this.db.getSnapshot === 'function')
+      ? this.db.getSnapshot()
+      : (window.localDB ? window.localDB.getSnapshot() : null);
+    const empTable = snap?.tables?.employees;
+    let empJob = '';
+    let empLocation = chosenLoc || 'Helena';
+    if (empTable && empTable.rows) {
+      const empRow = empTable.rows.find(r => String(r['Employee Name'] || '').trim().toLowerCase() === String(empName).trim().toLowerCase());
+      if (empRow) {
+        empJob = String(empRow['Job Number'] || empRow['Job #'] || '').trim();
+        if (!chosenLoc && empRow['Location']) empLocation = empRow['Location'];
+      }
+    }
+
+    const isGlove = sheetKey === 'gloves';
+    const itemSingular = isGlove ? 'Rubber Glove' : 'Rubber Sleeve';
+    const size = targetRow ? String(targetRow['Size'] || '').trim() : '';
+    const classVal = targetRow ? String(targetRow['Class'] || '').trim() : '';
+    const eslId = targetRow ? String(targetRow['ESL ID'] || '').trim() : '';
+
+    let tasks = [];
+    if (window.tripPlanner && typeof window.tripPlanner.loadManualTasks === 'function') {
+      tasks = window.tripPlanner.loadManualTasks() || [];
+    } else if (this.db && typeof this.db.getManualTasks === 'function') {
+      tasks = this.db.getManualTasks() || [];
+    }
+
+    const empClean = String(empName).trim().toLowerCase();
+    const keyword = isGlove ? 'glove' : 'sleeve';
+
+    // Check if an existing pending task for this employee and equipment type is on the board
+    const existingIdx = tasks.findIndex(t => {
+      if (String(t.status || '').toLowerCase() === 'complete') return false;
+      const tEmp = String(t.employee || '').trim().toLowerCase();
+      const tTitle = String(t.title || '').toLowerCase();
+      const tNotes = String(t.notes || '').toLowerCase();
+      const hasEmp = tEmp === empClean || tTitle.includes(empClean) || (Array.isArray(t.assignedEmployees) && t.assignedEmployees.some(e => String(e).trim().toLowerCase() === empClean));
+      if (!hasEmp) return false;
+      return tTitle.includes(keyword) || tNotes.includes(keyword) || tTitle.includes('ppe');
+    });
+
+    const nowIso = new Date().toISOString();
+    const specs = [];
+    if (size) specs.push(`Size ${size}`);
+    if (classVal) specs.push(`Class ${classVal}`);
+    if (eslId && eslId !== '—') specs.push(`ESL: ${eslId}`);
+    const specStr = specs.length > 0 ? ` (${specs.join(', ')})` : '';
+
+    const noteText = `Assigned ${itemSingular} #${itemIdentifier}${specStr} to ${empName}${empJob ? ` on Crew ${empJob}` : ''} at ${empLocation}. (Recorded from Rubber PPE Tracker)`;
+
+    if (existingIdx !== -1) {
+      const t = tasks[existingIdx];
+      t.status = 'Complete';
+      t.completedAt = nowIso;
+      t.dateKey = dateKey;
+      t.date = dateKey;
+      t.title = `Assigned ${itemSingular}: ${empName} (#${itemIdentifier})`;
+      t.notes = t.notes ? `${t.notes}\n\n✅ ${noteText}` : noteText;
+    } else {
+      const newTask = {
+        id: 'mt_ppe_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
+        taskCategory: 'personal_task',
+        title: `Assigned ${itemSingular}: ${empName} (#${itemIdentifier})`,
+        certType: '',
+        crewIds: empJob ? [empJob] : [],
+        crewId: empJob,
+        assignedEmployees: [empName],
+        employee: empName,
+        instructor: 'Cody Bechdol (Self)',
+        assignedTo: 'Myself',
+        dateKey: dateKey,
+        date: dateKey,
+        location: `${empLocation}${empJob ? ` (${empJob})` : ''}`,
+        time: '',
+        priority: 'Normal',
+        notes: noteText,
+        status: 'Complete',
+        createdAt: nowIso,
+        completedAt: nowIso
+      };
+      tasks.push(newTask);
+    }
+
+    if (this.db && typeof this.db.saveManualTasks === 'function') {
+      await this.db.saveManualTasks(tasks);
+    }
+
+    if (window.tripPlanner) {
+      window.tripPlanner.manualTasks = tasks;
+      if (typeof window.tripPlanner.renderPlanner === 'function') {
+        window.tripPlanner.renderPlanner();
+      }
+      if (typeof window.tripPlanner.notifyAccomplishmentsModal === 'function') {
+        window.tripPlanner.notifyAccomplishmentsModal();
+      }
+    }
+
+    if (window.timeBreakdownEngine) {
+      const tbModal = document.getElementById('time-breakdown-modal');
+      if (tbModal && tbModal.style.display !== 'none' && typeof window.timeBreakdownEngine.renderModal === 'function') {
+        window.timeBreakdownEngine.renderModal();
+      }
+    }
+
+    if (typeof window.showToast === 'function') {
+      window.showToast(`✅ Assigned ${itemSingular} #${itemIdentifier} to ${empName} and recorded to Trip Planner & Accomplishments!`, 'success');
     }
   }
 

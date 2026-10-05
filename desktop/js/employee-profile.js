@@ -2490,6 +2490,22 @@ class EmployeeProfileEngine {
       await this.db.persistSnapshot(snap);
     }
 
+    // Sync to Trip Planner as a completed task & notify Daily Accomplishments
+    if (window.ppeTrackingEngine && typeof window.ppeTrackingEngine.recordAssignmentToTripPlanner === 'function') {
+      try {
+        await window.ppeTrackingEngine.recordAssignmentToTripPlanner({
+          empName: displayName,
+          sheetKey: invKey,
+          itemIdentifier: itemIdentifier,
+          chosenDate: chosenDate,
+          chosenLoc: chosenLoc,
+          targetRow: targetRow
+        });
+      } catch (err) {
+        console.warn('Trip planner recording note from profile:', err);
+      }
+    }
+
     if (typeof window.showToast === 'function') {
       window.showToast(`Assigned ${invKey === 'gloves' ? 'Glove' : 'Sleeve'} #${itemIdentifier} to ${displayName}`, 'success');
     }

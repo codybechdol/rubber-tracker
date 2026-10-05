@@ -2243,14 +2243,15 @@ class TripPlannerApp {
       time: String(taskData.time || '').trim(),
       priority: String(taskData.priority || 'Normal').trim(),
       notes: String(taskData.notes || '').trim(),
-      status: 'Pending',
-      createdAt: new Date().toISOString(),
-      completedAt: null
+      status: taskData.status || 'Pending',
+      createdAt: taskData.createdAt || new Date().toISOString(),
+      completedAt: taskData.completedAt || (taskData.status === 'Complete' ? new Date().toISOString() : null)
     };
 
     this.manualTasks.push(newTask);
     this.saveManualTasks(this.manualTasks);
     this.renderPlanner();
+    this.notifyAccomplishmentsModal();
     return newTask;
   }
 

@@ -6263,6 +6263,23 @@ class SheetNavigator {
 
               // Record history event ONCE with fully consistent row
               await this.db.recordItemHistoryEvent(sheetName, tableRow, `Assigned to ${curAssigned}`);
+
+              // If assigning gloves or sleeves, sync to Trip Planner as completed task & Accomplishments
+              if (window.ppeTrackingEngine && typeof window.ppeTrackingEngine.recordAssignmentToTripPlanner === 'function' && (this.currentSheetKey === 'gloves' || this.currentSheetKey === 'sleeves')) {
+                try {
+                  await window.ppeTrackingEngine.recordAssignmentToTripPlanner({
+                    empName: curAssigned,
+                    sheetKey: this.currentSheetKey,
+                    itemIdentifier: itemIdentifier,
+                    chosenDate: chosenDate,
+                    chosenLoc: chosenLoc,
+                    targetRow: tableRow
+                  });
+                } catch (err) {
+                  console.warn('Trip planner recording note from sheet:', err);
+                }
+              }
+
               flashSuccess();
               return;
             }

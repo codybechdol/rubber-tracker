@@ -532,7 +532,8 @@ class TimeBreakdownEngine {
           totalOfficeTasks++;
           const loc = (ot.location && ot.location !== 'Helena Office') ? ` [${ot.location}]` : '';
           const time = ot.time ? ` (${ot.time})` : '';
-          const notes = ot.notes ? ` · ${ot.notes}` : '';
+          const rawNotes = ot.notes ? ot.notes.replace(/\r?\n+/g, ' · ').trim() : '';
+          const notes = rawNotes ? ` · ${rawNotes}` : '';
           lines.push(`     • ${ot.title}${loc}${time}${notes}`);
         });
       }
