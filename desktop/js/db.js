@@ -245,6 +245,29 @@ class LocalDatabase {
     this.listeners = [];
   }
 
+  _invalidateHistoryEngines(tableKey = null) {
+    if (typeof window !== 'undefined') {
+      if (window.itemStatsEngine && typeof window.itemStatsEngine.invalidateCache === 'function') {
+        window.itemStatsEngine.invalidateCache();
+      }
+      if (window.historyIssuesEngine && typeof window.historyIssuesEngine.invalidateCache === 'function') {
+        window.historyIssuesEngine.invalidateCache(tableKey);
+        if (typeof window.historyIssuesEngine.updateTabBadges === 'function') {
+          window.historyIssuesEngine.updateTabBadges();
+        }
+      }
+      if (window.historyNavigator && typeof window.historyNavigator.renderCurrentHistory === 'function') {
+        const activeHistKey = window.historyNavigator.currentSheetKey;
+        if (!tableKey || !activeHistKey || tableKey === activeHistKey || tableKey.replace('_history', '') === activeHistKey.replace('_history', '')) {
+          const historyView = document.getElementById('history-view');
+          if (historyView && historyView.classList.contains('active')) {
+            window.historyNavigator.renderCurrentHistory();
+          }
+        }
+      }
+    }
+  }
+
   async init() {
     // Load snapshot from desktop API or IndexedDB / localStorage
     if (window.desktopAPI) {
@@ -2167,6 +2190,7 @@ class LocalDatabase {
 
     this.schedulePersistSnapshot(this.snapshot, 600);
     this.notify();
+    this._invalidateHistoryEngines(histTableKey);
   }
 
   /**
@@ -2260,6 +2284,7 @@ class LocalDatabase {
       }
     }
 
+    this._invalidateHistoryEngines(tableKey);
     return true;
   }
 
@@ -2278,13 +2303,13 @@ class LocalDatabase {
       if (rowIdx === -1) {
         const obj = matchFnOrRowObj;
         const oDate = String(obj['Date Assigned'] || obj['Date'] || obj['Action Date'] || '').trim();
-        const oItem = String(obj['Item #'] || obj['Item'] || obj['Serial #'] || obj['Glove'] || obj['Sleeve'] || obj['Blanket'] || '').trim();
+        const oItem = String(obj['Item #'] || obj['Item'] || obj['Serial #'] || obj['Glove'] || obj['Sleeve'] || obj['Blanket'] || '').replace(/^#/, '').trim();
         const oAssigned = String(obj['Assigned To'] || obj['Employee Name'] || obj['Employee'] || '').trim();
         const oNotes = String(obj['Notes'] || obj['Note'] || '').trim();
 
         rowIdx = table.rows.findIndex(r => {
           const rDate = String(r['Date Assigned'] || r['Date'] || r['Action Date'] || '').trim();
-          const rItem = String(r['Item #'] || r['Item'] || r['Serial #'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || '').trim();
+          const rItem = String(r['Item #'] || r['Item'] || r['Serial #'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || '').replace(/^#/, '').trim();
           const rAssigned = String(r['Assigned To'] || r['Employee Name'] || r['Employee'] || '').trim();
           const rNotes = String(r['Notes'] || r['Note'] || '').trim();
           return rDate === oDate && rItem.toLowerCase() === oItem.toLowerCase() && (oAssigned ? rAssigned.toLowerCase() === oAssigned.toLowerCase() : true) && (oNotes ? rNotes === oNotes : true);
@@ -2311,14 +2336,14 @@ class LocalDatabase {
       if (dateColIdx === -1) dateColIdx = 0;
 
       const oDate = String(removedRow['Date Assigned'] || removedRow['Date'] || '').trim();
-      const oItem = String(removedRow['Item #'] || removedRow['Item'] || removedRow['Serial #'] || '').trim();
+      const oItem = String(removedRow['Item #'] || removedRow['Item'] || removedRow['Serial #'] || '').replace(/^#/, '').trim();
       const oAssigned = String(removedRow['Assigned To'] || '').trim();
 
       let gridIdx = -1;
       if (removedRow._rowIdx && removedRow._rowIdx >= 2 && removedRow._rowIdx <= table.rawGrid.length) {
         const candidateRow = table.rawGrid[removedRow._rowIdx - 1];
         if (candidateRow) {
-          const cItem = String(candidateRow[itemColIdx] || '').trim();
+          const cItem = String(candidateRow[itemColIdx] || '').replace(/^#/, '').trim();
           const cDate = String(candidateRow[dateColIdx] || '').trim();
           if ((!oItem || cItem.toLowerCase() === oItem.toLowerCase()) && (!oDate || cDate === oDate)) {
             gridIdx = removedRow._rowIdx - 1;
@@ -2330,7 +2355,7 @@ class LocalDatabase {
         gridIdx = table.rawGrid.findIndex((gr, idx) => {
           if (idx === 0) return false;
           const grDate = String(gr[dateColIdx] || gr[0] || '').trim();
-          const grItem = String(gr[itemColIdx] || gr[1] || '').trim();
+          const grItem = String(gr[itemColIdx] || gr[1] || '').replace(/^#/, '').trim();
           const grAssigned = assignedColIdx !== -1 ? String(gr[assignedColIdx] || '').trim() : String(gr[5] || gr[4] || gr[3] || '').trim();
           return (oDate ? grDate === oDate : true) && (oItem ? grItem.toLowerCase() === oItem.toLowerCase() : true) && (oAssigned ? grAssigned.toLowerCase() === oAssigned.toLowerCase() : true);
         });
@@ -2350,6 +2375,7 @@ class LocalDatabase {
       rowData: removedRow
     });
 
+    this._invalidateHistoryEngines(historyTableKey);
     return true;
   }
 
@@ -2540,6 +2566,7 @@ class LocalDatabase {
 
     this.schedulePersistSnapshot(this.snapshot, 600);
     this.notify();
+    this._invalidateHistoryEngines(historyTableKey);
     return true;
   }
 
@@ -3140,6 +3167,7 @@ class LocalDatabase {
       }
 
       await this.saveTable(tableKey, table);
+      this._invalidateHistoryEngines(tableKey);
     }
 
     return { removedCount, totalRemaining: table.rows.length, tableKey };
