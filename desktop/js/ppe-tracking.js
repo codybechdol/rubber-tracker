@@ -12,18 +12,24 @@
 class RubberPpeTrackingEngine {
   constructor(db) {
     this.db = db || window.localDB;
-    this.currentFilter = 'all_missing'; // 'all_missing' | 'missing_gloves' | 'missing_sleeves' | 'missing_both' | 'fully_equipped' | 'all_tracked'
+    this.currentFilter = 'all_missing'; // 'all_missing' | 'missing_gloves' | 'missing_sleeves' | 'missing_both' | 'fully_equipped' | 'excluded' | 'all_tracked'
     this.classificationFilter = 'all'; // 'all' | 'sup' | 'gf' | 'f' | 'jry' | 'ap1_3' | 'ap4_7'
     this.locationFilter = 'all';
     this.searchQuery = '';
     this.currentAuditData = null;
     this.activeAssignTarget = null; // { employeeName, itemType: 'gloves' | 'sleeves', preferredSize, location }
+    this.excludedEmployeeMap = this.loadExcludedEmployeeMap();
   }
 
   init() {
     // Escape key handling for PPE modals
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
+        const exclusionsModal = document.getElementById('ppe-exclusions-modal');
+        if (exclusionsModal && exclusionsModal.classList.contains('active')) {
+          this.closeExclusionsModal();
+          return;
+        }
         const quickAssignModal = document.getElementById('ppe-quick-assign-modal');
         if (quickAssignModal && quickAssignModal.classList.contains('active')) {
           this.closeQuickAssignModal();
@@ -40,6 +46,257 @@ class RubberPpeTrackingEngine {
     setTimeout(() => {
       this.updateToolbarBadge();
     }, 400);
+  }
+
+  /**
+   * Loads excluded employees mapping (normalized name -> original display name) from localStorage
+   */
+  loadExcludedEmployeeMap() {
+    const map = new Map();
+    try {
+      const raw = localStorage.getItem('sa_ppe_excluded_employees');
+      if (raw) {
+        const arr = JSON.parse(raw);
+        if (Array.isArray(arr)) {
+          arr.forEach(name => {
+            const clean = String(name || '').trim();
+            if (clean) {
+              map.set(this.normalizeName(clean), clean);
+            }
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('Error reading excluded PPE employees config:', e);
+    }
+    return map;
+  }
+
+  /**
+   * Persists excluded employee list to localStorage
+   */
+  saveExcludedEmployeeMap() {
+    try {
+      const list = Array.from(this.excludedEmployeeMap.values());
+      localStorage.setItem('sa_ppe_excluded_employees', JSON.stringify(list));
+    } catch (e) {
+      console.error('Error saving excluded PPE employees config:', e);
+    }
+  }
+
+  /**
+   * Checks whether an employee is currently excluded from Rubber PPE tracking
+   */
+  isEmployeeExcluded(empName) {
+    if (!empName) return false;
+    const norm = this.normalizeName(empName);
+    if (!norm) return false;
+    if (this.excludedEmployeeMap.has(norm)) return true;
+    for (const key of this.excludedEmployeeMap.keys()) {
+      if (this.isNameMatch(key, norm)) return true;
+    }
+    return false;
+  }
+
+  /**
+   * Adds or removes an employee from Rubber PPE tracking exclusions
+   */
+  setEmployeeExcluded(empName, isExcluded) {
+    if (!empName) return;
+    const clean = String(empName).trim();
+    const norm = this.normalizeName(clean);
+    if (!norm) return;
+
+    if (isExcluded) {
+      this.excludedEmployeeMap.set(norm, clean);
+    } else {
+      this.excludedEmployeeMap.delete(norm);
+      for (const key of this.excludedEmployeeMap.keys()) {
+        if (this.isNameMatch(key, norm)) {
+          this.excludedEmployeeMap.delete(key);
+        }
+      }
+    }
+
+    this.saveExcludedEmployeeMap();
+    this.compileAuditData();
+    this.updateToolbarBadge();
+
+    // Re-render main modal if active
+    const modal = document.getElementById('rubber-ppe-tracking-modal');
+    const body = document.getElementById('rubber-ppe-modal-body');
+    if (modal && modal.classList.contains('active') && body) {
+      this.renderModalContent(body);
+    }
+
+    // Re-render exclusions modal if active
+    const exclModal = document.getElementById('ppe-exclusions-modal');
+    const exclBody = document.getElementById('ppe-exclusions-modal-body');
+    if (exclModal && exclModal.classList.contains('active') && exclBody) {
+      this.renderExclusionsModalContent(exclBody);
+    }
+
+    // Refresh crew cards in sheets view if available
+    if (window.sheetNavigator && typeof window.sheetNavigator.renderCurrentSheet === 'function') {
+      window.sheetNavigator.renderCurrentSheet();
+    }
+
+    if (typeof window.showToast === 'function') {
+      if (isExcluded) {
+        window.showToast(`🚫 Excluded "${clean}" from Rubber PPE compliance tracking`, 'info');
+      } else {
+        window.showToast(`✅ Restored "${clean}" to Rubber PPE compliance tracking`, 'success');
+      }
+    }
+  }
+
+  /**
+   * Toggles exclusion status for an employee
+   */
+  toggleEmployeeExcluded(empName) {
+    const isCurrently = this.isEmployeeExcluded(empName);
+    this.setEmployeeExcluded(empName, !isCurrently);
+  }
+
+  /**
+   * Prompts user for confirmation before excluding an employee
+   */
+  promptExcludeEmployee(empName) {
+    if (!empName) return;
+    const confirmed = confirm(
+      `Exclude "${empName}" from Rubber PPE compliance tracking?\n\n` +
+      `• They will no longer be counted as missing gloves or sleeves.\n` +
+      `• Alert badges will be hidden on crew cards.\n` +
+      `• You can re-include them at any time from the Excluded tab or Manage Exclusions dialog.`
+    );
+    if (confirmed) {
+      this.setEmployeeExcluded(empName, true);
+    }
+  }
+
+  /**
+   * Clears all exclusions
+   */
+  clearAllExclusions() {
+    this.excludedEmployeeMap.clear();
+    this.saveExcludedEmployeeMap();
+    this.compileAuditData();
+    this.updateToolbarBadge();
+
+    const modal = document.getElementById('rubber-ppe-tracking-modal');
+    const body = document.getElementById('rubber-ppe-modal-body');
+    if (modal && modal.classList.contains('active') && body) {
+      this.renderModalContent(body);
+    }
+
+    const exclModal = document.getElementById('ppe-exclusions-modal');
+    const exclBody = document.getElementById('ppe-exclusions-modal-body');
+    if (exclModal && exclModal.classList.contains('active') && exclBody) {
+      this.renderExclusionsModalContent(exclBody);
+    }
+
+    if (window.sheetNavigator && typeof window.sheetNavigator.renderCurrentSheet === 'function') {
+      window.sheetNavigator.renderCurrentSheet();
+    }
+
+    if (typeof window.showToast === 'function') {
+      window.showToast('✅ Cleared all PPE tracking exclusions', 'success');
+    }
+  }
+
+  promptClearAllExclusions() {
+    if (this.excludedEmployeeMap.size === 0) {
+      alert('There are no excluded employees to clear.');
+      return;
+    }
+    if (confirm(`Are you sure you want to remove all ${this.excludedEmployeeMap.size} exclusion(s) and restore all employees to Rubber PPE tracking?`)) {
+      this.clearAllExclusions();
+    }
+  }
+
+  /**
+   * Excludes all active employees of a specific classification tier (e.g., 'sup')
+   */
+  excludeEmployeesByTier(tierKey) {
+    const audit = this.compileAuditData();
+    const records = audit?.records || [];
+    let count = 0;
+    records.forEach(r => {
+      if (r.classMeta && r.classMeta.tier === tierKey && !r.isExcluded) {
+        this.excludedEmployeeMap.set(this.normalizeName(r.name), r.name);
+        count++;
+      }
+    });
+
+    if (count === 0) {
+      if (typeof window.showToast === 'function') {
+        window.showToast(`No new employees found matching classification ${tierKey.toUpperCase()}`, 'info');
+      }
+      return;
+    }
+
+    this.saveExcludedEmployeeMap();
+    this.compileAuditData();
+    this.updateToolbarBadge();
+
+    const modal = document.getElementById('rubber-ppe-tracking-modal');
+    const body = document.getElementById('rubber-ppe-modal-body');
+    if (modal && modal.classList.contains('active') && body) {
+      this.renderModalContent(body);
+    }
+
+    const exclModal = document.getElementById('ppe-exclusions-modal');
+    const exclBody = document.getElementById('ppe-exclusions-modal-body');
+    if (exclModal && exclModal.classList.contains('active') && exclBody) {
+      this.renderExclusionsModalContent(exclBody);
+    }
+
+    if (typeof window.showToast === 'function') {
+      window.showToast(`🚫 Excluded ${count} employee(s) in ${tierKey.toUpperCase()} from Rubber PPE tracking`, 'success');
+    }
+  }
+
+  /**
+   * Excludes all active employees on a specific crew prefix (e.g., '005')
+   */
+  excludeEmployeesByJobPrefix(prefix) {
+    const audit = this.compileAuditData();
+    const records = audit?.records || [];
+    let count = 0;
+    const pfx = String(prefix).trim().toLowerCase();
+    records.forEach(r => {
+      if (String(r.jobNumber).toLowerCase().startsWith(pfx) && !r.isExcluded) {
+        this.excludedEmployeeMap.set(this.normalizeName(r.name), r.name);
+        count++;
+      }
+    });
+
+    if (count === 0) {
+      if (typeof window.showToast === 'function') {
+        window.showToast(`No active employees found matching Job Prefix ${prefix}`, 'info');
+      }
+      return;
+    }
+
+    this.saveExcludedEmployeeMap();
+    this.compileAuditData();
+    this.updateToolbarBadge();
+
+    const modal = document.getElementById('rubber-ppe-tracking-modal');
+    const body = document.getElementById('rubber-ppe-modal-body');
+    if (modal && modal.classList.contains('active') && body) {
+      this.renderModalContent(body);
+    }
+
+    const exclModal = document.getElementById('ppe-exclusions-modal');
+    const exclBody = document.getElementById('ppe-exclusions-modal-body');
+    if (exclModal && exclModal.classList.contains('active') && exclBody) {
+      this.renderExclusionsModalContent(exclBody);
+    }
+
+    if (typeof window.showToast === 'function') {
+      window.showToast(`🚫 Excluded ${count} employee(s) on crew ${prefix} from Rubber PPE tracking`, 'success');
+    }
   }
 
   /**
@@ -272,6 +529,7 @@ class RubberPpeTrackingEngine {
     let totalMissingSleeves = 0;
     let totalMissingBoth = 0;
     let totalFullyEquipped = 0;
+    let totalExcluded = 0;
     let totalAp1_3 = 0;
     let totalAp4_7 = 0;
     let totalSupGfF = 0;
@@ -304,13 +562,9 @@ class RubberPpeTrackingEngine {
       const classMeta = this.parseTrackedClassification(rawCls);
       if (!classMeta) continue; // Only track SUP, GF, F, JRY, and AP 1-7
 
-      totalTracked++;
-      if (locClean && locClean !== '—') locationSet.add(locClean);
+      const isExcluded = this.isEmployeeExcluded(name);
 
-      if (classMeta.tier === 'ap1_3') totalAp1_3++;
-      else if (classMeta.tier === 'ap4_7') totalAp4_7++;
-      else if (classMeta.tier === 'jry') totalJry++;
-      else totalSupGfF++;
+      if (locClean && locClean !== '—') locationSet.add(locClean);
 
       const altNames = String(emp['Alternate Names'] || '').trim();
       const jobNumber = String(emp['Job Number'] || emp['Job #'] || emp['Crew'] || '—').trim();
@@ -336,11 +590,21 @@ class RubberPpeTrackingEngine {
       const isMissingAny = missingGloves || missingSleeves;
       const isFullyEquipped = !isMissingAny;
 
-      if (isMissingAny) totalMissingAny++;
-      if (missingGloves) totalMissingGloves++;
-      if (missingSleeves) totalMissingSleeves++;
-      if (isMissingBoth) totalMissingBoth++;
-      if (isFullyEquipped) totalFullyEquipped++;
+      if (isExcluded) {
+        totalExcluded++;
+      } else {
+        totalTracked++;
+        if (classMeta.tier === 'ap1_3') totalAp1_3++;
+        else if (classMeta.tier === 'ap4_7') totalAp4_7++;
+        else if (classMeta.tier === 'jry') totalJry++;
+        else totalSupGfF++;
+
+        if (isMissingAny) totalMissingAny++;
+        if (missingGloves) totalMissingGloves++;
+        if (missingSleeves) totalMissingSleeves++;
+        if (isMissingBoth) totalMissingBoth++;
+        if (isFullyEquipped) totalFullyEquipped++;
+      }
 
       records.push({
         name,
@@ -363,12 +627,16 @@ class RubberPpeTrackingEngine {
         isMissingBoth,
         isMissingAny,
         isFullyEquipped,
+        isExcluded,
         empRow: emp
       });
     }
 
-    // Sort: Missing first, then by classification tier (Foreman/Sup -> AP 4-7 -> AP 1-3), then by name
+    // Sort: Non-excluded Missing first, then non-excluded equipped, then excluded, then by tier and name
     records.sort((a, b) => {
+      if (a.isExcluded !== b.isExcluded) {
+        return a.isExcluded ? 1 : -1;
+      }
       if (a.isMissingAny !== b.isMissingAny) {
         return a.isMissingAny ? -1 : 1;
       }
@@ -391,6 +659,8 @@ class RubberPpeTrackingEngine {
         totalMissingSleeves,
         totalMissingBoth,
         totalFullyEquipped,
+        totalExcluded,
+        totalAllPersonnel: records.length,
         totalAp1_3,
         totalAp4_7,
         totalSupGfF,
@@ -411,6 +681,7 @@ class RubberPpeTrackingEngine {
 
     const audit = this.compileAuditData();
     const missingCount = audit?.summary?.totalMissingAny || 0;
+    const exclCount = audit?.summary?.totalExcluded || 0;
 
     if (badge) {
       badge.textContent = missingCount;
@@ -425,7 +696,8 @@ class RubberPpeTrackingEngine {
       }
     }
 
-    btn.title = `Rubber PPE Tracker: ${missingCount} employee${missingCount === 1 ? '' : 's'} in SUP, GF, F, JRY, AP 1-7 missing required rubber PPE`;
+    const exclNote = exclCount > 0 ? ` (${exclCount} excluded)` : '';
+    btn.title = `Rubber PPE Tracker: ${missingCount} employee${missingCount === 1 ? '' : 's'} in SUP, GF, F, JRY, AP 1-7 missing required rubber PPE${exclNote}`;
   }
 
   /**
@@ -443,6 +715,9 @@ class RubberPpeTrackingEngine {
 
     const rec = (this.currentAuditData?.records || []).find(r => this.isNameMatch(r.name, empName));
     if (!rec) return '';
+
+    // If excluded from PPE tracking, don't show any missing alerts
+    if (rec.isExcluded) return '';
 
     if (rec.isMissingBoth) {
       return `
@@ -547,11 +822,12 @@ class RubberPpeTrackingEngine {
     // Filter records according to user controls
     const filteredRecords = records.filter(rec => {
       // 1. Primary Filter Tab
-      if (this.currentFilter === 'all_missing' && !rec.isMissingAny) return false;
-      if (this.currentFilter === 'missing_gloves' && !rec.missingGloves) return false;
-      if (this.currentFilter === 'missing_sleeves' && !rec.missingSleeves) return false;
-      if (this.currentFilter === 'missing_both' && !rec.isMissingBoth) return false;
-      if (this.currentFilter === 'fully_equipped' && !rec.isFullyEquipped) return false;
+      if (this.currentFilter === 'all_missing' && (!rec.isMissingAny || rec.isExcluded)) return false;
+      if (this.currentFilter === 'missing_gloves' && (!rec.missingGloves || rec.isExcluded)) return false;
+      if (this.currentFilter === 'missing_sleeves' && (!rec.missingSleeves || rec.isExcluded)) return false;
+      if (this.currentFilter === 'missing_both' && (!rec.isMissingBoth || rec.isExcluded)) return false;
+      if (this.currentFilter === 'fully_equipped' && (!rec.isFullyEquipped || rec.isExcluded)) return false;
+      if (this.currentFilter === 'excluded' && !rec.isExcluded) return false;
 
       // 2. Classification Filter
       if (this.classificationFilter !== 'all') {
@@ -606,7 +882,10 @@ class RubberPpeTrackingEngine {
               </div>
             </div>
           </div>
-          <div style="display: flex; gap: 8px; align-items: center;">
+          <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+            <button class="btn btn-secondary" onclick="window.ppeTrackingEngine.openExclusionsDialog()" style="font-size: 12px; font-weight: 600; padding: 6px 12px; border-color: rgba(148, 163, 184, 0.4); color: #cbd5e1; display: flex; align-items: center; gap: 6px;" title="Manage employees excluded from PPE tracking">
+              <span>🚫</span> Manage Exclusions ${summary.totalExcluded > 0 ? `(${summary.totalExcluded})` : ''}
+            </button>
             <button class="btn btn-secondary" onclick="window.ppeTrackingEngine.exportToCsv()" style="font-size: 12px; font-weight: 600; padding: 6px 12px; border-color: rgba(59, 130, 246, 0.4); color: #93c5fd; display: flex; align-items: center; gap: 6px;" title="Export current filtered list to CSV">
               <span>📥</span> Export CSV
             </button>
@@ -674,6 +953,17 @@ class RubberPpeTrackingEngine {
             <div style="font-size: 11px; color: #34d399; margin-top: 4px;">100% Compliant</div>
           </div>
 
+          <div class="ppe-stat-card ${this.currentFilter === 'excluded' ? 'active-stat' : ''}"
+               onclick="window.ppeTrackingEngine.setFilter('excluded')"
+               style="background: ${this.currentFilter === 'excluded' ? 'rgba(148, 163, 184, 0.22)' : 'rgba(148, 163, 184, 0.08)'}; border: 1px solid ${this.currentFilter === 'excluded' ? '#94a3b8' : 'rgba(148, 163, 184, 0.3)'}; border-radius: 8px; padding: 10px 14px; cursor: pointer; transition: all 0.15s ease;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+              <span style="font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px;">Excluded</span>
+              <span style="font-size: 16px;">🚫</span>
+            </div>
+            <div style="font-size: 24px; font-weight: 800; color: #cbd5e1; line-height: 1;">${summary.totalExcluded}</div>
+            <div style="font-size: 11px; color: #94a3b8; margin-top: 4px;">Exempt Personnel</div>
+          </div>
+
           <div class="ppe-stat-card ${this.currentFilter === 'all_tracked' ? 'active-stat' : ''}"
                onclick="window.ppeTrackingEngine.setFilter('all_tracked')"
                style="background: ${this.currentFilter === 'all_tracked' ? 'rgba(59, 130, 246, 0.22)' : 'rgba(59, 130, 246, 0.08)'}; border: 1px solid ${this.currentFilter === 'all_tracked' ? '#3b82f6' : 'rgba(59, 130, 246, 0.3)'}; border-radius: 8px; padding: 10px 14px; cursor: pointer; transition: all 0.15s ease;">
@@ -682,7 +972,7 @@ class RubberPpeTrackingEngine {
               <span style="font-size: 16px;">👥</span>
             </div>
             <div style="font-size: 24px; font-weight: 800; color: #bfdbfe; line-height: 1;">${summary.totalTracked}</div>
-            <div style="font-size: 11px; color: #93c5fd; margin-top: 4px;">Active Personnel</div>
+            <div style="font-size: 11px; color: #93c5fd; margin-top: 4px;">Active Personnel${summary.totalExcluded > 0 ? ` (${summary.totalExcluded} Excluded)` : ''}</div>
           </div>
 
         </div>
@@ -707,8 +997,11 @@ class RubberPpeTrackingEngine {
             <button class="filter-pill ${this.currentFilter === 'fully_equipped' ? 'active' : ''}" onclick="window.ppeTrackingEngine.setFilter('fully_equipped')">
               ✅ Equipped (${summary.totalFullyEquipped})
             </button>
+            <button class="filter-pill ${this.currentFilter === 'excluded' ? 'active' : ''}" onclick="window.ppeTrackingEngine.setFilter('excluded')" style="${summary.totalExcluded > 0 ? 'border-color: rgba(148, 163, 184, 0.45); color: #cbd5e1;' : ''}">
+              🚫 Excluded (${summary.totalExcluded})
+            </button>
             <button class="filter-pill ${this.currentFilter === 'all_tracked' ? 'active' : ''}" onclick="window.ppeTrackingEngine.setFilter('all_tracked')">
-              All (${summary.totalTracked})
+              All (${records.length})
             </button>
           </div>
 
@@ -785,12 +1078,16 @@ class RubberPpeTrackingEngine {
                     <td colspan="8" style="padding: 40px 20px; text-align: center; color: var(--text-muted);">
                       <div style="font-size: 32px; margin-bottom: 8px;">🎉</div>
                       <div style="font-size: 15px; font-weight: 700; color: #f8fafc; margin-bottom: 4px;">
-                        ${this.currentFilter === 'all_missing' || this.currentFilter === 'missing_gloves' || this.currentFilter === 'missing_sleeves' ? 'No Missing Equipment!' : 'No Employees Match the Current Filters'}
+                        ${this.currentFilter === 'excluded'
+                          ? 'No Excluded Employees'
+                          : (this.currentFilter === 'all_missing' || this.currentFilter === 'missing_gloves' || this.currentFilter === 'missing_sleeves' ? 'No Missing Equipment!' : 'No Employees Match the Current Filters')}
                       </div>
-                      <div style="font-size: 12.5px; color: #94a3b8; max-width: 460px; margin: 0 auto;">
-                        ${this.currentFilter === 'all_missing' 
-                          ? 'All active employees in the selected classifications are fully equipped with their required rubber gloves and sleeves.' 
-                          : 'Try clearing your search query or selecting a different filter above.'}
+                      <div style="font-size: 12.5px; color: #94a3b8; max-width: 480px; margin: 0 auto;">
+                        ${this.currentFilter === 'excluded'
+                          ? 'No employees are currently excluded from Rubber PPE compliance tracking. Click "🚫 Exclude" on any employee row or "Manage Exclusions" above to exempt personnel.'
+                          : (this.currentFilter === 'all_missing' 
+                            ? 'All active employees in the selected classifications are fully equipped with their required rubber gloves and sleeves.' 
+                            : 'Try clearing your search query or selecting a different filter above.')}
                       </div>
                     </td>
                   </tr>
@@ -919,7 +1216,13 @@ class RubberPpeTrackingEngine {
 
     // Overall status pill
     let overallBadge = '';
-    if (r.isMissingBoth) {
+    if (r.isExcluded) {
+      overallBadge = `
+        <span class="badge" style="background: rgba(148, 163, 184, 0.18); color: #cbd5e1; border: 1px dashed rgba(148, 163, 184, 0.45); font-weight: 700; font-size: 11px; padding: 3px 8px; border-radius: 4px;" title="Exempt / Excluded from Rubber PPE compliance tracking">
+          🚫 Excluded
+        </span>
+      `;
+    } else if (r.isMissingBoth) {
       overallBadge = `
         <span class="badge" style="background: rgba(239, 68, 68, 0.2); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.45); font-weight: 700; font-size: 11px; padding: 3px 8px; border-radius: 4px;">
           🚨 Needs Both
@@ -946,7 +1249,7 @@ class RubberPpeTrackingEngine {
     }
 
     return `
-      <tr style="background: ${bg}; border-bottom: 1px solid rgba(255,255,255,0.05); transition: background 0.12s ease;"
+      <tr style="background: ${bg}; border-bottom: 1px solid rgba(255,255,255,0.05); transition: background 0.12s ease; ${r.isExcluded ? 'opacity: 0.85;' : ''}"
           onmouseover="this.style.background='rgba(255,255,255,0.04)';"
           onmouseout="this.style.background='${bg}';">
         
@@ -1019,22 +1322,37 @@ class RubberPpeTrackingEngine {
                     title="View complete employee equipment profile">
               👤 Dossier
             </button>
-            ${r.missingGloves ? `
+            ${r.isExcluded ? `
               <button class="btn btn-xs" 
-                      onclick="window.ppeTrackingEngine.promptQuickAssign('${this.escapeJs(r.name)}', 'gloves', '${this.escapeJs(r.gloveSize)}', '${this.escapeJs(r.location)}')"
-                      style="background: #2563eb; color: #fff; font-size: 11px; padding: 3px 8px; border-radius: 4px; border: none; cursor: pointer;"
-                      title="Quick assign available rubber gloves">
-                + Glove
+                      onclick="window.ppeTrackingEngine.setEmployeeExcluded('${this.escapeJs(r.name)}', false)"
+                      style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); color: #6ee7b7; font-size: 11px; padding: 3px 8px; border-radius: 4px; cursor: pointer; display: inline-flex; align-items: center; gap: 3px;"
+                      title="Include ${this.escapeHtml(r.name)} back in Rubber PPE compliance tracking">
+                <span>↩</span> Include
               </button>
-            ` : ''}
-            ${r.missingSleeves ? `
-              <button class="btn btn-xs" 
-                      onclick="window.ppeTrackingEngine.promptQuickAssign('${this.escapeJs(r.name)}', 'sleeves', '${this.escapeJs(r.sleeveSize)}', '${this.escapeJs(r.location)}')"
-                      style="background: #7c3aed; color: #fff; font-size: 11px; padding: 3px 8px; border-radius: 4px; border: none; cursor: pointer;"
-                      title="Quick assign available rubber sleeves">
-                + Sleeve
+            ` : `
+              ${r.missingGloves ? `
+                <button class="btn btn-xs" 
+                        onclick="window.ppeTrackingEngine.promptQuickAssign('${this.escapeJs(r.name)}', 'gloves', '${this.escapeJs(r.gloveSize)}', '${this.escapeJs(r.location)}')"
+                        style="background: #2563eb; color: #fff; font-size: 11px; padding: 3px 8px; border-radius: 4px; border: none; cursor: pointer;"
+                        title="Quick assign available rubber gloves">
+                  + Glove
+                </button>
+              ` : ''}
+              ${r.missingSleeves ? `
+                <button class="btn btn-xs" 
+                        onclick="window.ppeTrackingEngine.promptQuickAssign('${this.escapeJs(r.name)}', 'sleeves', '${this.escapeJs(r.sleeveSize)}', '${this.escapeJs(r.location)}')"
+                        style="background: #7c3aed; color: #fff; font-size: 11px; padding: 3px 8px; border-radius: 4px; border: none; cursor: pointer;"
+                        title="Quick assign available rubber sleeves">
+                  + Sleeve
+                </button>
+              ` : ''}
+              <button class="btn btn-xs btn-secondary" 
+                      onclick="window.ppeTrackingEngine.promptExcludeEmployee('${this.escapeJs(r.name)}')"
+                      style="font-size: 11px; padding: 3px 7px; color: #94a3b8; border-color: rgba(148, 163, 184, 0.35); cursor: pointer;"
+                      title="Exclude ${this.escapeHtml(r.name)} from Rubber PPE compliance tracking">
+                🚫 Exclude
               </button>
-            ` : ''}
+            `}
           </div>
         </td>
 
@@ -1460,6 +1778,9 @@ class RubberPpeTrackingEngine {
   /**
    * Generates and downloads a CSV of the tracked equipment audit
    */
+  /**
+   * Generates and downloads a CSV of the tracked equipment audit
+   */
   exportToCsv() {
     const audit = this.compileAuditData();
     const records = audit?.records || [];
@@ -1470,6 +1791,7 @@ class RubberPpeTrackingEngine {
       'Requirement Rule',
       'Job Number',
       'Location',
+      'Excluded from Tracking',
       'Rubber Gloves Status',
       'Assigned Glove #',
       'Preferred Glove Size',
@@ -1482,6 +1804,7 @@ class RubberPpeTrackingEngine {
     const csvRows = [headers.join(',')];
 
     records.forEach(r => {
+      const isExcl = r.isExcluded ? 'Yes' : 'No';
       const gloveStatus = r.hasGloves ? 'Assigned' : 'Missing';
       const gloveItems = r.assignedGloves.map(g => `#${g.itemNum} (${g.size})`).join('; ') || 'None';
 
@@ -1492,7 +1815,8 @@ class RubberPpeTrackingEngine {
       const sleeveItems = r.assignedSleeves.map(s => `#${s.itemNum} (${s.size})`).join('; ') || (r.classMeta.needsSleeves ? 'None' : 'N/A');
 
       let overall = 'Fully Equipped';
-      if (r.isMissingBoth) overall = 'Missing Both Gloves & Sleeves';
+      if (r.isExcluded) overall = 'Excluded (Exempt)';
+      else if (r.isMissingBoth) overall = 'Missing Both Gloves & Sleeves';
       else if (r.missingGloves) overall = 'Missing Gloves';
       else if (r.missingSleeves) overall = 'Missing Sleeves';
 
@@ -1502,6 +1826,7 @@ class RubberPpeTrackingEngine {
         `"${String(r.classMeta.ruleSummary).replace(/"/g, '""')}"`,
         `"${String(r.jobNumber).replace(/"/g, '""')}"`,
         `"${String(r.location).replace(/"/g, '""')}"`,
+        `"${isExcl}"`,
         `"${gloveStatus}"`,
         `"${gloveItems.replace(/"/g, '""')}"`,
         `"${String(r.gloveSize).replace(/"/g, '""')}"`,
@@ -1521,6 +1846,180 @@ class RubberPpeTrackingEngine {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  }
+
+  /**
+   * Opens the Manage Exclusions modal
+   */
+  openExclusionsDialog() {
+    const modal = document.getElementById('ppe-exclusions-modal');
+    const body = document.getElementById('ppe-exclusions-modal-body');
+    if (!modal || !body) return;
+
+    this.renderExclusionsModalContent(body);
+    modal.classList.add('active');
+  }
+
+  /**
+   * Closes the Manage Exclusions modal
+   */
+  closeExclusionsModal() {
+    const modal = document.getElementById('ppe-exclusions-modal');
+    if (modal) modal.classList.remove('active');
+  }
+
+  /**
+   * Renders the Manage Exclusions modal content
+   */
+  renderExclusionsModalContent(container) {
+    if (!container) return;
+    const audit = this.compileAuditData();
+    const records = audit?.records || [];
+
+    const snap = (this.db && typeof this.db.getSnapshot === 'function')
+      ? this.db.getSnapshot()
+      : (window.localDB ? window.localDB.getSnapshot() : null);
+    const empTable = snap?.tables?.employees;
+    const allEmpRows = empTable?.rows || [];
+
+    const availableToAdd = [];
+    allEmpRows.forEach(emp => {
+      const name = String(emp['Employee Name'] || emp['Name'] || '').trim();
+      if (!name) return;
+      const loc = String(emp['Location'] || '').toLowerCase();
+      if (loc === 'previous employee' || loc.includes('previous')) return;
+      const norm = this.normalizeName(name);
+      if (norm === 'lost' || norm === 'in testing' || norm.includes('system placeholder')) return;
+      if (!this.isEmployeeExcluded(name)) {
+        availableToAdd.push({
+          name,
+          classification: String(emp['Job Classification'] || emp['Classification'] || '—').trim(),
+          job: String(emp['Job Number'] || emp['Job #'] || '—').trim(),
+          location: String(emp['Location'] || 'Helena').trim()
+        });
+      }
+    });
+
+    availableToAdd.sort((a, b) => a.name.localeCompare(b.name));
+
+    container.innerHTML = `
+      <div style="display: flex; flex-direction: column; gap: 14px;">
+        <!-- Explanation Info Banner -->
+        <div style="background: rgba(148, 163, 184, 0.08); border: 1px solid rgba(148, 163, 184, 0.25); border-left: 4px solid #94a3b8; border-radius: 6px; padding: 10px 14px; font-size: 12px; color: #cbd5e1; line-height: 1.45;">
+          <div style="font-weight: 700; color: #f8fafc; margin-bottom: 2px;">
+            Rubber PPE Compliance Exclusions
+          </div>
+          Excluded employees are exempt from Rubber PPE tracking. They will not count as missing gloves or sleeves, will not reduce compliance percentages, and will not show missing equipment warning badges on crew cards.
+        </div>
+
+        <!-- Quick Presets -->
+        <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+          <div style="font-size: 12px; font-weight: 700; color: #94a3b8;">
+            ⚡ Quick Presets:
+          </div>
+          <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+            <button class="btn btn-xs btn-secondary" onclick="window.ppeTrackingEngine.excludeEmployeesByTier('sup')" style="font-size: 11px; padding: 4px 8px; color: #cbd5e1;" title="Exclude all employees with classification SUP (Superintendents/Supervisors)">
+              👑 Exclude All SUP (Supervisors)
+            </button>
+            <button class="btn btn-xs btn-secondary" onclick="window.ppeTrackingEngine.excludeEmployeesByJobPrefix('005')" style="font-size: 11px; padding: 4px 8px; color: #cbd5e1;" title="Exclude all employees on crew prefix 005 (Office/Management/Light Duty)">
+              🏢 Exclude 005- Office / Mgmt
+            </button>
+          </div>
+        </div>
+
+        <!-- Add Employee to Exclusions Search Bar -->
+        <div style="background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px 14px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+          <label style="font-size: 12px; font-weight: 700; color: #cbd5e1; white-space: nowrap;">
+            ➕ Exclude Employee:
+          </label>
+          <select id="ppe-exclude-select-emp" style="flex: 1; min-width: 220px; font-size: 12px; padding: 6px 8px; background: var(--bg-secondary); border: 1px solid var(--border-color); color: #fff; border-radius: 4px;">
+            <option value="">-- Select an employee to exclude --</option>
+            ${availableToAdd.map(emp => `
+              <option value="${this.escapeHtml(emp.name)}">${this.escapeHtml(emp.name)} (${this.escapeHtml(emp.classification)} · Crew ${this.escapeHtml(emp.job)} · ${this.escapeHtml(emp.location)})</option>
+            `).join('')}
+          </select>
+          <button class="btn btn-sm btn-primary" onclick="
+            const sel = document.getElementById('ppe-exclude-select-emp');
+            if (sel && sel.value) {
+              window.ppeTrackingEngine.setEmployeeExcluded(sel.value, true);
+            }
+          " style="font-size: 11.5px; padding: 5px 12px; font-weight: 700;">
+            🚫 Exclude
+          </button>
+        </div>
+
+        <!-- Currently Excluded Employees List -->
+        <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px; overflow: hidden;">
+          <div style="padding: 8px 12px; background: rgba(0,0,0,0.15); border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;">
+            <div style="font-size: 12.5px; font-weight: 700; color: #f8fafc; display: flex; align-items: center; gap: 6px;">
+              <span>🚫</span>
+              <span>Currently Excluded Employees</span>
+              <span class="badge" style="background: rgba(148, 163, 184, 0.2); color: #cbd5e1; font-size: 10.5px; padding: 1px 6px; border-radius: 10px;">
+                ${this.excludedEmployeeMap.size}
+              </span>
+            </div>
+            ${this.excludedEmployeeMap.size > 0 ? `
+              <span style="font-size: 11px; color: #94a3b8;">
+                Click "↩ Include" to restore
+              </span>
+            ` : ''}
+          </div>
+
+          <div style="max-height: 38vh; overflow-y: auto;">
+            ${this.excludedEmployeeMap.size === 0 ? `
+              <div style="padding: 28px 16px; text-align: center; color: var(--text-muted);">
+                <div style="font-size: 24px; margin-bottom: 6px;">🛡️</div>
+                <div style="font-size: 13.5px; font-weight: 700; color: #f8fafc; margin-bottom: 3px;">No Excluded Employees</div>
+                <div style="font-size: 11.5px; color: #94a3b8;">All active personnel in tracked classifications are currently monitored for Rubber PPE compliance.</div>
+              </div>
+            ` : `
+              <table class="data-table" style="width: 100%; border-collapse: collapse; font-size: 12px;">
+                <thead>
+                  <tr style="background: var(--bg-tertiary); border-bottom: 1px solid var(--border-color);">
+                    <th style="padding: 8px 10px; color: #cbd5e1;">Employee</th>
+                    <th style="padding: 8px 10px; color: #cbd5e1;">Classification</th>
+                    <th style="padding: 8px 10px; color: #cbd5e1;">Job / Crew</th>
+                    <th style="padding: 8px 10px; color: #cbd5e1;">Location</th>
+                    <th style="padding: 8px 10px; text-align: right; color: #cbd5e1;">Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${Array.from(this.excludedEmployeeMap.values()).map(empName => {
+                    const matchRec = records.find(r => this.isNameMatch(r.name, empName));
+                    const cls = matchRec ? matchRec.classification : '—';
+                    const job = matchRec ? matchRec.jobNumber : '—';
+                    const loc = matchRec ? matchRec.location : '—';
+
+                    return `
+                      <tr style="border-bottom: 1px solid rgba(255,255,255,0.04);">
+                        <td style="padding: 8px 10px; font-weight: 700; color: #f1f5f9;">
+                          ${this.escapeHtml(empName)}
+                        </td>
+                        <td style="padding: 8px 10px; color: #94a3b8;">
+                          ${this.escapeHtml(cls)}
+                        </td>
+                        <td style="padding: 8px 10px; color: #93c5fd; font-family: monospace;">
+                          ${this.escapeHtml(job)}
+                        </td>
+                        <td style="padding: 8px 10px; color: #cbd5e1;">
+                          ${this.escapeHtml(loc)}
+                        </td>
+                        <td style="padding: 8px 10px; text-align: right;">
+                          <button class="btn btn-xs" onclick="window.ppeTrackingEngine.setEmployeeExcluded('${this.escapeJs(empName)}', false)" style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.35); color: #6ee7b7; font-size: 11px; padding: 2px 8px; border-radius: 4px; cursor: pointer; display: inline-flex; align-items: center; gap: 3px;">
+                            <span>↩</span> Include
+                          </button>
+                        </td>
+                      </tr>
+                    `;
+                  }).join('')}
+                </tbody>
+              </table>
+            `}
+          </div>
+        </div>
+
+      </div>
+    `;
   }
 
   escapeHtml(str) {

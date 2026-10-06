@@ -1834,9 +1834,38 @@ class EmployeeProfileEngine {
    */
   renderRubberPpeComplianceSection(data) {
     if (!data) return '';
+    const empName = data.displayName || data.name || '';
     const classMeta = (window.ppeTrackingEngine && typeof window.ppeTrackingEngine.parseTrackedClassification === 'function')
       ? window.ppeTrackingEngine.parseTrackedClassification(data.role)
       : null;
+
+    const isExcluded = !!(window.ppeTrackingEngine && typeof window.ppeTrackingEngine.isEmployeeExcluded === 'function' && window.ppeTrackingEngine.isEmployeeExcluded(empName));
+
+    // If explicitly excluded from Rubber PPE tracking
+    if (isExcluded) {
+      const codeLabel = classMeta ? classMeta.code : (data.role || 'Exempt');
+      return `
+        <div class="ppe-profile-compliance-card" style="background: rgba(148, 163, 184, 0.08); border: 1px solid rgba(148, 163, 184, 0.3); border-radius: 8px; padding: 12px 16px; margin-bottom: 18px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span style="font-size: 20px;">🚫</span>
+            <div>
+              <div style="font-size: 13px; font-weight: 700; color: #cbd5e1; display: flex; align-items: center; gap: 6px;">
+                <span>Exempt from Rubber PPE Compliance Tracker</span>
+                <span class="badge" style="background: rgba(148, 163, 184, 0.2); color: #94a3b8; font-size: 10px; padding: 1px 6px; border-radius: 4px;">
+                  ${this.escapeHtml(codeLabel)} (Exempt)
+                </span>
+              </div>
+              <div style="font-size: 11.5px; color: #94a3b8; margin-top: 2px;">
+                This employee is manually excluded from Rubber PPE deficit tracking, alert badges, and compliance metrics.
+              </div>
+            </div>
+          </div>
+          <button type="button" class="btn btn-sm" onclick="if(window.ppeTrackingEngine){ window.ppeTrackingEngine.setEmployeeExcluded('${this.escapeJs(empName)}', false); if(window.employeeProfileEngine){ window.employeeProfileEngine.openProfileModal('${this.escapeJs(empName)}', 'equipment'); } }" style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.35); color: #6ee7b7; font-size: 11px; padding: 4px 10px; border-radius: 4px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;">
+            <span>↩</span> Re-Include in Tracking
+          </button>
+        </div>
+      `;
+    }
 
     const allEq = data.assignedEquipment || [];
     const hasGloves = allEq.some(e => e.eqKey === 'gloves');
@@ -1862,9 +1891,14 @@ class EmployeeProfileEngine {
               </div>
             </div>
           </div>
-          <div style="display: flex; gap: 6px; font-size: 11px; flex-wrap: wrap;">
+          <div style="display: flex; gap: 6px; font-size: 11px; flex-wrap: wrap; align-items: center;">
             <span style="background: rgba(16, 185, 129, 0.15); color: #6ee7b7; padding: 2px 8px; border-radius: 4px; border: 1px solid rgba(16, 185, 129, 0.25);">🧤 Gloves Assigned (Size ${this.escapeHtml(data.gloveSize || 'Std')})</span>
             <span style="background: rgba(16, 185, 129, 0.15); color: #6ee7b7; padding: 2px 8px; border-radius: 4px; border: 1px solid rgba(16, 185, 129, 0.25);">🦾 Sleeves Assigned (Size ${this.escapeHtml(data.sleeveSize || 'Std')})</span>
+            ${classMeta ? `
+              <button type="button" class="btn btn-xs btn-secondary" onclick="if(window.ppeTrackingEngine){ window.ppeTrackingEngine.promptExcludeEmployee('${this.escapeJs(empName)}'); if(window.employeeProfileEngine){ window.employeeProfileEngine.openProfileModal('${this.escapeJs(empName)}', 'equipment'); } }" style="font-size: 10px; padding: 2px 6px; color: #94a3b8; border-color: rgba(148, 163, 184, 0.3);" title="Exempt this employee from Rubber PPE tracking">
+                🚫 Exclude
+              </button>
+            ` : ''}
           </div>
         </div>
       `;
@@ -1888,8 +1922,11 @@ class EmployeeProfileEngine {
               </div>
             </div>
           </div>
-          <div style="display: flex; gap: 6px; font-size: 11px; flex-wrap: wrap;">
+          <div style="display: flex; gap: 6px; font-size: 11px; flex-wrap: wrap; align-items: center;">
             <span style="background: rgba(16, 185, 129, 0.15); color: #6ee7b7; padding: 2px 8px; border-radius: 4px; border: 1px solid rgba(16, 185, 129, 0.25);">🧤 Gloves Assigned (Size ${this.escapeHtml(data.gloveSize || 'Std')})</span>
+            <button type="button" class="btn btn-xs btn-secondary" onclick="if(window.ppeTrackingEngine){ window.ppeTrackingEngine.promptExcludeEmployee('${this.escapeJs(empName)}'); if(window.employeeProfileEngine){ window.employeeProfileEngine.openProfileModal('${this.escapeJs(empName)}', 'equipment'); } }" style="font-size: 10px; padding: 2px 6px; color: #94a3b8; border-color: rgba(148, 163, 184, 0.3);" title="Exempt this employee from Rubber PPE tracking">
+              🚫 Exclude
+            </button>
           </div>
         </div>
       `;
@@ -1915,6 +1952,13 @@ class EmployeeProfileEngine {
     if (missingSleeves) {
       html += this.renderPpeItemProgressiveWorkflow(data, classMeta, 'sleeves');
     }
+    html += `
+      <div style="display: flex; justify-content: flex-end; align-items: center; padding-top: 4px;">
+        <button type="button" class="btn btn-sm" onclick="if(window.ppeTrackingEngine){ window.ppeTrackingEngine.promptExcludeEmployee('${this.escapeJs(empName)}'); if(window.employeeProfileEngine){ window.employeeProfileEngine.openProfileModal('${this.escapeJs(empName)}', 'equipment'); } }" style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); color: #fca5a5; font-size: 11px; padding: 3px 10px; border-radius: 4px; display: inline-flex; align-items: center; gap: 5px; cursor: pointer;" title="Exclude this employee from Rubber PPE compliance deficits and alerts">
+          🚫 Exclude from Rubber PPE Tracker
+        </button>
+      </div>
+    `;
     html += `</div>`;
     return html;
   }
