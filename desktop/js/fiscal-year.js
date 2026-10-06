@@ -591,12 +591,15 @@ class FiscalYearEngine {
       if (optTraining) {
         const trainTable = snap.tables['training_tracking'] || snap.tables['Training Tracking'];
         if (trainTable && trainTable.rows) {
-          const crewCol = trainTable.headers.find(h => /^(crew|job\s*number)$/i.test(h.trim())) || 'Crew';
-          const dateCol = trainTable.headers.find(h => /^(date|month)$/i.test(h.trim())) || 'Date';
+          const crewCol = trainTable.headers.find(h => /^(crew(\s*#|\s*number)?|job\s*number)$/i.test(h.trim())) || 'Crew #';
+          const monthCol = trainTable.headers.find(h => /^(month|date)$/i.test(h.trim())) || 'Month';
+          const futureMonths = ['october', 'november', 'december'];
 
           trainTable.rows.forEach(r => {
+            const mVal = String(r[monthCol] || '').trim().toLowerCase();
             const curCrew = String(r[crewCol] || '').trim();
-            if (transitionMap.has(curCrew)) {
+            // Only update future months (Q4: Oct, Nov, Dec) to prevent overwriting past completed training
+            if (futureMonths.includes(mVal) && transitionMap.has(curCrew)) {
               r[crewCol] = transitionMap.get(curCrew);
               trainingRowsUpdated++;
             }
