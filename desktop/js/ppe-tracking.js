@@ -455,10 +455,18 @@ class RubberPpeTrackingEngine {
           totalMissingSleeves: 0,
           totalMissingBoth: 0,
           totalFullyEquipped: 0,
+          totalExcluded: 0,
+          totalAllPersonnel: 0,
           totalAp1_3: 0,
           totalAp4_7: 0,
           totalSupGfF: 0,
-          totalJry: 0
+          totalJry: 0,
+          totalGlovesInNeeds: 0,
+          totalSleevesInNeeds: 0,
+          totalInPurchaseNeeds: 0,
+          totalGlovesToQueue: 0,
+          totalSleevesToQueue: 0,
+          totalItemsToQueue: 0
         }
       };
     }
@@ -470,26 +478,60 @@ class RubberPpeTrackingEngine {
     const sleeveSwapsTable = snap.tables['sleeve_swaps'];
     const safetyNeedsTable = snap.tables['safety_equipment_needs'];
 
+    const empRows = (empTable && empTable.rows) ? empTable.rows : [];
+    const gloveRows = (glovesTable && glovesTable.rows) ? glovesTable.rows : [];
+    const sleeveRows = (sleevesTable && sleevesTable.rows) ? sleevesTable.rows : [];
+
     // Pre-build sets of employees who already have gloves or sleeves queued in Purchase Needs
     const gloveNeedsSet = new Set();
     const sleeveNeedsSet = new Set();
 
-    if (gloveSwapsTable && gloveSwapsTable.rows) {
-      gloveSwapsTable.rows.forEach(r => {
-        const rEmp = String(r['Employee'] || r['Employee Name'] || '').trim();
-        const rStatus = String(r['Status'] || '').trim().toLowerCase();
-        const rPick = String(r['Pick List Item #'] || '').trim();
+    if (gloveSwapsTable) {
+      const gRows = gloveSwapsTable.rows || gloveSwapsTable.rawGrid || [];
+      gRows.forEach(r => {
+        let rEmp = '';
+        let rStatus = '';
+        let rPick = '';
+        if (Array.isArray(r)) {
+          const firstCell = String(r[0] || '').trim();
+          if (firstCell.includes('📍') || firstCell.includes('👤') || firstCell.includes('👷') ||
+              firstCell.includes('Foreman:') || firstCell.includes('Swaps') || firstCell === 'Employee' || firstCell === 'Item #') {
+            return;
+          }
+          rEmp = firstCell;
+          rPick = String(r[6] || '').trim();
+          rStatus = String(r[7] || '').trim().toLowerCase();
+        } else if (r && typeof r === 'object') {
+          rEmp = String(r['Employee'] || r['Employee Name'] || '').trim();
+          rStatus = String(r['Status'] || '').trim().toLowerCase();
+          rPick = String(r['Pick List Item #'] || '').trim();
+        }
         if (rEmp && (rStatus.includes('purchase') || rPick === '—')) {
           gloveNeedsSet.add(this.normalizeName(rEmp));
         }
       });
     }
 
-    if (sleeveSwapsTable && sleeveSwapsTable.rows) {
-      sleeveSwapsTable.rows.forEach(r => {
-        const rEmp = String(r['Employee'] || r['Employee Name'] || '').trim();
-        const rStatus = String(r['Status'] || '').trim().toLowerCase();
-        const rPick = String(r['Pick List Item #'] || '').trim();
+    if (sleeveSwapsTable) {
+      const sRows = sleeveSwapsTable.rows || sleeveSwapsTable.rawGrid || [];
+      sRows.forEach(r => {
+        let rEmp = '';
+        let rStatus = '';
+        let rPick = '';
+        if (Array.isArray(r)) {
+          const firstCell = String(r[0] || '').trim();
+          if (firstCell.includes('📍') || firstCell.includes('👤') || firstCell.includes('👷') ||
+              firstCell.includes('Foreman:') || firstCell.includes('Swaps') || firstCell === 'Employee' || firstCell === 'Item #') {
+            return;
+          }
+          rEmp = firstCell;
+          rPick = String(r[6] || '').trim();
+          rStatus = String(r[7] || '').trim().toLowerCase();
+        } else if (r && typeof r === 'object') {
+          rEmp = String(r['Employee'] || r['Employee Name'] || '').trim();
+          rStatus = String(r['Status'] || '').trim().toLowerCase();
+          rPick = String(r['Pick List Item #'] || '').trim();
+        }
         if (rEmp && (rStatus.includes('purchase') || rPick === '—')) {
           sleeveNeedsSet.add(this.normalizeName(rEmp));
         }
