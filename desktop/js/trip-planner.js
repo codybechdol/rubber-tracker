@@ -775,7 +775,7 @@ class TripPlannerApp {
 
   setSwapsFilter(filter) {
     this.swapsFilter = filter;
-    ['all', 'gloves', 'sleeves'].forEach(f => {
+    ['all', 'gloves', 'sleeves', 'reclaims'].forEach(f => {
       const btn = document.getElementById(`btn-filter-swaps-${f}`);
       if (btn) {
         if (f === filter) btn.classList.add('active');
