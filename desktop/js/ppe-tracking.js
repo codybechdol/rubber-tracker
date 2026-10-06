@@ -466,10 +466,47 @@ class RubberPpeTrackingEngine {
     const empTable = snap.tables['employees'];
     const glovesTable = snap.tables['gloves'];
     const sleevesTable = snap.tables['sleeves'];
+    const gloveSwapsTable = snap.tables['glove_swaps'];
+    const sleeveSwapsTable = snap.tables['sleeve_swaps'];
+    const safetyNeedsTable = snap.tables['safety_equipment_needs'];
 
-    const empRows = (empTable && empTable.rows) ? empTable.rows : [];
-    const gloveRows = (glovesTable && glovesTable.rows) ? glovesTable.rows : [];
-    const sleeveRows = (sleevesTable && sleevesTable.rows) ? sleevesTable.rows : [];
+    // Pre-build sets of employees who already have gloves or sleeves queued in Purchase Needs
+    const gloveNeedsSet = new Set();
+    const sleeveNeedsSet = new Set();
+
+    if (gloveSwapsTable && gloveSwapsTable.rows) {
+      gloveSwapsTable.rows.forEach(r => {
+        const rEmp = String(r['Employee'] || r['Employee Name'] || '').trim();
+        const rStatus = String(r['Status'] || '').trim().toLowerCase();
+        const rPick = String(r['Pick List Item #'] || '').trim();
+        if (rEmp && (rStatus.includes('purchase') || rPick === '—')) {
+          gloveNeedsSet.add(this.normalizeName(rEmp));
+        }
+      });
+    }
+
+    if (sleeveSwapsTable && sleeveSwapsTable.rows) {
+      sleeveSwapsTable.rows.forEach(r => {
+        const rEmp = String(r['Employee'] || r['Employee Name'] || '').trim();
+        const rStatus = String(r['Status'] || '').trim().toLowerCase();
+        const rPick = String(r['Pick List Item #'] || '').trim();
+        if (rEmp && (rStatus.includes('purchase') || rPick === '—')) {
+          sleeveNeedsSet.add(this.normalizeName(rEmp));
+        }
+      });
+    }
+
+    if (safetyNeedsTable && safetyNeedsTable.rows) {
+      safetyNeedsTable.rows.forEach(r => {
+        const rEmp = String(r['Employee'] || '').trim();
+        const rType = String(r['Item Type'] || '').trim().toLowerCase();
+        const rStatus = String(r['Status'] || '').trim().toLowerCase();
+        if (rEmp && !rStatus.includes('received') && !rStatus.includes('fulfilled')) {
+          if (rType.includes('glove')) gloveNeedsSet.add(this.normalizeName(rEmp));
+          if (rType.includes('sleeve')) sleeveNeedsSet.add(this.normalizeName(rEmp));
+        }
+      });
+    }
 
     const NON_ASSIGNED_STATUSES = new Set([
       'on shelf', 'lost', 'destroyed', 'failed rubber', 'failed',
@@ -535,6 +572,11 @@ class RubberPpeTrackingEngine {
     let totalSupGfF = 0;
     let totalJry = 0;
 
+    let totalGlovesInNeeds = 0;
+    let totalSleevesInNeeds = 0;
+    let totalGlovesToQueue = 0;
+    let totalSleevesToQueue = 0;
+
     for (let i = 0; i < empRows.length; i++) {
       const emp = empRows[i];
       const name = String(emp['Employee Name'] || emp['Name'] || emp['Worker'] || '').trim();
@@ -590,6 +632,24 @@ class RubberPpeTrackingEngine {
       const isMissingAny = missingGloves || missingSleeves;
       const isFullyEquipped = !isMissingAny;
 
+      // Purchase Needs status
+      let gloveInNeeds = gloveNeedsSet.has(nameNorm);
+      if (!gloveInNeeds) {
+        for (const k of gloveNeedsSet.keys()) {
+          if (this.isNameMatch(k, nameNorm)) { gloveInNeeds = true; break; }
+        }
+      }
+
+      let sleeveInNeeds = sleeveNeedsSet.has(nameNorm);
+      if (!sleeveInNeeds) {
+        for (const k of sleeveNeedsSet.keys()) {
+          if (this.isNameMatch(k, nameNorm)) { sleeveInNeeds = true; break; }
+        }
+      }
+
+      const needsGlovesToPurchase = missingGloves && !gloveInNeeds;
+      const needsSleevesToPurchase = missingSleeves && !sleeveInNeeds;
+
       if (isExcluded) {
         totalExcluded++;
       } else {
@@ -600,8 +660,16 @@ class RubberPpeTrackingEngine {
         else totalSupGfF++;
 
         if (isMissingAny) totalMissingAny++;
-        if (missingGloves) totalMissingGloves++;
-        if (missingSleeves) totalMissingSleeves++;
+        if (missingGloves) {
+          totalMissingGloves++;
+          if (gloveInNeeds) totalGlovesInNeeds++;
+          else totalGlovesToQueue++;
+        }
+        if (missingSleeves) {
+          totalMissingSleeves++;
+          if (sleeveInNeeds) totalSleevesInNeeds++;
+          else totalSleevesToQueue++;
+        }
         if (isMissingBoth) totalMissingBoth++;
         if (isFullyEquipped) totalFullyEquipped++;
       }
@@ -628,6 +696,10 @@ class RubberPpeTrackingEngine {
         isMissingAny,
         isFullyEquipped,
         isExcluded,
+        gloveInNeeds,
+        sleeveInNeeds,
+        needsGlovesToPurchase,
+        needsSleevesToPurchase,
         empRow: emp
       });
     }
@@ -664,7 +736,13 @@ class RubberPpeTrackingEngine {
         totalAp1_3,
         totalAp4_7,
         totalSupGfF,
-        totalJry
+        totalJry,
+        totalGlovesInNeeds,
+        totalSleevesInNeeds,
+        totalInPurchaseNeeds: totalGlovesInNeeds + totalSleevesInNeeds,
+        totalGlovesToQueue,
+        totalSleevesToQueue,
+        totalItemsToQueue: totalGlovesToQueue + totalSleevesToQueue
       }
     };
 
@@ -828,6 +906,8 @@ class RubberPpeTrackingEngine {
       if (this.currentFilter === 'missing_both' && (!rec.isMissingBoth || rec.isExcluded)) return false;
       if (this.currentFilter === 'fully_equipped' && (!rec.isFullyEquipped || rec.isExcluded)) return false;
       if (this.currentFilter === 'excluded' && !rec.isExcluded) return false;
+      if (this.currentFilter === 'in_purchase_needs' && (!rec.isMissingAny || (!rec.gloveInNeeds && !rec.sleeveInNeeds) || rec.isExcluded)) return false;
+      if (this.currentFilter === 'needs_queue' && ((!rec.needsGlovesToPurchase && !rec.needsSleevesToPurchase) || rec.isExcluded)) return false;
 
       // 2. Classification Filter
       if (this.classificationFilter !== 'all') {
@@ -883,6 +963,12 @@ class RubberPpeTrackingEngine {
             </div>
           </div>
           <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+            <button class="btn btn-warning" onclick="window.ppeTrackingEngine.promptAddAllMissingToPurchaseNeeds()" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color: #ffffff; border: none; font-size: 12px; font-weight: 700; padding: 6px 14px; border-radius: 4px; display: flex; align-items: center; gap: 6px; box-shadow: 0 2px 6px rgba(245, 158, 11, 0.35); cursor: pointer;" title="Add all active employees with missing rubber gloves or sleeves to Purchase Needs (Immediate Urgency)">
+              <span>🛒</span> Add All Missing to Purchase Needs ${summary.totalItemsToQueue > 0 ? `<span class="badge" style="background: rgba(0,0,0,0.3); color: #fff; font-size: 10px; padding: 1px 6px; border-radius: 8px;">${summary.totalItemsToQueue}</span>` : ''}
+            </button>
+            <button class="btn btn-secondary" onclick="window.ppeTrackingEngine.openPurchaseNeedsView()" style="font-size: 12px; font-weight: 600; padding: 6px 12px; border-color: rgba(16, 185, 129, 0.4); color: #6ee7b7; display: flex; align-items: center; gap: 6px;" title="Open Purchase Orders & Purchase Needs workspace">
+              <span>📋</span> Purchase Needs
+            </button>
             <button class="btn btn-secondary" onclick="window.ppeTrackingEngine.openExclusionsDialog()" style="font-size: 12px; font-weight: 600; padding: 6px 12px; border-color: rgba(148, 163, 184, 0.4); color: #cbd5e1; display: flex; align-items: center; gap: 6px;" title="Manage employees excluded from PPE tracking">
               <span>🚫</span> Manage Exclusions ${summary.totalExcluded > 0 ? `(${summary.totalExcluded})` : ''}
             </button>
@@ -896,7 +982,7 @@ class RubberPpeTrackingEngine {
         </div>
 
         <!-- KPI Metric Cards Grid -->
-        <div class="ppe-metrics-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px;">
+        <div class="ppe-metrics-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px;">
           
           <div class="ppe-stat-card ${this.currentFilter === 'all_missing' ? 'active-stat' : ''}" 
                onclick="window.ppeTrackingEngine.setFilter('all_missing')"
@@ -940,6 +1026,17 @@ class RubberPpeTrackingEngine {
             </div>
             <div style="font-size: 24px; font-weight: 800; color: #fecdd3; line-height: 1;">${summary.totalMissingBoth}</div>
             <div style="font-size: 11px; color: #fb7185; margin-top: 4px;">Zero rubber PPE</div>
+          </div>
+
+          <div class="ppe-stat-card ${this.currentFilter === 'in_purchase_needs' ? 'active-stat' : ''}"
+               onclick="window.ppeTrackingEngine.setFilter('in_purchase_needs')"
+               style="background: ${this.currentFilter === 'in_purchase_needs' ? 'rgba(245, 158, 11, 0.22)' : 'rgba(245, 158, 11, 0.08)'}; border: 1px solid ${this.currentFilter === 'in_purchase_needs' ? '#f59e0b' : 'rgba(245, 158, 11, 0.3)'}; border-radius: 8px; padding: 10px 14px; cursor: pointer; transition: all 0.15s ease;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+              <span style="font-size: 11px; font-weight: 700; color: #fbbf24; text-transform: uppercase; letter-spacing: 0.5px;">In Purchase Needs</span>
+              <span style="font-size: 16px;">🛒</span>
+            </div>
+            <div style="font-size: 24px; font-weight: 800; color: #fef3c7; line-height: 1;">${summary.totalInPurchaseNeeds}</div>
+            <div style="font-size: 11px; color: #fbbf24; margin-top: 4px;">${summary.totalItemsToQueue > 0 ? `${summary.totalItemsToQueue} unqueued` : 'All queued in Needs'}</div>
           </div>
 
           <div class="ppe-stat-card ${this.currentFilter === 'fully_equipped' ? 'active-stat' : ''}"
@@ -994,6 +1091,14 @@ class RubberPpeTrackingEngine {
             <button class="filter-pill ${this.currentFilter === 'missing_both' ? 'active' : ''}" onclick="window.ppeTrackingEngine.setFilter('missing_both')">
               ⚠️ Needs Both (${summary.totalMissingBoth})
             </button>
+            <button class="filter-pill ${this.currentFilter === 'in_purchase_needs' ? 'active' : ''}" onclick="window.ppeTrackingEngine.setFilter('in_purchase_needs')" style="border-color: rgba(245, 158, 11, 0.45); color: #fcd34d;">
+              🛒 In Needs (${summary.totalInPurchaseNeeds})
+            </button>
+            ${summary.totalItemsToQueue > 0 ? `
+              <button class="filter-pill ${this.currentFilter === 'needs_queue' ? 'active' : ''}" onclick="window.ppeTrackingEngine.setFilter('needs_queue')" style="border-color: rgba(239, 68, 68, 0.45); color: #fca5a5;">
+                ⏳ Needs Queuing (${summary.totalItemsToQueue})
+              </button>
+            ` : ''}
             <button class="filter-pill ${this.currentFilter === 'fully_equipped' ? 'active' : ''}" onclick="window.ppeTrackingEngine.setFilter('fully_equipped')">
               ✅ Equipped (${summary.totalFullyEquipped})
             </button>
@@ -1038,6 +1143,7 @@ class RubberPpeTrackingEngine {
               ` : ''}
             </div>
           </div>
+
         </div>
 
         <!-- Table View or Empty State -->
@@ -1080,14 +1186,20 @@ class RubberPpeTrackingEngine {
                       <div style="font-size: 15px; font-weight: 700; color: #f8fafc; margin-bottom: 4px;">
                         ${this.currentFilter === 'excluded'
                           ? 'No Excluded Employees'
-                          : (this.currentFilter === 'all_missing' || this.currentFilter === 'missing_gloves' || this.currentFilter === 'missing_sleeves' ? 'No Missing Equipment!' : 'No Employees Match the Current Filters')}
+                          : (this.currentFilter === 'in_purchase_needs' ? 'No Items in Purchase Needs Yet'
+                            : (this.currentFilter === 'needs_queue' ? 'All Missing PPE is Already Queued!'
+                              : (this.currentFilter === 'all_missing' || this.currentFilter === 'missing_gloves' || this.currentFilter === 'missing_sleeves' ? 'No Missing Equipment!' : 'No Employees Match the Current Filters')))}
                       </div>
                       <div style="font-size: 12.5px; color: #94a3b8; max-width: 480px; margin: 0 auto;">
                         ${this.currentFilter === 'excluded'
                           ? 'No employees are currently excluded from Rubber PPE compliance tracking. Click "🚫 Exclude" on any employee row or "Manage Exclusions" above to exempt personnel.'
-                          : (this.currentFilter === 'all_missing' 
-                            ? 'All active employees in the selected classifications are fully equipped with their required rubber gloves and sleeves.' 
-                            : 'Try clearing your search query or selecting a different filter above.')}
+                          : (this.currentFilter === 'in_purchase_needs'
+                            ? 'No missing rubber gloves or sleeves are currently recorded in Purchase Needs. Click "🛒 Add All Missing to Purchase Needs" above to queue items.'
+                            : (this.currentFilter === 'needs_queue'
+                              ? 'All active personnel missing rubber gloves or sleeves have already been queued into Purchase Needs with Immediate Urgency.'
+                              : (this.currentFilter === 'all_missing' 
+                                ? 'All active employees in the selected classifications are fully equipped with their required rubber gloves and sleeves.' 
+                                : 'Try clearing your search query or selecting a different filter above.')))}
                       </div>
                     </td>
                   </tr>
@@ -1154,6 +1266,18 @@ class RubberPpeTrackingEngine {
           <span style="font-size: 11px; color: #94a3b8;" title="Preferred Glove Size on file">
             Size: <strong style="color: #f1f5f9;">${this.escapeHtml(r.gloveSize)}</strong>
           </span>
+          ${r.gloveInNeeds ? `
+            <span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.35); font-size: 10px; padding: 2px 6px; border-radius: 4px; display: inline-flex; align-items: center; gap: 3px;" title="Rubber gloves for ${this.escapeHtml(r.name)} are queued in Purchase Needs (Urgency: Immediate)">
+              <span>🛒</span> In Needs
+            </span>
+          ` : `
+            <button class="btn btn-xs" 
+                    onclick="window.ppeTrackingEngine.addToPurchaseNeeds('${this.escapeJs(r.name)}', 'gloves', '${this.escapeJs(r.gloveSize)}')"
+                    style="background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.35); color: #fcd34d; padding: 2px 7px; font-size: 11px; border-radius: 3px; cursor: pointer; display: inline-flex; align-items: center; gap: 3px;"
+                    title="Queue rubber gloves for ${this.escapeHtml(r.name)} in Purchase Needs (Urgency: Immediate)">
+              <span>🛒</span> + Need
+            </button>
+          `}
           <button class="btn btn-xs" 
                   onclick="window.ppeTrackingEngine.promptQuickAssign('${this.escapeJs(r.name)}', 'gloves', '${this.escapeJs(r.gloveSize)}', '${this.escapeJs(r.location)}')"
                   style="background: rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.35); color: #93c5fd; padding: 2px 7px; font-size: 11px; border-radius: 3px; cursor: pointer;"
@@ -1204,6 +1328,18 @@ class RubberPpeTrackingEngine {
           <span style="font-size: 11px; color: #94a3b8;" title="Preferred Sleeve Size on file">
             Size: <strong style="color: #f1f5f9;">${this.escapeHtml(r.sleeveSize)}</strong>
           </span>
+          ${r.sleeveInNeeds ? `
+            <span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.35); font-size: 10px; padding: 2px 6px; border-radius: 4px; display: inline-flex; align-items: center; gap: 3px;" title="Rubber sleeves for ${this.escapeHtml(r.name)} are queued in Purchase Needs (Urgency: Immediate)">
+              <span>🛒</span> In Needs
+            </span>
+          ` : `
+            <button class="btn btn-xs" 
+                    onclick="window.ppeTrackingEngine.addToPurchaseNeeds('${this.escapeJs(r.name)}', 'sleeves', '${this.escapeJs(r.sleeveSize)}')"
+                    style="background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.35); color: #fcd34d; padding: 2px 7px; font-size: 11px; border-radius: 3px; cursor: pointer; display: inline-flex; align-items: center; gap: 3px;"
+                    title="Queue rubber sleeves for ${this.escapeHtml(r.name)} in Purchase Needs (Urgency: Immediate)">
+              <span>🛒</span> + Need
+            </button>
+          `}
           <button class="btn btn-xs" 
                   onclick="window.ppeTrackingEngine.promptQuickAssign('${this.escapeJs(r.name)}', 'sleeves', '${this.escapeJs(r.sleeveSize)}', '${this.escapeJs(r.location)}')"
                   style="background: rgba(168, 85, 247, 0.15); border: 1px solid rgba(168, 85, 247, 0.35); color: #d8b4fe; padding: 2px 7px; font-size: 11px; border-radius: 3px; cursor: pointer;"
@@ -1330,6 +1466,14 @@ class RubberPpeTrackingEngine {
                 <span>↩</span> Include
               </button>
             ` : `
+              ${(!r.isExcluded && (r.needsGlovesToPurchase || r.needsSleevesToPurchase)) ? `
+                <button class="btn btn-xs" 
+                        onclick="window.ppeTrackingEngine.addToPurchaseNeedsForEmployee('${this.escapeJs(r.name)}')"
+                        style="background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.35); color: #fcd34d; font-size: 11px; padding: 3px 8px; border-radius: 4px; cursor: pointer; display: inline-flex; align-items: center; gap: 3px;"
+                        title="Queue unfulfilled PPE for ${this.escapeHtml(r.name)} in Purchase Needs (Urgency: Immediate)">
+                  <span>🛒</span> + Need
+                </button>
+              ` : ''}
               ${r.missingGloves ? `
                 <button class="btn btn-xs" 
                         onclick="window.ppeTrackingEngine.promptQuickAssign('${this.escapeJs(r.name)}', 'gloves', '${this.escapeJs(r.gloveSize)}', '${this.escapeJs(r.location)}')"
@@ -1358,6 +1502,415 @@ class RubberPpeTrackingEngine {
 
       </tr>
     `;
+  }
+
+  /**
+   * Retrieves preferred voltage class for an employee and equipment type
+   */
+  getPreferredPpeClass(displayName, itemType) {
+    if (!displayName) return 'Class 2';
+    const isGlove = itemType === 'gloves' || itemType === 'glove';
+    
+    // Defer to employeeProfileEngine if present
+    if (window.employeeProfileEngine && typeof window.employeeProfileEngine.getPreferredPpeClass === 'function') {
+      return window.employeeProfileEngine.getPreferredPpeClass(displayName, itemType);
+    }
+
+    const snap = (this.db && typeof this.db.getSnapshot === 'function')
+      ? this.db.getSnapshot()
+      : (window.localDB ? window.localDB.getSnapshot() : null);
+
+    // 1. Check existing swap row for an explicitly recorded Class
+    const swapKey = isGlove ? 'glove_swaps' : 'sleeve_swaps';
+    const swapTable = snap?.tables?.[swapKey];
+    if (swapTable && swapTable.rows) {
+      const row = swapTable.rows.find(r => this.isNameMatch(r['Employee'] || r['Employee Name'] || '', displayName));
+      if (row && (row['Class'] || row['KV'])) {
+        const cStr = String(row['Class'] || row['KV']).trim();
+        if (cStr) {
+          return cStr.toLowerCase().startsWith('class') ? cStr : `Class ${cStr}`;
+        }
+      }
+    }
+
+    // 2. Check localStorage saved preferences
+    try {
+      const stored = localStorage.getItem('sa_emp_preferred_classes');
+      if (stored) {
+        const prefMap = JSON.parse(stored);
+        const key = `${displayName.trim().toLowerCase()}_${itemType}`;
+        if (prefMap[key]) return prefMap[key];
+      }
+    } catch (e) {
+      // ignore
+    }
+
+    // 3. Check any active or history inventory item for this employee
+    const invKey = isGlove ? 'gloves' : 'sleeves';
+    const invTable = snap?.tables?.[invKey];
+    if (invTable && invTable.rows) {
+      const held = invTable.rows.find(r => this.isNameMatch(r['Assigned To'] || r['Holder'] || '', displayName));
+      if (held && held['Class']) {
+        const cStr = String(held['Class']).trim();
+        if (cStr) return cStr.toLowerCase().startsWith('class') ? cStr : `Class ${cStr}`;
+      }
+    }
+
+    // 4. Default: Class 2 is standard lineworker safety class for both gloves and sleeves
+    return 'Class 2';
+  }
+
+  /**
+   * Checks if an employee's equipment need is already queued in Purchase Needs
+   */
+  isItemInPurchaseNeeds(empName, itemType) {
+    if (!empName) return false;
+    const isGlove = itemType === 'gloves' || itemType === 'glove';
+    const normName = this.normalizeName(empName);
+    const snap = (this.db && typeof this.db.getSnapshot === 'function')
+      ? this.db.getSnapshot()
+      : (window.localDB ? window.localDB.getSnapshot() : null);
+    if (!snap || !snap.tables) return false;
+
+    const swapKey = isGlove ? 'glove_swaps' : 'sleeve_swaps';
+    const swapTable = snap.tables[swapKey];
+    if (swapTable && swapTable.rows) {
+      const match = swapTable.rows.some(r => {
+        const rEmp = String(r['Employee'] || r['Employee Name'] || '').trim();
+        const rStatus = String(r['Status'] || '').trim().toLowerCase();
+        const rPick = String(r['Pick List Item #'] || '').trim();
+        return this.isNameMatch(rEmp, normName) && (rStatus.includes('purchase') || rPick === '—');
+      });
+      if (match) return true;
+    }
+
+    const needsTable = snap.tables['safety_equipment_needs'];
+    if (needsTable && needsTable.rows) {
+      const match = needsTable.rows.some(r => {
+        const rEmp = String(r['Employee'] || '').trim();
+        const rType = String(r['Item Type'] || '').trim().toLowerCase();
+        const rStatus = String(r['Status'] || '').trim().toLowerCase();
+        const matchesType = isGlove ? rType.includes('glove') : rType.includes('sleeve');
+        return this.isNameMatch(rEmp, normName) && matchesType && !rStatus.includes('received') && !rStatus.includes('fulfilled');
+      });
+      if (match) return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Queues an individual missing PPE item (gloves or sleeves) into Purchase Needs with Immediate Urgency
+   */
+  async addToPurchaseNeeds(empName, itemType, size, classVal = null, suppressRefresh = false) {
+    if (!empName) return;
+    const isGlove = itemType === 'gloves' || itemType === 'glove';
+    const itemKey = isGlove ? 'gloves' : 'sleeves';
+    const itemLabel = isGlove ? 'Rubber Gloves' : 'Rubber Sleeves';
+    const swapKey = isGlove ? 'glove_swaps' : 'sleeve_swaps';
+    const swapSheetName = isGlove ? 'Glove Swaps' : 'Sleeve Swaps';
+
+    let resolvedSize = size && size !== '—' && size !== 'N/A' && size !== 'Not specified' ? String(size).trim() : '';
+    const snap = (this.db && typeof this.db.getSnapshot === 'function')
+      ? this.db.getSnapshot()
+      : (window.localDB ? window.localDB.getSnapshot() : null);
+
+    if (!resolvedSize && snap && snap.tables && snap.tables.employees) {
+      const empRow = snap.tables.employees.rows?.find(r => this.isNameMatch(r['Employee Name'] || r['Name'] || '', empName));
+      if (empRow) {
+        const szVal = String(empRow[isGlove ? 'Glove Size' : 'Sleeve Size'] || '').trim();
+        if (szVal && szVal !== '—' && szVal !== 'N/A') resolvedSize = szVal;
+      }
+    }
+    if (!resolvedSize) {
+      resolvedSize = isGlove ? '10' : 'Regular';
+    }
+
+    const chosenClass = classVal || this.getPreferredPpeClass(empName, itemKey);
+    const normClass = chosenClass.toLowerCase().startsWith('class') ? chosenClass : `Class ${chosenClass}`;
+
+    if (!snap || !snap.tables) {
+      alert('Local database snapshot is not available.');
+      return;
+    }
+
+    const swapTable = snap.tables[swapKey];
+    if (swapTable && swapTable.rows) {
+      const headers = swapTable.headers || [
+        'Employee', 'Current Item', 'Size', 'Date Assigned', 'Change Out Date',
+        'Days Left', 'Pick List Item #', 'Status', 'Picked', 'Date Changed'
+      ];
+
+      if (!headers.includes('Class')) headers.push('Class');
+      if (!headers.includes('Urgency')) headers.push('Urgency');
+
+      let existingRow = swapTable.rows.find(r => this.isNameMatch(r['Employee'] || r['Employee Name'] || '', empName));
+      const fn = (this.db && typeof this.db.addMutation === 'function')
+        ? this.db.addMutation.bind(this.db)
+        : ((this.db && typeof this.db.queueMutation === 'function') ? this.db.queueMutation.bind(this.db) : null);
+
+      if (existingRow) {
+        existingRow['Size'] = resolvedSize;
+        existingRow['Class'] = normClass;
+        existingRow['Status'] = 'Need to Purchase ❌';
+        existingRow['Pick List Item #'] = '—';
+        existingRow['Urgency'] = 'Immediate';
+        existingRow['Days Left'] = 0;
+
+        if (fn) {
+          const actualRowIdx = existingRow._rowIdx || (swapTable.rows.indexOf(existingRow) + 2);
+          const getColNum = (hName) => {
+            const idx = headers.findIndex(h => h.toLowerCase() === hName.toLowerCase());
+            return idx !== -1 ? idx + 1 : headers.length;
+          };
+          const sName = swapTable.name || swapSheetName;
+          await fn({ action: 'UPDATE_CELL', sheetName: sName, tableKey: swapKey, row: actualRowIdx, col: getColNum('Status'), header: 'Status', value: 'Need to Purchase ❌' });
+          await fn({ action: 'UPDATE_CELL', sheetName: sName, tableKey: swapKey, row: actualRowIdx, col: getColNum('Pick List Item #'), header: 'Pick List Item #', value: '—' });
+          await fn({ action: 'UPDATE_CELL', sheetName: sName, tableKey: swapKey, row: actualRowIdx, col: getColNum('Size'), header: 'Size', value: resolvedSize });
+          await fn({ action: 'UPDATE_CELL', sheetName: sName, tableKey: swapKey, row: actualRowIdx, col: getColNum('Days Left'), header: 'Days Left', value: 0 });
+          if (headers.includes('Class')) {
+            await fn({ action: 'UPDATE_CELL', sheetName: sName, tableKey: swapKey, row: actualRowIdx, col: getColNum('Class'), header: 'Class', value: normClass });
+          }
+          if (headers.includes('Urgency')) {
+            await fn({ action: 'UPDATE_CELL', sheetName: sName, tableKey: swapKey, row: actualRowIdx, col: getColNum('Urgency'), header: 'Urgency', value: 'Immediate' });
+          }
+        }
+      } else {
+        const newRow = {};
+        headers.forEach((h, idx) => {
+          if (idx === 0) newRow[h] = empName;
+          else if (idx === 1) newRow[h] = '—';
+          else if (idx === 2) newRow[h] = resolvedSize;
+          else if (idx === 3) newRow[h] = 'N/A';
+          else if (idx === 4) newRow[h] = 'N/A';
+          else if (idx === 5) newRow[h] = 0;
+          else if (idx === 6) newRow[h] = '—';
+          else if (idx === 7) newRow[h] = 'Need to Purchase ❌';
+          else if (idx === 8) newRow[h] = 'FALSE';
+          else if (idx === 9) newRow[h] = '—';
+          else newRow[h] = '';
+        });
+        newRow['Class'] = normClass;
+        newRow['Urgency'] = 'Immediate';
+        newRow['Days Left'] = 0;
+
+        swapTable.rows.push(newRow);
+        if (Array.isArray(swapTable.rawGrid)) {
+          swapTable.rawGrid.push(Object.values(newRow));
+        }
+
+        if (fn) {
+          await fn({
+            action: 'ADD_ROW',
+            sheetName: swapTable.name || swapSheetName,
+            tableKey: swapKey,
+            row: swapTable.rows.length + 1,
+            rowData: newRow,
+            data: newRow
+          });
+        }
+      }
+    }
+
+    // Also update safety_equipment_needs if present
+    const needsTable = snap.tables['safety_equipment_needs'];
+    if (needsTable && needsTable.rows) {
+      const today = new Date();
+      const todayFormatted = `${String(today.getMonth() + 1).padStart(2, '0')}/${String(today.getDate()).padStart(2, '0')}/${today.getFullYear()}`;
+      let existingNeed = needsTable.rows.find(r => this.isNameMatch(r['Employee'] || '', empName) && (isGlove ? (r['Item Type'] || '').includes('Glove') : (r['Item Type'] || '').includes('Sleeve')));
+      if (existingNeed) {
+        existingNeed['Size'] = resolvedSize;
+        existingNeed['Class'] = normClass;
+        existingNeed['Urgency'] = 'Immediate';
+        existingNeed['Status'] = 'Pending Purchase';
+      } else {
+        const needsRow = {
+          'Employee': empName,
+          'Item Type': itemLabel,
+          'Size': resolvedSize,
+          'Class': normClass,
+          'Urgency': 'Immediate',
+          'Status': 'Pending Purchase',
+          'Date Requested': todayFormatted,
+          'Notes': `Added from Rubber PPE Compliance Tracker for ${empName} (Urgency: Immediate)`
+        };
+        needsTable.rows.push(needsRow);
+      }
+    }
+
+    if (this.db && typeof this.db.persistSnapshot === 'function') {
+      await this.db.persistSnapshot(snap);
+    }
+
+    if (!suppressRefresh) {
+      if (window.procurementEngine && typeof window.procurementEngine.loadData === 'function') {
+        window.procurementEngine.loadData();
+      }
+
+      this.compileAuditData();
+      this.updateToolbarBadge();
+
+      const modalBody = document.getElementById('rubber-ppe-modal-body');
+      if (modalBody) {
+        this.renderModalContent(modalBody);
+      }
+
+      if (typeof window.showToast === 'function') {
+        window.showToast(`🛒 Queued Size ${resolvedSize} (${normClass}) ${itemLabel} for ${empName} in Purchase Needs (Urgency: Immediate)`, 'success');
+      }
+    }
+  }
+
+  /**
+   * Adds all missing PPE items for a specific employee to Purchase Needs
+   */
+  async addToPurchaseNeedsForEmployee(empName) {
+    if (!empName) return;
+    const audit = this.compileAuditData();
+    const rec = audit?.records?.find(r => this.isNameMatch(r.name, empName));
+    if (!rec) return;
+
+    if (rec.isExcluded) {
+      if (typeof window.showToast === 'function') {
+        window.showToast(`Employee ${empName} is excluded from Rubber PPE tracking.`, 'warning');
+      }
+      return;
+    }
+
+    const itemsQueued = [];
+    if (rec.needsGlovesToPurchase) {
+      await this.addToPurchaseNeeds(rec.name, 'gloves', rec.gloveSize, null, true);
+      itemsQueued.push('Rubber Gloves');
+    }
+    if (rec.needsSleevesToPurchase) {
+      await this.addToPurchaseNeeds(rec.name, 'sleeves', rec.sleeveSize, null, true);
+      itemsQueued.push('Rubber Sleeves');
+    }
+
+    if (itemsQueued.length === 0) {
+      if (typeof window.showToast === 'function') {
+        window.showToast(`All missing PPE items for ${empName} are already queued in Purchase Needs!`, 'info');
+      }
+      return;
+    }
+
+    if (window.procurementEngine && typeof window.procurementEngine.loadData === 'function') {
+      window.procurementEngine.loadData();
+    }
+
+    this.compileAuditData();
+    this.updateToolbarBadge();
+
+    const modalBody = document.getElementById('rubber-ppe-modal-body');
+    if (modalBody) {
+      this.renderModalContent(modalBody);
+    }
+
+    if (typeof window.showToast === 'function') {
+      window.showToast(`🛒 Queued ${itemsQueued.join(' and ')} for ${empName} in Purchase Needs (Urgency: Immediate)`, 'success');
+    }
+  }
+
+  /**
+   * Prompts user confirmation to add all unqueued missing items to Purchase Needs
+   */
+  async promptAddAllMissingToPurchaseNeeds() {
+    const audit = this.compileAuditData();
+    const records = audit?.records || [];
+
+    const itemsToQueue = [];
+    records.forEach(r => {
+      if (r.isExcluded) return;
+      if (r.needsGlovesToPurchase) {
+        itemsToQueue.push({
+          empName: r.name,
+          itemType: 'gloves',
+          size: r.gloveSize,
+          classification: r.classification,
+          location: r.location
+        });
+      }
+      if (r.needsSleevesToPurchase) {
+        itemsToQueue.push({
+          empName: r.name,
+          itemType: 'sleeves',
+          size: r.sleeveSize,
+          classification: r.classification,
+          location: r.location
+        });
+      }
+    });
+
+    if (itemsToQueue.length === 0) {
+      if (typeof window.showToast === 'function') {
+        window.showToast('✅ All missing rubber gloves and sleeves are already queued in Purchase Needs!', 'info');
+      } else {
+        alert('All missing rubber gloves and sleeves for monitored personnel are already queued in Purchase Needs.');
+      }
+      return;
+    }
+
+    const gloveCount = itemsToQueue.filter(x => x.itemType === 'gloves').length;
+    const sleeveCount = itemsToQueue.filter(x => x.itemType === 'sleeves').length;
+    const uniqueEmployees = new Set(itemsToQueue.map(x => x.empName)).size;
+
+    const confirmMsg = `Queue ${itemsToQueue.length} missing PPE items into Purchase Needs?\n\n` +
+      `• Personnel count: ${uniqueEmployees} active employees\n` +
+      `• Rubber Gloves: ${gloveCount} items\n` +
+      `• Rubber Sleeves: ${sleeveCount} items\n` +
+      `• Priority: HIGH 🔴 Immediate (0 days remaining)\n\n` +
+      `Items will appear immediately in the Procurement & Purchase Needs workspace. Proceed?`;
+
+    if (confirm(confirmMsg)) {
+      await this.addAllMissingToPurchaseNeeds(itemsToQueue);
+    }
+  }
+
+  /**
+   * Batch adds multiple items to Purchase Needs in one transaction
+   */
+  async addAllMissingToPurchaseNeeds(itemsToQueue) {
+    if (!Array.isArray(itemsToQueue) || itemsToQueue.length === 0) return;
+
+    for (const item of itemsToQueue) {
+      await this.addToPurchaseNeeds(item.empName, item.itemType, item.size, null, true);
+    }
+
+    if (window.procurementEngine && typeof window.procurementEngine.loadData === 'function') {
+      window.procurementEngine.loadData();
+    }
+
+    this.compileAuditData();
+    this.updateToolbarBadge();
+
+    const modalBody = document.getElementById('rubber-ppe-modal-body');
+    if (modalBody) {
+      this.renderModalContent(modalBody);
+    }
+
+    if (typeof window.showToast === 'function') {
+      window.showToast(`🛒 Successfully queued ${itemsToQueue.length} missing PPE items into Purchase Needs (Urgency: Immediate)!`, 'success');
+    }
+  }
+
+  /**
+   * Switches directly to the Procurement & Purchase Needs workspace view
+   */
+  openPurchaseNeedsView() {
+    this.closeModal();
+
+    if (typeof window.switchView === 'function') {
+      window.switchView('procurement-view');
+    } else if (window.sheetNavigator && typeof window.sheetNavigator.switchView === 'function') {
+      window.sheetNavigator.switchView('procurement-view');
+    } else {
+      const navItem = document.querySelector('.nav-item[data-view="procurement-view"]');
+      if (navItem) navItem.click();
+    }
+
+    if (window.procurementEngine && typeof window.procurementEngine.loadData === 'function') {
+      window.procurementEngine.loadData();
+    }
   }
 
   resetFilters() {
@@ -1778,9 +2331,6 @@ class RubberPpeTrackingEngine {
   /**
    * Generates and downloads a CSV of the tracked equipment audit
    */
-  /**
-   * Generates and downloads a CSV of the tracked equipment audit
-   */
   exportToCsv() {
     const audit = this.compileAuditData();
     const records = audit?.records || [];
@@ -1798,6 +2348,7 @@ class RubberPpeTrackingEngine {
       'Rubber Sleeves Status',
       'Assigned Sleeve #',
       'Preferred Sleeve Size',
+      'Queued in Purchase Needs',
       'Overall Status'
     ];
 
@@ -1813,6 +2364,11 @@ class RubberPpeTrackingEngine {
       else if (r.hasSleeves) sleeveStatus = 'Assigned';
 
       const sleeveItems = r.assignedSleeves.map(s => `#${s.itemNum} (${s.size})`).join('; ') || (r.classMeta.needsSleeves ? 'None' : 'N/A');
+
+      let inNeedsStr = 'No';
+      if (r.gloveInNeeds && r.sleeveInNeeds) inNeedsStr = 'Yes (Gloves & Sleeves)';
+      else if (r.gloveInNeeds) inNeedsStr = 'Yes (Gloves)';
+      else if (r.sleeveInNeeds) inNeedsStr = 'Yes (Sleeves)';
 
       let overall = 'Fully Equipped';
       if (r.isExcluded) overall = 'Excluded (Exempt)';
@@ -1833,6 +2389,7 @@ class RubberPpeTrackingEngine {
         `"${sleeveStatus}"`,
         `"${sleeveItems.replace(/"/g, '""')}"`,
         `"${String(r.sleeveSize).replace(/"/g, '""')}"`,
+        `"${inNeedsStr}"`,
         `"${overall}"`
       ];
       csvRows.push(row.join(','));
