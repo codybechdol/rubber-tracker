@@ -278,6 +278,7 @@ class TripPlannerApp {
     }
 
     // 2. Check inventory table: is old item already in Cody's Truck / Ready For Test / Packed For Testing?
+    const isReclaimItem = !!(item && (item.isReclaim || (!pickItm || pickItm === '—' || pickItm === '-')));
     const invTable = this.db ? this.db.getTable(invKey) : null;
     if (invTable && invTable.rows && oldItm) {
       const oldRow = invTable.rows.find(it => {
@@ -288,7 +289,11 @@ class TripPlannerApp {
         const loc = String(oldRow['Location'] || '').toLowerCase();
         const st = String(oldRow['Status'] || '').toLowerCase();
         const asg = String(oldRow['Assigned To'] || '').toLowerCase();
-        if (loc.includes('truck') && (st.includes('ready for test') || asg.includes('packed for test') || st.includes('in testing'))) {
+        if (!isReclaimItem && loc.includes('truck') && (st.includes('ready for test') || asg.includes('packed for test') || st.includes('in testing'))) {
+          const dtAssigned = String(oldRow['Date Assigned'] || '').trim();
+          return { isCompleted: true, date: dtAssigned || '', invRow: oldRow };
+        }
+        if (isReclaimItem && loc.includes('helena') && st.includes('in stock')) {
           const dtAssigned = String(oldRow['Date Assigned'] || '').trim();
           return { isCompleted: true, date: dtAssigned || '', invRow: oldRow };
         }
@@ -3499,7 +3504,12 @@ class TripPlannerApp {
       if (window.tripRouteMap) {
         window.tripRouteMap.render();
       }
-      this.showToast(`🚚 Scheduled ${payload.swap.type || 'glove'} swap for ${payload.employeeName || payload.swap.employeeName || 'employee'} on ${dateKey}`);
+      const isReclaim = !!(payload.swap.isReclaim || (payload.swap.daysLeft && String(payload.swap.daysLeft).includes('PREV')));
+      if (isReclaim) {
+        this.showToast(`📦 Scheduled reclaim of ${payload.swap.type || 'item'} #${payload.swap.currentItem || ''} from ${payload.employeeName || payload.swap.employeeName || 'former employee'} on ${dateKey}`);
+      } else {
+        this.showToast(`🚚 Scheduled ${payload.swap.type || 'glove'} swap for ${payload.employeeName || payload.swap.employeeName || 'employee'} on ${dateKey}`);
+      }
     } else if (payload.type === 'employee' && Array.isArray(payload.swaps)) {
       payload.swaps.forEach(s => {
         const sKey = this.getSwapKey(s);
@@ -3832,8 +3842,11 @@ class TripPlannerApp {
     const oldDateAssigned = oldRow ? String(oldRow['Date Assigned'] || '—').trim() : '—';
     const oldStatus = oldRow ? String(oldRow['Status'] || 'Assigned').trim() : 'Assigned';
 
-    // Also check if old item in inventory is already transferred to Cody's Truck / Ready For Test
-    if (!isAlreadyCompleted && oldRow) {
+    // Check if item is a Previous Employee Reclaim
+    const isReclaim = !!(target && (target.isReclaim || target.daysLeft === 'PREV EMP' || String(target.daysLeft || '').includes('PREV') || String(target.status || '').toLowerCase().includes('return to shelf') || !pickItemNum || pickItemNum === '—' || pickItemNum === '-'));
+
+    // Also check if old item in inventory is already transferred to Cody's Truck / Ready For Test (for replacement swaps only)
+    if (!isAlreadyCompleted && oldRow && !isReclaim) {
       const oldLoc = String(oldRow['Location'] || '').toLowerCase();
       const oldSt = String(oldRow['Status'] || '').toLowerCase();
       const oldAssigned = String(oldRow['Assigned To'] || '').toLowerCase();
@@ -3860,8 +3873,8 @@ class TripPlannerApp {
     const todayIso = today.toISOString().split('T')[0];
 
     // Update Header
-    if (iconEl) iconEl.textContent = itemIcon;
-    if (titleEl) titleEl.textContent = `${itemLabel} Swap Details & Completion`;
+    if (iconEl) iconEl.textContent = isReclaim ? '📦' : itemIcon;
+    if (titleEl) titleEl.textContent = isReclaim ? `${itemLabel} Reclaim & Warehouse Return` : `${itemLabel} Swap Details & Completion`;
 
     // Render Body
     bodyEl.innerHTML = `
@@ -3870,6 +3883,11 @@ class TripPlannerApp {
         <div>
           <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px; flex-wrap: wrap;">
             <span style="font-size: 16px; font-weight: 800; color: #f8fafc;">👤 ${this.escapeHtml(empName)}</span>
+            ${isReclaim ? `
+              <span class="badge" style="background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.35); font-weight: 700; font-size: 11px; padding: 2px 7px;">
+                Former Employee (Reclaim)
+              </span>
+            ` : ''}
             ${empClassification ? `
               <span class="badge" style="background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.35); font-weight: 700; font-size: 11px; padding: 2px 7px;">
                 ${this.escapeHtml(empClassification)}
@@ -3890,7 +3908,7 @@ class TripPlannerApp {
         </button>
       </div>
 
-      <!-- Side-by-Side Equipment Cards (Old vs New) -->
+      <!-- Side-by-Side Equipment Cards (Old vs New / Warehouse Return) -->
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 14px;">
         
         <!-- Left: Current Issued Equipment (Returning) -->
@@ -3898,10 +3916,10 @@ class TripPlannerApp {
           <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 8px;">
             <div style="display: flex; align-items: center; gap: 6px;">
               <span style="font-size: 16px;">🔄</span>
-              <span style="font-weight: 800; font-size: 13px; color: #fca5a5;">Current ${itemLabel} (Returning)</span>
+              <span style="font-weight: 800; font-size: 13px; color: #fca5a5;">${isReclaim ? `Reclaim ${itemLabel} (Returning)` : `Current ${itemLabel} (Returning)`}</span>
             </div>
             <span class="badge" style="background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3); font-size: 10.5px; font-weight: 700; padding: 2px 6px;">
-              ${oldStatus}
+              ${isReclaim ? 'Return to Shelf' : oldStatus}
             </span>
           </div>
 
@@ -3929,81 +3947,120 @@ class TripPlannerApp {
               <span style="color: #cbd5e1;">${this.escapeHtml(oldDateAssigned)}</span>
             </div>
             <div style="display: flex; justify-content: space-between; align-items: center;">
-              <span style="color: var(--text-secondary);">Change Out Due:</span>
-              <strong style="color: ${swDaysLeft.includes('EXP') || swDaysLeft.includes('OVERDUE') ? '#ef4444' : '#f59e0b'};">${this.escapeHtml(swDueDate)} ${swDaysLeft ? `(${this.escapeHtml(swDaysLeft)})` : ''}</strong>
+              <span style="color: var(--text-secondary);">${isReclaim ? 'Status / Days:' : 'Change Out Due:'}</span>
+              <strong style="color: ${isReclaim ? '#fbbf24' : (swDaysLeft.includes('EXP') || swDaysLeft.includes('OVERDUE') ? '#ef4444' : '#f59e0b')};">${isReclaim ? 'PREV EMP (Return to Shelf)' : `${this.escapeHtml(swDueDate)} ${swDaysLeft ? `(${this.escapeHtml(swDaysLeft)})` : ''}`}</strong>
             </div>
           </div>
 
           <div style="margin-top: auto; padding-top: 8px; border-top: 1px dashed var(--border-color); font-size: 11px; color: #94a3b8; display: flex; align-items: center; gap: 6px;">
             <span>📦 Destination:</span>
-            <strong style="color: #fca5a5;">Cody's Truck (Ready For Test)</strong>
+            <strong style="color: #fca5a5;">Cody's Truck ➔ Warehouse Retest</strong>
           </div>
         </div>
 
-        <!-- Right: New Replacement Equipment (Issuing) -->
-        <div style="background: var(--bg-primary); border: 1px solid var(--border-color); border-top: 4px solid #10b981; border-radius: 8px; padding: 14px; display: flex; flex-direction: column; gap: 10px;">
-          <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 8px;">
-            <div style="display: flex; align-items: center; gap: 6px;">
-              <span style="font-size: 16px;">✨</span>
-              <span style="font-weight: 800; font-size: 13px; color: #86efac;">New Replacement ${itemLabel}</span>
-            </div>
-            <span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); font-size: 10.5px; font-weight: 700; padding: 2px 6px;">
-              ${pickItemNum ? newStatus : '⚠️ Not Picked Yet'}
-            </span>
-          </div>
-
-          <div style="display: flex; flex-direction: column; gap: 6px; font-size: 12px;">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-              <span style="color: var(--text-secondary);">Pick List Item #:</span>
-              <strong style="font-family: monospace; font-size: 13px; color: #4ade80;">${this.escapeHtml(pickItemNum || '—')}</strong>
-            </div>
-            ${newEsl && newEsl !== '—' ? `
-              <div style="display: flex; justify-content: space-between; align-items: center;">
-                <span style="color: var(--text-secondary);">ESL ID:</span>
-                <span style="font-family: monospace; color: #cbd5e1;">${this.escapeHtml(newEsl)}</span>
+        ${isReclaim ? `
+          <!-- Right: Warehouse Return Destination (For Reclaims) -->
+          <div style="background: var(--bg-primary); border: 1px solid var(--border-color); border-top: 4px solid #f59e0b; border-radius: 8px; padding: 14px; display: flex; flex-direction: column; gap: 10px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 8px;">
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <span style="font-size: 16px;">🏢</span>
+                <span style="font-weight: 800; font-size: 13px; color: #fde047;">Warehouse Return & Retest</span>
               </div>
-            ` : ''}
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-              <span style="color: var(--text-secondary);">Size / Class:</span>
-              <span style="font-weight: 600; color: #f8fafc;">${this.escapeHtml(newSize)} ${newClass !== '—' ? `• Class ${this.escapeHtml(newClass)}` : ''}</span>
+              <span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); font-size: 10.5px; font-weight: 700; padding: 2px 6px;">
+                ${isAlreadyCompleted ? 'Delivered to Truck ✅' : 'Return to Shelf / Retest'}
+              </span>
             </div>
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-              <span style="color: var(--text-secondary);">Test Date:</span>
-              <span style="color: #cbd5e1;">${this.escapeHtml(newTestDate)}</span>
-            </div>
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-              <span style="color: var(--text-secondary);">Current Location:</span>
-              <span style="color: #cbd5e1;">${this.escapeHtml(newLocation)}</span>
-            </div>
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-              <span style="color: var(--text-secondary);">New Change Out:</span>
-              <strong style="color: #34d399;">${projectedChgOutStr} (+${intervalMonths} mo)</strong>
-            </div>
-          </div>
 
-          <div style="margin-top: auto; padding-top: 8px; border-top: 1px dashed var(--border-color); font-size: 11px; color: #94a3b8; display: flex; align-items: center; gap: 6px;">
-            <span>👤 Assigned To:</span>
-            <strong style="color: #4ade80;">${this.escapeHtml(empName)} @ ${this.escapeHtml(empLoc)}</strong>
+            <div style="display: flex; flex-direction: column; gap: 6px; font-size: 12px;">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="color: var(--text-secondary);">Workflow:</span>
+                <strong style="color: #fbbf24;">PPE Field Reclaim</strong>
+              </div>
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="color: var(--text-secondary);">Staging Location:</span>
+                <span style="color: #cbd5e1;">Cody's Truck (Ready For Test)</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="color: var(--text-secondary);">Final Destination:</span>
+                <span style="color: #cbd5e1;">Helena Warehouse (Testing Cycle)</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="color: var(--text-secondary);">Inventory Status:</span>
+                <strong style="color: #38bdf8;">Unassign & Return to Inventory</strong>
+              </div>
+            </div>
+
+            <div style="margin-top: auto; padding-top: 8px; border-top: 1px dashed var(--border-color); font-size: 11px; color: #94a3b8; display: flex; align-items: center; gap: 6px;">
+              <span>📦 Reclaim For:</span>
+              <strong style="color: #fca5a5;">${this.escapeHtml(empName)} (Former Worker)</strong>
+            </div>
           </div>
-        </div>
+        ` : `
+          <!-- Right: New Replacement Equipment (Issuing) -->
+          <div style="background: var(--bg-primary); border: 1px solid var(--border-color); border-top: 4px solid #10b981; border-radius: 8px; padding: 14px; display: flex; flex-direction: column; gap: 10px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 8px;">
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <span style="font-size: 16px;">✨</span>
+                <span style="font-weight: 800; font-size: 13px; color: #86efac;">New Replacement ${itemLabel}</span>
+              </div>
+              <span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); font-size: 10.5px; font-weight: 700; padding: 2px 6px;">
+                ${pickItemNum ? newStatus : '⚠️ Not Picked Yet'}
+              </span>
+            </div>
+
+            <div style="display: flex; flex-direction: column; gap: 6px; font-size: 12px;">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="color: var(--text-secondary);">Pick List Item #:</span>
+                <strong style="font-family: monospace; font-size: 13px; color: #4ade80;">${this.escapeHtml(pickItemNum || '—')}</strong>
+              </div>
+              ${newEsl && newEsl !== '—' ? `
+                <div style="display: flex; justify-content: space-between; align-items: center;">
+                  <span style="color: var(--text-secondary);">ESL ID:</span>
+                  <span style="font-family: monospace; color: #cbd5e1;">${this.escapeHtml(newEsl)}</span>
+                </div>
+              ` : ''}
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="color: var(--text-secondary);">Size / Class:</span>
+                <span style="font-weight: 600; color: #f8fafc;">${this.escapeHtml(newSize)} ${newClass !== '—' ? `• Class ${this.escapeHtml(newClass)}` : ''}</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="color: var(--text-secondary);">Test Date:</span>
+                <span style="color: #cbd5e1;">${this.escapeHtml(newTestDate)}</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="color: var(--text-secondary);">Current Location:</span>
+                <span style="color: #cbd5e1;">${this.escapeHtml(newLocation)}</span>
+              </div>
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="color: var(--text-secondary);">New Change Out:</span>
+                <strong style="color: #34d399;">${projectedChgOutStr} (+${intervalMonths} mo)</strong>
+              </div>
+            </div>
+
+            <div style="margin-top: auto; padding-top: 8px; border-top: 1px dashed var(--border-color); font-size: 11px; color: #94a3b8; display: flex; align-items: center; gap: 6px;">
+              <span>👤 Assigned To:</span>
+              <strong style="color: #4ade80;">${this.escapeHtml(empName)} @ ${this.escapeHtml(empLoc)}</strong>
+            </div>
+          </div>
+        `}
 
       </div>
 
-      <!-- Swap Completion Form Card -->
-      <div class="admin-only-control" style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 8px; padding: 14px 18px; display: flex; flex-direction: column; gap: 10px;">
+      <!-- Swap / Reclaim Completion Form Card -->
+      <div class="admin-only-control" style="background: ${isReclaim ? 'rgba(245, 158, 11, 0.08)' : 'rgba(16, 185, 129, 0.08)'}; border: 1px solid ${isReclaim ? 'rgba(245, 158, 11, 0.25)' : 'rgba(16, 185, 129, 0.25)'}; border-radius: 8px; padding: 14px 18px; display: flex; flex-direction: column; gap: 10px;">
         <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
           <div>
             <h4 style="margin: 0; font-size: 13.5px; font-weight: 800; color: #f8fafc; display: flex; align-items: center; gap: 6px;">
-              <span>✅</span>
-              <span>${isAlreadyCompleted ? 'Swap Completed & Delivered' : 'Complete Swap & Deliver Equipment'}</span>
+              <span>${isReclaim ? '📦' : '✅'}</span>
+              <span>${isReclaim ? (isAlreadyCompleted ? 'Equipment Reclaimed & Returned' : 'Reclaim PPE & Return to Warehouse') : (isAlreadyCompleted ? 'Swap Completed & Delivered' : 'Complete Swap & Deliver Equipment')}</span>
             </h4>
             <p style="margin: 2px 0 0 0; font-size: 11.5px; color: var(--text-secondary);">
-              ${isAlreadyCompleted ? `Delivered${(dateChangedVal || oldDateAssigned || (target && target.completedDate)) ? ` on ${this.escapeHtml(dateChangedVal || oldDateAssigned || target.completedDate)}` : ''}. Old item sent to Cody's Truck; new item assigned to employee.` : `Entering a date marks the swap Delivered ✅, reassigns old item ${oldItemNum || ''} to Cody's Truck (Ready For Test), and assigns ${pickItemNum || ''} to ${empName}.`}
+              ${isReclaim ? (isAlreadyCompleted ? `Reclaimed${(dateChangedVal || oldDateAssigned || (target && target.completedDate)) ? ` on ${this.escapeHtml(dateChangedVal || oldDateAssigned || target.completedDate)}` : ''}. Item transferred to Cody's Truck (Ready For Test).` : `Entering a date marks the item Delivered ✅, transfers item #${oldItemNum || ''} to Cody's Truck (Ready For Test), and clears the former employee's active assignment.`) : (isAlreadyCompleted ? `Delivered${(dateChangedVal || oldDateAssigned || (target && target.completedDate)) ? ` on ${this.escapeHtml(dateChangedVal || oldDateAssigned || target.completedDate)}` : ''}. Old item sent to Cody's Truck; new item assigned to employee.` : `Entering a date marks the swap Delivered ✅, reassigns old item ${oldItemNum || ''} to Cody's Truck (Ready For Test), and assigns ${pickItemNum || ''} to ${empName}.`)}
             </p>
           </div>
           ${isAlreadyCompleted ? `
             <span class="badge" style="background: #10b981; color: #fff; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 4px;">
-              ✓ Delivered${(dateChangedVal || oldDateAssigned || (target && target.completedDate)) ? ` on ${this.escapeHtml(dateChangedVal || oldDateAssigned || target.completedDate)}` : ' ✅'}
+              ✓ ${isReclaim ? 'Reclaimed' : 'Delivered'}${(dateChangedVal || oldDateAssigned || (target && target.completedDate)) ? ` on ${this.escapeHtml(dateChangedVal || oldDateAssigned || target.completedDate)}` : ' ✅'}
             </span>
           ` : ''}
         </div>
@@ -4011,7 +4068,7 @@ class TripPlannerApp {
         ${!isAlreadyCompleted ? `
           <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 4px;">
             <label style="font-size: 12px; font-weight: 700; color: #cbd5e1; display: flex; align-items: center; gap: 6px;">
-              <span>📅 Swap Date:</span>
+              <span>📅 ${isReclaim ? 'Reclaim Date:' : 'Swap Date:'}</span>
               <input type="date" id="swap-completion-date" value="${todayIso}" class="form-control" style="padding: 5px 10px; font-size: 12px; background: var(--bg-primary); color: #f8fafc; border: 1px solid var(--border-color); border-radius: 4px;" />
             </label>
             <span style="font-size: 11px; color: var(--text-muted);">Defaults to today (${today.toLocaleDateString()})</span>
@@ -4024,8 +4081,8 @@ class TripPlannerApp {
     if (actionsEl) {
       if (!isAlreadyCompleted) {
         actionsEl.innerHTML = `
-          <button class="btn admin-only-control" style="background-color: #10b981; color: white; font-weight: 800; font-size: 13px; padding: 8px 18px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 6px; box-shadow: 0 2px 8px rgba(16, 185, 129, 0.4);" onclick="window.tripPlanner.executeCompleteSwapFromModal('${tableKey}', ${swRowIdx !== null ? swRowIdx : `'${this.escapeJs(empName)}'`}, '${this.escapeJs(empName)}', '${this.escapeJs(oldItemNum)}')">
-            <span>✓ Complete Swap & Update Inventory</span>
+          <button class="btn admin-only-control" style="background-color: ${isReclaim ? '#f59e0b' : '#10b981'}; color: ${isReclaim ? '#000' : 'white'}; font-weight: 800; font-size: 13px; padding: 8px 18px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 6px; box-shadow: 0 2px 8px ${isReclaim ? 'rgba(245, 158, 11, 0.4)' : 'rgba(168, 85, 247, 0.4)'};" onclick="window.tripPlanner.executeCompleteSwapFromModal('${tableKey}', ${swRowIdx !== null ? swRowIdx : `'${this.escapeJs(empName)}'`}, '${this.escapeJs(empName)}', '${this.escapeJs(oldItemNum)}')">
+            <span>✓ ${isReclaim ? 'Reclaim Item & Update Inventory' : 'Complete Swap & Update Inventory'}</span>
           </button>
         `;
       } else {
@@ -4134,7 +4191,12 @@ class TripPlannerApp {
     }
 
     this.closeSwapDetailsModal();
-    this.showToast(`✅ Swap completed for ${empName}! Swaps sheet & Inventory updated.`);
+    const isModalReclaim = (swRow && (swRow['Days Left'] === 'PREV EMP' || String(swRow['Days Left'] || '').includes('PREV') || String(swRow['Status'] || '').toLowerCase().includes('return to shelf'))) || !swRow || !swRow['Pick List Item #'] || swRow['Pick List Item #'] === '—';
+    if (isModalReclaim) {
+      this.showToast(`✅ Reclaim completed for ${empName}! Item #${currentItem || ''} transferred to Cody's Truck (Ready For Test).`);
+    } else {
+      this.showToast(`✅ Swap completed for ${empName}! Swaps sheet & Inventory updated.`);
+    }
     this.renderPlanner();
     this.renderPickedSwapsList();
     this.notifyAccomplishmentsModal();
@@ -6662,17 +6724,19 @@ class TripPlannerApp {
               <div id="section-body-${dateKey}-swaps" style="display: ${isSwapsCollapsed ? 'none' : 'flex'}; flex-direction: column; gap: 5px; margin-top: 5px;">
                 ${dayScheduledSwaps.map(s => {
                   const isGlove = (s.type || '').toLowerCase() === 'glove';
+                  const isReclaim = !!s.isReclaim;
                   const loc = s.location || '';
                   const isDone = !!s.isCompleted;
                   return `
-                    <div class="scheduled-swap-card ${isDone ? 'completed-swap-card' : ''}" draggable="${!isDone}" data-skey="${this.escapeHtml(s._sKey)}" style="background: var(--bg-primary); border: 1px solid ${isDone ? 'rgba(16, 185, 129, 0.25)' : 'rgba(16, 185, 129, 0.35)'}; border-left: 4px solid #10b981; border-radius: 6px; padding: 7px 9px; box-shadow: 0 1px 4px rgba(0,0,0,0.25); cursor: ${isDone ? 'default' : 'grab'}; opacity: ${isDone ? '0.72' : '1'}; transition: all 0.15s ease;" onmouseover="this.style.borderColor='#34d399'" onmouseout="this.style.borderColor='${isDone ? 'rgba(16, 185, 129, 0.25)' : 'rgba(16, 185, 129, 0.35)'}'">
+                    <div class="scheduled-swap-card ${isDone ? 'completed-swap-card' : ''}" draggable="${!isDone}" data-skey="${this.escapeHtml(s._sKey)}" style="background: var(--bg-primary); border: 1px solid ${isDone ? 'rgba(16, 185, 129, 0.25)' : (isReclaim ? 'rgba(245, 158, 11, 0.35)' : 'rgba(16, 185, 129, 0.35)')}; border-left: 4px solid ${isReclaim ? '#f59e0b' : '#10b981'}; border-radius: 6px; padding: 7px 9px; box-shadow: 0 1px 4px rgba(0,0,0,0.25); cursor: ${isDone ? 'default' : 'grab'}; opacity: ${isDone ? '0.72' : '1'}; transition: all 0.15s ease;" onmouseover="this.style.borderColor='${isReclaim ? '#fbbf24' : '#34d399'}'" onmouseout="this.style.borderColor='${isDone ? 'rgba(16, 185, 129, 0.25)' : (isReclaim ? 'rgba(245, 158, 11, 0.35)' : 'rgba(16, 185, 129, 0.35)')}'">
                       <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 6px;">
                         <div style="display: flex; align-items: flex-start; gap: 7px; flex: 1; min-width: 0;">
-                          <input type="checkbox" ${isDone ? 'checked' : ''} style="cursor: pointer; margin-top: 3px; accent-color: #10b981; width: 14px; height: 14px;" title="${isDone ? 'Swap completed (click to view / revert)' : 'Click to view / complete swap'}" onclick="event.stopPropagation(); window.tripPlanner.openSwapDetailsModal(${JSON.stringify(s).replace(/"/g, '&quot;')}, '${this.escapeJs(s.crewId || '')}', '${this.escapeJs(loc)}')">
+                          <input type="checkbox" ${isDone ? 'checked' : ''} style="cursor: pointer; margin-top: 3px; accent-color: ${isReclaim ? '#f59e0b' : '#10b981'}; width: 14px; height: 14px;" title="${isDone ? 'Completed (click to view / revert)' : 'Click to view / complete'}" onclick="event.stopPropagation(); window.tripPlanner.openSwapDetailsModal(${JSON.stringify(s).replace(/"/g, '&quot;')}, '${this.escapeJs(s.crewId || '')}', '${this.escapeJs(loc)}')">
                           <div style="flex: 1; min-width: 0;">
                             <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 3px;">
                               <span style="font-weight: 700; font-size: 12px; color: ${isDone ? '#94a3b8' : '#f8fafc'}; text-decoration: ${isDone ? 'line-through' : 'none'}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
                                 ${this.escapeHtml(s.employeeName)}
+                                ${isReclaim ? `<span style="font-size: 9.5px; color: #f87171; font-weight: 600; margin-left: 4px;">(Prev Emp)</span>` : ''}
                               </span>
                               <div style="display: flex; gap: 4px; align-items: center;">
                                 ${s.classification ? `<span class="badge" style="background: rgba(148, 163, 184, 0.15); color: #94a3b8; font-size: 9px; padding: 1px 4px; border-radius: 3px;">${this.escapeHtml(s.classification)}</span>` : ''}
@@ -6681,8 +6745,8 @@ class TripPlannerApp {
                             </div>
                             <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: #cbd5e1; margin-top: 4px; flex-wrap: wrap; gap: 4px;">
                               <div style="display: flex; align-items: center; gap: 4px; flex-wrap: wrap;">
-                                <span class="badge" style="background: ${isGlove ? 'rgba(59, 130, 246, 0.18)' : 'rgba(168, 85, 247, 0.18)'}; color: ${isGlove ? '#93c5fd' : '#d8b4fe'}; border: 1px solid ${isGlove ? 'rgba(59, 130, 246, 0.35)' : 'rgba(168, 85, 247, 0.35)'}; font-size: 9.5px; font-weight: 700; padding: 1px 5px; border-radius: 3px;">
-                                  ${isGlove ? '🧤 Glove' : '🧤 Sleeve'}${s.itemClass ? ` (CL ${this.escapeHtml(s.itemClass)})` : ''}
+                                <span class="badge" style="background: ${isReclaim ? 'rgba(245, 158, 11, 0.18)' : (isGlove ? 'rgba(59, 130, 246, 0.18)' : 'rgba(168, 85, 247, 0.18)')}; color: ${isReclaim ? '#fbbf24' : (isGlove ? '#93c5fd' : '#d8b4fe')}; border: 1px solid ${isReclaim ? 'rgba(245, 158, 11, 0.35)' : (isGlove ? 'rgba(59, 130, 246, 0.35)' : 'rgba(168, 85, 247, 0.35)')}; font-size: 9.5px; font-weight: 700; padding: 1px 5px; border-radius: 3px;">
+                                  ${isReclaim ? '📦 Reclaim ' : ''}${isGlove ? '🧤 Glove' : '🧤 Sleeve'}${s.itemClass ? ` (CL ${this.escapeHtml(s.itemClass)})` : ''}
                                 </span>
                                 ${isDone ? `
                                   <span class="badge" style="background: rgba(16, 185, 129, 0.25); color: #a7f3d0; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 9px; font-weight: 800; padding: 1px 5px; border-radius: 3px;">
@@ -6691,7 +6755,15 @@ class TripPlannerApp {
                                 ` : ''}
                               </div>
                               <span style="font-size: 11px; color: #e2e8f0;">
-                                ${isDone ? `
+                                ${isReclaim ? (isDone ? `
+                                  Reclaimed: <strong style="color: #94a3b8; text-decoration: line-through;">#${this.escapeHtml(s.currentItem || '—')}</strong>
+                                  &nbsp;➔&nbsp;
+                                  <strong style="color: #4ade80;">Helena 🏢</strong>
+                                ` : `
+                                  Reclaim: <strong style="color: #fca5a5;">#${this.escapeHtml(s.currentItem || '—')}</strong>
+                                  &nbsp;➔&nbsp;
+                                  <strong style="color: #fbbf24;">Helena 🏢</strong>
+                                `) : (isDone ? `
                                   Returned: <strong style="color: #94a3b8; text-decoration: line-through;">${this.escapeHtml(s.currentItem || '—')}</strong>
                                   &nbsp;➔&nbsp;
                                   Assigned: <strong style="color: #4ade80;">${this.escapeHtml(s.pickItem || '—')}</strong>
@@ -6699,7 +6771,7 @@ class TripPlannerApp {
                                   Current: <strong style="color: #fca5a5;">${this.escapeHtml(s.currentItem || '—')}</strong>
                                   &nbsp;➔&nbsp;
                                   Pick: <strong style="color: #4ade80;">${this.escapeHtml(s.pickItem || '—')}</strong>
-                                `}
+                                `)}
                                 ${s.size ? `<span style="color: #94a3b8; font-size: 9.5px;"> (${this.escapeHtml(s.size)})</span>` : ''}
                               </span>
                             </div>
@@ -6713,8 +6785,8 @@ class TripPlannerApp {
                         </div>
                         <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 6px; margin-left: 4px;">
                           ${!isDone ? `
-                            <button class="btn btn-primary" style="padding: 2px 7px; font-size: 9px; background: #10b981; border: none; font-weight: 700; cursor: pointer; border-radius: 3px; white-space: nowrap;" onclick="event.stopPropagation(); window.tripPlanner.openSwapDetailsModal(${JSON.stringify(s).replace(/"/g, '&quot;')}, '${this.escapeJs(s.crewId || '')}', '${this.escapeJs(loc)}')">
-                              🔍 Swap
+                            <button class="btn btn-primary" style="padding: 2px 7px; font-size: 9px; background: ${isReclaim ? '#f59e0b; color: #000;' : '#10b981;'}; border: none; font-weight: 700; cursor: pointer; border-radius: 3px; white-space: nowrap;" onclick="event.stopPropagation(); window.tripPlanner.openSwapDetailsModal(${JSON.stringify(s).replace(/"/g, '&quot;')}, '${this.escapeJs(s.crewId || '')}', '${this.escapeJs(loc)}')">
+                              ${isReclaim ? '📦 Reclaim' : '🔍 Swap'}
                             </button>
                           ` : `
                             <button class="btn btn-secondary" style="padding: 2px 6px; font-size: 9px; color: #a7f3d0; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.35); font-weight: 700; cursor: pointer; border-radius: 3px; white-space: nowrap;" onclick="event.stopPropagation(); window.tripPlanner.openSwapDetailsModal(${JSON.stringify(s).replace(/"/g, '&quot;')}, '${this.escapeJs(s.crewId || '')}', '${this.escapeJs(loc)}')">
@@ -6842,17 +6914,19 @@ class TripPlannerApp {
                                       <div style="font-size: 9.5px; font-weight: 800; color: #34d399; display: flex; align-items: center; justify-content: space-between; margin-bottom: 2px;">
                                         <span>🚚 Picked Swaps Ready (${crewPickedSwaps.length})</span>
                                       </div>
-                                      ${crewPickedSwaps.map(ps => `
-                                        <div style="font-size: 9.5px; color: #e2e8f0; display: flex; justify-content: space-between; align-items: center; margin-top: 3px; gap: 4px; cursor: pointer; padding: 2px 4px; border-radius: 3px; transition: background 0.15s;" onmouseover="this.style.background='rgba(255,255,255,0.08)'" onmouseout="this.style.background='transparent'" onclick="event.stopPropagation(); window.tripPlanner.openSwapDetailsModal(${JSON.stringify(ps).replace(/"/g, '&quot;')}, '${this.escapeJs(c.crewId)}', '${this.escapeJs(trip.location)}')" title="Click to view swap details & complete swap">
+                                      ${crewPickedSwaps.map(ps => {
+                                        const isReclaim = !!ps.isReclaim;
+                                        return `
+                                        <div style="font-size: 9.5px; color: #e2e8f0; display: flex; justify-content: space-between; align-items: center; margin-top: 3px; gap: 4px; cursor: pointer; padding: 2px 4px; border-radius: 3px; transition: background 0.15s;" onmouseover="this.style.background='rgba(255,255,255,0.08)'" onmouseout="this.style.background='transparent'" onclick="event.stopPropagation(); window.tripPlanner.openSwapDetailsModal(${JSON.stringify(ps).replace(/"/g, '&quot;')}, '${this.escapeJs(c.crewId)}', '${this.escapeJs(trip.location)}')" title="${isReclaim ? 'Click to view reclaim details' : 'Click to view swap details & complete swap'}">
                                           <span style="flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                                            <strong>${this.escapeHtml(ps.employeeName)}</strong>: ${ps.type === 'Glove' ? '🧤 Glove' : '🧤 Sleeve'} <span style="color: #fca5a5;">${this.escapeHtml(ps.currentItem || '—')}</span> ➔ <strong style="color: #4ade80;">${this.escapeHtml(ps.pickItem || '—')}</strong>
+                                            <strong>${this.escapeHtml(ps.employeeName)}</strong>: ${isReclaim ? '📦 Reclaim ' : ''}${ps.type === 'Glove' ? '🧤 Glove' : '🧤 Sleeve'} ${isReclaim ? `<span style="color: #fca5a5;">#${this.escapeHtml(ps.currentItem || '—')}</span> ➔ <strong style="color: #fbbf24;">Helena</strong>` : `<span style="color: #fca5a5;">${this.escapeHtml(ps.currentItem || '—')}</span> ➔ <strong style="color: #4ade80;">${this.escapeHtml(ps.pickItem || '—')}</strong>`}
                                             ${ps.size ? `<span style="color: #94a3b8; font-size: 9px;"> (${this.escapeHtml(ps.size)})</span>` : ''}
                                           </span>
-                                          <button class="btn btn-primary" style="padding: 1px 6px; font-size: 8.5px; background: #10b981; border: none; font-weight: 700; cursor: pointer; border-radius: 3px; white-space: nowrap;" onclick="event.stopPropagation(); window.tripPlanner.openSwapDetailsModal(${JSON.stringify(ps).replace(/"/g, '&quot;')}, '${this.escapeJs(c.crewId)}', '${this.escapeJs(trip.location)}')" title="View swap details & complete swap">
-                                            🔍 Swap
+                                          <button class="btn btn-primary" style="padding: 1px 6px; font-size: 8.5px; background: ${isReclaim ? '#f59e0b; color: #000;' : '#10b981;'}; border: none; font-weight: 700; cursor: pointer; border-radius: 3px; white-space: nowrap;" onclick="event.stopPropagation(); window.tripPlanner.openSwapDetailsModal(${JSON.stringify(ps).replace(/"/g, '&quot;')}, '${this.escapeJs(c.crewId)}', '${this.escapeJs(trip.location)}')" title="${isReclaim ? 'View reclaim details' : 'View swap details & complete swap'}">
+                                            ${isReclaim ? '📦 Reclaim' : '🔍 Swap'}
                                           </button>
                                         </div>
-                                      `).join('')}
+                                      `;}).join('')}
                                     </div>
                                   ` : ''}
 
@@ -6861,17 +6935,19 @@ class TripPlannerApp {
                                       <div style="font-size: 9.5px; font-weight: 800; color: #34d399; display: flex; align-items: center; justify-content: space-between; margin-bottom: 2px;">
                                         <span>✅ Completed Swaps (${crewCompletedSwaps.length})</span>
                                       </div>
-                                      ${crewCompletedSwaps.map(cs => `
+                                      ${crewCompletedSwaps.map(cs => {
+                                        const isReclaim = !!cs.isReclaim;
+                                        return `
                                         <div style="font-size: 9.5px; color: #cbd5e1; display: flex; justify-content: space-between; align-items: center; margin-top: 3px; gap: 4px; cursor: pointer; padding: 2px 4px; border-radius: 3px; transition: background 0.15s;" onmouseover="this.style.background='rgba(255,255,255,0.08)'" onmouseout="this.style.background='transparent'" onclick="event.stopPropagation(); window.tripPlanner.openSwapDetailsModal(${JSON.stringify(cs).replace(/"/g, '&quot;')}, '${this.escapeJs(c.crewId)}', '${this.escapeJs(trip.location)}')" title="Click to view completed swap details">
                                           <span style="flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                                            <strong style="color: #94a3b8; text-decoration: line-through;">${this.escapeHtml(cs.employeeName)}</strong>: ${cs.type === 'Glove' ? '🧤 Glove' : (cs.type === 'Sleeve' ? '🧤 Sleeve' : this.escapeHtml(cs.type))} <span style="color: #94a3b8; text-decoration: line-through;">#${this.escapeHtml(cs.currentItem || '—')}</span> ➔ <strong style="color: #4ade80;">#${this.escapeHtml(cs.pickItem || '—')}</strong>
+                                            <strong style="color: #94a3b8; text-decoration: line-through;">${this.escapeHtml(cs.employeeName)}</strong>: ${isReclaim ? '📦 Reclaimed ' : ''}${cs.type === 'Glove' ? '🧤 Glove' : (cs.type === 'Sleeve' ? '🧤 Sleeve' : this.escapeHtml(cs.type))} ${isReclaim ? `<span style="color: #94a3b8; text-decoration: line-through;">#${this.escapeHtml(cs.currentItem || '—')}</span> ➔ <strong style="color: #4ade80;">Helena</strong>` : `<span style="color: #94a3b8; text-decoration: line-through;">#${this.escapeHtml(cs.currentItem || '—')}</span> ➔ <strong style="color: #4ade80;">#${this.escapeHtml(cs.pickItem || '—')}</strong>`}
                                             ${cs.size ? `<span style="color: #94a3b8; font-size: 9px;"> (${this.escapeHtml(cs.size)})</span>` : ''}
                                           </span>
                                           <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #a7f3d0; font-size: 8.5px; font-weight: 700; padding: 1px 4px; border-radius: 3px; white-space: nowrap;">
                                             ✓ Done
                                           </span>
                                         </div>
-                                      `).join('')}
+                                      `;}).join('')}
                                     </div>
                                   ` : ''}
                                 </div>
@@ -7194,6 +7270,74 @@ class TripPlannerApp {
       });
     }
 
+    const empHistoryTable = this.db.getTable('employee_history') || this.db.getTable('Employee History');
+    const empHistory = (empHistoryTable && empHistoryTable.rows) ? empHistoryTable.rows : [];
+
+    // Helper to resolve an employee's physical location & crew
+    const resolveEmployeeLocationAndCrew = (empName, rowLoc, empInfo, rowForeman) => {
+      let location = 'Helena';
+      let crewId = 'Unassigned';
+      let foreman = rowForeman || '';
+      let jobName = '';
+
+      const cleanRowLoc = this.cleanPhysicalLocation(rowLoc);
+      if (cleanRowLoc && !this.isStatusLocation(cleanRowLoc)) {
+        location = cleanRowLoc;
+      }
+
+      const rawJob = (empInfo && empInfo.jobNum) || '';
+      if (rawJob) {
+        const sig = this.getSignificantJobNumber(rawJob) || rawJob;
+        crewId = sig;
+        if (crewMap[sig]) {
+          const c = crewMap[sig];
+          if (c.foreman) foreman = c.foreman;
+          if (c.jobName) jobName = c.jobName;
+          if ((!location || location === 'Helena' || this.isStatusLocation(location)) && c.location && !this.isStatusLocation(c.location)) {
+            location = c.location;
+          }
+        }
+      }
+
+      if ((!location || location === 'Helena' || this.isStatusLocation(location)) && empName) {
+        const eLower = empName.toLowerCase();
+        for (let i = empHistory.length - 1; i >= 0; i--) {
+          const h = empHistory[i];
+          if (String(h['Employee Name'] || h['Name'] || '').toLowerCase() === eLower) {
+            const hLoc = this.cleanPhysicalLocation(h['Location'] || '');
+            if (hLoc && !this.isStatusLocation(hLoc)) {
+              location = hLoc;
+              break;
+            }
+          }
+        }
+      }
+
+      if ((!location || location === 'Helena' || this.isStatusLocation(location)) && empInfo && empInfo.location && !this.isStatusLocation(empInfo.location)) {
+        location = this.cleanPhysicalLocation(empInfo.location);
+      }
+
+      if (this.isStatusLocation(location)) location = 'Helena';
+      return { location, crewId, foreman, jobName };
+    };
+
+    // Helper to check if a row is a Previous Employee Reclaim
+    const isRowPreviousEmployeeReclaim = (row, empName, empInfo) => {
+      if (!row) return false;
+      const dc = String(row['Date Changed'] || row['Delivered Date'] || '').trim();
+      const st = String(row['Status'] || '').toLowerCase();
+      if (dc || st.includes('delivered') || st.includes('completed')) return false;
+
+      const dl = String(row['Days Left'] || '').toUpperCase();
+      const rLoc = String(row['Location'] || row._location || '').toLowerCase();
+      const eLoc = String((empInfo && empInfo.location) || '').toLowerCase();
+
+      if (dl.includes('PREV')) return true;
+      if (st.includes('return to shelf')) return true;
+      if (rLoc.includes('previous') || eLoc.includes('previous')) return true;
+      return false;
+    };
+
     const pickedItems = [];
 
     // Helper to check if a row is picked
@@ -7224,47 +7368,40 @@ class TripPlannerApp {
     const glovesInvTable = this.db ? this.db.getTable('gloves') : null;
     if (gloveSwapsTable && gloveSwapsTable.rows) {
       gloveSwapsTable.rows.forEach((r, idx) => {
-        if (!isRowPicked(r, 'glove_swaps')) return;
         const empName = String(r['Employee'] || r['Employee Name'] || r['Name'] || '').trim();
         if (!empName) return;
+        const empInfo = empMap[empName.toLowerCase()] || {};
+        const isReclaim = isRowPreviousEmployeeReclaim(r, empName, empInfo);
+        const isPicked = isRowPicked(r, 'glove_swaps');
+
+        if (!isPicked && !isReclaim) return;
 
         const currentItem = String(r['Current Glove #'] || r['Current Item #'] || r['Current Item'] || '').trim();
         if (currentItem && glovesInvTable && glovesInvTable.rows) {
-          const itRow = glovesInvTable.rows.find(it => String(it['Item #'] || '').trim() === currentItem);
+          const itRow = glovesInvTable.rows.find(it => String(it['Item #'] || it['Glove'] || '').trim() === currentItem);
           if (itRow) {
             const itLoc = String(itRow['Location'] || '').toLowerCase();
             const itSt = String(itRow['Status'] || '').toLowerCase();
             const itAsg = String(itRow['Assigned To'] || '').toLowerCase();
-            if (itLoc.includes('truck') && (itSt.includes('ready for test') || itAsg.includes('packed for test'))) {
+            if (!isReclaim && itLoc.includes('truck') && (itSt.includes('ready for test') || itAsg.includes('packed for test'))) {
               return; // Already turned in and swapped
             }
           }
         }
-        const pickItem = String(r['Pick List Glove #'] || r['Pick List Item #'] || r['Pick List Item'] || '').trim();
+        const pickItem = String(r['Pick List Glove #'] || r['Pick List Item #'] || r['Pick List Item'] || '').trim() || (isReclaim ? '—' : '');
         const size = String(r['Size'] || '').trim();
         const itemClass = String(r['Class'] || '').trim();
-        const status = String(r['Status'] || 'Ready For Delivery 🚚').trim();
+        const status = String(r['Status'] || (isReclaim ? 'Return to Shelf' : 'Ready For Delivery 🚚')).trim();
         const changeOutDate = r['Change Out Date'] || '';
-        const daysLeft = r['Days Left'] !== undefined ? r['Days Left'] : '';
+        const daysLeft = r['Days Left'] !== undefined ? r['Days Left'] : (isReclaim ? 'PREV EMP' : '');
 
-        const empInfo = empMap[empName.toLowerCase()] || {};
-        let rawLoc = r._location || empInfo.location || '';
-        let rawJob = empInfo.jobNum || '';
+        const rawJob = empInfo.jobNum || '';
         const classification = empInfo.classification || '';
-        const crewId = this.getSignificantJobNumber(rawJob) || rawJob || 'Unassigned';
-        const crewInfo = crewMap[crewId] || {};
-
-        let location = 'Helena';
-        if (rawLoc && !this.isStatusLocation(rawLoc)) {
-          location = this.cleanPhysicalLocation(rawLoc);
-        } else if (crewInfo.location && !this.isStatusLocation(crewInfo.location)) {
-          location = crewInfo.location;
-        } else if (rawLoc) {
-          location = this.cleanPhysicalLocation(rawLoc);
-        }
+        const resolved = resolveEmployeeLocationAndCrew(empName, r._location || r['Location'] || '', empInfo, r._foreman || r['Foreman'] || '');
 
         pickedItems.push({
           type: 'Glove',
+          isReclaim: isReclaim,
           employeeName: empName,
           currentItem: currentItem,
           pickItem: pickItem,
@@ -7275,12 +7412,12 @@ class TripPlannerApp {
           daysLeft: daysLeft,
           tableKey: 'glove_swaps',
           rowIdx: idx,
-          location: location,
-          crewId: crewId,
-          foreman: crewInfo.foreman || r._foreman || '',
-          jobName: crewInfo.jobName || '',
+          location: resolved.location,
+          crewId: resolved.crewId,
+          foreman: resolved.foreman,
+          jobName: resolved.jobName,
           classification: classification,
-          jobNum: rawJob
+          jobNum: rawJob || resolved.crewId
         });
       });
     }
@@ -7289,47 +7426,40 @@ class TripPlannerApp {
     const sleevesInvTable = this.db ? this.db.getTable('sleeves') : null;
     if (sleeveSwapsTable && sleeveSwapsTable.rows) {
       sleeveSwapsTable.rows.forEach((r, idx) => {
-        if (!isRowPicked(r, 'sleeve_swaps')) return;
         const empName = String(r['Employee'] || r['Employee Name'] || r['Name'] || '').trim();
         if (!empName) return;
+        const empInfo = empMap[empName.toLowerCase()] || {};
+        const isReclaim = isRowPreviousEmployeeReclaim(r, empName, empInfo);
+        const isPicked = isRowPicked(r, 'sleeve_swaps');
+
+        if (!isPicked && !isReclaim) return;
 
         const currentItem = String(r['Current Sleeve #'] || r['Current Item #'] || r['Current Item'] || '').trim();
         if (currentItem && sleevesInvTable && sleevesInvTable.rows) {
-          const itRow = sleevesInvTable.rows.find(it => String(it['Item #'] || '').trim() === currentItem);
+          const itRow = sleevesInvTable.rows.find(it => String(it['Item #'] || it['Sleeve'] || '').trim() === currentItem);
           if (itRow) {
             const itLoc = String(itRow['Location'] || '').toLowerCase();
             const itSt = String(itRow['Status'] || '').toLowerCase();
             const itAsg = String(itRow['Assigned To'] || '').toLowerCase();
-            if (itLoc.includes('truck') && (itSt.includes('ready for test') || itAsg.includes('packed for test'))) {
+            if (!isReclaim && itLoc.includes('truck') && (itSt.includes('ready for test') || itAsg.includes('packed for test'))) {
               return; // Already turned in and swapped
             }
           }
         }
-        const pickItem = String(r['Pick List Sleeve #'] || r['Pick List Item #'] || r['Pick List Item'] || '').trim();
+        const pickItem = String(r['Pick List Sleeve #'] || r['Pick List Item #'] || r['Pick List Item'] || '').trim() || (isReclaim ? '—' : '');
         const size = String(r['Size'] || '').trim();
         const itemClass = String(r['Class'] || '').trim();
-        const status = String(r['Status'] || 'Ready For Delivery 🚚').trim();
+        const status = String(r['Status'] || (isReclaim ? 'Return to Shelf' : 'Ready For Delivery 🚚')).trim();
         const changeOutDate = r['Change Out Date'] || '';
-        const daysLeft = r['Days Left'] !== undefined ? r['Days Left'] : '';
+        const daysLeft = r['Days Left'] !== undefined ? r['Days Left'] : (isReclaim ? 'PREV EMP' : '');
 
-        const empInfo = empMap[empName.toLowerCase()] || {};
-        let rawLoc = r._location || empInfo.location || '';
-        let rawJob = empInfo.jobNum || '';
+        const rawJob = empInfo.jobNum || '';
         const classification = empInfo.classification || '';
-        const crewId = this.getSignificantJobNumber(rawJob) || rawJob || 'Unassigned';
-        const crewInfo = crewMap[crewId] || {};
-
-        let location = 'Helena';
-        if (rawLoc && !this.isStatusLocation(rawLoc)) {
-          location = this.cleanPhysicalLocation(rawLoc);
-        } else if (crewInfo.location && !this.isStatusLocation(crewInfo.location)) {
-          location = crewInfo.location;
-        } else if (rawLoc) {
-          location = this.cleanPhysicalLocation(rawLoc);
-        }
+        const resolved = resolveEmployeeLocationAndCrew(empName, r._location || r['Location'] || '', empInfo, r._foreman || r['Foreman'] || '');
 
         pickedItems.push({
           type: 'Sleeve',
+          isReclaim: isReclaim,
           employeeName: empName,
           currentItem: currentItem,
           pickItem: pickItem,
@@ -7340,19 +7470,67 @@ class TripPlannerApp {
           daysLeft: daysLeft,
           tableKey: 'sleeve_swaps',
           rowIdx: idx,
-          location: location,
-          crewId: crewId,
-          foreman: crewInfo.foreman || r._foreman || '',
-          jobName: crewInfo.jobName || '',
+          location: resolved.location,
+          crewId: resolved.crewId,
+          foreman: resolved.foreman,
+          jobName: resolved.jobName,
           classification: classification,
-          jobNum: rawJob
+          jobNum: rawJob || resolved.crewId
         });
       });
     }
 
+    // 5. Also scan inventory for any items assigned to Previous Employees not already covered
+    const scanInvForReclaims = (invTable, type, tableKey) => {
+      if (!invTable || !invTable.rows) return;
+      invTable.rows.forEach((it, idx) => {
+        const itemNum = String(it['Item #'] || it['Glove'] || it['Sleeve'] || it['Serial #'] || '').trim();
+        if (!itemNum) return;
+        const asg = String(it['Assigned To'] || '').trim();
+        const loc = String(it['Location'] || '').toLowerCase();
+        const st = String(it['Status'] || '').toLowerCase();
+        const empInfo = empMap[asg.toLowerCase()] || {};
+        const isPrevEmp = loc.includes('previous') || String(empInfo.location || '').toLowerCase().includes('previous');
+        if (!isPrevEmp) return;
+
+        // Skip if already in pickedItems
+        const already = pickedItems.some(pi => pi.type === type && String(pi.currentItem).trim() === itemNum);
+        if (already) return;
+
+        // Skip if already returned to Helena stock
+        if (loc.includes('helena') && st.includes('in stock')) return;
+
+        const resolved = resolveEmployeeLocationAndCrew(asg, it['Location'] || '', empInfo, '');
+        pickedItems.push({
+          type: type,
+          isReclaim: true,
+          employeeName: asg,
+          currentItem: itemNum,
+          pickItem: '—',
+          size: String(it['Size'] || '').trim(),
+          itemClass: String(it['Class'] || '').trim(),
+          status: 'Return to Shelf',
+          changeOutDate: it['Change Out Date'] || '',
+          daysLeft: 'PREV EMP',
+          tableKey: tableKey,
+          rowIdx: idx,
+          location: resolved.location,
+          crewId: resolved.crewId,
+          foreman: resolved.foreman,
+          jobName: resolved.jobName,
+          classification: empInfo.classification || '',
+          jobNum: empInfo.jobNum || resolved.crewId
+        });
+      });
+    };
+    scanInvForReclaims(glovesInvTable, 'Glove', 'glove_swaps');
+    scanInvForReclaims(sleevesInvTable, 'Sleeve', 'sleeve_swaps');
+
     let totalGloves = 0;
     let totalSleeves = 0;
+    let totalReclaims = 0;
     pickedItems.forEach(i => {
+      if (i.isReclaim) totalReclaims++;
       if (i.type === 'Glove') totalGloves++;
       if (i.type === 'Sleeve') totalSleeves++;
     });
@@ -7361,7 +7539,8 @@ class TripPlannerApp {
       items: pickedItems,
       totalPicked: pickedItems.length,
       totalGloves: totalGloves,
-      totalSleeves: totalSleeves
+      totalSleeves: totalSleeves,
+      totalReclaims: totalReclaims
     };
   }
 
@@ -7402,11 +7581,13 @@ class TripPlannerApp {
       return true;
     });
 
-    // Apply category filter (all, gloves, sleeves)
+    // Apply category filter (all, gloves, sleeves, reclaims)
     if (this.swapsFilter === 'gloves') {
       items = items.filter(i => i.type === 'Glove');
     } else if (this.swapsFilter === 'sleeves') {
       items = items.filter(i => i.type === 'Sleeve');
+    } else if (this.swapsFilter === 'reclaims') {
+      items = items.filter(i => i.isReclaim);
     }
 
     // Apply search filter
@@ -7419,19 +7600,32 @@ class TripPlannerApp {
         const locMatch = (i.location || '').toLowerCase().includes(q);
         const crewMatch = (i.crewId || '').toLowerCase().includes(q);
         const foremanMatch = (i.foreman || '').toLowerCase().includes(q);
-        return empMatch || curMatch || pickMatch || locMatch || crewMatch || foremanMatch;
+        const reclaimMatch = i.isReclaim && 'reclaim'.includes(q);
+        return empMatch || curMatch || pickMatch || locMatch || crewMatch || foremanMatch || reclaimMatch;
       });
     }
 
     if (countBadge) {
-      countBadge.textContent = `${items.length} Picked`;
+      if (this.swapsFilter === 'reclaims') {
+        countBadge.textContent = `${items.length} Reclaim${items.length === 1 ? '' : 's'}`;
+      } else {
+        countBadge.textContent = `${items.length} Picked`;
+      }
     }
     if (collapsedCountBadge) {
       collapsedCountBadge.textContent = `${items.length}`;
     }
 
     if (items.length === 0) {
-      if (data.totalPicked === 0) {
+      if (this.swapsFilter === 'reclaims') {
+        list.innerHTML = `
+          <div style="padding: 30px 16px; text-align: center; color: var(--text-muted); font-size: 11.5px; background: rgba(0,0,0,0.15); border-radius: 8px; border: 1px dashed var(--border-color); margin-top: 10px;">
+            <div style="font-size: 24px; margin-bottom: 8px;">📦</div>
+            <div style="font-weight: 700; color: #f1f5f9; margin-bottom: 4px; font-size: 12.5px;">No Pending Reclaims</div>
+            <div style="color: var(--text-secondary); line-height: 1.4;">All former employee PPE has been returned to the warehouse.</div>
+          </div>
+        `;
+      } else if (data.totalPicked === 0) {
         list.innerHTML = `
           <div style="padding: 30px 16px; text-align: center; color: var(--text-muted); font-size: 11.5px; background: rgba(0,0,0,0.15); border-radius: 8px; border: 1px dashed var(--border-color); margin-top: 10px;">
             <div style="font-size: 24px; margin-bottom: 8px;">🧤</div>
@@ -7564,33 +7758,44 @@ class TripPlannerApp {
 
           let swapsHtml = emp.swaps.map(s => {
             const isGlove = s.type === 'Glove';
-            const typeColor = isGlove ? '#93c5fd' : '#d8b4fe';
-            const typeBg = isGlove ? 'rgba(59, 130, 246, 0.15)' : 'rgba(168, 85, 247, 0.15)';
-            const typeBorder = isGlove ? 'rgba(59, 130, 246, 0.3)' : 'rgba(168, 85, 247, 0.3)';
+            const isReclaim = !!s.isReclaim;
+            const typeColor = isReclaim ? '#fbbf24' : (isGlove ? '#93c5fd' : '#d8b4fe');
+            const typeBg = isReclaim ? 'rgba(245, 158, 11, 0.15)' : (isGlove ? 'rgba(59, 130, 246, 0.15)' : 'rgba(168, 85, 247, 0.15)');
+            const typeBorder = isReclaim ? 'rgba(245, 158, 11, 0.35)' : (isGlove ? 'rgba(59, 130, 246, 0.3)' : 'rgba(168, 85, 247, 0.3)');
 
             return `
-              <div class="picked-swap-item-card" draggable="true" style="background: rgba(0, 0, 0, 0.25); border: 1px solid rgba(255, 255, 255, 0.06); border-radius: 4px; padding: 5px 7px; margin-top: 4px; cursor: pointer;" title="Click to view swap details or drag to schedule" onclick="window.tripPlanner.openSwapDetailsModal(${JSON.stringify(s).replace(/"/g, '&quot;')}, null, '${this.escapeJs(locName)}')">
+              <div class="picked-swap-item-card" draggable="true" style="background: rgba(0, 0, 0, 0.25); border: 1px solid ${isReclaim ? 'rgba(245, 158, 11, 0.25)' : 'rgba(255, 255, 255, 0.06)'}; border-radius: 4px; padding: 5px 7px; margin-top: 4px; cursor: pointer; transition: border-color 0.15s ease;" title="${isReclaim ? 'Click to view reclaim details or drag to schedule' : 'Click to view swap details or drag to schedule'}" onmouseover="this.style.borderColor='${isReclaim ? '#fbbf24' : '#60a5fa'}'" onmouseout="this.style.borderColor='${isReclaim ? 'rgba(245, 158, 11, 0.25)' : 'rgba(255, 255, 255, 0.06)'}'" onclick="window.tripPlanner.openSwapDetailsModal(${JSON.stringify(s).replace(/"/g, '&quot;')}, null, '${this.escapeJs(locName)}')">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px;">
                   <span class="badge" style="background: ${typeBg}; color: ${typeColor}; border: 1px solid ${typeBorder}; font-size: 9.5px; font-weight: 700; padding: 1px 5px; border-radius: 3px;">
-                    ${isGlove ? '🧤 Glove' : '🧤 Sleeve'}${s.itemClass ? ` (CL ${this.escapeHtml(s.itemClass)})` : ''}
+                    ${isReclaim ? '📦 Reclaim ' : ''}${isGlove ? '🧤 Glove' : '🧤 Sleeve'}${s.itemClass ? ` (CL ${this.escapeHtml(s.itemClass)})` : ''}
                   </span>
                   <div style="display: flex; gap: 4px; align-items: center;">
                     ${s._missedScheduleDate ? `
                       <span class="badge" style="background: rgba(239, 68, 68, 0.2); color: #f87171; font-size: 8.5px; font-weight: 700; padding: 1px 4px; border: 1px solid rgba(239, 68, 68, 0.35); border-radius: 3px;" title="Scheduled on ${s._missedScheduleDate} but was not completed. Re-added to list.">
                         ⚠️ Missed ${s._missedScheduleDate}
                       </span>
+                    ` : (isReclaim ? `
+                      <span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; font-size: 9px; font-weight: 700; padding: 1px 5px; border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 3px;">
+                        To Reclaim 📦
+                      </span>
                     ` : `
                       <span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; font-size: 9px; font-weight: 700; padding: 1px 5px; border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 3px;">
                         Ready 🚚
                       </span>
-                    `}
+                    `)}
                   </div>
                 </div>
                 <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: #e2e8f0;">
                   <span>
-                    Current: <strong style="color: #f87171;">${this.escapeHtml(s.currentItem || '—')}</strong>
-                    &nbsp;➔&nbsp;
-                    Pick: <strong style="color: #4ade80;">${this.escapeHtml(s.pickItem || '—')}</strong>
+                    ${isReclaim ? `
+                      Reclaim: <strong style="color: #f87171;">#${this.escapeHtml(s.currentItem || '—')}</strong>
+                      &nbsp;➔&nbsp;
+                      <strong style="color: #fbbf24;">Helena 🏢</strong>
+                    ` : `
+                      Current: <strong style="color: #f87171;">${this.escapeHtml(s.currentItem || '—')}</strong>
+                      &nbsp;➔&nbsp;
+                      Pick: <strong style="color: #4ade80;">${this.escapeHtml(s.pickItem || '—')}</strong>
+                    `}
                   </span>
                   ${s.size ? `<span style="font-size: 10px; color: #94a3b8;">Sz: ${this.escapeHtml(s.size)}</span>` : ''}
                 </div>
@@ -7598,9 +7803,13 @@ class TripPlannerApp {
             `;
           }).join('');
 
+          const hasReclaim = emp.swaps.some(s => s.isReclaim);
           empCard.innerHTML = `
             <div style="display: flex; justify-content: space-between; align-items: center;">
-              <span style="font-weight: 700; font-size: 12px; color: #f8fafc;">${this.escapeHtml(emp.name)}</span>
+              <span style="font-weight: 700; font-size: 12px; color: #f8fafc;">
+                ${this.escapeHtml(emp.name)}
+                ${hasReclaim ? `<span style="font-size: 9.5px; color: #f87171; font-weight: 600; margin-left: 4px;">(Prev Emp)</span>` : ''}
+              </span>
               ${emp.classification ? `<span class="badge" style="background: rgba(148, 163, 184, 0.15); color: #94a3b8; font-size: 9.5px; padding: 1px 5px; border-radius: 3px;">${this.escapeHtml(emp.classification)}</span>` : ''}
             </div>
             ${swapsHtml}
