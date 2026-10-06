@@ -8,12 +8,18 @@ class ProcurementEngine {
     this.items = [];
     this.selectedVendor = null;
     this.vendors = [];
+    this.previousEmployeesSet = new Set();
   }
 
   init() {
     const vendorSelect = document.getElementById('procurement-vendor-select');
     if (vendorSelect) {
       vendorSelect.addEventListener('change', (e) => this.onVendorChange(e.target.value));
+    }
+
+    const btnRefresh = document.getElementById('btn-procurement-refresh');
+    if (btnRefresh) {
+      btnRefresh.addEventListener('click', () => this.refreshPurchaseNeeds());
     }
 
     const btnGenPO = document.getElementById('btn-procurement-gen-po');
@@ -102,7 +108,404 @@ class ProcurementEngine {
     this.vendors = Object.values(vendorMap);
   }
 
+  cleanEmployeeName(name) {
+    if (!name) return '';
+    let str = String(name).trim();
+    str = str.replace(/^active\s*\|\s*/i, '').trim();
+    str = str.replace(/\s+(?:st|step)\s*\d+\s*(?:new\s*hire)?.*$/i, '').trim();
+    str = str.replace(/\s+new\s*hire.*$/i, '').trim();
+    return str;
+  }
+
+  normalizeName(name) {
+    if (!name) return '';
+    const cleaned = this.cleanEmployeeName(name);
+    return cleaned.toLowerCase()
+      .replace(/\(.*?\)/g, '')
+      .replace(/[^a-z0-9]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  isNameMatch(nameA, nameB) {
+    if (!nameA || !nameB) return false;
+    if (window.employeeProfileEngine && typeof window.employeeProfileEngine.isNameMatch === 'function') {
+      return window.employeeProfileEngine.isNameMatch(nameA, nameB);
+    }
+    const nA = this.normalizeName(nameA);
+    const nB = this.normalizeName(nameB);
+    if (!nA || !nB) return false;
+    if (nA === nB) return true;
+    if (nA.includes(nB) || nB.includes(nA)) return true;
+    return false;
+  }
+
+  /**
+   * Pre-loads the set of former / departed personnel across employee tables, history, and archive
+   */
+  loadPreviousEmployees() {
+    this.previousEmployeesSet = new Set();
+    const snap = (this.db && typeof this.db.getSnapshot === 'function')
+      ? this.db.getSnapshot()
+      : (window.localDB ? window.localDB.getSnapshot() : null);
+    if (!snap || !snap.tables) return this.previousEmployeesSet;
+
+    // 1. Check window.previousEmployeesEngine if available
+    if (window.previousEmployeesEngine && typeof window.previousEmployeesEngine.getPreviousEmployees === 'function') {
+      try {
+        const prevList = window.previousEmployeesEngine.getPreviousEmployees();
+        prevList.forEach(p => {
+          if (!p.isActive && p.name) {
+            this.previousEmployeesSet.add(this.normalizeName(p.name));
+          }
+        });
+      } catch (err) {
+        console.warn('Error reading from previousEmployeesEngine:', err);
+      }
+    }
+
+    // 2. Check dedicated previous_employees / past_employees table
+    const prevTable = (this.db && typeof this.db.getTable === 'function' ? (this.db.getTable('previous_employees') || this.db.getTable('Previous Employees')) : null)
+      || snap.tables['previous_employees'] || snap.tables['previous_employee'] || snap.tables['past_employees'] || snap.tables['Previous Employees'];
+    if (prevTable) {
+      const rows = prevTable.rows || prevTable.rawGrid || [];
+      rows.forEach(r => {
+        let name = '';
+        if (Array.isArray(r)) {
+          if (String(r[0] || '').toLowerCase().includes('employee')) return;
+          name = String(r[0] || '').trim();
+        } else if (r && typeof r === 'object') {
+          name = String(r['Employee Name'] || r['Name'] || r['Worker'] || r['Employee'] || '').trim();
+        }
+        if (name) this.previousEmployeesSet.add(this.normalizeName(name));
+      });
+    }
+
+    // 3. Check employees table for departed/inactive markers
+    const empTable = snap.tables['employees'] || (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('employees') : null);
+    if (empTable) {
+      const rows = empTable.rows || empTable.rawGrid || [];
+      rows.forEach(r => {
+        let name = '';
+        let loc = '';
+        let status = '';
+        let lastDay = '';
+
+        if (Array.isArray(r)) {
+          name = String(r[0] || '').trim();
+          loc = String(r[1] || '').trim();
+          status = String(r[2] || '').trim();
+        } else if (r && typeof r === 'object') {
+          name = String(r['Employee Name'] || r['Name'] || r['Worker'] || '').trim();
+          loc = String(r['Location'] || r['City'] || '').trim();
+          status = String(r['Status'] || r['Employee Status'] || '').trim();
+          lastDay = String(r['Last Day'] || r['Term Date'] || r['Termination Date'] || '').trim();
+        }
+
+        if (!name) return;
+        const locLower = loc.toLowerCase();
+        const statLower = status.toLowerCase();
+
+        const isDeparted = locLower === 'previous employee' || locLower.includes('previous') ||
+                           statLower === 'previous employee' || statLower.includes('inactive') ||
+                           statLower.includes('terminated') || statLower.includes('departed') ||
+                           statLower.includes('former') || statLower.includes('quit') ||
+                           statLower.includes('resigned') || statLower.includes('reclaim');
+
+        let isPastLastDay = false;
+        if (lastDay) {
+          const ld = new Date(lastDay);
+          if (!isNaN(ld.getTime()) && ld < new Date()) {
+            isPastLastDay = true;
+          }
+        }
+
+        if (isDeparted || isPastLastDay) {
+          this.previousEmployeesSet.add(this.normalizeName(name));
+        }
+      });
+    }
+
+    // 4. Check employee_history table for departure events
+    const histTable = snap.tables['employee_history'] || (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('employee_history') : null);
+    if (histTable && histTable.rows) {
+      histTable.rows.forEach(r => {
+        const name = String(r['Employee Name'] || r['Name'] || r['Worker'] || '').trim();
+        const eventType = String(r['Event Type'] || r['Event'] || r['Action'] || '').toLowerCase();
+        if (name && (eventType.includes('term') || eventType.includes('quit') || eventType.includes('depart') || eventType.includes('last day') || eventType.includes('previous'))) {
+          this.previousEmployeesSet.add(this.normalizeName(name));
+        }
+      });
+    }
+
+    // 5. Scan active inventory tables for items assigned to Previous Employees
+    const invKeys = ['gloves', 'sleeves', 'blankets', 'macks'];
+    invKeys.forEach(iKey => {
+      const iTable = snap.tables[iKey] || (this.db && typeof this.db.getTable === 'function' ? this.db.getTable(iKey) : null);
+      if (iTable && iTable.rows) {
+        iTable.rows.forEach(r => {
+          const asg = String(r['Assigned To'] || r['Assigned'] || '').trim();
+          if (!asg) return;
+          const loc = String(r['Location'] || '').toLowerCase();
+          const st = String(r['Status'] || '').toLowerCase();
+          if (loc.includes('previous') || st.includes('previous') || st.includes('reclaim')) {
+            this.previousEmployeesSet.add(this.normalizeName(asg));
+          }
+        });
+      }
+    });
+
+    // 6. Scan swap sheets for explicit PREV EMP reclaim rows
+    const swapKeys = ['glove_swaps', 'sleeve_swaps', 'blanket_swaps', 'mack_swaps'];
+    swapKeys.forEach(sKey => {
+      const sTable = snap.tables[sKey] || (this.db && typeof this.db.getTable === 'function' ? this.db.getTable(sKey) : null);
+      if (sTable) {
+        const rows = sTable.rows || [];
+        rows.forEach(r => {
+          const emp = String(r['Employee'] || r['Employee Name'] || r['Assigned To'] || '').trim();
+          if (!emp) return;
+          const dl = String(r['Days Left'] || r['Days Remaining'] || '').toUpperCase();
+          const st = String(r['Status'] || '').toLowerCase();
+          if (dl.includes('PREV') || st.includes('return to shelf') || st.includes('reclaim')) {
+            this.previousEmployeesSet.add(this.normalizeName(emp));
+          }
+        });
+
+        const rawGrid = sTable.rawGrid || [];
+        rawGrid.forEach(gRow => {
+          if (!Array.isArray(gRow) || !gRow.length) return;
+          const first = String(gRow[0] || '').trim();
+          if (!first || first.includes('📍') || first.includes('👤') || first.includes('Foreman:') || first === 'Employee') return;
+          const daysCell = String(gRow[5] || '').toUpperCase();
+          const statCell = String(gRow[7] || '').toLowerCase();
+          if (daysCell.includes('PREV') || statCell.includes('return to shelf') || statCell.includes('reclaim')) {
+            this.previousEmployeesSet.add(this.normalizeName(first));
+          }
+        });
+      }
+    });
+
+    return this.previousEmployeesSet;
+  }
+
+  /**
+   * Returns true if an employee is a former / departed employee
+   */
+  isDepartedOrPreviousEmployee(empName) {
+    if (!empName) return false;
+    const clean = String(empName).trim();
+    const cleanLower = clean.toLowerCase();
+
+    // On Shelf items are safety stock, not employees
+    if (cleanLower === 'on shelf' || cleanLower === 'shelf' || cleanLower.startsWith('on shelf')) {
+      return false;
+    }
+
+    // Explicit previous employee or reclaim tags in name
+    if (cleanLower.includes('previous employee') || cleanLower.includes('(previous)') || cleanLower.includes('reclaim') || cleanLower.includes('departed')) {
+      return true;
+    }
+
+    const norm = this.normalizeName(clean);
+    if (!norm) return false;
+
+    // Direct check in pre-built set
+    if (this.previousEmployeesSet && this.previousEmployeesSet.has(norm)) {
+      return true;
+    }
+
+    // Fuzzy check against previous employees set
+    if (this.previousEmployeesSet) {
+      for (const prevNorm of this.previousEmployeesSet) {
+        if (this.isNameMatch(norm, prevNorm)) {
+          return true;
+        }
+      }
+    }
+
+    // Fallback 1: check employees table directly
+    const snap = (this.db && typeof this.db.getSnapshot === 'function')
+      ? this.db.getSnapshot()
+      : (window.localDB ? window.localDB.getSnapshot() : null);
+    const empTable = snap?.tables?.employees || (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('employees') : null);
+    if (empTable && empTable.rows) {
+      const empRow = empTable.rows.find(r => this.isNameMatch(r['Employee Name'] || r['Name'] || r[0] || '', clean));
+      if (empRow) {
+        const loc = String(empRow['Location'] || empRow['City'] || empRow[1] || '').toLowerCase();
+        const stat = String(empRow['Status'] || empRow['Employee Status'] || empRow[2] || '').toLowerCase();
+        const lastDay = String(empRow['Last Day'] || empRow['Term Date'] || '').trim();
+
+        if (loc === 'previous employee' || loc.includes('previous') ||
+            stat === 'previous employee' || stat.includes('inactive') ||
+            stat.includes('terminated') || stat.includes('departed') ||
+            stat.includes('former') || stat.includes('quit') || stat.includes('resigned') ||
+            stat.includes('reclaim')) {
+          this.previousEmployeesSet?.add(norm);
+          return true;
+        }
+        if (lastDay) {
+          const ld = new Date(lastDay);
+          if (!isNaN(ld.getTime()) && ld < new Date()) {
+            this.previousEmployeesSet?.add(norm);
+            return true;
+          }
+        }
+      }
+    }
+
+    // Fallback 2: Check if employee is in PPE inventory with Location: 'Previous Employee'
+    const invKeys = ['gloves', 'sleeves', 'blankets', 'macks'];
+    for (const iKey of invKeys) {
+      const iTable = snap?.tables?.[iKey] || (this.db && typeof this.db.getTable === 'function' ? this.db.getTable(iKey) : null);
+      if (iTable && iTable.rows) {
+        const found = iTable.rows.some(r => {
+          const asg = String(r['Assigned To'] || r['Assigned'] || '').trim();
+          if (!this.isNameMatch(asg, clean)) return false;
+          const loc = String(r['Location'] || '').toLowerCase();
+          const st = String(r['Status'] || '').toLowerCase();
+          return loc.includes('previous') || st.includes('previous') || st.includes('reclaim');
+        });
+        if (found) {
+          this.previousEmployeesSet?.add(norm);
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Cleans up lingering 'Need to Purchase' flags on swap sheets for confirmed former staff.
+   */
+  async cleanupDepartedEmployeeSwapNeeds() {
+    const snap = (this.db && typeof this.db.getSnapshot === 'function')
+      ? this.db.getSnapshot()
+      : (window.localDB ? window.localDB.getSnapshot() : null);
+    if (!snap || !snap.tables) return;
+
+    let modified = false;
+    const swapKeys = ['glove_swaps', 'sleeve_swaps', 'blanket_swaps', 'mack_swaps'];
+    const fn = (this.db && typeof this.db.addMutation === 'function')
+      ? this.db.addMutation.bind(this.db)
+      : ((this.db && typeof this.db.queueMutation === 'function') ? this.db.queueMutation.bind(this.db) : null);
+
+    for (const sKey of swapKeys) {
+      const table = snap.tables[sKey];
+      if (!table) continue;
+      const headers = table.headers || (Array.isArray(table.rawGrid?.[1]) ? table.rawGrid[1] : []);
+
+      // 1. Clean table.rows
+      if (table.rows && Array.isArray(table.rows)) {
+        for (let rIdx = 0; rIdx < table.rows.length; rIdx++) {
+          const row = table.rows[rIdx];
+          const emp = String(row['Employee'] || row['Employee Name'] || row['Assigned To'] || '').trim();
+          if (!emp) continue;
+
+          if (this.isDepartedOrPreviousEmployee(emp)) {
+            const status = String(row['Status'] || '').trim().toLowerCase();
+            const pickItem = String(row['Pick List Item #'] || '').trim();
+
+            // If this row has a purchase need status, clear it or convert to Reclaim / Departed
+            if (status.includes('purchase') || pickItem === '—') {
+              const hasExistingItem = row['Current Item'] && row['Current Item'] !== '—' && row['Current Item'] !== 'N/A';
+              const newStatus = hasExistingItem ? 'Reclaim (Departed)' : 'Departed — Inactive';
+              row['Status'] = newStatus;
+              row['Pick List Item #'] = '';
+              row['Urgency'] = 'None';
+              modified = true;
+
+              if (fn) {
+                const actualRowIdx = row._rowIdx || (rIdx + 2);
+                const getColNum = (hName) => {
+                  const idx = headers.findIndex(h => h.toLowerCase() === hName.toLowerCase());
+                  return idx !== -1 ? idx + 1 : headers.length;
+                };
+                const sName = table.name || sKey;
+                try {
+                  await fn({ action: 'UPDATE_CELL', sheetName: sName, tableKey: sKey, row: actualRowIdx, col: getColNum('Status'), header: 'Status', value: newStatus });
+                  await fn({ action: 'UPDATE_CELL', sheetName: sName, tableKey: sKey, row: actualRowIdx, col: getColNum('Pick List Item #'), header: 'Pick List Item #', value: '' });
+                  if (headers.includes('Urgency')) {
+                    await fn({ action: 'UPDATE_CELL', sheetName: sName, tableKey: sKey, row: actualRowIdx, col: getColNum('Urgency'), header: 'Urgency', value: 'None' });
+                  }
+                } catch (e) {
+                  console.warn('Could not queue cleanup mutation for', emp, e);
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // 2. Clean table.rawGrid if present
+      if (table.rawGrid && Array.isArray(table.rawGrid)) {
+        const pickIdx = headers.findIndex(h => /pick\s*list/i.test(h));
+        const statIdx = headers.findIndex(h => /^status$/i.test(h));
+        const effPickIdx = pickIdx !== -1 ? pickIdx : 6;
+        const effStatIdx = statIdx !== -1 ? statIdx : 7;
+
+        for (let gIdx = 0; gIdx < table.rawGrid.length; gIdx++) {
+          const gRow = table.rawGrid[gIdx];
+          if (!Array.isArray(gRow) || !gRow.length) continue;
+          const emp = String(gRow[0] || '').trim();
+          if (!emp || emp.includes('📍') || emp.includes('👤') || emp.includes('Foreman:') || emp === 'Employee') continue;
+
+          if (this.isDepartedOrPreviousEmployee(emp)) {
+            const st = String(gRow[effStatIdx] || '').toLowerCase();
+            const pi = String(gRow[effPickIdx] || '').trim();
+            if (st.includes('purchase') || pi === '—') {
+              gRow[effStatIdx] = 'Reclaim (Departed)';
+              gRow[effPickIdx] = '';
+              modified = true;
+            }
+          }
+        }
+      }
+    }
+
+    if (modified && this.db && typeof this.db.persistSnapshot === 'function') {
+      await this.db.persistSnapshot(snap);
+    }
+  }
+
+  /**
+   * Refreshes the purchase needs from inventory & swap sheets, cleans up departed employee flags,
+   * updates pricing, and re-renders the workspace.
+   */
+  async refreshPurchaseNeeds() {
+    const btn = document.getElementById('btn-procurement-refresh');
+    if (btn) {
+      btn.innerHTML = '<span>⏳</span> Refreshing...';
+      btn.disabled = true;
+    }
+
+    try {
+      this.loadVendors();
+      this.loadPreviousEmployees();
+      await this.cleanupDepartedEmployeeSwapNeeds();
+      this.scanPurchaseNeeds();
+      this.updatePricing();
+      this.render();
+
+      if (typeof window.showToast === 'function') {
+        window.showToast('🔄 Purchase Needs refreshed! Former employees excluded.', 'success');
+      }
+    } catch (err) {
+      console.error('Error refreshing purchase needs:', err);
+      if (typeof window.showToast === 'function') {
+        window.showToast('⚠️ Error refreshing Purchase Needs: ' + err.message, 'error');
+      }
+    } finally {
+      if (btn) {
+        btn.innerHTML = '<span>🔄</span> Refresh';
+        btn.disabled = false;
+      }
+    }
+  }
+
   scanPurchaseNeeds() {
+    this.loadPreviousEmployees();
+
     const swapSheets = [
       { key: 'glove_swaps', type: 'Gloves', label: '🧤 Gloves' },
       { key: 'sleeve_swaps', type: 'Sleeves', label: '🦺 Sleeves' },
@@ -137,6 +540,7 @@ class ProcurementEngine {
         let pickItem = '';
         let status = '';
         let daysLeft = 30;
+        let daysRaw = '';
         let rowClass = currentClass;
         let isImmediateRow = false;
 
@@ -155,7 +559,8 @@ class ProcurementEngine {
 
           emp = firstCell;
           size = String(row[2] || '—').trim();
-          const daysVal = parseInt(row[5], 10);
+          daysRaw = String(row[5] || '').trim();
+          const daysVal = parseInt(daysRaw, 10);
           if (!isNaN(daysVal)) daysLeft = daysVal;
           pickItem = String(row[6] || '').trim();
           status = String(row[7] || '').trim();
@@ -172,7 +577,8 @@ class ProcurementEngine {
         } else if (typeof row === 'object' && row !== null) {
           emp = String(row['Employee'] || row['Employee Name'] || row['Assigned To'] || '').trim();
           size = String(row['Size'] || '—').trim();
-          const daysVal = parseInt(row['Days Left'] || row['Days Remaining'], 10);
+          daysRaw = String(row['Days Left'] || row['Days Remaining'] || '').trim();
+          const daysVal = parseInt(daysRaw, 10);
           if (!isNaN(daysVal)) daysLeft = daysVal;
           pickItem = String(row['Pick List Item #'] || row['Pick Item #'] || '').trim();
           status = String(row['Status'] || row['Pick List Status'] || '').trim();
@@ -189,13 +595,31 @@ class ProcurementEngine {
 
         const statLower = status.toLowerCase();
         const isSizeUp = statLower.includes('size up');
+        const isShelfStock = emp.toLowerCase().includes('on shelf') || emp.toLowerCase() === 'shelf';
+
+        // Filter out return/reclaim/former employee indicators
+        const isPrevEmpIndicator = daysRaw.toUpperCase().includes('PREV') ||
+                                   statLower.includes('return to shelf') ||
+                                   statLower.includes('reclaim') ||
+                                   statLower.includes('previous') ||
+                                   statLower.includes('departed') ||
+                                   statLower.includes('inactive') ||
+                                   (statLower.includes('return') && !isShelfStock) ||
+                                   (statLower.includes('shelf') && !isShelfStock);
+
+        if (isPrevEmpIndicator) return;
+
         const isNeedToPurchase = statLower.includes('need to purchase') ||
                                  statLower.includes('purchase') ||
                                  isSizeUp ||
-                                 pickItem === '—' ||
+                                 (pickItem === '—' && !statLower.includes('return') && !statLower.includes('reclaim')) ||
                                  (pickItem === '' && statLower.includes('unassigned'));
 
         if (!isNeedToPurchase || !emp) return;
+
+        // Filter out former / previous employees
+        if (this.isDepartedOrPreviousEmployee(emp)) return;
+        if (statLower.includes('reclaim') || statLower.includes('previous') || statLower.includes('departed')) return;
 
         const aggKey = `${s.type}|${size}|${rowClass}`;
 
@@ -228,6 +652,75 @@ class ProcurementEngine {
         }
       });
     });
+
+    // Also scan safety_equipment_needs table if present
+    const needsTable = this.db.getTable('safety_equipment_needs');
+    if (needsTable) {
+      const nRows = needsTable.rows || needsTable.rawGrid || [];
+      nRows.forEach(row => {
+        let emp = '';
+        let itemType = 'Gloves';
+        let typeLabel = '🧤 Gloves';
+        let size = '—';
+        let rowClass = 'Class 2';
+        let urgency = 'Immediate';
+        let status = '';
+
+        if (row && typeof row === 'object') {
+          emp = String(row['Employee'] || '').trim();
+          const rawType = String(row['Item Type'] || '').trim();
+          if (rawType.toLowerCase().includes('sleeve')) {
+            itemType = 'Sleeves';
+            typeLabel = '🦺 Sleeves';
+          } else if (rawType.toLowerCase().includes('glove')) {
+            itemType = 'Gloves';
+            typeLabel = '🧤 Gloves';
+          } else if (rawType.toLowerCase().includes('blanket')) {
+            itemType = 'Blankets';
+            typeLabel = '🧱 Blankets';
+          } else if (rawType.toLowerCase().includes('mack')) {
+            itemType = 'MACKs';
+            typeLabel = '🧱 MACKs';
+          } else {
+            itemType = rawType || 'Other';
+            typeLabel = `📦 ${itemType}`;
+          }
+          size = String(row['Size'] || '—').trim();
+          rowClass = String(row['Class'] || 'Class 2').trim();
+          urgency = String(row['Urgency'] || 'Immediate').trim();
+          status = String(row['Status'] || '').trim().toLowerCase();
+        }
+
+        if (!emp || status.includes('received') || status.includes('fulfilled')) return;
+        if (this.isDepartedOrPreviousEmployee(emp)) return;
+
+        const isImmediate = urgency.toLowerCase() === 'immediate';
+        const aggKey = `${itemType}|${size}|${rowClass}`;
+
+        if (!aggregated[aggKey]) {
+          aggregated[aggKey] = {
+            itemType: itemType,
+            typeLabel: typeLabel,
+            size: size,
+            classVal: rowClass,
+            quantity: 0,
+            employees: [],
+            sizeUpCount: 0,
+            minDaysLeft: isImmediate ? 0 : 15,
+            isImmediate: isImmediate,
+            selected: true,
+            price: 0,
+            partNumber: ''
+          };
+        }
+
+        if (!aggregated[aggKey].employees.includes(emp)) {
+          aggregated[aggKey].quantity += 1;
+          aggregated[aggKey].employees.push(emp);
+          if (isImmediate) aggregated[aggKey].isImmediate = true;
+        }
+      });
+    }
 
     this.items = Object.values(aggregated).map(item => {
       let priority = 'LOW';

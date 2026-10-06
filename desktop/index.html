@@ -777,6 +777,9 @@
             <select id="procurement-vendor-select" title="Select vendor" aria-label="Select vendor" style="padding: 6px 12px; font-size: 12px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; min-width: 200px;">
               <option value="">Select a vendor...</option>
             </select>
+            <button class="btn btn-secondary" id="btn-procurement-refresh" style="display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 6px 12px; color: #cbd5e1;" onclick="window.procurementEngine.refreshPurchaseNeeds()" title="Refresh purchase needs from all swap sheets, exclude departed employees, and update pricing">
+              <span>🔄</span> Refresh
+            </button>
             <button class="btn btn-secondary" id="btn-procurement-manage-vendors" style="display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 6px 12px;" onclick="window.procurementEngine.openManageVendorsModal()">
               <span>⚙️</span> Manage Vendors
             </button>
