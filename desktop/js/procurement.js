@@ -9,6 +9,57 @@ class ProcurementEngine {
     this.selectedVendor = null;
     this.vendors = [];
     this.previousEmployeesSet = new Set();
+    this.currentSectionFilter = 'all'; // 'all' | 'swaps_need' | 'swaps_size_up' | 'assigned_size_up' | 'compliance_missing'
+    this.SECTIONS = {
+      swaps_need: {
+        key: 'swaps_need',
+        title: 'Swaps Page — Need to Purchase',
+        shortTitle: 'Swaps: Need to Purchase',
+        icon: '🛒',
+        badgeColor: 'rgba(59, 130, 246, 0.2)',
+        badgeBorder: 'rgba(59, 130, 246, 0.4)',
+        badgeText: '#93c5fd',
+        headerBg: 'rgba(30, 41, 59, 0.95)',
+        accentBorder: '#3b82f6',
+        desc: 'Unassigned swap items & safety stock replenishment needing procurement'
+      },
+      swaps_size_up: {
+        key: 'swaps_size_up',
+        title: 'Swaps Page — Size Up Replacements',
+        shortTitle: 'Swaps: Size Up',
+        icon: '🔄',
+        badgeColor: 'rgba(168, 85, 247, 0.2)',
+        badgeBorder: 'rgba(168, 85, 247, 0.4)',
+        badgeText: '#d8b4fe',
+        headerBg: 'rgba(45, 30, 60, 0.95)',
+        accentBorder: '#a855f7',
+        desc: 'Temporary size-up replacements picked on swap pages (order proper size)'
+      },
+      assigned_size_up: {
+        key: 'assigned_size_up',
+        title: 'Currently Assigned — Size Up in Field',
+        shortTitle: 'Assigned: Size Up',
+        icon: '⚠️',
+        badgeColor: 'rgba(245, 158, 11, 0.2)',
+        badgeBorder: 'rgba(245, 158, 11, 0.4)',
+        badgeText: '#fcd34d',
+        headerBg: 'rgba(55, 35, 20, 0.95)',
+        accentBorder: '#f59e0b',
+        desc: 'Active personnel currently wearing oversized equipment (order preferred size)'
+      },
+      compliance_missing: {
+        key: 'compliance_missing',
+        title: 'PPE Compliance — Missing Equipment',
+        shortTitle: 'PPE Compliance: Missing',
+        icon: '🛡️',
+        badgeColor: 'rgba(239, 68, 68, 0.2)',
+        badgeBorder: 'rgba(239, 68, 68, 0.4)',
+        badgeText: '#fca5a5',
+        headerBg: 'rgba(45, 20, 30, 0.95)',
+        accentBorder: '#ef4444',
+        desc: 'Active mandated personnel (SUP, GF, F, JRY, AP 1-7) missing rubber gloves or sleeves'
+      }
+    };
   }
 
   init() {
@@ -503,9 +554,238 @@ class ProcurementEngine {
     }
   }
 
+  /**
+   * Sets the active section filter tab ('all' or specific section key)
+   */
+  setSectionFilter(filterKey) {
+    this.currentSectionFilter = filterKey || 'all';
+    this.render();
+  }
+
+  /**
+   * Toggles selection for all items in a specific section
+   */
+  toggleSectionSelected(sectionKey, isChecked) {
+    this.items.forEach(item => {
+      if (item.section === sectionKey) {
+        item.selected = isChecked;
+      }
+    });
+    this.render();
+  }
+
+  /**
+   * Evaluates if classification is one of SUP, GF, F, JRY, or AP 1-7.
+   * Matches standard Rubber PPE Compliance rules.
+   */
+  parseTrackedClassification(rawCls) {
+    if (!rawCls) return null;
+    const s = String(rawCls).trim();
+    const up = s.toUpperCase();
+
+    // 1. Apprentices & Sub Techs (AP 1-7, ST 1-7, etc.)
+    const apMatch = up.match(/^(?:AP|ST|APP|APPRENTICE|SUB TECH)[\s\-_.]*([1-7])(?:\b|\s|$)/i) ||
+                    up.match(/^([1-7])[\s\-_.]*(?:AP|ST|APP|APPRENTICE)\b/i) ||
+                    up.match(/^(?:AP|ST)\s*([1-7])$/i);
+
+    if (apMatch) {
+      const level = parseInt(apMatch[1], 10);
+      return {
+        code: `AP ${level}`,
+        level: level,
+        tier: level <= 3 ? 'ap1_3' : 'ap4_7',
+        needsGloves: true,
+        needsSleeves: level >= 4
+      };
+    }
+
+    // 2. Supervisor / Superintendent (SUP)
+    if (/^(SUP|SUPERVISOR|SUPERINTENDENT|SUPV|SUP\.)(\s|$)/i.test(up)) {
+      return { code: 'SUP', level: 0, tier: 'sup', needsGloves: true, needsSleeves: true };
+    }
+
+    // 3. General Foreman (GF)
+    if (/^(GF|GENERAL\s*FOREMAN|GEN\s*FOREMAN|GEN\.\s*FOREMAN|GF\.)(\s|$)/i.test(up)) {
+      return { code: 'GF', level: 0, tier: 'gf', needsGloves: true, needsSleeves: true };
+    }
+
+    // 4. Foreman (F, GTO F, Foreman, Crew Lead)
+    if (/^(F|FOREMAN|GTO\s*F|GTO\s*FOREMAN|F\.)(\s|$)/i.test(up)) {
+      return { code: up.includes('GTO') ? 'GTO F' : 'F', level: 0, tier: 'f', needsGloves: true, needsSleeves: true };
+    }
+
+    // 5. Journeyman Lineman (JRY, JL, Journeyman - but NOT JRY OP)
+    if (/^(JRY|JL|JOURNEYMAN|JOURNEYMAN\s*LINEMAN)$/i.test(up) ||
+        (/^(JRY|JL|JOURNEYMAN|JOURNEYMAN\s*LINEMAN)\b/i.test(up) && !/\b(OP|OPERATOR)\b/i.test(up))) {
+      return { code: 'JRY', level: 0, tier: 'jry', needsGloves: true, needsSleeves: true };
+    }
+
+    return null;
+  }
+
+  /**
+   * Checks whether an employee is excluded from PPE compliance tracking
+   */
+  isEmployeePpeExcluded(empName) {
+    if (!empName) return false;
+    if (window.ppeTrackingEngine && typeof window.ppeTrackingEngine.isEmployeeExcluded === 'function') {
+      return window.ppeTrackingEngine.isEmployeeExcluded(empName);
+    }
+    try {
+      const raw = localStorage.getItem('sa_ppe_excluded_employees');
+      if (raw) {
+        const arr = JSON.parse(raw);
+        if (Array.isArray(arr)) {
+          const norm = this.normalizeName(empName);
+          return arr.some(x => this.isNameMatch(this.normalizeName(x), norm));
+        }
+      }
+    } catch { /* ignore */ }
+    return false;
+  }
+
   scanPurchaseNeeds() {
     this.loadPreviousEmployees();
 
+    const snap = (this.db && typeof this.db.getSnapshot === 'function')
+      ? this.db.getSnapshot()
+      : (window.localDB ? window.localDB.getSnapshot() : null);
+
+    const NON_ASSIGNED_STATUSES = new Set([
+      'on shelf', 'shelf', 'lost', 'destroyed', 'failed rubber', 'failed',
+      'retired', 'in testing', 'packed for testing', 'not repairable', 'reclaimed'
+    ]);
+
+    const cleanSize = (val) => {
+      if (val === null || val === undefined) return '';
+      const s = String(val).trim();
+      const lower = s.toLowerCase();
+      if (!s || s === '—' || s === '-' || lower === 'n/a' || lower === 'none' || lower === 'unknown' || lower === 'null') {
+        return '';
+      }
+      return s;
+    };
+
+    // Tracks employees who already have purchase demands queued to avoid duplicate demands
+    const coveredMap = {
+      Gloves: new Set(),
+      Sleeves: new Set(),
+      Blankets: new Set(),
+      MACKs: new Set()
+    };
+
+    const markCovered = (type, empName) => {
+      if (!empName) return;
+      const clean = this.cleanEmployeeName(empName);
+      if (clean && coveredMap[type]) {
+        coveredMap[type].add(this.normalizeName(clean));
+      }
+    };
+
+    const isCovered = (type, empName) => {
+      if (!empName) return false;
+      const norm = this.normalizeName(empName);
+      if (!norm || !coveredMap[type]) return false;
+      if (coveredMap[type].has(norm)) return true;
+      for (const k of coveredMap[type]) {
+        if (this.isNameMatch(k, norm)) return true;
+      }
+      return false;
+    };
+
+    // Build active employees directory
+    const empTable = snap?.tables?.employees || (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('employees') : null);
+    const empRows = empTable ? (empTable.rows || empTable.rawGrid || []) : [];
+    const empDirectory = new Map();
+
+    empRows.forEach(r => {
+      let name = '';
+      let gloveSize = '';
+      let sleeveSize = '';
+      let classification = '';
+      let loc = '';
+      let jobNumber = '';
+      let lastDay = '';
+
+      if (Array.isArray(r)) {
+        name = String(r[0] || '').trim();
+        loc = String(r[1] || '').trim();
+        jobNumber = String(r[2] || '').trim();
+        classification = String(r[3] || '').trim();
+        gloveSize = String(r[4] || '').trim();
+        sleeveSize = String(r[5] || '').trim();
+        lastDay = String(r[13] || '').trim();
+      } else if (r && typeof r === 'object') {
+        name = String(r['Employee Name'] || r['Name'] || r['Worker'] || '').trim();
+        loc = String(r['Location'] || r['City'] || '').trim();
+        jobNumber = String(r['Job Number'] || r['Job #'] || r['Crew'] || '').trim();
+        classification = String(r['Job Classification'] || r['Classification'] || r['Class'] || '').trim();
+        gloveSize = String(r['Glove Size'] || r['Glove'] || '').trim();
+        sleeveSize = String(r['Sleeve Size'] || r['Sleeve'] || '').trim();
+        lastDay = String(r['Last Day'] || r['Term Date'] || '').trim();
+      }
+
+      if (!name) return;
+      const normName = this.normalizeName(name);
+      empDirectory.set(normName, {
+        raw: r,
+        name: name,
+        location: loc,
+        jobNumber: jobNumber,
+        classification: classification,
+        gloveSize: gloveSize,
+        sleeveSize: sleeveSize,
+        lastDay: lastDay
+      });
+    });
+
+    const getEmpRecord = (empName) => {
+      if (!empName) return null;
+      const norm = this.normalizeName(empName);
+      if (empDirectory.has(norm)) return empDirectory.get(norm);
+      for (const [k, v] of empDirectory.entries()) {
+        if (this.isNameMatch(k, norm)) return v;
+      }
+      return null;
+    };
+
+    const aggregated = {};
+
+    const addItem = (section, itemType, typeLabel, size, hasNoSize, classVal, empLabel, minDaysLeft, isImmediate) => {
+      const aggKey = `${section}|${itemType}|${size}|${classVal}`;
+      if (!aggregated[aggKey]) {
+        aggregated[aggKey] = {
+          section: section,
+          sectionTitle: this.SECTIONS[section] ? this.SECTIONS[section].title : section,
+          itemType: itemType,
+          typeLabel: typeLabel,
+          size: size,
+          hasNoSize: !!hasNoSize,
+          classVal: classVal,
+          quantity: 0,
+          employees: [],
+          sizeUpCount: 0,
+          minDaysLeft: minDaysLeft !== undefined ? minDaysLeft : 30,
+          isImmediate: !!isImmediate,
+          selected: true,
+          price: 0,
+          partNumber: ''
+        };
+      }
+
+      if (empLabel && !aggregated[aggKey].employees.includes(empLabel)) {
+        aggregated[aggKey].quantity += 1;
+        aggregated[aggKey].employees.push(empLabel);
+      }
+      if (isImmediate) aggregated[aggKey].isImmediate = true;
+      if (minDaysLeft !== undefined && minDaysLeft < aggregated[aggKey].minDaysLeft) {
+        aggregated[aggKey].minDaysLeft = minDaysLeft;
+      }
+    };
+
+    // =========================================================================
+    // SECTION 1 & 2: SWAPS PAGES (Need to Purchase & Size Up Replacements)
+    // =========================================================================
     const swapSheets = [
       { key: 'glove_swaps', type: 'Gloves', label: '🧤 Gloves' },
       { key: 'sleeve_swaps', type: 'Sleeves', label: '🦺 Sleeves' },
@@ -518,10 +798,8 @@ class ProcurementEngine {
       { key: 'aed_swaps', type: 'AED', label: '🏥 AED Units' }
     ];
 
-    const aggregated = {};
-
     swapSheets.forEach(s => {
-      const table = this.db.getTable(s.key);
+      const table = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable(s.key) : null) || snap?.tables?.[s.key];
       if (!table) return;
 
       const rawRows = table.rawGrid || table.rows || [];
@@ -565,7 +843,6 @@ class ProcurementEngine {
           pickItem = String(row[6] || '').trim();
           status = String(row[7] || '').trim();
 
-          // Check if Class was stored explicitly in row array
           if (row[10] && String(row[10]).toLowerCase().includes('class')) {
             rowClass = String(row[10]).trim();
           } else {
@@ -621,40 +898,44 @@ class ProcurementEngine {
         if (this.isDepartedOrPreviousEmployee(emp)) return;
         if (statLower.includes('reclaim') || statLower.includes('previous') || statLower.includes('departed')) return;
 
-        const aggKey = `${s.type}|${size}|${rowClass}`;
+        const empRec = getEmpRecord(emp);
 
-        if (!aggregated[aggKey]) {
-          aggregated[aggKey] = {
-            itemType: s.type,
-            typeLabel: s.label,
-            size: size,
-            classVal: rowClass,
-            quantity: 0,
-            employees: [],
-            sizeUpCount: 0,
-            minDaysLeft: daysLeft,
-            isImmediate: isImmediateRow,
-            selected: true,
-            price: 0,
-            partNumber: ''
-          };
-        }
+        if (isSizeUp) {
+          // Requirement 2: Swaps Page Size Up Replacements
+          const prefSize = s.type === 'Gloves' ? cleanSize(empRec?.gloveSize) : (s.type === 'Sleeves' ? cleanSize(empRec?.sleeveSize) : '');
+          const validRowSize = cleanSize(size);
+          const neededSize = prefSize || validRowSize || '⚠️ Needs Size';
+          const hasNoSize = (neededSize === '⚠️ Needs Size');
+          const empLabel = hasNoSize
+            ? `${emp} (Size Up Picked ⚠️ Needs Size)`
+            : `${emp} (Size Up Picked: ${size || '—'} → Needed: ${neededSize})`;
 
-        aggregated[aggKey].quantity += 1;
-        if (isSizeUp) aggregated[aggKey].sizeUpCount += 1;
-        if (isImmediateRow) aggregated[aggKey].isImmediate = true;
-        const empLabel = isSizeUp ? `${emp} (Size Up Picked)` : emp;
-        if (emp && !aggregated[aggKey].employees.includes(empLabel)) {
-          aggregated[aggKey].employees.push(empLabel);
-        }
-        if (daysLeft < aggregated[aggKey].minDaysLeft) {
-          aggregated[aggKey].minDaysLeft = daysLeft;
+          addItem('swaps_size_up', s.type, s.label, neededSize, hasNoSize, rowClass, empLabel, daysLeft, isImmediateRow);
+          markCovered(s.type, emp);
+        } else {
+          // Requirement 1: Swaps Page Need To Purchase
+          const validRowSize = cleanSize(size);
+          let neededSize = validRowSize;
+          let hasNoSize = false;
+
+          if (!neededSize && !isShelfStock) {
+            const prefSize = s.type === 'Gloves' ? cleanSize(empRec?.gloveSize) : (s.type === 'Sleeves' ? cleanSize(empRec?.sleeveSize) : '');
+            neededSize = prefSize || '⚠️ Needs Size';
+            hasNoSize = (neededSize === '⚠️ Needs Size');
+          }
+          if (!neededSize && isShelfStock) {
+            neededSize = 'Standard';
+          }
+
+          const empLabel = hasNoSize ? `${emp} (⚠️ No preferred size listed in Employees)` : emp;
+          addItem('swaps_need', s.type, s.label, neededSize, hasNoSize, rowClass, empLabel, daysLeft, isImmediateRow);
+          markCovered(s.type, emp);
         }
       });
     });
 
-    // Also scan safety_equipment_needs table if present
-    const needsTable = this.db.getTable('safety_equipment_needs');
+    // Scan safety_equipment_needs table
+    const needsTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('safety_equipment_needs') : null) || snap?.tables?.['safety_equipment_needs'];
     if (needsTable) {
       const nRows = needsTable.rows || needsTable.rawGrid || [];
       nRows.forEach(row => {
@@ -695,39 +976,221 @@ class ProcurementEngine {
         if (this.isDepartedOrPreviousEmployee(emp)) return;
 
         const isImmediate = urgency.toLowerCase() === 'immediate';
-        const aggKey = `${itemType}|${size}|${rowClass}`;
+        const isSizeUp = status.includes('size up');
+        const section = isSizeUp ? 'swaps_size_up' : 'swaps_need';
+        const cleanS = cleanSize(size) || '⚠️ Needs Size';
+        const hasNoSize = (cleanS === '⚠️ Needs Size');
 
-        if (!aggregated[aggKey]) {
-          aggregated[aggKey] = {
-            itemType: itemType,
-            typeLabel: typeLabel,
-            size: size,
-            classVal: rowClass,
-            quantity: 0,
-            employees: [],
-            sizeUpCount: 0,
-            minDaysLeft: isImmediate ? 0 : 15,
-            isImmediate: isImmediate,
-            selected: true,
-            price: 0,
-            partNumber: ''
-          };
+        addItem(section, itemType, typeLabel, cleanS, hasNoSize, rowClass, emp, isImmediate ? 0 : 15, isImmediate);
+        markCovered(itemType, emp);
+      });
+    }
+
+    // =========================================================================
+    // SECTION 3: CURRENTLY ASSIGNED — SIZE UP IN FIELD
+    // =========================================================================
+    // Active personnel in the field currently wearing an oversized glove or sleeve
+    const glovesTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('gloves') : null) || snap?.tables?.['gloves'];
+    if (glovesTable) {
+      const gRows = glovesTable.rows || glovesTable.rawGrid || [];
+      gRows.forEach(g => {
+        let asg = '';
+        let assignedSize = '';
+        let classVal = 'Class 2';
+        let status = '';
+        let notes = '';
+
+        if (Array.isArray(g)) {
+          asg = String(g[8] || '').trim();
+          assignedSize = String(g[2] || '').trim();
+          classVal = String(g[3] || 'Class 2').trim();
+          status = String(g[7] || '').trim();
+          notes = String(g[11] || '').trim();
+        } else if (g && typeof g === 'object') {
+          asg = String(g['Assigned To'] || g['Assigned'] || '').trim();
+          assignedSize = String(g['Size'] || '').trim();
+          classVal = String(g['Class'] || 'Class 2').trim();
+          status = String(g['Status'] || '').trim();
+          notes = String(g['Notes'] || '').trim();
         }
 
-        if (!aggregated[aggKey].employees.includes(emp)) {
-          aggregated[aggKey].quantity += 1;
-          aggregated[aggKey].employees.push(emp);
-          if (isImmediate) aggregated[aggKey].isImmediate = true;
+        if (!asg) return;
+        const asgLower = asg.toLowerCase();
+        if (asgLower.includes('shelf') || asgLower === 'unassigned' || asgLower === 'lost' || asgLower === 'in testing') return;
+        if (this.isDepartedOrPreviousEmployee(asg)) return;
+
+        const statLower = status.toLowerCase();
+        if (NON_ASSIGNED_STATUSES.has(statLower)) return;
+
+        // Skip if already queued under Swaps for Gloves
+        if (isCovered('Gloves', asg)) return;
+
+        const empRec = getEmpRecord(asg);
+        if (!empRec) return;
+        if (empRec.location && empRec.location.toLowerCase().includes('previous')) return;
+
+        const prefGlove = cleanSize(empRec.gloveSize);
+        const notesLower = notes.toLowerCase();
+
+        const hasMarker = statLower.includes('size up') || notesLower.includes('size up');
+        const numAssigned = parseFloat(assignedSize);
+        const numPref = parseFloat(prefGlove);
+        const isMismatch = !isNaN(numAssigned) && !isNaN(numPref) && (numAssigned > numPref);
+
+        if (hasMarker || isMismatch) {
+          const neededSize = prefGlove || '⚠️ Needs Size';
+          const hasNoSize = !prefGlove;
+          const finalClass = classVal.toLowerCase().startsWith('class') ? classVal : `Class ${classVal}`;
+          const empLabel = hasNoSize
+            ? `${asg} (Wearing Size ${assignedSize} ⚠️ Needs Preferred Size)`
+            : `${asg} (Wearing Size ${assignedSize} → Needed: ${neededSize})`;
+
+          addItem('assigned_size_up', 'Gloves', '🧤 Gloves', neededSize, hasNoSize, finalClass, empLabel, 10, true);
+          markCovered('Gloves', asg);
         }
       });
     }
 
+    const sleevesTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('sleeves') : null) || snap?.tables?.['sleeves'];
+    if (sleevesTable) {
+      const sRows = sleevesTable.rows || sleevesTable.rawGrid || [];
+      const sleeveRanks = { 'small': 1, 'sm': 1, 'regular': 2, 'reg': 2, 'large': 3, 'lg': 3, 'extra large': 4, 'xl': 4, '2xl': 5, 'xxl': 5 };
+
+      sRows.forEach(s => {
+        let asg = '';
+        let assignedSize = '';
+        let classVal = 'Class 2';
+        let status = '';
+        let notes = '';
+
+        if (Array.isArray(s)) {
+          asg = String(s[8] || '').trim();
+          assignedSize = String(s[2] || '').trim();
+          classVal = String(s[3] || 'Class 2').trim();
+          status = String(s[7] || '').trim();
+          notes = String(s[11] || '').trim();
+        } else if (s && typeof s === 'object') {
+          asg = String(s['Assigned To'] || s['Assigned'] || '').trim();
+          assignedSize = String(s['Size'] || '').trim();
+          classVal = String(s['Class'] || 'Class 2').trim();
+          status = String(s['Status'] || '').trim();
+          notes = String(s['Notes'] || '').trim();
+        }
+
+        if (!asg) return;
+        const asgLower = asg.toLowerCase();
+        if (asgLower.includes('shelf') || asgLower === 'unassigned' || asgLower === 'lost' || asgLower === 'in testing') return;
+        if (this.isDepartedOrPreviousEmployee(asg)) return;
+
+        const statLower = status.toLowerCase();
+        if (NON_ASSIGNED_STATUSES.has(statLower)) return;
+
+        // Skip if already queued under Swaps for Sleeves
+        if (isCovered('Sleeves', asg)) return;
+
+        const empRec = getEmpRecord(asg);
+        if (!empRec) return;
+        if (empRec.location && empRec.location.toLowerCase().includes('previous')) return;
+
+        const prefSleeve = cleanSize(empRec.sleeveSize);
+        const notesLower = notes.toLowerCase();
+
+        const hasMarker = statLower.includes('size up') || notesLower.includes('size up');
+        const rankAssigned = sleeveRanks[assignedSize.toLowerCase()] || 0;
+        const rankPref = sleeveRanks[prefSleeve.toLowerCase()] || 0;
+        const isMismatch = rankAssigned > 0 && rankPref > 0 && (rankAssigned > rankPref);
+
+        if (hasMarker || isMismatch) {
+          const neededSize = prefSleeve || '⚠️ Needs Size';
+          const hasNoSize = !prefSleeve;
+          const finalClass = classVal.toLowerCase().startsWith('class') ? classVal : `Class ${classVal}`;
+          const empLabel = hasNoSize
+            ? `${asg} (Wearing Size ${assignedSize} ⚠️ Needs Preferred Size)`
+            : `${asg} (Wearing Size ${assignedSize} → Needed: ${neededSize})`;
+
+          addItem('assigned_size_up', 'Sleeves', '🦺 Sleeves', neededSize, hasNoSize, finalClass, empLabel, 10, true);
+          markCovered('Sleeves', asg);
+        }
+      });
+    }
+
+    // =========================================================================
+    // SECTION 4: PPE COMPLIANCE — MISSING EQUIPMENT
+    // =========================================================================
+    // Active personnel in tracked classifications (SUP, GF, F, JRY, AP 1-7) missing rubber equipment
+    const hasInventoryItem = (table, empName) => {
+      if (!table || !empName) return false;
+      const rows = table.rows || table.rawGrid || [];
+      for (let i = 0; i < rows.length; i++) {
+        const r = rows[i];
+        let asg = '';
+        let st = '';
+        if (Array.isArray(r)) {
+          asg = String(r[8] || '').trim();
+          st = String(r[7] || '').trim().toLowerCase();
+        } else if (r && typeof r === 'object') {
+          asg = String(r['Assigned To'] || r['Assigned'] || '').trim();
+          st = String(r['Status'] || '').trim().toLowerCase();
+        }
+        if (!asg || NON_ASSIGNED_STATUSES.has(st) || asg.toLowerCase().includes('shelf')) continue;
+        if (this.isNameMatch(asg, empName)) return true;
+      }
+      return false;
+    };
+
+    empDirectory.forEach(empRec => {
+      if (this.isDepartedOrPreviousEmployee(empRec.name)) return;
+      if (empRec.location && empRec.location.toLowerCase().includes('previous')) return;
+      if (empRec.lastDay) {
+        const ld = new Date(empRec.lastDay);
+        if (!isNaN(ld.getTime()) && ld < new Date()) return;
+      }
+
+      const meta = this.parseTrackedClassification(empRec.classification);
+      if (!meta) return;
+
+      if (this.isEmployeePpeExcluded(empRec.name)) return;
+
+      // 4A. Missing Rubber Gloves
+      if (meta.needsGloves && !isCovered('Gloves', empRec.name) && !hasInventoryItem(glovesTable, empRec.name)) {
+        const validPref = cleanSize(empRec.gloveSize);
+        const neededSize = validPref || '⚠️ Needs Size';
+        const hasNoSize = !validPref;
+        const empLabel = hasNoSize
+          ? `${empRec.name} (⚠️ No preferred size listed in Employees)`
+          : `${empRec.name} (${meta.code} - Missing Gloves)`;
+
+        addItem('compliance_missing', 'Gloves', '🧤 Gloves', neededSize, hasNoSize, 'Class 2', empLabel, 0, true);
+        markCovered('Gloves', empRec.name);
+      }
+
+      // 4B. Missing Rubber Sleeves (AP 4-7, JRY, SUP, GF, F)
+      if (meta.needsSleeves && !isCovered('Sleeves', empRec.name) && !hasInventoryItem(sleevesTable, empRec.name)) {
+        const validPref = cleanSize(empRec.sleeveSize);
+        const neededSize = validPref || '⚠️ Needs Size';
+        const hasNoSize = !validPref;
+        const empLabel = hasNoSize
+          ? `${empRec.name} (⚠️ No preferred size listed in Employees)`
+          : `${empRec.name} (${meta.code} - Missing Sleeves)`;
+
+        addItem('compliance_missing', 'Sleeves', '🦺 Sleeves', neededSize, hasNoSize, 'Class 2', empLabel, 0, true);
+        markCovered('Sleeves', empRec.name);
+      }
+    });
+
+    // =========================================================================
+    // COMPILE & PRIORITIZE ITEMS
+    // =========================================================================
     this.items = Object.values(aggregated).map(item => {
       let priority = 'LOW';
       let priorityEmoji = '🟢';
       let timeframe = 'Consider / Future';
 
-      if (item.isImmediate || item.minDaysLeft <= 0) {
+      if (item.hasNoSize) {
+        priority = 'HIGH';
+        priorityEmoji = '🔴';
+        timeframe = 'Immediate (Needs Size)';
+      } else if (item.isImmediate || item.minDaysLeft <= 0) {
         priority = 'HIGH';
         priorityEmoji = '🔴';
         timeframe = 'Immediate';
@@ -749,9 +1212,25 @@ class ProcurementEngine {
       };
     });
 
+    // Sort order: Group by Section first, then by Urgency, then Quantity
+    const sectionOrder = {
+      'swaps_need': 1,
+      'swaps_size_up': 2,
+      'assigned_size_up': 3,
+      'compliance_missing': 4
+    };
+    const priorityOrder = { 'HIGH': 1, 'MEDIUM': 2, 'LOW': 3 };
+
     this.items.sort((a, b) => {
-      const order = { 'HIGH': 1, 'MEDIUM': 2, 'LOW': 3 };
-      return (order[a.priority] || 4) - (order[b.priority] || 4) || b.quantity - a.quantity;
+      const sA = sectionOrder[a.section] || 9;
+      const sB = sectionOrder[b.section] || 9;
+      if (sA !== sB) return sA - sB;
+
+      const pA = priorityOrder[a.priority] || 4;
+      const pB = priorityOrder[b.priority] || 4;
+      if (pA !== pB) return pA - pB;
+
+      return b.quantity - a.quantity;
     });
   }
 
@@ -777,23 +1256,19 @@ class ProcurementEngine {
       const tType = (item.itemType || '').toLowerCase(); // e.g. "gloves", "sleeves", "blankets", "macks"
       const tSize = (item.size || '').toLowerCase().trim(); // e.g. "10.5", "9", "regular"
 
-      // 1. Exact Match (Type + Class + Size) - e.g. "Glove CL2 9.5", "Glove Class 2 9.5"
-      let match = catalog.find(ci => {
-        const name = ci.item.toLowerCase();
-        const typeMatch = name.includes(tType.slice(0, 4)) || (tType.startsWith('glove') && name.includes('glove')) || (tType.startsWith('sleeve') && name.includes('sleeve')) || (tType.startsWith('blanket') && name.includes('blanket'));
-        const classMatch = !tClassNum || name.includes(`cl${tClassNum}`) || name.includes(`class ${tClassNum}`) || name.includes(`class${tClassNum}`) || name.includes(` ${tClassNum} `) || name.endsWith(` ${tClassNum}`);
-        const sizeMatch = (tSize !== '—' && tSize !== '') && (
-          name.endsWith(` ${tSize}`) ||
-          name.includes(` ${tSize} `) ||
-          name.includes(` ${tSize}`) ||
-          name.includes(`size ${tSize}`) ||
-          name.includes(` ${tSize}h`) ||
-          name.includes(tSize)
-        );
-        return typeMatch && classMatch && sizeMatch;
-      });
+      // 1. Exact Match (Type + Class + Size) if valid size
+      let match = null;
+      if (!item.hasNoSize && tSize !== '—' && tSize !== '' && !tSize.includes('needs size')) {
+        match = catalog.find(ci => {
+          const name = ci.item.toLowerCase();
+          const typeMatch = name.includes(tType.slice(0, 4)) || (tType.startsWith('glove') && name.includes('glove')) || (tType.startsWith('sleeve') && name.includes('sleeve')) || (tType.startsWith('blanket') && name.includes('blanket'));
+          const classMatch = !tClassNum || name.includes(`cl${tClassNum}`) || name.includes(`class ${tClassNum}`) || name.includes(`class${tClassNum}`) || name.includes(` ${tClassNum} `) || name.endsWith(` ${tClassNum}`);
+          const sizeMatch = name.endsWith(` ${tSize}`) || name.includes(` ${tSize} `) || name.includes(` ${tSize}`) || name.includes(`size ${tSize}`) || name.includes(` ${tSize}h`) || name.includes(tSize);
+          return typeMatch && classMatch && sizeMatch;
+        });
+      }
 
-      // 2. Type + Class Match (e.g. "Class 2 Sleeve", "Blanket CL4")
+      // 2. Type + Class Match (e.g. "Class 2 Glove", "Class 2 Sleeve", or item needing size confirmation)
       if (!match) {
         match = catalog.find(ci => {
           const name = ci.item.toLowerCase();
@@ -846,23 +1321,74 @@ class ProcurementEngine {
         <div style="padding: 40px; text-align: center; color: var(--text-muted);">
           <div style="font-size: 32px; margin-bottom: 8px;">✅</div>
           <h3 style="color: var(--text-primary); font-size: 16px;">All Equipment In Stock</h3>
-          <p style="margin-top: 6px; font-size: 13px;">No items currently require purchase across any swap sheets.</p>
+          <p style="margin-top: 6px; font-size: 13px;">No items currently require purchase across swap sheets, assignments, or compliance.</p>
         </div>
       `;
       this.updateTotals();
       return;
     }
 
+    // Calculate section counts
+    const counts = {
+      all: this.items.length,
+      swaps_need: this.items.filter(i => i.section === 'swaps_need').length,
+      swaps_size_up: this.items.filter(i => i.section === 'swaps_size_up').length,
+      assigned_size_up: this.items.filter(i => i.section === 'assigned_size_up').length,
+      compliance_missing: this.items.filter(i => i.section === 'compliance_missing').length
+    };
+
+    // Filter items based on active section filter
+    const activeFilter = this.currentSectionFilter || 'all';
+    const displayItems = activeFilter === 'all'
+      ? this.items
+      : this.items.filter(i => i.section === activeFilter);
+
+    // Group display items by section
+    const grouped = {};
+    Object.keys(this.SECTIONS).forEach(secKey => {
+      grouped[secKey] = [];
+    });
+    displayItems.forEach((item, globalIdx) => {
+      const sKey = item.section || 'swaps_need';
+      if (!grouped[sKey]) grouped[sKey] = [];
+      grouped[sKey].push({ ...item, _globalIdx: globalIdx });
+    });
+
     let html = `
+      <!-- Section Filter Tabs Bar -->
+      <div class="procurement-section-tabs" style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; align-items: center; padding-bottom: 10px; border-bottom: 1px solid var(--border-color);">
+        <span style="font-size: 12px; color: var(--text-muted); font-weight: 700; margin-right: 4px;">VIEW SECTION:</span>
+        <button type="button" class="btn ${activeFilter === 'all' ? 'btn-primary' : 'btn-secondary'}" style="font-size: 11.5px; padding: 4px 10px; display: inline-flex; align-items: center; gap: 6px;" onclick="window.procurementEngine.setSectionFilter('all')">
+          <span>📋 All Sections</span>
+          <span style="background: rgba(255,255,255,0.15); padding: 1px 6px; border-radius: 10px; font-size: 10.5px;">${counts.all}</span>
+        </button>
+        <button type="button" class="btn ${activeFilter === 'swaps_need' ? 'btn-primary' : 'btn-secondary'}" style="font-size: 11.5px; padding: 4px 10px; display: inline-flex; align-items: center; gap: 6px;" onclick="window.procurementEngine.setSectionFilter('swaps_need')">
+          <span>🛒 Swaps: Need to Purchase</span>
+          <span style="background: rgba(255,255,255,0.15); padding: 1px 6px; border-radius: 10px; font-size: 10.5px;">${counts.swaps_need}</span>
+        </button>
+        <button type="button" class="btn ${activeFilter === 'swaps_size_up' ? 'btn-primary' : 'btn-secondary'}" style="font-size: 11.5px; padding: 4px 10px; display: inline-flex; align-items: center; gap: 6px;" onclick="window.procurementEngine.setSectionFilter('swaps_size_up')">
+          <span>🔄 Swaps: Size Up</span>
+          <span style="background: rgba(255,255,255,0.15); padding: 1px 6px; border-radius: 10px; font-size: 10.5px;">${counts.swaps_size_up}</span>
+        </button>
+        <button type="button" class="btn ${activeFilter === 'assigned_size_up' ? 'btn-primary' : 'btn-secondary'}" style="font-size: 11.5px; padding: 4px 10px; display: inline-flex; align-items: center; gap: 6px;" onclick="window.procurementEngine.setSectionFilter('assigned_size_up')">
+          <span>⚠️ Assigned: Size Up</span>
+          <span style="background: rgba(255,255,255,0.15); padding: 1px 6px; border-radius: 10px; font-size: 10.5px;">${counts.assigned_size_up}</span>
+        </button>
+        <button type="button" class="btn ${activeFilter === 'compliance_missing' ? 'btn-primary' : 'btn-secondary'}" style="font-size: 11.5px; padding: 4px 10px; display: inline-flex; align-items: center; gap: 6px;" onclick="window.procurementEngine.setSectionFilter('compliance_missing')">
+          <span>🛡️ PPE Compliance: Missing</span>
+          <span style="background: rgba(255,255,255,0.15); padding: 1px 6px; border-radius: 10px; font-size: 10.5px;">${counts.compliance_missing}</span>
+        </button>
+      </div>
+
       <table class="table" style="width: 100%; border-collapse: collapse; font-size: 13px;">
         <thead>
           <tr style="background: rgba(255,255,255,0.05); border-bottom: 2px solid var(--border-color);">
-            <th style="padding: 10px; width: 40px; text-align: center;"><input type="checkbox" id="procurement-select-all" checked></th>
+            <th style="padding: 10px; width: 40px; text-align: center;"><input type="checkbox" id="procurement-select-all" checked title="Select or deselect all items"></th>
             <th style="padding: 10px; text-align: left;">Category & Item</th>
-            <th style="padding: 10px; text-align: center; width: 80px;">Size</th>
+            <th style="padding: 10px; text-align: center; width: 95px;">Size</th>
             <th style="padding: 10px; text-align: center; width: 90px;">Class / KV</th>
             <th style="padding: 10px; text-align: center; width: 80px;">Qty</th>
-            <th style="padding: 10px; text-align: center; width: 140px;">Urgency</th>
+            <th style="padding: 10px; text-align: center; width: 150px;">Urgency</th>
             <th style="padding: 10px; text-align: right; width: 100px;">Unit Price</th>
             <th style="padding: 10px; text-align: right; width: 110px;">Est. Total</th>
           </tr>
@@ -870,53 +1396,109 @@ class ProcurementEngine {
         <tbody>
     `;
 
-    this.items.forEach((item, idx) => {
-      const isChecked = item.selected ? 'checked' : '';
-      const totalCost = (item.price || 0) * item.quantity;
-      const notes = item.employees.length > 0 ? `For: ${item.employees.join(', ')}` : '';
+    // Render grouped sections
+    Object.keys(this.SECTIONS).forEach(secKey => {
+      const secConfig = this.SECTIONS[secKey];
+      const secItems = grouped[secKey] || [];
+      if (secItems.length === 0) return;
+
+      const secUnits = secItems.reduce((acc, it) => acc + it.quantity, 0);
+      const secAllChecked = secItems.every(it => it.selected);
 
       html += `
-        <tr style="border-bottom: 1px solid var(--border-color); ${item.selected ? 'background: rgba(37, 99, 235, 0.05);' : ''}">
+        <!-- Section Header Row -->
+        <tr class="procurement-section-header-row" style="background: ${secConfig.headerBg}; border-top: 2px solid ${secConfig.accentBorder}; border-bottom: 1px solid var(--border-color);">
           <td style="padding: 8px; text-align: center;">
-            <input type="checkbox" class="procurement-item-check" data-idx="${idx}" ${isChecked}>
+            <input type="checkbox" class="procurement-section-check" data-section="${secKey}" ${secAllChecked ? 'checked' : ''} title="Select/Deselect all in ${secConfig.title}">
           </td>
-          <td style="padding: 8px;">
-            <div style="font-weight: 600; color: var(--text-primary);">${item.typeLabel}</div>
-            ${item.partNumber ? `<div style="font-size: 11px; color: #3b82f6;">PN: ${item.partNumber}</div>` : ''}
-            ${notes ? `<div style="font-size: 11px; color: var(--text-muted);">${notes}</div>` : ''}
-          </td>
-          <td style="padding: 8px; text-align: center; font-weight: 600;">${item.size}</td>
-          <td style="padding: 8px; text-align: center;">${item.classVal}</td>
-          <td style="padding: 8px; text-align: center;">
-            <input type="number" min="1" value="${item.quantity}" data-idx="${idx}" class="procurement-qty-input" style="width: 55px; padding: 4px 6px; text-align: center; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary);">
-          </td>
-          <td style="padding: 8px; text-align: center;">
-            <span class="badge ${item.priority === 'HIGH' ? 'badge-danger' : (item.priority === 'MEDIUM' ? 'badge-warning' : 'badge-success')}">
-              ${item.priorityEmoji} ${item.timeframe}
-            </span>
-          </td>
-          <td style="padding: 8px; text-align: right; font-family: monospace;">
-            ${item.price > 0 ? `$${item.price.toFixed(2)}` : '—'}
-          </td>
-          <td style="padding: 8px; text-align: right; font-weight: 600; font-family: monospace;">
-            ${totalCost > 0 ? `$${totalCost.toFixed(2)}` : '—'}
+          <td colspan="7" style="padding: 10px 12px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="font-size: 16px;">${secConfig.icon}</span>
+                <span style="font-weight: 800; font-size: 13.5px; color: ${secConfig.badgeText};">${secConfig.title.toUpperCase()}</span>
+                <span class="brand-badge" style="background: ${secConfig.badgeColor}; color: ${secConfig.badgeText}; border: 1px solid ${secConfig.badgeBorder}; font-size: 11px; font-weight: 700;">
+                  ${secItems.length} line ${secItems.length === 1 ? 'item' : 'items'} (${secUnits} units)
+                </span>
+              </div>
+              <div style="font-size: 11.5px; color: var(--text-muted); font-style: italic;">
+                ${secConfig.desc}
+              </div>
+            </div>
           </td>
         </tr>
       `;
+
+      secItems.forEach(item => {
+        const isChecked = item.selected ? 'checked' : '';
+        const totalCost = (item.price || 0) * item.quantity;
+        const notes = item.employees.length > 0 ? `For: ${item.employees.join(', ')}` : '';
+
+        html += `
+          <tr style="border-bottom: 1px solid var(--border-color); ${item.selected ? 'background: rgba(37, 99, 235, 0.05);' : ''}">
+            <td style="padding: 8px; text-align: center;">
+              <input type="checkbox" class="procurement-item-check" data-idx="${item._globalIdx}" ${isChecked}>
+            </td>
+            <td style="padding: 8px;">
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <span style="font-weight: 600; color: var(--text-primary);">${item.typeLabel}</span>
+                <span class="badge" style="font-size: 10px; padding: 1px 5px; background: ${secConfig.badgeColor}; color: ${secConfig.badgeText}; border: 1px solid ${secConfig.badgeBorder};">
+                  ${secConfig.shortTitle}
+                </span>
+              </div>
+              ${item.partNumber ? `<div style="font-size: 11px; color: #3b82f6; margin-top: 1px;">PN: ${item.partNumber}</div>` : ''}
+              ${notes ? `<div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">${notes}</div>` : ''}
+            </td>
+            <td style="padding: 8px; text-align: center;">
+              ${item.hasNoSize ? `
+                <span class="badge" style="background: rgba(245, 158, 11, 0.25); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.5); font-weight: 700; padding: 3px 8px; border-radius: 4px; font-size: 11px; display: inline-block;">
+                  ⚠️ Needs Size
+                </span>
+              ` : `
+                <span style="font-weight: 600; color: var(--text-primary); font-size: 13px;">${item.size}</span>
+              `}
+            </td>
+            <td style="padding: 8px; text-align: center; color: var(--text-secondary);">${item.classVal}</td>
+            <td style="padding: 8px; text-align: center;">
+              <input type="number" min="1" value="${item.quantity}" data-idx="${item._globalIdx}" class="procurement-qty-input" style="width: 55px; padding: 4px 6px; text-align: center; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary);">
+            </td>
+            <td style="padding: 8px; text-align: center;">
+              <span class="badge ${item.priority === 'HIGH' ? 'badge-danger' : (item.priority === 'MEDIUM' ? 'badge-warning' : 'badge-success')}">
+                ${item.priorityEmoji} ${item.timeframe}
+              </span>
+            </td>
+            <td style="padding: 8px; text-align: right; font-family: monospace;">
+              ${item.price > 0 ? `$${item.price.toFixed(2)}` : '—'}
+            </td>
+            <td style="padding: 8px; text-align: right; font-weight: 600; font-family: monospace;">
+              ${totalCost > 0 ? `$${totalCost.toFixed(2)}` : '—'}
+            </td>
+          </tr>
+        `;
+      });
     });
 
     html += '</tbody></table>';
     container.innerHTML = html;
 
+    // Master Select All Event
     const selectAll = document.getElementById('procurement-select-all');
     if (selectAll) {
       selectAll.addEventListener('change', (e) => {
         const val = e.target.checked;
-        this.items.forEach(i => i.selected = val);
+        displayItems.forEach(i => i.selected = val);
         this.render();
       });
     }
 
+    // Section Select All Checkboxes
+    container.querySelectorAll('.procurement-section-check').forEach(cb => {
+      cb.addEventListener('change', (e) => {
+        const sKey = e.target.dataset.section;
+        this.toggleSectionSelected(sKey, e.target.checked);
+      });
+    });
+
+    // Individual Item Checkboxes
     container.querySelectorAll('.procurement-item-check').forEach(cb => {
       cb.addEventListener('change', (e) => {
         const idx = parseInt(e.target.dataset.idx, 10);
@@ -927,6 +1509,7 @@ class ProcurementEngine {
       });
     });
 
+    // Quantity Input Handlers
     container.querySelectorAll('.procurement-qty-input').forEach(input => {
       input.addEventListener('change', (e) => {
         const idx = parseInt(e.target.dataset.idx, 10);
@@ -962,7 +1545,7 @@ class ProcurementEngine {
   }
 
   generatePOText() {
-    const selected = this.items.filter(i => i.selected);
+    const selected = this.items.filter(i => i.selected && i.quantity > 0);
     if (selected.length === 0) {
       alert('Please select at least one item to generate a purchase order.');
       return;
@@ -983,18 +1566,33 @@ class ProcurementEngine {
 
     let grandTotal = 0;
 
-    selected.forEach(item => {
-      let line = `• (${item.quantity}) ${item.itemType} - Size ${item.size} - Class/Rating: ${item.classVal}`;
-      if (item.partNumber) line += ` [Part #: ${item.partNumber}]`;
-      if (item.price > 0) {
-        const itemTotal = item.price * item.quantity;
-        grandTotal += itemTotal;
-        line += ` @ $${item.price.toFixed(2)} ea = $${itemTotal.toFixed(2)}`;
-      }
-      lines.push(line);
+    // Group selected items by section in the PO text
+    const secKeys = ['swaps_need', 'swaps_size_up', 'assigned_size_up', 'compliance_missing'];
+    secKeys.forEach(sKey => {
+      const secItems = selected.filter(i => i.section === sKey);
+      if (secItems.length === 0) return;
+
+      const secTitle = this.SECTIONS[sKey]?.title || sKey;
+      lines.push(`--- ${secTitle.toUpperCase()} ---`);
+
+      secItems.forEach(item => {
+        const sizeDisplay = item.hasNoSize ? '⚠️ NEEDS SIZE (VERIFY WITH WORKER)' : `Size ${item.size}`;
+        let line = `• (${item.quantity}) ${item.itemType} - ${sizeDisplay} - Class/Rating: ${item.classVal}`;
+        if (item.partNumber) line += ` [Part #: ${item.partNumber}]`;
+        if (item.price > 0) {
+          const itemTotal = item.price * item.quantity;
+          grandTotal += itemTotal;
+          line += ` @ $${item.price.toFixed(2)} ea = $${itemTotal.toFixed(2)}`;
+        }
+        if (item.employees && item.employees.length > 0) {
+          line += `\n    └ ${item.employees.join(', ')}`;
+        }
+        lines.push(line);
+      });
+      lines.push('');
     });
 
-    lines.push('\n----------------------------------------------------');
+    lines.push('----------------------------------------------------');
     if (grandTotal > 0) {
       lines.push(`Estimated Total: $${grandTotal.toFixed(2)}`);
     }
@@ -1300,17 +1898,19 @@ class ProcurementEngine {
     const v = this.selectedVendor;
     const recipient = v ? v.email : '';
     const subject = encodeURIComponent(`Purchase Order Request - PPE & Equipment (${new Date().toLocaleDateString()})`);
-    
+
     let bodyText = `Dear ${v ? (v.contact || v.name) : 'Vendor'},\n\nPlease process the following purchase order for Mountain Power:\n\n`;
     bodyText += `========================================================\n`;
-    bodyText += `ITEM DESCRIPTION | SPEC | PART # | QTY | UNIT PRICE | TOTAL\n`;
+    bodyText += `SECTION | ITEM | SPEC / SIZE | PART # | QTY | UNIT | TOTAL\n`;
     bodyText += `========================================================\n`;
 
     let grandTotal = 0;
     activeItems.forEach(item => {
       const lineTotal = item.price > 0 ? (item.price * item.quantity) : 0;
       grandTotal += lineTotal;
-      bodyText += `${item.itemType} | Size: ${item.size} (${item.classVal}) | Part: ${item.partNumber || 'N/A'} | Qty: ${item.quantity} | Unit: $${item.price.toFixed(2)} | Total: $${lineTotal.toFixed(2)}\n`;
+      const sizeDisplay = item.hasNoSize ? '⚠️ NEEDS SIZE (VERIFY)' : item.size;
+      const secTag = item.sectionTitle || item.section;
+      bodyText += `[${secTag}] ${item.itemType} | Size: ${sizeDisplay} (${item.classVal}) | Part: ${item.partNumber || 'N/A'} | Qty: ${item.quantity} | Unit: $${item.price.toFixed(2)} | Total: $${lineTotal.toFixed(2)}\n`;
     });
 
     bodyText += `========================================================\n`;
@@ -1331,11 +1931,13 @@ class ProcurementEngine {
       return;
     }
 
-    const lines = ['Item Category,Size,Class / KV,Part Number,Quantity,Unit Price,Subtotal,Assigned Personnel'];
+    const lines = ['Section,Item Category,Size,Class / KV,Part Number,Quantity,Unit Price,Subtotal,Assigned Personnel'];
     activeItems.forEach(i => {
       const sub = (i.price * i.quantity).toFixed(2);
       const emps = `"${i.employees.join('; ')}"`;
-      lines.push(`"${i.itemType}","${i.size}","${i.classVal}","${i.partNumber}",${i.quantity},$${i.price.toFixed(2)},$${sub},${emps}`);
+      const sizeDisplay = i.hasNoSize ? '⚠️ Needs Size' : i.size;
+      const secName = i.sectionTitle || i.section;
+      lines.push(`"${secName}","${i.itemType}","${sizeDisplay}","${i.classVal}","${i.partNumber}",${i.quantity},$${i.price.toFixed(2)},$${sub},${emps}`);
     });
 
     const csvContent = lines.join('\r\n');
