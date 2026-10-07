@@ -4413,6 +4413,98 @@ class SheetNavigator {
       rows = rows.filter(r => !this.isRowPreviousEmployee(r, prevEmpNames));
     }
 
+    // Filter Locations & Approvals sheet: Only locations from the Job Tracking page need to show here
+    if (this.currentSheetKey === 'locations') {
+      const jtTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('job_tracking') : null) || this.db?.snapshot?.tables?.['job_tracking'];
+      const statusLocations = new Set([
+        'vacation', 'light duty', 'weeds', 'leave', 'previous employee', 'medical',
+        "worker's comp", 'unknown', 'in testing', 'location', 'lost', 'destroyed',
+        "cody's truck", 'arnett / jm test', 'arnett', 'office', 'base'
+      ]);
+
+      const validJtLocations = new Map();
+      if (jtTable && jtTable.rows) {
+        jtTable.rows.forEach(j => {
+          let loc = String(j['Location'] || j['City'] || '').trim();
+          if (!loc) return;
+          const parenMatch = loc.match(/^([^(]+)\s*\([^)]+\)$/);
+          if (parenMatch) loc = parenMatch[1].trim();
+          const lower = loc.toLowerCase();
+          if (!statusLocations.has(lower) && loc) {
+            if (!validJtLocations.has(lower)) {
+              const formatted = loc.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+              validJtLocations.set(lower, formatted);
+            }
+          }
+        });
+      }
+
+      if (validJtLocations.size > 0) {
+        const seenLocs = new Map();
+        const matchedRows = [];
+
+        // 1. Match existing location rows, filter out status/non-JT locations, and deduplicate
+        rows.forEach(r => {
+          const rawName = String(r['Location'] || Object.values(r)[0] || '').trim();
+          const parenMatch = rawName.match(/^([^(]+)\s*\([^)]+\)$/);
+          const cleanName = parenMatch ? parenMatch[1].trim() : rawName;
+          const lower = cleanName.toLowerCase();
+
+          if (validJtLocations.has(lower)) {
+            if (seenLocs.has(lower)) {
+              // Deduplicate: If multiple (e.g. Helena), prefer canonical 0 drive time / Home direction
+              const prev = seenLocs.get(lower);
+              const curDt = Number(r['Drive Time (min)'] !== undefined ? r['Drive Time (min)'] : (r['Drive Time'] || 0));
+              const curDir = String(r['Direction'] || '').toLowerCase();
+              if (lower === 'helena' && (curDt === 0 || curDir === 'home')) {
+                const idx = matchedRows.indexOf(prev);
+                if (idx !== -1) matchedRows[idx] = r;
+                seenLocs.set(lower, r);
+              }
+            } else {
+              seenLocs.set(lower, r);
+              matchedRows.push(r);
+            }
+          }
+        });
+
+        // 2. Synthesize missing Job Tracking locations so every JT crew location is present
+        validJtLocations.forEach((canonicalName, lower) => {
+          if (!seenLocs.has(lower)) {
+            let dt = 60;
+            let dir = 'Montana';
+            if (window.tripPlannerEngine && window.tripPlannerEngine.masterLocations) {
+              const mInfo = window.tripPlannerEngine.masterLocations[canonicalName];
+              if (mInfo) {
+                dt = mInfo.mins;
+                dir = mInfo.dir || 'Montana';
+              }
+            }
+            const synthRow = {
+              'Location': canonicalName,
+              'Drive Time (min)': dt,
+              'Direction': dir,
+              'Overnight City': '',
+              'Base Time (min)': 15,
+              'Per Task (min)': 10,
+              'Rubber Class Approval': 'CL2'
+            };
+            matchedRows.push(synthRow);
+            seenLocs.set(lower, synthRow);
+          }
+        });
+
+        // Default sort alphabetically
+        matchedRows.sort((a, b) => {
+          const nA = String(a['Location'] || Object.values(a)[0] || '').trim();
+          const nB = String(b['Location'] || Object.values(b)[0] || '').trim();
+          return nA.localeCompare(nB);
+        });
+
+        rows = matchedRows;
+      }
+    }
+
     // Multi-criteria filtering for inventory sheets
     const isInventorySheet = ['gloves', 'sleeves', 'blankets', 'macks', 'hv_testers', 'phasing_sets', 'aed', 'grounds', 'hot_sticks'].includes(this.currentSheetKey);
 
@@ -5531,13 +5623,13 @@ class SheetNavigator {
           } else if (hLower.includes('rubber class') || hLower.includes('approval')) {
             const vUpper = String(val || '').trim().toUpperCase();
             let bColor = '#2563eb';
-            let bText = '🧤 CL2 (17kV)';
+            let bText = '🧤 CL2';
             if (vUpper === 'CL3') {
               bColor = '#7c3aed';
-              bText = '⚡ CL3 (26.5kV)';
+              bText = '⚡ CL3';
             } else if (vUpper === 'CL2') {
               bColor = '#2563eb';
-              bText = '🧤 CL2 (17kV)';
+              bText = '🧤 CL2';
             } else if (vUpper === 'CL2 & CL3' || vUpper === 'CL2 & 3' || vUpper.includes('&') || vUpper.includes('BOTH')) {
               bColor = '#059669';
               bText = '🔄 CL2 & CL3';
@@ -6655,13 +6747,13 @@ class SheetNavigator {
           } else if (this.currentSheetKey === 'locations' && (hLower.includes('rubber class') || hLower.includes('approval'))) {
             const vUpper = String(newVal || '').trim().toUpperCase();
             let bColor = '#2563eb';
-            let bText = '🧤 CL2 (17kV)';
+            let bText = '🧤 CL2';
             if (vUpper === 'CL3') {
               bColor = '#7c3aed';
-              bText = '⚡ CL3 (26.5kV)';
+              bText = '⚡ CL3';
             } else if (vUpper === 'CL2') {
               bColor = '#2563eb';
-              bText = '🧤 CL2 (17kV)';
+              bText = '🧤 CL2';
             } else if (vUpper === 'CL2 & CL3' || vUpper === 'CL2 & 3' || vUpper.includes('&') || vUpper.includes('BOTH')) {
               bColor = '#059669';
               bText = '🔄 CL2 & CL3';
@@ -7636,8 +7728,8 @@ class SheetNavigator {
       results = qLower ? standardLocs.filter(l => l.name.toLowerCase().includes(qLower) || l.subText.toLowerCase().includes(qLower)) : standardLocs;
     } else if (this.currentSheetKey === 'locations' && (h.includes('rubber class') || h.includes('approval'))) {
       const approvalOptions = [
-        { name: 'CL2', subText: 'Class 2 Rubber (17kV max)', icon: '🧤' },
-        { name: 'CL3', subText: 'Class 3 Rubber (26.5kV max) - e.g. Big Sky', icon: '⚡' },
+        { name: 'CL2', subText: 'Class 2 Rubber', icon: '🧤' },
+        { name: 'CL3', subText: 'Class 3 Rubber - e.g. Big Sky', icon: '⚡' },
         { name: 'CL2 & CL3', subText: 'Both Class 2 and Class 3 Approved', icon: '🔄' },
         { name: 'None', subText: 'No High Voltage Rubber Work / Office', icon: '🚫' }
       ];

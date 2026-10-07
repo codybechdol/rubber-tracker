@@ -60,19 +60,56 @@ class LocationApprovalsEngine {
    */
   getLocationsData() {
     const locTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('locations') : null) || this.db?.snapshot?.tables?.['locations'];
+    const jtTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('job_tracking') : null) || this.db?.snapshot?.tables?.['job_tracking'];
     if (!locTable || !locTable.rows) return [];
 
-    return locTable.rows.map((r, idx) => {
-      const name = String(r['Location'] || Object.values(r)[0] || '').trim();
+    const statusLocations = new Set([
+      'vacation', 'light duty', 'weeds', 'leave', 'previous employee', 'medical',
+      "worker's comp", 'unknown', 'in testing', 'location', 'lost', 'destroyed',
+      "cody's truck", 'arnett / jm test', 'arnett', 'office', 'base'
+    ]);
+
+    const validJtLocations = new Map();
+    if (jtTable && jtTable.rows) {
+      jtTable.rows.forEach(j => {
+        let loc = String(j['Location'] || j['City'] || '').trim();
+        if (!loc) return;
+        const parenMatch = loc.match(/^([^(]+)\s*\([^)]+\)$/);
+        if (parenMatch) loc = parenMatch[1].trim();
+        const lower = loc.toLowerCase();
+        if (!statusLocations.has(lower) && loc) {
+          if (!validJtLocations.has(lower)) {
+            const formatted = loc.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+            validJtLocations.set(lower, formatted);
+          }
+        }
+      });
+    }
+
+    const seenLocs = new Map();
+    const matched = [];
+
+    locTable.rows.forEach((r, idx) => {
+      const rawName = String(r['Location'] || Object.values(r)[0] || '').trim();
+      const parenMatch = rawName.match(/^([^(]+)\s*\([^)]+\)$/);
+      const cleanName = parenMatch ? parenMatch[1].trim() : rawName;
+      const lower = cleanName.toLowerCase();
+
+      // If validJtLocations is populated, only include locations from Job Tracking
+      if (validJtLocations.size > 0 && !validJtLocations.has(lower)) {
+        return;
+      }
+      if (statusLocations.has(lower)) return;
+
       const driveTime = r['Drive Time (min)'] !== undefined ? r['Drive Time (min)'] : (r['Drive Time'] || 0);
       const direction = String(r['Direction'] || '').trim();
       const approval = String(r['Rubber Class Approval'] || r['Approval'] || Object.values(r)[6] || 'CL2').trim();
       const baseTime = r['Base Time (min)'] || 15;
       const perTask = r['Per Task (min)'] || 10;
 
-      return {
+      const locObj = {
         _rowIdx: r._rowIdx || (idx + 2),
-        name,
+        name: validJtLocations.get(lower) || cleanName,
         driveTime,
         direction,
         approval,
@@ -80,7 +117,58 @@ class LocationApprovalsEngine {
         perTask,
         rawRecord: r
       };
-    }).filter(l => l.name);
+
+      if (seenLocs.has(lower)) {
+        // If duplicate Helena, prefer canonical 0 drive time / Home direction
+        if (lower === 'helena' && (Number(driveTime) === 0 || direction.toLowerCase() === 'home')) {
+          const prev = seenLocs.get(lower);
+          const pIdx = matched.indexOf(prev);
+          if (pIdx !== -1) matched[pIdx] = locObj;
+          seenLocs.set(lower, locObj);
+        }
+      } else {
+        seenLocs.set(lower, locObj);
+        matched.push(locObj);
+      }
+    });
+
+    // Synthesize missing Job Tracking locations so every JT crew location is present
+    if (validJtLocations.size > 0) {
+      validJtLocations.forEach((canonicalName, lower) => {
+        if (!seenLocs.has(lower)) {
+          let dt = 60;
+          let dir = 'Montana';
+          if (window.tripPlannerEngine && window.tripPlannerEngine.masterLocations) {
+            const mInfo = window.tripPlannerEngine.masterLocations[canonicalName];
+            if (mInfo) {
+              dt = mInfo.mins;
+              dir = mInfo.dir || 'Montana';
+            }
+          }
+          matched.push({
+            _rowIdx: 9999,
+            name: canonicalName,
+            driveTime: dt,
+            direction: dir,
+            approval: 'CL2',
+            baseTime: 15,
+            perTask: 10,
+            rawRecord: {
+              'Location': canonicalName,
+              'Drive Time (min)': dt,
+              'Direction': dir,
+              'Overnight City': '',
+              'Base Time (min)': 15,
+              'Per Task (min)': 10,
+              'Rubber Class Approval': 'CL2'
+            }
+          });
+        }
+      });
+    }
+
+    matched.sort((a, b) => a.name.localeCompare(b.name));
+    return matched;
   }
 
   /**
@@ -234,12 +322,12 @@ class LocationApprovalsEngine {
       <!-- Stats Summary Banner -->
       <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 18px;">
         <div style="background: rgba(124, 58, 237, 0.12); border: 1px solid rgba(124, 58, 237, 0.35); border-radius: 8px; padding: 12px 14px; text-align: center;">
-          <div style="font-size: 11px; font-weight: 700; color: #c084fc; text-transform: uppercase; letter-spacing: 0.5px;">⚡ Class 3 Only (26.5kV)</div>
+          <div style="font-size: 11px; font-weight: 700; color: #c084fc; text-transform: uppercase; letter-spacing: 0.5px;">⚡ Class 3 Only</div>
           <div style="font-size: 24px; font-weight: 800; color: #fff; margin-top: 4px;">${countCL3}</div>
           <div style="font-size: 10.5px; color: #e9d5ff; margin-top: 2px;">e.g. Big Sky</div>
         </div>
         <div style="background: rgba(37, 99, 235, 0.12); border: 1px solid rgba(37, 99, 235, 0.35); border-radius: 8px; padding: 12px 14px; text-align: center;">
-          <div style="font-size: 11px; font-weight: 700; color: #93c5fd; text-transform: uppercase; letter-spacing: 0.5px;">🧤 Class 2 Only (17kV)</div>
+          <div style="font-size: 11px; font-weight: 700; color: #93c5fd; text-transform: uppercase; letter-spacing: 0.5px;">🧤 Class 2 Only</div>
           <div style="font-size: 24px; font-weight: 800; color: #fff; margin-top: 4px;">${countCL2}</div>
           <div style="font-size: 10.5px; color: #bfdbfe; margin-top: 2px;">Helena, Bozeman, Butte...</div>
         </div>
@@ -278,7 +366,7 @@ class LocationApprovalsEngine {
               <th style="padding: 10px 16px;">Location</th>
               <th style="padding: 10px 16px;">Region / Direction</th>
               <th style="padding: 10px 16px;">Drive Time (from Helena)</th>
-              <th style="padding: 10px 16px;">Current Voltage Requirement</th>
+              <th style="padding: 10px 16px;">Rubber Class Approval</th>
               <th style="padding: 10px 16px; width: 220px;">Adjust Class Approval</th>
             </tr>
           </thead>
@@ -300,13 +388,13 @@ class LocationApprovalsEngine {
 
         let badgeHtml = '';
         if (appUpper === 'CL3') {
-          badgeHtml = `<span class="badge loc-approval-badge-btn" style="background-color: #7c3aed; color: #fff; padding: 4px 10px; border-radius: 4px; font-weight: 700; font-size: 11.5px; display: inline-flex; align-items: center; gap: 5px; cursor: pointer; transition: transform 0.1s, box-shadow 0.1s;" title="Click to cycle approval: CL2 → CL3 → Both → None" onclick="window.locationApprovalsEngine.cycleApproval('${this.escapeJs(loc.name)}', '${appUpper}')"><span>⚡ Class 3 (26.5kV Only)</span> <span style="font-size: 10px; opacity: 0.8;">⟳</span></span>`;
+          badgeHtml = `<span class="badge loc-approval-badge-btn" style="background-color: #7c3aed; color: #fff; padding: 4px 10px; border-radius: 4px; font-weight: 700; font-size: 11.5px; display: inline-flex; align-items: center; gap: 5px; cursor: pointer; transition: transform 0.1s, box-shadow 0.1s;" title="Click to cycle approval: CL2 → CL3 → Both → None" onclick="window.locationApprovalsEngine.cycleApproval('${this.escapeJs(loc.name)}', '${appUpper}')"><span>⚡ Class 3</span> <span style="font-size: 10px; opacity: 0.8;">⟳</span></span>`;
         } else if (appUpper === 'CL2') {
-          badgeHtml = `<span class="badge loc-approval-badge-btn" style="background-color: #2563eb; color: #fff; padding: 4px 10px; border-radius: 4px; font-weight: 700; font-size: 11.5px; display: inline-flex; align-items: center; gap: 5px; cursor: pointer; transition: transform 0.1s, box-shadow 0.1s;" title="Click to cycle approval: CL2 → CL3 → Both → None" onclick="window.locationApprovalsEngine.cycleApproval('${this.escapeJs(loc.name)}', '${appUpper}')"><span>🧤 Class 2 (17kV Only)</span> <span style="font-size: 10px; opacity: 0.8;">⟳</span></span>`;
+          badgeHtml = `<span class="badge loc-approval-badge-btn" style="background-color: #2563eb; color: #fff; padding: 4px 10px; border-radius: 4px; font-weight: 700; font-size: 11.5px; display: inline-flex; align-items: center; gap: 5px; cursor: pointer; transition: transform 0.1s, box-shadow 0.1s;" title="Click to cycle approval: CL2 → CL3 → Both → None" onclick="window.locationApprovalsEngine.cycleApproval('${this.escapeJs(loc.name)}', '${appUpper}')"><span>🧤 Class 2</span> <span style="font-size: 10px; opacity: 0.8;">⟳</span></span>`;
         } else if (appUpper.includes('&') || appUpper.includes('BOTH')) {
           badgeHtml = `<span class="badge loc-approval-badge-btn" style="background-color: #059669; color: #fff; padding: 4px 10px; border-radius: 4px; font-weight: 700; font-size: 11.5px; display: inline-flex; align-items: center; gap: 5px; cursor: pointer; transition: transform 0.1s, box-shadow 0.1s;" title="Click to cycle approval: CL2 → CL3 → Both → None" onclick="window.locationApprovalsEngine.cycleApproval('${this.escapeJs(loc.name)}', '${appUpper}')"><span>🔄 Class 2 & Class 3</span> <span style="font-size: 10px; opacity: 0.8;">⟳</span></span>`;
         } else if (appUpper === 'NONE') {
-          badgeHtml = `<span class="badge loc-approval-badge-btn" style="background-color: #475569; color: #cbd5e1; padding: 4px 10px; border-radius: 4px; font-weight: 600; font-size: 11.5px; display: inline-flex; align-items: center; gap: 5px; cursor: pointer; transition: transform 0.1s, box-shadow 0.1s;" title="Click to cycle approval: CL2 → CL3 → Both → None" onclick="window.locationApprovalsEngine.cycleApproval('${this.escapeJs(loc.name)}', '${appUpper}')"><span>🚫 None (Office / Shop)</span> <span style="font-size: 10px; opacity: 0.8;">⟳</span></span>`;
+          badgeHtml = `<span class="badge loc-approval-badge-btn" style="background-color: #475569; color: #cbd5e1; padding: 4px 10px; border-radius: 4px; font-weight: 600; font-size: 11.5px; display: inline-flex; align-items: center; gap: 5px; cursor: pointer; transition: transform 0.1s, box-shadow 0.1s;" title="Click to cycle approval: CL2 → CL3 → Both → None" onclick="window.locationApprovalsEngine.cycleApproval('${this.escapeJs(loc.name)}', '${appUpper}')"><span>🚫 None</span> <span style="font-size: 10px; opacity: 0.8;">⟳</span></span>`;
         } else {
           badgeHtml = `<span class="badge loc-approval-badge-btn" style="background-color: #2563eb; color: #fff; padding: 4px 10px; border-radius: 4px; font-weight: 700; font-size: 11.5px; cursor: pointer;" title="Click to cycle approval" onclick="window.locationApprovalsEngine.cycleApproval('${this.escapeJs(loc.name)}', '${appUpper}')">🧤 ${this.escapeHtml(loc.approval)} ⟳</span>`;
         }
@@ -330,10 +418,10 @@ class LocationApprovalsEngine {
             </td>
             <td style="padding: 12px 16px;">
               <select class="form-control" style="width: 100%; font-size: 12.5px; font-weight: 600; padding: 5px 8px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 5px; color: #fff;" onchange="window.locationApprovalsEngine.updateApproval('${this.escapeJs(loc.name)}', this.value)">
-                <option value="CL2" ${appUpper === 'CL2' ? 'selected' : ''}>🧤 CL2 (Class 2 - 17kV)</option>
-                <option value="CL3" ${appUpper === 'CL3' ? 'selected' : ''}>⚡ CL3 (Class 3 - 26.5kV)</option>
+                <option value="CL2" ${appUpper === 'CL2' ? 'selected' : ''}>🧤 CL2 (Class 2)</option>
+                <option value="CL3" ${appUpper === 'CL3' ? 'selected' : ''}>⚡ CL3 (Class 3)</option>
                 <option value="CL2 & CL3" ${(appUpper.includes('&') || appUpper.includes('BOTH')) ? 'selected' : ''}>🔄 CL2 & CL3 (Both Approved)</option>
-                <option value="None" ${appUpper === 'NONE' ? 'selected' : ''}>🚫 None (No HV Rubber)</option>
+                <option value="None" ${appUpper === 'NONE' ? 'selected' : ''}>🚫 None</option>
               </select>
             </td>
           </tr>
