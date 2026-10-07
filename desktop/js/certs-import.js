@@ -13,6 +13,12 @@ class CertsImportEngine {
     this.mappedData = [];
     this.fileName = '';
     this.preserveNewerDates = true;
+    this.ignoreHiddenRows = true; // Automatically skip hidden cells/rows from Excel by default
+    this.hiddenRowCount = 0;
+    this.hiddenColCount = 0;
+    this.currentWorkbook = null;
+    this.currentSheetName = '';
+    this.overriddenPreservedKeys = new Set();
 
     // Get supported certification types dynamically from CertsConfigEngine
     this.refreshCertDefinitions();
@@ -88,6 +94,7 @@ class CertsImportEngine {
     this.mappedData = [];
     this.preservedRecords = [];
     this.unmatchedEmployees = [];
+    this.overriddenPreservedKeys = new Set();
     this.activeDiscrepancyTab = 'all';
     this.fileName = '';
 
@@ -181,7 +188,9 @@ class CertsImportEngine {
     reader.onload = (e) => {
       try {
         const data = new Uint8Array(e.target.result);
-        const workbook = XLSX.read(data, { type: 'array', cellDates: true });
+        // Enable cellStyles to get hidden row/column metadata (!rows, !cols)
+        const workbook = XLSX.read(data, { type: 'array', cellDates: true, cellStyles: true });
+        this.currentWorkbook = workbook;
         
         // Scan all sheets and select the one with the highest number of matched cert headers
         let bestSheetName = workbook.SheetNames[0];
@@ -190,7 +199,7 @@ class CertsImportEngine {
         for (const sName of workbook.SheetNames) {
           const ws = workbook.Sheets[sName];
           if (!ws || !ws['!ref']) continue;
-          const sampleGrid = this.extractGridFromWorksheet(ws, 15);
+          const sampleGrid = this.extractGridFromWorksheet(ws, 15, false);
           let sheetScore = 0;
           sampleGrid.forEach(row => {
             row.forEach(cell => {
@@ -204,10 +213,8 @@ class CertsImportEngine {
           }
         }
 
-        const worksheet = workbook.Sheets[bestSheetName];
-        const grid = this.extractGridFromWorksheet(worksheet);
-
-        this.processRawSheetData(grid);
+        this.currentSheetName = bestSheetName;
+        this.reprocessCurrentSheet();
       } catch (err) {
         console.error('Failed to parse Excel file:', err);
         alert('❌ Error reading file: ' + err.message);
@@ -217,19 +224,106 @@ class CertsImportEngine {
   }
 
   /**
-   * Robust cell extraction handling SheetJS text, date objects, and Excel serial numbers.
+   * Re-extracts grid from current worksheet and re-runs discrepancy comparison.
    */
-  extractGridFromWorksheet(worksheet, maxRows = Infinity) {
+  reprocessCurrentSheet() {
+    if (!this.currentWorkbook || !this.currentSheetName) return;
+    const worksheet = this.currentWorkbook.Sheets[this.currentSheetName];
+    const grid = this.extractGridFromWorksheet(worksheet, Infinity, this.ignoreHiddenRows);
+    this.processRawSheetData(grid);
+  }
+
+  /**
+   * Toggles whether hidden rows/cells from Excel are ignored or processed.
+   */
+  toggleIgnoreHiddenRows(ignore) {
+    this.ignoreHiddenRows = !!ignore;
+    this.reprocessCurrentSheet();
+  }
+
+  /**
+   * Toggles whether an individual preserved record should use the Excel date instead of app date.
+   */
+  togglePreservedOverride(empName, certType, useExcelDate) {
+    const key = `${String(empName || '').toLowerCase().trim()}_${this.normalizeCertKey(certType)}`;
+    if (useExcelDate) {
+      this.overriddenPreservedKeys.add(key);
+    } else {
+      this.overriddenPreservedKeys.delete(key);
+    }
+    this.renderPreviewScreen();
+  }
+
+  /**
+   * Batch toggle: override ALL preserved records to use Excel date or keep all App dates.
+   */
+  setAllPreservedOverrides(useExcelDate) {
+    if (!this.preservedRecords) return;
+    if (useExcelDate) {
+      this.preservedRecords.forEach(p => {
+        const key = `${String(p.employeeName || '').toLowerCase().trim()}_${this.normalizeCertKey(p.certType)}`;
+        this.overriddenPreservedKeys.add(key);
+      });
+    } else {
+      this.overriddenPreservedKeys.clear();
+    }
+    this.renderPreviewScreen();
+  }
+
+  /**
+   * Checks if a row is hidden in Excel via !rows metadata (hidden property, or zero height).
+   */
+  isRowHidden(sheet, rowIndex) {
+    if (!sheet || !sheet['!rows']) return false;
+    const rowInfo = sheet['!rows'][rowIndex];
+    return !!(rowInfo && (rowInfo.hidden === true || rowInfo.hidden === 1 || rowInfo.hpt === 0 || rowInfo.hpx === 0));
+  }
+
+  /**
+   * Checks if a column is hidden in Excel via !cols metadata (hidden property, or zero width).
+   */
+  isColHidden(sheet, colIndex) {
+    if (!sheet || !sheet['!cols']) return false;
+    const colInfo = sheet['!cols'][colIndex];
+    return !!(colInfo && (colInfo.hidden === true || colInfo.hidden === 1 || colInfo.wpx === 0 || colInfo.width === 0));
+  }
+
+  /**
+   * Robust cell extraction handling SheetJS text, date objects, Excel serial numbers,
+   * and skipping hidden rows/columns when skipHidden is enabled.
+   */
+  extractGridFromWorksheet(worksheet, maxRows = Infinity, skipHidden = true) {
     if (!worksheet || !worksheet['!ref']) return [];
     const range = XLSX.utils.decode_range(worksheet['!ref']);
     const grid = [];
     const endRow = Math.min(range.e.r, range.s.r + maxRows - 1);
+    
+    if (maxRows === Infinity) {
+      this.hiddenRowCount = 0;
+      this.hiddenColCount = 0;
+    }
+
+    // Build visible column index list
+    const visibleCols = [];
+    for (let c = range.s.c; c <= range.e.c; c++) {
+      if (skipHidden && this.isColHidden(worksheet, c)) {
+        if (maxRows === Infinity) this.hiddenColCount++;
+        continue;
+      }
+      visibleCols.push(c);
+    }
 
     for (let r = range.s.r; r <= endRow; r++) {
+      if (skipHidden && this.isRowHidden(worksheet, r)) {
+        if (maxRows === Infinity) this.hiddenRowCount++;
+        continue;
+      }
+
       const row = [];
       let hasData = false;
 
-      for (let c = range.s.c; c <= range.e.c; c++) {
+      for (let i = 0; i < visibleCols.length; i++) {
+        const c = visibleCols[i];
         const cellAddr = XLSX.utils.encode_cell({ r: r, c: c });
         const cell = worksheet[cellAddr];
         let val = '';
@@ -411,7 +505,7 @@ class CertsImportEngine {
       // Filter out Previous Employee records
       if (loc === 'previous employee' || loc.includes('previous') ||
           status === 'previous employee' || status.includes('inactive') || status.includes('terminated') ||
-          job.startsWith('002-') || job.includes('previous')) {
+          job.includes('previous')) {
         return;
       }
 
@@ -462,6 +556,41 @@ class CertsImportEngine {
         if (nameParts.length >= 2) {
           const revName = `${nameParts[nameParts.length - 1]} ${nameParts.slice(0, -1).join(' ')}`;
           matchedEmp = activeEmpLookup[revName];
+        }
+      }
+
+      if (!matchedEmp) {
+        // Try without parentheses/nicknames (e.g. "Michael (Troy) Ramey" -> "Michael Ramey")
+        const withoutParens = normName.replace(/\([^)]*\)/g, '').replace(/\s+/g, ' ').trim();
+        if (withoutParens && activeEmpLookup[withoutParens]) {
+          matchedEmp = activeEmpLookup[withoutParens];
+        }
+      }
+
+      if (!matchedEmp) {
+        // Try nickname inside parentheses as first name (e.g. "Michael (Troy) Ramey" -> "Troy Ramey")
+        const parenMatch = normName.match(/\(([^)]+)\)/);
+        if (parenMatch) {
+          const nickName = parenMatch[1].trim();
+          const cleanTokens = normName.replace(/\([^)]*\)/g, '').replace(/\s+/g, ' ').trim().split(' ');
+          if (cleanTokens.length > 0) {
+            const lastName = cleanTokens[cleanTokens.length - 1];
+            const candidate = `${nickName} ${lastName}`.trim();
+            if (activeEmpLookup[candidate]) {
+              matchedEmp = activeEmpLookup[candidate];
+            }
+          }
+        }
+      }
+
+      if (!matchedEmp) {
+        // Try without middle name / middle initial (e.g. "First M. Last" -> "First Last")
+        const nameParts = normName.split(' ');
+        if (nameParts.length >= 3) {
+          const noMiddle = `${nameParts[0]} ${nameParts[nameParts.length - 1]}`;
+          if (activeEmpLookup[noMiddle]) {
+            matchedEmp = activeEmpLookup[noMiddle];
+          }
         }
       }
 
@@ -539,9 +668,11 @@ class CertsImportEngine {
                   location: empLocation,
                   jobNum: empJobNum,
                   certType: certDef.key,
+                  certDef: certDef,
                   appDate: currentAcqDate,
                   excelDate: dateStr,
-                  reason: 'App date acquired is newer than Excel date'
+                  reason: 'App date acquired is newer than Excel date',
+                  isNonExpiring: true
                 });
                 return; // Keep existing newer date
               }
@@ -561,9 +692,11 @@ class CertsImportEngine {
                   location: empLocation,
                   jobNum: empJobNum,
                   certType: certDef.key,
+                  certDef: certDef,
                   appDate: currentExpDate,
                   excelDate: dateStr,
-                  reason: 'App expiration date is newer than Excel date'
+                  reason: 'App expiration date is newer than Excel date',
+                  isNonExpiring: false
                 });
                 return; // Keep existing newer date
               }
@@ -784,6 +917,16 @@ class CertsImportEngine {
     const preservedCount = (this.preservedRecords || []).length;
     const unmatchedCount = (this.unmatchedEmployees || []).length;
 
+    let overriddenPreservedCount = 0;
+    (this.preservedRecords || []).forEach(p => {
+      const key = `${String(p.employeeName || '').toLowerCase().trim()}_${this.normalizeCertKey(p.certType)}`;
+      if (this.overriddenPreservedKeys && this.overriddenPreservedKeys.has(key)) {
+        overriddenPreservedCount++;
+      }
+    });
+
+    const totalUpdatesToApply = selectedUpdatesCount + overriddenPreservedCount;
+
     // Filter preserved records by search term
     const filteredPreserved = (this.preservedRecords || []).filter(p => {
       if (!this.previewSearchTerm) return true;
@@ -813,6 +956,10 @@ class CertsImportEngine {
             </div>
           </div>
           <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+            <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--text-secondary); cursor: pointer; user-select: none; background: rgba(255,255,255,0.06); padding: 5px 10px; border-radius: 6px; border: 1px solid var(--border-color);" title="When checked, hidden rows and columns in the Excel spreadsheet will be automatically skipped">
+              <input type="checkbox" ${this.ignoreHiddenRows ? 'checked' : ''} onchange="window.certsImportEngine.toggleIgnoreHiddenRows(this.checked)" style="accent-color: #10b981;">
+              <span>Ignore Hidden Excel Rows ${this.hiddenRowCount > 0 ? `<strong style="color: #6ee7b7;">(${this.hiddenRowCount} skipped)</strong>` : ''}</span>
+            </label>
             <button class="btn btn-secondary" onclick="window.certsImportEngine.copyDiscrepanciesReport()" style="font-size: 11.5px; background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4); display: flex; align-items: center; gap: 5px;">
               <span>📋</span> Copy Report
             </button>
@@ -837,7 +984,7 @@ class CertsImportEngine {
             ✨ New Records (${totalNewRecords})
           </button>
           <button type="button" class="btn btn-sm" onclick="window.certsImportEngine.setDiscrepancyTab('preserved')" style="padding: 5px 12px; font-size: 12px; font-weight: 700; border-radius: 6px; border: 1px solid ${this.activeDiscrepancyTab === 'preserved' ? '#8b5cf6' : 'var(--border-color)'}; background: ${this.activeDiscrepancyTab === 'preserved' ? 'rgba(139, 92, 246, 0.2)' : 'transparent'}; color: ${this.activeDiscrepancyTab === 'preserved' ? '#c4b5fd' : 'var(--text-muted)'}; cursor: pointer;">
-            🔒 Preserved in App (${preservedCount})
+            🔒 Preserved in App (${preservedCount}) ${overriddenPreservedCount > 0 ? `<span style="background: rgba(234, 179, 8, 0.35); color: #fde047; padding: 1px 6px; border-radius: 10px; font-size: 10px; margin-left: 4px; border: 1px solid rgba(234, 179, 8, 0.5);">⚡ ${overriddenPreservedCount} using Excel</span>` : ''}
           </button>
           <button type="button" class="btn btn-sm" onclick="window.certsImportEngine.setDiscrepancyTab('unmatched')" style="padding: 5px 12px; font-size: 12px; font-weight: 700; border-radius: 6px; border: 1px solid ${this.activeDiscrepancyTab === 'unmatched' ? '#ef4444' : 'var(--border-color)'}; background: ${this.activeDiscrepancyTab === 'unmatched' ? 'rgba(239, 68, 68, 0.2)' : 'transparent'}; color: ${this.activeDiscrepancyTab === 'unmatched' ? '#fca5a5' : 'var(--text-muted)'}; cursor: pointer;">
             ❓ Unmatched in Excel (${unmatchedCount})
@@ -889,37 +1036,85 @@ class CertsImportEngine {
         <!-- Diff Preview Table -->
         <div style="max-height: 380px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-primary);">
           ${this.activeDiscrepancyTab === 'preserved' ? `
+            <div style="background: rgba(139, 92, 246, 0.08); border-bottom: 1px solid rgba(139, 92, 246, 0.25); padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+              <div style="display: flex; align-items: center; gap: 10px;">
+                <span style="font-size: 20px;">🔒</span>
+                <div>
+                  <div style="font-size: 13px; font-weight: 700; color: #c4b5fd;">Preserved Newer Dates in App (${preservedCount})</div>
+                  <div style="font-size: 11.5px; color: var(--text-secondary); margin-top: 2px;">
+                    By default, the app protects your dates when the app date is newer than the Excel date.
+                    ${overriddenPreservedCount > 0 ? `<strong style="color: #fde047; margin-left: 4px;">⚡ ${overriddenPreservedCount} selected to use Excel date instead.</strong>` : 'You can optionally choose to use the Excel date instead below.'}
+                  </div>
+                </div>
+              </div>
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <button type="button" class="btn btn-secondary" onclick="window.certsImportEngine.setAllPreservedOverrides(true)" style="font-size: 11.5px; padding: 5px 12px; background: rgba(234, 179, 8, 0.18); color: #fde047; border: 1px solid rgba(234, 179, 8, 0.4); font-weight: 700; display: flex; align-items: center; gap: 5px;" title="Override all preserved dates to use Excel dates instead">
+                  <span>⚡</span> Use All Excel Dates (${preservedCount})
+                </button>
+                <button type="button" class="btn btn-secondary" onclick="window.certsImportEngine.setAllPreservedOverrides(false)" style="font-size: 11.5px; padding: 5px 12px; background: rgba(139, 92, 246, 0.18); color: #c4b5fd; border: 1px solid rgba(139, 92, 246, 0.4); font-weight: 600; display: flex; align-items: center; gap: 5px;" title="Reset all to keep newer App dates">
+                  <span>🔒</span> Keep All App Dates
+                </button>
+              </div>
+            </div>
             <table class="data-table" style="width: 100%; border-collapse: collapse; font-size: 12px;">
               <thead>
                 <tr style="position: sticky; top: 0; background: #1e293b; z-index: 5; border-bottom: 2px solid #334155;">
-                  <th style="width: 220px; padding: 8px 12px;">Employee</th>
+                  <th style="width: 200px; padding: 8px 12px;">Employee</th>
                   <th style="padding: 8px 12px;">Certification Type</th>
-                  <th style="width: 130px; padding: 8px 12px;">Current App Date</th>
-                  <th style="width: 30px; text-align: center; padding: 8px 4px;">🔒</th>
-                  <th style="width: 130px; padding: 8px 12px;">Excel Date</th>
-                  <th style="width: 140px; text-align: center; padding: 8px 12px;">Protection Status</th>
+                  <th style="width: 120px; padding: 8px 12px;">Current App Date</th>
+                  <th style="width: 120px; padding: 8px 12px;">Excel Date</th>
+                  <th style="width: 150px; text-align: center; padding: 8px 12px;">Status</th>
+                  <th style="width: 160px; text-align: center; padding: 8px 12px;">Action / Choice</th>
                 </tr>
               </thead>
               <tbody>
                 ${filteredPreserved.length === 0 ? `
                   <tr><td colspan="6" style="padding: 36px 16px; text-align: center; color: var(--text-muted);">No preserved records found. (No instances where the App date was newer than the Excel date).</td></tr>
-                ` : filteredPreserved.map(p => `
-                  <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
-                    <td style="font-weight: 700; color: #f8fafc; padding: 8px 12px;">${this.escapeHtml(p.employeeName)} ${p.location ? `<span style="font-size: 11px; color: var(--text-muted);">(${this.escapeHtml(p.location)})</span>` : ''}</td>
-                    <td style="font-weight: 600; color: #93c5fd; padding: 8px 12px;">${this.escapeHtml(p.certType)}</td>
-                    <td style="font-weight: 700; color: #34d399; font-family: monospace; padding: 8px 12px;">${this.escapeHtml(p.appDate)}</td>
-                    <td style="text-align: center; color: #c4b5fd; font-size: 14px; padding: 8px 4px;">🔒</td>
-                    <td style="color: #fde047; font-family: monospace; padding: 8px 12px;">${this.escapeHtml(p.excelDate)}</td>
-                    <td style="text-align: center; padding: 8px 12px;">
-                      <span class="badge" style="background: rgba(139, 92, 246, 0.2); color: #c4b5fd; border: 1px solid rgba(139, 92, 246, 0.4); font-size: 10.5px;">
-                        🔒 Kept Newer App Date
-                      </span>
-                    </td>
-                  </tr>
-                `).join('')}
+                ` : filteredPreserved.map(p => {
+                  const key = `${String(p.employeeName || '').toLowerCase().trim()}_${this.normalizeCertKey(p.certType)}`;
+                  const isOverridden = this.overriddenPreservedKeys && this.overriddenPreservedKeys.has(key);
+                  return `
+                    <tr style="border-bottom: 1px solid rgba(255,255,255,0.05); ${isOverridden ? 'background: rgba(234, 179, 8, 0.08);' : ''}">
+                      <td style="font-weight: 700; color: #f8fafc; padding: 8px 12px;">${this.escapeHtml(p.employeeName)} ${p.location ? `<span style="font-size: 11px; color: var(--text-muted);">(${this.escapeHtml(p.location)})</span>` : ''}</td>
+                      <td style="font-weight: 600; color: #93c5fd; padding: 8px 12px;">${this.escapeHtml(p.certType)}</td>
+                      <td style="font-weight: 700; color: #34d399; font-family: monospace; padding: 8px 12px;">${this.escapeHtml(p.appDate)}</td>
+                      <td style="font-weight: 700; color: #fde047; font-family: monospace; padding: 8px 12px;">${this.escapeHtml(p.excelDate)}</td>
+                      <td style="text-align: center; padding: 8px 12px;">
+                        ${isOverridden ? `
+                          <span class="badge" style="background: rgba(234, 179, 8, 0.25); color: #fde047; border: 1px solid rgba(234, 179, 8, 0.5); font-size: 10.5px; font-weight: 700;">
+                            ⚡ Using Excel Date
+                          </span>
+                        ` : `
+                          <span class="badge" style="background: rgba(139, 92, 246, 0.2); color: #c4b5fd; border: 1px solid rgba(139, 92, 246, 0.4); font-size: 10.5px;">
+                            🔒 Kept Newer App Date
+                          </span>
+                        `}
+                      </td>
+                      <td style="text-align: center; padding: 8px 12px;">
+                        ${isOverridden ? `
+                          <button type="button" class="btn btn-secondary" onclick="window.certsImportEngine.togglePreservedOverride('${this.escapeHtml(p.employeeName)}', '${this.escapeHtml(p.certType)}', false)" style="padding: 3px 10px; font-size: 11px; background: rgba(139, 92, 246, 0.2); color: #c4b5fd; border: 1px solid rgba(139, 92, 246, 0.4); display: inline-flex; align-items: center; gap: 4px;" title="Revert to keeping the newer app date">
+                            <span>🔒</span> Keep App Date
+                          </button>
+                        ` : `
+                          <button type="button" class="btn btn-secondary" onclick="window.certsImportEngine.togglePreservedOverride('${this.escapeHtml(p.employeeName)}', '${this.escapeHtml(p.certType)}', true)" style="padding: 3px 10px; font-size: 11px; background: rgba(234, 179, 8, 0.18); color: #fde047; border: 1px solid rgba(234, 179, 8, 0.45); font-weight: 600; display: inline-flex; align-items: center; gap: 4px;" title="Use Excel date (${this.escapeHtml(p.excelDate)}) instead of app date">
+                            <span>⚡</span> Use Excel Date
+                          </button>
+                        `}
+                      </td>
+                    </tr>
+                  `;
+                }).join('')}
               </tbody>
             </table>
           ` : (this.activeDiscrepancyTab === 'unmatched' ? `
+            <div style="padding: 12px 16px; background: rgba(239, 68, 68, 0.08); border-bottom: 1px solid rgba(239, 68, 68, 0.2); font-size: 12px; color: #fca5a5; display: flex; align-items: flex-start; gap: 10px;">
+              <span style="font-size: 18px; line-height: 1;">🛡️</span>
+              <div style="line-height: 1.45;">
+                <strong>Safe to Ignore — Zero Impact:</strong> These ${filteredUnmatched.length} names from the Excel file were not found in your active employee roster (or are from inactive/hidden rows in Excel). 
+                <strong>They are completely skipped</strong> during import and no changes will be made to your app or database.
+                ${this.hiddenRowCount > 0 ? `<div style="margin-top: 4px; color: #6ee7b7;">🔒 Note: <strong>${this.hiddenRowCount}</strong> hidden rows from Excel were already automatically skipped.</div>` : ''}
+              </div>
+            </div>
             <table class="data-table" style="width: 100%; border-collapse: collapse; font-size: 12px;">
               <thead>
                 <tr style="position: sticky; top: 0; background: #1e293b; z-index: 5; border-bottom: 2px solid #334155;">
@@ -939,7 +1134,7 @@ class CertsImportEngine {
                     <td style="color: var(--text-secondary); padding: 8px 12px;">${this.escapeHtml(u.jobNum || '—')}</td>
                     <td style="text-align: center; padding: 8px 12px;">
                       <span class="badge" style="background: rgba(239, 68, 68, 0.2); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.4); font-size: 10.5px;">
-                        ⚠️ Not Found in Active Roster (Skipped)
+                        ⚠️ Skipped / Ignored (Not in Active Roster)
                       </span>
                     </td>
                   </tr>
@@ -995,8 +1190,8 @@ class CertsImportEngine {
         </div>
         <div style="display: flex; gap: 8px; align-items: center;">
           <button class="btn btn-secondary" onclick="window.certsImportEngine.closeImportModal()">Cancel</button>
-          <button class="btn btn-primary" onclick="window.certsImportEngine.confirmImport()" style="font-weight: 700; background: linear-gradient(135deg, #10b981 0%, #059669 100%); border: none; display: flex; align-items: center; gap: 6px; box-shadow: 0 2px 8px rgba(16, 185, 129, 0.4);" ${selectedUpdatesCount === 0 ? 'disabled' : ''}>
-            <span>🚀</span> Apply & Save ${selectedUpdatesCount} Cert Updates
+          <button class="btn btn-primary" onclick="window.certsImportEngine.confirmImport()" style="font-weight: 700; background: linear-gradient(135deg, #10b981 0%, #059669 100%); border: none; display: flex; align-items: center; gap: 6px; box-shadow: 0 2px 8px rgba(16, 185, 129, 0.4);" ${totalUpdatesToApply === 0 ? 'disabled' : ''}>
+            <span>🚀</span> Apply & Save ${totalUpdatesToApply} Cert Updates
           </button>
         </div>
       `;
@@ -1031,6 +1226,8 @@ class CertsImportEngine {
 
     // 2. Preserved in App
     (this.preservedRecords || []).forEach(p => {
+      const key = `${String(p.employeeName || '').toLowerCase().trim()}_${this.normalizeCertKey(p.certType)}`;
+      const isOverridden = this.overriddenPreservedKeys && this.overriddenPreservedKeys.has(key);
       rows.push({
         'Employee Name': p.employeeName,
         'Location': p.location || '',
@@ -1038,8 +1235,8 @@ class CertsImportEngine {
         'Certification Type': p.certType,
         'Current Date in App': p.appDate,
         'New Date in Excel': p.excelDate,
-        'Discrepancy Category': 'Preserved in App (App Date Newer)',
-        'Import Status': 'Protected / Skipped'
+        'Discrepancy Category': isOverridden ? 'Preserved in App (Overridden to Excel Date)' : 'Preserved in App (App Date Newer)',
+        'Import Status': isOverridden ? 'Will Update to Excel Date (User Override)' : 'Protected / Kept Newer App Date'
       });
     });
 
@@ -1052,8 +1249,8 @@ class CertsImportEngine {
         'Certification Type': '(All Certs)',
         'Current Date in App': 'N/A (Not Found in App)',
         'New Date in Excel': 'Present in File',
-        'Discrepancy Category': 'Employee Not Found in Active Roster',
-        'Import Status': 'Skipped'
+        'Discrepancy Category': 'Employee Not Found in Active Roster (or Hidden Row in Excel)',
+        'Import Status': 'Skipped / Ignored (Zero Database Impact)'
       });
     });
 
@@ -1115,11 +1312,15 @@ class CertsImportEngine {
 
     if (this.preservedRecords && this.preservedRecords.length > 0) {
       text += `--- PRESERVED IN APP (App date is newer) (${this.preservedRecords.length}) ---\n`;
-      text += this.preservedRecords.map(p => `• ${p.employeeName}: ${p.certType} (App: ${p.appDate} vs Excel: ${p.excelDate})`).join('\n') + '\n\n';
+      text += this.preservedRecords.map(p => {
+        const key = `${String(p.employeeName || '').toLowerCase().trim()}_${this.normalizeCertKey(p.certType)}`;
+        const isOverridden = this.overriddenPreservedKeys && this.overriddenPreservedKeys.has(key);
+        return `• ${p.employeeName}: ${p.certType} (App: ${p.appDate} vs Excel: ${p.excelDate}) [${isOverridden ? 'OVERRIDDEN -> WILL USE EXCEL DATE' : 'KEPT APP DATE'}]`;
+      }).join('\n') + '\n\n';
     }
 
     if (this.unmatchedEmployees && this.unmatchedEmployees.length > 0) {
-      text += `--- UNMATCHED EMPLOYEES IN EXCEL (${this.unmatchedEmployees.length}) ---\n`;
+      text += `--- UNMATCHED EMPLOYEES IN EXCEL (${this.unmatchedEmployees.length} - SKIPPED / ZERO DATABASE IMPACT) ---\n`;
       text += this.unmatchedEmployees.map(u => `• ${u.formattedName || u.rawName} (${u.location || 'Unknown'})`).join('\n') + '\n\n';
     }
 
@@ -1138,7 +1339,9 @@ class CertsImportEngine {
    * Applies changes to local database and queues outbox mutations for cloud sync.
    */
   async confirmImport() {
-    if (this.mappedData.length === 0) return;
+    const hasRegularChanges = (this.mappedData || []).some(emp => Object.keys(emp.changes || {}).length > 0);
+    const hasOverrides = this.overriddenPreservedKeys && this.overriddenPreservedKeys.size > 0;
+    if (!hasRegularChanges && !hasOverrides) return;
 
     if (!this.db) this.db = window.localDB || window.safetyDB;
 
@@ -1154,6 +1357,7 @@ class CertsImportEngine {
 
     let appliedCount = 0;
 
+    // 1. Apply regular changes
     for (const emp of this.mappedData) {
       for (const cKey of Object.keys(emp.changes)) {
         // Only apply if user kept this cert type selected
@@ -1254,6 +1458,71 @@ class CertsImportEngine {
             });
           }
 
+          appliedCount++;
+        }
+      }
+    }
+
+    // 2. Apply selected overrides from preserved records
+    if (this.preservedRecords && this.overriddenPreservedKeys && this.overriddenPreservedKeys.size > 0) {
+      for (const p of this.preservedRecords) {
+        const key = `${String(p.employeeName || '').toLowerCase().trim()}_${this.normalizeCertKey(p.certType)}`;
+        if (!this.overriddenPreservedKeys.has(key)) continue;
+
+        const certDef = p.certDef || this.certDefinitions[p.certType] || { key: p.certType, nonExpiring: !!p.isNonExpiring };
+        const targetNormalized = this.normalizeCertKey(p.certType);
+
+        let targetRowIdx = certsTable.rows.findIndex(r => {
+          const rEmp = String(r['Employee Name'] || r['Name'] || '').toLowerCase().trim();
+          const rType = this.normalizeCertKey(r['Item Type'] || r['Cert Type'] || r['Type'] || '');
+          return rEmp === p.employeeName.toLowerCase().trim() && rType === targetNormalized;
+        });
+
+        if (targetRowIdx !== -1) {
+          const row = certsTable.rows[targetRowIdx];
+          const sheetRowNumber = targetRowIdx + 2;
+
+          if (certDef.nonExpiring) {
+            const oldVal = row['Date Acquired'] || '';
+            row['Date Acquired'] = p.excelDate;
+            if (this.db && typeof this.db.addMutation === 'function') {
+              await this.db.addMutation({
+                action: 'UPDATE_CELL',
+                sheetName: 'Expiring Certs',
+                tableKey: 'expiring_certs',
+                row: sheetRowNumber,
+                col: 3,
+                header: 'Date Acquired',
+                value: p.excelDate,
+                oldValue: oldVal,
+                employeeName: p.employeeName,
+                certName: p.certType,
+                itemType: p.certType
+              });
+            }
+          } else {
+            const oldVal = row['Expiration Date'] || '';
+            row['Expiration Date'] = p.excelDate;
+            const statusCalc = this.calculateLocalCertStatus(p.excelDate);
+            row['Days Until Expiration'] = statusCalc.daysUntil;
+            row['Status'] = statusCalc.status;
+
+            if (this.db && typeof this.db.addMutation === 'function') {
+              await this.db.addMutation({
+                action: 'UPDATE_CELL',
+                sheetName: 'Expiring Certs',
+                tableKey: 'expiring_certs',
+                row: sheetRowNumber,
+                col: 4,
+                header: 'Expiration Date',
+                value: p.excelDate,
+                oldValue: oldVal,
+                employeeName: p.employeeName,
+                certName: p.certType,
+                itemType: p.certType
+              });
+            }
+          }
           appliedCount++;
         }
       }
