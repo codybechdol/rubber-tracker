@@ -4079,12 +4079,13 @@ function scanIncidentReportEmails(options) {
     }
 
     // Multi-query search in Gmail to guarantee all incident report emails are found
-    var maxThreads = options.maxThreads || 150;
+    var maxThreads = options.maxThreads || 100;
     var searchQueries = [
-      'label:incident-reports',
+      'from:mptablets@mountainpower.com',
       'subject:"Incident Report"',
       'from:mptablets@mountainpower.com subject:"Incident Report"',
-      'from:mptablets@mountainpower.com "Incident Report"'
+      'from:mptablets@mountainpower.com "Incident Report"',
+      'label:incident-reports'
     ];
 
     var threadsMap = {};
@@ -4107,13 +4108,29 @@ function scanIncidentReportEmails(options) {
       }
     }
 
+    // Sort all threads newest to oldest so recent incidents are prioritized
+    threads.sort(function(a, b) {
+      var da = a.getLastMessageDate() ? a.getLastMessageDate().getTime() : 0;
+      var db = b.getLastMessageDate() ? b.getLastMessageDate().getTime() : 0;
+      return db - da;
+    });
+
     var newCount = 0;
     var skippedCount = 0;
     var newRows = [];
+    var startTime = new Date().getTime();
 
     for (var t = 0; t < threads.length; t++) {
+      // 22-second circuit breaker to prevent Google Web App HTTP gateway timeout (25-30s limit)
+      if (new Date().getTime() - startTime > 22000) {
+        Logger.log('scanIncidentReportEmails: Approaching Web App timeout limit (22s). Halting loop and saving ' + newRows.length + ' new reports.');
+        break;
+      }
+
       var thread = threads[t];
       var msgs = thread.getMessages();
+      // Reverse messages so newest in thread is processed first
+      msgs.reverse();
 
       for (var m = 0; m < msgs.length; m++) {
         var msg = msgs[m];
@@ -4167,13 +4184,15 @@ function scanIncidentReportEmails(options) {
           parsed.involvedEmployees = sEmpMatch[1].trim();
         }
 
-        // Attempt text extraction from PDF
+        // Attempt text extraction from PDF (budgeted to avoid timeout)
         var pdfText = '';
         if (pdfAtt && typeof extractTextFromPDF === 'function') {
-          try {
-            pdfText = extractTextFromPDF(pdfAtt, 5 * 1024 * 1024) || '';
-          } catch (ocrErr) {
-            Logger.log('OCR error for ' + subject + ': ' + ocrErr);
+          if (new Date().getTime() - startTime < 16000) {
+            try {
+              pdfText = extractTextFromPDF(pdfAtt, 2.5 * 1024 * 1024) || '';
+            } catch (ocrErr) {
+              Logger.log('OCR error for ' + subject + ': ' + ocrErr);
+            }
           }
         }
 

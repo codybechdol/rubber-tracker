@@ -5530,15 +5530,24 @@ class SheetNavigator {
             customCellHtml = `<span style="font-weight: 700; color: #60a5fa;">📍 ${this.escapeHtml(val)}</span>`;
           } else if (hLower.includes('rubber class') || hLower.includes('approval')) {
             const vUpper = String(val || '').trim().toUpperCase();
+            let bColor = '#2563eb';
+            let bText = '🧤 CL2 (17kV)';
             if (vUpper === 'CL3') {
-              customCellHtml = `<span class="badge" style="background-color: #7c3aed; color: #fff; padding: 2px 8px; border-radius: 4px; font-weight: 700;">⚡ CL3 (26.5kV)</span>`;
+              bColor = '#7c3aed';
+              bText = '⚡ CL3 (26.5kV)';
             } else if (vUpper === 'CL2') {
-              customCellHtml = `<span class="badge" style="background-color: #2563eb; color: #fff; padding: 2px 8px; border-radius: 4px; font-weight: 700;">🧤 CL2 (17kV)</span>`;
-            } else if (vUpper === 'CL2 & CL3' || vUpper === 'CL2 & 3') {
-              customCellHtml = `<span class="badge" style="background-color: #059669; color: #fff; padding: 2px 8px; border-radius: 4px; font-weight: 700;">🔄 CL2 & CL3</span>`;
+              bColor = '#2563eb';
+              bText = '🧤 CL2 (17kV)';
+            } else if (vUpper === 'CL2 & CL3' || vUpper === 'CL2 & 3' || vUpper.includes('&') || vUpper.includes('BOTH')) {
+              bColor = '#059669';
+              bText = '🔄 CL2 & CL3';
             } else if (vUpper === 'NONE') {
-              customCellHtml = `<span class="badge" style="background-color: #475569; color: #cbd5e1; padding: 2px 8px; border-radius: 4px; font-weight: 600;">🚫 None</span>`;
+              bColor = '#475569';
+              bText = '🚫 None';
+            } else {
+              bText = `🧤 ${this.escapeHtml(val || 'CL2')}`;
             }
+            customCellHtml = `<span class="badge badge-approval-clickable" style="background-color: ${bColor}; color: #fff; padding: 3px 9px; border-radius: 4px; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; user-select: none;" title="Click to change rubber class approval"><span>${bText}</span> <span style="font-size: 10px; opacity: 0.7;">▾</span></span>`;
           } else if (hLower === 'direction') {
             customCellHtml = `<span style="font-weight: 600; color: #cbd5e1;">🧭 ${this.escapeHtml(val)}</span>`;
           }
@@ -5596,6 +5605,12 @@ class SheetNavigator {
           this.showCellAutocomplete(td, currentText);
         }
       });
+
+      if (isLocationApprovalCol) {
+        td.addEventListener('click', (e) => {
+          this.showCellAutocomplete(td, '');
+        });
+      }
 
       if (hasAutocomplete) {
         td.addEventListener('input', () => {
@@ -5707,6 +5722,14 @@ class SheetNavigator {
               newVal = `${p[1]}/${p[2]}/${p[0]}`;
             }
             targetCell.textContent = newVal;
+          }
+
+          if (this.currentSheetKey === 'locations' && (hLower.includes('rubber class') || hLower.includes('approval'))) {
+            const nUpper = newVal.toUpperCase();
+            if (nUpper.includes('CL3') && !nUpper.includes('&') && !nUpper.includes('BOTH') && !nUpper.includes('CL2')) newVal = 'CL3';
+            else if (nUpper.includes('CL2') && (nUpper.includes('CL3') || nUpper.includes('&') || nUpper.includes('BOTH'))) newVal = 'CL2 & CL3';
+            else if (nUpper.includes('NONE')) newVal = 'None';
+            else if (nUpper.includes('CL2')) newVal = 'CL2';
           }
 
           const sheetName = targetCell.dataset.sheet || (tableData ? tableData.name : this.currentSheetKey);
@@ -6628,6 +6651,30 @@ class SheetNavigator {
               targetCell.innerHTML = `<span class="profile-link-badge" style="color: #60a5fa; cursor: pointer; margin-right: 4px; display: inline-block;" title="Click to view assignments & certs for ${this.escapeHtml(newVal)}" onclick="event.stopPropagation(); if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(newVal)}');}">👤</span><span class="cell-text" style="font-weight: 600; color: #93c5fd;">${this.escapeHtml(newVal)}</span>`;
             } else {
               targetCell.textContent = newVal;
+            }
+          } else if (this.currentSheetKey === 'locations' && (hLower.includes('rubber class') || hLower.includes('approval'))) {
+            const vUpper = String(newVal || '').trim().toUpperCase();
+            let bColor = '#2563eb';
+            let bText = '🧤 CL2 (17kV)';
+            if (vUpper === 'CL3') {
+              bColor = '#7c3aed';
+              bText = '⚡ CL3 (26.5kV)';
+            } else if (vUpper === 'CL2') {
+              bColor = '#2563eb';
+              bText = '🧤 CL2 (17kV)';
+            } else if (vUpper === 'CL2 & CL3' || vUpper === 'CL2 & 3' || vUpper.includes('&') || vUpper.includes('BOTH')) {
+              bColor = '#059669';
+              bText = '🔄 CL2 & CL3';
+            } else if (vUpper === 'NONE') {
+              bColor = '#475569';
+              bText = '🚫 None';
+            } else {
+              bText = `🧤 ${newVal}`;
+            }
+            targetCell.innerHTML = `<span class="badge badge-approval-clickable" style="background-color: ${bColor}; color: #fff; padding: 3px 9px; border-radius: 4px; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; user-select: none;" title="Click to change rubber class approval"><span>${bText}</span> <span style="font-size: 10px; opacity: 0.7;">▾</span></span>`;
+
+            if (window.procurementEngine && typeof window.procurementEngine.buildPurchaseNeeds === 'function') {
+              window.procurementEngine.buildPurchaseNeeds();
             }
           } else if (!targetCell.querySelector('.cell-text')) {
             targetCell.textContent = newVal;
@@ -7588,14 +7635,19 @@ class SheetNavigator {
       }
       results = qLower ? standardLocs.filter(l => l.name.toLowerCase().includes(qLower) || l.subText.toLowerCase().includes(qLower)) : standardLocs;
     } else if (this.currentSheetKey === 'locations' && (h.includes('rubber class') || h.includes('approval'))) {
-      const qLower = String(query || '').toLowerCase().trim();
       const approvalOptions = [
         { name: 'CL2', subText: 'Class 2 Rubber (17kV max)', icon: '🧤' },
         { name: 'CL3', subText: 'Class 3 Rubber (26.5kV max) - e.g. Big Sky', icon: '⚡' },
         { name: 'CL2 & CL3', subText: 'Both Class 2 and Class 3 Approved', icon: '🔄' },
         { name: 'None', subText: 'No High Voltage Rubber Work / Office', icon: '🚫' }
       ];
-      results = qLower ? approvalOptions.filter(o => o.name.toLowerCase().includes(qLower) || o.subText.toLowerCase().includes(qLower)) : approvalOptions;
+      const qClean = String(query || '').replace(/[^\w\s&]/g, '').trim().toLowerCase();
+      if (!qClean || qClean.includes('17kv') || qClean.includes('26') || qClean.includes('cl2') || qClean.includes('cl3') || qClean.includes('none') || qClean.includes('both')) {
+        results = approvalOptions;
+      } else {
+        results = approvalOptions.filter(o => o.name.toLowerCase().includes(qClean) || o.subText.toLowerCase().includes(qClean));
+        if (results.length === 0) results = approvalOptions;
+      }
     } else if (this.currentSheetKey === 'locations' && h === 'direction') {
       const qLower = String(query || '').toLowerCase().trim();
       const directions = [

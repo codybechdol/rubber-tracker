@@ -474,9 +474,14 @@ class IncidentReportsEngine {
           <p style="font-size: 13px; max-width: 480px; margin: 0 auto 16px auto; color: #94a3b8; line-height: 1.5;">
             ${this.searchQuery ? `No incident reports match "${this.escapeHtml(this.searchQuery)}".` : 'No incident reports logged for this quarter yet. Click "Scan Gmail" to search for new reports from mptablets@mountainpower.com.'}
           </p>
-          <button class="btn btn-primary" onclick="window.incidentReportsEngine.scanEmails()" style="font-weight: 700; background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%); border: none; padding: 8px 18px; border-radius: 6px; color: #fff; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;">
-            <span>📬</span> Scan Gmail for Incidents
-          </button>
+          <div style="display: flex; gap: 10px; justify-content: center; align-items: center; flex-wrap: wrap;">
+            <button class="btn btn-primary" onclick="window.incidentReportsEngine.scanEmails()" style="font-weight: 700; background: linear-gradient(135deg, #ef4444 0%, #b91c1c 100%); border: none; padding: 8px 18px; border-radius: 6px; color: #fff; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;">
+              <span>📬</span> Scan Gmail for Incidents
+            </button>
+            <button class="btn btn-secondary" onclick="window.incidentReportsEngine.openAddIncidentModal()" style="font-weight: 700; border-color: #f59e0b; color: #fcd34d; background: rgba(245, 158, 11, 0.1); padding: 8px 18px; border-radius: 6px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;">
+              <span>➕</span> Log Incident Manually
+            </button>
+          </div>
         </div>
       `;
     }
@@ -729,7 +734,7 @@ class IncidentReportsEngine {
   /**
    * Scans Gmail for new incident reports from mptablets@mountainpower.com
    */
-  async scanEmails() {
+  async scanEmails(forceFullRescan = false) {
     if (this.isScanning) return;
     this.isScanning = true;
 
@@ -752,12 +757,12 @@ class IncidentReportsEngine {
       const payload = {
         action: 'scanIncidentEmails',
         daysBack: 365,
-        rescan: true
+        rescan: !!forceFullRescan
       };
 
       let result = null;
       if (window.syncEngine && typeof window.syncEngine.executeNetworkRequest === 'function') {
-        result = await window.syncEngine.executeNetworkRequest(syncUrl, 'POST', payload, 120000);
+        result = await window.syncEngine.executeNetworkRequest(syncUrl, 'POST', payload, 60000);
       } else {
         const resp = await fetch(syncUrl, {
           method: 'POST',
@@ -1341,6 +1346,295 @@ class IncidentReportsEngine {
     } else {
       window.open(url, '_blank');
     }
+  }
+
+  /**
+   * Opens the Log/Add Incident Modal
+   */
+  openAddIncidentModal() {
+    let modal = document.getElementById('add-incident-modal');
+    if (!modal) {
+      this.createAddIncidentModalDom();
+      modal = document.getElementById('add-incident-modal');
+    }
+    if (!modal) return;
+
+    // Prefill date with today
+    const dateInput = document.getElementById('inc-add-date');
+    if (dateInput) dateInput.value = new Date().toISOString().split('T')[0];
+
+    const timeInput = document.getElementById('inc-add-time');
+    if (timeInput) {
+      const now = new Date();
+      timeInput.value = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    }
+
+    modal.style.display = 'flex';
+  }
+
+  /**
+   * Closes the Log/Add Incident Modal
+   */
+  closeAddIncidentModal() {
+    const modal = document.getElementById('add-incident-modal');
+    if (modal) modal.style.display = 'none';
+  }
+
+  /**
+   * Auto-populates Job and Foreman when an employee is selected/typed
+   */
+  onAddModalEmployeeChange(empName) {
+    if (!empName) return;
+    const cleanName = empName.toLowerCase().trim();
+    const snap = this.db?.snapshot;
+    const empTable = snap?.tables?.['employees'] || this.db?.getTable?.('employees');
+    const jtTable = snap?.tables?.['job_tracking'] || this.db?.getTable?.('job_tracking');
+
+    if (empTable && empTable.rows) {
+      const emp = empTable.rows.find(e => {
+        const n = String(e['Name'] || e['Employee Name'] || Object.values(e)[0] || '').trim().toLowerCase();
+        return n === cleanName || n.includes(cleanName);
+      });
+      if (emp) {
+        const jobField = document.getElementById('inc-add-job');
+        const locField = document.getElementById('inc-add-location');
+        if (jobField && !jobField.value && emp['Job Number']) {
+          jobField.value = emp['Job Number'].replace(/^job\s*#?\s*/i, '');
+        }
+        if (locField && !locField.value && emp['Location']) {
+          locField.value = emp['Location'];
+        }
+
+        // Cross-reference Foreman from Job Tracking
+        const fField = document.getElementById('inc-add-foreman');
+        if (fField && !fField.value && jtTable && jtTable.rows) {
+          const jNum = (emp['Job Number'] || '').replace(/^job\s*#?\s*/i, '').trim();
+          const jt = jtTable.rows.find(j => {
+            const jn = String(j['Job Number'] || j['Job #'] || Object.values(j)[0] || '').trim();
+            return jn === jNum || jn === jNum.replace(/^0+/, '');
+          });
+          if (jt && (jt['Foreman'] || jt['Crew Lead'])) {
+            fField.value = jt['Foreman'] || jt['Crew Lead'];
+          } else if (emp['Crew Lead'] === 'Yes' || emp['Job Classification'] === 'F') {
+            fField.value = emp['Name'] || emp['Employee Name'];
+          }
+        }
+      }
+    }
+  }
+
+  /**
+   * Injects modal HTML into body if not already present
+   */
+  createAddIncidentModalDom() {
+    if (document.getElementById('add-incident-modal')) return;
+
+    const modal = document.createElement('div');
+    modal.id = 'add-incident-modal';
+    modal.className = 'modal-overlay';
+    modal.style.zIndex = '1250';
+    modal.style.display = 'none';
+
+    modal.innerHTML = `
+      <div class="modal-box" style="max-width: 640px; width: 92%; max-height: 90vh; display: flex; flex-direction: column; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7); border: 1px solid rgba(245, 158, 11, 0.4);">
+        <div class="modal-header" style="background: linear-gradient(135deg, #451a03 0%, #78350f 100%); color: white; padding: 14px 20px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(245, 158, 11, 0.3);">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span style="font-size: 22px;">⚠️</span>
+            <div>
+              <div style="font-weight: 800; font-size: 16px; letter-spacing: 0.3px;">Log Incident Report</div>
+              <div style="font-size: 11.5px; color: #fde68a; margin-top: 1px;">Record an operational incident, utility strike, vehicle damage, or injury.</div>
+            </div>
+          </div>
+          <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 12px; background: rgba(0,0,0,0.25); border: none; color: white; cursor: pointer;" onclick="window.incidentReportsEngine.closeAddIncidentModal()">✕</button>
+        </div>
+
+        <div class="modal-body" style="padding: 20px; overflow-y: auto; max-height: 72vh; background: var(--bg-primary); display: flex; flex-direction: column; gap: 14px;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <div>
+              <label style="font-size: 11.5px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">Date of Incident *</label>
+              <input type="date" id="inc-add-date" class="form-control" style="width: 100%; box-sizing: border-box; padding: 7px 10px; margin-top: 4px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
+            </div>
+            <div>
+              <label style="font-size: 11.5px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">Time of Incident</label>
+              <input type="text" id="inc-add-time" class="form-control" placeholder="e.g. 12:25 PM" style="width: 100%; box-sizing: border-box; padding: 7px 10px; margin-top: 4px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <div>
+              <label style="font-size: 11.5px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">Involved Employee(s) *</label>
+              <input type="text" id="inc-add-emp" class="form-control" placeholder="e.g. Darrell Swann" onchange="window.incidentReportsEngine.onAddModalEmployeeChange(this.value)" style="width: 100%; box-sizing: border-box; padding: 7px 10px; margin-top: 4px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
+            </div>
+            <div>
+              <label style="font-size: 11.5px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">Incident Type</label>
+              <select id="inc-add-type" class="form-control" style="width: 100%; box-sizing: border-box; padding: 7px 10px; margin-top: 4px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
+                <option value="General Incident">📋 General Incident</option>
+                <option value="Dig-in">🚜 Dig-in / Utility Strike</option>
+                <option value="Vehicle">🚗 Vehicle Damage / Incident</option>
+                <option value="Property Damage">💥 Property Damage</option>
+                <option value="Near Miss">⚠️ Near Miss</option>
+                <option value="Employee Injury">🩹 Employee Injury</option>
+                <option value="Circuit Interruption OH">⚡ Circuit Interruption OH</option>
+                <option value="Other">📝 Other</option>
+              </select>
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <div>
+              <label style="font-size: 11.5px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">Job #</label>
+              <input type="text" id="inc-add-job" class="form-control" placeholder="e.g. 013-27" style="width: 100%; box-sizing: border-box; padding: 7px 10px; margin-top: 4px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
+            </div>
+            <div>
+              <label style="font-size: 11.5px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">Foreman / Supervisor</label>
+              <input type="text" id="inc-add-foreman" class="form-control" placeholder="e.g. Darrell Swann" style="width: 100%; box-sizing: border-box; padding: 7px 10px; margin-top: 4px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
+            </div>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 12px;">
+            <div>
+              <label style="font-size: 11.5px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">Address / Highway Location</label>
+              <input type="text" id="inc-add-location" class="form-control" placeholder="e.g. Belgrade, MT" style="width: 100%; box-sizing: border-box; padding: 7px 10px; margin-top: 4px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
+            </div>
+            <div>
+              <label style="font-size: 11.5px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">Unit # (Truck)</label>
+              <input type="text" id="inc-add-unit" class="form-control" placeholder="e.g. 550" style="width: 100%; box-sizing: border-box; padding: 7px 10px; margin-top: 4px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
+            </div>
+            <div>
+              <label style="font-size: 11.5px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">Ticket # (811)</label>
+              <input type="text" id="inc-add-ticket" class="form-control" placeholder="e.g. 26123456" style="width: 100%; box-sizing: border-box; padding: 7px 10px; margin-top: 4px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
+            </div>
+          </div>
+
+          <div>
+            <label style="font-size: 11.5px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">Brief Explanation / Summary</label>
+            <textarea id="inc-add-explanation" rows="3" class="form-control" placeholder="Explain what happened during the incident..." style="width: 100%; box-sizing: border-box; padding: 8px 10px; margin-top: 4px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; resize: vertical;"></textarea>
+          </div>
+
+          <div>
+            <label style="font-size: 11.5px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">Avoidable / Corrective Actions Taken</label>
+            <textarea id="inc-add-avoidable" rows="2" class="form-control" placeholder="Could this incident have been avoided? Corrective actions..." style="width: 100%; box-sizing: border-box; padding: 8px 10px; margin-top: 4px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; resize: vertical;"></textarea>
+          </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <div>
+              <label style="font-size: 11.5px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">Attached PDF Filename</label>
+              <input type="text" id="inc-add-pdfname" class="form-control" placeholder="e.g. Darrell Swann.pdf" style="width: 100%; box-sizing: border-box; padding: 7px 10px; margin-top: 4px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
+            </div>
+            <div>
+              <label style="font-size: 11.5px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">Photo Count</label>
+              <input type="number" id="inc-add-photos" class="form-control" value="0" min="0" style="width: 100%; box-sizing: border-box; padding: 7px 10px; margin-top: 4px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: 10px; padding: 12px 20px; background: var(--bg-secondary); border-top: 1px solid var(--border-color);">
+          <button class="btn btn-secondary" style="padding: 7px 16px; font-size: 13px;" onclick="window.incidentReportsEngine.closeAddIncidentModal()">Cancel</button>
+          <button class="btn btn-primary" style="padding: 7px 20px; font-size: 13px; font-weight: 700; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); border: none; color: #000;" onclick="window.incidentReportsEngine.saveIncidentModal()">Save Incident Report</button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(modal);
+  }
+
+  /**
+   * Saves a newly created incident report
+   */
+  async saveIncidentModal() {
+    const dateVal = document.getElementById('inc-add-date')?.value?.trim();
+    const timeVal = document.getElementById('inc-add-time')?.value?.trim() || '';
+    const empVal = document.getElementById('inc-add-emp')?.value?.trim() || '';
+    const jobVal = document.getElementById('inc-add-job')?.value?.trim() || '';
+    const foremanVal = document.getElementById('inc-add-foreman')?.value?.trim() || '';
+    const typeVal = document.getElementById('inc-add-type')?.value?.trim() || 'General Incident';
+    const locVal = document.getElementById('inc-add-location')?.value?.trim() || '';
+    const unitVal = document.getElementById('inc-add-unit')?.value?.trim() || '';
+    const ticketVal = document.getElementById('inc-add-ticket')?.value?.trim() || '';
+    const expVal = document.getElementById('inc-add-explanation')?.value?.trim() || '';
+    const avoidableVal = document.getElementById('inc-add-avoidable')?.value?.trim() || '';
+    const photosVal = parseInt(document.getElementById('inc-add-photos')?.value || '0', 10);
+    const pdfName = document.getElementById('inc-add-pdfname')?.value?.trim() || '';
+
+    if (!dateVal) {
+      alert('Please enter a valid Date of Incident.');
+      return;
+    }
+    if (!empVal && !jobVal) {
+      alert('Please provide either an Involved Employee or Job Number.');
+      return;
+    }
+
+    const dObj = this.parseDate(dateVal) || new Date();
+    const yyyy = dObj.getFullYear();
+    const qNum = Math.floor(dObj.getMonth() / 3) + 1;
+    const quarterKey = `${yyyy}-Q${qNum}`;
+
+    const snap = this.db?.snapshot;
+    if (!snap) return;
+    if (!snap.tables) snap.tables = {};
+    if (!snap.tables['incident_reports']) {
+      snap.tables['incident_reports'] = {
+        name: 'Incident Reports',
+        headers: ['Date Received', 'Date of Incident', 'Time', 'Quarter', 'Job #', 'Foreman', 'Involved Employee(s)', 'Incident Type', 'Address / Location', 'Unit #', 'Ticket #', 'Brief Explanation', 'Avoidable / Prevention', 'Photo Count', 'Email ID', 'PDF Filename', 'Status', 'Notes'],
+        rows: []
+      };
+    }
+    const table = snap.tables['incident_reports'];
+    const newIdx = table.rows.length + 2;
+    const emailId = `manual_${Date.now()}`;
+
+    const newRecord = {
+      _rowIdx: newIdx,
+      'Date Received': new Date().toISOString(),
+      'Date of Incident': dateVal,
+      'Time': timeVal,
+      'Quarter': quarterKey,
+      'Job #': jobVal,
+      'Foreman': foremanVal,
+      'Involved Employee(s)': empVal,
+      'Incident Type': typeVal,
+      'Address / Location': locVal,
+      'Unit #': unitVal,
+      'Ticket #': ticketVal,
+      'Brief Explanation': expVal,
+      'Avoidable / Prevention': avoidableVal,
+      'Photo Count': isNaN(photosVal) ? 0 : photosVal,
+      'Email ID': emailId,
+      'PDF Filename': pdfName,
+      'Status': 'Under Review',
+      'Notes': ''
+    };
+
+    table.rows.push(newRecord);
+
+    if (table.rawGrid && table.headers) {
+      table.rawGrid.push(table.headers.map(h => newRecord[h] !== undefined ? newRecord[h] : ''));
+    }
+
+    // Queue mutation for Google Sheets backend
+    await this.db.addMutation({
+      action: 'ADD_ROW',
+      sheetName: 'Incident Reports',
+      tableKey: 'incident_reports',
+      row: newIdx,
+      itemIdentifier: emailId,
+      data: newRecord
+    });
+
+    // Save snapshot
+    if (typeof this.db.persistSnapshot === 'function') {
+      await this.db.persistSnapshot(snap);
+    } else if (window.desktopAPI) {
+      await window.desktopAPI.saveLocalSnapshot(snap);
+    }
+
+    if (window.showToast) {
+      window.showToast(`✅ Logged incident report for ${empVal || jobVal}`, 'success');
+    }
+
+    this.closeAddIncidentModal();
+    this.render();
   }
 
   escapeHtml(str) {

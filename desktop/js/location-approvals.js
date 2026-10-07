@@ -162,6 +162,22 @@ class LocationApprovalsEngine {
   }
 
   /**
+   * Cycles to next approval setting on click: CL2 -> CL3 -> CL2 & CL3 -> None -> CL2
+   */
+  cycleApproval(locationName, currentApproval) {
+    const cycleMap = {
+      'CL2': 'CL3',
+      'CL3': 'CL2 & CL3',
+      'CL2 & CL3': 'None',
+      'NONE': 'CL2'
+    };
+    let cur = String(currentApproval || 'CL2').toUpperCase().trim();
+    if (cur.includes('&') || cur.includes('BOTH')) cur = 'CL2 & CL3';
+    const next = cycleMap[cur] || 'CL2';
+    this.updateApproval(locationName, next);
+  }
+
+  /**
    * Sets filter tab
    */
   setFilter(filter) {
@@ -284,15 +300,15 @@ class LocationApprovalsEngine {
 
         let badgeHtml = '';
         if (appUpper === 'CL3') {
-          badgeHtml = `<span class="badge" style="background-color: #7c3aed; color: #fff; padding: 3px 10px; border-radius: 4px; font-weight: 700; font-size: 11.5px; display: inline-flex; align-items: center; gap: 4px;">⚡ Class 3 (26.5kV Only)</span>`;
+          badgeHtml = `<span class="badge loc-approval-badge-btn" style="background-color: #7c3aed; color: #fff; padding: 4px 10px; border-radius: 4px; font-weight: 700; font-size: 11.5px; display: inline-flex; align-items: center; gap: 5px; cursor: pointer; transition: transform 0.1s, box-shadow 0.1s;" title="Click to cycle approval: CL2 → CL3 → Both → None" onclick="window.locationApprovalsEngine.cycleApproval('${this.escapeJs(loc.name)}', '${appUpper}')"><span>⚡ Class 3 (26.5kV Only)</span> <span style="font-size: 10px; opacity: 0.8;">⟳</span></span>`;
         } else if (appUpper === 'CL2') {
-          badgeHtml = `<span class="badge" style="background-color: #2563eb; color: #fff; padding: 3px 10px; border-radius: 4px; font-weight: 700; font-size: 11.5px; display: inline-flex; align-items: center; gap: 4px;">🧤 Class 2 (17kV Only)</span>`;
+          badgeHtml = `<span class="badge loc-approval-badge-btn" style="background-color: #2563eb; color: #fff; padding: 4px 10px; border-radius: 4px; font-weight: 700; font-size: 11.5px; display: inline-flex; align-items: center; gap: 5px; cursor: pointer; transition: transform 0.1s, box-shadow 0.1s;" title="Click to cycle approval: CL2 → CL3 → Both → None" onclick="window.locationApprovalsEngine.cycleApproval('${this.escapeJs(loc.name)}', '${appUpper}')"><span>🧤 Class 2 (17kV Only)</span> <span style="font-size: 10px; opacity: 0.8;">⟳</span></span>`;
         } else if (appUpper.includes('&') || appUpper.includes('BOTH')) {
-          badgeHtml = `<span class="badge" style="background-color: #059669; color: #fff; padding: 3px 10px; border-radius: 4px; font-weight: 700; font-size: 11.5px; display: inline-flex; align-items: center; gap: 4px;">🔄 Class 2 & Class 3</span>`;
+          badgeHtml = `<span class="badge loc-approval-badge-btn" style="background-color: #059669; color: #fff; padding: 4px 10px; border-radius: 4px; font-weight: 700; font-size: 11.5px; display: inline-flex; align-items: center; gap: 5px; cursor: pointer; transition: transform 0.1s, box-shadow 0.1s;" title="Click to cycle approval: CL2 → CL3 → Both → None" onclick="window.locationApprovalsEngine.cycleApproval('${this.escapeJs(loc.name)}', '${appUpper}')"><span>🔄 Class 2 & Class 3</span> <span style="font-size: 10px; opacity: 0.8;">⟳</span></span>`;
         } else if (appUpper === 'NONE') {
-          badgeHtml = `<span class="badge" style="background-color: #475569; color: #cbd5e1; padding: 3px 10px; border-radius: 4px; font-weight: 600; font-size: 11.5px; display: inline-flex; align-items: center; gap: 4px;">🚫 None (Office / Shop)</span>`;
+          badgeHtml = `<span class="badge loc-approval-badge-btn" style="background-color: #475569; color: #cbd5e1; padding: 4px 10px; border-radius: 4px; font-weight: 600; font-size: 11.5px; display: inline-flex; align-items: center; gap: 5px; cursor: pointer; transition: transform 0.1s, box-shadow 0.1s;" title="Click to cycle approval: CL2 → CL3 → Both → None" onclick="window.locationApprovalsEngine.cycleApproval('${this.escapeJs(loc.name)}', '${appUpper}')"><span>🚫 None (Office / Shop)</span> <span style="font-size: 10px; opacity: 0.8;">⟳</span></span>`;
         } else {
-          badgeHtml = `<span class="badge" style="background-color: #2563eb; color: #fff; padding: 3px 10px; border-radius: 4px; font-weight: 700; font-size: 11.5px;">🧤 ${loc.approval}</span>`;
+          badgeHtml = `<span class="badge loc-approval-badge-btn" style="background-color: #2563eb; color: #fff; padding: 4px 10px; border-radius: 4px; font-weight: 700; font-size: 11.5px; cursor: pointer;" title="Click to cycle approval" onclick="window.locationApprovalsEngine.cycleApproval('${this.escapeJs(loc.name)}', '${appUpper}')">🧤 ${this.escapeHtml(loc.approval)} ⟳</span>`;
         }
 
         html += `
