@@ -623,7 +623,8 @@ class SwapGenerationEngine {
         prevEmpItems.push({
           data: rowData,
           employeeName: employeeName,
-          foreman: getForemanForEmployee(employeeName)
+          foreman: getForemanForEmployee(employeeName),
+          itemClass: String(item['Class'] || item['Rubber Class'] || '').trim()
         });
       }
     });
@@ -1174,6 +1175,7 @@ class SwapGenerationEngine {
           }
           rawGrid.push(r.data);
           const obj = this.gridRowToObj(allHeaders, r.data);
+          obj['Class'] = String(r.itemClass || '').trim();
           obj._location = 'PREVIOUS EMPLOYEE';
           obj._foreman = foreman;
           obj._daysLeftColor = '#ef4444';

@@ -1565,6 +1565,9 @@ class LocalDatabase {
     let curLoc = 'Helena';
     let curForeman = '';
     let curClass = isGloves ? '2' : '2';
+    let inPrevEmpSection = false;
+    const invKey = isGloves ? 'gloves' : isSleeves ? 'sleeves' : isBlanket ? 'blankets' : isMack ? 'macks' : null;
+    const invTable = invKey ? this.getTable(invKey) : null;
 
     // Read manual picks from snapshot or local storage for authoritative pick states
     let manualPicks = {};
@@ -1600,11 +1603,16 @@ class LocalDatabase {
       if (/class\s*\d/i.test(c0)) {
         const m = c0.match(/class\s*(\d)/i);
         if (m) curClass = m[1];
+        inPrevEmpSection = false;
+        return;
+      }
+      // Previous employee section banner
+      if (/previous\s*employee/i.test(c0)) {
+        inPrevEmpSection = true;
         return;
       }
       // Other non-employee rows
       if (
-        /previous\s*employee/i.test(c0) ||
         /needs\s*retest/i.test(c0) ||
         /stage\s*\d/i.test(c0) ||
         /no\s*swaps\s*due/i.test(c0) ||
@@ -1637,13 +1645,30 @@ class LocalDatabase {
         }
       }
 
+      let rowClass = curClass;
+      if (invTable && invTable.rows && curItem) {
+        const invMatch = invTable.rows.find(it => {
+          const num = String(it['Item #'] || it['Glove'] || it['Sleeve'] || it['Blanket'] || it['MACK'] || it['Serial #'] || it['ESL ID'] || Object.values(it)[0] || '').trim();
+          return num === curItem;
+        });
+        if (invMatch) {
+          const realClass = String(invMatch['Class'] || invMatch['Rubber Class'] || invMatch['KV'] || '').trim();
+          if (realClass) {
+            rowClass = realClass;
+          }
+        }
+      }
+      if (inPrevEmpSection && (!invTable || !curItem)) {
+        rowClass = '';
+      }
+
       const rowObj = {
         _rowIdx: idx + 1,
         'Employee': c0,
         [`Current ${itemLabel} #`]: curItem,
         'Current Item #': curItem,
         'Size': String(gr[sizeCol] || '').trim(),
-        'Class': curClass,
+        'Class': rowClass,
         'Date Assigned': String(gr[dateAssignedCol] || '').trim(),
         'Change Out Date': String(gr[changeOutCol] || '').trim(),
         'Days Left': gr[daysLeftCol] !== undefined ? gr[daysLeftCol] : '',

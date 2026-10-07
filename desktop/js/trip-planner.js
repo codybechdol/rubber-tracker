@@ -7377,8 +7377,9 @@ class TripPlannerApp {
         if (!isPicked && !isReclaim) return;
 
         const currentItem = String(r['Current Glove #'] || r['Current Item #'] || r['Current Item'] || '').trim();
+        let itRow = null;
         if (currentItem && glovesInvTable && glovesInvTable.rows) {
-          const itRow = glovesInvTable.rows.find(it => String(it['Item #'] || it['Glove'] || '').trim() === currentItem);
+          itRow = glovesInvTable.rows.find(it => String(it['Item #'] || it['Glove'] || '').trim() === currentItem);
           if (itRow) {
             const itLoc = String(itRow['Location'] || '').toLowerCase();
             const itSt = String(itRow['Status'] || '').toLowerCase();
@@ -7389,8 +7390,11 @@ class TripPlannerApp {
           }
         }
         const pickItem = String(r['Pick List Glove #'] || r['Pick List Item #'] || r['Pick List Item'] || '').trim() || (isReclaim ? '—' : '');
-        const size = String(r['Size'] || '').trim();
-        const itemClass = String(r['Class'] || '').trim();
+        const size = String(r['Size'] || (itRow && itRow['Size']) || '').trim();
+        let itemClass = String(r['Class'] || '').trim();
+        if ((!itemClass || isReclaim) && itRow && itRow['Class']) {
+          itemClass = String(itRow['Class']).trim();
+        }
         const status = String(r['Status'] || (isReclaim ? 'Return to Shelf' : 'Ready For Delivery 🚚')).trim();
         const changeOutDate = r['Change Out Date'] || '';
         const daysLeft = r['Days Left'] !== undefined ? r['Days Left'] : (isReclaim ? 'PREV EMP' : '');
@@ -7435,8 +7439,9 @@ class TripPlannerApp {
         if (!isPicked && !isReclaim) return;
 
         const currentItem = String(r['Current Sleeve #'] || r['Current Item #'] || r['Current Item'] || '').trim();
+        let itRow = null;
         if (currentItem && sleevesInvTable && sleevesInvTable.rows) {
-          const itRow = sleevesInvTable.rows.find(it => String(it['Item #'] || it['Sleeve'] || '').trim() === currentItem);
+          itRow = sleevesInvTable.rows.find(it => String(it['Item #'] || it['Sleeve'] || '').trim() === currentItem);
           if (itRow) {
             const itLoc = String(itRow['Location'] || '').toLowerCase();
             const itSt = String(itRow['Status'] || '').toLowerCase();
@@ -7447,8 +7452,11 @@ class TripPlannerApp {
           }
         }
         const pickItem = String(r['Pick List Sleeve #'] || r['Pick List Item #'] || r['Pick List Item'] || '').trim() || (isReclaim ? '—' : '');
-        const size = String(r['Size'] || '').trim();
-        const itemClass = String(r['Class'] || '').trim();
+        const size = String(r['Size'] || (itRow && itRow['Size']) || '').trim();
+        let itemClass = String(r['Class'] || '').trim();
+        if ((!itemClass || isReclaim) && itRow && itRow['Class']) {
+          itemClass = String(itRow['Class']).trim();
+        }
         const status = String(r['Status'] || (isReclaim ? 'Return to Shelf' : 'Ready For Delivery 🚚')).trim();
         const changeOutDate = r['Change Out Date'] || '';
         const daysLeft = r['Days Left'] !== undefined ? r['Days Left'] : (isReclaim ? 'PREV EMP' : '');
