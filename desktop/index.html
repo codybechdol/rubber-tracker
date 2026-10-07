@@ -154,6 +154,9 @@
         <div class="nav-item" data-action="open-ppe-tracker" onclick="if(window.ppeTrackingEngine){window.ppeTrackingEngine.openModal();}">
           <span class="nav-item-icon">🧤</span> Rubber PPE Tracker
         </div>
+        <div class="nav-item" data-action="open-location-approvals" onclick="if(window.locationApprovalsEngine){window.locationApprovalsEngine.openModal();}">
+          <span class="nav-item-icon">📍</span> Location Approvals
+        </div>
         <div class="nav-item" id="nav-item-fiscal-year" data-action="open-fiscal-year-transition" onclick="if(window.fiscalYearEngine){window.fiscalYearEngine.openModal();}">
           <span class="nav-item-icon">📅</span> FY Transition
         </div>
@@ -223,6 +226,9 @@
             <button class="btn btn-secondary" id="btn-ppe-tracking" style="display: none; padding: 6px 12px; font-size: 12px; align-items: center; gap: 6px; border-color: rgba(245, 158, 11, 0.45); color: #fbbf24; background: rgba(245, 158, 11, 0.1);" onclick="window.ppeTrackingEngine.openModal()" title="View rubber gloves and sleeves compliance for SUP, GF, F, JRY, and AP 1-7">
               <span>🧤</span> Rubber PPE Tracker
               <span id="ppe-missing-badge" class="badge" style="background: #ef4444; color: #fff; font-size: 10px; font-weight: 800; padding: 1px 6px; border-radius: 10px; display: none;">0</span>
+            </button>
+            <button class="btn btn-secondary" id="btn-location-approvals-top" style="padding: 6px 12px; font-size: 12px; align-items: center; gap: 5px; border-color: #8b5cf6; color: #c084fc; background: rgba(139, 92, 246, 0.1); display: inline-flex;" onclick="window.locationApprovalsEngine.openModal()" title="View and adjust high voltage rubber class requirements (CL2, CL3, Both) for each location">
+              <span>📍</span> Location Approvals
             </button>
             <button class="btn btn-secondary" id="btn-toggle-sheet-visuals" style="display: none; padding: 6px 12px; font-size: 12px; align-items: center; gap: 5px; border-color: #3b82f6; color: #93c5fd;" onclick="window.sheetNavigator.toggleVisualsDashboard()" title="Toggle Visual Analytics & Lifecycle Metrics Dashboard">
               <span>📊</span> Visual Analytics
@@ -779,6 +785,9 @@
             </select>
             <button class="btn btn-secondary" id="btn-procurement-refresh" style="display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 6px 12px; color: #cbd5e1;" onclick="window.procurementEngine.refreshPurchaseNeeds()" title="Refresh purchase needs from all swap sheets, exclude departed employees, and update pricing">
               <span>🔄</span> Refresh
+            </button>
+            <button class="btn btn-secondary" id="btn-procurement-location-approvals" style="display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 6px 12px; border-color: #8b5cf6; color: #c084fc; background: rgba(139, 92, 246, 0.1);" onclick="window.locationApprovalsEngine.openModal()" title="View and adjust high voltage rubber class requirements (CL2, CL3, Both) for each location">
+              <span>📍</span> Location Approvals
             </button>
             <button class="btn btn-secondary" id="btn-procurement-manage-vendors" style="display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 6px 12px;" onclick="window.procurementEngine.openManageVendorsModal()">
               <span>⚙️</span> Manage Vendors
@@ -2055,6 +2064,33 @@
     </div>
   </div>
 
+  <!-- Location Rubber Class Approvals Modal -->
+  <div id="location-approvals-modal" class="modal-overlay" style="z-index: 1200; display: none;">
+    <div class="modal-box" style="max-width: 960px; width: 94%; max-height: 92vh; display: flex; flex-direction: column; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7); border: 1px solid rgba(124, 58, 237, 0.4);">
+      <div class="modal-header" style="background: linear-gradient(135deg, #1e1b4b 0%, #312e81 100%); color: white; padding: 14px 20px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid rgba(124, 58, 237, 0.3);">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 22px;">📍</span>
+          <div>
+            <div style="font-weight: 800; font-size: 16px; letter-spacing: 0.3px;">Location Rubber Class Approvals</div>
+            <div style="font-size: 11.5px; color: #c7d2fe; margin-top: 1px;">Adjust high voltage glove & sleeve voltage requirements (CL2, CL3, or Both) for each crew location.</div>
+          </div>
+        </div>
+        <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 12px; background: rgba(0,0,0,0.25); border: none; color: white; cursor: pointer;" onclick="window.locationApprovalsEngine.closeModal()">✕</button>
+      </div>
+
+      <div class="modal-body" id="loc-approvals-modal-body" style="padding: 20px; overflow-y: auto; max-height: 76vh; background: var(--bg-primary);">
+        <!-- Injected dynamically by location-approvals.js -->
+      </div>
+
+      <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center; padding: 12px 20px; background: var(--bg-secondary); border-top: 1px solid var(--border-color);">
+        <div style="font-size: 11.5px; color: var(--text-muted);">
+          💡 Changes take effect immediately in Swaps, Trip Planner, and Purchase Needs, and sync to Google Sheets.
+        </div>
+        <button class="btn btn-primary" style="padding: 6px 18px; font-size: 13px; font-weight: 700; background: linear-gradient(135deg, #7c3aed 0%, #6d28d9 100%); border: none;" onclick="window.locationApprovalsEngine.closeModal()">Done</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Compose Training Schedule Email Modal -->
   <div id="training-email-modal" class="modal-overlay">
     <div class="modal-box" style="max-width: 880px; width: 94%; max-height: 92vh; display: flex; flex-direction: column;">
@@ -2654,6 +2690,7 @@
   <script src="js/incident-reports.js?v=20260930_01"></script>
   <script src="js/weekly-summary.js?v=20260930_01"></script>
   <script src="js/fiscal-year.js?v=20261001_04"></script>
+  <script src="js/location-approvals.js?v=20261007_01"></script>
   <script src="js/ai-copilot.js?v=20261002_03"></script>
 
   <script>
@@ -2894,6 +2931,9 @@
 
         window.fiscalYearEngine = new FiscalYearEngine(window.localDB);
         window.fiscalYearEngine.init();
+
+        window.locationApprovalsEngine = new LocationApprovalsEngine(window.localDB);
+        window.locationApprovalsEngine.init();
 
         if (window.aiCopilotEngine) {
           window.aiCopilotEngine.init();
