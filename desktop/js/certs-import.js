@@ -86,6 +86,9 @@ class CertsImportEngine {
   openImportModal() {
     this.parsedRows = [];
     this.mappedData = [];
+    this.preservedRecords = [];
+    this.unmatchedEmployees = [];
+    this.activeDiscrepancyTab = 'all';
     this.fileName = '';
 
     const modal = document.getElementById('certs-import-modal');
@@ -481,8 +484,14 @@ class CertsImportEngine {
         })?.obj;
       }
 
-      // CRITICAL: If this person is NOT a current active employee on the Employees page, SKIP THEM!
+      // CRITICAL: If this person is NOT a current active employee on the Employees page, record discrepancy and skip
       if (!matchedEmp) {
+        this.unmatchedEmployees.push({
+          rawName: rawName,
+          formattedName: formattedName,
+          location: locCol !== -1 && row[locCol] ? String(row[locCol]).trim() : 'Unknown',
+          jobNum: jobCol !== -1 && row[jobCol] ? String(row[jobCol]).trim() : ''
+        });
         return; // Exclude previous employees and non-company records
       }
 
@@ -525,6 +534,15 @@ class CertsImportEngine {
               const oldD = new Date(currentAcqDate);
               const newD = new Date(dateStr);
               if (!isNaN(oldD.getTime()) && !isNaN(newD.getTime()) && oldD > newD) {
+                this.preservedRecords.push({
+                  employeeName: finalEmpName,
+                  location: empLocation,
+                  jobNum: empJobNum,
+                  certType: certDef.key,
+                  appDate: currentAcqDate,
+                  excelDate: dateStr,
+                  reason: 'App date acquired is newer than Excel date'
+                });
                 return; // Keep existing newer date
               }
             }
@@ -538,6 +556,15 @@ class CertsImportEngine {
               const oldD = new Date(currentExpDate);
               const newD = new Date(dateStr);
               if (!isNaN(oldD.getTime()) && !isNaN(newD.getTime()) && oldD > newD) {
+                this.preservedRecords.push({
+                  employeeName: finalEmpName,
+                  location: empLocation,
+                  jobNum: empJobNum,
+                  certType: certDef.key,
+                  appDate: currentExpDate,
+                  excelDate: dateStr,
+                  reason: 'App expiration date is newer than Excel date'
+                });
                 return; // Keep existing newer date
               }
             }
@@ -709,22 +736,37 @@ class CertsImportEngine {
     if (!this.selectedImportCertTypes) {
       this.selectedImportCertTypes = new Set(this.availableImportCertTypes || []);
     }
+    if (!this.activeDiscrepancyTab) {
+      this.activeDiscrepancyTab = 'all';
+    }
 
     // Filter employees and changes according to search term and selected cert types
     const filteredEmployees = [];
     let selectedUpdatesCount = 0;
+    let totalDateMismatches = 0;
+    let totalNewRecords = 0;
 
     this.mappedData.forEach(emp => {
-      if (this.previewSearchTerm) {
-        const matchName = emp.employeeName.toLowerCase().includes(this.previewSearchTerm);
-        const matchLoc = (emp.location || '').toLowerCase().includes(this.previewSearchTerm);
-        if (!matchName && !matchLoc) return;
-      }
-
       const matchingChanges = {};
       Object.keys(emp.changes).forEach(cKey => {
+        const ch = emp.changes[cKey];
+        if (ch.isNewRecord) totalNewRecords++;
+        else totalDateMismatches++;
+
         if (this.selectedImportCertTypes.has(cKey)) {
-          matchingChanges[cKey] = emp.changes[cKey];
+          // Filter by active tab
+          if (this.activeDiscrepancyTab === 'mismatches' && ch.isNewRecord) return;
+          if (this.activeDiscrepancyTab === 'new' && !ch.isNewRecord) return;
+
+          // Filter by search term
+          if (this.previewSearchTerm) {
+            const matchName = emp.employeeName.toLowerCase().includes(this.previewSearchTerm);
+            const matchLoc = (emp.location || '').toLowerCase().includes(this.previewSearchTerm);
+            const matchCert = cKey.toLowerCase().includes(this.previewSearchTerm);
+            if (!matchName && !matchLoc && !matchCert) return;
+          }
+
+          matchingChanges[cKey] = ch;
           selectedUpdatesCount++;
         }
       });
@@ -739,30 +781,75 @@ class CertsImportEngine {
       }
     });
 
+    const preservedCount = (this.preservedRecords || []).length;
+    const unmatchedCount = (this.unmatchedEmployees || []).length;
+
+    // Filter preserved records by search term
+    const filteredPreserved = (this.preservedRecords || []).filter(p => {
+      if (!this.previewSearchTerm) return true;
+      return p.employeeName.toLowerCase().includes(this.previewSearchTerm) ||
+             p.certType.toLowerCase().includes(this.previewSearchTerm) ||
+             (p.location || '').toLowerCase().includes(this.previewSearchTerm);
+    });
+
+    // Filter unmatched employees by search term
+    const filteredUnmatched = (this.unmatchedEmployees || []).filter(u => {
+      if (!this.previewSearchTerm) return true;
+      return (u.formattedName || u.rawName).toLowerCase().includes(this.previewSearchTerm) ||
+             (u.location || '').toLowerCase().includes(this.previewSearchTerm);
+    });
+
     body.innerHTML = `
       <div style="display: flex; flex-direction: column; gap: 12px;">
         
-        <!-- Summary Banner -->
+        <!-- Summary Banner with Export & Audit Actions -->
         <div style="background: linear-gradient(135deg, rgba(16, 185, 129, 0.15) 0%, rgba(5, 150, 105, 0.05) 100%); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 8px; padding: 12px 18px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
           <div>
             <div style="font-size: 14px; font-weight: 800; color: #6ee7b7; display: flex; align-items: center; gap: 8px;">
-              <span>✅</span> Import Preview: <code>${this.escapeHtml(this.fileName)}</code>
+              <span>📊</span> Discrepancy Audit: <code>${this.escapeHtml(this.fileName)}</code>
             </div>
             <div style="font-size: 12px; color: var(--text-secondary); margin-top: 2px;">
-              Detected <strong>${this.mappedData.length}</strong> employee(s) with <strong>${selectedUpdatesCount}</strong> selected update(s) across <strong>${(this.availableImportCertTypes || []).length}</strong> certification types.
+              <strong>🛡️ Audit Mode:</strong> Zero changes have been made to your database. Review differences or export report below before saving.
             </div>
           </div>
-          <button class="btn btn-secondary" onclick="window.certsImportEngine.renderUploadView()" style="font-size: 11.5px;">
-            📁 Choose Different File
+          <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+            <button class="btn btn-secondary" onclick="window.certsImportEngine.copyDiscrepanciesReport()" style="font-size: 11.5px; background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4); display: flex; align-items: center; gap: 5px;">
+              <span>📋</span> Copy Report
+            </button>
+            <button class="btn btn-secondary" onclick="window.certsImportEngine.exportDiscrepancies('xlsx')" style="font-size: 11.5px; background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); font-weight: 700; display: flex; align-items: center; gap: 5px;" title="Download full comparison spreadsheet as Excel">
+              <span>📥</span> Export Discrepancies (.xlsx)
+            </button>
+            <button class="btn btn-secondary" onclick="window.certsImportEngine.renderUploadView()" style="font-size: 11.5px;">
+              📁 Re-Upload
+            </button>
+          </div>
+        </div>
+
+        <!-- Discrepancy Category Tabs -->
+        <div style="display: flex; gap: 6px; border-bottom: 2px solid var(--border-color); padding-bottom: 4px; overflow-x: auto;">
+          <button type="button" class="btn btn-sm" onclick="window.certsImportEngine.setDiscrepancyTab('all')" style="padding: 5px 12px; font-size: 12px; font-weight: 700; border-radius: 6px; border: 1px solid ${this.activeDiscrepancyTab === 'all' ? '#3b82f6' : 'var(--border-color)'}; background: ${this.activeDiscrepancyTab === 'all' ? 'rgba(59, 130, 246, 0.2)' : 'transparent'}; color: ${this.activeDiscrepancyTab === 'all' ? '#93c5fd' : 'var(--text-muted)'}; cursor: pointer;">
+            🔄 All Changes (${totalDateMismatches + totalNewRecords})
+          </button>
+          <button type="button" class="btn btn-sm" onclick="window.certsImportEngine.setDiscrepancyTab('mismatches')" style="padding: 5px 12px; font-size: 12px; font-weight: 700; border-radius: 6px; border: 1px solid ${this.activeDiscrepancyTab === 'mismatches' ? '#eab308' : 'var(--border-color)'}; background: ${this.activeDiscrepancyTab === 'mismatches' ? 'rgba(234, 179, 8, 0.2)' : 'transparent'}; color: ${this.activeDiscrepancyTab === 'mismatches' ? '#fde047' : 'var(--text-muted)'}; cursor: pointer;">
+            ⚠️ Date Mismatches (${totalDateMismatches})
+          </button>
+          <button type="button" class="btn btn-sm" onclick="window.certsImportEngine.setDiscrepancyTab('new')" style="padding: 5px 12px; font-size: 12px; font-weight: 700; border-radius: 6px; border: 1px solid ${this.activeDiscrepancyTab === 'new' ? '#10b981' : 'var(--border-color)'}; background: ${this.activeDiscrepancyTab === 'new' ? 'rgba(16, 185, 129, 0.2)' : 'transparent'}; color: ${this.activeDiscrepancyTab === 'new' ? '#6ee7b7' : 'var(--text-muted)'}; cursor: pointer;">
+            ✨ New Records (${totalNewRecords})
+          </button>
+          <button type="button" class="btn btn-sm" onclick="window.certsImportEngine.setDiscrepancyTab('preserved')" style="padding: 5px 12px; font-size: 12px; font-weight: 700; border-radius: 6px; border: 1px solid ${this.activeDiscrepancyTab === 'preserved' ? '#8b5cf6' : 'var(--border-color)'}; background: ${this.activeDiscrepancyTab === 'preserved' ? 'rgba(139, 92, 246, 0.2)' : 'transparent'}; color: ${this.activeDiscrepancyTab === 'preserved' ? '#c4b5fd' : 'var(--text-muted)'}; cursor: pointer;">
+            🔒 Preserved in App (${preservedCount})
+          </button>
+          <button type="button" class="btn btn-sm" onclick="window.certsImportEngine.setDiscrepancyTab('unmatched')" style="padding: 5px 12px; font-size: 12px; font-weight: 700; border-radius: 6px; border: 1px solid ${this.activeDiscrepancyTab === 'unmatched' ? '#ef4444' : 'var(--border-color)'}; background: ${this.activeDiscrepancyTab === 'unmatched' ? 'rgba(239, 68, 68, 0.2)' : 'transparent'}; color: ${this.activeDiscrepancyTab === 'unmatched' ? '#fca5a5' : 'var(--text-muted)'}; cursor: pointer;">
+            ❓ Unmatched in Excel (${unmatchedCount})
           </button>
         </div>
 
-        <!-- Interactive Cert Types Selector Bar -->
-        ${(this.availableImportCertTypes && this.availableImportCertTypes.length > 0) ? `
+        <!-- Interactive Cert Types Selector Bar (only shown on change tabs) -->
+        ${(this.activeDiscrepancyTab !== 'preserved' && this.activeDiscrepancyTab !== 'unmatched' && this.availableImportCertTypes && this.availableImportCertTypes.length > 0) ? `
           <div style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 14px; display: flex; flex-direction: column; gap: 8px;">
             <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
               <span style="font-size: 12px; font-weight: 700; color: #93c5fd; display: flex; align-items: center; gap: 6px;">
-                <span>📜</span> Select Certification Types to Import:
+                <span>📜</span> Certification Types Included:
               </span>
               <div style="display: flex; gap: 6px;">
                 <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 11px;" onclick="window.certsImportEngine.selectAllImportCertTypes(true)">Select All</button>
@@ -788,59 +875,262 @@ class CertsImportEngine {
 
         <!-- Search Bar -->
         <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px;">
-          <input type="text" placeholder="🔍 Search employee name or location..." value="${this.escapeHtml(this.previewSearchTerm)}" style="width: 100%; max-width: 320px; padding: 6px 12px; font-size: 12px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary);" oninput="window.certsImportEngine.setPreviewSearch(this.value)">
-          <div style="font-size: 12px; color: var(--text-muted);">Showing <strong>${filteredEmployees.length}</strong> employee(s)</div>
+          <input type="text" placeholder="🔍 Filter by employee name, cert type, or location..." value="${this.escapeHtml(this.previewSearchTerm)}" style="width: 100%; max-width: 380px; padding: 6px 12px; font-size: 12px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary);" oninput="window.certsImportEngine.setPreviewSearch(this.value)">
+          <div style="font-size: 12px; color: var(--text-muted);">
+            ${this.activeDiscrepancyTab === 'preserved'
+              ? `Showing <strong>${filteredPreserved.length}</strong> preserved cert(s)`
+              : (this.activeDiscrepancyTab === 'unmatched'
+                ? `Showing <strong>${filteredUnmatched.length}</strong> unmatched employee(s)`
+                : `Showing <strong>${filteredEmployees.length}</strong> employee(s) with <strong>${selectedUpdatesCount}</strong> update(s)`
+              )}
+          </div>
         </div>
 
         <!-- Diff Preview Table -->
         <div style="max-height: 380px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-primary);">
-          <table class="data-table" style="width: 100%; border-collapse: collapse; font-size: 12px;">
-            <thead>
-              <tr style="position: sticky; top: 0; background: #1e293b; z-index: 5; border-bottom: 2px solid #334155;">
-                <th style="width: 200px; padding: 8px 12px;">Employee</th>
-                <th style="padding: 8px 12px;">Certification Type</th>
-                <th style="width: 120px; padding: 8px 12px;">Current Date</th>
-                <th style="width: 30px; text-align: center; padding: 8px 4px;">→</th>
-                <th style="width: 120px; padding: 8px 12px;">New Date</th>
-                <th style="width: 90px; text-align: center; padding: 8px 12px;">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${filteredEmployees.length === 0 ? `
-                <tr><td colspan="6" style="padding: 36px 16px; text-align: center; color: var(--text-muted);">No matching certification updates found. Check your filters above.</td></tr>
-              ` : filteredEmployees.map(emp => {
-                const changeKeys = Object.keys(emp.changes);
-                return changeKeys.map((cKey, idx) => {
-                  const ch = emp.changes[cKey];
-                  return `
-                    <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
-                      ${idx === 0 ? `<td rowspan="${changeKeys.length}" style="font-weight: 700; color: #f8fafc; border-right: 1px solid var(--border-color); padding: 8px 12px; vertical-align: top;">${this.escapeHtml(emp.employeeName)}</td>` : ''}
-                      <td style="font-weight: 600; color: #93c5fd; padding: 8px 12px;">${this.escapeHtml(cKey)}</td>
-                      <td style="color: var(--text-muted); font-family: monospace; padding: 8px 12px;">${this.escapeHtml(ch.oldDate || '—')}</td>
-                      <td style="text-align: center; color: #34d399; font-weight: bold; padding: 8px 4px;">→</td>
-                      <td style="font-weight: 700; color: #34d399; font-family: monospace; padding: 8px 12px;">${this.escapeHtml(ch.newDate)}</td>
-                      <td style="text-align: center; padding: 8px 12px;">
-                        <span class="badge" style="background: ${ch.isNewRecord ? 'rgba(59, 130, 246, 0.2)' : 'rgba(16, 185, 129, 0.2)'}; color: ${ch.isNewRecord ? '#93c5fd' : '#6ee7b7'}; border: 1px solid ${ch.isNewRecord ? 'rgba(59, 130, 246, 0.4)' : 'rgba(16, 185, 129, 0.4)'}; font-size: 10.5px;">
-                          ${ch.isNewRecord ? '✨ New' : '🔄 Update'}
-                        </span>
-                      </td>
-                    </tr>
-                  `;
-                }).join('');
-              }).join('')}
-            </tbody>
-          </table>
+          ${this.activeDiscrepancyTab === 'preserved' ? `
+            <table class="data-table" style="width: 100%; border-collapse: collapse; font-size: 12px;">
+              <thead>
+                <tr style="position: sticky; top: 0; background: #1e293b; z-index: 5; border-bottom: 2px solid #334155;">
+                  <th style="width: 220px; padding: 8px 12px;">Employee</th>
+                  <th style="padding: 8px 12px;">Certification Type</th>
+                  <th style="width: 130px; padding: 8px 12px;">Current App Date</th>
+                  <th style="width: 30px; text-align: center; padding: 8px 4px;">🔒</th>
+                  <th style="width: 130px; padding: 8px 12px;">Excel Date</th>
+                  <th style="width: 140px; text-align: center; padding: 8px 12px;">Protection Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${filteredPreserved.length === 0 ? `
+                  <tr><td colspan="6" style="padding: 36px 16px; text-align: center; color: var(--text-muted);">No preserved records found. (No instances where the App date was newer than the Excel date).</td></tr>
+                ` : filteredPreserved.map(p => `
+                  <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                    <td style="font-weight: 700; color: #f8fafc; padding: 8px 12px;">${this.escapeHtml(p.employeeName)} ${p.location ? `<span style="font-size: 11px; color: var(--text-muted);">(${this.escapeHtml(p.location)})</span>` : ''}</td>
+                    <td style="font-weight: 600; color: #93c5fd; padding: 8px 12px;">${this.escapeHtml(p.certType)}</td>
+                    <td style="font-weight: 700; color: #34d399; font-family: monospace; padding: 8px 12px;">${this.escapeHtml(p.appDate)}</td>
+                    <td style="text-align: center; color: #c4b5fd; font-size: 14px; padding: 8px 4px;">🔒</td>
+                    <td style="color: #fde047; font-family: monospace; padding: 8px 12px;">${this.escapeHtml(p.excelDate)}</td>
+                    <td style="text-align: center; padding: 8px 12px;">
+                      <span class="badge" style="background: rgba(139, 92, 246, 0.2); color: #c4b5fd; border: 1px solid rgba(139, 92, 246, 0.4); font-size: 10.5px;">
+                        🔒 Kept Newer App Date
+                      </span>
+                    </td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          ` : (this.activeDiscrepancyTab === 'unmatched' ? `
+            <table class="data-table" style="width: 100%; border-collapse: collapse; font-size: 12px;">
+              <thead>
+                <tr style="position: sticky; top: 0; background: #1e293b; z-index: 5; border-bottom: 2px solid #334155;">
+                  <th style="padding: 8px 12px;">Name in Excel Sheet</th>
+                  <th style="width: 160px; padding: 8px 12px;">Location in File</th>
+                  <th style="width: 140px; padding: 8px 12px;">Job in File</th>
+                  <th style="width: 220px; text-align: center; padding: 8px 12px;">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${filteredUnmatched.length === 0 ? `
+                  <tr><td colspan="4" style="padding: 36px 16px; text-align: center; color: var(--text-muted);">All employees in the Excel sheet matched active company employees. None skipped!</td></tr>
+                ` : filteredUnmatched.map(u => `
+                  <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                    <td style="font-weight: 700; color: #f87171; padding: 8px 12px;">${this.escapeHtml(u.formattedName || u.rawName)}</td>
+                    <td style="color: var(--text-secondary); padding: 8px 12px;">${this.escapeHtml(u.location || '—')}</td>
+                    <td style="color: var(--text-secondary); padding: 8px 12px;">${this.escapeHtml(u.jobNum || '—')}</td>
+                    <td style="text-align: center; padding: 8px 12px;">
+                      <span class="badge" style="background: rgba(239, 68, 68, 0.2); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.4); font-size: 10.5px;">
+                        ⚠️ Not Found in Active Roster (Skipped)
+                      </span>
+                    </td>
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          ` : `
+            <table class="data-table" style="width: 100%; border-collapse: collapse; font-size: 12px;">
+              <thead>
+                <tr style="position: sticky; top: 0; background: #1e293b; z-index: 5; border-bottom: 2px solid #334155;">
+                  <th style="width: 200px; padding: 8px 12px;">Employee</th>
+                  <th style="padding: 8px 12px;">Certification Type</th>
+                  <th style="width: 120px; padding: 8px 12px;">Current App Date</th>
+                  <th style="width: 30px; text-align: center; padding: 8px 4px;">→</th>
+                  <th style="width: 120px; padding: 8px 12px;">New Excel Date</th>
+                  <th style="width: 90px; text-align: center; padding: 8px 12px;">Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${filteredEmployees.length === 0 ? `
+                  <tr><td colspan="6" style="padding: 36px 16px; text-align: center; color: var(--text-muted);">No matching certification updates found for this tab. Check your filters above.</td></tr>
+                ` : filteredEmployees.map(emp => {
+                  const changeKeys = Object.keys(emp.changes);
+                  return changeKeys.map((cKey, idx) => {
+                    const ch = emp.changes[cKey];
+                    return `
+                      <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+                        ${idx === 0 ? `<td rowspan="${changeKeys.length}" style="font-weight: 700; color: #f8fafc; border-right: 1px solid var(--border-color); padding: 8px 12px; vertical-align: top;">${this.escapeHtml(emp.employeeName)} ${emp.location ? `<div style="font-size: 11px; font-weight: normal; color: var(--text-muted);">${this.escapeHtml(emp.location)}</div>` : ''}</td>` : ''}
+                        <td style="font-weight: 600; color: #93c5fd; padding: 8px 12px;">${this.escapeHtml(cKey)}</td>
+                        <td style="color: var(--text-muted); font-family: monospace; padding: 8px 12px;">${this.escapeHtml(ch.oldDate || '—')}</td>
+                        <td style="text-align: center; color: #34d399; font-weight: bold; padding: 8px 4px;">→</td>
+                        <td style="font-weight: 700; color: #34d399; font-family: monospace; padding: 8px 12px;">${this.escapeHtml(ch.newDate)}</td>
+                        <td style="text-align: center; padding: 8px 12px;">
+                          <span class="badge" style="background: ${ch.isNewRecord ? 'rgba(59, 130, 246, 0.2)' : 'rgba(16, 185, 129, 0.2)'}; color: ${ch.isNewRecord ? '#93c5fd' : '#6ee7b7'}; border: 1px solid ${ch.isNewRecord ? 'rgba(59, 130, 246, 0.4)' : 'rgba(16, 185, 129, 0.4)'}; font-size: 10.5px;">
+                            ${ch.isNewRecord ? '✨ New' : '🔄 Update'}
+                          </span>
+                        </td>
+                      </tr>
+                    `;
+                  }).join('');
+                }).join('')}
+              </tbody>
+            </table>
+          `)}
         </div>
       </div>
     `;
 
     if (footer) {
       footer.innerHTML = `
-        <button class="btn btn-secondary" onclick="window.certsImportEngine.closeImportModal()">Cancel</button>
-        <button class="btn btn-primary" onclick="window.certsImportEngine.confirmImport()" style="font-weight: 700; background: linear-gradient(135deg, #10b981 0%, #059669 100%); border: none; display: flex; align-items: center; gap: 6px; box-shadow: 0 2px 8px rgba(16, 185, 129, 0.4);" ${selectedUpdatesCount === 0 ? 'disabled' : ''}>
-          <span>🚀</span> Apply & Save ${selectedUpdatesCount} Cert Updates
-        </button>
+        <div style="font-size: 11.5px; color: var(--text-muted); display: flex; align-items: center; gap: 6px;">
+          <span>ℹ️</span> Changes are only committed when you click Save.
+        </div>
+        <div style="display: flex; gap: 8px; align-items: center;">
+          <button class="btn btn-secondary" onclick="window.certsImportEngine.closeImportModal()">Cancel</button>
+          <button class="btn btn-primary" onclick="window.certsImportEngine.confirmImport()" style="font-weight: 700; background: linear-gradient(135deg, #10b981 0%, #059669 100%); border: none; display: flex; align-items: center; gap: 6px; box-shadow: 0 2px 8px rgba(16, 185, 129, 0.4);" ${selectedUpdatesCount === 0 ? 'disabled' : ''}>
+            <span>🚀</span> Apply & Save ${selectedUpdatesCount} Cert Updates
+          </button>
+        </div>
       `;
+    }
+  }
+
+  setDiscrepancyTab(tabKey) {
+    this.activeDiscrepancyTab = tabKey;
+    this.renderPreviewScreen();
+  }
+
+  exportDiscrepancies(format = 'xlsx') {
+    const rows = [];
+    
+    // 1. Changes (Updates & New records)
+    (this.mappedData || []).forEach(emp => {
+      Object.keys(emp.changes).forEach(cKey => {
+        const ch = emp.changes[cKey];
+        const isSelected = this.selectedImportCertTypes && this.selectedImportCertTypes.has(cKey);
+        rows.push({
+          'Employee Name': emp.employeeName,
+          'Location': emp.location || '',
+          'Job #': emp.jobNum || '',
+          'Certification Type': cKey,
+          'Current Date in App': ch.oldDate || '(None / Missing)',
+          'New Date in Excel': ch.newDate,
+          'Discrepancy Category': ch.isNewRecord ? 'New in Excel (Missing in App)' : 'Date Mismatch',
+          'Import Status': isSelected ? 'Will Update' : 'Deselected by User'
+        });
+      });
+    });
+
+    // 2. Preserved in App
+    (this.preservedRecords || []).forEach(p => {
+      rows.push({
+        'Employee Name': p.employeeName,
+        'Location': p.location || '',
+        'Job #': p.jobNum || '',
+        'Certification Type': p.certType,
+        'Current Date in App': p.appDate,
+        'New Date in Excel': p.excelDate,
+        'Discrepancy Category': 'Preserved in App (App Date Newer)',
+        'Import Status': 'Protected / Skipped'
+      });
+    });
+
+    // 3. Unmatched employees in Excel
+    (this.unmatchedEmployees || []).forEach(u => {
+      rows.push({
+        'Employee Name': u.formattedName || u.rawName,
+        'Location': u.location || '',
+        'Job #': u.jobNum || '',
+        'Certification Type': '(All Certs)',
+        'Current Date in App': 'N/A (Not Found in App)',
+        'New Date in Excel': 'Present in File',
+        'Discrepancy Category': 'Employee Not Found in Active Roster',
+        'Import Status': 'Skipped'
+      });
+    });
+
+    if (rows.length === 0) {
+      alert('ℹ️ No discrepancies found to export.');
+      return;
+    }
+
+    const timestamp = new Date().toISOString().slice(0, 10);
+    const baseName = (this.fileName || 'Expiring_Certs').replace(/\.[^/.]+$/, '');
+    const filename = `${baseName}_Discrepancies_${timestamp}.xlsx`;
+
+    if (window.XLSX && typeof window.XLSX.utils !== 'undefined') {
+      const ws = window.XLSX.utils.json_to_sheet(rows);
+      const wb = window.XLSX.utils.book_new();
+      window.XLSX.utils.book_append_sheet(wb, ws, 'Discrepancies');
+      window.XLSX.writeFile(wb, filename);
+    } else {
+      // Fallback CSV download
+      const headers = Object.keys(rows[0]);
+      const csvLines = [headers.join(',')];
+      rows.forEach(r => {
+        csvLines.push(headers.map(h => `"${String(r[h] || '').replace(/"/g, '""')}"`).join(','));
+      });
+      const blob = new Blob([csvLines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${baseName}_Discrepancies_${timestamp}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }
+  }
+
+  copyDiscrepanciesReport() {
+    let text = `CERTIFICATIONS DISCREPANCY AUDIT REPORT\nFile: ${this.fileName}\nGenerated: ${new Date().toLocaleString()}\n`;
+    text += `========================================================\n\n`;
+    
+    const updates = [];
+    const newRecords = [];
+    (this.mappedData || []).forEach(emp => {
+      Object.keys(emp.changes).forEach(cKey => {
+        const ch = emp.changes[cKey];
+        if (ch.isNewRecord) {
+          newRecords.push(`• ${emp.employeeName} (${emp.location || 'Helena'}): ${cKey} -> ${ch.newDate} [New in Excel]`);
+        } else {
+          updates.push(`• ${emp.employeeName} (${emp.location || 'Helena'}): ${cKey} -> App: ${ch.oldDate || 'None'} ➔ Excel: ${ch.newDate}`);
+        }
+      });
+    });
+
+    text += `--- DATE MISMATCHES (${updates.length}) ---\n`;
+    text += updates.length ? updates.join('\n') + '\n\n' : 'None\n\n';
+
+    text += `--- NEW RECORDS IN EXCEL (${newRecords.length}) ---\n`;
+    text += newRecords.length ? newRecords.join('\n') + '\n\n' : 'None\n\n';
+
+    if (this.preservedRecords && this.preservedRecords.length > 0) {
+      text += `--- PRESERVED IN APP (App date is newer) (${this.preservedRecords.length}) ---\n`;
+      text += this.preservedRecords.map(p => `• ${p.employeeName}: ${p.certType} (App: ${p.appDate} vs Excel: ${p.excelDate})`).join('\n') + '\n\n';
+    }
+
+    if (this.unmatchedEmployees && this.unmatchedEmployees.length > 0) {
+      text += `--- UNMATCHED EMPLOYEES IN EXCEL (${this.unmatchedEmployees.length}) ---\n`;
+      text += this.unmatchedEmployees.map(u => `• ${u.formattedName || u.rawName} (${u.location || 'Unknown'})`).join('\n') + '\n\n';
+    }
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(() => {
+        alert('📋 Discrepancy report copied to clipboard!');
+      }).catch(() => {
+        prompt('Copy report:', text);
+      });
+    } else {
+      prompt('Copy report:', text);
     }
   }
 

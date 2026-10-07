@@ -565,8 +565,10 @@ class HistoryNavigator {
               html += `<td>${valStr ? `<span style="padding: 2px 8px; border-radius: 12px; font-size: 11px; font-weight: 500; display: inline-block; ${pillStyle}">${this.escapeHtml(valStr)}</span>` : ''}</td>`;
             } else if (hLower === 'item #' || hLower === 'serial #' || hLower === 'item') {
               html += `<td style="font-weight: 700; color: #60a5fa;">${this.escapeHtml(String(val))}</td>`;
-              if (valStr.toLowerCase() === 'new' || valStr.toLowerCase() === 'newly purchased' || valStr.toLowerCase() === 'brand new' || valStr.toLowerCase() === 'on shelf (new purchase)') {
-                html += `<td><span style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); padding: 2px 8px; border-radius: 6px; font-weight: 700; font-size: 11px; display: inline-flex; align-items: center; gap: 4px;"><span>✨</span> On Shelf (New Purchase)</span></td>`;
+            } else if (hLower === 'assigned to' || hLower === 'employee name') {
+              const vl = valStr.toLowerCase();
+              if (vl === 'new' || vl === 'newly purchased' || vl === 'brand new' || vl === 'brand new (on shelf)' || vl === 'on shelf (new purchase)' || vl.includes('brand new') || vl.includes('new purchase')) {
+                html += `<td><span style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); padding: 2px 8px; border-radius: 6px; font-weight: 700; font-size: 11px; display: inline-flex; align-items: center; gap: 4px;"><span>✨</span> Brand New (On Shelf)</span></td>`;
               } else {
                 html += `<td style="font-weight: 600; color: var(--text-primary);">${this.escapeHtml(String(val))}</td>`;
               }
@@ -653,8 +655,9 @@ class HistoryNavigator {
         } else if (hLower === 'item #' || hLower === 'serial #' || hLower === 'item') {
           html += `<td style="font-weight: 600; color: var(--text-primary);">${this.escapeHtml(String(val))}</td>`;
         } else if (hLower === 'assigned to' || hLower === 'employee name') {
-          if (valStr.toLowerCase() === 'new' || valStr.toLowerCase() === 'newly purchased' || valStr.toLowerCase() === 'brand new' || valStr.toLowerCase() === 'on shelf (new purchase)') {
-            html += `<td><span style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); padding: 2px 8px; border-radius: 6px; font-weight: 700; font-size: 11px; display: inline-flex; align-items: center; gap: 4px;"><span>✨</span> On Shelf (New Purchase)</span></td>`;
+          const vl = valStr.toLowerCase();
+          if (vl === 'new' || vl === 'newly purchased' || vl === 'brand new' || vl === 'brand new (on shelf)' || vl === 'on shelf (new purchase)' || vl.includes('brand new') || vl.includes('new purchase')) {
+            html += `<td><span style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); padding: 2px 8px; border-radius: 6px; font-weight: 700; font-size: 11px; display: inline-flex; align-items: center; gap: 4px;"><span>✨</span> Brand New (On Shelf)</span></td>`;
           } else {
             html += `<td style="font-weight: 500;">${this.escapeHtml(String(val))}</td>`;
           }

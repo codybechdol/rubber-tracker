@@ -2099,6 +2099,10 @@ class LocalDatabase {
     const isNewPurchase = originReason === 'New Purchase' ||
                           reasonNote === 'New Purchase' ||
                           assignedTo.toLowerCase() === 'on shelf (new purchase)' ||
+                          assignedTo.toLowerCase() === 'brand new (on shelf)' ||
+                          assignedTo.toLowerCase() === 'brand new' ||
+                          assignedTo.toLowerCase().includes('brand new') ||
+                          assignedTo.toLowerCase().includes('new purchase') ||
                           (assignedTo.toLowerCase() === 'on shelf' && (rowNotesLower === 'new' || rowNotesLower.startsWith('new,') || rowNotesLower.startsWith('new -')));
 
     if (isNewPurchase) {
@@ -3134,6 +3138,7 @@ class LocalDatabase {
       const getRank = (assigned) => {
         const a = String(assigned || '').toLowerCase().trim();
         if (statePrecedence[a] !== undefined) return statePrecedence[a];
+        if (a.includes('brand new') || a.includes('new purchase') || a === 'brand new (on shelf)' || a === 'on shelf (new purchase)') return 1;
         if (a.includes('fail') || a.includes('destroy')) return 8;
         if (a.includes('lost')) return 7;
         if (a.includes('test')) return 6;

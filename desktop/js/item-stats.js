@@ -162,17 +162,49 @@ class ItemStatsEngine {
     }
 
     // 0. Brand New Purchase (Initial acquisition / On Shelf from new)
-    if (
+    const isBrandNewAssigned = (
       sAssigned === 'on shelf (new purchase)' ||
+      sAssigned === 'brand new (on shelf)' ||
       sAssigned === 'new' ||
       sAssigned === 'newly purchased' ||
       sAssigned === 'brand new' ||
       sAssigned === 'new purchase' ||
       sAssigned === 'new item' ||
       sAssigned.startsWith('new (') ||
-      ((sNotes === 'new' || sNotes.startsWith('new,') || sNotes.startsWith('new -') || sNotes.startsWith('new |') || sNotes.includes('new purchase') || sNotes.includes('initial purchase') || sNotes.includes('newly purchased')) &&
-       (!sAssigned || sAssigned === 'on shelf' || sAssigned === 'in stock' || sStatus === 'in stock' || sStatus === 'on shelf' || sAssigned === 'on shelf (new purchase)'))
-    ) {
+      sAssigned.startsWith('brand new') ||
+      sAssigned.startsWith('new purchase') ||
+      sAssigned.includes('brand new') ||
+      sAssigned.includes('new purchase') ||
+      sAssigned.includes('newly purchased')
+    ) && !sAssigned.includes('newman') && !sAssigned.includes('new assignment');
+
+    const isBrandNewNotes = (
+      sNotes === 'new' ||
+      sNotes.startsWith('new,') ||
+      sNotes.startsWith('new -') ||
+      sNotes.startsWith('new |') ||
+      sNotes.startsWith('new (') ||
+      sNotes.includes('new purchase') ||
+      sNotes.includes('initial purchase') ||
+      sNotes.includes('newly purchased') ||
+      sNotes.includes('brand new')
+    ) && !sNotes.includes('newman') && !sNotes.includes('new assignment');
+
+    const isShelfHolder = (
+      !sAssigned ||
+      sAssigned === 'on shelf' ||
+      sAssigned === 'in stock' ||
+      sAssigned === 'shelf' ||
+      sAssigned === 'storage' ||
+      sAssigned === 'unassigned' ||
+      sAssigned === 'brand new (on shelf)' ||
+      sAssigned === 'on shelf (new purchase)' ||
+      sAssigned.includes('shelf') ||
+      sStatus === 'in stock' ||
+      sStatus === 'on shelf'
+    );
+
+    if (isBrandNewAssigned || (isBrandNewNotes && isShelfHolder)) {
       return {
         key: 'NEW_PURCHASE',
         label: 'Brand New (On Shelf)',
@@ -293,6 +325,8 @@ class ItemStatsEngine {
       sAssigned === 'unassigned' ||
       sAssigned === 'shelf' ||
       sAssigned === 'previous employee' ||
+      sAssigned.includes('shelf') ||
+      sAssigned.includes('storage') ||
       sAssigned === 'n/a' ||
       sAssigned === 'none' ||
       sAssigned === 'unknown' ||
@@ -363,19 +397,69 @@ class ItemStatsEngine {
     const firstRawAssigned = String(sorted[0]['Assigned To'] || sorted[0]['Employee Name'] || sorted[0]['Employee'] || '').toLowerCase().trim();
     const firstRawNotes = String(sorted[0]['Notes'] || sorted[0]['Note'] || '').toLowerCase().trim();
     const activeRowNotes = activeItemRow ? String(activeItemRow['Notes'] || '').toLowerCase().trim() : '';
-    const isPurchaseOrigin = firstRawAssigned === 'on shelf (new purchase)' ||
-                             firstRawAssigned === 'new' ||
-                             firstRawAssigned === 'newly purchased' ||
-                             firstRawAssigned === 'brand new' ||
-                             firstRawAssigned === 'new purchase' ||
-                             firstRawAssigned.startsWith('new (') ||
-                             firstRawNotes === 'new' ||
-                             firstRawNotes.startsWith('new,') ||
-                             firstRawNotes.startsWith('new -') ||
-                             firstRawNotes.startsWith('new |') ||
-                             firstRawNotes.includes('new purchase') ||
-                             firstRawNotes.includes('initial purchase') ||
-                             (firstRawAssigned === 'on shelf' && (activeRowNotes === 'new' || activeRowNotes.startsWith('new,')));
+
+    const firstState = this.classifyState(sorted[0]['Assigned To'], sorted[0]['Location'], sorted[0]['Notes'], sorted[0]['Status']);
+    const isFirstStateNew = firstState.key === 'NEW_PURCHASE' || Boolean(firstState.isPurchaseEntry);
+
+    const isFirstAssignedNew = (
+      firstRawAssigned === 'on shelf (new purchase)' ||
+      firstRawAssigned === 'brand new (on shelf)' ||
+      firstRawAssigned === 'new' ||
+      firstRawAssigned === 'newly purchased' ||
+      firstRawAssigned === 'brand new' ||
+      firstRawAssigned === 'new purchase' ||
+      firstRawAssigned === 'new item' ||
+      firstRawAssigned.startsWith('new (') ||
+      firstRawAssigned.startsWith('brand new') ||
+      firstRawAssigned.startsWith('new purchase') ||
+      firstRawAssigned.includes('brand new') ||
+      firstRawAssigned.includes('new purchase') ||
+      firstRawAssigned.includes('newly purchased')
+    ) && !firstRawAssigned.includes('newman') && !firstRawAssigned.includes('new assignment');
+
+    const isFirstNotesNew = (
+      firstRawNotes === 'new' ||
+      firstRawNotes.startsWith('new,') ||
+      firstRawNotes.startsWith('new -') ||
+      firstRawNotes.startsWith('new |') ||
+      firstRawNotes.startsWith('new (') ||
+      firstRawNotes.includes('new purchase') ||
+      firstRawNotes.includes('initial purchase') ||
+      firstRawNotes.includes('newly purchased') ||
+      firstRawNotes.includes('brand new')
+    ) && !firstRawNotes.includes('newman') && !firstRawNotes.includes('new assignment');
+
+    const isActiveNotesNew = (
+      activeRowNotes === 'new' ||
+      activeRowNotes.startsWith('new,') ||
+      activeRowNotes.startsWith('new -') ||
+      activeRowNotes.startsWith('new |') ||
+      activeRowNotes.startsWith('new (') ||
+      activeRowNotes.includes('new purchase') ||
+      activeRowNotes.includes('initial purchase') ||
+      activeRowNotes.includes('brand new') ||
+      activeRowNotes.includes('newly purchased')
+    ) && !activeRowNotes.includes('newman') && !activeRowNotes.includes('new assignment');
+
+    const isInitialShelfHolder = (
+      !firstRawAssigned ||
+      firstRawAssigned === 'on shelf' ||
+      firstRawAssigned === 'shelf' ||
+      firstRawAssigned === 'in stock' ||
+      firstRawAssigned === 'storage' ||
+      firstRawAssigned === 'unassigned' ||
+      firstRawAssigned === 'brand new (on shelf)' ||
+      firstRawAssigned === 'on shelf (new purchase)' ||
+      firstRawAssigned.includes('shelf') ||
+      firstRawAssigned.includes('brand new') ||
+      firstRawAssigned.includes('new purchase') ||
+      sorted.length <= 2
+    );
+
+    const isPurchaseOrigin = isFirstStateNew ||
+                             isFirstAssignedNew ||
+                             isFirstNotesNew ||
+                             (isActiveNotesNew && isInitialShelfHolder);
 
     let fieldDays = 0;
     let shelfDays = 0;
@@ -468,7 +552,18 @@ class ItemStatsEngine {
       const notes = current['Notes'] || current['Note'] || '';
       const status = current['Status'] || '';
 
-      const state = this.classifyState(assignedTo, location, notes, status);
+      let state = this.classifyState(assignedTo, location, notes, status);
+      // Upgrade earliest origin event to NEW_PURCHASE if it is recognized as a known purchase origin
+      if (i === 0 && isPurchaseOrigin && (state.key === 'SHELF' || state.key === 'FIELD')) {
+        state = {
+          key: 'NEW_PURCHASE',
+          label: 'Brand New (On Shelf)',
+          badgeClass: 'badge-new-purchase',
+          color: '#10b981',
+          icon: '✨',
+          isPurchaseEntry: true
+        };
+      }
 
       let endDate;
       if (next) {
@@ -496,7 +591,21 @@ class ItemStatsEngine {
       if (state.key === 'FIELD') {
         fieldDays += days;
         const linemanName = assignedTo.trim();
-        if (linemanName && !['new', 'n/a', 'unknown', 'none', 'shelf', 'storage'].includes(linemanName.toLowerCase())) {
+        const lowerLineman = linemanName.toLowerCase();
+        const isNonEmployee = (
+          ['new', 'n/a', 'unknown', 'none', 'shelf', 'storage', 'brand new', 'unassigned', '-', '—'].includes(lowerLineman) ||
+          lowerLineman.includes('shelf') ||
+          lowerLineman.includes('brand new') ||
+          lowerLineman.includes('new purchase') ||
+          lowerLineman.includes('in testing') ||
+          lowerLineman.includes('testing') ||
+          lowerLineman.includes('packed') ||
+          lowerLineman.includes('delivery') ||
+          lowerLineman.includes('failed') ||
+          lowerLineman.includes('destroyed') ||
+          lowerLineman.includes('lost')
+        );
+        if (linemanName && !isNonEmployee) {
           const canKey = this.getCanonicalEmployeeName(linemanName);
           if (!linemenMap[canKey]) {
             linemenMap[canKey] = {
@@ -846,7 +955,7 @@ class ItemStatsEngine {
       if (assigned.startsWith('packed for') || assigned === 'in testing') return;
 
       // Primary requirement: Locate "On Shelf (New Purchase)" in history and "New" note in the last column
-      const isOnShelfNewPurchase = assigned === 'on shelf (new purchase)';
+      const isOnShelfNewPurchase = assigned === 'on shelf (new purchase)' || assigned === 'brand new (on shelf)' || assigned.includes('brand new') || assigned.includes('new purchase');
       const hasNewNote = notesLower === 'new' || notesLower.startsWith('new,') || notesLower.startsWith('new -') || notesLower.startsWith('new |');
 
       // Also support legacy patterns recorded in past 2026 logs:
@@ -1774,10 +1883,16 @@ class ItemStatsEngine {
     if (foundActive && groupRows.length === 0) {
       const activeStatus = String(foundActive['Status'] || '').trim().toLowerCase();
       const activeNotes = String(foundActive['Notes'] || '').trim();
-      const hasOriginNote = activeNotes.toLowerCase().includes('new purchase') ||
-                            activeNotes.toLowerCase().includes('failed pair') ||
-                            activeNotes.toLowerCase().includes('item found') ||
-                            activeNotes.toLowerCase().includes('initial purchase');
+      const activeNotesLower = activeNotes.toLowerCase();
+      const hasOriginNote = activeNotesLower === 'new' ||
+                            activeNotesLower.startsWith('new,') ||
+                            activeNotesLower.startsWith('new -') ||
+                            activeNotesLower.startsWith('new |') ||
+                            activeNotesLower.includes('new purchase') ||
+                            activeNotesLower.includes('brand new') ||
+                            activeNotesLower.includes('failed pair') ||
+                            activeNotesLower.includes('item found') ||
+                            activeNotesLower.includes('initial purchase');
 
       if (hasOriginNote && (activeStatus === 'failed rubber' || activeStatus === 'destroyed' || activeStatus === 'lost' || activeStatus === 'assigned' || activeStatus === 'in testing' || activeStatus === 'ready for delivery' || activeStatus === 'ready for test')) {
         // Event 1: Origin Purchase on shelf
@@ -2477,14 +2592,22 @@ class ItemStatsEngine {
           assignedTo = 'In Testing';
           location = 'Arnett / JM Test';
           notes = 'Sent to lab';
+        } else if (
+          targetLower.includes('brand new') ||
+          targetLower.includes('new purchase') ||
+          targetLower === 'on shelf (new purchase)' ||
+          targetLower === 'brand new (on shelf)' ||
+          targetLower === 'new' ||
+          targetLower === 'newly purchased' ||
+          targetLower.startsWith('new (')
+        ) {
+          assignedTo = 'Brand New (On Shelf)';
+          location = 'Helena';
+          notes = 'Initial Purchase (On Shelf)';
         } else if (targetLower.includes('on shelf') || targetLower === 'shelf' || targetLower === 'storage' || targetLower === 'unassigned') {
           assignedTo = 'On Shelf';
           location = 'Helena';
           notes = 'On Shelf';
-        } else if (targetLower === 'new' || targetLower === 'newly purchased' || targetLower === 'brand new' || targetLower === 'new purchase' || targetLower.startsWith('new (')) {
-          assignedTo = 'New';
-          location = 'Helena';
-          notes = 'Initial Purchase (On Shelf)';
         } else {
           const matchedEmp = empLookup[targetLower];
           if (matchedEmp) {
@@ -2792,7 +2915,15 @@ class ItemStatsEngine {
       if (!location || location === 'Helena' || location === "Cody's Truck" || location === 'Belgrade') {
         location = 'Arnett / JM Test';
       }
-    } else if (assignedLower === 'on shelf' || assignedLower === 'shelf') {
+    } else if (
+      assignedLower === 'on shelf' ||
+      assignedLower === 'shelf' ||
+      assignedLower === 'brand new (on shelf)' ||
+      assignedLower === 'brand new' ||
+      assignedLower === 'on shelf (new purchase)' ||
+      assignedLower.includes('brand new') ||
+      assignedLower.includes('new purchase')
+    ) {
       coordinatedStatus = 'On Shelf';
       if (!location || location === "Cody's Truck" || location === 'Arnett / JM Test') {
         location = 'Helena';
@@ -2810,7 +2941,10 @@ class ItemStatsEngine {
       coordinatedStatus = 'Lost';
       location = 'Lost';
     } else {
-      const nonEmpHolders = ['new', 'unassigned', 'n/a', '—', '-'];
+      const nonEmpHolders = [
+        'new', 'unassigned', 'n/a', '—', '-', 'brand new', 'brand new (on shelf)',
+        'on shelf (new purchase)', 'new purchase', 'shelf', 'on shelf', 'storage'
+      ];
       if (!nonEmpHolders.includes(assignedLower)) {
         coordinatedStatus = 'Assigned';
         const empTable = this.db ? this.db.getTable('employees') : (window.localDB ? window.localDB.getTable('employees') : null);
@@ -3153,7 +3287,12 @@ class ItemStatsEngine {
     newLocation = (window.getPhysicalLocation ? window.getPhysicalLocation(newLocation) : newLocation) || newLocation;
     let newAssignedTo = assignedToInput ? assignedToInput.value.trim() : (row['Assigned To'] || '');
 
-    const nonEmpHolders = ['on shelf', 'in testing', 'packed for testing', 'packed for delivery', 'failed rubber', 'failed', 'lost', 'destroyed', 'new', 'unassigned', 'n/a', '—', '-'];
+    const nonEmpHolders = [
+      'on shelf', 'in testing', 'packed for testing', 'packed for delivery',
+      'failed rubber', 'failed', 'lost', 'destroyed', 'new', 'unassigned',
+      'n/a', '—', '-', 'brand new', 'brand new (on shelf)', 'on shelf (new purchase)',
+      'new purchase', 'storage'
+    ];
     if (newAssignedTo && !nonEmpHolders.includes(newAssignedTo.toLowerCase())) {
       if (newStatus.toLowerCase() === 'on shelf') {
         newStatus = 'Assigned';
