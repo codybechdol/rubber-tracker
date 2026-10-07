@@ -193,6 +193,70 @@ class PreviousEmployeesEngine {
     return true;
   }
 
+  isStatusLocation(location) {
+    if (!location) return true;
+    const s = String(location).trim().toLowerCase();
+    const statusLocations = [
+      'previous employee', 'previous', 'vacation', 'light duty', 'weeds',
+      'leave', 'unknown', 'n/a', 'none', 'medical', "worker's comp"
+    ];
+    if (statusLocations.includes(s)) return true;
+    if (s.startsWith('previous')) return true;
+    const parenMatch = s.match(/\((.*?)\)/);
+    if (parenMatch && statusLocations.includes(parenMatch[1].trim())) {
+      return false; // Still has physical city outside parens
+    }
+    return false;
+  }
+
+  normalizeLocation(location) {
+    if (!location) return '';
+    let s = String(location).trim();
+    const lower = s.toLowerCase();
+    if (lower === 'msla') return 'Missoula';
+    if (lower === 'bzm' || lower === 'boz') return 'Bozeman';
+    if (lower === 'gf' || lower === 'gtf') return 'Great Falls';
+    if (lower === 'hlna' || lower === 'hel') return 'Helena';
+    if (lower === 'liv') return 'Livingston';
+    if (lower === 'blgs' || lower === 'bill') return 'Billings';
+    if (lower === 'butte') return 'Butte';
+    if (/^[a-z]+$/.test(s)) {
+      return s.charAt(0).toUpperCase() + s.slice(1);
+    }
+    return s;
+  }
+
+  getPhysicalLocation(location) {
+    if (!location) return '';
+    let s = String(location).trim();
+    s = s.replace(/\s*\(.*?\)\s*/g, ' ').trim();
+    if (this.isStatusLocation(s)) return '';
+    return this.normalizeLocation(s);
+  }
+
+  resolveLocationFromJob(jobNumber, jobTrackingTable) {
+    if (!jobNumber || jobNumber === 'N/A') return '';
+    const cleanJob = String(jobNumber).trim();
+    if (!jobTrackingTable || !jobTrackingTable.rows) return '';
+    const headers = jobTrackingTable.headers || [];
+
+    const baseJob = cleanJob.split('.')[0].trim();
+    const basePrefix = baseJob.split('-')[0].trim();
+
+    for (const r of jobTrackingTable.rows) {
+      const rJob = this.extractRowValue(r, headers, ['Job Number', 'Job #', 'Job']);
+      if (!rJob) continue;
+      const rJobTrim = String(rJob).trim();
+      const rJobBase = rJobTrim.split('.')[0].trim();
+      if (rJobTrim === cleanJob || rJobBase === baseJob || rJobBase === basePrefix) {
+        const loc = this.extractRowValue(r, headers, ['Location', 'City', 'Yard']);
+        const phys = this.getPhysicalLocation(loc);
+        if (phys) return phys;
+      }
+    }
+    return '';
+  }
+
   extractRowValue(row, headers, aliasList) {
     if (!row) return '';
     const rowKeys = Object.keys(row);
@@ -283,6 +347,7 @@ class PreviousEmployeesEngine {
         const eventType = this.extractRowValue(r, headers, ['Event Type', 'Event', 'Action', 'Type']);
         const dateStr = this.extractRowValue(r, headers, ['Date', 'Date Changed', 'Timestamp', 'Event Date']);
         const loc = this.extractRowValue(r, headers, ['Location', 'City', 'Yard', 'Shop']);
+        const physLoc = this.getPhysicalLocation(loc);
         const job = this.extractRowValue(r, headers, ['Job Number', 'Job #', 'Job', 'Crew', 'Crew #']);
         const hireDate = this.extractRowValue(r, headers, ['Hire Date', 'Hire', 'Start Date']);
         const lastDay = this.extractRowValue(r, headers, ['Last Day', 'Term Date', 'Termination Date', 'End Date', 'Departure Date']);
@@ -291,7 +356,7 @@ class PreviousEmployeesEngine {
         if (!prevMap.has(norm)) {
           prevMap.set(norm, {
             name: name,
-            lastLocation: loc || 'Unknown',
+            lastLocation: physLoc || '',
             lastJob: job || 'N/A',
             lastClassification: 'Lineman',
             hireDate: hireDate || '',
@@ -305,7 +370,7 @@ class PreviousEmployeesEngine {
         }
 
         const entry = prevMap.get(norm);
-        if (loc && entry.lastLocation === 'Unknown') entry.lastLocation = loc;
+        if (physLoc && (!entry.lastLocation || entry.lastLocation === 'Unknown')) entry.lastLocation = physLoc;
         if (job && entry.lastJob === 'N/A') entry.lastJob = job;
         if (hireDate && !entry.hireDate) entry.hireDate = hireDate;
         if (lastDay && !entry.lastDay) entry.lastDay = lastDay;
@@ -332,6 +397,7 @@ class PreviousEmployeesEngine {
         const norm = this.normalizeName(name);
 
         const loc = this.extractRowValue(r, headers, ['Location', 'City', 'Yard', 'Shop']);
+        const physLoc = this.getPhysicalLocation(loc);
         const job = this.extractRowValue(r, headers, ['Job Number', 'Job #', 'Job', 'Crew', 'Crew #']);
         const role = this.extractRowValue(r, headers, ['Job Classification', 'Classification', 'Role', 'Title', 'Position']);
         const hireDate = this.extractRowValue(r, headers, ['Hire Date', 'Hire', 'Start Date']);
@@ -341,7 +407,7 @@ class PreviousEmployeesEngine {
         if (!prevMap.has(norm)) {
           prevMap.set(norm, {
             name: name,
-            lastLocation: loc || 'Unknown',
+            lastLocation: physLoc || '',
             lastJob: job || 'N/A',
             lastClassification: role || 'Lineman',
             hireDate: hireDate || '',
@@ -354,7 +420,7 @@ class PreviousEmployeesEngine {
           });
         } else {
           const entry = prevMap.get(norm);
-          if (loc && entry.lastLocation === 'Unknown') entry.lastLocation = loc;
+          if (physLoc && (!entry.lastLocation || entry.lastLocation === 'Unknown')) entry.lastLocation = physLoc;
           if (job && entry.lastJob === 'N/A') entry.lastJob = job;
           if (role && entry.lastClassification === 'Lineman') entry.lastClassification = role;
           if (hireDate && !entry.hireDate) entry.hireDate = hireDate;
@@ -373,6 +439,7 @@ class PreviousEmployeesEngine {
         const norm = this.normalizeName(name);
 
         const loc = this.extractRowValue(r, headers, ['Location', 'City', 'Yard']);
+        const physLoc = this.getPhysicalLocation(loc);
         const locLower = loc.toLowerCase();
         const status = this.extractRowValue(r, headers, ['Status', 'Employee Status']).toLowerCase();
         const job = this.extractRowValue(r, headers, ['Job Number', 'Job #', 'Job', 'Crew']);
@@ -381,14 +448,14 @@ class PreviousEmployeesEngine {
         const lastDay = this.extractRowValue(r, headers, ['Last Day', 'Term Date', 'End Date']);
         const lastReason = this.extractRowValue(r, headers, ['Last Day Reason', 'Reason', 'Notes', 'Details']);
 
-        const isPrevious = locLower === 'previous employee' || locLower.includes('previous') ||
+        const isPrevious = this.isStatusLocation(locLower) || locLower.includes('previous') ||
                            status === 'previous employee' || status.includes('inactive') || status.includes('terminated') || status.includes('departed');
 
         if (isPrevious) {
           if (!prevMap.has(norm)) {
             prevMap.set(norm, {
               name: name,
-              lastLocation: locLower === 'previous employee' ? 'Unknown' : loc,
+              lastLocation: physLoc || '',
               lastJob: job || 'N/A',
               lastClassification: role || 'Lineman',
               hireDate: hireDate || '',
@@ -401,6 +468,7 @@ class PreviousEmployeesEngine {
             });
           } else {
             const entry = prevMap.get(norm);
+            if (physLoc && (!entry.lastLocation || entry.lastLocation === 'Unknown')) entry.lastLocation = physLoc;
             if (role) entry.lastClassification = role;
             if (hireDate && !entry.hireDate) entry.hireDate = hireDate;
             if (lastDay && !entry.lastDay) entry.lastDay = lastDay;
@@ -492,6 +560,49 @@ class PreviousEmployeesEngine {
       });
     }
 
+    // 6. Resolve final physical location for all former employees
+    const jobTrackingTable = snap.tables['job_tracking'];
+    for (const entry of prevMap.values()) {
+      let resolvedLoc = this.getPhysicalLocation(entry.lastLocation);
+
+      // Fallback 1: Resolve from entry.lastJob via job_tracking
+      if (!resolvedLoc && entry.lastJob && entry.lastJob !== 'N/A') {
+        resolvedLoc = this.resolveLocationFromJob(entry.lastJob, jobTrackingTable);
+      }
+
+      // Fallback 2: Scan history events for most recent physical location or job
+      if (!resolvedLoc && entry.historyEvents && entry.historyEvents.length > 0) {
+        for (const ev of entry.historyEvents) {
+          if (ev.location) {
+            const evPhys = this.getPhysicalLocation(ev.location);
+            if (evPhys) {
+              resolvedLoc = evPhys;
+              break;
+            }
+          }
+          if (ev.jobNumber) {
+            const jobPhys = this.resolveLocationFromJob(ev.jobNumber, jobTrackingTable);
+            if (jobPhys) {
+              resolvedLoc = jobPhys;
+              break;
+            }
+          }
+          if (ev.notes) {
+            const m = ev.notes.match(/Location:\s*(?:[A-Za-z\s]+?\s*→\s*)?([A-Za-z\s]+?)(?:\.|\;|$)/i);
+            if (m) {
+              const notePhys = this.getPhysicalLocation(m[1]);
+              if (notePhys) {
+                resolvedLoc = notePhys;
+                break;
+              }
+            }
+          }
+        }
+      }
+
+      entry.lastLocation = resolvedLoc || 'Unknown';
+    }
+
     // Convert map to array and exclude currently active staff
     const results = Array.from(prevMap.values()).filter(p => !p.isActive && this.isValidEmployeeName(p.name));
 
@@ -518,16 +629,195 @@ class PreviousEmployeesEngine {
     }
     const res = await window.syncEngine.downloadLatestSnapshot();
     if (res && res.success) {
-      this.renderWorkspace();
+      this.renderWorkspace({ forceFull: true });
     }
+  }
+
+  /**
+   * Returns list of previous employees filtered by active search and filter controls
+   */
+  getFilteredEmployees(allPrevEmployees) {
+    const list = allPrevEmployees || this.getPreviousEmployees();
+    const term = (this.searchTerm || '').trim().toLowerCase();
+
+    return list.filter(e => {
+      // Search
+      if (term) {
+        const match = (e.name && e.name.toLowerCase().includes(term)) ||
+                      (e.lastLocation && e.lastLocation.toLowerCase().includes(term)) ||
+                      (e.lastJob && e.lastJob.toLowerCase().includes(term)) ||
+                      (e.lastClassification && e.lastClassification.toLowerCase().includes(term)) ||
+                      (e.lastReason && e.lastReason.toLowerCase().includes(term));
+        if (!match) return false;
+      }
+
+      // Location
+      if (this.locationFilter && this.locationFilter !== 'all') {
+        if (!e.lastLocation || e.lastLocation.toLowerCase() !== this.locationFilter.toLowerCase()) return false;
+      }
+
+      // PPE Status
+      if (this.ppeFilter === 'unreturned') {
+        if (e.unreturnedGloves.length === 0 && e.unreturnedSleeves.length === 0) return false;
+      } else if (this.ppeFilter === 'cleared') {
+        if (e.unreturnedGloves.length > 0 || e.unreturnedSleeves.length > 0) return false;
+      }
+
+      return true;
+    });
+  }
+
+  /**
+   * Generates HTML markup for the previous employees data table or empty state
+   */
+  renderTableHtml(filtered) {
+    if (!filtered || filtered.length === 0) {
+      return `
+        <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 40px 20px; text-align: center; color: var(--text-muted);">
+          <div style="font-size: 32px; margin-bottom: 8px;">📂</div>
+          <h4 style="color: var(--text-primary); font-size: 15px; margin-bottom: 4px;">No Previous Employees Found</h4>
+          <p style="font-size: 12px; margin: 0;">Try adjusting your search query or location filters.</p>
+        </div>
+      `;
+    }
+
+    let html = `
+      <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.2);">
+        <table class="data-table" style="width: 100%; border-collapse: collapse; text-align: left;">
+          <thead>
+            <tr style="background: rgba(15, 23, 42, 0.85); border-bottom: 1px solid var(--border-color); font-size: 11.5px; text-transform: uppercase; color: var(--text-muted);">
+              <th style="padding: 10px 14px;">Employee Name</th>
+              <th style="padding: 10px 14px;">Former Role</th>
+              <th style="padding: 10px 14px;">Last Job / Crew</th>
+              <th style="padding: 10px 14px;">Last Location</th>
+              <th style="padding: 10px 14px;">Departure Date & Reason</th>
+              <th style="padding: 10px 14px;">Unreturned PPE Status</th>
+              <th style="padding: 10px 14px; text-align: right;">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+    `;
+
+    filtered.forEach((emp) => {
+      const totalUnreturned = emp.unreturnedGloves.length + emp.unreturnedSleeves.length;
+      const unreturnedTooltip = [];
+      if (emp.unreturnedGloves.length > 0) {
+        unreturnedTooltip.push(`🧤 Gloves: ${emp.unreturnedGloves.map(g => '#' + g.itemNum).join(', ')}`);
+      }
+      if (emp.unreturnedSleeves.length > 0) {
+        unreturnedTooltip.push(`🦺 Sleeves: ${emp.unreturnedSleeves.map(s => '#' + s.itemNum).join(', ')}`);
+      }
+
+      html += `
+        <tr style="border-bottom: 1px solid rgba(255, 255, 255, 0.05); transition: background 0.15s ease;" onmouseover="this.style.background='rgba(59, 130, 246, 0.05)'" onmouseout="this.style.background='transparent'">
+          <td style="padding: 10px 14px;">
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <div style="width: 28px; height: 28px; border-radius: 50%; background: linear-gradient(135deg, #475569 0%, #1e293b 100%); display: flex; align-items: center; justify-content: center; font-size: 14px;">
+                👤
+              </div>
+              <div>
+                <span style="font-weight: 700; color: #60a5fa; cursor: pointer; text-decoration: underline dotted; font-size: 13px;" title="Click to view full profile & equipment dossier for ${this.escapeHtml(emp.name)}" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(emp.name)}');}">
+                  ${this.escapeHtml(emp.name)}
+                </span>
+              </div>
+            </div>
+          </td>
+          <td style="padding: 10px 14px; font-size: 12px; color: #cbd5e1;">
+            <span class="badge" style="background: rgba(99, 102, 241, 0.15); color: #a5b4fc; border: 1px solid rgba(99, 102, 241, 0.3); font-size: 11px;">
+              ⚡ ${this.escapeHtml(emp.lastClassification)}
+            </span>
+          </td>
+          <td style="padding: 10px 14px; font-size: 12px; font-family: monospace; color: #93c5fd; font-weight: 600;">
+            ${this.escapeHtml(emp.lastJob)}
+          </td>
+          <td style="padding: 10px 14px; font-size: 12px; color: #c4b5fd;">
+            📍 ${this.escapeHtml(emp.lastLocation)}
+          </td>
+          <td style="padding: 10px 14px; font-size: 12px;">
+            <div style="font-weight: 600; color: var(--text-primary);">${this.escapeHtml(emp.lastDay || 'N/A')}</div>
+            <div style="font-size: 11px; color: var(--text-muted);">${this.escapeHtml(emp.lastReason)}</div>
+          </td>
+          <td style="padding: 10px 14px; font-size: 12px;">
+            ${totalUnreturned > 0 ? `
+              <span class="badge" style="background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4); font-size: 11px; font-weight: 700; cursor: help;" title="${this.escapeHtml(unreturnedTooltip.join('\n'))}">
+                ⚠️ ${totalUnreturned} Item(s) Pending Reclaim
+              </span>
+            ` : `
+              <span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; font-size: 11px; font-weight: 600;">
+                ✅ No PPE Held
+              </span>
+            `}
+          </td>
+          <td style="padding: 10px 14px; text-align: right; white-space: nowrap;">
+            <div style="display: inline-flex; align-items: center; gap: 6px;">
+              <button class="btn btn-secondary" style="padding: 4px 8px; font-size: 11.5px; border-color: #3b82f6; color: #60a5fa;" title="View dossier & profile" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(emp.name)}');}">
+                👤 Profile
+              </button>
+              ${(emp.certRecords && emp.certRecords.length > 0) ? `
+                <button class="btn btn-secondary" style="padding: 4px 8px; font-size: 11.5px; border-color: rgba(234, 179, 8, 0.4); color: #facc15; font-weight: 600;" title="View ${emp.certRecords.length} archived certifications on file" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(emp.name)}', 'certs');}">
+                  📜 ${emp.certRecords.length} Certs
+                </button>
+              ` : ''}
+              <button class="btn btn-primary" style="padding: 4px 10px; font-size: 11.5px; background: #059669; border-color: #059669; font-weight: 700; display: inline-flex; align-items: center; gap: 4px;" title="Rehire to active roster" onclick="window.previousEmployeesEngine.openRehireModal('${this.escapeJs(emp.name)}')">
+                <span>⚡</span> Rehire
+              </button>
+            </div>
+          </td>
+        </tr>
+      `;
+    });
+
+    html += `
+          </tbody>
+        </table>
+      </div>
+    `;
+
+    return html;
+  }
+
+  /**
+   * Dynamically updates the table content without replacing or destroying the searchbar or toolbar DOM
+   */
+  renderFilteredTable() {
+    const tableWrapper = document.getElementById('prev-emp-table-wrapper');
+    if (!tableWrapper) {
+      this.renderWorkspace();
+      return;
+    }
+
+    const filtered = this.getFilteredEmployees();
+
+    const countBadge = document.getElementById('previous-employees-count-badge');
+    if (countBadge) {
+      countBadge.textContent = `${filtered.length} former staff`;
+    }
+
+    const clearBtn = document.getElementById('prev-emp-search-clear');
+    if (clearBtn) {
+      clearBtn.style.display = this.searchTerm ? 'block' : 'none';
+    }
+
+    tableWrapper.innerHTML = this.renderTableHtml(filtered);
   }
 
   /**
    * Renders the Previous Employees Workspace
    */
-  renderWorkspace() {
+  renderWorkspace(options = {}) {
     const container = document.getElementById('previous-employees-table-container');
     if (!container) return;
+
+    const existingWrapper = document.getElementById('prev-emp-table-wrapper');
+    if (existingWrapper && !options.forceFull) {
+      this.renderFilteredTable();
+      return;
+    }
+
+    const prevSearchInput = document.getElementById('prev-emp-search-input');
+    const wasSearchFocused = (document.activeElement === prevSearchInput);
+    const selStart = prevSearchInput ? prevSearchInput.selectionStart : null;
+    const selEnd = prevSearchInput ? prevSearchInput.selectionEnd : null;
 
     const allPrevEmployees = this.getPreviousEmployees();
 
@@ -541,32 +831,7 @@ class PreviousEmployeesEngine {
     const uniqueLocations = Array.from(locSet).sort();
 
     // Filter list
-    let filtered = allPrevEmployees.filter(e => {
-      // Search
-      if (this.searchTerm) {
-        const term = this.searchTerm.toLowerCase();
-        const match = e.name.toLowerCase().includes(term) ||
-                      e.lastLocation.toLowerCase().includes(term) ||
-                      e.lastJob.toLowerCase().includes(term) ||
-                      e.lastClassification.toLowerCase().includes(term) ||
-                      e.lastReason.toLowerCase().includes(term);
-        if (!match) return false;
-      }
-
-      // Location
-      if (this.locationFilter !== 'all') {
-        if (e.lastLocation.toLowerCase() !== this.locationFilter.toLowerCase()) return false;
-      }
-
-      // PPE Status
-      if (this.ppeFilter === 'unreturned') {
-        if (e.unreturnedGloves.length === 0 && e.unreturnedSleeves.length === 0) return false;
-      } else if (this.ppeFilter === 'cleared') {
-        if (e.unreturnedGloves.length > 0 || e.unreturnedSleeves.length > 0) return false;
-      }
-
-      return true;
-    });
+    const filtered = this.getFilteredEmployees(allPrevEmployees);
 
     // Update count badge
     const countBadge = document.getElementById('previous-employees-count-badge');
@@ -618,11 +883,14 @@ class PreviousEmployeesEngine {
       <!-- Filter Controls Toolbar -->
       <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
         <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap; flex: 1;">
-          <input type="text" id="prev-emp-search-input" placeholder="🔍 Search previous employees, past jobs, notes..." class="form-control" style="max-width: 280px; padding: 6px 10px; font-size: 12px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary);" value="${this.escapeHtml(this.searchTerm)}" oninput="window.previousEmployeesEngine.setSearch(this.value)">
+          <div style="position: relative; max-width: 280px; width: 100%;">
+            <input type="text" id="prev-emp-search-input" placeholder="🔍 Search previous employees, past jobs, notes..." class="form-control" style="width: 100%; padding: 6px 28px 6px 10px; font-size: 12px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary);" value="${this.escapeHtml(this.searchTerm)}" oninput="window.previousEmployeesEngine.setSearch(this.value)">
+            <span id="prev-emp-search-clear" onclick="window.previousEmployeesEngine.clearSearch()" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); color: var(--text-muted); cursor: pointer; font-size: 12px; display: ${this.searchTerm ? 'block' : 'none'};" title="Clear search">✕</span>
+          </div>
 
           <div style="display: flex; align-items: center; gap: 6px;">
             <span style="font-size: 11.5px; font-weight: 700; color: var(--text-muted);">Location:</span>
-            <select style="padding: 5px 8px; font-size: 11.5px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary);" onchange="window.previousEmployeesEngine.setLocationFilter(this.value)">
+            <select id="prev-emp-loc-filter" style="padding: 5px 8px; font-size: 11.5px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary);" onchange="window.previousEmployeesEngine.setLocationFilter(this.value)">
               <option value="all" ${this.locationFilter === 'all' ? 'selected' : ''}>All Locations (${uniqueLocations.length})</option>
               ${uniqueLocations.map(l => `<option value="${this.escapeHtml(l)}" ${this.locationFilter.toLowerCase() === l.toLowerCase() ? 'selected' : ''}>${this.escapeHtml(l)}</option>`).join('')}
             </select>
@@ -630,7 +898,7 @@ class PreviousEmployeesEngine {
 
           <div style="display: flex; align-items: center; gap: 6px;">
             <span style="font-size: 11.5px; font-weight: 700; color: var(--text-muted);">PPE Status:</span>
-            <select style="padding: 5px 8px; font-size: 11.5px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary);" onchange="window.previousEmployeesEngine.setPpeFilter(this.value)">
+            <select id="prev-emp-ppe-filter" style="padding: 5px 8px; font-size: 11.5px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary);" onchange="window.previousEmployeesEngine.setPpeFilter(this.value)">
               <option value="all" ${this.ppeFilter === 'all' ? 'selected' : ''}>All Records</option>
               <option value="unreturned" ${this.ppeFilter === 'unreturned' ? 'selected' : ''}>🔴 Has Unreturned PPE</option>
               <option value="cleared" ${this.ppeFilter === 'cleared' ? 'selected' : ''}>🟢 PPE Cleared</option>
@@ -642,133 +910,62 @@ class PreviousEmployeesEngine {
           🔄 Reset Filters
         </button>
       </div>
+
+      <!-- Table Wrapper -->
+      <div id="prev-emp-table-wrapper">
+        ${this.renderTableHtml(filtered)}
+      </div>
     `;
 
-    if (filtered.length === 0) {
-      html += `
-        <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 40px 20px; text-align: center; color: var(--text-muted);">
-          <div style="font-size: 32px; margin-bottom: 8px;">📂</div>
-          <h4 style="color: var(--text-primary); font-size: 15px; margin-bottom: 4px;">No Previous Employees Found</h4>
-          <p style="font-size: 12px; margin: 0;">Try adjusting your search query or location filters.</p>
-        </div>
-      `;
-    } else {
-      html += `
-        <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.2);">
-          <table class="data-table" style="width: 100%; border-collapse: collapse; text-align: left;">
-            <thead>
-              <tr style="background: rgba(15, 23, 42, 0.85); border-bottom: 1px solid var(--border-color); font-size: 11.5px; text-transform: uppercase; color: var(--text-muted);">
-                <th style="padding: 10px 14px;">Employee Name</th>
-                <th style="padding: 10px 14px;">Former Role</th>
-                <th style="padding: 10px 14px;">Last Job / Crew</th>
-                <th style="padding: 10px 14px;">Last Location</th>
-                <th style="padding: 10px 14px;">Departure Date & Reason</th>
-                <th style="padding: 10px 14px;">Unreturned PPE Status</th>
-                <th style="padding: 10px 14px; text-align: right;">Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-      `;
-
-      filtered.forEach((emp) => {
-        const totalUnreturned = emp.unreturnedGloves.length + emp.unreturnedSleeves.length;
-        const unreturnedTooltip = [];
-        if (emp.unreturnedGloves.length > 0) {
-          unreturnedTooltip.push(`🧤 Gloves: ${emp.unreturnedGloves.map(g => '#' + g.itemNum).join(', ')}`);
-        }
-        if (emp.unreturnedSleeves.length > 0) {
-          unreturnedTooltip.push(`🦺 Sleeves: ${emp.unreturnedSleeves.map(s => '#' + s.itemNum).join(', ')}`);
-        }
-
-        html += `
-          <tr style="border-bottom: 1px solid rgba(255, 255, 255, 0.05); transition: background 0.15s ease;" onmouseover="this.style.background='rgba(59, 130, 246, 0.05)'" onmouseout="this.style.background='transparent'">
-            <td style="padding: 10px 14px;">
-              <div style="display: flex; align-items: center; gap: 8px;">
-                <div style="width: 28px; height: 28px; border-radius: 50%; background: linear-gradient(135deg, #475569 0%, #1e293b 100%); display: flex; align-items: center; justify-content: center; font-size: 14px;">
-                  👤
-                </div>
-                <div>
-                  <span style="font-weight: 700; color: #60a5fa; cursor: pointer; text-decoration: underline dotted; font-size: 13px;" title="Click to view full profile & equipment dossier for ${this.escapeHtml(emp.name)}" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(emp.name)}');}">
-                    ${this.escapeHtml(emp.name)}
-                  </span>
-                </div>
-              </div>
-            </td>
-            <td style="padding: 10px 14px; font-size: 12px; color: #cbd5e1;">
-              <span class="badge" style="background: rgba(99, 102, 241, 0.15); color: #a5b4fc; border: 1px solid rgba(99, 102, 241, 0.3); font-size: 11px;">
-                ⚡ ${this.escapeHtml(emp.lastClassification)}
-              </span>
-            </td>
-            <td style="padding: 10px 14px; font-size: 12px; font-family: monospace; color: #93c5fd; font-weight: 600;">
-              ${this.escapeHtml(emp.lastJob)}
-            </td>
-            <td style="padding: 10px 14px; font-size: 12px; color: #c4b5fd;">
-              📍 ${this.escapeHtml(emp.lastLocation)}
-            </td>
-            <td style="padding: 10px 14px; font-size: 12px;">
-              <div style="font-weight: 600; color: var(--text-primary);">${this.escapeHtml(emp.lastDay || 'N/A')}</div>
-              <div style="font-size: 11px; color: var(--text-muted);">${this.escapeHtml(emp.lastReason)}</div>
-            </td>
-            <td style="padding: 10px 14px; font-size: 12px;">
-              ${totalUnreturned > 0 ? `
-                <span class="badge" style="background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4); font-size: 11px; font-weight: 700; cursor: help;" title="${this.escapeHtml(unreturnedTooltip.join('\n'))}">
-                  ⚠️ ${totalUnreturned} Item(s) Pending Reclaim
-                </span>
-              ` : `
-                <span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; font-size: 11px; font-weight: 600;">
-                  ✅ No PPE Held
-                </span>
-              `}
-            </td>
-            <td style="padding: 10px 14px; text-align: right; white-space: nowrap;">
-              <div style="display: inline-flex; align-items: center; gap: 6px;">
-                <button class="btn btn-secondary" style="padding: 4px 8px; font-size: 11.5px; border-color: #3b82f6; color: #60a5fa;" title="View dossier & profile" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(emp.name)}');}">
-                  👤 Profile
-                </button>
-                ${(emp.certRecords && emp.certRecords.length > 0) ? `
-                  <button class="btn btn-secondary" style="padding: 4px 8px; font-size: 11.5px; border-color: rgba(234, 179, 8, 0.4); color: #facc15; font-weight: 600;" title="View ${emp.certRecords.length} archived certifications on file" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(emp.name)}', 'certs');}">
-                    📜 ${emp.certRecords.length} Certs
-                  </button>
-                ` : ''}
-                <button class="btn btn-primary" style="padding: 4px 10px; font-size: 11.5px; background: #059669; border-color: #059669; font-weight: 700; display: inline-flex; align-items: center; gap: 4px;" title="Rehire to active roster" onclick="window.previousEmployeesEngine.openRehireModal('${this.escapeJs(emp.name)}')">
-                  <span>⚡</span> Rehire
-                </button>
-              </div>
-            </td>
-          </tr>
-        `;
-      });
-
-      html += `
-            </tbody>
-          </table>
-        </div>
-      `;
-    }
-
     container.innerHTML = html;
+
+    if (wasSearchFocused) {
+      const newSearchInput = document.getElementById('prev-emp-search-input');
+      if (newSearchInput) {
+        newSearchInput.focus();
+        if (selStart !== null && selEnd !== null) {
+          try { newSearchInput.setSelectionRange(selStart, selEnd); } catch (e) {}
+        }
+      }
+    }
   }
 
   setSearch(val) {
-    this.searchTerm = val.trim();
-    this.renderWorkspace();
+    this.searchTerm = val || '';
+    this.renderFilteredTable();
+  }
+
+  clearSearch() {
+    this.searchTerm = '';
+    const input = document.getElementById('prev-emp-search-input');
+    if (input) {
+      input.value = '';
+      input.focus();
+    }
+    this.renderFilteredTable();
   }
 
   setLocationFilter(val) {
     this.locationFilter = val;
-    this.renderWorkspace();
+    this.renderFilteredTable();
   }
 
   setPpeFilter(val) {
     this.ppeFilter = val;
-    this.renderWorkspace();
+    this.renderFilteredTable();
   }
 
   resetFilters() {
     this.searchTerm = '';
     this.locationFilter = 'all';
     this.ppeFilter = 'all';
-    this.renderWorkspace();
+    const input = document.getElementById('prev-emp-search-input');
+    if (input) input.value = '';
+    const locSel = document.getElementById('prev-emp-loc-filter');
+    if (locSel) locSel.value = 'all';
+    const ppeSel = document.getElementById('prev-emp-ppe-filter');
+    if (ppeSel) ppeSel.value = 'all';
+    this.renderFilteredTable();
   }
 
   /**
@@ -1063,7 +1260,7 @@ class PreviousEmployeesEngine {
 
       alert(`🎉 Successfully rehired ${empName} to Crew ${jobNum} (${location})!\n\nTheir record has been restored to active Employees and queued for Google Sheets sync.`);
 
-      this.renderWorkspace();
+      this.renderWorkspace({ forceFull: true });
       if (window.sheetNavigator) {
         window.sheetNavigator.renderCurrentSheet();
       }
@@ -1163,7 +1360,7 @@ class PreviousEmployeesEngine {
 
     alert(`✅ Successfully cleaned up ${removedEmployees.length} previous employee(s) from the active Employees sheet.\n\nAll historical records and uncollected PPE are preserved in the Previous Employees workspace.`);
 
-    this.renderWorkspace();
+    this.renderWorkspace({ forceFull: true });
     if (window.sheetNavigator) {
       window.sheetNavigator.renderCurrentSheet();
     }
