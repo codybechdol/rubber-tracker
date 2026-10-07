@@ -1021,9 +1021,9 @@ class CertsImportEngine {
         ` : ''}
 
         <!-- Search Bar -->
-        <div style="display: flex; align-items: center; justify-content: space-between; gap: 10px;">
-          <input type="text" placeholder="🔍 Filter by employee name, cert type, or location..." value="${this.escapeHtml(this.previewSearchTerm)}" style="width: 100%; max-width: 380px; padding: 6px 12px; font-size: 12px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary);" oninput="window.certsImportEngine.setPreviewSearch(this.value)">
-          <div style="font-size: 12px; color: var(--text-muted);">
+        <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
+          <input type="text" placeholder="🔍 Filter by employee name, cert type, or location..." value="${this.escapeHtml(this.previewSearchTerm)}" style="width: 100%; max-width: 480px; padding: 8px 14px; font-size: 13px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary);" oninput="window.certsImportEngine.setPreviewSearch(this.value)">
+          <div style="font-size: 12.5px; color: var(--text-muted);">
             ${this.activeDiscrepancyTab === 'preserved'
               ? `Showing <strong>${filteredPreserved.length}</strong> preserved cert(s)`
               : (this.activeDiscrepancyTab === 'unmatched'
@@ -1034,7 +1034,7 @@ class CertsImportEngine {
         </div>
 
         <!-- Diff Preview Table -->
-        <div style="max-height: 380px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-primary);">
+        <div style="max-height: 58vh; min-height: 480px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-primary); box-shadow: inset 0 2px 6px rgba(0,0,0,0.2);">
           ${this.activeDiscrepancyTab === 'preserved' ? `
             <div style="background: rgba(139, 92, 246, 0.08); border-bottom: 1px solid rgba(139, 92, 246, 0.25); padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
               <div style="display: flex; align-items: center; gap: 10px;">
