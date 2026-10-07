@@ -1385,6 +1385,48 @@ class LocalDatabase {
           }
         }
       });
+
+      // Deduplicate equipment inventory items (strictly enforce unique item numbers)
+      if (isInv && table.rows.length > 0) {
+        const seenItems = new Map();
+        const dupRowsToRemove = new Set();
+        table.rows.forEach(r => {
+          const itemNum = String(r['Item #'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['MACK'] || r['HVT #'] || r['Phasing Set #'] || r['AED #'] || r['Ground #'] || r['Hot Stick #'] || r['Serial #'] || (table.headers && r[table.headers[0]]) || Object.values(r)[0] || '').trim();
+          if (itemNum) {
+            const key = itemNum.toLowerCase();
+            if (seenItems.has(key)) {
+              console.warn(`[normalizeTableData] Deduplicating inventory row for ${tableKey}: Item #${itemNum}`);
+              dupRowsToRemove.add(r);
+            } else {
+              seenItems.set(key, r);
+            }
+          }
+        });
+
+        if (dupRowsToRemove.size > 0) {
+          table.rows = table.rows.filter(r => !dupRowsToRemove.has(r));
+          table.rowCount = table.rows.length;
+          table.rows.forEach((r, idx) => {
+            r._rowIdx = idx + 2;
+          });
+          if (table.rawGrid && table.rawGrid.length > 1) {
+            const seenGridItems = new Set();
+            const newRawGrid = [table.rawGrid[0]];
+            for (let i = 1; i < table.rawGrid.length; i++) {
+              const gridRow = table.rawGrid[i];
+              if (!Array.isArray(gridRow)) continue;
+              const gItem = String(gridRow[0] || '').trim().toLowerCase();
+              if (gItem && seenGridItems.has(gItem)) {
+                continue; // Skip duplicate item row from rawGrid
+              }
+              if (gItem) seenGridItems.add(gItem);
+              newRawGrid.push(gridRow);
+            }
+            table.rawGrid = newRawGrid;
+            table.maxRows = table.rawGrid.length;
+          }
+        }
+      }
     }
 
     // 3. Header finding logic & Swap Table Row Reconstruction
@@ -1856,6 +1898,22 @@ class LocalDatabase {
     if (!table.headers || table.headers.length === 0) {
       table.headers = Object.keys(rowObj);
       table.rawGrid[0] = table.headers;
+    }
+
+    // Uniqueness enforcement for inventory equipment: prevent inserting duplicate items
+    const isInv = ['gloves', 'sleeves', 'blankets', 'macks', 'hv_testers', 'phasing_sets', 'aed', 'grounds', 'hot_sticks'].includes(tableKey);
+    if (isInv && table.rows && table.rows.length > 0) {
+      const itemNum = String(rowObj['Item #'] || rowObj['Glove'] || rowObj['Sleeve'] || rowObj['Blanket'] || rowObj['MACK'] || rowObj['HVT #'] || rowObj['Phasing Set #'] || rowObj['AED #'] || rowObj['Ground #'] || rowObj['Hot Stick #'] || rowObj['Serial #'] || Object.values(rowObj)[0] || '').trim();
+      if (itemNum) {
+        const existing = table.rows.find(r => {
+          const rNum = String(r['Item #'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['MACK'] || r['HVT #'] || r['Phasing Set #'] || r['AED #'] || r['Ground #'] || r['Hot Stick #'] || r['Serial #'] || Object.values(r)[0] || '').trim();
+          return rNum.toLowerCase() === itemNum.toLowerCase();
+        });
+        if (existing) {
+          console.warn(`[LocalDatabase.addRow] Duplicate item blocked: Item #${itemNum} already exists in ${table.name || tableKey}`);
+          return existing;
+        }
+      }
     }
 
     // Add to rows array (insert at the beginning so newly added items appear at the top)

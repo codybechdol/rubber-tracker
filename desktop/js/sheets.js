@@ -34,6 +34,7 @@ class SheetNavigator {
     this.sheetList = [
       { key: 'employees', label: '👥 Employees', icon: '👤', isSwap: false },
       { key: 'job_tracking', label: '📋 Job Tracking', icon: '📋', isSwap: false },
+      { key: 'locations', label: '📍 Locations & Approvals', icon: '📍', isSwap: false },
       { key: 'gloves', label: '🧤 Gloves', icon: '🧤', isSwap: false },
       { key: 'glove_swaps', label: '🔄 Glove Swaps', icon: '🔄', isSwap: true },
       { key: 'sleeves', label: '🦺 Sleeves', icon: '🦺', isSwap: false },
@@ -5523,8 +5524,29 @@ class SheetNavigator {
           }
         }
 
+        // Locations & Approvals Formatting
+        if (this.currentSheetKey === 'locations') {
+          if (colIdx === 0 || hLower === 'location') {
+            customCellHtml = `<span style="font-weight: 700; color: #60a5fa;">📍 ${this.escapeHtml(val)}</span>`;
+          } else if (hLower.includes('rubber class') || hLower.includes('approval')) {
+            const vUpper = String(val || '').trim().toUpperCase();
+            if (vUpper === 'CL3') {
+              customCellHtml = `<span class="badge" style="background-color: #7c3aed; color: #fff; padding: 2px 8px; border-radius: 4px; font-weight: 700;">⚡ CL3 (26.5kV)</span>`;
+            } else if (vUpper === 'CL2') {
+              customCellHtml = `<span class="badge" style="background-color: #2563eb; color: #fff; padding: 2px 8px; border-radius: 4px; font-weight: 700;">🧤 CL2 (17kV)</span>`;
+            } else if (vUpper === 'CL2 & CL3' || vUpper === 'CL2 & 3') {
+              customCellHtml = `<span class="badge" style="background-color: #059669; color: #fff; padding: 2px 8px; border-radius: 4px; font-weight: 700;">🔄 CL2 & CL3</span>`;
+            } else if (vUpper === 'NONE') {
+              customCellHtml = `<span class="badge" style="background-color: #475569; color: #cbd5e1; padding: 2px 8px; border-radius: 4px; font-weight: 600;">🚫 None</span>`;
+            }
+          } else if (hLower === 'direction') {
+            customCellHtml = `<span style="font-weight: 600; color: #cbd5e1;">🧭 ${this.escapeHtml(val)}</span>`;
+          }
+        }
+
         const isSmsCol = hLower.includes('sms');
-        const isEditable = !isPrimaryItemCol && !isEmployeeNameCol && !isSmsCol && !hLower.includes('change out') && !hLower.startsWith('skip ') && window.currentRoleMode !== 'view_only';
+        const isLocationNameCol = (this.currentSheetKey === 'locations' && (colIdx === 0 || hLower === 'location'));
+        const isEditable = !isPrimaryItemCol && !isEmployeeNameCol && !isLocationNameCol && !isSmsCol && !hLower.includes('change out') && !hLower.startsWith('skip ') && window.currentRoleMode !== 'view_only';
         let itemIdentifier = '';
         if (this.currentSheetKey === 'expiring_certs') {
           itemIdentifier = `${row['Employee Name'] || row['Name'] || ''} | ${row['Item Type'] || row['Cert Type'] || ''}`;
@@ -5558,7 +5580,8 @@ class SheetNavigator {
       const header = (td.dataset.header || '').toLowerCase();
       const isAssignedCol = (header.includes('assigned') || header === 'holder') && !header.includes('date');
       const isEmpDepartureCol = this.currentSheetKey === 'employees' && (header === 'location' || header === 'last day reason');
-      const hasAutocomplete = isAssignedCol || isEmpDepartureCol;
+      const isLocationApprovalCol = this.currentSheetKey === 'locations' && (header.includes('rubber class') || header.includes('approval') || header === 'direction');
+      const hasAutocomplete = isAssignedCol || isEmpDepartureCol || isLocationApprovalCol;
 
       td.addEventListener('focus', () => {
         const targetCell = td;
@@ -7564,6 +7587,28 @@ class SheetNavigator {
         });
       }
       results = qLower ? standardLocs.filter(l => l.name.toLowerCase().includes(qLower) || l.subText.toLowerCase().includes(qLower)) : standardLocs;
+    } else if (this.currentSheetKey === 'locations' && (h.includes('rubber class') || h.includes('approval'))) {
+      const qLower = String(query || '').toLowerCase().trim();
+      const approvalOptions = [
+        { name: 'CL2', subText: 'Class 2 Rubber (17kV max)', icon: '🧤' },
+        { name: 'CL3', subText: 'Class 3 Rubber (26.5kV max) - e.g. Big Sky', icon: '⚡' },
+        { name: 'CL2 & CL3', subText: 'Both Class 2 and Class 3 Approved', icon: '🔄' },
+        { name: 'None', subText: 'No High Voltage Rubber Work / Office', icon: '🚫' }
+      ];
+      results = qLower ? approvalOptions.filter(o => o.name.toLowerCase().includes(qLower) || o.subText.toLowerCase().includes(qLower)) : approvalOptions;
+    } else if (this.currentSheetKey === 'locations' && h === 'direction') {
+      const qLower = String(query || '').toLowerCase().trim();
+      const directions = [
+        { name: 'Home', subText: 'Helena Base', icon: '🏠' },
+        { name: 'North', subText: 'North towards Great Falls', icon: '⬆️' },
+        { name: 'East', subText: 'East towards Bozeman / Billings', icon: '➡️' },
+        { name: 'Southwest', subText: 'Southwest towards Butte', icon: '↙️' },
+        { name: 'West', subText: 'West towards Missoula', icon: '⬅️' },
+        { name: 'Northwest', subText: 'Northwest towards Kalispell', icon: '↖️' },
+        { name: 'Far', subText: 'Remote / Out of State', icon: '✈️' },
+        { name: 'Office', subText: 'Non-field Location', icon: '🏢' }
+      ];
+      results = qLower ? directions.filter(d => d.name.toLowerCase().includes(qLower) || d.subText.toLowerCase().includes(qLower)) : directions;
     } else {
       if (!window.employeeResolver) return;
       results = window.employeeResolver.search(query, 10);

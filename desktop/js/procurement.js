@@ -967,7 +967,8 @@ class ProcurementEngine {
             typeLabel = `📦 ${itemType}`;
           }
           size = String(row['Size'] || '—').trim();
-          rowClass = String(row['Class'] || 'Class 2').trim();
+          const rawRowClass = (row['Class'] !== undefined && row['Class'] !== null && String(row['Class']).trim() !== '') ? row['Class'] : 'Class 2';
+          rowClass = String(rawRowClass).trim();
           urgency = String(row['Urgency'] || 'Immediate').trim();
           status = String(row['Status'] || '').trim().toLowerCase();
         }
@@ -1003,13 +1004,15 @@ class ProcurementEngine {
         if (Array.isArray(g)) {
           asg = String(g[8] || '').trim();
           assignedSize = String(g[2] || '').trim();
-          classVal = String(g[3] || 'Class 2').trim();
+          const rawClass = (g[3] !== undefined && g[3] !== null && String(g[3]).trim() !== '') ? g[3] : 'Class 2';
+          classVal = String(rawClass).trim();
           status = String(g[7] || '').trim();
           notes = String(g[11] || '').trim();
         } else if (g && typeof g === 'object') {
           asg = String(g['Assigned To'] || g['Assigned'] || '').trim();
           assignedSize = String(g['Size'] || '').trim();
-          classVal = String(g['Class'] || 'Class 2').trim();
+          const rawClass = (g['Class'] !== undefined && g['Class'] !== null && String(g['Class']).trim() !== '') ? g['Class'] : 'Class 2';
+          classVal = String(rawClass).trim();
           status = String(g['Status'] || '').trim();
           notes = String(g['Notes'] || '').trim();
         }
@@ -1066,13 +1069,15 @@ class ProcurementEngine {
         if (Array.isArray(s)) {
           asg = String(s[8] || '').trim();
           assignedSize = String(s[2] || '').trim();
-          classVal = String(s[3] || 'Class 2').trim();
+          const rawClass = (s[3] !== undefined && s[3] !== null && String(s[3]).trim() !== '') ? s[3] : 'Class 2';
+          classVal = String(rawClass).trim();
           status = String(s[7] || '').trim();
           notes = String(s[11] || '').trim();
         } else if (s && typeof s === 'object') {
           asg = String(s['Assigned To'] || s['Assigned'] || '').trim();
           assignedSize = String(s['Size'] || '').trim();
-          classVal = String(s['Class'] || 'Class 2').trim();
+          const rawClass = (s['Class'] !== undefined && s['Class'] !== null && String(s['Class']).trim() !== '') ? s['Class'] : 'Class 2';
+          classVal = String(rawClass).trim();
           status = String(s['Status'] || '').trim();
           notes = String(s['Notes'] || '').trim();
         }
@@ -1138,6 +1143,16 @@ class ProcurementEngine {
       return false;
     };
 
+    const locTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('locations') : null) || snap?.tables?.['locations'];
+    const locApprovals = {};
+    if (locTable && locTable.rows) {
+      locTable.rows.forEach(r => {
+        const loc = String(r['Location'] || Object.values(r)[0] || '').trim().toLowerCase();
+        const app = String(r['Rubber Class Approval'] || r['Approval'] || Object.values(r)[6] || '').trim();
+        if (loc && app) locApprovals[loc] = app;
+      });
+    }
+
     empDirectory.forEach(empRec => {
       if (this.isDepartedOrPreviousEmployee(empRec.name)) return;
       if (empRec.location && empRec.location.toLowerCase().includes('previous')) return;
@@ -1151,6 +1166,18 @@ class ProcurementEngine {
 
       if (this.isEmployeePpeExcluded(empRec.name)) return;
 
+      // Determine appropriate rubber class approval for employee location
+      let locationApprovalClass = 'Class 2';
+      if (empRec.location) {
+        const cleanEmpLoc = String(empRec.location).replace(/\s*\([^)]*\)/g, '').trim().toLowerCase();
+        const app = locApprovals[cleanEmpLoc] ? locApprovals[cleanEmpLoc].toUpperCase() : '';
+        if (app === 'CL3') {
+          locationApprovalClass = 'Class 3';
+        } else if (app === 'CL2') {
+          locationApprovalClass = 'Class 2';
+        }
+      }
+
       // 4A. Missing Rubber Gloves
       if (meta.needsGloves && !isCovered('Gloves', empRec.name) && !hasInventoryItem(glovesTable, empRec.name)) {
         const validPref = cleanSize(empRec.gloveSize);
@@ -1160,7 +1187,7 @@ class ProcurementEngine {
           ? `${empRec.name} (⚠️ No preferred size listed in Employees)`
           : `${empRec.name} (${meta.code} - Missing Gloves)`;
 
-        addItem('compliance_missing', 'Gloves', '🧤 Gloves', neededSize, hasNoSize, 'Class 2', empLabel, 0, true);
+        addItem('compliance_missing', 'Gloves', '🧤 Gloves', neededSize, hasNoSize, locationApprovalClass, empLabel, 0, true);
         markCovered('Gloves', empRec.name);
       }
 
@@ -1173,7 +1200,7 @@ class ProcurementEngine {
           ? `${empRec.name} (⚠️ No preferred size listed in Employees)`
           : `${empRec.name} (${meta.code} - Missing Sleeves)`;
 
-        addItem('compliance_missing', 'Sleeves', '🦺 Sleeves', neededSize, hasNoSize, 'Class 2', empLabel, 0, true);
+        addItem('compliance_missing', 'Sleeves', '🦺 Sleeves', neededSize, hasNoSize, locationApprovalClass, empLabel, 0, true);
         markCovered('Sleeves', empRec.name);
       }
     });
