@@ -38,7 +38,7 @@ function requestWithRedirects(targetUrl, method, postData, redirectCount = 0) {
       path: parsed.pathname + parsed.search,
       method: method,
       headers: headers,
-      timeout: 120000
+      timeout: 180000
     }, (res) => {
       // Follow HTTP 301, 302, 303, 307 redirects
       if ([301, 302, 303, 307].includes(res.statusCode) && res.headers.location) {
@@ -61,7 +61,7 @@ function requestWithRedirects(targetUrl, method, postData, redirectCount = 0) {
 
     req.on('timeout', () => {
       req.destroy();
-      reject(new Error('Request timed out after 60 seconds'));
+      reject(new Error('Request timed out after 180 seconds'));
     });
 
     req.on('error', err => reject(err));

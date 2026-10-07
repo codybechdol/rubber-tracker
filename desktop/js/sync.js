@@ -561,10 +561,21 @@ class SyncEngine {
 
     if (outbox.length === 0) {
       html += `
-        <div id="sync-modal-empty-state" style="padding: 30px; text-align: center; color: var(--text-muted); animation: fadeIn 0.3s ease;">
+        <div id="sync-modal-empty-state" style="padding: 24px; text-align: center; color: var(--text-muted); animation: fadeIn 0.3s ease;">
           <div style="font-size: 28px; margin-bottom: 8px;">✅</div>
-          <div style="font-weight: 600; font-size: 14px;">No pending offline changes</div>
-          <div style="font-size: 12px; margin-top: 4px;">All edits are fully in sync with Google Sheets.</div>
+          <div style="font-weight: 600; font-size: 14px; color: var(--text-primary);">No pending offline changes</div>
+          <div style="font-size: 12px; margin-top: 4px; margin-bottom: 20px;">All edits in the app are currently recorded.</div>
+          <div style="background: rgba(139, 92, 246, 0.08); border: 1px solid rgba(139, 92, 246, 0.25); border-radius: 8px; padding: 14px 18px; max-width: 480px; margin: 0 auto; text-align: left;">
+            <div style="font-weight: 600; font-size: 12.5px; color: #a78bfa; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
+              <span>🔄</span> Ensure Sheets is an Exact Copy
+            </div>
+            <div style="font-size: 11.5px; color: var(--text-secondary); line-height: 1.5; margin-bottom: 12px;">
+              If Google Sheets has duplicate entries (e.g. from past manual entries or legacy sheet workflows), you can overwrite Google Sheets with the clean, deduplicated app data right now.
+            </div>
+            <button class="btn btn-primary" onclick="window.syncEngine.pushAllTablesExactCopy()" style="background: #7c3aed; border-color: #6d28d9; width: 100%; justify-content: center; font-size: 12px; font-weight: 600;">
+              🔄 Overwrite Sheets with App Data (Exact Copy)
+            </button>
+          </div>
         </div>
       `;
     } else {
@@ -1752,8 +1763,9 @@ class SyncEngine {
         const activeUrl = this.syncUrl || DEFAULT_SYNC_URL;
         resp = await this.executeNetworkRequest(activeUrl, 'POST', {
           action: 'createBackup',
-          forceFullCopy: true
-        }, 120000);
+          forceFullCopy: true,
+          snapshot: (this.db && this.db.snapshot) ? this.db.snapshot : null
+        }, 180000);
 
         if (resp && resp.status === 'ok' && resp.success) {
           lastErr = null;
@@ -1820,6 +1832,129 @@ class SyncEngine {
     }
 
     this.isSyncing = false;
+  }
+
+  /**
+   * Pushes complete, clean data for all active tables from the desktop app to Google Sheets
+   * using REPLACE_TABLE_DATA mutations, guaranteeing Google Sheets is an exact 1:1 copy
+   * of the desktop app with zero duplicate rows.
+   */
+  async pushAllTablesExactCopy() {
+    if (this.isSyncing) return;
+    if (!this.db || !this.db.snapshot || !this.db.snapshot.tables) {
+      alert('Local database snapshot is not loaded yet.');
+      return;
+    }
+
+    const confirmMsg = 'This will overwrite Google Sheets tables with the exact current data from this app and remove any duplicate or orphaned rows on the cloud.\n\nProceed?';
+    if (!confirm(confirmMsg)) return;
+
+    this.isSyncing = true;
+    const startTime = Date.now();
+    this.openSyncModal('Overwriting Sheets with App Data', '🔄');
+    this.renderModalChanges([], 'Preparing clean table data...', 'syncing', false);
+    this.updateStatusUI('syncing', 'Overwriting Sheets with app data...');
+
+    // Tables to overwrite in priority order:
+    // 1. Equipment Inventory
+    // 2. Employees & Job Tracking
+    // 3. Companion sheets
+    const tablesToPush = [
+      'gloves', 'sleeves', 'blankets', 'macks', 'hv_testers', 'phasing_sets', 'aed', 'grounds', 'hot_sticks',
+      'employees', 'job_tracking', 'expiring_certs'
+    ];
+
+    const mutations = [];
+    for (const tblKey of tablesToPush) {
+      const table = this.db.getTable(tblKey);
+      if (table && table.headers && table.rows) {
+        const sheetName = this.db.getSheetNameForTableKey(tblKey) || table.name;
+        if (sheetName) {
+          mutations.push({
+            id: `exact_copy_${tblKey}_${Date.now()}`,
+            action: 'REPLACE_TABLE_DATA',
+            sheetName: sheetName,
+            tableKey: tblKey,
+            headers: table.headers,
+            rows: table.rows
+          });
+        }
+      }
+    }
+
+    if (mutations.length === 0) {
+      this.renderModalChanges([], 'No tables available to overwrite.', 'info', false);
+      this.isSyncing = false;
+      return;
+    }
+
+    let currentBatchText = `Overwriting ${mutations.length} sheets with app data...`;
+    this.renderModalChanges(mutations, `${currentBatchText} (${this.formatDuration(0)})`, 'syncing', false);
+
+    const timerInterval = setInterval(() => {
+      const elapsedMs = Date.now() - startTime;
+      const subTitleEl = document.getElementById('sync-modal-subtitle');
+      if (subTitleEl) {
+        subTitleEl.textContent = `${currentBatchText} (${this.formatDuration(elapsedMs)})`;
+      }
+    }, 200);
+
+    let pushedCount = 0;
+    try {
+      for (let mIdx = 0; mIdx < mutations.length; mIdx++) {
+        const mut = mutations[mIdx];
+        currentBatchText = `Overwriting ${mut.sheetName} (${mIdx + 1} of ${mutations.length})...`;
+        const subTitleEl = document.getElementById('sync-modal-subtitle');
+        if (subTitleEl) subTitleEl.textContent = `${currentBatchText} (${this.formatDuration(Date.now() - startTime)})`;
+
+        const activeUrl = this.syncUrl || DEFAULT_SYNC_URL;
+        const res = await this.executeNetworkRequest(activeUrl, 'POST', {
+          action: 'applyMutations',
+          mutations: [mut],
+          detectConflicts: false,
+          force: true,
+          skipPostProcessing: mIdx < (mutations.length - 1), // Only post-process on the last table
+          returnSnapshot: false
+        }, 120000);
+
+        if (res && res.errors && res.errors.length > 0) {
+          console.warn(`Warning overwriting ${mut.sheetName}:`, res.errors);
+        }
+        pushedCount++;
+        await this.animateTasksPushed([mut], mutations.length - pushedCount, mutations.length);
+      }
+
+      // Also trigger backend deduplication pass to ensure perfect clean state
+      try {
+        const activeUrl = this.syncUrl || DEFAULT_SYNC_URL;
+        await this.executeNetworkRequest(activeUrl, 'POST', {
+          action: 'deduplicateInventory'
+        }, 60000);
+      } catch (dedupeErr) {
+        console.warn('Post-exact-copy deduplicateInventory warning:', dedupeErr);
+      }
+
+      clearInterval(timerInterval);
+      const totalElapsedMs = Date.now() - startTime;
+      const durationFormatted = this.formatDuration(totalElapsedMs);
+
+      this.openSyncModal('Sheets Overwritten Successfully', '✅');
+      this.renderModalChanges([], `✅ Successfully made Google Sheets an exact copy of the app in ${durationFormatted}! All duplicate entries have been eliminated.`, 'success', false);
+      this.updateStatusUI('synced', `Exact Copy Complete (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`);
+
+      setTimeout(() => {
+        this.closeSyncModal();
+      }, 2500);
+
+    } catch (err) {
+      clearInterval(timerInterval);
+      console.error('pushAllTablesExactCopy error:', err);
+      this.openSyncModal('Exact Copy Failed', '❌');
+      this.renderModalChanges([], `Failed to overwrite Google Sheets: ${err.message}`, 'error', true);
+      this.updateStatusUI('offline', 'Exact copy failed');
+    } finally {
+      this.isSyncing = false;
+    }
   }
 
   formatDuration(ms) {

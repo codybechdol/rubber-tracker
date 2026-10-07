@@ -1700,23 +1700,28 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
                 }
               }
 
+              var updateDupRowsToDelete = [];
               if (targetRowIdx === -1 && idStr) {
                 var cleanId = idStr.replace(/^[#bBsS\-_]+/, '').trim();
                 for (var r = 1; r < data.length; r++) {
                   var c0 = String(data[r][0] || '').trim().toLowerCase();
                   var c0Clean = c0.replace(/^[#bBsS\-_]+/, '').trim();
-                  if (c0 === idStr || (cleanId && c0Clean === cleanId)) {
-                    targetRowIdx = r + 1; // 1-based sheet row
-                    break;
-                  }
+                  var isMatch = (c0 === idStr || (cleanId && c0Clean === cleanId));
                   // For non-employees sheets (like Job Tracking or inventory), check secondary identifiers
-                  if (!isEmpSheet) {
+                  if (!isMatch && !isEmpSheet) {
                     var c1 = String(data[r][1] || '').trim().toLowerCase();
                     var c3 = (data[r].length > 3) ? String(data[r][3] || '').trim().toLowerCase() : '';
                     var c3Clean = c3.replace(/^[#\-_]+/, '').trim();
                     if (c1 === idStr || c3 === idStr || (cleanId && c3Clean === cleanId)) {
-                      targetRowIdx = r + 1;
-                      break;
+                      isMatch = true;
+                    }
+                  }
+                  if (isMatch) {
+                    if (targetRowIdx === -1) {
+                      targetRowIdx = r + 1; // 1-based sheet row
+                      if (!isInvSheet && !isEmpSheet) break;
+                    } else {
+                      updateDupRowsToDelete.push(r + 1);
                     }
                   }
                 }
@@ -1839,6 +1844,18 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
                       safeSetCellWithValidationFallback(sheet.getRange(targetRowIdx, dirtyCells[dc].col), dirtyCells[dc].val);
                     }
                   }
+                }
+                if (updateDupRowsToDelete.length > 0) {
+                  updateDupRowsToDelete.sort(function(a, b) { return b - a; });
+                  for (var uDel = 0; uDel < updateDupRowsToDelete.length; uDel++) {
+                    try {
+                      sheet.deleteRow(updateDupRowsToDelete[uDel]);
+                      Logger.log('UPDATE_ROW deduplication: Deleted duplicate row ' + updateDupRowsToDelete[uDel] + ' in ' + sheetName);
+                    } catch (uDelErr) {
+                      Logger.log('UPDATE_ROW deduplication error: ' + uDelErr);
+                    }
+                  }
+                  delete activeSheetData[sheetName];
                 }
                 sheetsModified[sheetName] = true;
                 appliedCount++;
@@ -2217,12 +2234,54 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
               return val;
             });
 
-            var newRowIdx = lastRow + 1;
-            if (sheet.getMaxRows() < newRowIdx) {
-              sheet.insertRowsAfter(sheet.getMaxRows(), Math.max(newRowIdx - sheet.getMaxRows(), 50));
+            var isInvSheet = ['gloves', 'sleeves', 'blankets', 'macks', 'hv testers', 'phasing sets', 'aed', 'grounds', 'hot sticks', 'hv_testers', 'phasing_sets', 'hot_sticks'].indexOf(sheetLower) !== -1;
+            var isEmpSheet = (sheetLower === 'employees' || sheetLower === 'previous employees' || sheetLower === 'previous_employees');
+            var isJtSheet = (sheetLower === 'job tracking' || sheetLower === 'job_tracking');
+
+            var itemKey = '';
+            if (isInvSheet) {
+              itemKey = String(mut.rowData['Item #'] || mut.rowData['Glove'] || mut.rowData['Sleeve'] || mut.rowData['Blanket'] || mut.rowData['MACK'] || mut.rowData['Serial #'] || mut.rowData['HVT #'] || mut.rowData['Phasing Set #'] || mut.rowData['AED #'] || mut.rowData['Ground #'] || mut.rowData['Hot Stick #'] || mut.itemIdentifier || '').trim();
+            } else if (isEmpSheet) {
+              itemKey = String(mut.rowData['Name'] || mut.rowData['Employee Name'] || mut.rowData['Employee'] || mut.itemIdentifier || '').trim();
+            } else if (isJtSheet) {
+              itemKey = String(mut.rowData['Job Number'] || mut.rowData['Job #'] || mut.itemIdentifier || '').trim();
             }
 
-            var targetRowRange = sheet.getRange(newRowIdx, 1, 1, rowArray.length);
+            var existingTargetRow = -1;
+            var duplicateRowsToDelete = [];
+
+            if (itemKey && lastRow > 1) {
+              var sData = activeSheetData[sheetName];
+              if (!sData) {
+                sData = sheet.getDataRange().getValues();
+                activeSheetData[sheetName] = sData;
+              }
+              var cleanKey = itemKey.replace(/^[#\-_]+/, '').trim().toLowerCase();
+              for (var rScan = 1; rScan < sData.length; rScan++) {
+                var c0 = String(sData[rScan][0] || '').trim().toLowerCase();
+                var c0Clean = c0.replace(/^[#\-_]+/, '').trim();
+                var isMatch = (c0 === cleanKey || c0Clean === cleanKey);
+                if (!isMatch && isInvSheet && (sheetLower.indexOf('hv') !== -1 || sheetLower.indexOf('phasing') !== -1)) {
+                  var c1 = (sData[rScan].length > 1) ? String(sData[rScan][1] || '').trim().toLowerCase() : '';
+                  var c3 = (sData[rScan].length > 3) ? String(sData[rScan][3] || '').trim().toLowerCase() : '';
+                  isMatch = (c1 === cleanKey || c3 === cleanKey);
+                }
+                if (isMatch) {
+                  if (existingTargetRow === -1) {
+                    existingTargetRow = rScan + 1; // 1-based sheet row of first occurrence
+                  } else {
+                    duplicateRowsToDelete.push(rScan + 1); // Extra duplicate row
+                  }
+                }
+              }
+            }
+
+            var targetWriteRow = (existingTargetRow !== -1) ? existingTargetRow : (lastRow + 1);
+            if (sheet.getMaxRows() < targetWriteRow) {
+              sheet.insertRowsAfter(sheet.getMaxRows(), Math.max(targetWriteRow - sheet.getMaxRows(), 50));
+            }
+
+            var targetRowRange = sheet.getRange(targetWriteRow, 1, 1, rowArray.length);
             try { targetRowRange.clearDataValidations(); } catch (cdv) {}
 
             try {
@@ -2233,12 +2292,33 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
                 targetRowRange.setValues([rowArray]);
               } catch (retryErr) {
                 if (typeof safeWriteRowToTable === 'function') {
-                  safeWriteRowToTable(sheet, newRowIdx, rowArray, headers);
+                  safeWriteRowToTable(sheet, targetWriteRow, rowArray, headers);
                 } else {
-                  sheet.appendRow(rowArray);
+                  if (existingTargetRow !== -1) {
+                    sheet.getRange(targetWriteRow, 1, 1, rowArray.length).setValues([rowArray]);
+                  } else {
+                    sheet.appendRow(rowArray);
+                  }
                 }
               }
             }
+
+            // If duplicate rows existed, delete them from bottom to top
+            if (duplicateRowsToDelete.length > 0) {
+              duplicateRowsToDelete.sort(function(a, b) { return b - a; });
+              for (var dIdx = 0; dIdx < duplicateRowsToDelete.length; dIdx++) {
+                try {
+                  sheet.deleteRow(duplicateRowsToDelete[dIdx]);
+                  Logger.log('ADD_ROW deduplication: Deleted duplicate row ' + duplicateRowsToDelete[dIdx] + ' in ' + sheetName);
+                } catch (delErr) {
+                  Logger.log('ADD_ROW deduplication error: ' + delErr);
+                }
+              }
+              delete activeSheetData[sheetName];
+            } else if (existingTargetRow !== -1 && activeSheetData[sheetName] && activeSheetData[sheetName][existingTargetRow - 1]) {
+              activeSheetData[sheetName][existingTargetRow - 1] = rowArray;
+            }
+
             sheetsModified[sheetName] = true;
             appliedCount++;
           }
@@ -2751,6 +2831,23 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
       if (typeof cleanupCompletedSecondaryJobNumbers === 'function') cleanupCompletedSecondaryJobNumbers(ss);
     } catch (syncErr) {
       Logger.log('applyBatchSyncMutations post-sync error: ' + syncErr);
+    }
+  }
+
+  // Auto deduplicate equipment inventory sheets if modified
+  if (!skipPostProcessing) {
+    var invSheetNames = ['Gloves', 'Sleeves', 'Blankets', 'MACKs', 'HV Testers', 'Phasing Sets', 'AED', 'Grounds', 'Hot Sticks'];
+    for (var invI = 0; invI < invSheetNames.length; invI++) {
+      var invSName = invSheetNames[invI];
+      if (sheetsModified[invSName]) {
+        try {
+          if (typeof deduplicateInventorySheet === 'function') {
+            deduplicateInventorySheet(invSName);
+          }
+        } catch (dedupeErr) {
+          Logger.log('applyBatchSyncMutations deduplicateInventorySheet error for ' + invSName + ': ' + dedupeErr);
+        }
+      }
     }
   }
 
@@ -4413,4 +4510,242 @@ function scanIncidentReportEmails(options) {
     return { success: false, error: err.toString() };
   }
 }
+
+/**
+ * Deduplicates an equipment inventory sheet (Gloves, Sleeves, Blankets, MACKs, etc.)
+ * Finds rows with identical Item # or Serial #, picks the most canonical row,
+ * rewrites the sheet in a single batch, and clears any trailing rows.
+ *
+ * @param {string} sheetName - Name of the inventory sheet
+ * @return {Object} Result summary { success, sheet, duplicatesRemoved, totalRows }
+ */
+function deduplicateInventorySheet(sheetName) {
+  var ss = typeof getActiveSpreadsheetSafe === 'function' ? getActiveSpreadsheetSafe() : SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) return { success: false, error: 'No active spreadsheet' };
+
+  var sheet = ss.getSheetByName(sheetName);
+  if (!sheet) return { success: false, error: 'Sheet not found: ' + sheetName };
+
+  var lastRow = sheet.getLastRow();
+  var lastCol = sheet.getLastColumn();
+  if (lastRow <= 2 || lastCol < 1) {
+    return { success: true, sheet: sheetName, duplicatesRemoved: 0, totalRows: lastRow };
+  }
+
+  var data = sheet.getRange(1, 1, lastRow, lastCol).getValues();
+
+  // Detect header row index (0 or 1 if title row exists)
+  var headerRowIdx = 0;
+  var row0Count = data[0].filter(function(v) { return String(v || '').trim() !== ''; }).length;
+  if (row0Count <= 2 && data.length > 1) {
+    var row1Count = data[1].filter(function(v) { return String(v || '').trim() !== ''; }).length;
+    if (row1Count >= 3) {
+      headerRowIdx = 1;
+    }
+  }
+
+  var headers = data[headerRowIdx];
+  var rows = data.slice(headerRowIdx + 1);
+
+  // Dynamically find item identifier column index from headers
+  var idColIdx = 0;
+  for (var c = 0; c < headers.length; c++) {
+    var hName = String(headers[c] || '').toLowerCase().trim();
+    if (hName === 'item #' || hName === 'item' || hName === 'glove' || hName === 'sleeve' || hName === 'blanket' || hName === 'mack' || hName === 'serial #' || hName === 'serial') {
+      idColIdx = c;
+      break;
+    }
+  }
+
+  // Find columns for status, assigned to, and dates to score canonical row
+  var statColIdx = -1;
+  var assignedColIdx = -1;
+  var testDateColIdx = -1;
+  var dateAssignedColIdx = -1;
+  for (var c = 0; c < headers.length; c++) {
+    var h = String(headers[c] || '').toLowerCase().trim();
+    if (h === 'status') statColIdx = c;
+    else if (h === 'assigned to' || h === 'assigned') assignedColIdx = c;
+    else if (h === 'test date' || h === 'cal date' || h === 'calibration date') testDateColIdx = c;
+    else if (h === 'date assigned' || h === 'date') dateAssignedColIdx = c;
+  }
+
+  // Helper to score how "canonical" / up-to-date a row is
+  function scoreRow(row, origIdx) {
+    var score = 0;
+    var stat = statColIdx !== -1 ? String(row[statColIdx] || '').trim().toLowerCase() : '';
+    var assigned = assignedColIdx !== -1 ? String(row[assignedColIdx] || '').trim().toLowerCase() : '';
+
+    // Active assignment is preferred over lost/failed/empty
+    if (assigned && assigned !== 'on shelf' && assigned !== 'in stock' && assigned !== 'packed for testing' && assigned !== 'ready for test' && assigned !== 'packed for delivery' && assigned !== 'ready for delivery') {
+      score += 100;
+    } else if (assigned === 'on shelf' || assigned === 'in stock') {
+      score += 50;
+    }
+
+    if (stat === 'assigned') score += 50;
+    else if (stat === 'in stock' || stat === 'on shelf') score += 40;
+    else if (stat === 'ready for test' || stat === 'in testing') score += 30;
+    else if (stat === 'lost' || stat === 'failed rubber' || stat === 'retired') score += 10;
+
+    // Prefer rows with valid dates
+    if (dateAssignedColIdx !== -1 && row[dateAssignedColIdx]) {
+      var dAssigned = row[dateAssignedColIdx];
+      if (typeof dAssigned === 'string') dAssigned = new Date(dAssigned);
+      if (dAssigned instanceof Date && !isNaN(dAssigned.getTime())) {
+        score += Math.min(20, Math.floor(dAssigned.getTime() / (1000 * 60 * 60 * 24 * 365)));
+      }
+    }
+    if (testDateColIdx !== -1 && row[testDateColIdx]) {
+      var dTest = row[testDateColIdx];
+      if (typeof dTest === 'string') dTest = new Date(dTest);
+      if (dTest instanceof Date && !isNaN(dTest.getTime())) {
+        score += Math.min(10, Math.floor(dTest.getTime() / (1000 * 60 * 60 * 24 * 365 * 2)));
+      }
+    }
+
+    // Tie-breaker: prefer later rows in the sheet (more recently added)
+    score += (origIdx / 10000);
+    return score;
+  }
+
+  // Group rows by cleaned item identifier
+  var groupMap = {};
+  var duplicateCount = 0;
+
+  for (var r = 0; r < rows.length; r++) {
+    var row = rows[r];
+    var rawId = String(row[idColIdx] || '').trim();
+    if (!rawId) {
+      // Keep rows without an ID (e.g. blank spacer or notes)
+      var emptyKey = '__blank_' + r;
+      groupMap[emptyKey] = [ { row: row, origIdx: r, score: 0 } ];
+      continue;
+    }
+    var cleanId = rawId.replace(/^[#bBsS\-_]+/, '').trim().toLowerCase();
+    if (!groupMap[cleanId]) {
+      groupMap[cleanId] = [];
+    } else {
+      duplicateCount++;
+    }
+    groupMap[cleanId].push({
+      row: row,
+      origIdx: r,
+      score: scoreRow(row, r)
+    });
+  }
+
+  var matches155 = [];
+  for (var mR = 0; mR < rows.length; mR++) {
+    var checkId = String(rows[mR][idColIdx] || '').trim();
+    if (checkId.indexOf('155') !== -1) {
+      matches155.push({ r: mR + 2, raw: checkId, clean: checkId.replace(/^[#bBsS\-_]+/, '').trim().toLowerCase(), assigned: rows[mR][assignedColIdx] });
+    }
+  }
+
+  // If no duplicates found, return early
+  if (duplicateCount === 0) {
+    return {
+      success: true,
+      sheet: sheetName,
+      duplicatesRemoved: 0,
+      totalRows: lastRow,
+      idColHeader: headers[idColIdx],
+      headerRowIdx: headerRowIdx,
+      matches155: matches155
+    };
+  }
+
+  // Build clean rows by selecting the best row for each key
+  var cleanRows = [];
+  var seenKeys = {};
+  for (var r2 = 0; r2 < rows.length; r2++) {
+    var rawId2 = String(rows[r2][idColIdx] || '').trim();
+    var cleanId2 = rawId2 ? rawId2.replace(/^[#bBsS\-_]+/, '').trim().toLowerCase() : ('__blank_' + r2);
+    if (seenKeys[cleanId2]) continue;
+    seenKeys[cleanId2] = true;
+
+    var candidates = groupMap[cleanId2];
+    if (candidates.length === 1) {
+      cleanRows.push(candidates[0].row);
+    } else {
+      // Pick candidate with highest score
+      candidates.sort(function(a, b) { return b.score - a.score; });
+      cleanRows.push(candidates[0].row);
+    }
+  }
+
+  var fullGrid = [headers].concat(cleanRows);
+  var targetWriteStart = headerRowIdx + 1; // 1-based start row in sheet
+
+  // Write clean grid back to sheet
+  sheet.getRange(targetWriteStart, 1, fullGrid.length, lastCol).setValues(fullGrid);
+
+  // Clear trailing rows if any were removed
+  var newTotalRows = targetWriteStart + fullGrid.length - 1;
+  if (lastRow > newTotalRows) {
+    sheet.getRange(newTotalRows + 1, 1, lastRow - newTotalRows, lastCol).clearContent();
+    sheet.getRange(newTotalRows + 1, 1, lastRow - newTotalRows, lastCol).clearDataValidations();
+  }
+
+  SpreadsheetApp.flush();
+  Logger.log('deduplicateInventorySheet: ' + sheetName + ' removed ' + duplicateCount + ' duplicate row(s). Rows now: ' + newTotalRows);
+  if (typeof logEvent === 'function') {
+    logEvent('Deduplicated ' + sheetName + ': removed ' + duplicateCount + ' duplicate row(s)', 'INFO');
+  }
+
+  return {
+    success: true,
+    sheet: sheetName,
+    duplicatesRemoved: duplicateCount,
+    totalRows: newTotalRows,
+    idColHeader: headers[idColIdx],
+    headerRowIdx: headerRowIdx
+  };
+}
+
+/**
+ * Deduplicates all equipment inventory sheets across the spreadsheet.
+ */
+function deduplicateAllInventorySheets() {
+  var ss = typeof getActiveSpreadsheetSafe === 'function' ? getActiveSpreadsheetSafe() : SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) return { success: false, error: 'No active spreadsheet' };
+
+  var targetSheets = [
+    typeof SHEET_GLOVES !== 'undefined' ? SHEET_GLOVES : 'Gloves',
+    typeof SHEET_SLEEVES !== 'undefined' ? SHEET_SLEEVES : 'Sleeves',
+    typeof SHEET_BLANKETS !== 'undefined' ? SHEET_BLANKETS : 'Blankets',
+    typeof SHEET_MACKS !== 'undefined' ? SHEET_MACKS : 'MACKs',
+    typeof SHEET_HV_TESTERS !== 'undefined' ? SHEET_HV_TESTERS : 'HV Testers',
+    typeof SHEET_PHASING_SETS !== 'undefined' ? SHEET_PHASING_SETS : 'Phasing Sets',
+    typeof SHEET_AED !== 'undefined' ? SHEET_AED : 'AED',
+    typeof SHEET_GROUNDS !== 'undefined' ? SHEET_GROUNDS : 'Grounds',
+    typeof SHEET_HOT_STICKS !== 'undefined' ? SHEET_HOT_STICKS : 'Hot Sticks'
+  ];
+
+  var results = [];
+  var totalRemoved = 0;
+
+  for (var i = 0; i < targetSheets.length; i++) {
+    var sName = targetSheets[i];
+    if (ss.getSheetByName(sName)) {
+      try {
+        var r = deduplicateInventorySheet(sName);
+        if (r && r.duplicatesRemoved > 0) {
+          totalRemoved += r.duplicatesRemoved;
+          results.push(sName + ': ' + r.duplicatesRemoved + ' removed');
+        }
+      } catch (err) {
+        Logger.log('deduplicateAllInventorySheets error on ' + sName + ': ' + err);
+      }
+    }
+  }
+
+  return {
+    success: true,
+    totalDuplicatesRemoved: totalRemoved,
+    summary: results.length > 0 ? results.join(', ') : 'All inventory sheets clean (0 duplicates found)'
+  };
+}
+
 
