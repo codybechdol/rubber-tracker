@@ -686,6 +686,65 @@ class ProcurementEngine {
     return false;
   }
 
+  /**
+   * Checks whether an employee was manually excluded from PPE tracking
+   */
+  isManualPpeExcluded(empName) {
+    if (!empName) return false;
+    try {
+      const raw = localStorage.getItem('sa_ppe_excluded_employees');
+      if (raw) {
+        const arr = JSON.parse(raw);
+        if (Array.isArray(arr)) {
+          const norm = this.normalizeName(empName);
+          if (arr.some(x => this.isNameMatch(this.normalizeName(x), norm))) return true;
+        }
+      }
+    } catch { /* ignore */ }
+    return false;
+  }
+
+  /**
+   * Gets the crew discipline/type for an employee
+   */
+  getEmployeeCrewType(empName) {
+    if (!empName) return 'Electric';
+    if (window.ppeTrackingEngine && typeof window.ppeTrackingEngine.isEmployeeCrewDisciplineExcluded === 'function') {
+      const check = window.ppeTrackingEngine.isEmployeeCrewDisciplineExcluded(empName);
+      if (check && check.crewType) return check.crewType;
+    }
+    try {
+      const snap = (this.db && typeof this.db.getSnapshot === 'function')
+        ? this.db.getSnapshot()
+        : (window.localDB ? window.localDB.getSnapshot() : null);
+      const empTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('employees') : null) || snap?.tables?.['employees'];
+      const jtTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('job_tracking') : null) || snap?.tables?.['job_tracking'];
+
+      if (empTable && empTable.rows) {
+        const norm = this.normalizeName(empName);
+        const emp = empTable.rows.find(e => this.isNameMatch(this.normalizeName(e['Employee Name'] || e['Name'] || ''), norm));
+        if (emp) {
+          const rawJob = String(emp['Job Number'] || emp['Job #'] || '').trim();
+          const jn = rawJob.replace(/\.\d+.*$/, '').trim();
+          if (jtTable && jtTable.rows) {
+            const jt = jtTable.rows.find(j => {
+              const jNum = String(j['Job Number'] || j['Job #'] || Object.values(j)[0] || '').replace(/\.\d+.*$/, '').trim();
+              return jNum === jn;
+            });
+            if (jt && jt['Crew Type']) return String(jt['Crew Type']).trim();
+          }
+          if (jn.startsWith('005')) return 'Office';
+          const lower = (rawJob + ' ' + (emp['Location'] || '')).toLowerCase();
+          if (lower.includes('sub') || lower.includes('substation')) return 'Substation';
+          if (lower.includes('gas')) return 'Gas';
+          if (lower.includes('mechanic') || lower.includes('shop')) return 'Mechanic';
+          return 'Electric';
+        }
+      }
+    } catch { /* ignore */ }
+    return 'Electric';
+  }
+
   scanPurchaseNeeds() {
     this.loadPreviousEmployees();
 
@@ -1004,9 +1063,16 @@ class ProcurementEngine {
         if (this.isDepartedOrPreviousEmployee(emp)) return;
         if (statLower.includes('reclaim') || statLower.includes('previous') || statLower.includes('departed')) return;
 
-        // Exclude personnel on non-Electric / non-Office crews from generating glove and sleeve purchase needs
-        if ((s.type === 'Gloves' || s.type === 'Sleeves') && !isShelfStock && this.isEmployeePpeExcluded(emp)) {
-          return;
+        // Exclude personnel on Gas and Mechanic crews from generating glove and sleeve purchase needs.
+        // Electric, Office, AND Substation employees assigned an item that is out of stock or size up are included!
+        if ((s.type === 'Gloves' || s.type === 'Sleeves') && !isShelfStock) {
+          const crewType = this.getEmployeeCrewType(emp);
+          if (crewType === 'Gas' || crewType === 'Mechanic') {
+            return;
+          }
+          if (this.isManualPpeExcluded(emp)) {
+            return;
+          }
         }
 
         const empRec = getEmpRecord(emp);
