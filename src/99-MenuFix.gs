@@ -29,6 +29,7 @@ function _buildGloveManagerMenu() {
         .addItem('👷 Assign Crew Leads', 'showAssignCrewLeadsDialog')
         .addItem('🔄 Sync Crews', 'menuSyncCrews')
         .addItem('⚡ Transfer Crew Equipment (Foreman Change)', 'menuTransferCrewEquipment')
+        .addItem('🏷️ Add Crew Type Column to Job Tracking', 'migrateJobTrackingAddCrewType')
         .addItem('📂 View Job Tracking', 'openJobTrackingSheet'))
 
       // === STEP 2: GENERATE ALL REPORTS ===
@@ -140,6 +141,7 @@ function _buildGloveManagerMenu() {
           .addItem('📂 View Job Tracking', 'openJobTrackingSheet')
           .addItem('🔄 Refresh Job Tracking', 'refreshJobTrackingFromEmployees')
           .addItem('👤 Refresh Job Tracking Foremen', 'refreshJobTrackingForemen')
+          .addItem('🏷️ Add Crew Type Column to Job Tracking', 'migrateJobTrackingAddCrewType')
           .addItem('📐 Auto-Configure Secondary Jobs (Mark N/A)', 'menuAutoConfigureSecondaryJobs')
           .addItem('✅ Mark Job Complete', 'markJobComplete')
           .addItem('🧹 Clean Completed Secondary Jobs', 'menuCleanupCompletedSecondaryJobs')

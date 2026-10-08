@@ -85,9 +85,91 @@ class RubberPpeTrackingEngine {
   }
 
   /**
-   * Checks whether an employee is currently excluded from Rubber PPE tracking
+   * Helper: Build crew discipline map from job_tracking (baseJob -> 'Electric' | 'Substation' | 'Gas' | 'Office' | 'Mechanic')
    */
-  isEmployeeExcluded(empName) {
+  getCrewTypeMap() {
+    const map = new Map();
+    const jtTable = this.db ? this.db.getTable('job_tracking') : null;
+    if (jtTable && jtTable.rows) {
+      for (const r of jtTable.rows) {
+        const jn = String(r['Job Number'] || r['Job #'] || Object.values(r)[0] || '').replace(/\.\d+.*$/, '').trim();
+        if (!jn) continue;
+        let ct = String(r['Crew Type'] || '').trim();
+        if (!ct) {
+          const bn = jn.toLowerCase();
+          const jName = String(r['Job Name'] || '').toLowerCase();
+          const loc = String(r['Location'] || '').toLowerCase();
+          if (bn.startsWith('005') || jName.includes('office') || jName.includes('management') || loc === 'office') {
+            ct = 'Office';
+          } else if (jName.includes('substation') || jName.includes('sub-station')) {
+            ct = 'Substation';
+          } else if (jName.includes('gas')) {
+            ct = 'Gas';
+          } else if (jName.includes('mechanic') || jName.includes('shop') || jName.includes('garage')) {
+            ct = 'Mechanic';
+          } else {
+            ct = 'Electric';
+          }
+        }
+        map.set(jn, ct);
+      }
+    }
+    return map;
+  }
+
+  /**
+   * Checks whether an employee's crew discipline excludes them from Rubber PPE tracking.
+   * Rule: ONLY Electric and Office crews require rubber gloves and/or sleeves.
+   * Substation, Gas, and Mechanic crews are excluded.
+   */
+  isEmployeeCrewDisciplineExcluded(empName, jobNumber) {
+    if (!empName) return { excluded: false, crewType: 'Electric' };
+
+    let baseJob = '';
+    if (jobNumber && jobNumber !== '—') {
+      baseJob = String(jobNumber).replace(/\.\d+.*$/, '').trim();
+    }
+    if (!baseJob) {
+      const empTable = this.db ? this.db.getTable('employees') : null;
+      if (empTable && empTable.rows) {
+        const norm = this.normalizeName(empName);
+        const emp = empTable.rows.find(e => {
+          const n = String(e['Employee Name'] || e['Name'] || '').trim();
+          return this.isNameMatch(this.normalizeName(n), norm);
+        });
+        if (emp) {
+          const jn = String(emp['Job Number'] || emp['Job #'] || '').trim();
+          baseJob = jn.replace(/\.\d+.*$/, '').trim();
+        }
+      }
+    }
+
+    if (!baseJob) return { excluded: false, crewType: 'Electric' };
+
+    const crewMap = this.getCrewTypeMap();
+    let crewType = crewMap.get(baseJob);
+    if (!crewType) {
+      if (baseJob.startsWith('005')) {
+        crewType = 'Office';
+      } else {
+        crewType = 'Electric';
+      }
+    }
+
+    // Rule: ONLY Electric and Office crews require rubber PPE
+    const isExcluded = (crewType !== 'Electric' && crewType !== 'Office');
+    return {
+      excluded: isExcluded,
+      crewType: crewType,
+      reason: isExcluded ? `${crewType} Crew (No Rubber PPE Req)` : ''
+    };
+  }
+
+  /**
+   * Checks whether an employee is currently excluded from Rubber PPE tracking
+   * (either manually excluded or by crew discipline)
+   */
+  isEmployeeExcluded(empName, jobNumber) {
     if (!empName) return false;
     const norm = this.normalizeName(empName);
     if (!norm) return false;
@@ -95,6 +177,8 @@ class RubberPpeTrackingEngine {
     for (const key of this.excludedEmployeeMap.keys()) {
       if (this.isNameMatch(key, norm)) return true;
     }
+    const crewCheck = this.isEmployeeCrewDisciplineExcluded(empName, jobNumber);
+    if (crewCheck.excluded) return true;
     return false;
   }
 
@@ -646,10 +730,6 @@ class RubberPpeTrackingEngine {
       const classMeta = this.parseTrackedClassification(rawCls);
       if (!classMeta) continue; // Only track SUP, GF, F, JRY, and AP 1-7
 
-      const isExcluded = this.isEmployeeExcluded(name);
-
-      if (locClean && locClean !== '—') locationSet.add(locClean);
-
       const altNames = String(emp['Alternate Names'] || '').trim();
       const jobNumber = String(emp['Job Number'] || emp['Job #'] || emp['Crew'] || '—').trim();
       const gloveSize = String(emp['Glove Size'] || emp['Glove'] || '—').trim();
@@ -658,6 +738,13 @@ class RubberPpeTrackingEngine {
       const email = String(emp['Email Address'] || emp['Email'] || '').trim();
       const crewLead = String(emp['Crew Lead'] || '').trim();
 
+      const crewCheck = this.isEmployeeCrewDisciplineExcluded(name, jobNumber);
+      const isManualExcluded = this.excludedEmployeeMap.has(nameNorm);
+      const isExcluded = crewCheck.excluded || isManualExcluded;
+      const exclusionReason = crewCheck.excluded ? crewCheck.reason : (isManualExcluded ? 'Manually Excluded' : '');
+
+      if (locClean && locClean !== '—') locationSet.add(locClean);
+
       // Correlate with inventory
       const assignedGloves = findAssignedItems(gloveRows, name, altNames);
       const assignedSleeves = findAssignedItems(sleeveRows, name, altNames);
@@ -665,10 +752,10 @@ class RubberPpeTrackingEngine {
       const hasGloves = assignedGloves.length > 0;
       const hasSleeves = assignedSleeves.length > 0;
 
-      const missingGloves = !hasGloves;
-      // AP 1-3 ONLY need gloves, NOT sleeves.
-      // AP 4-7, JRY, SUP, GF, F need rubber gloves AND sleeves.
-      const missingSleeves = classMeta.needsSleeves && !hasSleeves;
+      // Only Electric and Office crews require rubber gloves and/or sleeves.
+      // Substation, Gas, and Mechanic crews are excluded.
+      const missingGloves = !crewCheck.excluded && !hasGloves;
+      const missingSleeves = !crewCheck.excluded && classMeta.needsSleeves && !hasSleeves;
 
       const isMissingBoth = missingGloves && missingSleeves;
       const isMissingAny = missingGloves || missingSleeves;
@@ -738,6 +825,9 @@ class RubberPpeTrackingEngine {
         isMissingAny,
         isFullyEquipped,
         isExcluded,
+        crewType: crewCheck.crewType,
+        isCrewDisciplineExcluded: crewCheck.excluded,
+        exclusionReason,
         gloveInNeeds,
         sleeveInNeeds,
         needsGlovesToPurchase,
@@ -1299,6 +1389,14 @@ class RubberPpeTrackingEngine {
           `).join('')}
         </div>
       `;
+    } else if (r.isCrewDisciplineExcluded) {
+      glovesCell = `
+        <div style="display: flex; align-items: center; gap: 5px;">
+          <span class="badge" style="background: rgba(148, 163, 184, 0.12); color: #94a3b8; border: 1px dashed rgba(148, 163, 184, 0.3); font-size: 10.5px; padding: 2px 7px; border-radius: 4px;" title="Discipline: ${this.escapeHtml(r.crewType || 'Exempt')} crews do not require rubber PPE">
+            ⚪ Not Required (${this.escapeHtml(r.crewType || 'Exempt')})
+          </span>
+        </div>
+      `;
     } else {
       glovesCell = `
         <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
@@ -1361,6 +1459,14 @@ class RubberPpeTrackingEngine {
           `).join('')}
         </div>
       `;
+    } else if (r.isCrewDisciplineExcluded) {
+      sleevesCell = `
+        <div style="display: flex; align-items: center; gap: 5px;">
+          <span class="badge" style="background: rgba(148, 163, 184, 0.12); color: #94a3b8; border: 1px dashed rgba(148, 163, 184, 0.3); font-size: 10.5px; padding: 2px 7px; border-radius: 4px;" title="Discipline: ${this.escapeHtml(r.crewType || 'Exempt')} crews do not require rubber PPE">
+            ⚪ Not Required (${this.escapeHtml(r.crewType || 'Exempt')})
+          </span>
+        </div>
+      `;
     } else {
       sleevesCell = `
         <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
@@ -1395,9 +1501,11 @@ class RubberPpeTrackingEngine {
     // Overall status pill
     let overallBadge = '';
     if (r.isExcluded) {
+      const badgeText = r.isCrewDisciplineExcluded ? `🚫 ${r.crewType || 'Exempt'} Crew` : '🚫 Excluded';
+      const badgeTitle = r.exclusionReason || 'Exempt / Excluded from Rubber PPE compliance tracking';
       overallBadge = `
-        <span class="badge" style="background: rgba(148, 163, 184, 0.18); color: #cbd5e1; border: 1px dashed rgba(148, 163, 184, 0.45); font-weight: 700; font-size: 11px; padding: 3px 8px; border-radius: 4px;" title="Exempt / Excluded from Rubber PPE compliance tracking">
-          🚫 Excluded
+        <span class="badge" style="background: rgba(148, 163, 184, 0.18); color: #cbd5e1; border: 1px dashed rgba(148, 163, 184, 0.45); font-weight: 700; font-size: 11px; padding: 3px 8px; border-radius: 4px;" title="${this.escapeHtml(badgeTitle)}">
+          ${this.escapeHtml(badgeText)}
         </span>
       `;
     } else if (r.isMissingBoth) {

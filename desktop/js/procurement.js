@@ -631,22 +631,58 @@ class ProcurementEngine {
 
   /**
    * Checks whether an employee is excluded from PPE compliance tracking
+   * (checks manual exclusions and crew discipline exclusions)
    */
   isEmployeePpeExcluded(empName) {
     if (!empName) return false;
     if (window.ppeTrackingEngine && typeof window.ppeTrackingEngine.isEmployeeExcluded === 'function') {
       return window.ppeTrackingEngine.isEmployeeExcluded(empName);
     }
+    // Fallback: check manual map
     try {
       const raw = localStorage.getItem('sa_ppe_excluded_employees');
       if (raw) {
         const arr = JSON.parse(raw);
         if (Array.isArray(arr)) {
           const norm = this.normalizeName(empName);
-          return arr.some(x => this.isNameMatch(this.normalizeName(x), norm));
+          if (arr.some(x => this.isNameMatch(this.normalizeName(x), norm))) return true;
         }
       }
     } catch { /* ignore */ }
+
+    // Fallback: check crew discipline from db
+    try {
+      const snap = (this.db && typeof this.db.getSnapshot === 'function')
+        ? this.db.getSnapshot()
+        : (window.localDB ? window.localDB.getSnapshot() : null);
+      const empTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('employees') : null) || snap?.tables?.['employees'];
+      const jtTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('job_tracking') : null) || snap?.tables?.['job_tracking'];
+
+      if (empTable && empTable.rows) {
+        const norm = this.normalizeName(empName);
+        const emp = empTable.rows.find(e => this.isNameMatch(this.normalizeName(e['Employee Name'] || e['Name'] || ''), norm));
+        if (emp) {
+          const jn = String(emp['Job Number'] || emp['Job #'] || '').replace(/\.\d+.*$/, '').trim();
+          if (jn) {
+            let crewType = '';
+            if (jtTable && jtTable.rows) {
+              const jt = jtTable.rows.find(j => {
+                const jNum = String(j['Job Number'] || j['Job #'] || Object.values(j)[0] || '').replace(/\.\d+.*$/, '').trim();
+                return jNum === jn;
+              });
+              if (jt && jt['Crew Type']) crewType = String(jt['Crew Type']).trim();
+            }
+            if (!crewType) {
+              if (jn.startsWith('005')) crewType = 'Office';
+              else crewType = 'Electric';
+            }
+            // Only Electric and Office require rubber PPE
+            if (crewType !== 'Electric' && crewType !== 'Office') return true;
+          }
+        }
+      }
+    } catch { /* ignore */ }
+
     return false;
   }
 
@@ -967,6 +1003,11 @@ class ProcurementEngine {
         // Filter out former / previous employees
         if (this.isDepartedOrPreviousEmployee(emp)) return;
         if (statLower.includes('reclaim') || statLower.includes('previous') || statLower.includes('departed')) return;
+
+        // Exclude personnel on non-Electric / non-Office crews from generating glove and sleeve purchase needs
+        if ((s.type === 'Gloves' || s.type === 'Sleeves') && !isShelfStock && this.isEmployeePpeExcluded(emp)) {
+          return;
+        }
 
         const empRec = getEmpRecord(emp);
 

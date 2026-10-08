@@ -858,12 +858,33 @@ class CrewImportEngine {
         }
       }
 
+      let crewType = '';
+      if (existingJobInDb && existingJobInDb['Crew Type']) {
+        crewType = String(existingJobInDb['Crew Type']).trim();
+      }
+      if (!crewType) {
+        const jNum = String(header.jobNumber || '').trim();
+        const searchStr = `${header.fullText} ${header.locationName} ${crewNote}`.toLowerCase();
+        if (jNum.startsWith('005') || searchStr.includes('office') || searchStr.includes('management') || searchStr.includes('admin') || physicalLoc.toLowerCase() === 'office') {
+          crewType = 'Office';
+        } else if (searchStr.includes('substation') || searchStr.includes('sub-station') || searchStr.includes('sub station')) {
+          crewType = 'Substation';
+        } else if (searchStr.includes('gas')) {
+          crewType = 'Gas';
+        } else if (searchStr.includes('mechanic') || searchStr.includes('shop') || searchStr.includes('garage') || searchStr.includes('fleet')) {
+          crewType = 'Mechanic';
+        } else {
+          crewType = 'Electric';
+        }
+      }
+
       this.parsedCrews.push({
         jobNumber: header.jobNumber,
         location: physicalLoc,
         originalLocation: header.locationName,
         fullHeaderText: header.fullText,
         crewNote: crewNote,
+        crewType: crewType,
         scheduleType: sched.type,
         scheduleLabel: sched.label,
         scheduleBadgeColor: sched.badgeColor,
@@ -3601,6 +3622,7 @@ class CrewImportEngine {
             'Location': physicalLoc,
             'Foreman': foremanName,
             'Crew Size': crewSize,
+            'Crew Type': crew.crewType || 'Electric',
             'Status': status,
             'Skip Sun': days.skipSun,
             'Skip Mon': days.skipMon,
@@ -3640,6 +3662,7 @@ class CrewImportEngine {
           jobRow['Location'] = physicalLoc;
           jobRow['Foreman'] = foremanName;
           jobRow['Crew Size'] = crewSize;
+          jobRow['Crew Type'] = crew.crewType || jobRow['Crew Type'] || 'Electric';
           jobRow['Status'] = finalStatus;
           jobRow['Skip Sun'] = days.skipSun;
           jobRow['Skip Mon'] = days.skipMon;
@@ -3673,6 +3696,7 @@ class CrewImportEngine {
             'Location': physicalLoc,
             'Foreman': foremanName,
             'Crew Size': crewSize,
+            'Crew Type': jobRow['Crew Type'],
             'Status': finalStatus,
             'Skip Sun': days.skipSun,
             'Skip Mon': days.skipMon,
@@ -4717,6 +4741,15 @@ class CrewImportEngine {
           </div>
           
           <div style="display: flex; align-items: center; gap: 6px;">
+            <!-- Crew Discipline Dropdown -->
+            <select class="form-control" style="font-size: 11px; font-weight: 700; padding: 3px 6px; background: var(--bg-primary); color: #60a5fa; border: 1px solid var(--border-color); border-radius: 4px; cursor: pointer;" onchange="window.crewImportEngine.setCrewType('${crew.jobNumber}', this.value)" title="Crew Discipline / Type (Electric and Office require rubber PPE)">
+              <option value="Electric" ${(crew.crewType || 'Electric') === 'Electric' ? 'selected' : ''}>⚡ Electric</option>
+              <option value="Substation" ${crew.crewType === 'Substation' ? 'selected' : ''}>🏗️ Substation</option>
+              <option value="Gas" ${crew.crewType === 'Gas' ? 'selected' : ''}>⛽ Gas</option>
+              <option value="Office" ${crew.crewType === 'Office' ? 'selected' : ''}>🏢 Office</option>
+              <option value="Mechanic" ${crew.crewType === 'Mechanic' ? 'selected' : ''}>🔧 Mechanic</option>
+            </select>
+
             <!-- Status Dropdown -->
             <select class="form-control" style="font-size: 11px; font-weight: 700; padding: 3px 6px; background: ${sStyle.bg}; color: ${sStyle.color}; border: 1px solid ${sStyle.border}; border-radius: 4px; cursor: pointer;" onchange="window.crewImportEngine.handleStatusChange('${crew.jobNumber}', this.value)">
               <option value="Active" ${status === 'Active' ? 'selected' : ''}>🟢 Active</option>
@@ -4965,6 +4998,14 @@ class CrewImportEngine {
 
     crew.scheduleDays[flagKey] = !crew.scheduleDays[flagKey];
     this.render();
+  }
+
+  setCrewType(jobNumber, newType) {
+    const crew = this.parsedCrews.find(c => c.jobNumber === jobNumber);
+    if (crew) {
+      crew.crewType = newType;
+      this.render();
+    }
   }
 
   handleStatusChange(jobNumber, newStatus) {

@@ -459,7 +459,8 @@ function setupJobTrackingSheet() {
     'Skip Days',            // W (hidden)
     'Schedule Effective',   // X (hidden)
     'Schedule History',     // Y (hidden)
-    'Job Name'              // Z (project/site name, distinct from Location city)
+    'Job Name',             // Z (project/site name, distinct from Location city)
+    'Crew Type'             // AA (Electric, Substation, Gas, Office, Mechanic)
   ];
 
   // Write headers
@@ -499,6 +500,7 @@ function setupJobTrackingSheet() {
   sheet.setColumnWidth(24, 130); // Schedule Effective (hidden)
   sheet.setColumnWidth(25, 200); // Schedule History (hidden)
   sheet.setColumnWidth(26, 200); // Job Name
+  sheet.setColumnWidth(27, 130); // Crew Type
 
   // Hide schedule history columns (V-Y = columns 22-25)
   sheet.hideColumns(22, 4);
@@ -513,6 +515,14 @@ function setupJobTrackingSheet() {
     .setAllowInvalid(true)
     .build();
   sheet.getRange(2, 10, 500, 1).setDataValidation(statusRule);
+
+  // Add data validation for Crew Type column (AA = column 27)
+  var crewTypeValues = ['Electric', 'Substation', 'Gas', 'Office', 'Mechanic'];
+  var crewTypeRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(crewTypeValues, true)
+    .setAllowInvalid(true)
+    .build();
+  sheet.getRange(2, 27, 500, 1).setDataValidation(crewTypeRule);
 
   // Add data validation for Work Schedule column (V = column 22)
   var scheduleValues = ['Mon-Thu', 'Tue-Fri', 'Mon-Fri', 'Custom'];

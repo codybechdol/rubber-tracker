@@ -656,8 +656,15 @@ function applyCrewChanges(changes) {
     Logger.log('applyCrewChanges: Received crewSchedules for ' + Object.keys(crewSchedules).length + ' crews');
   }
 
+  // Extract crewTypeMap — discipline choices from Crew Import (Electric, Substation, Gas, Office, Mechanic)
+  var crewTypeMap = {};
+  if (changes.length > 0 && (changes[0].crewTypeMap || changes[0].crewTypes)) {
+    crewTypeMap = changes[0].crewTypeMap || changes[0].crewTypes;
+    Logger.log('applyCrewChanges: Received crewTypeMap for ' + Object.keys(crewTypeMap).length + ' crews');
+  }
+
   // Sync with Job Tracking sheet if it exists
-  var jobTrackingResult = syncJobTrackingAfterImport(ss, jobNameMap, earlyActivatedJobs, crewSchedules);
+  var jobTrackingResult = syncJobTrackingAfterImport(ss, jobNameMap, earlyActivatedJobs, crewSchedules, crewTypeMap);
   var pendingJobs = [];
 
   if (jobTrackingResult) {
@@ -690,9 +697,10 @@ function applyCrewChanges(changes) {
  * @param {Array} earlyActivatedJobs - Jobs the user pre-confirmed as Active (activate in Job Tracking)
  * @return {Object} Result with message and pendingJobs array
  */
-function syncJobTrackingAfterImport(ss, jobNameMap, earlyActivatedJobs, crewSchedules) {
+function syncJobTrackingAfterImport(ss, jobNameMap, earlyActivatedJobs, crewSchedules, crewTypeMap) {
   earlyActivatedJobs = earlyActivatedJobs || [];
   crewSchedules = crewSchedules || {};
+  crewTypeMap = crewTypeMap || {};
   var jobSheet = ss.getSheetByName('Job Tracking');
   if (!jobSheet) {
     Logger.log('syncJobTrackingAfterImport: Job Tracking sheet not found, skipping');
@@ -1009,6 +1017,12 @@ function syncJobTrackingAfterImport(ss, jobNameMap, earlyActivatedJobs, crewSche
     if (jobNamesFilled > 0) {
       results.push(jobNamesFilled + ' Job Name(s) backfilled');
     }
+  }
+
+  // Backfill empty Crew Types from crewTypeMap or heuristics
+  var crewTypesFilled = backfillCrewTypesFromImport(jobSheet, crewTypeMap);
+  if (crewTypesFilled > 0) {
+    results.push(crewTypesFilled + ' Crew Type(s) set');
   }
 
   Logger.log('syncJobTrackingAfterImport: ' + results.join(', '));
@@ -1830,31 +1844,34 @@ function deriveScheduleLabel(row) {
  * @param {string} status - Status (Active, Pending Start, Completed, On Hold)
  * @return {Object} Result with success status and message
  */
-function addOrUpdateJobTracking(jobNumber, location, foreman, crewSize, startDate, status, jobName) {
+function addOrUpdateJobTracking(jobNumber, location, foreman, crewSize, startDate, status, jobName, crewType) {
   Logger.log('=== addOrUpdateJobTracking ===');
-  Logger.log('Job: ' + jobNumber + ', Location: ' + location + ', JobName: ' + (jobName || '(none)') + ', Status: ' + status + ', Start: ' + startDate);
+  Logger.log('Job: ' + jobNumber + ', Location: ' + location + ', JobName: ' + (jobName || '(none)') + ', CrewType: ' + (crewType || '(default)') + ', Status: ' + status + ', Start: ' + startDate);
 
   try {
     var ss = SpreadsheetApp.getActiveSpreadsheet();
     var jobSheet = ss.getSheetByName('Job Tracking');
 
     if (!jobSheet) {
-      // Create the sheet if it doesn't exist (21 visible columns + 4 hidden + 1 Job Name = 26 total)
+      // Create the sheet if it doesn't exist (21 visible columns + 4 hidden + 1 Job Name + 1 Crew Type = 27 total)
       jobSheet = ss.insertSheet('Job Tracking');
-      var headers = ['Job Number', 'Location', 'Foreman', 'Crew Size', 'Start Date', 'Put On Hold Date', 'Estimated Return', 'Est. End Date', 'Actual End Date', 'Status', 'Notes', 'Skip Sun', 'Skip Mon', 'Skip Tue', 'Skip Wed', 'Skip Thu', 'Skip Fri', 'Skip Sat', 'Skip Weekly Meeting', 'Skip Monthly Checklist', 'Last Updated', 'Work Schedule', 'Skip Days', 'Schedule Effective', 'Schedule History', 'Job Name'];
+      var headers = ['Job Number', 'Location', 'Foreman', 'Crew Size', 'Start Date', 'Put On Hold Date', 'Estimated Return', 'Est. End Date', 'Actual End Date', 'Status', 'Notes', 'Skip Sun', 'Skip Mon', 'Skip Tue', 'Skip Wed', 'Skip Thu', 'Skip Fri', 'Skip Sat', 'Skip Weekly Meeting', 'Skip Monthly Checklist', 'Last Updated', 'Work Schedule', 'Skip Days', 'Schedule Effective', 'Schedule History', 'Job Name', 'Crew Type'];
       jobSheet.getRange(1, 1, 1, headers.length).setValues([headers]);
       jobSheet.getRange(1, 1, 1, headers.length).setFontWeight('bold').setBackground('#1565c0').setFontColor('white');
       jobSheet.hideColumns(22, 4);  // Hide V-Y (Work Schedule through Schedule History)
-      Logger.log('Created Job Tracking sheet with 26 columns (includes Job Name)');
+      Logger.log('Created Job Tracking sheet with 27 columns (includes Job Name and Crew Type)');
     }
 
-    // Find Job Name column dynamically
+    // Find Job Name and Crew Type columns dynamically
     var allHeaders = jobSheet.getRange(1, 1, 1, jobSheet.getLastColumn()).getValues()[0];
     var jobNameCol = -1;
+    var crewTypeCol = -1;
     for (var h = 0; h < allHeaders.length; h++) {
-      if (String(allHeaders[h]).trim() === 'Job Name') { jobNameCol = h + 1; break; } // 1-based
+      var hText = String(allHeaders[h]).trim();
+      if (hText === 'Job Name') { jobNameCol = h + 1; } // 1-based
+      if (hText === 'Crew Type') { crewTypeCol = h + 1; } // 1-based
     }
-    Logger.log('addOrUpdateJobTracking: Sheet has ' + allHeaders.length + ' columns, jobNameCol=' + jobNameCol);
+    Logger.log('addOrUpdateJobTracking: Sheet has ' + allHeaders.length + ' columns, jobNameCol=' + jobNameCol + ', crewTypeCol=' + crewTypeCol);
 
     var data = jobSheet.getDataRange().getValues();
     Logger.log('addOrUpdateJobTracking: Sheet has ' + data.length + ' rows of data');
@@ -1897,6 +1914,10 @@ function addOrUpdateJobTracking(jobNumber, location, foreman, crewSize, startDat
       if (jobNameCol > 0 && jobName) {
         jobSheet.getRange(existingRow, jobNameCol).setValue(jobName);
       }
+      // Write Crew Type if column exists and value provided
+      if (crewTypeCol > 0 && crewType) {
+        jobSheet.getRange(existingRow, crewTypeCol).setValue(crewType);
+      }
 
       Logger.log('Updated existing job ' + jobNumber + ' at row ' + existingRow);
       return { success: true, message: 'Updated job ' + jobNumber, row: existingRow, action: 'updated' };
@@ -1926,12 +1947,14 @@ function addOrUpdateJobTracking(jobNumber, location, foreman, crewSize, startDat
         formattedTimestamp          // Last Updated (U)
       ];
 
-      // Pad to Job Name column if it exists
-      if (jobNameCol > 0) {
-        while (newRow.length < jobNameCol - 1) {
+      // Pad to Job Name and Crew Type columns if they exist
+      var maxSpecialCol = Math.max(jobNameCol, crewTypeCol);
+      if (maxSpecialCol > 0) {
+        while (newRow.length < maxSpecialCol) {
           newRow.push(''); // Pad hidden columns
         }
-        newRow.push(jobName || ''); // Job Name (Z or wherever it is)
+        if (jobNameCol > 0) newRow[jobNameCol - 1] = (jobName || '');
+        if (crewTypeCol > 0) newRow[crewTypeCol - 1] = (crewType || 'Electric');
       }
 
       jobSheet.appendRow(newRow);
@@ -1989,7 +2012,8 @@ function addNewJobsToTracking(jobsJson) {
       0,                 // crew size (unknown yet)
       job.startDate || '',  // start date (from pending start picker, or empty)
       jobStatus,         // 'Pending Start' or 'Active'
-      job.jobName        // Job Name field
+      job.jobName,       // Job Name field
+      job.crewType       // Crew Type field
     );
     result.jobNumber = job.jobNumber; // Attach job number to result for client-side tracking
     results.push(result);
@@ -2049,6 +2073,121 @@ function migrateJobTrackingAddJobName() {
   SpreadsheetApp.getUi().alert('✅ Added "Job Name" column at column ' + String.fromCharCode(64 + newCol) + '.\n\n' +
     'Job Names will be filled automatically during the next Crew Import.');
   Logger.log('migrateJobTrackingAddJobName: Added Job Name column at column ' + newCol);
+}
+
+/**
+ * Migration function: Adds "Crew Type" column to existing Job Tracking sheet (Column AA / 27).
+ * Safe to run multiple times (idempotent).
+ * Backfills default crew types for existing rows based on heuristics:
+ * - Office/005 -> Office
+ * - Substation -> Substation
+ * - Gas -> Gas
+ * - Mechanic/Shop -> Mechanic
+ * - Default -> Electric
+ *
+ * Menu: Glove Manager → 📥 Import Crew Makeup → 🏷️ Add Crew Type Column to Job Tracking
+ */
+function migrateJobTrackingAddCrewType() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName('Job Tracking');
+
+  if (!sheet) {
+    if (typeof SpreadsheetApp.getUi === 'function') {
+      try {
+        SpreadsheetApp.getUi().alert('Job Tracking sheet not found. Run Setup Job Tracking Sheet first.');
+      } catch (e) {
+        Logger.log('Job Tracking sheet not found.');
+      }
+    }
+    return;
+  }
+
+  var headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  var crewTypeCol = -1;
+
+  // Check if already exists
+  for (var i = 0; i < headers.length; i++) {
+    if (String(headers[i]).trim() === 'Crew Type') {
+      crewTypeCol = i + 1; // 1-based
+      break;
+    }
+  }
+
+  var newlyAdded = false;
+  if (crewTypeCol === -1) {
+    crewTypeCol = sheet.getLastColumn() + 1;
+    sheet.getRange(1, crewTypeCol).setValue('Crew Type');
+    sheet.getRange(1, crewTypeCol).setFontWeight('bold').setBackground('#1565c0').setFontColor('white');
+    sheet.setColumnWidth(crewTypeCol, 130);
+    newlyAdded = true;
+  }
+
+  // Set dropdown validation for Crew Type column (Electric, Substation, Gas, Office, Mechanic)
+  var crewTypeValues = ['Electric', 'Substation', 'Gas', 'Office', 'Mechanic'];
+  var crewTypeRule = SpreadsheetApp.newDataValidation()
+    .requireValueInList(crewTypeValues, true)
+    .setAllowInvalid(true)
+    .build();
+  var maxRows = Math.max(sheet.getMaxRows() - 1, 100);
+  sheet.getRange(2, crewTypeCol, maxRows, 1).setDataValidation(crewTypeRule);
+
+  // Backfill existing rows if blank
+  var lastRow = sheet.getLastRow();
+  var backfilledCount = 0;
+  if (lastRow > 1) {
+    var range = sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn());
+    var data = range.getValues();
+    var crewTypeIdx = crewTypeCol - 1;
+    var jobNameIdx = -1;
+    var locIdx = 1; // Col B
+    var notesIdx = 10; // Col K
+
+    for (var h = 0; h < headers.length; h++) {
+      if (String(headers[h]).trim() === 'Job Name') jobNameIdx = h;
+    }
+
+    var updates = false;
+    for (var r = 0; r < data.length; r++) {
+      var row = data[r];
+      var currentVal = String(row[crewTypeIdx] || '').trim();
+      if (!currentVal) {
+        var jNum = String(row[0] || '').trim();
+        var jLoc = String(row[locIdx] || '').trim().toLowerCase();
+        var jNotes = notesIdx < row.length ? String(row[notesIdx] || '').trim().toLowerCase() : '';
+        var jName = jobNameIdx >= 0 && jobNameIdx < row.length ? String(row[jobNameIdx] || '').trim().toLowerCase() : '';
+
+        var textBlob = (jNum + ' ' + jLoc + ' ' + jNotes + ' ' + jName).toLowerCase();
+        var assignedType = 'Electric';
+        if (jNum.indexOf('005') === 0 || textBlob.indexOf('office') !== -1 || textBlob.indexOf('light duty') !== -1) {
+          assignedType = 'Office';
+        } else if (textBlob.indexOf('substation') !== -1 || textBlob.indexOf('sub dock') !== -1 || textBlob.indexOf('sub ') !== -1) {
+          assignedType = 'Substation';
+        } else if (textBlob.indexOf('gas') !== -1) {
+          assignedType = 'Gas';
+        } else if (textBlob.indexOf('mechanic') !== -1 || textBlob.indexOf('shop') !== -1 || textBlob.indexOf('fleet') !== -1) {
+          assignedType = 'Mechanic';
+        }
+
+        row[crewTypeIdx] = assignedType;
+        backfilledCount++;
+        updates = true;
+      }
+    }
+
+    if (updates) {
+      range.setValues(data);
+    }
+  }
+
+  var msg = (newlyAdded ? '✅ Added "Crew Type" column at column ' + String.fromCharCode(64 + crewTypeCol) + '.\n\n' : '✅ "Crew Type" column verified at column ' + String.fromCharCode(64 + crewTypeCol) + '.\n\n') +
+    'Backfilled ' + backfilledCount + ' crew(s) with detected discipline (Electric, Substation, Gas, Office, Mechanic).';
+
+  Logger.log('migrateJobTrackingAddCrewType: ' + msg);
+  try {
+    SpreadsheetApp.getUi().alert(msg);
+  } catch (e) {
+    // Non-interactive context
+  }
 }
 
 /**
@@ -2250,6 +2389,78 @@ function backfillJobNamesFromImport(jobSheet, crewJobNameMap) {
   }
 
   Logger.log('backfillJobNamesFromImport: Filled ' + filledCount + ' Job Name(s)');
+  return filledCount;
+}
+
+/**
+ * Backfills empty "Crew Type" values in Job Tracking from Crew Import or discipline heuristics.
+ *
+ * @param {Sheet} jobSheet - Job Tracking sheet
+ * @param {Object} crewTypeMap - Optional map of jobNumber -> crewType
+ * @return {number} Number of crew types filled
+ */
+function backfillCrewTypesFromImport(jobSheet, crewTypeMap) {
+  if (!jobSheet) return 0;
+  crewTypeMap = crewTypeMap || {};
+
+  var headers = jobSheet.getRange(1, 1, 1, jobSheet.getLastColumn()).getValues()[0];
+  var crewTypeCol = -1;
+  var jobNameCol = -1;
+  var locationCol = 2; // B
+  var notesCol = 11; // K
+  for (var h = 0; h < headers.length; h++) {
+    var hdr = String(headers[h]).trim();
+    if (hdr === 'Crew Type') { crewTypeCol = h + 1; }
+    if (hdr === 'Job Name') { jobNameCol = h + 1; }
+  }
+
+  if (crewTypeCol === -1) {
+    return 0;
+  }
+
+  var data = jobSheet.getDataRange().getValues();
+  var filledCount = 0;
+  var dataModified = false;
+
+  for (var i = 1; i < data.length; i++) {
+    var jobNumber = String(data[i][0] || '').trim();
+    var currentCrewType = String(data[i][crewTypeCol - 1] || '').trim();
+
+    // Only backfill if currently empty
+    if (jobNumber && !currentCrewType) {
+      var assignedType = 'Electric';
+      if (crewTypeMap[jobNumber]) {
+        assignedType = crewTypeMap[jobNumber];
+      } else {
+        var jLoc = String(data[i][locationCol - 1] || '').toLowerCase();
+        var jNotes = String(data[i][notesCol - 1] || '').toLowerCase();
+        var jName = jobNameCol > 0 ? String(data[i][jobNameCol - 1] || '').toLowerCase() : '';
+        var textBlob = (jobNumber + ' ' + jLoc + ' ' + jNotes + ' ' + jName).toLowerCase();
+
+        if (jobNumber.indexOf('005') === 0 || textBlob.indexOf('office') !== -1 || textBlob.indexOf('light duty') !== -1) {
+          assignedType = 'Office';
+        } else if (textBlob.indexOf('substation') !== -1 || textBlob.indexOf('sub dock') !== -1 || textBlob.indexOf('sub ') !== -1) {
+          assignedType = 'Substation';
+        } else if (textBlob.indexOf('gas') !== -1) {
+          assignedType = 'Gas';
+        } else if (textBlob.indexOf('mechanic') !== -1 || textBlob.indexOf('shop') !== -1 || textBlob.indexOf('fleet') !== -1) {
+          assignedType = 'Mechanic';
+        }
+      }
+
+      data[i][crewTypeCol - 1] = assignedType;
+      dataModified = true;
+      filledCount++;
+      Logger.log('backfillCrewTypesFromImport: ' + jobNumber + ' → "' + assignedType + '"');
+    }
+  }
+
+  if (dataModified) {
+    var crewTypeValues = data.map(function(row) { return [row[crewTypeCol - 1]]; });
+    jobSheet.getRange(1, crewTypeCol, data.length, 1).setValues(crewTypeValues);
+    Logger.log('backfillCrewTypesFromImport: Batch wrote Crew Type column');
+  }
+
   return filledCount;
 }
 

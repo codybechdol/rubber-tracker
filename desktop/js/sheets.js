@@ -2280,12 +2280,32 @@ class SheetNavigator {
       }
       const hasNumberingIssue = duplicateSuffixes.length > 0 || hasGaps;
 
+      // Crew Type / Discipline (Electric, Substation, Gas, Office, Mechanic)
+      let crewType = (jt && jt['Crew Type']) ? String(jt['Crew Type']).trim() : '';
+      if (!crewType) {
+        const bn = String(baseJob || '').trim();
+        const jnLower = String(jobName || '').toLowerCase();
+        const locLower = String(loc || '').toLowerCase();
+        if (bn.startsWith('005') || jnLower.includes('office') || jnLower.includes('management') || jnLower.includes('admin') || locLower === 'office') {
+          crewType = 'Office';
+        } else if (jnLower.includes('substation') || jnLower.includes('sub-station') || jnLower.includes('sub station')) {
+          crewType = 'Substation';
+        } else if (jnLower.includes('gas')) {
+          crewType = 'Gas';
+        } else if (jnLower.includes('mechanic') || jnLower.includes('shop') || jnLower.includes('garage') || jnLower.includes('fleet')) {
+          crewType = 'Mechanic';
+        } else {
+          crewType = 'Electric';
+        }
+      }
+
       crewCards.push({
         baseJob,
         jobNumber: (jt && jt['Job Number']) ? String(jt['Job Number']).trim() : baseJob,
         location: loc,
         foreman,
         status,
+        crewType,
         schedule,
         jobName,
         isSkipSun, isSkipMon, isSkipTue, isSkipWed, isSkipThu, isSkipFri, isSkipSat,
@@ -2529,6 +2549,26 @@ class SheetNavigator {
         return `<span class="badge" style="background: var(--bg-tertiary); color: var(--text-muted); font-size: 10px; padding: 2px 6px; border-radius: 4px;">${this.escapeHtml(stat)}</span>`;
       };
 
+      const getCrewTypeBadge = (type) => {
+        const t = String(type || 'Electric').trim();
+        if (t === 'Electric') {
+          return `<span class="badge" style="background: rgba(14, 165, 233, 0.15); color: #38bdf8; border: 1px solid rgba(14, 165, 233, 0.35); font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px;" title="Discipline: Electric (Rubber PPE required)">⚡ Electric</span>`;
+        }
+        if (t === 'Substation') {
+          return `<span class="badge" style="background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.35); font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px;" title="Discipline: Substation (No Rubber PPE required)">🏗️ Substation</span>`;
+        }
+        if (t === 'Gas') {
+          return `<span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.35); font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px;" title="Discipline: Gas (No Rubber PPE required)">⛽ Gas</span>`;
+        }
+        if (t === 'Office') {
+          return `<span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.35); font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px;" title="Discipline: Office (Rubber PPE required)">🏢 Office</span>`;
+        }
+        if (t === 'Mechanic') {
+          return `<span class="badge" style="background: rgba(148, 163, 184, 0.2); color: #94a3b8; border: 1px solid rgba(148, 163, 184, 0.35); font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px;" title="Discipline: Mechanic (No Rubber PPE required)">🔧 Mechanic</span>`;
+        }
+        return `<span class="badge" style="background: var(--bg-tertiary); color: var(--text-muted); font-size: 10px; padding: 2px 6px; border-radius: 4px;">${this.escapeHtml(t)}</span>`;
+      };
+
       if (isEditing) {
         // INLINE EDIT MODE
         return `
@@ -2551,7 +2591,7 @@ class SheetNavigator {
 
             <!-- Form Fields -->
             <div style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px;">
-              <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+              <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;">
                 <div>
                   <label style="font-size: 10.5px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 3px;">📍 Location</label>
                   <input type="text" id="edit-crew-loc-${this.escapeHtml(crew.baseJob)}" value="${this.escapeHtml(crew.location)}" list="dl-crew-locations"
@@ -2565,6 +2605,17 @@ class SheetNavigator {
                     <option value="Pending Start" ${crew.status === 'Pending Start' ? 'selected' : ''}>🟡 Pending Start</option>
                     <option value="On Hold" ${crew.status === 'On Hold' ? 'selected' : ''}>⏸️ On Hold</option>
                     <option value="Completed" ${crew.status === 'Completed' ? 'selected' : ''}>🏁 Completed</option>
+                  </select>
+                </div>
+                <div>
+                  <label style="font-size: 10.5px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 3px;">Discipline / Type</label>
+                  <select id="edit-crew-type-${this.escapeHtml(crew.baseJob)}"
+                          style="width: 100%; box-sizing: border-box; padding: 5px 8px; font-size: 12px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary);">
+                    <option value="Electric" ${crew.crewType === 'Electric' ? 'selected' : ''}>⚡ Electric</option>
+                    <option value="Substation" ${crew.crewType === 'Substation' ? 'selected' : ''}>🏗️ Substation</option>
+                    <option value="Gas" ${crew.crewType === 'Gas' ? 'selected' : ''}>⛽ Gas</option>
+                    <option value="Office" ${crew.crewType === 'Office' ? 'selected' : ''}>🏢 Office</option>
+                    <option value="Mechanic" ${crew.crewType === 'Mechanic' ? 'selected' : ''}>🔧 Mechanic</option>
                   </select>
                 </div>
               </div>
@@ -2658,6 +2709,7 @@ class SheetNavigator {
                   ${this.escapeHtml(crew.jobNumber)}
                 </span>
                 ${getStatusBadge(crew.status)}
+                ${getCrewTypeBadge(crew.crewType)}
               </div>
               ${crew.jobName ? `
                 <div style="font-size: 11px; color: var(--text-muted); margin-top: 3px; font-weight: 500;">
@@ -3695,6 +3747,7 @@ class SheetNavigator {
 
     const locInput = document.getElementById(`edit-crew-loc-${baseJob}`);
     const statusSelect = document.getElementById(`edit-crew-status-${baseJob}`);
+    const typeSelect = document.getElementById(`edit-crew-type-${baseJob}`);
     const jobNameInput = document.getElementById(`edit-crew-jobname-${baseJob}`);
     const foremanSelect = document.getElementById(`edit-crew-foreman-${baseJob}`);
     const schedSelect = document.getElementById(`edit-crew-sched-${baseJob}`);
@@ -3706,6 +3759,7 @@ class SheetNavigator {
 
     const newLoc = locInput ? locInput.value.trim() : (jt?.Location || 'Helena');
     const newStatus = statusSelect ? statusSelect.value.trim() : (jt?.Status || 'Active');
+    const newCrewType = typeSelect ? typeSelect.value.trim() : (jt?.['Crew Type'] || 'Electric');
     const newJobName = jobNameInput ? jobNameInput.value.trim() : (jt?.['Job Name'] || '');
     const newForeman = foremanSelect ? foremanSelect.value.trim() : (jt?.Foreman || '');
     const newSchedule = schedSelect ? schedSelect.value.trim() : (jt?.['Work Schedule'] || 'Mon-Thu (4 10s)');
@@ -3727,6 +3781,7 @@ class SheetNavigator {
     if (jt) {
       jt['Location'] = newLoc;
       jt['Status'] = newStatus;
+      jt['Crew Type'] = newCrewType;
       jt['Job Name'] = newJobName;
       jt['Foreman'] = newForeman;
       jt['Work Schedule'] = newSchedule;
@@ -3755,6 +3810,7 @@ class SheetNavigator {
         updatedFields: {
           'Location': newLoc,
           'Status': newStatus,
+          'Crew Type': newCrewType,
           'Job Name': newJobName,
           'Foreman': newForeman,
           'Work Schedule': newSchedule,
@@ -5423,6 +5479,38 @@ class SheetNavigator {
             customCellHtml = `<span style="cursor: pointer; font-size: 14px;" data-toggle-checkbox="${sheetRowIdx}" data-col="${colIdx + 1}" data-sheet="${this.escapeHtml(tableData.name)}" data-header="${this.escapeHtml(h)}">${isChecked ? '☑️' : '⬜'}</span>`;
           } else if (hLower.includes('job number') || hLower === 'job #') {
             customCellHtml = `<span style="font-family: monospace; font-weight: bold; color: #60a5fa;">${this.escapeHtml(val)}</span>`;
+          } else if (hLower === 'crew type' || hLower === 'crew discipline' || hLower === 'discipline') {
+            const typeStr = String(val || 'Electric').trim();
+            let badgeBg = 'rgba(14, 165, 233, 0.15)';
+            let textColor = '#38bdf8';
+            let borderColor = 'rgba(14, 165, 233, 0.35)';
+            let icon = '⚡';
+            if (typeStr === 'Substation') {
+              badgeBg = 'rgba(168, 85, 247, 0.15)';
+              textColor = '#c084fc';
+              borderColor = 'rgba(168, 85, 247, 0.35)';
+              icon = '🏗️';
+            } else if (typeStr === 'Gas') {
+              badgeBg = 'rgba(245, 158, 11, 0.15)';
+              textColor = '#fbbf24';
+              borderColor = 'rgba(245, 158, 11, 0.35)';
+              icon = '⛽';
+            } else if (typeStr === 'Office') {
+              badgeBg = 'rgba(16, 185, 129, 0.15)';
+              textColor = '#34d399';
+              borderColor = 'rgba(16, 185, 129, 0.35)';
+              icon = '🏢';
+            } else if (typeStr === 'Mechanic') {
+              badgeBg = 'rgba(148, 163, 184, 0.2)';
+              textColor = '#94a3b8';
+              borderColor = 'rgba(148, 163, 184, 0.35)';
+              icon = '🔧';
+            }
+            customCellHtml = `
+              <span class="badge" style="background: ${badgeBg}; color: ${textColor}; border: 1px solid ${borderColor}; padding: 2px 7px; border-radius: 4px; font-weight: 700; font-size: 11px;">
+                ${icon} ${this.escapeHtml(typeStr)}
+              </span>
+            `;
           }
         }
 
@@ -7884,6 +7972,7 @@ class SheetNavigator {
 
     const today = new Date().toISOString().split('T')[0];
     const currentStatus = String(row['Status'] || 'Active').trim();
+    const currentCrewType = String(row['Crew Type'] || 'Electric').trim();
     const loc = row['Location'] || '';
     const foreman = row['Foreman'] || '';
 
@@ -7912,6 +8001,18 @@ class SheetNavigator {
               </div>
             </div>
             <button onclick="document.getElementById('job-lifecycle-sheet-modal').remove()" style="background: none; border: none; color: var(--text-muted); font-size: 20px; cursor: pointer;">✕</button>
+          </div>
+
+          <!-- Crew Discipline / Type Selector -->
+          <div style="margin-bottom: 16px;">
+            <label style="font-size: 12px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 6px;">Crew Discipline / Type:</label>
+            <select id="job-modal-crew-type" class="form-control" style="width: 100%; box-sizing: border-box; padding: 7px 10px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 6px; font-size: 12.5px; font-weight: 700;">
+              <option value="Electric" ${currentCrewType === 'Electric' ? 'selected' : ''}>⚡ Electric (Rubber PPE Required)</option>
+              <option value="Substation" ${currentCrewType === 'Substation' ? 'selected' : ''}>🏗️ Substation (No Rubber PPE)</option>
+              <option value="Gas" ${currentCrewType === 'Gas' ? 'selected' : ''}>⛽ Gas (No Rubber PPE)</option>
+              <option value="Office" ${currentCrewType === 'Office' ? 'selected' : ''}>🏢 Office (Rubber PPE Required)</option>
+              <option value="Mechanic" ${currentCrewType === 'Mechanic' ? 'selected' : ''}>🔧 Mechanic (No Rubber PPE)</option>
+            </select>
           </div>
 
           <!-- Status Selector -->
@@ -8038,9 +8139,11 @@ class SheetNavigator {
 
     const selectedRadio = document.querySelector('input[name="job-target-status"]:checked');
     const targetStatus = selectedRadio ? selectedRadio.value : 'Active';
+    const targetCrewType = document.getElementById('job-modal-crew-type')?.value || 'Electric';
     const todayFormatted = new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
 
     row['Status'] = targetStatus;
+    row['Crew Type'] = targetCrewType;
     row['Skip Sun'] = document.getElementById('skip-sun').checked;
     row['Skip Mon'] = document.getElementById('skip-mon').checked;
     row['Skip Tue'] = document.getElementById('skip-tue').checked;
@@ -8084,6 +8187,7 @@ class SheetNavigator {
       itemIdentifier: jobNum,
       updatedFields: {
         'Status': row['Status'],
+        'Crew Type': targetCrewType,
         'Skip Sun': row['Skip Sun'],
         'Skip Mon': row['Skip Mon'],
         'Skip Tue': row['Skip Tue'],
