@@ -2549,24 +2549,56 @@ class SheetNavigator {
         return `<span class="badge" style="background: var(--bg-tertiary); color: var(--text-muted); font-size: 10px; padding: 2px 6px; border-radius: 4px;">${this.escapeHtml(stat)}</span>`;
       };
 
-      const getCrewTypeBadge = (type) => {
+      const getCrewTypeBadge = (type, baseJob) => {
         const t = String(type || 'Electric').trim();
-        if (t === 'Electric') {
-          return `<span class="badge" style="background: rgba(14, 165, 233, 0.15); color: #38bdf8; border: 1px solid rgba(14, 165, 233, 0.35); font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px;" title="Discipline: Electric (Rubber PPE required)">⚡ Electric</span>`;
-        }
+        let bg = 'rgba(14, 165, 233, 0.15)';
+        let color = '#38bdf8';
+        let border = 'rgba(14, 165, 233, 0.35)';
+        let icon = '⚡';
+        let title = 'Discipline: Electric (Rubber PPE required)';
         if (t === 'Substation') {
-          return `<span class="badge" style="background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.35); font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px;" title="Discipline: Substation (No Rubber PPE required)">🏗️ Substation</span>`;
+          bg = 'rgba(168, 85, 247, 0.15)';
+          color = '#c084fc';
+          border = 'rgba(168, 85, 247, 0.35)';
+          icon = '🏗️';
+          title = 'Discipline: Substation (No Rubber PPE required)';
+        } else if (t === 'Gas') {
+          bg = 'rgba(245, 158, 11, 0.15)';
+          color = '#fbbf24';
+          border = 'rgba(245, 158, 11, 0.35)';
+          icon = '⛽';
+          title = 'Discipline: Gas (No Rubber PPE required)';
+        } else if (t === 'Office') {
+          bg = 'rgba(16, 185, 129, 0.15)';
+          color = '#34d399';
+          border = 'rgba(16, 185, 129, 0.35)';
+          icon = '🏢';
+          title = 'Discipline: Office (Rubber PPE required)';
+        } else if (t === 'Mechanic') {
+          bg = 'rgba(148, 163, 184, 0.2)';
+          color = '#94a3b8';
+          border = 'rgba(148, 163, 184, 0.35)';
+          icon = '🔧';
+          title = 'Discipline: Mechanic (No Rubber PPE required)';
         }
-        if (t === 'Gas') {
-          return `<span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.35); font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px;" title="Discipline: Gas (No Rubber PPE required)">⛽ Gas</span>`;
+
+        if (!baseJob || window.currentRoleMode === 'view_only') {
+          return `<span class="badge" style="background: ${bg}; color: ${color}; border: 1px solid ${border}; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px;" title="${title}">${icon} ${this.escapeHtml(t)}</span>`;
         }
-        if (t === 'Office') {
-          return `<span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.35); font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px;" title="Discipline: Office (Rubber PPE required)">🏢 Office</span>`;
-        }
-        if (t === 'Mechanic') {
-          return `<span class="badge" style="background: rgba(148, 163, 184, 0.2); color: #94a3b8; border: 1px solid rgba(148, 163, 184, 0.35); font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px;" title="Discipline: Mechanic (No Rubber PPE required)">🔧 Mechanic</span>`;
-        }
-        return `<span class="badge" style="background: var(--bg-tertiary); color: var(--text-muted); font-size: 10px; padding: 2px 6px; border-radius: 4px;">${this.escapeHtml(t)}</span>`;
+
+        return `
+          <select class="crew-type-select-badge"
+                  title="Discipline: Click to assign Electric, Substation, Gas, Office, or Mechanic to Job ${this.escapeHtml(baseJob)}"
+                  onclick="event.stopPropagation()"
+                  onchange="window.sheetNavigator.quickChangeCrewType('${this.escapeJs(baseJob)}', this.value)"
+                  style="background: ${bg}; color: ${color}; border: 1px solid ${border}; font-size: 10.5px; font-weight: 700; padding: 2px 6px; border-radius: 4px; cursor: pointer; outline: none; transition: all 0.2s ease;">
+            <option value="Electric" ${t === 'Electric' ? 'selected' : ''}>⚡ Electric</option>
+            <option value="Substation" ${t === 'Substation' ? 'selected' : ''}>🏗️ Substation</option>
+            <option value="Gas" ${t === 'Gas' ? 'selected' : ''}>⛽ Gas</option>
+            <option value="Office" ${t === 'Office' ? 'selected' : ''}>🏢 Office</option>
+            <option value="Mechanic" ${t === 'Mechanic' ? 'selected' : ''}>🔧 Mechanic</option>
+          </select>
+        `;
       };
 
       if (isEditing) {
@@ -2709,7 +2741,7 @@ class SheetNavigator {
                   ${this.escapeHtml(crew.jobNumber)}
                 </span>
                 ${getStatusBadge(crew.status)}
-                ${getCrewTypeBadge(crew.crewType)}
+                ${getCrewTypeBadge(crew.crewType, crew.baseJob)}
               </div>
               ${crew.jobName ? `
                 <div style="font-size: 11px; color: var(--text-muted); margin-top: 3px; font-weight: 500;">
@@ -4077,6 +4109,99 @@ class SheetNavigator {
     }
   }
 
+  async quickChangeCrewType(baseJob, newType) {
+    if (!baseJob || !newType) return;
+    const cleanJob = String(baseJob || '').trim().replace(/\.\d+.*$/, '');
+    const jtTable = this.db.getTable('job_tracking');
+    if (!jtTable) return;
+
+    if (!jtTable.rows) jtTable.rows = [];
+    if (!jtTable.headers) jtTable.headers = [];
+    if (!jtTable.headers.some(h => String(h).trim().toLowerCase() === 'crew type')) {
+      jtTable.headers.push('Crew Type');
+    }
+
+    let targetRow = jtTable.rows.find(j => {
+      const jn = String(j['Job Number'] || j['Job #'] || j['Crew'] || '').trim();
+      return jn === cleanJob || jn.replace(/\.\d+.*$/, '').trim() === cleanJob;
+    });
+
+    const todayFormatted = new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+
+    if (!targetRow) {
+      targetRow = {
+        'Job Number': cleanJob,
+        'Location': 'Helena',
+        'Status': 'Active',
+        'Crew Type': newType,
+        'Work Schedule': 'Mon-Thu (4 10s)',
+        'Skip Sun': true,
+        'Skip Mon': false,
+        'Skip Tue': false,
+        'Skip Wed': false,
+        'Skip Thu': false,
+        'Skip Fri': true,
+        'Skip Sat': true,
+        'Skip Weekly Meeting': false,
+        'Skip Monthly Checklist': false,
+        'Last Updated': todayFormatted
+      };
+      targetRow._rowIdx = (jtTable.rows.length || 0) + 2;
+      jtTable.rows.push(targetRow);
+      if (jtTable.rawGrid) {
+        jtTable.rawGrid.push(jtTable.headers.map(h => targetRow[h] !== undefined ? targetRow[h] : ''));
+      }
+      await this.db.addMutation({
+        action: 'ADD_ROW',
+        sheetName: jtTable.name || 'Job Tracking',
+        tableKey: 'job_tracking',
+        rowData: targetRow
+      });
+    } else {
+      const oldType = targetRow['Crew Type'] || 'Electric';
+      if (oldType === newType) return;
+
+      targetRow['Crew Type'] = newType;
+      targetRow['Last Updated'] = todayFormatted;
+
+      const rowIdx = targetRow._rowIdx || (jtTable.rows.indexOf(targetRow) + 2);
+      if (jtTable.rawGrid && jtTable.rawGrid[rowIdx - 1]) {
+        jtTable.rawGrid[rowIdx - 1] = jtTable.headers.map(h => targetRow[h] !== undefined ? targetRow[h] : '');
+      }
+
+      await this.db.addMutation({
+        action: 'UPDATE_ROW',
+        sheetName: jtTable.name || 'Job Tracking',
+        tableKey: 'job_tracking',
+        itemIdentifier: cleanJob,
+        row: rowIdx,
+        updatedFields: {
+          'Crew Type': newType,
+          'Last Updated': todayFormatted
+        }
+      });
+    }
+
+    if (typeof this.db.saveLocalSnapshot === 'function') {
+      await this.db.saveLocalSnapshot();
+    } else if (typeof this.db.persistSnapshot === 'function') {
+      await this.db.persistSnapshot(this.db.snapshot);
+    }
+
+    // Refresh dependent audit / procurement models
+    if (window.ppeTrackingEngine && typeof window.ppeTrackingEngine.compileAuditData === 'function') {
+      window.ppeTrackingEngine.compileAuditData();
+    }
+    if (window.procurementEngine && typeof window.procurementEngine.buildPurchaseNeeds === 'function') {
+      window.procurementEngine.buildPurchaseNeeds();
+    }
+
+    this.renderCurrentSheet();
+    if (typeof window.showToast === 'function') {
+      window.showToast(`✅ Updated Crew ${cleanJob} to ${newType}`);
+    }
+  }
+
   promptChangeMemberSlot(empName, currentSlot, baseJob) {
     const currentSuffix = (currentSlot.match(/\.(\d+)/) || [])[1] || '1';
     const newSuffix = prompt(`Edit slot suffix for ${empName} on Job ${baseJob}:\n\nEnter position number (e.g. 1, 2, 3...):`, currentSuffix);
@@ -4406,6 +4531,10 @@ class SheetNavigator {
   renderStandardTable(container, countBadge, tableData) {
     if (!tableData) {
       tableData = this.db.getTable(this.currentSheetKey) || { headers: [], rows: [] };
+    }
+    const isJobTracking = this.currentSheetKey === 'job_tracking';
+    if (isJobTracking && tableData.headers && !tableData.headers.some(h => String(h).trim().toLowerCase() === 'crew type')) {
+      tableData.headers.push('Crew Type');
     }
     const headers = tableData.headers || [];
     let rows = [...(tableData.rows || [])];
@@ -5334,7 +5463,6 @@ class SheetNavigator {
     }
     html += `</tr></thead><tbody>`;
 
-    const isJobTracking = this.currentSheetKey === 'job_tracking';
     const isCompliance = this.currentSheetKey === 'safety_compliance';
     const isEmployees = this.currentSheetKey === 'employees';
     const isTraining = this.currentSheetKey === 'training_tracking';
@@ -5474,43 +5602,61 @@ class SheetNavigator {
                 <button class="btn btn-secondary" style="padding: 1px 5px; font-size: 10px; border-radius: 3px; cursor: pointer;" title="Manage Job Lifecycle / Schedule" onclick="window.sheetNavigator.showJobLifecycleModal('${this.escapeHtml(jobNum)}')">⚙️</button>
               </div>
             `;
-          } else if (hLower.startsWith('skip ')) {
+          } else if (hLower.startsWith('skip ') && hLower !== 'skip days') {
             const isChecked = val === true || val === 'TRUE' || val === 'true';
             customCellHtml = `<span style="cursor: pointer; font-size: 14px;" data-toggle-checkbox="${sheetRowIdx}" data-col="${colIdx + 1}" data-sheet="${this.escapeHtml(tableData.name)}" data-header="${this.escapeHtml(h)}">${isChecked ? '☑️' : '⬜'}</span>`;
+          } else if (hLower === 'skip days') {
+            const sDays = String(val || '').trim();
+            customCellHtml = `<span style="font-size: 11px; color: var(--text-secondary); font-family: monospace;">${this.escapeHtml(sDays || '—')}</span>`;
           } else if (hLower.includes('job number') || hLower === 'job #') {
             customCellHtml = `<span style="font-family: monospace; font-weight: bold; color: #60a5fa;">${this.escapeHtml(val)}</span>`;
           } else if (hLower === 'crew type' || hLower === 'crew discipline' || hLower === 'discipline') {
-            const typeStr = String(val || 'Electric').trim();
+            let typeStr = String(val || '').trim();
+            if (!typeStr) {
+              const bn = String(row['Job Number'] || row['Job #'] || row['Crew'] || '').trim();
+              const jnLower = String(row['Job Name'] || '').toLowerCase();
+              const locLower = String(row['Location'] || row['City'] || '').toLowerCase();
+              if (bn.startsWith('005') || jnLower.includes('office') || jnLower.includes('management') || jnLower.includes('admin') || locLower === 'office') {
+                typeStr = 'Office';
+              } else if (jnLower.includes('substation') || jnLower.includes('sub-station') || jnLower.includes('sub station')) {
+                typeStr = 'Substation';
+              } else if (jnLower.includes('gas')) {
+                typeStr = 'Gas';
+              } else if (jnLower.includes('mechanic') || jnLower.includes('shop') || jnLower.includes('garage') || jnLower.includes('fleet')) {
+                typeStr = 'Mechanic';
+              } else {
+                typeStr = 'Electric';
+              }
+            }
+            const jobNum = String(row['Job Number'] || row['Job #'] || row['Crew'] || '').trim();
             let badgeBg = 'rgba(14, 165, 233, 0.15)';
             let textColor = '#38bdf8';
             let borderColor = 'rgba(14, 165, 233, 0.35)';
-            let icon = '⚡';
-            if (typeStr === 'Substation') {
-              badgeBg = 'rgba(168, 85, 247, 0.15)';
-              textColor = '#c084fc';
-              borderColor = 'rgba(168, 85, 247, 0.35)';
-              icon = '🏗️';
-            } else if (typeStr === 'Gas') {
-              badgeBg = 'rgba(245, 158, 11, 0.15)';
-              textColor = '#fbbf24';
-              borderColor = 'rgba(245, 158, 11, 0.35)';
-              icon = '⛽';
-            } else if (typeStr === 'Office') {
-              badgeBg = 'rgba(16, 185, 129, 0.15)';
-              textColor = '#34d399';
-              borderColor = 'rgba(16, 185, 129, 0.35)';
-              icon = '🏢';
-            } else if (typeStr === 'Mechanic') {
-              badgeBg = 'rgba(148, 163, 184, 0.2)';
-              textColor = '#94a3b8';
-              borderColor = 'rgba(148, 163, 184, 0.35)';
-              icon = '🔧';
+            if (typeStr === 'Substation') { badgeBg = 'rgba(168, 85, 247, 0.15)'; textColor = '#c084fc'; borderColor = 'rgba(168, 85, 247, 0.35)'; }
+            else if (typeStr === 'Gas') { badgeBg = 'rgba(245, 158, 11, 0.15)'; textColor = '#fbbf24'; borderColor = 'rgba(245, 158, 11, 0.35)'; }
+            else if (typeStr === 'Office') { badgeBg = 'rgba(16, 185, 129, 0.15)'; textColor = '#34d399'; borderColor = 'rgba(16, 185, 129, 0.35)'; }
+            else if (typeStr === 'Mechanic') { badgeBg = 'rgba(148, 163, 184, 0.2)'; textColor = '#94a3b8'; borderColor = 'rgba(148, 163, 184, 0.35)'; }
+
+            if (window.currentRoleMode === 'view_only') {
+              customCellHtml = `
+                <span class="badge" style="background: ${badgeBg}; color: ${textColor}; border: 1px solid ${borderColor}; padding: 2px 7px; border-radius: 4px; font-weight: 700; font-size: 11px;">
+                  ${this.escapeHtml(typeStr)}
+                </span>
+              `;
+            } else {
+              customCellHtml = `
+                <select class="crew-type-table-select"
+                        onclick="event.stopPropagation()"
+                        onchange="window.sheetNavigator.quickChangeCrewType('${this.escapeJs(jobNum)}', this.value)"
+                        style="background: var(--bg-primary); color: ${textColor}; border: 1px solid ${borderColor}; padding: 3px 8px; border-radius: 6px; font-weight: 700; font-size: 11.5px; cursor: pointer; outline: none;">
+                  <option value="Electric" ${typeStr === 'Electric' ? 'selected' : ''}>⚡ Electric</option>
+                  <option value="Substation" ${typeStr === 'Substation' ? 'selected' : ''}>🏗️ Substation</option>
+                  <option value="Gas" ${typeStr === 'Gas' ? 'selected' : ''}>⛽ Gas</option>
+                  <option value="Office" ${typeStr === 'Office' ? 'selected' : ''}>🏢 Office</option>
+                  <option value="Mechanic" ${typeStr === 'Mechanic' ? 'selected' : ''}>🔧 Mechanic</option>
+                </select>
+              `;
             }
-            customCellHtml = `
-              <span class="badge" style="background: ${badgeBg}; color: ${textColor}; border: 1px solid ${borderColor}; padding: 2px 7px; border-radius: 4px; font-weight: 700; font-size: 11px;">
-                ${icon} ${this.escapeHtml(typeStr)}
-              </span>
-            `;
           }
         }
 
@@ -5735,7 +5881,8 @@ class SheetNavigator {
 
         const isSmsCol = hLower.includes('sms');
         const isLocationNameCol = (this.currentSheetKey === 'locations' && (colIdx === 0 || hLower === 'location'));
-        const isEditable = !isPrimaryItemCol && !isEmployeeNameCol && !isLocationNameCol && !isSmsCol && !hLower.includes('change out') && !hLower.startsWith('skip ') && window.currentRoleMode !== 'view_only';
+        const isCrewTypeCol = ['crew type', 'crew discipline', 'discipline'].includes(hLower);
+        const isEditable = !isPrimaryItemCol && !isEmployeeNameCol && !isLocationNameCol && !isSmsCol && !isCrewTypeCol && !hLower.includes('change out') && !hLower.startsWith('skip ') && window.currentRoleMode !== 'view_only';
         let itemIdentifier = '';
         if (this.currentSheetKey === 'expiring_certs') {
           itemIdentifier = `${row['Employee Name'] || row['Name'] || ''} | ${row['Item Type'] || row['Cert Type'] || ''}`;
@@ -6894,6 +7041,25 @@ class SheetNavigator {
 
         span.textContent = newBool ? '☑️' : '⬜';
 
+        // Update in-memory row
+        const table = this.db.getTable(this.currentSheetKey) || (this.db.snapshot && this.db.snapshot.tables ? this.db.snapshot.tables[this.currentSheetKey] : null);
+        if (table && table.rows) {
+          const rowObj = table.rows.find(r => r._rowIdx === row);
+          if (rowObj) {
+            rowObj[header] = newBool;
+            if (this.currentSheetKey === 'job_tracking' && header.toLowerCase().startsWith('skip ')) {
+              const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+              const skipped = days.filter(d => {
+                const k = 'Skip ' + d;
+                return rowObj[k] === true || String(rowObj[k]).toLowerCase() === 'true';
+              });
+              rowObj['Skip Days'] = skipped.join(',');
+              const todayFormatted = new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+              rowObj['Last Updated'] = todayFormatted;
+            }
+          }
+        }
+
         await this.db.addMutation({
           action: 'UPDATE_CELL',
           sheetName: sheetName,
@@ -6902,6 +7068,12 @@ class SheetNavigator {
           header: header,
           value: newBool
         });
+
+        if (typeof this.db.saveLocalSnapshot === 'function') {
+          await this.db.saveLocalSnapshot();
+        } else if (typeof this.db.persistSnapshot === 'function') {
+          await this.db.persistSnapshot(this.db.snapshot);
+        }
 
         this.renderActiveView();
       });
