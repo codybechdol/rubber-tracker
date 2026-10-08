@@ -1391,10 +1391,16 @@ class RubberPpeTrackingEngine {
       `;
     } else if (r.isCrewDisciplineExcluded) {
       glovesCell = `
-        <div style="display: flex; align-items: center; gap: 5px;">
+        <div style="display: flex; align-items: center; gap: 6px;">
           <span class="badge" style="background: rgba(148, 163, 184, 0.12); color: #94a3b8; border: 1px dashed rgba(148, 163, 184, 0.3); font-size: 10.5px; padding: 2px 7px; border-radius: 4px;" title="Discipline: ${this.escapeHtml(r.crewType || 'Exempt')} crews do not require rubber PPE">
             ⚪ Not Required (${this.escapeHtml(r.crewType || 'Exempt')})
           </span>
+          <button class="btn btn-xs" 
+                  onclick="window.ppeTrackingEngine.promptQuickAssign('${this.escapeJs(r.name)}', 'gloves', '${this.escapeJs(r.gloveSize)}', '${this.escapeJs(r.location)}')"
+                  style="background: rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.35); color: #93c5fd; padding: 2px 7px; font-size: 11px; border-radius: 3px; cursor: pointer;"
+                  title="Assign an on-shelf glove to ${this.escapeHtml(r.name)}">
+            ➕ Assign
+          </button>
         </div>
       `;
     } else {
@@ -1430,16 +1436,7 @@ class RubberPpeTrackingEngine {
 
     // Sleeves column cell
     let sleevesCell = '';
-    if (!clsMeta.needsSleeves) {
-      // AP 1-3 only need gloves and NOT sleeves
-      sleevesCell = `
-        <div style="display: flex; align-items: center; gap: 5px;">
-          <span class="badge" style="background: rgba(148, 163, 184, 0.12); color: #94a3b8; border: 1px dashed rgba(148, 163, 184, 0.3); font-size: 10.5px; padding: 2px 7px; border-radius: 4px;" title="Rule: AP 1–3 only require rubber gloves. Sleeves become mandatory at AP 4.">
-            ⚪ Not Required (AP 1–3)
-          </span>
-        </div>
-      `;
-    } else if (r.hasSleeves) {
+    if (r.hasSleeves) {
       sleevesCell = `
         <div style="display: flex; flex-direction: column; gap: 3px;">
           ${r.assignedSleeves.map(s => `
@@ -1459,12 +1456,33 @@ class RubberPpeTrackingEngine {
           `).join('')}
         </div>
       `;
+    } else if (!clsMeta.needsSleeves) {
+      // AP 1-3 only need gloves and NOT sleeves
+      sleevesCell = `
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <span class="badge" style="background: rgba(148, 163, 184, 0.12); color: #94a3b8; border: 1px dashed rgba(148, 163, 184, 0.3); font-size: 10.5px; padding: 2px 7px; border-radius: 4px;" title="Rule: AP 1–3 only require rubber gloves. Sleeves become mandatory at AP 4.">
+            ⚪ Not Required (AP 1–3)
+          </span>
+          <button class="btn btn-xs" 
+                  onclick="window.ppeTrackingEngine.promptQuickAssign('${this.escapeJs(r.name)}', 'sleeves', '${this.escapeJs(r.sleeveSize)}', '${this.escapeJs(r.location)}')"
+                  style="background: rgba(168, 85, 247, 0.15); border: 1px solid rgba(168, 85, 247, 0.35); color: #d8b4fe; padding: 2px 7px; font-size: 11px; border-radius: 3px; cursor: pointer;"
+                  title="Assign an on-shelf sleeve to ${this.escapeHtml(r.name)}">
+            ➕ Assign
+          </button>
+        </div>
+      `;
     } else if (r.isCrewDisciplineExcluded) {
       sleevesCell = `
-        <div style="display: flex; align-items: center; gap: 5px;">
+        <div style="display: flex; align-items: center; gap: 6px;">
           <span class="badge" style="background: rgba(148, 163, 184, 0.12); color: #94a3b8; border: 1px dashed rgba(148, 163, 184, 0.3); font-size: 10.5px; padding: 2px 7px; border-radius: 4px;" title="Discipline: ${this.escapeHtml(r.crewType || 'Exempt')} crews do not require rubber PPE">
             ⚪ Not Required (${this.escapeHtml(r.crewType || 'Exempt')})
           </span>
+          <button class="btn btn-xs" 
+                  onclick="window.ppeTrackingEngine.promptQuickAssign('${this.escapeJs(r.name)}', 'sleeves', '${this.escapeJs(r.sleeveSize)}', '${this.escapeJs(r.location)}')"
+                  style="background: rgba(168, 85, 247, 0.15); border: 1px solid rgba(168, 85, 247, 0.35); color: #d8b4fe; padding: 2px 7px; font-size: 11px; border-radius: 3px; cursor: pointer;"
+                  title="Assign an on-shelf sleeve to ${this.escapeHtml(r.name)}">
+            ➕ Assign
+          </button>
         </div>
       `;
     } else {
@@ -1500,8 +1518,28 @@ class RubberPpeTrackingEngine {
 
     // Overall status pill
     let overallBadge = '';
-    if (r.isExcluded) {
-      const badgeText = r.isCrewDisciplineExcluded ? `🚫 ${r.crewType || 'Exempt'} Crew` : '🚫 Excluded';
+    if (r.isCrewDisciplineExcluded) {
+      if (r.hasGloves && r.hasSleeves) {
+        overallBadge = `
+          <span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #6ee7b7; border: 1px solid rgba(16, 185, 129, 0.35); font-weight: 700; font-size: 11px; padding: 3px 8px; border-radius: 4px;" title="${this.escapeHtml(r.crewType)} crew member with optional rubber gloves & sleeves assigned">
+            ✅ Equipped (${this.escapeHtml(r.crewType)})
+          </span>
+        `;
+      } else if (r.hasGloves) {
+        overallBadge = `
+          <span class="badge" style="background: rgba(14, 165, 233, 0.15); color: #7dd3fc; border: 1px solid rgba(14, 165, 233, 0.35); font-weight: 700; font-size: 11px; padding: 3px 8px; border-radius: 4px;" title="${this.escapeHtml(r.crewType)} crew member with optional rubber gloves assigned">
+            🧤 Has Gloves (${this.escapeHtml(r.crewType)})
+          </span>
+        `;
+      } else {
+        overallBadge = `
+          <span class="badge" style="background: rgba(148, 163, 184, 0.14); color: #94a3b8; border: 1px dashed rgba(148, 163, 184, 0.35); font-weight: 600; font-size: 11px; padding: 3px 8px; border-radius: 4px;" title="Discipline: ${this.escapeHtml(r.crewType)} crews do not require rubber PPE">
+            ⚪ ${this.escapeHtml(r.crewType)} (Not Required)
+          </span>
+        `;
+      }
+    } else if (r.isExcluded) {
+      const badgeText = '🚫 Excluded';
       const badgeTitle = r.exclusionReason || 'Exempt / Excluded from Rubber PPE compliance tracking';
       overallBadge = `
         <span class="badge" style="background: rgba(148, 163, 184, 0.18); color: #cbd5e1; border: 1px dashed rgba(148, 163, 184, 0.45); font-weight: 700; font-size: 11px; padding: 3px 8px; border-radius: 4px;" title="${this.escapeHtml(badgeTitle)}">
