@@ -21767,6 +21767,7 @@ function generateSwaps(itemType) {
     var hireDateColIdx = -1; // Hire Date column for pending detection
     var gloveSizeColIdx = -1;
     var sleeveSizeColIdx = -1;
+    var altNamesColIdx = -1;
     for (var h = 0; h < empHeaders.length; h++) {
       var headerLower = String(empHeaders[h]).trim().toLowerCase();
       if (headerLower === 'location') {
@@ -21786,6 +21787,9 @@ function generateSwaps(itemType) {
       }
       if (headerLower === 'sleeve size') {
         sleeveSizeColIdx = h;
+      }
+      if (/^(alt(ernat(e|ive))?(\s*names?)?|also\s*known\s*as|aka|aliases?)$/i.test(headerLower)) {
+        altNamesColIdx = h;
       }
     }
 
@@ -21808,6 +21812,22 @@ function generateSwaps(itemType) {
         empLocationMap[name] = (row[locationColIdx] || 'Unknown').toString().trim();
         empJobNumMap[name] = (row[jobNumColIdx] || '').toString().trim();
         empClassificationMap[name] = (row[classificationColIdx] || '').toString().trim();
+
+        // Also register all Alternate Names / Aliases pointing to this employee
+        if (altNamesColIdx !== -1 && row[altNamesColIdx]) {
+          var altRaw = String(row[altNamesColIdx]).trim();
+          if (altRaw) {
+            var alts = altRaw.split(/[;,/|]+/).map(function(s) { return s.trim().toLowerCase(); }).filter(Boolean);
+            alts.forEach(function(alt) {
+              if (ignoreNames.indexOf(alt) === -1) {
+                empMap[alt] = row;
+                empLocationMap[alt] = (row[locationColIdx] || 'Unknown').toString().trim();
+                empJobNumMap[alt] = (row[jobNumColIdx] || '').toString().trim();
+                empClassificationMap[alt] = (row[classificationColIdx] || '').toString().trim();
+              }
+            });
+          }
+        }
       }
     });
     if (pendingSkipped > 0) {
@@ -22007,14 +22027,29 @@ function generateSwaps(itemType) {
           return; // Skip inactive inventory items
         }
 
-        // If not a current employee, try location-based fallback (old-style: AssignedTo = city name)
+        // If not a current employee, try resolving via alias / token matching first
         if (!empMap[assignedTo]) {
-          if (assignedTo === 'previous employee') return; // Handled by Reclaims, not Swaps
-          var fallbackLead = locationToLeadMap[assignedTo];
-          if (!fallbackLead) return; // Not a known location either — skip
-          Logger.log('generateSwaps: Location fallback for item ' + item[COLS.INVENTORY.ITEM_NUM - 1] +
-                     ' — AssignedTo="' + assignedToRaw + '" → attributed to crew lead "' + fallbackLead + '"');
-          assignedTo = fallbackLead;
+          var resolvedEmpKey = null;
+          var assignedParts = assignedTo.replace(/[-_]+/g, ' ').split(/\s+/).filter(Boolean);
+          if (assignedParts.length >= 2) {
+            var aFirst = assignedParts[0];
+            var aLast = assignedParts[assignedParts.length - 1];
+            var firstLast = (aFirst + ' ' + aLast).toLowerCase();
+            if (empMap[firstLast]) {
+              resolvedEmpKey = firstLast;
+            }
+          }
+          if (resolvedEmpKey) {
+            assignedTo = resolvedEmpKey;
+          } else {
+            // Location fallback (old-style: AssignedTo = city name)
+            if (assignedTo === 'previous employee') return; // Handled by Reclaims, not Swaps
+            var fallbackLead = locationToLeadMap[assignedTo];
+            if (!fallbackLead) return; // Not a known location either — skip
+            Logger.log('generateSwaps: Location fallback for item ' + item[COLS.INVENTORY.ITEM_NUM - 1] +
+                       ' — AssignedTo="' + assignedToRaw + '" → attributed to crew lead "' + fallbackLead + '"');
+            assignedTo = fallbackLead;
+          }
         }
         var emp = empMap[assignedTo];
         var employeeLocation = empLocationMap[assignedTo] || 'Unknown';
@@ -27660,6 +27695,7 @@ function generateBlanketSwaps(silent) {
     var jobNumColIdx = 3;
     var classificationColIdx = 12;
     var hireDateColIdx = -1;
+    var altNamesColIdx = -1;
 
     for (var h = 0; h < empHeaders.length; h++) {
       var headerLower = String(empHeaders[h]).trim().toLowerCase();
@@ -27667,6 +27703,7 @@ function generateBlanketSwaps(silent) {
       if (headerLower === 'job number') jobNumColIdx = h;
       if (headerLower === 'job classification') classificationColIdx = h;
       if (headerLower === 'hire date') hireDateColIdx = h;
+      if (/^(alt(ernat(e|ive))?(\s*names?)?|also\s*known\s*as|aka|aliases?)$/i.test(headerLower)) altNamesColIdx = h;
     }
 
     for (var e = 1; e < empData.length; e++) {
@@ -27679,6 +27716,19 @@ function generateBlanketSwaps(silent) {
         empLocationMap[name] = (row[locationColIdx] || 'Unknown').toString().trim();
         empJobNumMap[name] = (row[jobNumColIdx] || '').toString().trim();
         empClassificationMap[name] = (row[classificationColIdx] || '').toString().trim();
+
+        if (altNamesColIdx !== -1 && row[altNamesColIdx]) {
+          var altRaw = String(row[altNamesColIdx]).trim();
+          if (altRaw) {
+            var alts = altRaw.split(/[;,/|]+/).map(function(s) { return s.trim().toLowerCase(); }).filter(Boolean);
+            alts.forEach(function(alt) {
+              empMap[alt] = row;
+              empLocationMap[alt] = (row[locationColIdx] || 'Unknown').toString().trim();
+              empJobNumMap[alt] = (row[jobNumColIdx] || '').toString().trim();
+              empClassificationMap[alt] = (row[classificationColIdx] || '').toString().trim();
+            });
+          }
+        }
       }
     }
   }
@@ -28115,6 +28165,7 @@ function generateMackSwaps(silent) {
     var jobNumColIdx = 3;
     var classificationColIdx = 12;
     var hireDateColIdx = -1;
+    var altNamesColIdx = -1;
 
     for (var h = 0; h < empHeaders.length; h++) {
       var headerLower = String(empHeaders[h]).trim().toLowerCase();
@@ -28122,6 +28173,7 @@ function generateMackSwaps(silent) {
       if (headerLower === 'job number') jobNumColIdx = h;
       if (headerLower === 'job classification') classificationColIdx = h;
       if (headerLower === 'hire date') hireDateColIdx = h;
+      if (/^(alt(ernat(e|ive))?(\s*names?)?|also\s*known\s*as|aka|aliases?)$/i.test(headerLower)) altNamesColIdx = h;
     }
 
     for (var e = 1; e < empData.length; e++) {
@@ -28133,6 +28185,19 @@ function generateMackSwaps(silent) {
         empLocationMap[name] = (row[locationColIdx] || 'Unknown').toString().trim();
         empJobNumMap[name] = (row[jobNumColIdx] || '').toString().trim();
         empClassificationMap[name] = (row[classificationColIdx] || '').toString().trim();
+
+        if (altNamesColIdx !== -1 && row[altNamesColIdx]) {
+          var altRaw = String(row[altNamesColIdx]).trim();
+          if (altRaw) {
+            var alts = altRaw.split(/[;,/|]+/).map(function(s) { return s.trim().toLowerCase(); }).filter(Boolean);
+            alts.forEach(function(alt) {
+              empMap[alt] = row;
+              empLocationMap[alt] = (row[locationColIdx] || 'Unknown').toString().trim();
+              empJobNumMap[alt] = (row[jobNumColIdx] || '').toString().trim();
+              empClassificationMap[alt] = (row[classificationColIdx] || '').toString().trim();
+            });
+          }
+        }
       }
     }
   }

@@ -462,16 +462,35 @@ class SwapGenerationEngine {
     const empClassificationMap = {};
     const empSizeMap = {};
 
+    // Initialize employee resolver if not already available
+    if (typeof window !== 'undefined' && !window.employeeResolver && typeof EmployeeNameResolver !== 'undefined') {
+      window.employeeResolver = new EmployeeNameResolver(this.db);
+    }
+
     empTable.rows.forEach(row => {
       const name = String(row['Name'] || row['Employee Name'] || Object.values(row)[0] || '').trim();
       const nameLower = name.toLowerCase();
       if (!name || ignoreNames.includes(nameLower)) return;
+
+      // Extract all Alternate Names / Aliases from row
+      let altNamesRaw = '';
+      for (const [k, v] of Object.entries(row)) {
+        if (/^(alt(ernat(e|ive))?(\s*names?)?|also\s*known\s*as|aka|aliases?)$/i.test(k.trim())) {
+          altNamesRaw = String(v || '').trim();
+          if (altNamesRaw) break;
+        }
+      }
+      if (!altNamesRaw) {
+        altNamesRaw = String(row['Alternate Names'] || row['Alternative names'] || row['Alternative Names'] || row['Alt Names'] || row['Aliases'] || row['Also Known As'] || '').trim();
+      }
+      const altList = altNamesRaw ? altNamesRaw.split(/[;,/|]+/).map(s => s.trim().toLowerCase()).filter(Boolean) : [];
 
       const locLower = String(row['Location'] || '').trim().toLowerCase();
       const statusLower = String(row['Status'] || '').trim().toLowerCase();
       if (locLower === 'previous employee' || locLower.includes('previous') ||
           statusLower === 'previous employee' || statusLower.includes('inactive') || statusLower.includes('terminated')) {
         previousEmployeeNames.add(nameLower);
+        altList.forEach(alt => previousEmployeeNames.add(alt));
         return; // Skip from active empMap
       }
 
@@ -486,9 +505,21 @@ class SwapGenerationEngine {
       empSizeMap[nameLower] = String(isGloves ? (row['Glove Size'] || row['Size'] || '10') : (row['Sleeve Size'] || row['Size'] || '20')).trim();
       // Active employee must never be in previousEmployeeNames
       previousEmployeeNames.delete(nameLower);
+
+      // Register all alternate names / aliases pointing to this employee
+      altList.forEach(alt => {
+        if (!ignoreNames.includes(alt)) {
+          empMap[alt] = row;
+          empLocationMap[alt] = empLocationMap[nameLower];
+          empJobNumMap[alt] = empJobNumMap[nameLower];
+          empClassificationMap[alt] = empClassificationMap[nameLower];
+          empSizeMap[alt] = empSizeMap[nameLower];
+          previousEmployeeNames.delete(alt);
+        }
+      });
     });
 
-    // Explicitly purge all active employees from previousEmployeeNames
+    // Explicitly purge all active employees and their aliases from previousEmployeeNames
     Object.keys(empMap).forEach(activeName => {
       previousEmployeeNames.delete(activeName);
     });
@@ -521,14 +552,15 @@ class SwapGenerationEngine {
     Object.keys(empMap).forEach(empName => {
       const loc = (empLocationMap[empName] || '').trim().toLowerCase();
       if (!loc) return;
+      const canonicalLead = String(empMap[empName]['Name'] || empMap[empName]['Employee Name'] || Object.values(empMap[empName])[0] || empName).trim().toLowerCase();
       const existingLead = locationToLeadMap[loc];
       if (!existingLead) {
-        locationToLeadMap[loc] = empName;
+        locationToLeadMap[loc] = canonicalLead;
       } else {
         const newRank = classHierarchyRank[empClassificationMap[empName]] || 99;
         const existingRank = classHierarchyRank[empClassificationMap[existingLead]] || 99;
         if (newRank < existingRank) {
-          locationToLeadMap[loc] = empName;
+          locationToLeadMap[loc] = canonicalLead;
         }
       }
     });
@@ -732,6 +764,31 @@ class SwapGenerationEngine {
         let assignedTo = String(assignedToRaw).trim().toLowerCase();
         if (!assignedTo || ignoreNames.includes(assignedTo)) return;
 
+        // Try employee resolver or name part matching if not directly found in empMap
+        if (!empMap[assignedTo]) {
+          let resolvedKey = null;
+          if (typeof window !== 'undefined' && window.employeeResolver && typeof window.employeeResolver.resolve === 'function') {
+            const res = window.employeeResolver.resolve(assignedToRaw);
+            if (res && res.match && !res.isStatus && res.employeeName) {
+              const resLower = res.employeeName.trim().toLowerCase();
+              if (empMap[resLower]) {
+                resolvedKey = resLower;
+              }
+            }
+          }
+          if (!resolvedKey) {
+            // First + last fallback (e.g. "John-Michael Baker" -> "John Baker")
+            const parts = assignedTo.replace(/[-_]+/g, ' ').split(/\s+/).filter(Boolean);
+            if (parts.length >= 2) {
+              const fl = `${parts[0]} ${parts[parts.length - 1]}`.toLowerCase();
+              if (empMap[fl]) resolvedKey = fl;
+            }
+          }
+          if (resolvedKey) {
+            assignedTo = resolvedKey;
+          }
+        }
+
         // Skip Previous Employee items from active swap generation (handled in prevEmpItems)
         const isAssignedActiveEmp = Boolean(empMap[assignedTo]);
         if (!isAssignedActiveEmp && (assignedTo === 'previous employee' || previousEmployeeNames.has(assignedTo) || locationLower === 'previous employee')) {
@@ -860,9 +917,15 @@ class SwapGenerationEngine {
         let isAlreadyPicked = false;
 
         // Check if there is a manual pick override preserved
+        const oldAssignedLower = (meta.oldAssignedTo || '').toLowerCase();
         const manualKey = `${employeeName.toLowerCase()}|${String(meta.itemNum).toLowerCase()}`;
+        const manualKeyOld = oldAssignedLower ? `${oldAssignedLower}|${String(meta.itemNum).toLowerCase()}` : '';
         const fallback = manualPicks[employeeName.toLowerCase()];
-        const manual = manualPicks[manualKey] || (fallback && (!fallback.currentItemNum || String(fallback.currentItemNum).toLowerCase() === String(meta.itemNum).toLowerCase()) ? fallback : null);
+        const fallbackOld = oldAssignedLower ? manualPicks[oldAssignedLower] : null;
+        const manual = manualPicks[manualKey] ||
+                       (manualKeyOld ? manualPicks[manualKeyOld] : null) ||
+                       (fallback && (!fallback.currentItemNum || String(fallback.currentItemNum).toLowerCase() === String(meta.itemNum).toLowerCase()) ? fallback : null) ||
+                       (fallbackOld && (!fallbackOld.currentItemNum || String(fallbackOld.currentItemNum).toLowerCase() === String(meta.itemNum).toLowerCase()) ? fallbackOld : null);
         let isManualSelected = false;
 
         if (manual && manual.pickListNum && manual.pickListNum !== '—' && manual.pickListNum !== '-') {
@@ -890,7 +953,7 @@ class SwapGenerationEngine {
               manualStat.includes('ready for delivery') ||
               pickListStatusRaw === 'ready for delivery' ||
               itAssignedTo.includes('packed for delivery') ||
-              (itPickedFor && itPickedFor.includes(employeeName.toLowerCase()))
+              (itPickedFor && (itPickedFor.includes(employeeName.toLowerCase()) || (oldAssignedLower && itPickedFor.includes(oldAssignedLower))))
             );
 
             if (isPickedState) {
@@ -909,8 +972,12 @@ class SwapGenerationEngine {
               this.db.clearManualPick(swapKey, employeeName, meta.itemNum);
             }
             delete manualPicks[manualKey];
+            if (manualKeyOld) delete manualPicks[manualKeyOld];
             if (manualPicks[employeeName.toLowerCase()] && manualPicks[employeeName.toLowerCase()].currentItemNum === meta.itemNum) {
               delete manualPicks[employeeName.toLowerCase()];
+            }
+            if (oldAssignedLower && manualPicks[oldAssignedLower] && manualPicks[oldAssignedLower].currentItemNum === meta.itemNum) {
+              delete manualPicks[oldAssignedLower];
             }
           }
         }
@@ -920,7 +987,7 @@ class SwapGenerationEngine {
           const pickedForMatch = inventoryData.find(it => {
             const pickedFor = String(it['Picked For'] || '').trim().toLowerCase();
             const classMatch = parseClassNum(it['Class']) === meta.itemClass;
-            const forEmp = pickedFor.includes(employeeName.toLowerCase());
+            const forEmp = pickedFor.includes(employeeName.toLowerCase()) || (oldAssignedLower && pickedFor.includes(oldAssignedLower));
             const notLost = !isLostLocate(it);
             return classMatch && forEmp && notLost;
           });
@@ -2420,7 +2487,24 @@ class SwapGenerationEngine {
     const empTable = this.db.getTable('employees');
     let empLoc = 'Helena';
     if (empTable && empTable.rows) {
-      const empMatch = empTable.rows.find(e => String(e['Name'] || e['Employee Name'] || Object.values(e)[0] || '').trim().toLowerCase() === empName.toLowerCase());
+      const empLower = empName.toLowerCase();
+      const empMatch = empTable.rows.find(e => {
+        const cName = String(e['Name'] || e['Employee Name'] || Object.values(e)[0] || '').trim().toLowerCase();
+        if (cName === empLower) return true;
+        let altRaw = '';
+        for (const [k, v] of Object.entries(e)) {
+          if (/^(alt(ernat(e|ive))?(\s*names?)?|also\s*known\s*as|aka|aliases?)$/i.test(k.trim())) {
+            altRaw = String(v || '').trim();
+            if (altRaw) break;
+          }
+        }
+        if (!altRaw) altRaw = String(e['Alternate Names'] || e['Alternative names'] || e['Alt Names'] || '').trim();
+        if (altRaw) {
+          const alts = altRaw.split(/[;,/|]+/).map(s => s.trim().toLowerCase());
+          if (alts.includes(empLower)) return true;
+        }
+        return false;
+      });
       if (empMatch) empLoc = String(empMatch['Location'] || 'Helena').trim();
     }
 
