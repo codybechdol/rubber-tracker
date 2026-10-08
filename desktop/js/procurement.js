@@ -569,6 +569,12 @@ class ProcurementEngine {
     this.items.forEach(item => {
       if (item.section === sectionKey) {
         item.selected = isChecked;
+        if (item.employees && item.employees.length > 0) {
+          item.employees.forEach(emp => {
+            emp.checked = isChecked;
+          });
+          item.quantity = isChecked ? item.employees.length : 0;
+        }
       }
     });
     this.render();
@@ -751,6 +757,49 @@ class ProcurementEngine {
 
     const aggregated = {};
 
+    // Tables & helper lookups for inventory presence and location voltage approval
+    const glovesTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('gloves') : null) || snap?.tables?.['gloves'];
+    const sleevesTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('sleeves') : null) || snap?.tables?.['sleeves'];
+
+    const hasInventoryItem = (table, empName) => {
+      if (!table || !empName) return false;
+      const rows = table.rows || table.rawGrid || [];
+      for (let i = 0; i < rows.length; i++) {
+        const r = rows[i];
+        let asg = '';
+        let st = '';
+        if (Array.isArray(r)) {
+          asg = String(r[8] || '').trim();
+          st = String(r[7] || '').trim().toLowerCase();
+        } else if (r && typeof r === 'object') {
+          asg = String(r['Assigned To'] || r['Assigned'] || '').trim();
+          st = String(r['Status'] || '').trim().toLowerCase();
+        }
+        if (!asg || NON_ASSIGNED_STATUSES.has(st) || asg.toLowerCase().includes('shelf')) continue;
+        if (this.isNameMatch(asg, empName)) return true;
+      }
+      return false;
+    };
+
+    const locTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('locations') : null) || snap?.tables?.['locations'];
+    const locApprovals = {};
+    if (locTable && locTable.rows) {
+      locTable.rows.forEach(r => {
+        const loc = String(r['Location'] || Object.values(r)[0] || '').trim().toLowerCase();
+        const app = String(r['Rubber Class Approval'] || r['Approval'] || Object.values(r)[6] || '').trim();
+        if (loc && app) locApprovals[loc] = app;
+      });
+    }
+
+    const getLocationApprovalClass = (empRec) => {
+      if (!empRec || !empRec.location) return 'Class 2';
+      const cleanEmpLoc = String(empRec.location).replace(/\s*\([^)]*\)/g, '').trim().toLowerCase();
+      const app = locApprovals[cleanEmpLoc] ? locApprovals[cleanEmpLoc].toUpperCase() : '';
+      if (app === 'CL3') return 'Class 3';
+      if (app === 'CL2') return 'Class 2';
+      return 'Class 2';
+    };
+
     const addItem = (section, itemType, typeLabel, size, hasNoSize, classVal, empLabel, minDaysLeft, isImmediate) => {
       const aggKey = `${section}|${itemType}|${size}|${classVal}`;
       if (!aggregated[aggKey]) {
@@ -773,10 +822,31 @@ class ProcurementEngine {
         };
       }
 
-      if (empLabel && !aggregated[aggKey].employees.includes(empLabel)) {
+      if (empLabel) {
+        let empName = empLabel;
+        let empDetail = '';
+        const match = empLabel.match(/^([^(]+?)\s*\((.+)\)$/);
+        if (match) {
+          empName = match[1].trim();
+          empDetail = match[2].trim();
+        } else {
+          empName = empLabel.trim();
+        }
+
+        const existing = aggregated[aggKey].employees.find(e => this.isNameMatch(e.name, empName));
+        if (!existing) {
+          aggregated[aggKey].employees.push({
+            name: empName,
+            label: empLabel,
+            detail: empDetail,
+            checked: true
+          });
+          aggregated[aggKey].quantity += 1;
+        }
+      } else {
         aggregated[aggKey].quantity += 1;
-        aggregated[aggKey].employees.push(empLabel);
       }
+
       if (isImmediate) aggregated[aggKey].isImmediate = true;
       if (minDaysLeft !== undefined && minDaysLeft < aggregated[aggKey].minDaysLeft) {
         aggregated[aggKey].minDaysLeft = minDaysLeft;
@@ -976,13 +1046,27 @@ class ProcurementEngine {
         if (!emp || status.includes('received') || status.includes('fulfilled')) return;
         if (this.isDepartedOrPreviousEmployee(emp)) return;
 
+        // If the employee already holds active inventory for this item type, their need is already met
+        if (itemType === 'Gloves' && hasInventoryItem(glovesTable, emp)) return;
+        if (itemType === 'Sleeves' && hasInventoryItem(sleevesTable, emp)) return;
+
+        const empRec = getEmpRecord(emp);
+        const meta = empRec ? this.parseTrackedClassification(empRec.classification) : null;
+        // For electrical lineworkers, sanitize Class 0 default to location approval or Class 2
+        if (meta && (rowClass === 'Class 0' || !rowClass)) {
+          rowClass = getLocationApprovalClass(empRec);
+        }
+
         const isImmediate = urgency.toLowerCase() === 'immediate';
         const isSizeUp = status.includes('size up');
-        const section = isSizeUp ? 'swaps_size_up' : 'swaps_need';
+        // Non-swap missing PPE belongs under PPE Compliance — Missing Equipment, not Swaps
+        const section = isSizeUp ? 'swaps_size_up' : 'compliance_missing';
         const cleanS = cleanSize(size) || '⚠️ Needs Size';
         const hasNoSize = (cleanS === '⚠️ Needs Size');
+        const empDetail = isSizeUp ? 'Size Up' : (meta ? `${meta.code} - Missing ${itemType}` : `Missing ${itemType}`);
+        const empLabel = `${emp} (${empDetail})`;
 
-        addItem(section, itemType, typeLabel, cleanS, hasNoSize, rowClass, emp, isImmediate ? 0 : 15, isImmediate);
+        addItem(section, itemType, typeLabel, cleanS, hasNoSize, rowClass, empLabel, isImmediate ? 0 : 15, isImmediate);
         markCovered(itemType, emp);
       });
     }
@@ -991,7 +1075,6 @@ class ProcurementEngine {
     // SECTION 3: CURRENTLY ASSIGNED — SIZE UP IN FIELD
     // =========================================================================
     // Active personnel in the field currently wearing an oversized glove or sleeve
-    const glovesTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('gloves') : null) || snap?.tables?.['gloves'];
     if (glovesTable) {
       const gRows = glovesTable.rows || glovesTable.rawGrid || [];
       gRows.forEach(g => {
@@ -1054,7 +1137,6 @@ class ProcurementEngine {
       });
     }
 
-    const sleevesTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('sleeves') : null) || snap?.tables?.['sleeves'];
     if (sleevesTable) {
       const sRows = sleevesTable.rows || sleevesTable.rawGrid || [];
       const sleeveRanks = { 'small': 1, 'sm': 1, 'regular': 2, 'reg': 2, 'large': 3, 'lg': 3, 'extra large': 4, 'xl': 4, '2xl': 5, 'xxl': 5 };
@@ -1123,36 +1205,6 @@ class ProcurementEngine {
     // SECTION 4: PPE COMPLIANCE — MISSING EQUIPMENT
     // =========================================================================
     // Active personnel in tracked classifications (SUP, GF, F, JRY, AP 1-7) missing rubber equipment
-    const hasInventoryItem = (table, empName) => {
-      if (!table || !empName) return false;
-      const rows = table.rows || table.rawGrid || [];
-      for (let i = 0; i < rows.length; i++) {
-        const r = rows[i];
-        let asg = '';
-        let st = '';
-        if (Array.isArray(r)) {
-          asg = String(r[8] || '').trim();
-          st = String(r[7] || '').trim().toLowerCase();
-        } else if (r && typeof r === 'object') {
-          asg = String(r['Assigned To'] || r['Assigned'] || '').trim();
-          st = String(r['Status'] || '').trim().toLowerCase();
-        }
-        if (!asg || NON_ASSIGNED_STATUSES.has(st) || asg.toLowerCase().includes('shelf')) continue;
-        if (this.isNameMatch(asg, empName)) return true;
-      }
-      return false;
-    };
-
-    const locTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('locations') : null) || snap?.tables?.['locations'];
-    const locApprovals = {};
-    if (locTable && locTable.rows) {
-      locTable.rows.forEach(r => {
-        const loc = String(r['Location'] || Object.values(r)[0] || '').trim().toLowerCase();
-        const app = String(r['Rubber Class Approval'] || r['Approval'] || Object.values(r)[6] || '').trim();
-        if (loc && app) locApprovals[loc] = app;
-      });
-    }
-
     empDirectory.forEach(empRec => {
       if (this.isDepartedOrPreviousEmployee(empRec.name)) return;
       if (empRec.location && empRec.location.toLowerCase().includes('previous')) return;
@@ -1167,16 +1219,7 @@ class ProcurementEngine {
       if (this.isEmployeePpeExcluded(empRec.name)) return;
 
       // Determine appropriate rubber class approval for employee location
-      let locationApprovalClass = 'Class 2';
-      if (empRec.location) {
-        const cleanEmpLoc = String(empRec.location).replace(/\s*\([^)]*\)/g, '').trim().toLowerCase();
-        const app = locApprovals[cleanEmpLoc] ? locApprovals[cleanEmpLoc].toUpperCase() : '';
-        if (app === 'CL3') {
-          locationApprovalClass = 'Class 3';
-        } else if (app === 'CL2') {
-          locationApprovalClass = 'Class 2';
-        }
-      }
+      const locationApprovalClass = getLocationApprovalClass(empRec);
 
       // 4A. Missing Rubber Gloves
       if (meta.needsGloves && !isCovered('Gloves', empRec.name) && !hasInventoryItem(glovesTable, empRec.name)) {
@@ -1458,22 +1501,73 @@ class ProcurementEngine {
       secItems.forEach(item => {
         const isChecked = item.selected ? 'checked' : '';
         const totalCost = (item.price || 0) * item.quantity;
-        const notes = item.employees.length > 0 ? `For: ${item.employees.join(', ')}` : '';
+        const hasEmployees = item.employees && item.employees.length > 0;
+        const checkedEmpCount = hasEmployees ? item.employees.filter(e => e.checked).length : 0;
+
+        let empRowsHtml = '';
+        if (hasEmployees) {
+          empRowsHtml = item.employees.map((emp, empIdx) => {
+            const isEmpChecked = emp.checked ? 'checked' : '';
+            const empTotal = (emp.checked && item.price > 0) ? `$${item.price.toFixed(2)}` : '—';
+            return `
+              <tr class="procurement-emp-row" data-item-idx="${item._globalIdx}" data-emp-idx="${empIdx}" style="background: rgba(15, 23, 42, 0.45); border-bottom: 1px solid rgba(255, 255, 255, 0.05); ${emp.checked ? '' : 'opacity: 0.55;'}">
+                <td style="padding: 6px 8px; text-align: right; color: #64748b; font-size: 13px; border-right: 1px solid rgba(255,255,255,0.04);">
+                  ↳
+                </td>
+                <td style="padding: 6px 12px;">
+                  <label style="display: inline-flex; align-items: center; gap: 8px; cursor: pointer; user-select: none; margin: 0;">
+                    <input type="checkbox" class="procurement-emp-check" data-item-idx="${item._globalIdx}" data-emp-idx="${empIdx}" ${isEmpChecked} style="cursor: pointer; accent-color: #2563eb; width: 15px; height: 15px; margin: 0;">
+                    <span style="font-weight: 600; font-size: 12.5px; color: ${emp.checked ? '#f8fafc' : '#94a3b8'};">
+                      👤 ${emp.name}
+                    </span>
+                    ${emp.detail ? `
+                      <span style="font-size: 11px; padding: 2px 7px; border-radius: 4px; background: rgba(255, 255, 255, 0.06); color: var(--text-secondary); border: 1px solid rgba(255, 255, 255, 0.08); font-weight: 500;">
+                        ${emp.detail}
+                      </span>
+                    ` : ''}
+                  </label>
+                </td>
+                <td style="padding: 6px 8px; text-align: center; color: var(--text-muted); font-size: 12px;">
+                  ${item.size}
+                </td>
+                <td style="padding: 6px 8px; text-align: center; color: var(--text-muted); font-size: 12px;">
+                  ${item.classVal}
+                </td>
+                <td style="padding: 6px 8px; text-align: center; font-size: 12px; font-weight: 600; color: ${emp.checked ? '#4ade80' : '#64748b'};">
+                  ${emp.checked ? '1' : '0'}
+                </td>
+                <td style="padding: 6px 8px; text-align: center; font-size: 11px; color: var(--text-muted);">
+                  ${item.timeframe}
+                </td>
+                <td style="padding: 6px 8px; text-align: right; font-family: monospace; font-size: 11.5px; color: var(--text-muted);">
+                  ${item.price > 0 ? `$${item.price.toFixed(2)}` : '—'}
+                </td>
+                <td style="padding: 6px 8px; text-align: right; font-family: monospace; font-size: 11.5px; color: ${emp.checked && item.price > 0 ? '#4ade80' : 'var(--text-muted)'}; font-weight: ${emp.checked ? '600' : 'normal'};">
+                  ${empTotal}
+                </td>
+              </tr>
+            `;
+          }).join('');
+        }
 
         html += `
-          <tr style="border-bottom: 1px solid var(--border-color); ${item.selected ? 'background: rgba(37, 99, 235, 0.05);' : ''}">
+          <tr style="border-bottom: 1px solid var(--border-color); ${item.selected ? 'background: rgba(37, 99, 235, 0.07);' : ''}">
             <td style="padding: 8px; text-align: center;">
-              <input type="checkbox" class="procurement-item-check" data-idx="${item._globalIdx}" ${isChecked}>
+              <input type="checkbox" class="procurement-item-check" data-idx="${item._globalIdx}" ${isChecked} title="Select/Deselect line item">
             </td>
             <td style="padding: 8px;">
-              <div style="display: flex; align-items: center; gap: 6px;">
-                <span style="font-weight: 600; color: var(--text-primary);">${item.typeLabel}</span>
+              <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                <span style="font-weight: 600; color: var(--text-primary); font-size: 13.5px;">${item.typeLabel}</span>
                 <span class="badge" style="font-size: 10px; padding: 1px 5px; background: ${secConfig.badgeColor}; color: ${secConfig.badgeText}; border: 1px solid ${secConfig.badgeBorder};">
                   ${secConfig.shortTitle}
                 </span>
+                ${hasEmployees ? `
+                  <span class="badge" style="font-size: 10.5px; padding: 1px 6px; background: rgba(255,255,255,0.08); color: var(--text-secondary); border-radius: 10px; border: 1px solid rgba(255,255,255,0.12);">
+                    👥 ${checkedEmpCount}/${item.employees.length} selected
+                  </span>
+                ` : ''}
               </div>
               ${item.partNumber ? `<div style="font-size: 11px; color: #3b82f6; margin-top: 1px;">PN: ${item.partNumber}</div>` : ''}
-              ${notes ? `<div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">${notes}</div>` : ''}
             </td>
             <td style="padding: 8px; text-align: center;">
               ${item.hasNoSize ? `
@@ -1484,9 +1578,9 @@ class ProcurementEngine {
                 <span style="font-weight: 600; color: var(--text-primary); font-size: 13px;">${item.size}</span>
               `}
             </td>
-            <td style="padding: 8px; text-align: center; color: var(--text-secondary);">${item.classVal}</td>
+            <td style="padding: 8px; text-align: center; color: var(--text-secondary); font-weight: 500;">${item.classVal}</td>
             <td style="padding: 8px; text-align: center;">
-              <input type="number" min="1" value="${item.quantity}" data-idx="${item._globalIdx}" class="procurement-qty-input" style="width: 55px; padding: 4px 6px; text-align: center; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary);">
+              <input type="number" min="0" value="${item.quantity}" data-idx="${item._globalIdx}" class="procurement-qty-input" style="width: 55px; padding: 4px 6px; text-align: center; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); font-weight: 600;">
             </td>
             <td style="padding: 8px; text-align: center;">
               <span class="badge ${item.priority === 'HIGH' ? 'badge-danger' : (item.priority === 'MEDIUM' ? 'badge-warning' : 'badge-success')}">
@@ -1500,6 +1594,7 @@ class ProcurementEngine {
               ${totalCost > 0 ? `$${totalCost.toFixed(2)}` : '—'}
             </td>
           </tr>
+          ${empRowsHtml}
         `;
       });
     });
@@ -1512,7 +1607,15 @@ class ProcurementEngine {
     if (selectAll) {
       selectAll.addEventListener('change', (e) => {
         const val = e.target.checked;
-        displayItems.forEach(i => i.selected = val);
+        displayItems.forEach(i => {
+          i.selected = val;
+          if (i.employees && i.employees.length > 0) {
+            i.employees.forEach(emp => {
+              emp.checked = val;
+            });
+            i.quantity = val ? i.employees.length : 0;
+          }
+        });
         this.render();
       });
     }
@@ -1529,10 +1632,33 @@ class ProcurementEngine {
     container.querySelectorAll('.procurement-item-check').forEach(cb => {
       cb.addEventListener('change', (e) => {
         const idx = parseInt(e.target.dataset.idx, 10);
-        if (this.items[idx]) {
-          this.items[idx].selected = e.target.checked;
-          this.updateTotals();
+        const item = this.items[idx];
+        if (!item) return;
+
+        item.selected = e.target.checked;
+        if (item.employees && item.employees.length > 0) {
+          item.employees.forEach(emp => {
+            emp.checked = item.selected;
+          });
+          item.quantity = item.selected ? item.employees.length : 0;
         }
+        this.render();
+      });
+    });
+
+    // Individual Employee Checkboxes
+    container.querySelectorAll('.procurement-emp-check').forEach(cb => {
+      cb.addEventListener('change', (e) => {
+        const itemIdx = parseInt(e.target.dataset.itemIdx, 10);
+        const empIdx = parseInt(e.target.dataset.empIdx, 10);
+        const item = this.items[itemIdx];
+        if (!item || !item.employees || !item.employees[empIdx]) return;
+
+        item.employees[empIdx].checked = e.target.checked;
+        const checkedCount = item.employees.filter(emp => emp.checked).length;
+        item.quantity = checkedCount;
+        item.selected = checkedCount > 0;
+        this.render();
       });
     });
 
@@ -1540,9 +1666,11 @@ class ProcurementEngine {
     container.querySelectorAll('.procurement-qty-input').forEach(input => {
       input.addEventListener('change', (e) => {
         const idx = parseInt(e.target.dataset.idx, 10);
-        const qty = parseInt(e.target.value, 10) || 1;
-        if (this.items[idx]) {
-          this.items[idx].quantity = Math.max(1, qty);
+        const qty = parseInt(e.target.value, 10);
+        const item = this.items[idx];
+        if (item) {
+          item.quantity = isNaN(qty) ? 0 : Math.max(0, qty);
+          item.selected = item.quantity > 0;
           this.render();
         }
       });
@@ -1612,7 +1740,10 @@ class ProcurementEngine {
           line += ` @ $${item.price.toFixed(2)} ea = $${itemTotal.toFixed(2)}`;
         }
         if (item.employees && item.employees.length > 0) {
-          line += `\n    └ ${item.employees.join(', ')}`;
+          const checkedEmps = item.employees.filter(e => e.checked).map(e => e.label || e.name);
+          if (checkedEmps.length > 0) {
+            line += `\n    └ ${checkedEmps.join(', ')}`;
+          }
         }
         lines.push(line);
       });
@@ -1961,7 +2092,8 @@ class ProcurementEngine {
     const lines = ['Section,Item Category,Size,Class / KV,Part Number,Quantity,Unit Price,Subtotal,Assigned Personnel'];
     activeItems.forEach(i => {
       const sub = (i.price * i.quantity).toFixed(2);
-      const emps = `"${i.employees.join('; ')}"`;
+      const checkedEmps = (i.employees || []).filter(e => e.checked).map(e => e.name || e.label);
+      const emps = checkedEmps.length > 0 ? `"${checkedEmps.join('; ')}"` : '""';
       const sizeDisplay = i.hasNoSize ? '⚠️ Needs Size' : i.size;
       const secName = i.sectionTitle || i.section;
       lines.push(`"${secName}","${i.itemType}","${sizeDisplay}","${i.classVal}","${i.partNumber}",${i.quantity},$${i.price.toFixed(2)},$${sub},${emps}`);
