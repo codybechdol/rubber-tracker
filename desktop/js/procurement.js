@@ -855,6 +855,51 @@ class ProcurementEngine {
     // Tables & helper lookups for inventory presence and location voltage approval
     const glovesTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('gloves') : null) || snap?.tables?.['gloves'];
     const sleevesTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('sleeves') : null) || snap?.tables?.['sleeves'];
+    const blanketsTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('blankets') : null) || snap?.tables?.['blankets'];
+    const macksTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('macks') : null) || snap?.tables?.['macks'];
+
+    const getInventoryItemSize = (type, itemNum) => {
+      if (!itemNum || itemNum === '—' || itemNum === '-') return '';
+      const cleanNum = String(itemNum).trim().replace(/^[#]/, '');
+      if (!cleanNum || cleanNum.toLowerCase() === 'none') return '';
+
+      let table = null;
+      if (type === 'Gloves') table = glovesTable;
+      else if (type === 'Sleeves') table = sleevesTable;
+      else if (type === 'Blankets') table = blanketsTable;
+      else if (type === 'MACKs') table = macksTable;
+
+      if (!table) return '';
+      const rows = table.rows || table.rawGrid || [];
+      for (let i = 0; i < rows.length; i++) {
+        const r = rows[i];
+        let num = '';
+        let itemSz = '';
+        if (Array.isArray(r)) {
+          num = String(r[0] || '').trim();
+          if (type === 'Blankets') {
+            itemSz = String(r[1] || '').trim();
+          } else {
+            itemSz = String(r[2] || '').trim();
+          }
+        } else if (r && typeof r === 'object') {
+          num = String(r['Item #'] || r['Item'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['MACK'] || r['Serial #'] || r['ESL ID'] || Object.values(r)[0] || '').trim();
+          itemSz = String(r['Size'] || r['Type'] || '').trim();
+        }
+        if (num) {
+          const cleanRNum = num.replace(/^[#]/, '').trim();
+          if (cleanRNum.toLowerCase() === cleanNum.toLowerCase()) {
+            return cleanSize(itemSz);
+          }
+          const pNum = parseInt(cleanRNum, 10);
+          const pClean = parseInt(cleanNum, 10);
+          if (!isNaN(pNum) && !isNaN(pClean) && pNum === pClean && String(pNum) === cleanRNum && String(pClean) === cleanNum) {
+            return cleanSize(itemSz);
+          }
+        }
+      }
+      return '';
+    };
 
     const hasInventoryItem = (table, empName) => {
       if (!table || !empName) return false;
@@ -1001,12 +1046,19 @@ class ProcurementEngine {
           }
 
           emp = firstCell;
-          size = String(row[2] || '—').trim();
-          daysRaw = String(row[5] || '').trim();
+          if (s.type === 'MACKs') {
+            size = String(row[3] || '—').trim();
+            daysRaw = String(row[7] || '').trim();
+            pickItem = String(row[8] || '').trim();
+            status = String(row[9] || '').trim();
+          } else {
+            size = String(row[2] || '—').trim();
+            daysRaw = String(row[5] || '').trim();
+            pickItem = String(row[6] || '').trim();
+            status = String(row[7] || '').trim();
+          }
           const daysVal = parseInt(daysRaw, 10);
           if (!isNaN(daysVal)) daysLeft = daysVal;
-          pickItem = String(row[6] || '').trim();
-          status = String(row[7] || '').trim();
 
           if (row[10] && String(row[10]).toLowerCase().includes('class')) {
             rowClass = String(row[10]).trim();
@@ -1022,7 +1074,7 @@ class ProcurementEngine {
           daysRaw = String(row['Days Left'] || row['Days Remaining'] || '').trim();
           const daysVal = parseInt(daysRaw, 10);
           if (!isNaN(daysVal)) daysLeft = daysVal;
-          pickItem = String(row['Pick List Item #'] || row['Pick Item #'] || '').trim();
+          pickItem = String(row['Pick List Item #'] || row['Pick Item #'] || row['Pick Item'] || row['Pick List'] || row['Picked For'] || '').trim();
           status = String(row['Status'] || row['Pick List Status'] || '').trim();
           if (row['Class'] || row['KV']) {
             const cStr = String(row['Class'] || row['KV']).trim();
@@ -1083,9 +1135,38 @@ class ProcurementEngine {
           const validRowSize = cleanSize(size);
           const neededSize = prefSize || validRowSize || '⚠️ Needs Size';
           const hasNoSize = (neededSize === '⚠️ Needs Size');
+
+          // Resolve actual size of the picked item from inventory
+          let pickedSize = getInventoryItemSize(s.type, pickItem);
+          if (!pickedSize) {
+            if (s.type === 'Gloves') {
+              const n = parseFloat(neededSize);
+              if (!isNaN(n)) pickedSize = String(n + 0.5);
+            } else if (s.type === 'Sleeves') {
+              const sleeveNext = {
+                'small': 'Regular', 'sm': 'Regular',
+                'regular': 'Large', 'reg': 'Large',
+                'large': 'X-Large', 'lg': 'X-Large',
+                'extra large': '2X-Large', 'xl': '2X-Large'
+              };
+              pickedSize = sleeveNext[neededSize.toLowerCase()] || '';
+            }
+          }
+          if (!pickedSize || pickedSize === neededSize) {
+            if (s.type === 'Gloves') {
+              const n = parseFloat(neededSize);
+              if (!isNaN(n)) pickedSize = String(n + 0.5);
+            }
+            if (!pickedSize) pickedSize = 'Size Up';
+          }
+
+          const cleanPickNum = String(pickItem || '').trim().replace(/^[#]/, '');
+          const hasValidPickNum = cleanPickNum && cleanPickNum !== '—' && cleanPickNum !== '-' && cleanPickNum.toLowerCase() !== 'none';
+          const itemTag = hasValidPickNum ? ` (#${cleanPickNum})` : '';
+
           const empLabel = hasNoSize
-            ? `${emp} (Size Up Picked ⚠️ Needs Size)`
-            : `${emp} (Size Up Picked: ${size || '—'} → Needed: ${neededSize})`;
+            ? `${emp} (Size Up Picked: ${pickedSize}${itemTag} ⚠️ Needs Size)`
+            : `${emp} (Size Up Picked: ${pickedSize}${itemTag} → Needed: ${neededSize})`;
 
           addItem('swaps_size_up', s.type, s.label, neededSize, hasNoSize, rowClass, empLabel, daysLeft, isImmediateRow);
           markCovered(s.type, emp);
