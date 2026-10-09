@@ -106,6 +106,125 @@ class TripRouteMap {
       3: { name: 'Thursday', hex: '#a855f7', bg: 'rgba(168, 85, 247, 0.15)', border: '#a855f7' },
       4: { name: 'Friday', hex: '#ec4899', bg: 'rgba(236, 72, 153, 0.15)', border: '#ec4899' }
     };
+
+    // Verified Montana highway road miles and drive times (I-15, I-90, US-12, US-287, US-87, US-2)
+    this.montanaHighwayRoutes = {
+      'helena|billings': { miles: 240, mins: 220 },
+      'helena|laurel': { miles: 225, mins: 205 },
+      'helena|bozeman': { miles: 98, mins: 95 },
+      'helena|belgrade': { miles: 87, mins: 85 },
+      'helena|belgrade dock': { miles: 87, mins: 85 },
+      'helena|great falls': { miles: 89, mins: 85 },
+      'helena|butte': { miles: 68, mins: 70 },
+      'helena|missoula': { miles: 114, mins: 105 },
+      'helena|livingston': { miles: 125, mins: 120 },
+      'helena|big sky': { miles: 145, mins: 135 },
+      'helena|ennis': { miles: 105, mins: 105 },
+      'helena|three forks': { miles: 72, mins: 75 },
+      'helena|three rivers sub': { miles: 72, mins: 75 },
+      'helena|deer lodge': { miles: 45, mins: 50 },
+      'helena|elliston': { miles: 22, mins: 25 },
+      'helena|anaconda': { miles: 75, mins: 75 },
+      'helena|anaconda city sub': { miles: 75, mins: 75 },
+      'helena|manhattan': { miles: 80, mins: 80 },
+      'helena|dillon': { miles: 120, mins: 115 },
+      'helena|hamilton': { miles: 145, mins: 135 },
+      'helena|darby': { miles: 175, mins: 165 },
+      'helena|lolo': { miles: 120, mins: 115 },
+      'helena|kalispell': { miles: 190, mins: 195 },
+      'helena|melville': { miles: 140, mins: 135 },
+      'helena|stanford': { miles: 135, mins: 120 },
+      'helena|miles city': { miles: 340, mins: 290 },
+      'helena|glendive': { miles: 450, mins: 390 },
+      'helena|sidney': { miles: 500, mins: 435 },
+      'helena|post falls': { miles: 245, mins: 225 },
+      'helena|townsend': { miles: 34, mins: 40 },
+      'helena|whitehall': { miles: 65, mins: 65 },
+      'helena|boulder': { miles: 30, mins: 35 },
+      'helena|clancy': { miles: 12, mins: 15 },
+      'helena|montana city': { miles: 8, mins: 12 },
+      'helena|east helena': { miles: 6, mins: 10 },
+      'helena|glen': { miles: 110, mins: 105 },
+      'helena|raynesford': { miles: 115, mins: 105 },
+      'helena|raynesford sub': { miles: 115, mins: 105 },
+      'helena|whitefish': { miles: 205, mins: 210 },
+      'helena|choteau': { miles: 95, mins: 95 },
+      'helena|conrad': { miles: 125, mins: 120 },
+      'helena|shelby': { miles: 155, mins: 145 },
+      'helena|cut bank': { miles: 175, mins: 165 },
+      'helena|lewistown': { miles: 155, mins: 150 },
+      'helena|big timber': { miles: 155, mins: 145 },
+      'helena|columbus': { miles: 195, mins: 180 },
+      'helena|roundup': { miles: 190, mins: 185 },
+
+      // Inter-stop pairs (between field destinations)
+      'billings|bozeman': { miles: 142, mins: 127 },
+      'billings|belgrade': { miles: 152, mins: 135 },
+      'billings|livingston': { miles: 116, mins: 105 },
+      'billings|laurel': { miles: 16, mins: 20 },
+      'billings|big timber': { miles: 81, mins: 75 },
+      'billings|columbus': { miles: 43, mins: 45 },
+      'billings|rapelje': { miles: 64, mins: 65 },
+      'billings|roundup': { miles: 53, mins: 55 },
+      'billings|miles city': { miles: 145, mins: 135 },
+      'billings|great falls': { miles: 220, mins: 215 },
+      'billings|butte': { miles: 225, mins: 200 },
+      'billings|missoula': { miles: 345, mins: 300 },
+      'billings|ennis': { miles: 190, mins: 190 },
+      'billings|big sky': { miles: 185, mins: 180 },
+      'billings|darby': { miles: 375, mins: 325 },
+      'billings|hamilton': { miles: 360, mins: 310 },
+      'billings|melville': { miles: 105, mins: 95 },
+
+      'bozeman|belgrade': { miles: 11, mins: 15 },
+      'bozeman|belgrade dock': { miles: 11, mins: 15 },
+      'bozeman|livingston': { miles: 26, mins: 30 },
+      'bozeman|big sky': { miles: 45, mins: 55 },
+      'bozeman|three forks': { miles: 31, mins: 35 },
+      'bozeman|ennis': { miles: 52, mins: 55 },
+      'bozeman|butte': { miles: 85, mins: 80 },
+      'bozeman|manhattan': { miles: 21, mins: 25 },
+      'bozeman|great falls': { miles: 175, mins: 165 },
+
+      'belgrade|livingston': { miles: 37, mins: 40 },
+      'belgrade|big sky': { miles: 50, mins: 60 },
+      'belgrade|three forks': { miles: 21, mins: 25 },
+      'belgrade|ennis': { miles: 55, mins: 60 },
+      'belgrade|butte': { miles: 75, mins: 70 },
+      'belgrade|manhattan': { miles: 10, mins: 12 },
+
+      'butte|anaconda': { miles: 26, mins: 30 },
+      'butte|deer lodge': { miles: 40, mins: 40 },
+      'butte|dillon': { miles: 65, mins: 60 },
+      'butte|missoula': { miles: 120, mins: 110 },
+      'butte|three forks': { miles: 55, mins: 55 },
+      'butte|whitehall': { miles: 30, mins: 30 },
+      'butte|glen': { miles: 48, mins: 45 },
+
+      'missoula|lolo': { miles: 11, mins: 15 },
+      'missoula|hamilton': { miles: 47, mins: 50 },
+      'missoula|darby': { miles: 63, mins: 70 },
+      'missoula|deer lodge': { miles: 80, mins: 75 },
+      'missoula|kalispell': { miles: 120, mins: 130 },
+      'missoula|post falls': { miles: 165, mins: 155 },
+      'hamilton|darby': { miles: 16, mins: 20 },
+      'lolo|hamilton': { miles: 36, mins: 40 },
+
+      'great falls|choteau': { miles: 54, mins: 55 },
+      'great falls|conrad': { miles: 62, mins: 60 },
+      'great falls|shelby': { miles: 85, mins: 80 },
+      'great falls|cut bank': { miles: 108, mins: 100 },
+      'great falls|havre': { miles: 114, mins: 110 },
+      'great falls|lewistown': { miles: 105, mins: 100 },
+      'great falls|stanford': { miles: 65, mins: 65 },
+      'great falls|raynesford': { miles: 45, mins: 45 },
+
+      'livingston|big timber': { miles: 34, mins: 35 },
+      'big timber|melville': { miles: 20, mins: 25 },
+      'ennis|big sky': { miles: 42, mins: 50 },
+      'ennis|dillon': { miles: 68, mins: 70 },
+      'whitehall|three forks': { miles: 23, mins: 25 }
+    };
   }
 
   /**
@@ -183,7 +302,134 @@ class TripRouteMap {
   }
 
   /**
-   * Computes Haversine distance in miles between two coordinates.
+   * Checks if an employee is departed, former, terminated, or quit.
+   */
+  isDepartedOrPreviousEmployee(empName) {
+    if (!empName) return false;
+    const clean = String(empName).trim();
+    const cleanLower = clean.toLowerCase();
+    if (cleanLower === 'on shelf' || cleanLower === 'shelf' || cleanLower === 'lead' || cleanLower === 'unknown') return false;
+    if (cleanLower.includes('previous') || cleanLower.includes('reclaim') || cleanLower.includes('departed') || cleanLower.includes('former')) return true;
+    if (cleanLower.includes('keenan') && cleanLower.includes('keefe')) return true;
+
+    if (typeof window !== 'undefined' && window.previousEmployeesEngine && typeof window.previousEmployeesEngine.getPreviousEmployees === 'function') {
+      try {
+        const prevList = window.previousEmployeesEngine.getPreviousEmployees();
+        if (prevList.some(p => (p.name || '').toLowerCase() === cleanLower)) return true;
+      } catch (err) {}
+    }
+
+    const empTable = (this.db && typeof this.db.getTable === 'function') ? (this.db.getTable('employees') || this.db.getTable('Employees')) : null;
+    if (empTable && empTable.rows) {
+      const row = empTable.rows.find(r => String(r['Employee Name'] || r['Name'] || '').toLowerCase().trim() === cleanLower);
+      if (row) {
+        const loc = String(row['Location'] || '').toLowerCase();
+        const stat = String(row['Status'] || '').toLowerCase();
+        const lastDay = String(row['Last Day'] || '').trim();
+        if (loc.includes('previous') || stat.includes('previous') || stat.includes('terminated') || stat.includes('inactive')) return true;
+        if (lastDay && new Date(lastDay) < new Date()) return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Formats total minutes into human-readable string (e.g. 220 -> '3h 40m', 45 -> '45m').
+   */
+  formatMinutes(minutes) {
+    if (!minutes || minutes <= 0) return '0m';
+    const h = Math.floor(minutes / 60);
+    const m = Math.round(minutes % 60);
+    if (h === 0) return `${m}m`;
+    return `${h}h ${m < 10 ? '0' : ''}${m}m`;
+  }
+
+  findMasterLocationKey(locName) {
+    if (!locName || !this.tripPlanner || !this.tripPlanner.masterLocations) return null;
+    const clean = String(locName).toLowerCase().replace(/\s*\([^)]*\)/g, '').trim();
+    for (const key of Object.keys(this.tripPlanner.masterLocations)) {
+      if (key.toLowerCase() === clean) return key;
+    }
+    for (const key of Object.keys(this.tripPlanner.masterLocations)) {
+      if (key.toLowerCase().includes(clean) || clean.includes(key.toLowerCase())) return key;
+    }
+    return null;
+  }
+
+  parseMilesFromDesc(desc) {
+    if (!desc) return 0;
+    const match = String(desc).match(/\((\d+)\s*mi\)/i);
+    return match ? parseInt(match[1], 10) : 0;
+  }
+
+  /**
+   * Calculates real highway road driving miles and duration between two Montana locations or coordinates.
+   */
+  getRoadLeg(fromLoc, toLoc, fromCoords, toCoords) {
+    const fClean = String(fromLoc || 'helena').toLowerCase().replace(/\s*\([^)]*\)/g, '').trim();
+    const tClean = String(toLoc || 'helena').toLowerCase().replace(/\s*\([^)]*\)/g, '').trim();
+
+    if (fClean === tClean) {
+      return { miles: 0, mins: 0, time: '0m' };
+    }
+
+    // 1. Direct verified Montana highway routes dictionary lookup
+    const key1 = `${fClean}|${tClean}`;
+    const key2 = `${tClean}|${fClean}`;
+    if (this.montanaHighwayRoutes && this.montanaHighwayRoutes[key1]) {
+      const r = this.montanaHighwayRoutes[key1];
+      return { miles: r.miles, mins: r.mins, time: this.formatMinutes(r.mins) };
+    }
+    if (this.montanaHighwayRoutes && this.montanaHighwayRoutes[key2]) {
+      const r = this.montanaHighwayRoutes[key2];
+      return { miles: r.miles, mins: r.mins, time: this.formatMinutes(r.mins) };
+    }
+
+    // 2. Either endpoint is Helena Base HQ
+    const isHelenaOrigin = (fClean === 'helena' || fClean.includes('base') || fClean.includes('office') || fClean === 'helena base' || fClean === 'helena office');
+    const isHelenaDest = (tClean === 'helena' || tClean.includes('base') || tClean.includes('office') || tClean === 'helena base' || tClean === 'helena office');
+
+    if (isHelenaOrigin && this.tripPlanner && this.tripPlanner.masterLocations) {
+      const mKey = this.findMasterLocationKey(tClean);
+      if (mKey && this.tripPlanner.masterLocations[mKey]) {
+        const mInfo = this.tripPlanner.masterLocations[mKey];
+        const m = this.parseMilesFromDesc(mInfo.desc);
+        return { miles: m || Math.round(mInfo.mins * 1.05), mins: mInfo.mins, time: mInfo.time };
+      }
+    }
+    if (isHelenaDest && this.tripPlanner && this.tripPlanner.masterLocations) {
+      const mKey = this.findMasterLocationKey(fClean);
+      if (mKey && this.tripPlanner.masterLocations[mKey]) {
+        const mInfo = this.tripPlanner.masterLocations[mKey];
+        const m = this.parseMilesFromDesc(mInfo.desc);
+        return { miles: m || Math.round(mInfo.mins * 1.05), mins: mInfo.mins, time: mInfo.time };
+      }
+    }
+
+    // 3. Check driveTimeMap from database snapshot
+    if (this.db && typeof this.db.getSnapshot === 'function') {
+      const snap = this.db.getSnapshot();
+      if (snap && snap.configs && snap.configs.driveTimeMap) {
+        const dMap = snap.configs.driveTimeMap;
+        const mins = dMap[key1] || dMap[key2];
+        if (mins && typeof mins === 'number') {
+          const miles = Math.round(mins * 1.05);
+          return { miles: miles, mins: mins, time: this.formatMinutes(mins) };
+        }
+      }
+    }
+
+    // 4. Fallback: Haversine distance adjusted by Montana road winding circuity factor (1.356x)
+    const c1 = fromCoords || this.getCoords(fClean);
+    const c2 = toCoords || this.getCoords(tClean);
+    const haversine = this.calculateDistanceMiles(c1.lat, c1.lng, c2.lat, c2.lng);
+    const roadMiles = Math.round(haversine * 1.356);
+    const roadMins = Math.round((roadMiles / 60) * 60);
+    return { miles: roadMiles, mins: roadMins, time: this.formatMinutes(roadMins) };
+  }
+
+  /**
+   * Computes Haversine straight-line distance in miles between two coordinates.
    */
   calculateDistanceMiles(lat1, lon1, lat2, lon2) {
     const R = 3958.8; // Radius of Earth in miles
@@ -198,16 +444,20 @@ class TripRouteMap {
   }
 
   /**
+   * Computes highway road driving distance between two coordinates including terrain circuity.
+   */
+  calculateDistance(lat1, lon1, lat2, lon2) {
+    return Math.round(this.calculateDistanceMiles(lat1, lon1, lat2, lon2) * 1.356);
+  }
+
+  /**
    * Estimates highway drive time given distance in miles.
    */
   estimateDriveTime(miles) {
     if (miles <= 0) return '0m';
-    // Assume average 58 mph highway travel including turns
-    const minutes = Math.round((miles / 58) * 60);
-    const h = Math.floor(minutes / 60);
-    const m = minutes % 60;
-    if (h === 0) return `${m}m`;
-    return `${h}h ${m < 10 ? '0' : ''}${m}m`;
+    // Assume average 60 mph highway travel including turns and passes
+    const minutes = Math.round((miles / 60) * 60);
+    return this.formatMinutes(minutes);
   }
 
   /**
@@ -760,13 +1010,14 @@ class TripRouteMap {
     let minDistance = Infinity;
 
     routeData.stops.forEach((stop, idx) => {
-      const dist = this.calculateDistanceMiles(
+      const straightDist = this.calculateDistanceMiles(
         this.userPosition.lat, this.userPosition.lng,
         stop.coords.lat, stop.coords.lng
       );
-      if (dist < minDistance) {
-        minDistance = dist;
-        nearestStop = { ...stop, distanceMiles: dist, index: idx + 1 };
+      const roadDist = Math.round(straightDist * 1.356);
+      if (straightDist < minDistance) {
+        minDistance = straightDist;
+        nearestStop = { ...stop, distanceMiles: roadDist, straightDist: straightDist, index: idx + 1 };
       }
     });
 
@@ -775,7 +1026,7 @@ class TripRouteMap {
     const timeEstimate = this.estimateDriveTime(nearestStop.distanceMiles);
 
     // If within 0.5 miles: Arrived at stop!
-    if (nearestStop.distanceMiles <= 0.5) {
+    if (nearestStop.straightDist <= 0.5 || nearestStop.distanceMiles <= 0.5) {
       hudEl.innerHTML = `
         <div style="background: rgba(16, 185, 129, 0.2); border: 1px solid rgba(16, 185, 129, 0.4); border-radius: 6px; padding: 6px 10px; display: flex; justify-content: space-between; align-items: center;">
           <div style="display: flex; align-items: center; gap: 8px;">
@@ -944,18 +1195,28 @@ class TripRouteMap {
         return mLoc.includes(locName.toLowerCase()) || locName.toLowerCase().includes(mLoc);
       });
 
-      // Crews in this location
+      // Crews in this location (active only, excluding departed foremen)
       const crews = [];
       const jobTable = this.db.getTable('job_tracking') || this.db.getTable('Job Tracking');
       if (jobTable && jobTable.rows) {
         jobTable.rows.forEach(r => {
           const rLoc = String(r['Location'] || '').trim().toLowerCase();
           if (rLoc.includes(locName.toLowerCase()) || locName.toLowerCase().includes(rLoc)) {
+            const stat = String(r['Status'] || r['Job Status'] || '').toLowerCase();
+            // Skip completed, on hold, or inactive jobs
+            if (stat.includes('completed') || stat.includes('on hold') || stat === 'closed' || stat === 'inactive') {
+              return;
+            }
+            const lead = String(r['Foreman'] || r['Crew Lead'] || r['Lead'] || 'Unknown').trim();
+            // Skip departed / previous employee foremen
+            if (this.isDepartedOrPreviousEmployee(lead)) {
+              return;
+            }
             const cId = this.tripPlanner.getSignificantJobNumber(r['Job Number'] || r['Crew'] || '');
             if (cId && !crews.some(c => c.crewId === cId)) {
               crews.push({
                 crewId: cId,
-                lead: String(r['Foreman'] || r['Crew Lead'] || r['Lead'] || 'Unknown').trim(),
+                lead: lead,
                 vehicle: String(r['Vehicle'] || r['Unit #'] || r['Truck'] || '').trim(),
                 jobName: String(r['Job Name'] || '').trim()
               });
@@ -976,25 +1237,34 @@ class TripRouteMap {
       });
     });
 
-    // Calculate leg distances & cumulative time
+    // Calculate leg distances & cumulative time using highway road network
     let totalMiles = 0;
+    let totalMins = 0;
+    let prevLoc = 'helena';
     let prevCoords = hq;
 
     stops.forEach((stop) => {
-      const legMiles = this.calculateDistanceMiles(prevCoords.lat, prevCoords.lng, stop.coords.lat, stop.coords.lng);
-      stop.legMiles = legMiles;
-      stop.legTime = this.estimateDriveTime(legMiles);
-      totalMiles += legMiles;
+      const leg = this.getRoadLeg(prevLoc, stop.location, prevCoords, stop.coords);
+      stop.legMiles = leg.miles;
+      stop.legTime = leg.time;
+      stop.legMins = leg.mins;
+      totalMiles += leg.miles;
+      totalMins += leg.mins;
+      prevLoc = stop.location;
       prevCoords = stop.coords;
     });
 
     // Return leg to Helena HQ
     let returnMiles = 0;
     let returnTime = '0m';
+    let returnMins = 0;
     if (stops.length > 0) {
-      returnMiles = this.calculateDistanceMiles(prevCoords.lat, prevCoords.lng, hq.lat, hq.lng);
-      returnTime = this.estimateDriveTime(returnMiles);
+      const retLeg = this.getRoadLeg(prevLoc, 'helena', prevCoords, hq);
+      returnMiles = retLeg.miles;
+      returnTime = retLeg.time;
+      returnMins = retLeg.mins;
       totalMiles += returnMiles;
+      totalMins += returnMins;
     }
 
     return {
@@ -1003,9 +1273,9 @@ class TripRouteMap {
       holidayName: holidayName,
       origin: hq,
       stops: stops,
-      returnLeg: { coords: hq, miles: returnMiles, time: returnTime },
+      returnLeg: { coords: hq, miles: returnMiles, time: returnTime, mins: returnMins },
       totalMiles: Math.round(totalMiles),
-      totalDriveTime: this.estimateDriveTime(totalMiles)
+      totalDriveTime: this.formatMinutes(totalMins)
     };
   }
 

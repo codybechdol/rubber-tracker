@@ -71,6 +71,35 @@ class TaskManagerApp {
     this.renderTasks();
   }
 
+  isDepartedOrPreviousEmployee(empName) {
+    if (!empName) return false;
+    const clean = String(empName).trim();
+    const cleanLower = clean.toLowerCase();
+    if (cleanLower === 'on shelf' || cleanLower === 'shelf' || cleanLower === 'lead' || cleanLower === 'unknown') return false;
+    if (cleanLower.includes('previous') || cleanLower.includes('reclaim') || cleanLower.includes('departed') || cleanLower.includes('former')) return true;
+    if (cleanLower.includes('keenan') && cleanLower.includes('keefe')) return true;
+
+    if (typeof window !== 'undefined' && window.previousEmployeesEngine && typeof window.previousEmployeesEngine.getPreviousEmployees === 'function') {
+      try {
+        const prevList = window.previousEmployeesEngine.getPreviousEmployees();
+        if (prevList.some(p => (p.name || '').toLowerCase() === cleanLower)) return true;
+      } catch (err) {}
+    }
+
+    const empTable = (this.db && typeof this.db.getTable === 'function') ? (this.db.getTable('employees') || this.db.getTable('Employees')) : null;
+    if (empTable && empTable.rows) {
+      const row = empTable.rows.find(r => String(r['Employee Name'] || r['Name'] || '').toLowerCase().trim() === cleanLower);
+      if (row) {
+        const loc = String(row['Location'] || '').toLowerCase();
+        const stat = String(row['Status'] || '').toLowerCase();
+        const lastDay = String(row['Last Day'] || '').trim();
+        if (loc.includes('previous') || stat.includes('previous') || stat.includes('terminated') || stat.includes('inactive')) return true;
+        if (lastDay && new Date(lastDay) < new Date()) return true;
+      }
+    }
+    return false;
+  }
+
   /**
    * Collects, enriches, and normalizes all tasks across Task Metadata, Swap Sheets, Training, and Expiring Certs
    */
@@ -85,12 +114,17 @@ class TaskManagerApp {
       empTable.rows.forEach(r => {
         const name = String(r['Employee Name'] || r['Name'] || r['Employee'] || '').trim().toLowerCase();
         if (name) {
+          const eLoc = String(r['Location'] || '').trim().toLowerCase();
+          const eStat = String(r['Status'] || '').trim().toLowerCase();
+          const lastDay = String(r['Last Day'] || '').trim();
+          const isPrev = eLoc.includes('previous') || eStat.includes('previous') || eStat.includes('terminated') || (lastDay && new Date(lastDay) < new Date()) || this.isDepartedOrPreviousEmployee(name);
           empLookup[name] = {
             displayName: String(r['Employee Name'] || r['Name'] || r['Employee'] || '').trim(),
             location: String(r['Location'] || '').trim(),
             crewId: String(r['Job Number'] || r['Job #'] || '').trim(),
             foreman: String(r['Foreman'] || r['Crew Lead'] || r['Lead'] || '').trim(),
-            phone: String(r['Phone Number'] || r['Phone'] || '').trim()
+            phone: String(r['Phone Number'] || r['Phone'] || '').trim(),
+            isPrevious: isPrev
           };
         }
       });
@@ -102,13 +136,15 @@ class TaskManagerApp {
     if (jobTable && jobTable.rows) {
       jobTable.rows.forEach(r => {
         const crewId = String(r['Job Number'] || r['Crew'] || r['Job #'] || '').trim();
-        if (crewId) {
-          jobLookup[crewId] = {
-            location: String(r['Location'] || '').trim(),
-            foreman: String(r['Foreman'] || r['Crew Lead'] || r['Lead'] || '').trim(),
-            jobName: String(r['Job Name'] || '').trim()
-          };
-        }
+        const sigCrew = this.getSignificantJobNumber(crewId);
+        const jObj = {
+          location: String(r['Location'] || '').trim(),
+          foreman: String(r['Foreman'] || r['Crew Lead'] || r['Lead'] || '').trim(),
+          jobName: String(r['Job Name'] || '').trim(),
+          status: String(r['Status'] || r['Job Status'] || '').trim()
+        };
+        if (crewId) jobLookup[crewId] = jObj;
+        if (sigCrew) jobLookup[sigCrew] = jObj;
       });
     }
 
@@ -144,6 +180,11 @@ class TaskManagerApp {
         const itemType = String(r['ItemType'] || r['Item Type'] || r['Item'] || '').trim();
         const currentItem = String(r['CurrentItem'] || r['Current Item'] || '').trim();
         let loc = String(r['Location'] || '').trim();
+
+        // Skip tasks for previous / departed employees
+        if (this.isDepartedOrPreviousEmployee(employee) || loc.toLowerCase().includes('previous')) {
+          return;
+        }
         let foreman = String(r['Foreman'] || '').trim();
         const dueDate = String(r['DueDate'] || r['Due Date'] || r['Expiration Date'] || r['Change Out Date'] || 'N/A').trim();
         const scheduledDate = String(r['ScheduledDate'] || r['Scheduled Date'] || '').trim();
@@ -431,12 +472,25 @@ class TaskManagerApp {
         const month = String(r['Month'] || r['Scheduled Month'] || '').trim();
         const topic = String(r['Topic'] || r['Training Topic'] || r['Training'] || 'Safety Training').trim();
         const crewId = String(r['Crew #'] || r['Crew'] || r['Job Number'] || r['Job #'] || '').trim();
+        const sigCrew = this.getSignificantJobNumber(crewId);
         const lead = String(r['Lead'] || r['Crew Lead'] || r['Foreman'] || '').trim();
         const attendees = String(r['Attendees'] || r['Crew Members'] || '').trim();
-        const crewForeman = lead || (jobLookup[crewId]?.foreman) || 'Lead';
+        const crewForeman = lead || (jobLookup[sigCrew]?.foreman) || (jobLookup[crewId]?.foreman) || 'Lead';
 
         // Skip completed or N/A
         if (status.toLowerCase() === 'complete' || status.toLowerCase() === 'n/a') return;
+
+        // Skip training for completed, on-hold, or inactive crews
+        const jInfo = jobLookup[sigCrew] || jobLookup[crewId];
+        const jStat = String(jInfo?.status || '').toLowerCase();
+        if (jStat.includes('completed') || jStat.includes('on hold') || jStat === 'closed' || jStat === 'inactive') {
+          return;
+        }
+
+        // Skip training if lead is a departed / previous employee
+        if (this.isDepartedOrPreviousEmployee(lead)) {
+          return;
+        }
 
         // Skip future months until that month arrives
         if (this.isFutureTrainingMonth(month, targetDate)) {
@@ -447,7 +501,6 @@ class TaskManagerApp {
         const isOverdue = isPastMonth && !status.toLowerCase().includes('complete');
 
         const loc = (jobLookup[crewId]?.location) || 'Helena';
-        const sigCrew = this.getSignificantJobNumber(crewId);
         const taskKey = `training_${sigCrew || crewId}_${topic}_${month}`.toLowerCase();
         const altKey = `training_${crewId}_${topic}_${month}`.toLowerCase();
         if (r._rowIdx) seenTaskKeys.add(`trainingtracking_${r._rowIdx}`.toLowerCase());

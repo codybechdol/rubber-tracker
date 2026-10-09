@@ -41,9 +41,9 @@ class TripPlannerApp {
       'Hamilton': { mins: 135, time: '2h 15m', desc: '2h 15m (145 mi)', dir: 'West' },
       'Melville': { mins: 135, time: '2h 15m', desc: '2h 15m (140 mi)', dir: 'East' },
       'Darby': { mins: 165, time: '2h 45m', desc: '2h 45m (175 mi)', dir: 'West' },
-      'Laurel': { mins: 190, time: '3h 10m', desc: '3h 10m (215 mi)', dir: 'East' },
+      'Laurel': { mins: 205, time: '3h 25m', desc: '3h 25m (225 mi)', dir: 'East' },
       'Kalispell': { mins: 195, time: '3h 15m', desc: '3h 15m (190 mi)', dir: 'Northwest' },
-      'Billings': { mins: 200, time: '3h 20m', desc: '3h 20m (230 mi)', dir: 'East' },
+      'Billings': { mins: 220, time: '3h 40m', desc: '3h 40m (240 mi)', dir: 'East' },
       'Post Falls': { mins: 225, time: '3h 45m', desc: '3h 45m (245 mi)', dir: 'West' },
       'Northern Lights': { mins: 270, time: '4h 30m', desc: '4h 30m (280 mi)', dir: 'North' },
       'Miles City': { mins: 290, time: '4h 50m', desc: '4h 50m (340 mi)', dir: 'East' },
@@ -1268,6 +1268,38 @@ class TripPlannerApp {
     return certsList;
   }
 
+  /**
+   * Checks if an employee is departed, former, terminated, or quit.
+   */
+  isDepartedOrPreviousEmployee(empName) {
+    if (!empName) return false;
+    const clean = String(empName).trim();
+    const cleanLower = clean.toLowerCase();
+    if (cleanLower === 'on shelf' || cleanLower === 'shelf' || cleanLower === 'lead' || cleanLower === 'unknown') return false;
+    if (cleanLower.includes('previous') || cleanLower.includes('reclaim') || cleanLower.includes('departed') || cleanLower.includes('former')) return true;
+    if (cleanLower.includes('keenan') && cleanLower.includes('keefe')) return true;
+
+    if (typeof window !== 'undefined' && window.previousEmployeesEngine && typeof window.previousEmployeesEngine.getPreviousEmployees === 'function') {
+      try {
+        const prevList = window.previousEmployeesEngine.getPreviousEmployees();
+        if (prevList.some(p => (p.name || '').toLowerCase() === cleanLower)) return true;
+      } catch (err) {}
+    }
+
+    const empTable = (this.db && typeof this.db.getTable === 'function') ? (this.db.getTable('employees') || this.db.getTable('Employees')) : null;
+    if (empTable && empTable.rows) {
+      const row = empTable.rows.find(r => String(r['Employee Name'] || r['Name'] || '').toLowerCase().trim() === cleanLower);
+      if (row) {
+        const loc = String(row['Location'] || '').toLowerCase();
+        const stat = String(row['Status'] || '').toLowerCase();
+        const lastDay = String(row['Last Day'] || '').trim();
+        if (loc.includes('previous') || stat.includes('previous') || stat.includes('terminated') || stat.includes('inactive')) return true;
+        if (lastDay && new Date(lastDay) < new Date()) return true;
+      }
+    }
+    return false;
+  }
+
   getEmployeeOptions() {
     const empTable = this.db.getTable('employees');
     if (!empTable || !empTable.rows) return [];
@@ -1278,7 +1310,12 @@ class TripPlannerApp {
         const role = String(r['Job Classification'] || r['Role'] || r['Title'] || '').trim();
         const crew = String(r['Job Number'] || r['Crew'] || '').trim();
         const status = String(r['Status'] || '').trim().toLowerCase();
-        if (!name || status === 'terminated' || status === 'previous employee') return null;
+        const loc = String(r['Location'] || '').trim().toLowerCase();
+        const lastDay = String(r['Last Day'] || '').trim();
+        if (!name) return null;
+        if (status === 'terminated' || status === 'previous employee' || loc.includes('previous')) return null;
+        if (lastDay && new Date(lastDay) < new Date()) return null;
+        if (this.isDepartedOrPreviousEmployee(name)) return null;
         return {
           name: name,
           role: role,
@@ -1534,31 +1571,40 @@ class TripPlannerApp {
     const empTable = this.db.getTable('employees');
     if (!empTable || !empTable.rows) return [];
 
-    // Also check job_tracking to see if a foreman is known for this crew
+    // Also check job_tracking to see if a foreman is known for this crew (active jobs only)
     let trackingForeman = '';
     const jobTable = this.db.getTable('job_tracking');
     if (jobTable && jobTable.rows) {
       const jRow = jobTable.rows.find(r => {
         const jNum = this.getSignificantJobNumber(String(r['Job Number'] || r['Crew'] || r['Job #'] || ''));
+        const jStat = String(r['Status'] || r['Job Status'] || '').toLowerCase();
+        if (jStat.includes('completed') || jStat.includes('on hold')) return false;
         return jNum.toLowerCase() === cleanId;
       });
       if (jRow) {
-        trackingForeman = String(jRow['Foreman'] || jRow['Crew Lead'] || jRow['Lead'] || '').trim();
+        const lead = String(jRow['Foreman'] || jRow['Crew Lead'] || jRow['Lead'] || '').trim();
+        if (!this.isDepartedOrPreviousEmployee(lead)) {
+          trackingForeman = lead;
+        }
       }
     }
 
     const members = [];
     empTable.rows.forEach(r => {
+      const name = String(r['Employee Name'] || r['Name'] || r['Employee'] || '').trim();
+      if (!name) return;
       const status = String(r['Status'] || '').trim().toLowerCase();
-      if (status === 'terminated' || status === 'previous employee') return;
+      const loc = String(r['Location'] || '').trim().toLowerCase();
+      const lastDay = String(r['Last Day'] || '').trim();
+      if (status === 'terminated' || status === 'previous employee' || loc.includes('previous')) return;
+      if (lastDay && new Date(lastDay) < new Date()) return;
+      if (this.isDepartedOrPreviousEmployee(name)) return;
+
       const rawJob = String(r['Job Number'] || r['Crew'] || '').trim();
       const rawSecJob = String(r['Secondary Job Number'] || r['Secondary Job #'] || '').trim();
       const jobNum = this.getSignificantJobNumber(rawJob).toLowerCase();
       const secJobNum = this.getSignificantJobNumber(rawSecJob).toLowerCase();
-
-      const name = String(r['Employee Name'] || r['Name'] || r['Employee'] || '').trim();
       const role = String(r['Job Classification'] || r['Role'] || r['Title'] || '').trim();
-      if (!name) return;
 
       const isMatch = (jobNum === cleanId) || (secJobNum === cleanId) || (trackingForeman && name.toLowerCase() === trackingForeman.toLowerCase());
 
@@ -1868,9 +1914,18 @@ class TripPlannerApp {
     container.innerHTML = this.selectedClassCrews.map(cId => {
       const members = this.getCrewMembers(cId);
       let foreman = 'Lead';
-      const jRow = jobRows.find(r => this.getSignificantJobNumber(String(r['Job Number'] || r['Crew'] || '')).toLowerCase() === cId.toLowerCase());
+      const jRow = jobRows.find(r => {
+        const jNum = this.getSignificantJobNumber(String(r['Job Number'] || r['Crew'] || '')).toLowerCase();
+        const jStat = String(r['Status'] || r['Job Status'] || '').toLowerCase();
+        return jNum === cId.toLowerCase() && !jStat.includes('completed') && !jStat.includes('on hold');
+      });
       if (jRow) {
-        foreman = String(jRow['Foreman'] || jRow['Crew Lead'] || jRow['Lead'] || 'Lead').trim();
+        const jLead = String(jRow['Foreman'] || jRow['Crew Lead'] || jRow['Lead'] || 'Lead').trim();
+        if (!this.isDepartedOrPreviousEmployee(jLead)) {
+          foreman = jLead;
+        } else if (members.length > 0 && members[0].isForeman) {
+          foreman = members[0].name;
+        }
       } else if (members.length > 0 && members[0].isForeman) {
         foreman = members[0].name;
       }
@@ -6027,7 +6082,11 @@ class TripPlannerApp {
           allKnownLocations.add(loc);
           const sLower = status.toLowerCase();
           const isExcludedPrefix = crewId.startsWith('002') || crewId.startsWith('005');
-          if (!isExcludedPrefix && (sLower === 'active' || sLower === 'pending start' || (!sLower.includes('completed') && !sLower.includes('on hold') && status !== ''))) {
+          const isCompletedOrHold = sLower.includes('completed') || sLower.includes('on hold') || sLower === 'closed' || sLower === 'inactive';
+          if (!isExcludedPrefix && !isCompletedOrHold && (sLower === 'active' || sLower === 'pending start' || status !== '')) {
+            if (this.isDepartedOrPreviousEmployee(foreman)) {
+              return;
+            }
             if (!activeCrewsByLoc[loc]) {
               activeCrewsByLoc[loc] = [];
             }
@@ -7258,10 +7317,16 @@ class TripPlannerApp {
       jobTable.rows.forEach(r => {
         const rawCrewId = String(r['Job Number'] || r['Crew'] || r['Job #'] || '').trim();
         const crewId = this.getSignificantJobNumber(rawCrewId);
+        const jStat = String(r['Status'] || r['Job Status'] || '').toLowerCase();
+        // Skip completed or on-hold jobs when mapping active crew foreman
+        if (jStat.includes('completed') || jStat.includes('on hold') || jStat === 'closed' || jStat === 'inactive') return;
+        const foreman = String(r['Foreman'] || r['Crew Lead'] || r['Lead'] || '').trim();
+        if (this.isDepartedOrPreviousEmployee(foreman)) return;
+
         if (crewId && !crewMap[crewId]) {
           crewMap[crewId] = {
             crewId: crewId,
-            foreman: String(r['Foreman'] || r['Crew Lead'] || r['Lead'] || '').trim(),
+            foreman: foreman,
             jobName: String(r['Job Name'] || '').trim(),
             location: this.cleanPhysicalLocation(String(r['Location'] || '').trim()),
             status: String(r['Status'] || r['Job Status'] || '').trim()
@@ -8526,4 +8591,10 @@ class TripPlannerApp {
   }
 }
 
-window.tripPlanner = new TripPlannerApp(window.localDB);
+if (typeof window !== 'undefined') {
+  window.TripPlannerApp = TripPlannerApp;
+  window.tripPlanner = new TripPlannerApp(window.localDB);
+}
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports = TripPlannerApp;
+}
