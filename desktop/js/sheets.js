@@ -99,6 +99,39 @@ class SheetNavigator {
     return `${mm}/${dd}/${yyyy}`;
   }
 
+  normalizeEquipmentIdentifier(val) {
+    if (val === null || val === undefined) return '';
+    return String(val)
+      .trim()
+      .toUpperCase()
+      .replace(/[\s\u00A0]+/g, '')
+      .replace(/[–—]/g, '-');
+  }
+
+  getPrimaryItemCol(sheetKey, headers = []) {
+    if (!headers || headers.length === 0) return null;
+    if (sheetKey === 'grounds') {
+      const serialH = headers.find(h => {
+        const hl = String(h || '').trim().toLowerCase();
+        return hl === 'serial #' || hl === 'serial' || hl === 'ground #' || hl === 'ground';
+      });
+      if (serialH) return serialH;
+    }
+    const candidates = [
+      'item #', 'item', 'serial #', 'serial', 'hv tester', 'hvt #', 'hvt',
+      'phasing set', 'ps #', 'aed', 'aed #', 'hot stick', 'blanket', 'mack',
+      'glove', 'sleeve', 'esl id'
+    ];
+    for (const c of candidates) {
+      const found = headers.find(h => {
+        const hl = String(h || '').trim().toLowerCase();
+        return hl === c || hl.startsWith(c);
+      });
+      if (found) return found;
+    }
+    return headers[0] || null;
+  }
+
   init() {
     this.renderTabsBar();
     this.setupSearch();
@@ -316,15 +349,17 @@ class SheetNavigator {
         this.searchTerm = '';
         const sInput = document.getElementById('sheet-search-input');
         if (sInput) sInput.value = '';
+        const INVENTORY_KEYS = ['gloves', 'sleeves', 'blankets', 'macks', 'hv_testers', 'phasing_sets', 'aed', 'grounds', 'hot_sticks'];
         if (sheet.key === 'employees') {
           this.multiSort = ['Location', 'Job Number'];
           this.sortCol = null;
         } else if (sheet.key === 'job_tracking') {
           this.multiSort = ['Status', 'Job Number'];
           this.sortCol = null;
-        } else if (sheet.key === 'grounds') {
-          this.multiSort = ['Type', 'Serial #'];
-          this.sortCol = null;
+        } else if (INVENTORY_KEYS.includes(sheet.key)) {
+          this.sortCol = null; // Auto-detected in renderStandardTable as primary item column
+          this.multiSort = null;
+          this.sortDir = 'asc';
         } else {
           this.sortCol = null;
           this.multiSort = null;
@@ -456,7 +491,11 @@ class SheetNavigator {
     };
 
     if (type === 'itemNum') {
-      const col = findCol(['glove', 'sleeve', 'blanket', 'mack', 'item #', 'item', 'serial #', 'esl id']);
+      const col = this.getPrimaryItemCol(this.currentSheetKey, headers) || findCol([
+        'item #', 'item', 'serial #', 'serial', 'hv tester', 'hvt #', 'hvt',
+        'phasing set', 'ps #', 'aed', 'aed #', 'hot stick', 'blanket', 'mack',
+        'glove', 'sleeve', 'ground #', 'ground', 'esl id'
+      ]);
       if (this.sortCol === col) {
         this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc';
       } else {
@@ -4942,8 +4981,30 @@ class SheetNavigator {
         if (rA !== rB) return rA - rB;
       }
 
+      // Natural alphanumeric comparison for item numbers with whitespace normalization
+      if (isEquipmentSheet && (colLower.includes('item') || colLower.includes('serial') || colLower.includes('tester') || colLower.includes('phasing') || colLower.includes('aed') || colLower.includes('stick') || colLower.includes('blanket') || colLower.includes('mack') || colLower.includes('glove') || colLower.includes('sleeve') || colLower === 'hvt' || colLower === 'hvt #' || colLower === 'ps #' || colLower === 'aed #')) {
+        const normA = this.normalizeEquipmentIdentifier(sA);
+        const normB = this.normalizeEquipmentIdentifier(sB);
+        const isNumA = /^\d+$/.test(normA);
+        const isNumB = /^\d+$/.test(normB);
+        if (isNumA && isNumB) {
+          const diff = parseInt(normA, 10) - parseInt(normB, 10);
+          if (diff !== 0) return diff;
+        }
+        const cmp = normA.localeCompare(normB, undefined, { numeric: true, sensitivity: 'base' });
+        if (cmp !== 0) return cmp;
+      }
+
       return sA.localeCompare(sB, undefined, { numeric: true, sensitivity: 'base' });
     };
+
+    const primaryCol = this.getPrimaryItemCol(this.currentSheetKey, headers);
+
+    // Default sort for all equipment sheets: automatically sort by identifying number (ascending natural alphanumeric)
+    if (isEquipmentSheet && !this.sortCol && !this.multiSort) {
+      this.sortCol = primaryCol;
+      this.sortDir = 'asc';
+    }
 
     // Sort logic
     if (this.multiSort && this.multiSort.length > 0) {
@@ -4957,25 +5018,19 @@ class SheetNavigator {
     } else if (this.sortCol) {
       const col = this.sortCol;
       const dir = this.sortDir === 'asc' ? 1 : -1;
+      const isPrimaryCol = isEquipmentSheet && (col === primaryCol || col === headers[0]);
       rows.sort((a, b) => {
-        return dir * compareValues(col, a[col], b[col]);
-      });
-    } else if (this.currentSheetKey === 'grounds' && !this.sortCol && !this.multiSort) {
-      // Default sort for Grounds: Type (OH/UG), then Serial #
-      const tCol = headers.find(h => {
-        const hl = String(h || '').toLowerCase().trim();
-        return hl === 'type' || hl === 'type (oh/ug)' || hl === 'type(oh/ug)';
-      }) || 'Type';
-      const sCol = headers.find(h => {
-        const hl = String(h || '').toLowerCase().trim();
-        return hl === 'serial #' || hl === 'serial' || hl === 'item #' || hl === 'item';
-      }) || 'Serial #';
-      this.multiSort = [tCol, sCol];
-      const dir = 1;
-      rows.sort((a, b) => {
-        const cmp1 = compareValues(tCol, a[tCol], b[tCol]);
-        if (cmp1 !== 0) return dir * cmp1;
-        return dir * compareValues(sCol, a[sCol], b[sCol]);
+        let valA = a[col];
+        let valB = b[col];
+        if (isPrimaryCol) {
+          if (!valA || String(valA).trim() === '') {
+            valA = a['Item #'] || a['HV Tester'] || a['HVT #'] || a['HVT'] || a['Phasing Set'] || a['PS #'] || a['AED'] || a['Glove'] || a['Sleeve'] || a['Blanket'] || a['MACK'] || a['Serial #'] || a['Hot Stick'] || '';
+          }
+          if (!valB || String(valB).trim() === '') {
+            valB = b['Item #'] || b['HV Tester'] || b['HVT #'] || b['HVT'] || b['Phasing Set'] || b['PS #'] || b['AED'] || b['Glove'] || b['Sleeve'] || b['Blanket'] || b['MACK'] || b['Serial #'] || b['Hot Stick'] || '';
+          }
+        }
+        return dir * compareValues(col, valA, valB);
       });
     } else if (this.currentSheetKey === 'safety_compliance') {
       // Default sort for Safety Compliance matching Google Sheets: Week Start (descending), then Job Number (ascending)
@@ -5097,16 +5152,22 @@ class SheetNavigator {
         </div>
       `;
     } else if (['hv_testers', 'phasing_sets', 'aed', 'hot_sticks'].includes(this.currentSheetKey)) {
-      const isItemSorted = this.sortCol && ['item #', 'item', 'serial #'].some(k => this.sortCol.toLowerCase().includes(k));
+      const primaryCol = this.getPrimaryItemCol(this.currentSheetKey, headers);
+      const isItemSorted = this.sortCol && (
+        this.sortCol === primaryCol ||
+        ['item #', 'item', 'serial #', 'serial', 'hv tester', 'hvt #', 'hvt', 'phasing set', 'ps #', 'aed', 'hot stick'].some(k => this.sortCol.toLowerCase().includes(k))
+      );
       const isLocSorted = this.sortCol && this.sortCol.toLowerCase().includes('location');
       const isStatSorted = this.sortCol && this.sortCol.toLowerCase().includes('status');
       const isAssignedSorted = this.sortCol && this.sortCol.toLowerCase().includes('assigned');
       const isChangeOutSorted = this.sortCol && (this.sortCol.toLowerCase().includes('change out') || this.sortCol.toLowerCase().includes('changeout') || this.sortCol.toLowerCase().includes('pad'));
 
+      const itemBtnLabel = this.currentSheetKey === 'hv_testers' ? 'HVT #' : (this.currentSheetKey === 'phasing_sets' ? 'PS #' : (this.currentSheetKey === 'aed' ? 'AED #' : 'Item #'));
+
       presetBarHtml = `
         <div style="padding: 8px 16px; background-color: var(--bg-secondary); border-bottom: 1px solid var(--border-color); display: flex; align-items: center; gap: 6px; font-size: 12px; overflow-x: auto; flex-wrap: wrap;">
           <span style="color: var(--text-muted); font-weight: 600; white-space: nowrap;">⚡ Quick Sort:</span>
-          <button class="btn btn-secondary ${isItemSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('itemNum')">🔢 Item #${dirArrow(isItemSorted)}</button>
+          <button class="btn btn-secondary ${isItemSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('itemNum')">🔢 ${itemBtnLabel}${dirArrow(isItemSorted)}</button>
           <button class="btn btn-secondary ${isLocSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('location')">📍 Location${dirArrow(isLocSorted)}</button>
           <button class="btn btn-secondary ${isStatSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('status')">🏷️ Status${dirArrow(isStatSorted)}</button>
           <button class="btn btn-secondary ${isAssignedSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px; white-space: nowrap;" onclick="window.sheetNavigator.setPresetSort('assignedTo')">👤 Assigned To${dirArrow(isAssignedSorted)}</button>
@@ -5444,7 +5505,40 @@ class SheetNavigator {
       `;
     }
 
-    let html = presetBarHtml + `<table class="data-table"><thead><tr>`;
+    // Pre-calculate duplicate identifiers for equipment sheets so they are flagged visually
+    const duplicateIds = new Set();
+    if (isEquipmentSheet) {
+      const seenIds = new Set();
+      (tableData.rows || []).forEach(r => {
+        const rawVal = r[primaryCol] || r['Item #'] || r['HV Tester'] || r['HVT #'] || r['Phasing Set'] || r['PS #'] || r['AED'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['MACK'] || r['Serial #'] || r['Hot Stick'] || '';
+        const idVal = this.normalizeEquipmentIdentifier(rawVal);
+        if (idVal) {
+          if (seenIds.has(idVal)) {
+            duplicateIds.add(idVal);
+          } else {
+            seenIds.add(idVal);
+          }
+        }
+      });
+    }
+
+    let duplicateBannerHtml = '';
+    if (isEquipmentSheet && duplicateIds.size > 0) {
+      const dupCount = duplicateIds.size;
+      const dupList = Array.from(duplicateIds).slice(0, 5).join(', ');
+      duplicateBannerHtml = `
+        <div style="padding: 8px 16px; background: rgba(239, 68, 68, 0.12); border-bottom: 1px solid rgba(239, 68, 68, 0.35); color: #fca5a5; font-size: 12px; display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap;">
+          <div style="display: flex; align-items: center; gap: 6px;">
+            <span style="font-size: 14px;">⚠️</span>
+            <span style="font-weight: 700; color: #f87171;">Duplicate Identifying Numbers:</span>
+            <span>${dupCount} identifier${dupCount > 1 ? 's' : ''} (#${this.escapeHtml(dupList)}${duplicateIds.size > 5 ? '...' : ''}) ${dupCount > 1 ? 'are' : 'is'} shared by multiple items.</span>
+          </div>
+          <span style="font-size: 11px; color: #cbd5e1;">Double-click any highlighted item cell to edit or rename.</span>
+        </div>
+      `;
+    }
+
+    let html = presetBarHtml + duplicateBannerHtml + `<table class="data-table"><thead><tr>`;
 
     headers.forEach((h) => {
       let sortIndicator = '';
@@ -5820,7 +5914,9 @@ class SheetNavigator {
         if (isEquipmentSheet && isPrimaryItemCol && val) {
           const itemKey = String(val).trim();
           const histKey = this.currentSheetKey.endsWith('_history') ? this.currentSheetKey : (this.currentSheetKey + '_history');
-          customCellHtml = `<span style="font-weight: 700; color: #60a5fa; cursor: pointer; text-decoration: underline dotted; display: inline-block; padding: 2px 4px; border-radius: 4px;" title="Click to inspect lifecycle dossier for #${this.escapeHtml(itemKey)}" onclick="if(window.itemStatsEngine){window.itemStatsEngine.openDossierModal('${this.escapeJs(itemKey)}', '${this.escapeJs(histKey)}');}">${this.escapeHtml(val)}</span>`;
+          const isDup = duplicateIds.has(this.normalizeEquipmentIdentifier(itemKey));
+          const dupBadge = isDup ? `<span class="badge" style="background: rgba(239, 68, 68, 0.25); color: #fca5a5; border: 1px solid #ef4444; font-size: 10px; padding: 1px 5px; margin-left: 6px; border-radius: 4px; font-weight: 700; white-space: nowrap; cursor: pointer;" title="Duplicate identifier! Another item in this sheet shares this number. Double-click to edit/rename.">⚠️ Duplicate</span>` : '';
+          customCellHtml = `<span style="font-weight: 700; color: #60a5fa; cursor: pointer; text-decoration: underline dotted; display: inline-block; padding: 2px 4px; border-radius: 4px;" title="Click to inspect lifecycle dossier for #${this.escapeHtml(itemKey)}" onclick="if(window.itemStatsEngine){window.itemStatsEngine.openDossierModal('${this.escapeJs(itemKey)}', '${this.escapeJs(histKey)}');}">${this.escapeHtml(val)}</span>${dupBadge}`;
         } else if (isEquipmentSheet && hLower === 'esl id' && val) {
           // ESL ID is an electronic tracking tag barcode (not linked to item lifecycle)
           customCellHtml = `<span class="cell-text" style="font-family: monospace; font-size: 11px; color: #94a3b8; font-weight: 500;">${this.escapeHtml(val)}</span>`;
@@ -6699,6 +6795,24 @@ class SheetNavigator {
             }
           }
 
+          // Validate uniqueness if editing primary equipment item cell
+          if (targetCell.dataset.primary === 'true' && newVal) {
+            const normNew = this.normalizeEquipmentIdentifier(newVal);
+            if (tableData && tableData.rows) {
+              const dup = tableData.rows.find(r => {
+                if (r._rowIdx === actualRowIdx) return false;
+                const rNum = this.normalizeEquipmentIdentifier(r['Item #'] || r['HV Tester'] || r['HVT #'] || r['Phasing Set'] || r['PS #'] || r['AED'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['MACK'] || r['Serial #'] || r['Hot Stick'] || Object.values(r)[0] || '');
+                return rNum && rNum === normNew;
+              });
+              if (dup) {
+                const assigned = dup['Assigned To'] || dup['Status'] || 'In Inventory';
+                alert(`⛔ Duplicate Error: Item #${newVal} already exists in ${tableData.name || this.currentSheetKey} (${assigned})!\n\nEquipment identifying numbers must be unique.`);
+                targetCell.textContent = initialVal;
+                return;
+              }
+            }
+          }
+
           // 1. Update in-memory row and grid
           if (tableRow) {
             tableRow[header] = newVal;
@@ -7093,12 +7207,15 @@ class SheetNavigator {
           if (newItemNum && newItemNum !== currentItemNum) {
             const curTable = this.db.getTable(this.currentSheetKey);
             if (curTable && curTable.rows) {
+              const normNew = this.normalizeEquipmentIdentifier(newItemNum);
               const dup = curTable.rows.find(r => {
-                const rNum = String(r['Item #'] || r['HV Tester'] || r['Phasing Set'] || r['AED'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['MACK'] || r['Serial #'] || Object.values(r)[0] || '').trim().toLowerCase();
-                return rNum === newItemNum.toLowerCase() && r._rowIdx !== targetRow;
+                if (r._rowIdx === targetRow) return false;
+                const rNum = this.normalizeEquipmentIdentifier(r['Item #'] || r['HV Tester'] || r['HVT #'] || r['Phasing Set'] || r['PS #'] || r['AED'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['MACK'] || r['Serial #'] || r['Hot Stick'] || Object.values(r)[0] || '');
+                return rNum && rNum === normNew;
               });
               if (dup) {
-                alert(`⛔ Duplicate Error: Item #${newItemNum} already exists in ${curTable.name || this.currentSheetKey}!`);
+                const assigned = dup['Assigned To'] || dup['Status'] || 'In Inventory';
+                alert(`⛔ Duplicate Error: Item #${newItemNum} already exists in ${curTable.name || this.currentSheetKey} (${assigned})!\n\nEquipment identifying numbers must be unique.`);
                 return;
               }
             }

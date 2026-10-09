@@ -846,24 +846,37 @@ class InventoryManager {
     this.updatePreview();
   }
 
-  checkDuplicate(cat, itemNum, eslId = '') {
+  normalizeEquipmentIdentifier(val) {
+    if (val === null || val === undefined) return '';
+    return String(val)
+      .trim()
+      .toUpperCase()
+      .replace(/[\s\u00A0]+/g, '')
+      .replace(/[–—]/g, '-');
+  }
+
+  checkDuplicate(cat, itemNum, eslId = '', excludeRowIdx = null) {
     const table = this.db.getTable(cat);
     if (!table || !table.rows || !itemNum) return null;
 
-    const cleanNum = String(itemNum).trim().toLowerCase();
-    const cleanEsl = String(eslId || '').trim().toLowerCase();
-    const isNumOnly = /^\d+$/.test(cleanNum);
-    const parsedCleanNum = isNumOnly ? parseInt(cleanNum, 10) : null;
+    const normNum = this.normalizeEquipmentIdentifier(itemNum);
+    const normEsl = this.normalizeEquipmentIdentifier(eslId);
+    const isNumOnly = /^\d+$/.test(normNum);
+    const parsedCleanNum = isNumOnly ? parseInt(normNum, 10) : null;
+
+    const firstHeader = (table.headers && table.headers[0]) || 'Item #';
 
     for (const r of table.rows) {
-      const firstKey = Object.keys(r)[0] || 'Item #';
-      const rNum = String(r['Item #'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['Serial #'] || r[firstKey] || '').trim().toLowerCase();
-      const rEsl = String(r['ESL ID'] || '').trim().toLowerCase();
+      if (excludeRowIdx && r._rowIdx === excludeRowIdx) continue;
+      const rNumRaw = r[firstHeader] || r['Item #'] || r['HV Tester'] || r['HVT #'] || r['HVT'] || r['Phasing Set'] || r['PS #'] || r['AED'] || r['AED #'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['MACK'] || r['Serial #'] || r['Hot Stick'] || r['Ground #'] || '';
+      const normRNum = this.normalizeEquipmentIdentifier(rNumRaw);
+      const rEsl = String(r['ESL ID'] || '').trim();
 
-      if (cleanNum && (rNum === cleanNum || (isNumOnly && /^\d+$/.test(rNum) && parseInt(rNum, 10) === parsedCleanNum))) {
-        return { field: 'itemNum', value: rNum, existingRow: r };
+      const matchNum = normNum && normRNum && (normRNum === normNum || (isNumOnly && /^\d+$/.test(normRNum) && parseInt(normRNum, 10) === parsedCleanNum));
+      if (matchNum) {
+        return { field: 'itemNum', value: rNumRaw || itemNum, existingRow: r };
       }
-      if (cleanEsl && rEsl && rEsl === cleanEsl) {
+      if (normEsl && rEsl && this.normalizeEquipmentIdentifier(rEsl) === normEsl) {
         return { field: 'eslId', value: rEsl, existingRow: r };
       }
     }
@@ -882,10 +895,15 @@ class InventoryManager {
 
     if (!itemNum) {
       if (feedback) feedback.innerHTML = '';
-      if (itemNumInput) itemNumInput.style.borderColor = 'var(--border-color)';
+      if (itemNumInput) {
+        itemNumInput.style.borderColor = 'var(--border-color)';
+        itemNumInput.style.boxShadow = 'none';
+      }
       if (submitBtn) {
         submitBtn.disabled = false;
         submitBtn.style.opacity = '1';
+        submitBtn.style.cursor = 'pointer';
+        submitBtn.title = '';
       }
       this.updatePreview();
       return;
@@ -893,25 +911,47 @@ class InventoryManager {
 
     const dup = this.checkDuplicate(cat, itemNum, eslId);
     if (dup) {
-      const assigned = dup.existingRow['Assigned To'] || dup.existingRow['Status'] || 'In Inventory';
+      const assigned = dup.existingRow['Assigned To'] || 'Unassigned';
+      const status = dup.existingRow['Status'] || 'In Inventory';
       const loc = dup.existingRow['Location'] || 'Helena';
+      const existVal = dup.value || itemNum;
       if (feedback) {
-        feedback.innerHTML = `<span style="color: #ef4444; font-weight: 600;">⛔ Item #${itemNum} already exists (${assigned} • ${loc})</span>`;
+        feedback.innerHTML = `
+          <div style="background: rgba(239, 68, 68, 0.15); border: 1px solid #ef4444; border-radius: 6px; padding: 6px 10px; margin-top: 5px; color: #fca5a5; font-size: 11.5px; line-height: 1.45;">
+            <div style="font-weight: 800; color: #f87171; display: flex; align-items: center; gap: 5px;">
+              <span>⛔</span> IDENTIFYING NUMBER ALREADY IN USE
+            </div>
+            <div style="margin-top: 2px;">
+              Item <strong>#${this.escapeHtml(existVal)}</strong> is already in inventory: <strong>${this.escapeHtml(status)}</strong> • <strong>${this.escapeHtml(assigned)}</strong> • 📍 ${this.escapeHtml(loc)}
+            </div>
+            <div style="color: #cbd5e1; font-size: 11px; margin-top: 2px;">
+              Identifying numbers must be unique and can only be used once. Please enter a different number.
+            </div>
+          </div>
+        `;
       }
-      if (itemNumInput) itemNumInput.style.borderColor = '#ef4444';
+      if (itemNumInput) {
+        itemNumInput.style.borderColor = '#ef4444';
+        itemNumInput.style.boxShadow = '0 0 0 3px rgba(239, 68, 68, 0.25)';
+      }
       if (submitBtn) {
         submitBtn.disabled = true;
         submitBtn.style.opacity = '0.5';
-        submitBtn.title = 'Duplicate item number not allowed';
+        submitBtn.style.cursor = 'not-allowed';
+        submitBtn.title = `Item #${itemNum} is already in use by ${assigned}`;
       }
     } else {
       if (feedback) {
-        feedback.innerHTML = `<span style="color: #10b981; font-weight: 600;">✓ Item #${itemNum} available</span>`;
+        feedback.innerHTML = `<span style="color: #10b981; font-weight: 600; display: inline-flex; align-items: center; gap: 4px; margin-top: 4px;">✓ Item #${this.escapeHtml(itemNum)} is available and unique</span>`;
       }
-      if (itemNumInput) itemNumInput.style.borderColor = '#10b981';
+      if (itemNumInput) {
+        itemNumInput.style.borderColor = '#10b981';
+        itemNumInput.style.boxShadow = 'none';
+      }
       if (submitBtn) {
         submitBtn.disabled = false;
         submitBtn.style.opacity = '1';
+        submitBtn.style.cursor = 'pointer';
         submitBtn.title = '';
       }
     }
@@ -1057,9 +1097,10 @@ class InventoryManager {
     // Hard Fail-Safe: Strictly block duplicate item numbers
     const dup = this.checkDuplicate(cat, itemNum, document.getElementById('f-esl-id')?.value);
     if (dup) {
-      const assigned = dup.existingRow['Assigned To'] || dup.existingRow['Status'] || 'In Inventory';
+      const assigned = dup.existingRow['Assigned To'] || 'Unassigned';
+      const status = dup.existingRow['Status'] || 'In Inventory';
       const loc = dup.existingRow['Location'] || 'Helena';
-      alert(`⛔ Duplicate Error: Item #${itemNum} already exists in ${table ? table.name : cat}!\n\nCurrent Record:\n• Status / Assigned To: ${assigned}\n• Location: ${loc}\n\nDuplicate item numbers are not allowed.`);
+      alert(`⛔ Duplicate Error: Item #${itemNum} already exists in ${table ? table.name : cat}!\n\nCurrent Record:\n• Status: ${status}\n• Assigned To: ${assigned}\n• Location: ${loc}\n\nEquipment identifying numbers must be unique and can only be used once.`);
       if (itemNumInput) {
         itemNumInput.focus();
         itemNumInput.select();
