@@ -259,8 +259,11 @@ function getPurchaseOrderNumber() {
   var fiscalYear = props.getProperty('CURRENT_FISCAL_YEAR');
 
   if (!fiscalYear) {
-    var currentYear = new Date().getFullYear();
-    fiscalYear = String(currentYear).slice(-2);
+    var now = new Date();
+    var year = now.getFullYear();
+    var month = now.getMonth(); // 0 = Jan, 9 = Oct
+    var fyYear = month >= 9 ? year + 1 : year;
+    fiscalYear = String(fyYear).slice(-2);
   }
 
   return '002-' + fiscalYear;

@@ -1890,14 +1890,45 @@ class ProcurementEngine {
   }
 
   /**
+   * Calculates the current fiscal year PO number prefix (002-XX).
+   * Fiscal year runs October 1 to September 30 (e.g., Oct 2026 starts FY27 -> 002-27).
+   */
+  getPurchaseOrderNumber() {
+    // 1. Check window.fiscalYearManager if initialized
+    if (window.fiscalYearManager && window.fiscalYearManager.currentFY) {
+      return `002-${window.fiscalYearManager.currentFY}`;
+    }
+    // 2. Check snapshot system config or metadata
+    const snap = (this.db && typeof this.db.getSnapshot === 'function')
+      ? this.db.getSnapshot()
+      : (window.localDB ? window.localDB.getSnapshot() : null);
+    if (snap?.metadata?.CURRENT_FISCAL_YEAR) {
+      return `002-${snap.metadata.CURRENT_FISCAL_YEAR}`;
+    }
+    // 3. Fiscal Year starts Oct 1: Month >= 9 (October) transitions to next calendar year suffix (e.g. Oct 2026 -> FY27 -> 002-27)
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = now.getMonth(); // 0-indexed: 9 = October
+    const fyYear = month >= 9 ? year + 1 : year;
+    return `002-${String(fyYear).slice(-2)}`;
+  }
+
+  /**
+   * Returns the primary shop & warehouse delivery shipping address.
+   */
+  getShippingAddress() {
+    return '606 West Custer Ave, Helena, MT, 59602';
+  }
+
+  /**
   * Builds clean, consolidated purchase order text formatted specifically for sending to suppliers.
   * Consolidates identical items by type, size, class, and part number, omitting internal section names and worker names.
   */
   buildCleanPOText(selected) {
-    const currentYear = new Date().getFullYear();
-    const poNum = `002-${String(currentYear).slice(-2)}`;
+    const poNum = this.getPurchaseOrderNumber();
     const vendorName = this.selectedVendor ? this.selectedVendor.name : '[Vendor Name]';
     const dateStr = new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+    const shipTo = this.getShippingAddress();
 
     let lines = [];
     lines.push(`PURCHASE ORDER: ${poNum}`);
@@ -1907,6 +1938,7 @@ class ProcurementEngine {
       const contactPart = this.selectedVendor.contact ? `${this.selectedVendor.contact} ` : '';
       lines.push(`Attn: ${contactPart}(${this.selectedVendor.email})`);
     }
+    lines.push(`Ship To: ${shipTo}`);
     lines.push('----------------------------------------------------');
     lines.push('Please fulfill the following order:\n');
 
@@ -2025,10 +2057,10 @@ class ProcurementEngine {
   * Preserves section categories and individual employee assignments.
   */
   buildDetailedPOText(selected) {
-    const currentYear = new Date().getFullYear();
-    const poNum = `002-${String(currentYear).slice(-2)}`;
+    const poNum = this.getPurchaseOrderNumber();
     const vendorName = this.selectedVendor ? this.selectedVendor.name : '[Vendor Name]';
     const dateStr = new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+    const shipTo = this.getShippingAddress();
 
     let lines = [];
     lines.push(`PURCHASE ORDER: ${poNum} (INTERNAL SUMMARY WITH WORKER BREAKDOWN)`);
@@ -2038,6 +2070,7 @@ class ProcurementEngine {
       const contactPart = this.selectedVendor.contact ? `${this.selectedVendor.contact} ` : '';
       lines.push(`Attn: ${contactPart}(${this.selectedVendor.email})`);
     }
+    lines.push(`Ship To: ${shipTo}`);
     lines.push('----------------------------------------------------');
     lines.push('Internal Breakdown by Needs Category & Personnel:\n');
 
@@ -2123,8 +2156,7 @@ class ProcurementEngine {
     const textarea = document.getElementById('procurement-po-textarea');
     const bodyText = textarea ? textarea.value : (this.generatedPOTexts?.clean || '');
     const vendorEmail = this.selectedVendor?.email || '';
-    const currentYear = new Date().getFullYear();
-    const poNum = `002-${String(currentYear).slice(-2)}`;
+    const poNum = this.getPurchaseOrderNumber();
     const vendorName = this.selectedVendor?.name || 'Vendor';
 
     const subject = `Purchase Order ${poNum} - ${vendorName}`;
