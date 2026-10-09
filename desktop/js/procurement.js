@@ -10,6 +10,8 @@ class ProcurementEngine {
     this.vendors = [];
     this.previousEmployeesSet = new Set();
     this.currentSectionFilter = 'all'; // 'all' | 'swaps_need' | 'swaps_size_up' | 'assigned_size_up' | 'compliance_missing'
+    this.currentPOFormat = 'clean';
+    this.generatedPOTexts = { clean: '', detailed: '' };
     this.SECTIONS = {
       swaps_need: {
         key: 'swaps_need',
@@ -1887,13 +1889,11 @@ class ProcurementEngine {
     if (totalEl) totalEl.textContent = `$${totalCost.toFixed(2)}`;
   }
 
-  generatePOText() {
-    const selected = this.items.filter(i => i.selected && i.quantity > 0);
-    if (selected.length === 0) {
-      alert('Please select at least one item to generate a purchase order.');
-      return;
-    }
-
+  /**
+  * Builds clean, consolidated purchase order text formatted specifically for sending to suppliers.
+  * Consolidates identical items by type, size, class, and part number, omitting internal section names and worker names.
+  */
+  buildCleanPOText(selected) {
     const currentYear = new Date().getFullYear();
     const poNum = `002-${String(currentYear).slice(-2)}`;
     const vendorName = this.selectedVendor ? this.selectedVendor.name : '[Vendor Name]';
@@ -1903,13 +1903,146 @@ class ProcurementEngine {
     lines.push(`PURCHASE ORDER: ${poNum}`);
     lines.push(`Date: ${dateStr}`);
     lines.push(`Vendor: ${vendorName}`);
-    if (this.selectedVendor && this.selectedVendor.email) lines.push(`Attn: ${this.selectedVendor.contact || ''} (${this.selectedVendor.email})`);
+    if (this.selectedVendor && this.selectedVendor.email) {
+      const contactPart = this.selectedVendor.contact ? `${this.selectedVendor.contact} ` : '';
+      lines.push(`Attn: ${contactPart}(${this.selectedVendor.email})`);
+    }
     lines.push('----------------------------------------------------');
     lines.push('Please fulfill the following order:\n');
 
+    // Consolidate identical items by itemType, normalized size, class, partNumber, and unit price
+    const consolidatedMap = new Map();
+
+    const formatClassStr = (classVal) => {
+      if (!classVal) return '';
+      const s = String(classVal).trim();
+      return /^class\b/i.test(s) ? s : `Class ${s}`;
+    };
+
+    const cleanSizeStr = (sizeVal, hasNoSize) => {
+      if (hasNoSize) return '⚠️ NEEDS SIZE (VERIFY WITH WORKER)';
+      if (!sizeVal) return 'Standard';
+      let s = String(sizeVal).trim();
+      // Remove redundant '(Class X)' if attached to size
+      s = s.replace(/\s*\(\s*Class\s*[^)]*\)/i, '').trim();
+      return s ? `Size ${s}` : 'Standard';
+    };
+
+    selected.forEach(item => {
+      const type = item.itemType || 'Equipment';
+      const sizeStr = cleanSizeStr(item.size, item.hasNoSize);
+      const classStr = formatClassStr(item.classVal);
+      const partNum = (item.partNumber || '').trim();
+      const price = parseFloat(item.price) || 0;
+      const qty = parseInt(item.quantity, 10) || 0;
+
+      const key = `${type}__${sizeStr}__${classStr}__${partNum}__${price}`.toLowerCase();
+
+      if (consolidatedMap.has(key)) {
+        const existing = consolidatedMap.get(key);
+        existing.quantity += qty;
+        existing.totalCost += price * qty;
+      } else {
+        consolidatedMap.set(key, {
+          itemType: type,
+          sizeDisplay: sizeStr,
+          classDisplay: classStr,
+          partNumber: partNum,
+          price: price,
+          quantity: qty,
+          totalCost: price * qty
+        });
+      }
+    });
+
+    const consolidatedItems = Array.from(consolidatedMap.values());
+
+    // Sort items logically: Category (Gloves, Sleeves, Blankets, MACKs, etc.) -> Class -> Size
+    const categoryRank = (type) => {
+      const t = String(type).toLowerCase();
+      if (t.includes('glove')) return 1;
+      if (t.includes('sleeve')) return 2;
+      if (t.includes('blanket')) return 3;
+      if (t.includes('mack')) return 4;
+      return 5;
+    };
+
+    const extractClassNum = (classStr) => {
+      const m = String(classStr).match(/\d+/);
+      return m ? parseInt(m[0], 10) : 99;
+    };
+
+    const extractSizeNum = (sizeStr) => {
+      const m = String(sizeStr).match(/\d+(\.\d+)?/);
+      return m ? parseFloat(m[0]) : 999;
+    };
+
+    consolidatedItems.sort((a, b) => {
+      const rA = categoryRank(a.itemType);
+      const rB = categoryRank(b.itemType);
+      if (rA !== rB) return rA - rB;
+
+      const cA = extractClassNum(a.classDisplay);
+      const cB = extractClassNum(b.classDisplay);
+      if (cA !== cB) return cA - cB;
+
+      const sA = extractSizeNum(a.sizeDisplay);
+      const sB = extractSizeNum(b.sizeDisplay);
+      if (sA !== sB) return sA - sB;
+
+      return a.sizeDisplay.localeCompare(b.sizeDisplay, undefined, { numeric: true });
+    });
+
     let grandTotal = 0;
 
-    // Group selected items by section in the PO text
+    consolidatedItems.forEach(item => {
+      let desc = `${item.itemType} - ${item.sizeDisplay}`;
+      if (item.classDisplay) desc += ` - ${item.classDisplay}`;
+      if (item.partNumber) desc += ` [Part #: ${item.partNumber}]`;
+
+      let line = `• (${item.quantity}) ${desc}`;
+      if (item.price > 0) {
+        grandTotal += item.totalCost;
+        line += ` @ $${item.price.toFixed(2)} ea = $${item.totalCost.toFixed(2)}`;
+      } else {
+        grandTotal += item.totalCost;
+      }
+      lines.push(line);
+    });
+
+    lines.push('\n----------------------------------------------------');
+    if (grandTotal > 0) {
+      lines.push(`Estimated Total: $${grandTotal.toFixed(2)}`);
+    }
+    lines.push('Please confirm availability and estimated delivery date.\n');
+    lines.push('Thank you,\nSafety Department');
+
+    return lines.join('\n');
+  }
+
+  /**
+  * Builds detailed internal purchase order summary for safety department audit records.
+  * Preserves section categories and individual employee assignments.
+  */
+  buildDetailedPOText(selected) {
+    const currentYear = new Date().getFullYear();
+    const poNum = `002-${String(currentYear).slice(-2)}`;
+    const vendorName = this.selectedVendor ? this.selectedVendor.name : '[Vendor Name]';
+    const dateStr = new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+
+    let lines = [];
+    lines.push(`PURCHASE ORDER: ${poNum} (INTERNAL SUMMARY WITH WORKER BREAKDOWN)`);
+    lines.push(`Date: ${dateStr}`);
+    lines.push(`Vendor: ${vendorName}`);
+    if (this.selectedVendor && this.selectedVendor.email) {
+      const contactPart = this.selectedVendor.contact ? `${this.selectedVendor.contact} ` : '';
+      lines.push(`Attn: ${contactPart}(${this.selectedVendor.email})`);
+    }
+    lines.push('----------------------------------------------------');
+    lines.push('Internal Breakdown by Needs Category & Personnel:\n');
+
+    let grandTotal = 0;
+
     const secKeys = ['swaps_need', 'swaps_size_up', 'assigned_size_up', 'compliance_missing'];
     secKeys.forEach(sKey => {
       const secItems = selected.filter(i => i.section === sKey);
@@ -1942,15 +2075,88 @@ class ProcurementEngine {
     if (grandTotal > 0) {
       lines.push(`Estimated Total: $${grandTotal.toFixed(2)}`);
     }
-    lines.push('Please confirm availability and estimated delivery date.\n');
-    lines.push('Thank you,\nSafety Department');
+    lines.push('Generated for internal safety department records.\n');
+    lines.push('Safety Department');
 
-    const poText = lines.join('\n');
+    return lines.join('\n');
+  }
+
+  /**
+  * Switches between clean vendor order text and detailed internal summary text in the PO modal.
+  */
+  setPOFormat(format = 'clean') {
+    this.currentPOFormat = format;
+    const textarea = document.getElementById('procurement-po-textarea');
+    const tabClean = document.getElementById('po-tab-clean');
+    const tabDetailed = document.getElementById('po-tab-detailed');
+    const hintEl = document.getElementById('po-format-hint');
+
+    if (textarea && this.generatedPOTexts) {
+      textarea.value = this.generatedPOTexts[format] || '';
+    }
+
+    if (tabClean && tabDetailed) {
+      if (format === 'clean') {
+        tabClean.style.background = '#2563eb';
+        tabClean.style.color = '#ffffff';
+        tabClean.style.boxShadow = '0 1px 3px rgba(0,0,0,0.3)';
+        tabDetailed.style.background = 'transparent';
+        tabDetailed.style.color = 'var(--text-secondary)';
+        tabDetailed.style.boxShadow = 'none';
+        if (hintEl) hintEl.textContent = 'Consolidated order ready to email to supplier (no worker names or internal section tags)';
+      } else {
+        tabDetailed.style.background = '#2563eb';
+        tabDetailed.style.color = '#ffffff';
+        tabDetailed.style.boxShadow = '0 1px 3px rgba(0,0,0,0.3)';
+        tabClean.style.background = 'transparent';
+        tabClean.style.color = 'var(--text-secondary)';
+        tabClean.style.boxShadow = 'none';
+        if (hintEl) hintEl.textContent = 'Internal department audit summary with worker assignments and swap reasons';
+      }
+    }
+  }
+
+  /**
+  * Opens default email client (mailto:) with current PO text pre-filled.
+  */
+  openInEmailClient() {
+    const textarea = document.getElementById('procurement-po-textarea');
+    const bodyText = textarea ? textarea.value : (this.generatedPOTexts?.clean || '');
+    const vendorEmail = this.selectedVendor?.email || '';
+    const currentYear = new Date().getFullYear();
+    const poNum = `002-${String(currentYear).slice(-2)}`;
+    const vendorName = this.selectedVendor?.name || 'Vendor';
+
+    const subject = `Purchase Order ${poNum} - ${vendorName}`;
+
+    if (!vendorEmail) {
+      if (textarea) {
+        navigator.clipboard.writeText(bodyText).then(() => {
+          alert(`Copied Purchase Order to clipboard!\n\nNote: No email address is configured for ${vendorName}. You can paste this directly into your email.`);
+        });
+      }
+      return;
+    }
+
+    const mailtoUrl = `mailto:${encodeURIComponent(vendorEmail)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(bodyText)}`;
+    window.open(mailtoUrl, '_blank');
+  }
+
+  generatePOText() {
+    const selected = this.items.filter(i => i.selected && i.quantity > 0);
+    if (selected.length === 0) {
+      alert('Please select at least one item to generate a purchase order.');
+      return;
+    }
+
+    this.generatedPOTexts = {
+      clean: this.buildCleanPOText(selected),
+      detailed: this.buildDetailedPOText(selected)
+    };
 
     const modal = document.getElementById('procurement-po-modal');
-    const textarea = document.getElementById('procurement-po-textarea');
-    if (modal && textarea) {
-      textarea.value = poText;
+    if (modal) {
+      this.setPOFormat('clean');
       modal.style.display = 'flex';
     }
   }

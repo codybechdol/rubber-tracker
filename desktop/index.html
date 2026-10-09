@@ -1874,16 +1874,31 @@
         <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 12px; background: rgba(0,0,0,0.2); border: none; color: white; cursor: pointer;" onclick="document.getElementById('procurement-po-modal').style.display='none'">✕</button>
       </div>
       <div class="modal-body" style="padding: 20px;">
-        <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 10px;">
-          Copy and paste this formatted text directly into an email to your vendor:
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; gap: 10px; flex-wrap: wrap;">
+          <div style="display: inline-flex; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; padding: 3px; gap: 4px;">
+            <button id="po-tab-clean" class="btn btn-secondary" style="padding: 5px 12px; font-size: 12px; font-weight: 700; border-radius: 4px; border: none; cursor: pointer; background: #2563eb; color: #ffffff;" onclick="window.procurementEngine.setPOFormat('clean')">
+              🏷️ Vendor Order (Clean)
+            </button>
+            <button id="po-tab-detailed" class="btn btn-secondary" style="padding: 5px 12px; font-size: 12px; font-weight: 700; border-radius: 4px; border: none; cursor: pointer; background: transparent; color: var(--text-secondary);" onclick="window.procurementEngine.setPOFormat('detailed')">
+              📋 Internal Summary (Detailed)
+            </button>
+          </div>
+          <span id="po-format-hint" style="font-size: 11.5px; color: var(--text-muted);">
+            Consolidated order ready to email to supplier (no worker names or internal section tags)
+          </span>
         </div>
         <textarea id="procurement-po-textarea" title="Generated Purchase Order Text" aria-label="Generated Purchase Order Text" placeholder="Purchase order details will appear here..." rows="16" style="width: 100%; font-family: monospace; font-size: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 12px; line-height: 1.5; resize: vertical;"></textarea>
       </div>
-      <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center;">
+      <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap;">
         <button class="btn btn-secondary" onclick="document.getElementById('procurement-po-modal').style.display='none'">Close</button>
-        <button class="btn btn-primary" id="btn-procurement-copy-po" style="font-weight: 700; display: inline-flex; align-items: center; gap: 6px;">
-          <span>📋</span> Copy to Clipboard
-        </button>
+        <div style="display: flex; gap: 8px;">
+          <button class="btn btn-secondary" id="btn-procurement-email-po" style="font-weight: 700; display: inline-flex; align-items: center; gap: 6px;" onclick="window.procurementEngine.openInEmailClient()">
+            <span>📧</span> Open in Email
+          </button>
+          <button class="btn btn-primary" id="btn-procurement-copy-po" style="font-weight: 700; display: inline-flex; align-items: center; gap: 6px;">
+            <span>📋</span> Copy to Clipboard
+          </button>
+        </div>
       </div>
     </div>
   </div>
