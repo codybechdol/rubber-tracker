@@ -221,9 +221,34 @@ class TripRouteMap {
 
       'livingston|big timber': { miles: 34, mins: 35 },
       'big timber|melville': { miles: 20, mins: 25 },
-      'ennis|big sky': { miles: 42, mins: 50 },
-      'ennis|dillon': { miles: 68, mins: 70 },
-      'whitehall|three forks': { miles: 23, mins: 25 }
+      'livingston|melville': { miles: 54, mins: 55 },
+      'big timber|columbus': { miles: 39, mins: 35 },
+      'columbus|laurel': { miles: 27, mins: 25 },
+      'columbus|rapelje': { miles: 28, mins: 30 },
+
+      // Ennis, Big Sky, and Southwest Montana highway road connections
+      'ennis|big sky': { miles: 82, mins: 90 }, // US-287 -> MT-84 -> US-191 through Gallatin Canyon
+      'ennis|livingston': { miles: 78, mins: 85 }, // US-287 -> MT-84 -> Bozeman -> I-90
+      'ennis|three forks': { miles: 44, mins: 45 }, // US-287 North
+      'ennis|whitehall': { miles: 52, mins: 50 }, // US-287 -> MT-2
+      'ennis|butte': { miles: 75, mins: 75 }, // US-287 -> I-90
+      'ennis|manhattan': { miles: 48, mins: 50 }, // US-287 -> Churchill Rd
+      'ennis|twin bridges': { miles: 32, mins: 35 }, // MT-287
+      'ennis|sheridan': { miles: 23, mins: 25 }, // MT-287
+      'ennis|dillon': { miles: 68, mins: 70 }, // MT-287 & MT-41
+
+      'big sky|livingston': { miles: 71, mins: 80 }, // US-191 -> I-90 East
+      'big sky|three forks': { miles: 65, mins: 70 }, // US-191 -> I-90 West
+      'big sky|butte': { miles: 125, mins: 120 }, // US-191 -> I-90 West
+      'big sky|whitehall': { miles: 95, mins: 95 }, // US-191 -> I-90 West
+      'big sky|dillon': { miles: 150, mins: 160 }, // US-191 -> MT-84 -> MT-287 -> MT-41
+      'big sky|belgrade': { miles: 50, mins: 60 }, // US-191 -> MT-85 / I-90
+
+      'whitehall|three forks': { miles: 23, mins: 25 },
+      'three forks|manhattan': { miles: 11, mins: 12 },
+      'three forks|livingston': { miles: 57, mins: 60 },
+      'dillon|twin bridges': { miles: 35, mins: 35 },
+      'dillon|whitehall': { miles: 58, mins: 55 }
     };
   }
 
@@ -441,9 +466,17 @@ class TripRouteMap {
       }
     }
 
-    // 4. Fallback: Haversine distance adjusted by Montana road winding circuity factor (1.356x)
+    // 4. Check cached road leg from OSRM router if available
     const c1 = fromCoords || this.getCoords(fClean);
     const c2 = toCoords || this.getCoords(tClean);
+    const legCoordKey1 = `${c1.lat.toFixed(3)},${c1.lng.toFixed(3)}|${c2.lat.toFixed(3)},${c2.lng.toFixed(3)}`;
+    const legCoordKey2 = `${c2.lat.toFixed(3)},${c2.lng.toFixed(3)}|${c1.lat.toFixed(3)},${c1.lng.toFixed(3)}`;
+    if (this.roadLegCache && (this.roadLegCache[legCoordKey1] || this.roadLegCache[legCoordKey2])) {
+      const cached = this.roadLegCache[legCoordKey1] || this.roadLegCache[legCoordKey2];
+      return { miles: cached.miles, mins: cached.mins, time: this.formatMinutes(cached.mins) };
+    }
+
+    // 5. Fallback: Haversine distance adjusted by Montana road winding circuity factor (1.356x)
     const haversine = this.calculateDistanceMiles(c1.lat, c1.lng, c2.lat, c2.lng);
     const roadMiles = Math.round(haversine * 1.356);
     const roadMins = Math.round((roadMiles / 60) * 60);
@@ -2009,6 +2042,7 @@ class TripRouteMap {
 
   async fetchRoadGeometry(latLngPoints) {
     if (!this.roadGeometryCache) this.roadGeometryCache = {};
+    if (!this.roadLegCache) this.roadLegCache = {};
     const cacheKey = latLngPoints.map(p => `${p[0].toFixed(3)},${p[1].toFixed(3)}`).join(';');
     if (this.roadGeometryCache[cacheKey]) {
       return this.roadGeometryCache[cacheKey];
@@ -2028,6 +2062,19 @@ class TripRouteMap {
         if (data && data.routes && data.routes[0] && data.routes[0].geometry && data.routes[0].geometry.coordinates) {
           const roadLatLngs = data.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
           this.roadGeometryCache[cacheKey] = roadLatLngs;
+
+          // Cache real road distance & duration for every consecutive pair of points
+          if (data.routes[0].legs && data.routes[0].legs.length === latLngPoints.length - 1) {
+            data.routes[0].legs.forEach((leg, idx) => {
+              const pA = latLngPoints[idx];
+              const pB = latLngPoints[idx + 1];
+              const lKey = `${pA[0].toFixed(3)},${pA[1].toFixed(3)}|${pB[0].toFixed(3)},${pB[1].toFixed(3)}`;
+              const legMiles = Math.round(leg.distance / 1609.34);
+              const legMins = Math.round(leg.duration / 60);
+              this.roadLegCache[lKey] = { miles: legMiles, mins: legMins };
+            });
+          }
+
           return roadLatLngs;
         }
       }
