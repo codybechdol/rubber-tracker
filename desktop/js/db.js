@@ -985,7 +985,27 @@ class LocalDatabase {
 
   getTable(tableKey) {
     if (!this.snapshot || !this.snapshot.tables) return { headers: [], rows: [] };
-    const table = this.snapshot.tables[tableKey] || { headers: [], rows: [] };
+    let table = this.snapshot.tables[tableKey];
+    if (!table) {
+      const mappedKey = this.getTableKeyForSheet ? this.getTableKeyForSheet(tableKey) : null;
+      if (mappedKey && this.snapshot.tables[mappedKey]) {
+        table = this.snapshot.tables[mappedKey];
+      } else {
+        const sheetName = this.getSheetNameForTableKey ? this.getSheetNameForTableKey(tableKey) : null;
+        if (sheetName && this.snapshot.tables[sheetName]) {
+          table = this.snapshot.tables[sheetName];
+        } else {
+          const clean = String(tableKey || '').toLowerCase().replace(/[\s_]+/g, '');
+          for (const k of Object.keys(this.snapshot.tables)) {
+            if (k.toLowerCase().replace(/[\s_]+/g, '') === clean) {
+              table = this.snapshot.tables[k];
+              break;
+            }
+          }
+        }
+      }
+    }
+    table = table || { headers: [], rows: [] };
     return this.normalizeTableData(table, tableKey);
   }
 
@@ -1835,7 +1855,11 @@ class LocalDatabase {
       'drug test clinics': 'drug_test_clinics',
       'drug_test_clinics': 'drug_test_clinics',
       'incident reports': 'incident_reports',
-      'incident_reports': 'incident_reports'
+      'incident_reports': 'incident_reports',
+      'expiring certs': 'expiring_certs',
+      'expiring_certs': 'expiring_certs',
+      'training tracking': 'training_tracking',
+      'training_tracking': 'training_tracking'
     };
     if (map[clean]) return map[clean];
 

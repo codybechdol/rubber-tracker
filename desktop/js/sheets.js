@@ -738,37 +738,53 @@ class SheetNavigator {
     const searchInput = document.getElementById('expiring-certs-search-input');
     if (!container) return;
 
-    // Automatically ensure all active employees have their required certification rows
-    if (window.certsConfigEngine && typeof window.certsConfigEngine.applyRequirementsToMatrix === 'function') {
-      try {
-        await window.certsConfigEngine.applyRequirementsToMatrix(false);
-      } catch (e) {
-        console.warn('Could not auto-apply cert requirements:', e);
-      }
-    }
-
-    // Automatically deduplicate any duplicate certification rows
     try {
-      await this.deduplicateExpiringCerts(true);
-    } catch (e) {
-      console.warn('Could not auto-deduplicate expiring certs:', e);
-    }
-
-    if (searchInput) {
-      this.searchTerm = (searchInput.value || '').toLowerCase().trim();
-      if (!searchInput.dataset.bound) {
-        searchInput.dataset.bound = 'true';
-        searchInput.addEventListener('input', (e) => {
-          this.searchTerm = e.target.value.toLowerCase().trim();
-          this.renderExpiringCerts();
-        });
+      // Automatically ensure all active employees have their required certification rows
+      if (window.certsConfigEngine && typeof window.certsConfigEngine.applyRequirementsToMatrix === 'function') {
+        try {
+          await window.certsConfigEngine.applyRequirementsToMatrix(false, false);
+        } catch (e) {
+          console.warn('Could not auto-apply cert requirements:', e);
+        }
       }
-    } else {
-      this.searchTerm = '';
-    }
 
-    const tableData = this.db.getTable(this.currentSheetKey);
-    this.renderStandardTable(container, countBadge, tableData);
+      // Automatically deduplicate any duplicate certification rows
+      try {
+        await this.deduplicateExpiringCerts(true);
+      } catch (e) {
+        console.warn('Could not auto-deduplicate expiring certs:', e);
+      }
+
+      if (searchInput) {
+        this.searchTerm = (searchInput.value || '').toLowerCase().trim();
+        if (!searchInput.dataset.bound) {
+          searchInput.dataset.bound = 'true';
+          searchInput.addEventListener('input', (e) => {
+            this.searchTerm = e.target.value.toLowerCase().trim();
+            this.renderExpiringCerts();
+          });
+        }
+      } else {
+        this.searchTerm = '';
+      }
+
+      const tableData = (this.db ? (this.db.getTable(this.currentSheetKey) || this.db.getTable('Expiring Certs')) : null) || { headers: [], rows: [] };
+      this.renderStandardTable(container, countBadge, tableData);
+    } catch (err) {
+      console.error('Error rendering expiring certs:', err);
+      container.innerHTML = `
+        <div style="padding: 36px 20px; text-align: center; max-width: 580px; margin: 30px auto; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 14px;">
+          <div style="font-size: 42px; margin-bottom: 12px;">⚠️</div>
+          <h3 style="color: var(--text-primary); font-size: 18px; font-weight: 700; margin-bottom: 8px;">Error Displaying Expiring Certifications</h3>
+          <p style="color: var(--text-secondary); font-size: 13.5px; line-height: 1.5; margin-bottom: 22px;">
+            ${this.escapeHtml(err.message || String(err))}
+          </p>
+          <button class="btn btn-primary" onclick="window.sheetNavigator.renderExpiringCerts()" style="padding: 10px 20px; font-size: 13px; font-weight: 700; cursor: pointer;">
+            🔄 Retry Loading Certs
+          </button>
+        </div>
+      `;
+    }
   }
 
   /**
@@ -4574,6 +4590,8 @@ class SheetNavigator {
     if (!tableData) {
       tableData = this.db.getTable(this.currentSheetKey) || { headers: [], rows: [] };
     }
+    const isEquipmentSheet = ['gloves', 'sleeves', 'blankets', 'macks', 'hv_testers', 'phasing_sets', 'aed', 'grounds', 'hot_sticks'].includes(this.currentSheetKey);
+    const isInventorySheet = isEquipmentSheet;
     const isJobTracking = this.currentSheetKey === 'job_tracking';
     if (isJobTracking && tableData.headers && !tableData.headers.some(h => String(h).trim().toLowerCase() === 'crew type')) {
       tableData.headers.push('Crew Type');
@@ -4733,8 +4751,6 @@ class SheetNavigator {
     }
 
     // Multi-criteria filtering for inventory sheets
-    const isInventorySheet = ['gloves', 'sleeves', 'blankets', 'macks', 'hv_testers', 'phasing_sets', 'aed', 'grounds', 'hot_sticks'].includes(this.currentSheetKey);
-
     if (isInventorySheet) {
       // 1. Size Filter
       if (this.filterSize && this.filterSize !== 'all') {
@@ -5900,8 +5916,6 @@ class SheetNavigator {
         }
 
         // Equipment Sheet Formatting (Clickable Glove / Sleeve / Item # for Lifecycle Dossier)
-        const isEquipmentSheet = ['gloves', 'sleeves', 'blankets', 'macks', 'hv_testers', 'phasing_sets', 'aed', 'grounds', 'hot_sticks'].includes(this.currentSheetKey);
-        
         let isPrimaryItemCol = false;
         if (isEquipmentSheet) {
           if (this.currentSheetKey === 'grounds') {

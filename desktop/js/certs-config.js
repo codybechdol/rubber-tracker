@@ -229,6 +229,21 @@ class CertsConfigEngine {
     modal.style.display = 'flex';
   }
 
+  showConfigModal() {
+    return this.openConfigModal();
+  }
+
+  getDb() {
+    if (this.db && typeof this.db.getTable === 'function' && this.db.getTable('employees')) {
+      return this.db;
+    }
+    if (typeof window !== 'undefined' && window.localDB) {
+      this.db = window.localDB;
+      return this.db;
+    }
+    return this.db;
+  }
+
   /**
    * Closes the Configuration Modal.
    */
@@ -783,10 +798,15 @@ class CertsConfigEngine {
    * Scans active employees against configured certification requirements, syncs current employee
    * location and job number, reconciles non-expiring and expiring cert rows, and creates missing rows.
    */
-  async applyRequirementsToMatrix(showAlert = true) {
-    const empTable = this.db.getTable('employees');
-    const certTable = this.db.getTable('expiring_certs');
-    if (!empTable || !certTable) return;
+  async applyRequirementsToMatrix(showAlert = true, shouldRerender = true) {
+    if (this._isApplyingRequirements) return;
+    this._isApplyingRequirements = true;
+    try {
+      const db = this.getDb();
+      if (!db || typeof db.getTable !== 'function') return;
+      const empTable = db.getTable('employees');
+      const certTable = db.getTable('expiring_certs');
+      if (!empTable || !certTable) return;
 
     const activeEmployees = (empTable.rows || []).filter(e => {
       const name = String(e['Employee Name'] || e['Name'] || Object.values(e)[0] || '').trim();
@@ -1044,13 +1064,16 @@ class CertsConfigEngine {
         await window.desktopAPI.saveLocalSnapshot(this.db.snapshot);
       }
 
-      if (window.sheetNavigator && (window.sheetNavigator.currentSheetKey === 'expiring_certs' || document.getElementById('expiring-certs-view')?.classList.contains('active'))) {
+      if (shouldRerender && window.sheetNavigator && (window.sheetNavigator.currentSheetKey === 'expiring_certs' || document.getElementById('expiring-certs-view')?.classList.contains('active'))) {
         window.sheetNavigator.renderExpiringCerts();
       }
     }
 
     if (showAlert) {
       alert(`✅ Certification Requirements & Sync Applied!\n\n• ${reconciledExistingCount} certification records updated (validity/non-expiring).\n• ${syncedEmpDetailsCount} records synced with current employee Location and Job #.\n• ${newRowsToAdd.length} missing required rows created across ${activeEmployees.length} active employees.\n• All requirements and matrix records are now up to date.`);
+    }
+    } finally {
+      this._isApplyingRequirements = false;
     }
   }
 
@@ -1065,4 +1088,4 @@ class CertsConfigEngine {
 }
 
 // Global initialization
-window.certsConfigEngine = new CertsConfigEngine(window.db || { getTable: () => null, saveTable: () => null });
+window.certsConfigEngine = new CertsConfigEngine((typeof window !== 'undefined' ? (window.localDB || window.db) : null) || { getTable: () => null, saveTable: () => null });
