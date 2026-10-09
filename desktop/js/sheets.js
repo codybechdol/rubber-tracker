@@ -1798,7 +1798,10 @@ class SheetNavigator {
               }
             }
 
-            if (vLower === 'return to shelf' || vLower.includes('return to shelf') || vLower.includes('return')) {
+            if (vLower === 'ordered' || vLower.includes('ordered') || val.includes('Ordered')) {
+              const cleanVal = val.replace(/📦/g, '').trim();
+              customContent = `<span class="badge" style="background-color: #7c3aed; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700;">📦 ${this.escapeHtml(cleanVal || 'Ordered')}</span>`;
+            } else if (vLower === 'return to shelf' || vLower.includes('return to shelf') || vLower.includes('return')) {
               customContent = `<span class="badge" style="background-color: #475569; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">↩️ Return to Shelf</span>`;
             } else if (vLower === 'packed for testing' || vLower.includes('packed for testing')) {
               customContent = `<span class="badge" style="background-color: #4f46e5; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">🔬 Packed For Testing</span>`;

@@ -1093,8 +1093,9 @@ class ProcurementEngine {
         const isSizeUp = statLower.includes('size up');
         const isShelfStock = emp.toLowerCase().includes('on shelf') || emp.toLowerCase() === 'shelf';
 
-        // Filter out return/reclaim/former employee indicators
+        // Filter out return/reclaim/former employee indicators or already ordered items
         const isPrevEmpIndicator = daysRaw.toUpperCase().includes('PREV') ||
+                                   statLower.includes('ordered') ||
                                    statLower.includes('return to shelf') ||
                                    statLower.includes('reclaim') ||
                                    statLower.includes('previous') ||
@@ -1111,7 +1112,7 @@ class ProcurementEngine {
                                  (pickItem === '—' && !statLower.includes('return') && !statLower.includes('reclaim')) ||
                                  (pickItem === '' && statLower.includes('unassigned'));
 
-        if (!isNeedToPurchase || !emp) return;
+        if (!isNeedToPurchase || !emp || statLower.includes('ordered')) return;
 
         // Filter out former / previous employees
         if (this.isDepartedOrPreviousEmployee(emp)) return;
@@ -1233,7 +1234,7 @@ class ProcurementEngine {
           status = String(row['Status'] || '').trim().toLowerCase();
         }
 
-        if (!emp || status.includes('received') || status.includes('fulfilled')) return;
+        if (!emp || status.includes('received') || status.includes('fulfilled') || status.includes('ordered')) return;
         if (this.isDepartedOrPreviousEmployee(emp)) return;
 
         // If the employee already holds active inventory for this item type, their need is already met
@@ -2174,12 +2175,255 @@ class ProcurementEngine {
     window.open(mailtoUrl, '_blank');
   }
 
-  generatePOText() {
+  cleanSize(val) {
+    if (val === null || val === undefined) return '';
+    const s = String(val).trim();
+    const lower = s.toLowerCase();
+    if (!s || s === '—' || s === '-' || lower === 'n/a' || lower === 'none' || lower === 'unknown' || lower === 'null') {
+      return '';
+    }
+    return s;
+  }
+
+  isNeedToOrderStat(stat) {
+    if (!stat) return false;
+    const s = String(stat).toLowerCase().trim();
+    if (s.includes('ordered')) return false;
+    return s.includes('purchase') || s.includes('need to order') || s.includes('need to purchase') || s === 'unassigned';
+  }
+
+  /**
+   * Marks corresponding swap sheet rows as 'Ordered 📦' instead of 'Need to Purchase ❌' / 'Need To Order'
+   * for items selected when the PO is generated. Updates in-memory rows & rawGrid, saves snapshot,
+   * and queues UPDATE_CELL mutations for cloud sync.
+   * @param {Array} selectedItems - Selected procurement items
+   * @returns {Promise<number>} Number of swap rows updated
+   */
+  async markSwapsAsOrdered(selectedItems) {
+    if (!selectedItems || !Array.isArray(selectedItems) || selectedItems.length === 0) {
+      return 0;
+    }
+
+    const snap = (this.db && typeof this.db.getSnapshot === 'function')
+      ? this.db.getSnapshot()
+      : (window.localDB ? window.localDB.getSnapshot() : null);
+
+    const SWAP_MAP = {
+      'gloves': 'glove_swaps',
+      'sleeves': 'sleeve_swaps',
+      'blankets': 'blanket_swaps',
+      'macks': 'mack_swaps',
+      'hv testers': 'hv_tester_swaps',
+      'phasing sets': 'phasing_set_swaps',
+      'grounds': 'ground_swaps',
+      'hot sticks': 'hot_stick_swaps',
+      'aed': 'aed_swaps'
+    };
+
+    const SHEET_NAME_MAP = {
+      'glove_swaps': 'Glove Swaps',
+      'sleeve_swaps': 'Sleeve Swaps',
+      'blanket_swaps': 'Blanket Swaps',
+      'mack_swaps': 'MACK Swaps',
+      'hv_tester_swaps': 'HV Tester Swaps',
+      'phasing_set_swaps': 'Phasing Set Swaps',
+      'ground_swaps': 'Ground Swaps',
+      'hot_stick_swaps': 'Hot Stick Swaps',
+      'aed_swaps': 'AED Swaps'
+    };
+
+    let totalUpdated = 0;
+    const modifiedTables = new Set();
+    const updatedRows = new Set();
+
+    for (const item of selectedItems) {
+      // Only process items that correspond to swap sheets
+      if (item.section !== 'swaps_need' && item.section !== 'swaps_size_up') {
+        continue;
+      }
+
+      const itemTypeLower = String(item.itemType || '').trim().toLowerCase();
+      const swapKey = SWAP_MAP[itemTypeLower];
+      if (!swapKey) continue;
+
+      const table = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable(swapKey) : null) ||
+                    snap?.tables?.[swapKey];
+      if (!table) continue;
+
+      const sheetName = (this.db && typeof this.db.getSheetName === 'function')
+        ? this.db.getSheetName(swapKey)
+        : (SHEET_NAME_MAP[swapKey] || table.name || swapKey);
+
+      // Determine column indices
+      let statCol = -1;
+      let sizeCol = -1;
+      if (table.headers && Array.isArray(table.headers)) {
+        statCol = table.headers.findIndex(h => /^status$/i.test(String(h || '').trim()));
+        sizeCol = table.headers.findIndex(h => /^size$/i.test(String(h || '').trim()));
+      }
+      if (statCol === -1) {
+        statCol = swapKey.includes('mack') ? 9 : 7;
+      }
+      if (sizeCol === -1) {
+        sizeCol = swapKey.includes('mack') ? 3 : 2;
+      }
+
+      // Collect target employee names that were selected
+      let targetEmployees = [];
+      if (item.employees && Array.isArray(item.employees) && item.employees.length > 0) {
+        targetEmployees = item.employees.filter(e => e.checked !== false).map(e => e.name);
+      }
+      if (targetEmployees.length === 0 && item.quantity > 0) {
+        for (let q = 0; q < item.quantity; q++) {
+          targetEmployees.push('On Shelf');
+        }
+      }
+
+      for (const targetName of targetEmployees) {
+        const isTargetShelf = targetName.toLowerCase().includes('on shelf') || targetName.toLowerCase() === 'shelf';
+
+        let matchedRowObj = null;
+        let matchedGridIdx = -1;
+        let oldStatusVal = '';
+
+        // 1. Search table.rows if available
+        if (table.rows && Array.isArray(table.rows)) {
+          for (const r of table.rows) {
+            const rowEmp = String(r['Employee'] || r['Employee Name'] || r['Assigned To'] || '').trim();
+            const rowIdx = r._rowIdx || (table.rows.indexOf(r) + 2);
+            const rowKey = `${swapKey}:${rowIdx}`;
+            if (updatedRows.has(rowKey)) continue;
+
+            const curStat = String(r['Status'] || '').trim();
+            if (!this.isNeedToOrderStat(curStat)) continue;
+
+            if (isTargetShelf) {
+              const isRowShelf = rowEmp.toLowerCase().includes('on shelf') || rowEmp.toLowerCase() === 'shelf';
+              if (isRowShelf) {
+                const rSize = this.cleanSize(r['Size']);
+                const itemSize = this.cleanSize(item.size);
+                if (!itemSize || !rSize || itemSize.includes(rSize) || rSize.includes(itemSize)) {
+                  matchedRowObj = r;
+                  matchedGridIdx = rowIdx - 1;
+                  oldStatusVal = curStat;
+                  break;
+                }
+              }
+            } else {
+              if (this.isNameMatch(rowEmp, targetName)) {
+                matchedRowObj = r;
+                matchedGridIdx = rowIdx - 1;
+                oldStatusVal = curStat;
+                break;
+              }
+            }
+          }
+        }
+
+        // 2. Search table.rawGrid if not matched in rows
+        if (!matchedRowObj && table.rawGrid && Array.isArray(table.rawGrid)) {
+          for (let gIdx = 1; gIdx < table.rawGrid.length; gIdx++) {
+            const gr = table.rawGrid[gIdx];
+            if (!Array.isArray(gr)) continue;
+            const rowKey = `${swapKey}:${gIdx + 1}`;
+            if (updatedRows.has(rowKey)) continue;
+
+            const rowEmp = String(gr[0] || '').trim();
+            if (rowEmp.includes('📍') || rowEmp.includes('👤') || rowEmp.includes('👷') ||
+                rowEmp.includes('Foreman:') || rowEmp.includes('Swaps') || rowEmp === 'Employee' || rowEmp === 'Item #') {
+              continue;
+            }
+
+            const curStat = String(gr[statCol] || '').trim();
+            if (!this.isNeedToOrderStat(curStat)) continue;
+
+            if (isTargetShelf) {
+              const isRowShelf = rowEmp.toLowerCase().includes('on shelf') || rowEmp.toLowerCase() === 'shelf';
+              if (isRowShelf) {
+                const rSize = this.cleanSize(gr[sizeCol]);
+                const itemSize = this.cleanSize(item.size);
+                if (!itemSize || !rSize || itemSize.includes(rSize) || rSize.includes(itemSize)) {
+                  matchedGridIdx = gIdx;
+                  oldStatusVal = curStat;
+                  break;
+                }
+              }
+            } else {
+              if (this.isNameMatch(rowEmp, targetName)) {
+                matchedGridIdx = gIdx;
+                oldStatusVal = curStat;
+                break;
+              }
+            }
+          }
+        }
+
+        // Apply status transition to 'Ordered 📦'
+        if (matchedGridIdx !== -1 || matchedRowObj) {
+          const actualRowIdx = matchedRowObj ? (matchedRowObj._rowIdx || (matchedGridIdx + 1)) : (matchedGridIdx + 1);
+          const rowKey = `${swapKey}:${actualRowIdx}`;
+          updatedRows.add(rowKey);
+
+          // Update in-memory rowObj
+          if (matchedRowObj) {
+            matchedRowObj['Status'] = 'Ordered 📦';
+          }
+
+          // Update in-memory rawGrid
+          if (table.rawGrid && Array.isArray(table.rawGrid) && table.rawGrid[actualRowIdx - 1]) {
+            table.rawGrid[actualRowIdx - 1][statCol] = 'Ordered 📦';
+          }
+
+          // Queue UPDATE_CELL mutation for cloud repository sync
+          if (this.db && typeof this.db.addMutation === 'function') {
+            await this.db.addMutation({
+              action: 'UPDATE_CELL',
+              sheetName: sheetName,
+              tableKey: swapKey,
+              row: actualRowIdx,
+              col: statCol + 1,
+              header: 'Status',
+              oldValue: oldStatusVal || 'Need to Purchase ❌',
+              value: 'Ordered 📦'
+            });
+          }
+
+          modifiedTables.add(swapKey);
+          totalUpdated++;
+        }
+      }
+    }
+
+    if (totalUpdated > 0) {
+      // Save local database snapshot
+      if (this.db && typeof this.db.saveLocalSnapshot === 'function') {
+        await this.db.saveLocalSnapshot();
+      } else if (window.desktopAPI && typeof window.desktopAPI.saveLocalSnapshot === 'function' && snap) {
+        await window.desktopAPI.saveLocalSnapshot(snap);
+      }
+
+      // Re-scan purchase needs so ordered items are excluded from demand
+      this.scanPurchaseNeeds();
+      this.render();
+
+      // If active sheet matches a modified swap table, re-render it
+      if (window.sheetsEngine && modifiedTables.has(window.sheetsEngine.currentSheetKey)) {
+        window.sheetsEngine.render();
+      }
+    }
+
+    return totalUpdated;
+  }
+
+  async generatePOText() {
     const selected = this.items.filter(i => i.selected && i.quantity > 0);
     if (selected.length === 0) {
       alert('Please select at least one item to generate a purchase order.');
       return;
     }
+
+    // Mark corresponding swap items as ordered instead of Need To Order on swap sheets
+    const updatedCount = await this.markSwapsAsOrdered(selected);
 
     this.generatedPOTexts = {
       clean: this.buildCleanPOText(selected),
@@ -2188,6 +2432,16 @@ class ProcurementEngine {
 
     const modal = document.getElementById('procurement-po-modal');
     if (modal) {
+      const banner = document.getElementById('po-swaps-ordered-banner');
+      const bannerText = document.getElementById('po-swaps-ordered-text');
+      if (banner && bannerText) {
+        if (updatedCount > 0) {
+          bannerText.textContent = `Marked ${updatedCount} swap line item${updatedCount === 1 ? '' : 's'} as Ordered 📦 on Swaps sheets.`;
+          banner.style.display = 'flex';
+        } else {
+          banner.style.display = 'none';
+        }
+      }
       this.setPOFormat('clean');
       modal.style.display = 'flex';
     }

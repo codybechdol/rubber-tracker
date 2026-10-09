@@ -1652,7 +1652,7 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
                     var statCol = (isMack || sheetLower.includes('hv') || sheetLower.includes('phasing')) ? 10 : (sheetLower.includes('ground') ? 11 : (sheetLower.includes('hot stick') ? 9 : (sheetLower.includes('aed') ? 7 : 8)));
                     if (isManual) {
                       var curStatCell = sheet.getRange(mut.row, statCol).getValue();
-                      if (String(curStatCell).includes('Need to Purchase')) {
+                      if (String(curStatCell).includes('Need to Purchase') || String(curStatCell).includes('Ordered')) {
                         sheet.getRange(mut.row, statCol).setValue('In Stock ✅');
                       }
                     }

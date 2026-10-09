@@ -2078,7 +2078,7 @@ class SwapGenerationEngine {
           return;
         }
 
-        if (status.includes('in testing') || status.includes('need to purchase') || pickNum === '—') {
+        if (status.includes('in testing') || status.includes('need to purchase') || status.includes('ordered') || pickNum === '—') {
           const empSize = r['Size'];
           const currentItemNum = String(r[cfg.isGloves ? 'Current Glove #' : 'Current Sleeve #'] || r['Current Item #'] || '').trim();
           const currentInvItem = invTable.rows.find(it => {

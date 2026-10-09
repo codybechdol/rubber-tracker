@@ -479,6 +479,7 @@ function getItemsToOrder() {
       var pickStatus = cols.pickStatus !== -1 ? String(row[cols.pickStatus] || '').trim() : '';
       var pickItem = cols.pickItem !== -1 ? String(row[cols.pickItem] || '').trim() : '';
       var pickStatusLower = pickStatus.toLowerCase();
+      if (pickStatusLower.includes('ordered')) continue;
       var isSizeUp = pickStatusLower.includes('size up');
 
       var isNeedToPurchase = pickStatusLower.includes('purchase') ||
