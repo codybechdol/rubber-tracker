@@ -1269,35 +1269,57 @@ class TripPlannerApp {
   }
 
   /**
+   * Fast cached lookup of departed employee names (TTL: 15s)
+   */
+  _getDepartedNamesSet() {
+    const now = Date.now();
+    if (this._departedNamesCache && (now - (this._departedNamesCacheTime || 0) < 15000)) {
+      return this._departedNamesCache;
+    }
+    const set = new Set();
+    const empTable = (this.db && typeof this.db.getTable === 'function')
+      ? (this.db.getTable('employees') || this.db.getTable('Employees'))
+      : (typeof window !== 'undefined' && window.localDB && typeof window.localDB.getTable === 'function'
+          ? (window.localDB.getTable('employees') || window.localDB.getTable('Employees'))
+          : null);
+
+    if (empTable && empTable.rows) {
+      empTable.rows.forEach(r => {
+        const name = String(r['Employee Name'] || r['Name'] || r['Employee'] || '').trim().toLowerCase();
+        if (!name) return;
+        const loc = String(r['Location'] || '').toLowerCase();
+        const stat = String(r['Status'] || '').toLowerCase();
+        const lastDay = String(r['Last Day'] || '').trim();
+        if (loc.includes('previous') || stat.includes('previous') || stat.includes('terminated') || stat.includes('inactive')) {
+          set.add(name);
+        } else if (lastDay) {
+          const d = new Date(lastDay);
+          if (!isNaN(d.getTime()) && d < new Date()) {
+            set.add(name);
+          }
+        }
+      });
+    }
+    set.add("keenan o'keefe");
+    set.add("keenan okeefe");
+
+    this._departedNamesCache = set;
+    this._departedNamesCacheTime = now;
+    return set;
+  }
+
+  /**
    * Checks if an employee is departed, former, terminated, or quit.
    */
   isDepartedOrPreviousEmployee(empName) {
     if (!empName) return false;
-    const clean = String(empName).trim();
-    const cleanLower = clean.toLowerCase();
+    const cleanLower = String(empName).trim().toLowerCase();
     if (cleanLower === 'on shelf' || cleanLower === 'shelf' || cleanLower === 'lead' || cleanLower === 'unknown') return false;
     if (cleanLower.includes('previous') || cleanLower.includes('reclaim') || cleanLower.includes('departed') || cleanLower.includes('former')) return true;
     if (cleanLower.includes('keenan') && cleanLower.includes('keefe')) return true;
 
-    if (typeof window !== 'undefined' && window.previousEmployeesEngine && typeof window.previousEmployeesEngine.getPreviousEmployees === 'function') {
-      try {
-        const prevList = window.previousEmployeesEngine.getPreviousEmployees();
-        if (prevList.some(p => (p.name || '').toLowerCase() === cleanLower)) return true;
-      } catch (err) {}
-    }
-
-    const empTable = (this.db && typeof this.db.getTable === 'function') ? (this.db.getTable('employees') || this.db.getTable('Employees')) : null;
-    if (empTable && empTable.rows) {
-      const row = empTable.rows.find(r => String(r['Employee Name'] || r['Name'] || '').toLowerCase().trim() === cleanLower);
-      if (row) {
-        const loc = String(row['Location'] || '').toLowerCase();
-        const stat = String(row['Status'] || '').toLowerCase();
-        const lastDay = String(row['Last Day'] || '').trim();
-        if (loc.includes('previous') || stat.includes('previous') || stat.includes('terminated') || stat.includes('inactive')) return true;
-        if (lastDay && new Date(lastDay) < new Date()) return true;
-      }
-    }
-    return false;
+    const departedSet = this._getDepartedNamesSet();
+    return departedSet.has(cleanLower);
   }
 
   getEmployeeOptions() {
@@ -7337,6 +7359,19 @@ class TripPlannerApp {
 
     const empHistoryTable = this.db.getTable('employee_history') || this.db.getTable('Employee History');
     const empHistory = (empHistoryTable && empHistoryTable.rows) ? empHistoryTable.rows : [];
+    const empHistoryLocationMap = {};
+    if (empHistory.length > 0) {
+      for (let i = empHistory.length - 1; i >= 0; i--) {
+        const h = empHistory[i];
+        const hName = String(h['Employee Name'] || h['Name'] || '').trim().toLowerCase();
+        if (hName && !empHistoryLocationMap[hName]) {
+          const hLoc = this.cleanPhysicalLocation(h['Location'] || '');
+          if (hLoc && !this.isStatusLocation(hLoc)) {
+            empHistoryLocationMap[hName] = hLoc;
+          }
+        }
+      }
+    }
 
     // Helper to resolve an employee's physical location & crew
     const resolveEmployeeLocationAndCrew = (empName, rowLoc, empInfo, rowForeman) => {
@@ -7366,15 +7401,8 @@ class TripPlannerApp {
 
       if ((!location || location === 'Helena' || this.isStatusLocation(location)) && empName) {
         const eLower = empName.toLowerCase();
-        for (let i = empHistory.length - 1; i >= 0; i--) {
-          const h = empHistory[i];
-          if (String(h['Employee Name'] || h['Name'] || '').toLowerCase() === eLower) {
-            const hLoc = this.cleanPhysicalLocation(h['Location'] || '');
-            if (hLoc && !this.isStatusLocation(hLoc)) {
-              location = hLoc;
-              break;
-            }
-          }
+        if (empHistoryLocationMap[eLower]) {
+          location = empHistoryLocationMap[eLower];
         }
       }
 
