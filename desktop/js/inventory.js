@@ -1196,12 +1196,16 @@ class InventoryManager {
         'Notes': notes
       };
     } else if (cat === 'hv_testers' || cat === 'phasing_sets') {
+      const isHV = cat === 'hv_testers';
       const model = document.getElementById('f-model') ? document.getElementById('f-model').value : 'Chance';
       const kv = document.getElementById('f-kv') ? document.getElementById('f-kv').value.trim() : '69';
       const serial = document.getElementById('f-serial-num') ? document.getElementById('f-serial-num').value.trim() : '';
 
       newRow = {
+        [isHV ? 'HV Tester' : 'Phasing Set']: itemNum,
         'Item #': itemNum,
+        [isHV ? 'HVT #' : 'PS #']: itemNum,
+        [isHV ? 'HVT' : 'PS']: itemNum,
         'Model': model,
         'KV': kv,
         'Serial #': serial,
@@ -1218,6 +1222,8 @@ class InventoryManager {
       const model = document.getElementById('f-model') ? document.getElementById('f-model').value.trim() : 'Zoll AED Plus';
 
       newRow = {
+        'AED': itemNum,
+        'AED #': itemNum,
         'Item #': itemNum,
         'Model': model,
         'Serial #': '',
@@ -1238,6 +1244,7 @@ class InventoryManager {
 
       newRow = {
         'Serial #': itemNum,
+        'Ground #': itemNum,
         'Item #': itemNum,
         'Type': gType,
         'Type (OH/UG)': gType,
@@ -1258,6 +1265,8 @@ class InventoryManager {
       const len = document.getElementById('f-length') ? document.getElementById('f-length').value.trim() : '8 ft';
 
       newRow = {
+        'Hot Stick': itemNum,
+        'Hot Stick #': itemNum,
         'Item #': itemNum,
         'Type': hType,
         'Length': len,
@@ -1270,6 +1279,11 @@ class InventoryManager {
         'Picked For': '',
         'Notes': notes
       };
+    }
+
+    // Ensure table.headers[0] is explicitly populated on newRow so column 0 is never blank in rawGrid or view
+    if (table && table.headers && table.headers.length > 0) {
+      newRow[table.headers[0]] = itemNum;
     }
 
     // Add row to LocalDatabase with originReason for history tracking

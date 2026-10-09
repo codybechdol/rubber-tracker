@@ -5882,7 +5882,8 @@ class SheetNavigator {
         const isSmsCol = hLower.includes('sms');
         const isLocationNameCol = (this.currentSheetKey === 'locations' && (colIdx === 0 || hLower === 'location'));
         const isCrewTypeCol = ['crew type', 'crew discipline', 'discipline'].includes(hLower);
-        const isEditable = !isPrimaryItemCol && !isEmployeeNameCol && !isLocationNameCol && !isSmsCol && !isCrewTypeCol && !hLower.includes('change out') && !hLower.startsWith('skip ') && window.currentRoleMode !== 'view_only';
+        const isBlankPrimary = isPrimaryItemCol && (!val || String(val).trim() === '' || String(val).trim() === '—' || String(val).trim() === '-');
+        const isEditable = (!isPrimaryItemCol || isBlankPrimary) && !isEmployeeNameCol && !isLocationNameCol && !isSmsCol && !isCrewTypeCol && !hLower.includes('change out') && !hLower.startsWith('skip ') && window.currentRoleMode !== 'view_only';
         let itemIdentifier = '';
         if (this.currentSheetKey === 'expiring_certs') {
           itemIdentifier = `${row['Employee Name'] || row['Name'] || ''} | ${row['Item Type'] || row['Cert Type'] || ''}`;
@@ -5895,6 +5896,7 @@ class SheetNavigator {
                      data-row="${sheetRowIdx}" 
                      data-col="${colIdx + 1}" 
                      data-header="${this.escapeHtml(h)}"
+                     data-primary="${isPrimaryItemCol ? 'true' : 'false'}"
                      data-item="${this.escapeHtml(itemIdentifier)}"
                      data-sheet="${this.escapeHtml(tableData.name)}">${customCellHtml !== null ? customCellHtml : this.escapeHtml(val)}</td>`;
       });
@@ -5947,9 +5949,37 @@ class SheetNavigator {
         });
       }
 
-      // Quick calendar picker on double-click for date cells
+      // Quick calendar picker on double-click for date cells & Item # rename prompt
       td.addEventListener('dblclick', () => {
         if (window.currentRoleMode === 'view_only') return;
+
+        if (td.dataset.primary === 'true') {
+          const currentItemNum = (td.querySelector('.cell-text') ? td.querySelector('.cell-text').textContent : td.textContent).trim().replace(/^👤\s*/, '');
+          const targetRow = td.dataset.row ? parseInt(td.dataset.row, 10) : null;
+          const promptMsg = currentItemNum ? `Edit Item # (Current: ${currentItemNum}):` : 'Enter Item # / Equipment #:';
+          const entered = prompt(promptMsg, currentItemNum);
+          if (entered !== null) {
+            const newItemNum = entered.trim();
+            if (newItemNum && newItemNum !== currentItemNum) {
+              const curTable = this.db.getTable(this.currentSheetKey);
+              if (curTable && curTable.rows) {
+                const dup = curTable.rows.find(r => {
+                  const rNum = String(r['Item #'] || r['HV Tester'] || r['Phasing Set'] || r['AED'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['MACK'] || r['Serial #'] || Object.values(r)[0] || '').trim().toLowerCase();
+                  return rNum === newItemNum.toLowerCase() && r._rowIdx !== targetRow;
+                });
+                if (dup) {
+                  alert(`⛔ Duplicate Error: Item #${newItemNum} already exists in ${curTable.name || this.currentSheetKey}!`);
+                  return;
+                }
+              }
+              td.textContent = newItemNum;
+              td.focus();
+              td.blur();
+            }
+          }
+          return;
+        }
+
         if (header.includes('date') || header.includes('expiration') || header.includes('calibration')) {
           const targetCell = td;
           const currentText = targetCell.textContent.trim();
@@ -6672,6 +6702,37 @@ class SheetNavigator {
           // 1. Update in-memory row and grid
           if (tableRow) {
             tableRow[header] = newVal;
+            if (targetCell.dataset.primary === 'true') {
+              tableRow['Item #'] = newVal;
+              if (tableData && tableData.headers && tableData.headers[0]) {
+                tableRow[tableData.headers[0]] = newVal;
+              }
+              if (this.currentSheetKey === 'hv_testers') {
+                tableRow['HV Tester'] = newVal;
+                tableRow['HVT #'] = newVal;
+                tableRow['HVT'] = newVal;
+              } else if (this.currentSheetKey === 'phasing_sets') {
+                tableRow['Phasing Set'] = newVal;
+                tableRow['PS #'] = newVal;
+              } else if (this.currentSheetKey === 'aed') {
+                tableRow['AED'] = newVal;
+                tableRow['AED #'] = newVal;
+              } else if (this.currentSheetKey === 'gloves') {
+                tableRow['Glove'] = newVal;
+              } else if (this.currentSheetKey === 'sleeves') {
+                tableRow['Sleeve'] = newVal;
+              } else if (this.currentSheetKey === 'blankets') {
+                tableRow['Blanket'] = newVal;
+              } else if (this.currentSheetKey === 'macks') {
+                tableRow['MACK'] = newVal;
+              } else if (this.currentSheetKey === 'grounds') {
+                tableRow['Serial #'] = newVal;
+                tableRow['Ground #'] = newVal;
+              } else if (this.currentSheetKey === 'hot_sticks') {
+                tableRow['Hot Stick'] = newVal;
+                tableRow['Hot Stick #'] = newVal;
+              }
+            }
           }
           if (tableData && tableData.rawGrid && actualRowIdx && tableData.rawGrid[actualRowIdx - 1]) {
             const cIdx = (typeof col === 'number' && col >= 1) ? (col - 1) : (tableData.headers || []).indexOf(header);
@@ -7003,6 +7064,11 @@ class SheetNavigator {
             if (window.procurementEngine && typeof window.procurementEngine.buildPurchaseNeeds === 'function') {
               window.procurementEngine.buildPurchaseNeeds();
             }
+          } else if (targetCell.dataset.primary === 'true' && newVal) {
+            const itemKey = String(newVal).trim();
+            const histKey = this.currentSheetKey.endsWith('_history') ? this.currentSheetKey : (this.currentSheetKey + '_history');
+            targetCell.innerHTML = `<span style="font-weight: 700; color: #60a5fa; cursor: pointer; text-decoration: underline dotted; display: inline-block; padding: 2px 4px; border-radius: 4px;" title="Click to inspect lifecycle dossier for #${this.escapeHtml(itemKey)}" onclick="if(window.itemStatsEngine){window.itemStatsEngine.openDossierModal('${this.escapeJs(itemKey)}', '${this.escapeJs(histKey)}');}">${this.escapeHtml(newVal)}</span>`;
+            targetCell.dataset.item = newVal;
           } else if (!targetCell.querySelector('.cell-text')) {
             targetCell.textContent = newVal;
           }
@@ -7010,6 +7076,38 @@ class SheetNavigator {
           flashSuccess();
         } catch (err) {
           console.error('Error committing inline edit:', err);
+        }
+      });
+    });
+
+    // Attach double-click rename handlers to all non-editable primary equipment cells
+    container.querySelectorAll('td[data-primary="true"]:not(.editable)').forEach(td => {
+      td.addEventListener('dblclick', () => {
+        if (window.currentRoleMode === 'view_only') return;
+        const currentItemNum = (td.querySelector('.cell-text') ? td.querySelector('.cell-text').textContent : td.textContent).trim().replace(/^👤\s*/, '');
+        const targetRow = td.dataset.row ? parseInt(td.dataset.row, 10) : null;
+        const promptMsg = currentItemNum ? `Edit Item # (Current: ${currentItemNum}):` : 'Enter Item # / Equipment #:';
+        const entered = prompt(promptMsg, currentItemNum);
+        if (entered !== null) {
+          const newItemNum = entered.trim();
+          if (newItemNum && newItemNum !== currentItemNum) {
+            const curTable = this.db.getTable(this.currentSheetKey);
+            if (curTable && curTable.rows) {
+              const dup = curTable.rows.find(r => {
+                const rNum = String(r['Item #'] || r['HV Tester'] || r['Phasing Set'] || r['AED'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['MACK'] || r['Serial #'] || Object.values(r)[0] || '').trim().toLowerCase();
+                return rNum === newItemNum.toLowerCase() && r._rowIdx !== targetRow;
+              });
+              if (dup) {
+                alert(`⛔ Duplicate Error: Item #${newItemNum} already exists in ${curTable.name || this.currentSheetKey}!`);
+                return;
+              }
+            }
+            td.classList.add('editable');
+            td.contentEditable = 'true';
+            td.textContent = newItemNum;
+            td.focus();
+            td.blur();
+          }
         }
       });
     });

@@ -2207,8 +2207,8 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
               }
               
               // 3. Known alias matches
-              if (['item #', 'item', 'glove', 'sleeve', 'blanket', 'mack', 'serial #', 'serial', 'item number'].indexOf(hLower) !== -1) {
-                return mut.rowData['Item #'] || mut.rowData['Glove'] || mut.rowData['Sleeve'] || mut.rowData['Blanket'] || mut.rowData['Serial #'] || mut.rowData['ESL ID'] || '';
+              if (['item #', 'item', 'glove', 'sleeve', 'blanket', 'mack', 'hv tester', 'phasing set', 'aed', 'serial #', 'serial', 'item number', 'hvt #', 'hvt', 'ps #', 'aed #', 'ground', 'ground #', 'hot stick', 'hot stick #'].indexOf(hLower) !== -1) {
+                return mut.rowData['HV Tester'] || mut.rowData['HVT #'] || mut.rowData['HVT'] || mut.rowData['Phasing Set'] || mut.rowData['PS #'] || mut.rowData['AED'] || mut.rowData['AED #'] || mut.rowData['Item #'] || mut.rowData['Glove'] || mut.rowData['Sleeve'] || mut.rowData['Blanket'] || mut.rowData['MACK'] || mut.rowData['Ground #'] || mut.rowData['Hot Stick #'] || mut.rowData['Serial #'] || mut.rowData['ESL ID'] || '';
               }
               if (['esl id', 'esl', 'barcode'].indexOf(hLower) !== -1) {
                 return mut.rowData['ESL ID'] || mut.rowData['ESL'] || mut.rowData['Barcode'] || '';
