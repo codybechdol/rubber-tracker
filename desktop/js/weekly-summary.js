@@ -24,7 +24,7 @@ class WeeklySummaryEngine {
   constructor(db) {
     this.db = db;
     this.selectedLocation = 'all';
-    this.selectedWeek = 'current';
+    this.selectedWeek = 'previous';
     this.cachedData = null;
     this.selectedRecipients = new Set();
     window.weeklySummaryEngine = this;
@@ -254,6 +254,9 @@ class WeeklySummaryEngine {
       ratePercent: 100,
       missingDetails: []
     };
+    let targetWeek = 'Previous';
+    let targetWeekRangeStr = '';
+    let isPreviousWeek = true;
 
     if (compTable && compTable.rows && compTable.rows.length > 0) {
       const weekSet = new Set();
@@ -261,12 +264,46 @@ class WeeklySummaryEngine {
         const wk = String(r['Week Start'] || r['Week'] || '').trim();
         if (wk) weekSet.add(wk);
       });
-      compWeeks.push(...Array.from(weekSet));
+      // Sort weeks chronologically descending (newest first)
+      const sortedWeeks = Array.from(weekSet).sort((a, b) => {
+        const da = new Date(a);
+        const db = new Date(b);
+        return db.getTime() - da.getTime();
+      });
+      compWeeks.push(...sortedWeeks);
 
-      // Choose selected week or latest week
-      let targetWeek = this.selectedWeek;
-      if (targetWeek === 'current' || !compWeeks.includes(targetWeek)) {
-        targetWeek = compWeeks[compWeeks.length - 1] || 'Current';
+      // Determine previous week vs current week
+      let prevWeekStr = sortedWeeks.length > 1 ? sortedWeeks[1] : (sortedWeeks[0] || 'Previous');
+      if (sortedWeeks.length > 0) {
+        const newestDt = new Date(sortedWeeks[0]);
+        if (!isNaN(newestDt.getTime()) && newestDt < new Date(currentMon.getTime() - 2 * 86400000)) {
+          prevWeekStr = sortedWeeks[0];
+        }
+      }
+
+      if (this.selectedWeek === 'previous' || !this.selectedWeek) {
+        targetWeek = prevWeekStr;
+        isPreviousWeek = true;
+      } else if (this.selectedWeek === 'current') {
+        targetWeek = sortedWeeks[0] || 'Current';
+        isPreviousWeek = false;
+      } else if (compWeeks.includes(this.selectedWeek)) {
+        targetWeek = this.selectedWeek;
+        isPreviousWeek = (targetWeek === prevWeekStr);
+      } else {
+        targetWeek = prevWeekStr;
+        isPreviousWeek = true;
+      }
+
+      const twDt = this.parseDate(targetWeek);
+      if (twDt) {
+        const monDt = new Date(twDt);
+        if (twDt.getDay() === 0) monDt.setDate(twDt.getDate() + 1);
+        const sunDt = new Date(monDt);
+        sunDt.setDate(monDt.getDate() + 6);
+        targetWeekRangeStr = `${this.formatDateOnly(monDt)} – ${this.formatDateOnly(sunDt)}`;
+      } else {
+        targetWeekRangeStr = targetWeek;
       }
 
       const rowsInWeek = compTable.rows.filter(r => String(r['Week Start'] || r['Week'] || '').trim() === targetWeek);
@@ -336,9 +373,47 @@ class WeeklySummaryEngine {
       const tbl = this.db ? this.db.getTable(sw.key) : null;
       if (tbl && tbl.rows) {
         tbl.rows.forEach(r => {
-          const employee = String(r['Employee'] || r['Assigned To'] || r['Name'] || '').trim();
-          const currentItem = String(r['Current Glove #'] || r['Current Sleeve #'] || r['Current Item #'] || r['Serial #'] || r['Item #'] || '').trim();
-          const pickItem = String(r['Pick List Item #'] || r['Pick List Glove #'] || r['Pick List Sleeve #'] || r['Pick List Blanket #'] || r['Pick List MACK #'] || r['Pick List'] || '').trim();
+          const employee = String(
+            r['Crew Lead / Employee'] || 
+            r['Employee / Crew Lead'] || 
+            r['Employee'] || 
+            r['Assigned To'] || 
+            r['Crew Lead'] || 
+            r['Lead'] || 
+            r['Name'] || 
+            ''
+          ).trim();
+
+          const currentItem = String(
+            r['Current HV Tester #'] || 
+            r['Current Phasing Set #'] || 
+            r['Current Glove #'] || 
+            r['Current Sleeve #'] || 
+            r['Current Blanket #'] || 
+            r['Current MACK #'] || 
+            r['Current AED #'] || 
+            r['Current Hot Stick #'] || 
+            r['Current Item #'] || 
+            r['HVT #'] || 
+            r['Item #'] || 
+            r['Serial #'] || 
+            ''
+          ).trim();
+
+          const pickItem = String(
+            r['Pick List HV Tester #'] || 
+            r['Pick List Phasing Set #'] || 
+            r['Pick List Glove #'] || 
+            r['Pick List Sleeve #'] || 
+            r['Pick List Blanket #'] || 
+            r['Pick List MACK #'] || 
+            r['Pick List AED #'] || 
+            r['Pick List Serial #'] || 
+            r['Pick List Item #'] || 
+            r['Pick List'] || 
+            ''
+          ).trim();
+
           const loc = String(r['Location'] || '').trim();
           const stage = String(r['Status'] || r['Stage'] || '').trim();
 
@@ -347,27 +422,28 @@ class WeeklySummaryEngine {
             return;
           }
 
+          const empInfo = empMap.get(employee.toLowerCase()) || {};
+          const crew = empInfo.crew || String(r['Job Number'] || r['Job #'] || r['Crew'] || '').trim();
+          const resolvedLoc = loc || empInfo.loc || '—';
+
           // Apply Location filter
           if (this.selectedLocation !== 'all') {
-            const cleanLoc = loc.toLowerCase().replace(/\s*\(.*?\)\s*/g, '').trim();
+            const cleanLoc = resolvedLoc.toLowerCase().replace(/\s*\(.*?\)\s*/g, '').trim();
             if (!cleanLoc.includes(this.selectedLocation.toLowerCase())) return;
           }
 
-          const dueDateRaw = r['Change Out Date'] || r['Due Date'] || r['Test Date'];
+          const dueDateRaw = r['Change Out Date'] || r['Due Date'] || r['Test Date'] || r['Pad Expiration'];
           const dueDt = this.parseDate(dueDateRaw);
-
-          const empInfo = empMap.get(employee.toLowerCase()) || {};
-          const crew = empInfo.crew || String(r['Job Number'] || r['Job #'] || '').trim();
 
           const itemRecord = {
             categoryKey: sw.key,
             categoryLabel: sw.label,
             icon: sw.icon,
-            employee,
+            employee: employee || 'On Shelf',
             crew,
             currentItem,
             pickItem: (pickItem && pickItem !== '—' && pickItem !== '-') ? pickItem : null,
-            location: loc || empInfo.loc || '—',
+            location: resolvedLoc,
             size: r['Size'] || r['KV'] || r['Model'] || r['Class'] || '—',
             dueDate: dueDt ? this.formatDateOnly(dueDt) : String(dueDateRaw || '—'),
             dueDt,
@@ -451,38 +527,112 @@ class WeeklySummaryEngine {
       certsUpcoming.sort((a, b) => a.diffDays - b.diffDays);
     }
 
-    // 5. Training Classes Scheduled for This Week
+    // 5. Training Classes & Monthly Safety Training Scheduled / In-Progress
     const trainTable = this.db ? this.db.getTable('training_tracking') : null;
     const trainingThisWeek = [];
 
+    // A. Check for scheduled classroom cert courses from manual_tasks (Trip Planner)
+    const manualTasks = (this.db && typeof this.db.getManualTasks === 'function')
+      ? this.db.getManualTasks()
+      : (this.db?.snapshot?.configs?.manual_tasks || []);
+
+    const upcomingCutoff = new Date(currentMon);
+    upcomingCutoff.setDate(currentMon.getDate() + 14);
+
+    if (Array.isArray(manualTasks)) {
+      manualTasks.forEach(task => {
+        if (task.taskCategory === 'cert_class' || !!task.certType) {
+          const rawDate = task.dateKey || task.date;
+          const dt = this.parseDate(rawDate);
+          if (dt && dt >= currentMon && dt <= upcomingCutoff) {
+            if (this.selectedLocation !== 'all') {
+              const loc = String(task.location || '').toLowerCase();
+              if (!loc.includes(this.selectedLocation.toLowerCase())) return;
+            }
+            const attendeesCount = Array.isArray(task.assignedEmployees)
+              ? task.assignedEmployees.length
+              : (task.employee ? 1 : 0);
+
+            trainingThisWeek.push({
+              title: task.title || task.certType || 'Scheduled Training Class',
+              date: this.formatDateOnly(dt),
+              location: task.location || '—',
+              instructor: task.instructor || 'Instructor',
+              attendees: attendeesCount,
+              attendeesLabel: `${attendeesCount} Enrolled`,
+              status: task.status || 'Scheduled',
+              isMonthlyTopic: false
+            });
+          }
+        }
+      });
+    }
+
+    // B. Check training_tracking for completions this week or current month curriculum
     if (trainTable && trainTable.rows) {
+      const curMonthName = today.toLocaleString('en-US', { month: 'long' }).toLowerCase();
+      let pendingMonthCrews = [];
+      let monthTopic = '';
+
       trainTable.rows.forEach(r => {
-        const title = String(r['Class'] || r['Training Topic'] || r['Course'] || r['Title'] || '').trim();
-        const dateRaw = r['Date'] || r['Scheduled Date'];
+        const title = String(r['Class'] || r['Training Topic'] || r['Topic'] || r['Course'] || r['Title'] || '').trim();
+        const dateRaw = r['Completion Date'] || r['Date'] || r['Scheduled Date'];
+        const rowMonth = String(r['Month'] || '').trim().toLowerCase();
         const loc = String(r['Location'] || '').trim();
-        const instructor = String(r['Instructor'] || r['Lead'] || '—').trim();
+        const instructor = String(r['Trainer'] || r['Instructor'] || r['Lead'] || '—').trim();
         const attendees = String(r['Attendees'] || r['Crew'] || '').trim();
         const status = String(r['Status'] || '').trim();
 
-        if (!title && !dateRaw) return;
+        // Check if completed this week
+        if (dateRaw) {
+          const dt = this.parseDate(dateRaw);
+          if (dt && dt >= currentMon && dt <= nextSun) {
+            if (this.selectedLocation !== 'all') {
+              const cleanLoc = loc.toLowerCase().replace(/\s*\(.*?\)\s*/g, '').trim();
+              if (!cleanLoc.includes(this.selectedLocation.toLowerCase())) return;
+            }
 
-        const dt = this.parseDate(dateRaw);
-        if (dt && dt >= currentMon && dt <= nextSun) {
-          if (this.selectedLocation !== 'all') {
-            const cleanLoc = loc.toLowerCase().replace(/\s*\(.*?\)\s*/g, '').trim();
-            if (!cleanLoc.includes(this.selectedLocation.toLowerCase())) return;
+            trainingThisWeek.push({
+              title: title || 'Completed Safety Training',
+              date: this.formatDateOnly(dt),
+              location: loc || '—',
+              instructor,
+              attendees: attendees ? attendees.split(',').length : 1,
+              attendeesLabel: `${attendees ? attendees.split(',').length : 1} Attendees`,
+              status: status || 'Completed',
+              isMonthlyTopic: false
+            });
           }
+        }
 
-          trainingThisWeek.push({
-            title: title || 'Scheduled Safety Training',
-            date: this.formatDateOnly(dt),
-            location: loc || '—',
-            instructor,
-            attendees: attendees ? attendees.split(',').length : 0,
-            status: status || 'Scheduled'
-          });
+        // Check if assigned for current month and pending
+        if (rowMonth === curMonthName && status.toLowerCase() === 'pending') {
+          if (!monthTopic && title) monthTopic = title;
+          const lead = String(r['Crew Lead'] || r['Lead'] || '').trim();
+          const emp = empMap.get(lead.toLowerCase());
+          const crewLoc = loc || (emp && emp.loc) || '';
+          
+          if (this.selectedLocation === 'all' || crewLoc.toLowerCase().includes(this.selectedLocation.toLowerCase())) {
+            pendingMonthCrews.push(r);
+          }
         }
       });
+
+      // If active monthly topic exists and has pending crews, include as featured curriculum
+      if (pendingMonthCrews.length > 0 && monthTopic) {
+        const capMonth = today.toLocaleString('en-US', { month: 'long' });
+        const locLabel = this.selectedLocation !== 'all' ? `${this.selectedLocation} (${pendingMonthCrews.length} Crews)` : 'Company-Wide Field Delivery';
+        trainingThisWeek.push({
+          title: `${capMonth} Curriculum: ${monthTopic}`,
+          date: `${capMonth} ${today.getFullYear()}`,
+          location: locLabel,
+          instructor: 'Safety Dept / Crew Leads',
+          attendees: pendingMonthCrews.length,
+          attendeesLabel: `${pendingMonthCrews.length} Crews Pending`,
+          status: 'In Progress',
+          isMonthlyTopic: true
+        });
+      }
     }
 
     // 6. Recent Incident Reports (past 14 days)
@@ -490,20 +640,41 @@ class WeeklySummaryEngine {
     const fourteenDaysAgo = new Date(today);
     fourteenDaysAgo.setDate(today.getDate() - 14);
 
-    if (window.incidentReportsEngine && Array.isArray(window.incidentReportsEngine.incidents)) {
-      window.incidentReportsEngine.incidents.forEach(inc => {
-        const dt = inc.date instanceof Date ? inc.date : this.parseDate(inc.date);
+    const incTable = this.db ? this.db.getTable('incident_reports') : null;
+    let incidentRows = (incTable && incTable.rows && incTable.rows.length > 0) ? incTable.rows : [];
+
+    if (incidentRows.length === 0 && window.incidentReportsEngine) {
+      if (typeof window.incidentReportsEngine.loadIncidents === 'function') {
+        const loaded = window.incidentReportsEngine.loadIncidents();
+        if (Array.isArray(loaded) && loaded.length > 0) incidentRows = loaded;
+      } else if (Array.isArray(window.incidentReportsEngine.incidents)) {
+        incidentRows = window.incidentReportsEngine.incidents;
+      }
+    }
+
+    if (Array.isArray(incidentRows)) {
+      incidentRows.forEach(inc => {
+        const rawDate = inc['Date of Incident'] || inc['Date Received'] || inc['Date'] || inc.date || inc.incidentDate;
+        const dt = rawDate instanceof Date ? rawDate : this.parseDate(rawDate);
         if (dt && dt >= fourteenDaysAgo) {
+          const rawJob = inc['Job #'] || inc['Job Number'] || inc.jobNumber || inc.job || '—';
+          const rawForeman = inc['Foreman'] || inc.foreman || '—';
+          const rawType = inc['Incident Type'] || inc.incidentType || (Array.isArray(inc.tags) ? inc.tags.join(', ') : 'General Incident');
+          const desc = inc['Brief Explanation'] || inc['Explanation'] || inc.description || 'Incident report received via tablet email.';
+          const photoCount = inc['Photo Count'] || (Array.isArray(inc.photos) ? inc.photos.length : 0);
+
           recentIncidents.push({
             date: this.formatDateOnly(dt),
-            job: inc.jobNumber || '—',
-            foreman: inc.foreman || '—',
-            type: Array.isArray(inc.tags) ? inc.tags.join(', ') : (inc.incidentType || 'Incident'),
-            description: inc.description || 'Incident report received via tablet',
-            hasPhotos: (inc.photos && inc.photos.length > 0)
+            dt,
+            job: String(rawJob).replace(/^job\s*#?\s*/i, '').trim(),
+            foreman: String(rawForeman).trim(),
+            type: String(rawType).trim(),
+            description: String(desc).trim(),
+            hasPhotos: (photoCount > 0)
           });
         }
       });
+      recentIncidents.sort((a, b) => b.dt.getTime() - a.dt.getTime());
     }
 
     // 7. Notification Recipients (from Notification Emails column on Employees page)
@@ -519,6 +690,9 @@ class WeeklySummaryEngine {
       crewMembersMap,
       compliance: {
         weeks: compWeeks,
+        targetWeek,
+        targetWeekRangeStr,
+        isPreviousWeek,
         stats: compStats,
         crews: complianceByCrew
       },
@@ -569,9 +743,10 @@ class WeeklySummaryEngine {
             </div>
 
             <div style="display: flex; align-items: center; gap: 6px;">
-              <span style="font-size: 12px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">Week:</span>
+              <span style="font-size: 12px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">Compliance Week:</span>
               <select id="weekly-summary-week-select" onchange="window.weeklySummaryEngine.setWeekFilter(this.value)" style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 12px; color: #34d399; font-size: 13px; font-weight: 700; outline: none; cursor: pointer;">
-                <option value="current">Current Week (${data.weekRangeStr})</option>
+                <option value="previous" ${this.selectedWeek === 'previous' ? 'selected' : ''}>Previous Week (${this.escapeHtml(data.compliance.targetWeekRangeStr || 'Previous')})</option>
+                <option value="current" ${this.selectedWeek === 'current' ? 'selected' : ''}>Current Week (${data.weekRangeStr})</option>
                 ${data.compliance.weeks.map(wk => `<option value="${this.escapeHtml(wk)}" ${this.selectedWeek === wk ? 'selected' : ''}>Week of ${this.escapeHtml(wk)}</option>`).join('')}
               </select>
             </div>
@@ -689,7 +864,8 @@ class WeeklySummaryEngine {
               </span>
             </div>
             <div style="font-size: 12px; color: #94a3b8;">
-              Target Week: <strong style="color: #60a5fa;">${data.weekRangeStr}</strong>
+              Target Week: <strong style="color: #60a5fa;">${data.compliance.targetWeekRangeStr || data.weekRangeStr}</strong>
+              ${data.compliance.isPreviousWeek ? '<span style="margin-left: 6px; padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 700; background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.3);">Previous Week</span>' : ''}
             </div>
           </div>
 
@@ -987,14 +1163,18 @@ class WeeklySummaryEngine {
       html += `
         <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px; padding: 12px 14px; display: flex; justify-content: space-between; align-items: center;">
           <div style="display: flex; flex-direction: column; gap: 3px;">
-            <div style="font-weight: 700; font-size: 13px; color: #f8fafc;">${this.escapeHtml(t.title)}</div>
+            <div style="font-weight: 700; font-size: 13px; color: #f8fafc; display: flex; align-items: center; gap: 6px;">
+              <span>${t.isMonthlyTopic ? '📚' : '🎓'}</span>
+              <span>${this.escapeHtml(t.title)}</span>
+              ${t.isMonthlyTopic ? '<span style="padding: 1px 6px; border-radius: 4px; font-size: 10px; font-weight: 700; background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.35);">Curriculum</span>' : ''}
+            </div>
             <div style="font-size: 11.5px; color: #94a3b8;">
               📍 ${this.escapeHtml(t.location)} · 👨‍🏫 Instructor: <strong style="color: #cbd5e1;">${this.escapeHtml(t.instructor)}</strong>
             </div>
           </div>
           <div style="text-align: right;">
             <div style="font-size: 12px; font-weight: 700; color: #60a5fa;">📅 ${this.escapeHtml(t.date)}</div>
-            <div style="font-size: 11px; color: #34d399; font-weight: 600;">👥 ${t.attendees} Enrolled</div>
+            <div style="font-size: 11px; color: #34d399; font-weight: 600;">👥 ${this.escapeHtml(t.attendeesLabel || `${t.attendees} Enrolled`)}</div>
           </div>
         </div>
       `;
@@ -1745,6 +1925,82 @@ class WeeklySummaryEngine {
     }
 
     emailHtml += `
+      <!-- Training Section -->
+      <h2 style="font-size: 15px; font-weight: 700; color: #0f172a; border-bottom: 2px solid #2563eb; padding-bottom: 6px; margin-top: 24px;">🎓 4. Scheduled Safety Training (${data.training.length})</h2>
+    `;
+
+    if (data.training.length === 0) {
+      emailHtml += `<p style="font-size: 12.5px; color: #64748b;">No safety training sessions scheduled for this week.</p>`;
+    } else {
+      emailHtml += `
+        <table style="width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 24px;">
+          <thead>
+            <tr style="background: #f1f5f9; color: #334155; font-weight: 700; text-align: left;">
+              <th style="padding: 8px 10px; border: 1px solid #cbd5e1;">Topic / Course</th>
+              <th style="padding: 8px 10px; border: 1px solid #cbd5e1;">Date / Timing</th>
+              <th style="padding: 8px 10px; border: 1px solid #cbd5e1;">Location</th>
+              <th style="padding: 8px 10px; border: 1px solid #cbd5e1;">Instructor</th>
+              <th style="padding: 8px 10px; border: 1px solid #cbd5e1; text-align: right;">Status / Enrolled</th>
+            </tr>
+          </thead>
+          <tbody>
+      `;
+      data.training.forEach(t => {
+        emailHtml += `
+          <tr>
+            <td style="padding: 6px 10px; border: 1px solid #e2e8f0; font-weight: 700; color: #0f172a;">${t.isMonthlyTopic ? '📚 ' : '🎓 '}${this.escapeHtml(t.title)}</td>
+            <td style="padding: 6px 10px; border: 1px solid #e2e8f0; color: #2563eb; font-weight: 600;">${this.escapeHtml(t.date)}</td>
+            <td style="padding: 6px 10px; border: 1px solid #e2e8f0; color: #64748b;">${this.escapeHtml(t.location)}</td>
+            <td style="padding: 6px 10px; border: 1px solid #e2e8f0;">${this.escapeHtml(t.instructor)}</td>
+            <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: right; font-weight: 700; color: #16a34a;">${this.escapeHtml(t.attendeesLabel || `${t.attendees} Enrolled`)}</td>
+          </tr>
+        `;
+      });
+      emailHtml += `
+          </tbody>
+        </table>
+      `;
+    }
+
+    emailHtml += `
+      <!-- Incident Reports Section -->
+      <h2 style="font-size: 15px; font-weight: 700; color: #0f172a; border-bottom: 2px solid #2563eb; padding-bottom: 6px;">⚠️ 5. Recent Incident Reports (Past 14 Days: ${data.incidents.length})</h2>
+    `;
+
+    if (data.incidents.length === 0) {
+      emailHtml += `<p style="font-size: 12.5px; color: #16a34a; font-weight: 600;">✅ Clean Safety Record: Zero incident reports submitted in the past 14 days.</p>`;
+    } else {
+      emailHtml += `
+        <table style="width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 20px;">
+          <thead>
+            <tr style="background: #f1f5f9; color: #334155; font-weight: 700; text-align: left;">
+              <th style="padding: 8px 10px; border: 1px solid #cbd5e1;">Date</th>
+              <th style="padding: 8px 10px; border: 1px solid #cbd5e1;">Job / Crew</th>
+              <th style="padding: 8px 10px; border: 1px solid #cbd5e1;">Foreman</th>
+              <th style="padding: 8px 10px; border: 1px solid #cbd5e1;">Incident Type</th>
+              <th style="padding: 8px 10px; border: 1px solid #cbd5e1;">Description</th>
+            </tr>
+          </thead>
+          <tbody>
+      `;
+      data.incidents.forEach(inc => {
+        emailHtml += `
+          <tr style="background: #fffbeb;">
+            <td style="padding: 6px 10px; border: 1px solid #e2e8f0; font-weight: 700; color: #ea580c;">${this.escapeHtml(inc.date)}</td>
+            <td style="padding: 6px 10px; border: 1px solid #e2e8f0; font-weight: 700;">${this.escapeHtml(inc.job)}</td>
+            <td style="padding: 6px 10px; border: 1px solid #e2e8f0;">${this.escapeHtml(inc.foreman)}</td>
+            <td style="padding: 6px 10px; border: 1px solid #e2e8f0; color: #d97706; font-weight: 600;">${this.escapeHtml(inc.type)}</td>
+            <td style="padding: 6px 10px; border: 1px solid #e2e8f0; color: #334155;">${this.escapeHtml(inc.description)}</td>
+          </tr>
+        `;
+      });
+      emailHtml += `
+          </tbody>
+        </table>
+      `;
+    }
+
+    emailHtml += `
       <div style="margin-top: 30px; padding-top: 16px; border-top: 1px solid #e2e8f0; font-size: 11px; color: #94a3b8; text-align: center;">
         Generated on demand by Safety Assistant Desktop Edition · All data originates from the offline-first repository.
       </div>
@@ -1766,7 +2022,7 @@ class WeeklySummaryEngine {
       text += `Notification Distribution: ${data.recipients.emails.join(', ')}\n`;
     }
     text += `\nKEY METRICS:\n`;
-    text += `- Safety Compliance Rate: ${data.compliance.stats.ratePercent}% (${data.compliance.stats.completeCount}/${data.compliance.stats.totalCrews} crews complete)\n`;
+    text += `- Safety Compliance Rate: ${data.compliance.stats.ratePercent}% (${data.compliance.stats.completeCount}/${data.compliance.stats.totalCrews} crews complete) [Target: ${data.compliance.targetWeekRangeStr || data.weekRangeStr}]\n`;
     text += `- Equipment Swaps Action Required: ${data.swaps.totalActionRequired} (${data.swaps.overdue.length} overdue, ${data.swaps.dueThisWeek.length} due this week)\n`;
     text += `- Urgent Cert Expirations (< 30d): ${data.certs.urgent.length}\n`;
     text += `- Scheduled Training Sessions: ${data.training.length}\n`;
@@ -1784,6 +2040,22 @@ class WeeklySummaryEngine {
       text += `URGENT CERTIFICATIONS EXPIRING:\n`;
       data.certs.urgent.forEach(c => {
         text += `• ${c.employee} (Crew ${c.crew || '—'}): ${c.cert} expires ${c.expirationDate} (${c.diffDays} days remaining)\n`;
+      });
+      text += `\n`;
+    }
+
+    if (data.training.length > 0) {
+      text += `SCHEDULED SAFETY TRAINING:\n`;
+      data.training.forEach(t => {
+        text += `• ${t.title} — ${t.date} (${t.location}) | Instructor: ${t.instructor} | ${t.attendeesLabel || `${t.attendees} Enrolled`}\n`;
+      });
+      text += `\n`;
+    }
+
+    if (data.incidents.length > 0) {
+      text += `RECENT INCIDENT REPORTS (PAST 14d):\n`;
+      data.incidents.forEach(inc => {
+        text += `• [${inc.type}] Job #${inc.job} (Foreman: ${inc.foreman}) — ${inc.date}: ${inc.description}\n`;
       });
       text += `\n`;
     }
