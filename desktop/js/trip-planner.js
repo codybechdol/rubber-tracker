@@ -7598,6 +7598,18 @@ class TripPlannerApp {
         if (loc.includes('helena') && st.includes('in stock')) return;
 
         const resolved = resolveEmployeeLocationAndCrew(asg, it['Location'] || '', empInfo, '');
+        const swTable = this.db ? (this.db.getTable(tableKey) || this.db.getTable(this.db.getSheetNameForTableKey(tableKey))) : null;
+        let swapRowIdx = null;
+        if (swTable && swTable.rows && swTable.rows.length > 0) {
+          const sIdx = swTable.rows.findIndex(sr => {
+            const srEmp = String(sr['Employee'] || sr['Crew Lead / Employee'] || '').trim().toLowerCase();
+            const srItm = String(sr['Current Glove #'] || sr['Current Sleeve #'] || sr['Current Blanket #'] || sr['Current Item #'] || sr['Item #'] || '').trim().toLowerCase();
+            return (srEmp === asg.toLowerCase() || (window.employeeResolver && typeof window.employeeResolver.areSameEmployee === 'function' && window.employeeResolver.areSameEmployee(srEmp, asg))) &&
+                   (!itemNum || srItm === itemNum.toLowerCase());
+          });
+          if (sIdx !== -1) swapRowIdx = sIdx;
+        }
+
         pickedItems.push({
           type: type,
           isReclaim: true,
@@ -7610,7 +7622,8 @@ class TripPlannerApp {
           changeOutDate: it['Change Out Date'] || '',
           daysLeft: 'PREV EMP',
           tableKey: tableKey,
-          rowIdx: idx,
+          rowIdx: swapRowIdx,
+          invRowIdx: idx,
           location: resolved.location,
           crewId: resolved.crewId,
           foreman: resolved.foreman,

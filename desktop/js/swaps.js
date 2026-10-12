@@ -2484,10 +2484,36 @@ class SwapGenerationEngine {
         if (row) {
           row['Date Changed'] = dateFormatted;
           row['Status'] = 'Delivered ✅';
+          this.syncRowToRawGrid(swapTable, row);
+          await this.queueRowMutations(swapSheetKey, row, ['Date Changed', 'Status', 'Days Left']);
         }
         if (gridRow) {
           gridRow[7] = 'Delivered ✅';
           gridRow[9] = dateFormatted;
+          if (!row && swapTable) {
+            const gridIdx = swapTable.rawGrid ? swapTable.rawGrid.indexOf(gridRow) : -1;
+            if (gridIdx > 0 && typeof this.db.addMutation === 'function') {
+              const sheetName = swapTable.name || this.db.getSheetNameForTableKey(swapSheetKey) || swapSheetKey;
+              await this.db.addMutation({
+                action: 'UPDATE_CELL',
+                sheetName: sheetName,
+                row: gridIdx + 1,
+                col: 8,
+                header: 'Status',
+                itemIdentifier: oldItemNum,
+                value: 'Delivered ✅'
+              });
+              await this.db.addMutation({
+                action: 'UPDATE_CELL',
+                sheetName: sheetName,
+                row: gridIdx + 1,
+                col: 10,
+                header: 'Date Changed',
+                itemIdentifier: oldItemNum,
+                value: dateFormatted
+              });
+            }
+          }
         }
         oldRow['Location'] = "Cody's Truck";
         oldRow['Status'] = 'Ready For Test';
@@ -2503,11 +2529,43 @@ class SwapGenerationEngine {
         if (row) {
           row['Date Changed'] = '';
           row['Status'] = 'Ready For Delivery 🚚';
+          this.syncRowToRawGrid(swapTable, row);
+          await this.queueRowMutations(swapSheetKey, row, ['Date Changed', 'Status', 'Days Left']);
         }
         if (gridRow) {
           gridRow[7] = 'Ready For Delivery 🚚';
           gridRow[9] = '';
+          if (!row && swapTable) {
+            const gridIdx = swapTable.rawGrid ? swapTable.rawGrid.indexOf(gridRow) : -1;
+            if (gridIdx > 0 && typeof this.db.addMutation === 'function') {
+              const sheetName = swapTable.name || this.db.getSheetNameForTableKey(swapSheetKey) || swapSheetKey;
+              await this.db.addMutation({
+                action: 'UPDATE_CELL',
+                sheetName: sheetName,
+                row: gridIdx + 1,
+                col: 8,
+                header: 'Status',
+                itemIdentifier: oldItemNum,
+                value: 'Ready For Delivery 🚚'
+              });
+              await this.db.addMutation({
+                action: 'UPDATE_CELL',
+                sheetName: sheetName,
+                row: gridIdx + 1,
+                col: 10,
+                header: 'Date Changed',
+                itemIdentifier: oldItemNum,
+                value: ''
+              });
+            }
+          }
         }
+      }
+      if (this.db && typeof this.db.persistSnapshot === 'function' && this.db.snapshot) {
+        await this.db.persistSnapshot(this.db.snapshot);
+      }
+      if (this.db && typeof this.db.notify === 'function') {
+        this.db.notify();
       }
       if (window.sheetNavigator) window.sheetNavigator.renderActiveView();
       return;
