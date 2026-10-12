@@ -250,18 +250,23 @@ class TimeBreakdownEngine {
           const invTable = invLookup[cfg.inv] || {};
           const newInvItem = invTable[entry.pickListNum] || {};
 
-          let rawDate = newInvItem['Date Assigned'] || (entry.timestamp ? entry.timestamp.substring(0, 10) : '');
+          let rawDate = entry.deliveredDate || (entry.timestamp ? entry.timestamp.substring(0, 10) : '') || newInvItem['Date Assigned'];
           const dKey = this.normalizeDateKey(rawDate);
           if (daysMap[dKey]) {
-            const dedupe = `${cfg.label}_${empClean}_${entry.pickListNum}_${entry.currentItemNum}`.toLowerCase();
+            const rawPick = String(entry.pickListNum || '').trim();
+            const cleanNew = (rawPick === '—' || rawPick === '-') ? '' : rawPick;
+            const cleanOld = String(entry.currentItemNum || '').trim();
+            const isReclaim = !cleanNew;
+            const dedupe = `${cfg.label}_${empClean}_${cleanNew}_${cleanOld}`.toLowerCase();
             if (!seenSwapKeys.has(dedupe)) {
               seenSwapKeys.add(dedupe);
               const swapObj = {
-                type: `${cfg.label} Swap`,
+                type: isReclaim ? `${cfg.label} Reclaim` : `${cfg.label} Swap`,
                 label: cfg.label,
+                isReclaim: isReclaim,
                 employee: empClean,
-                oldItem: entry.currentItemNum || '',
-                newItem: entry.pickListNum || '',
+                oldItem: cleanOld,
+                newItem: cleanNew,
                 size: newInvItem['Size'] || '',
                 itemClass: newInvItem['Class'] || '',
                 kv: newInvItem['KV'] || '',
@@ -313,17 +318,20 @@ class TimeBreakdownEngine {
             if (daysMap[dKey]) {
               const empClean = String(r['Employee'] || r['Assigned To'] || 'Worker').trim();
               const oldItem = String(r['Current Glove #'] || r['Current Sleeve #'] || r['Current Item #'] || r['Item #'] || '').trim();
-              const newItem = String(r['Pick List Glove #'] || r['Pick List Sleeve #'] || r['Pick List Item #'] || '').trim();
-              const dedupe = `${cfg.label}_${empClean}_${newItem}_${oldItem}`.toLowerCase();
+              const rawPick = String(r['Pick List Glove #'] || r['Pick List Sleeve #'] || r['Pick List Item #'] || '').trim();
+              const cleanNew = (rawPick === '—' || rawPick === '-') ? '' : rawPick;
+              const isReclaim = Boolean(!cleanNew || String(r['Days Left'] || '').toUpperCase().includes('PREV') || status.includes('return to shelf'));
+              const dedupe = `${cfg.label}_${empClean}_${cleanNew}_${oldItem}`.toLowerCase();
               if (!seenSwapKeys.has(dedupe)) {
                 seenSwapKeys.add(dedupe);
                 const empInfo = empMap[empClean.toLowerCase()] || {};
                 const swapObj = {
-                  type: `${cfg.label} Swap`,
+                  type: isReclaim ? `${cfg.label} Reclaim` : `${cfg.label} Swap`,
                   label: cfg.label,
+                  isReclaim: isReclaim,
                   employee: empClean,
                   oldItem: oldItem,
-                  newItem: newItem,
+                  newItem: cleanNew,
                   size: r['Size'] || '',
                   itemClass: r['Class'] || '',
                   kv: r['KV'] || '',
@@ -356,6 +364,93 @@ class TimeBreakdownEngine {
             }
           }
         });
+      }
+    });
+
+    // C. Completed Equipment Swaps & Reclaims from Trip Planner (scheduled_swaps)
+    const schedRegistry = {};
+    if (this.db && typeof this.db.getScheduledSwaps === 'function') {
+      Object.assign(schedRegistry, this.db.getScheduledSwaps() || {});
+    }
+    if (this.db && this.db.snapshot && this.db.snapshot.configs && this.db.snapshot.configs.scheduled_swaps) {
+      Object.assign(schedRegistry, this.db.snapshot.configs.scheduled_swaps);
+    }
+    try {
+      const localSched = JSON.parse(localStorage.getItem('TRIP_PLANNER_SCHEDULED_SWAPS') || localStorage.getItem('sa_trip_scheduled_swaps') || '{}');
+      Object.assign(schedRegistry, localSched);
+    } catch { /* ignore */ }
+
+    Object.keys(schedRegistry).forEach(k => {
+      const entry = schedRegistry[k];
+      if (!entry || (!entry.completed && !entry.isCompleted)) return;
+
+      const rawDate = entry.completedDate || entry.dateKey || entry.date;
+      const dKey = this.normalizeDateKey(rawDate);
+      if (!daysMap[dKey]) return;
+
+      const swapData = entry.swap || entry;
+      const empClean = String(entry.employeeName || swapData.employeeName || swapData.employee || '').trim();
+      if (!empClean) return;
+
+      const oldItem = String(swapData.currentItem || swapData.oldItem || entry.currentItem || '').trim();
+      const rawNew = String(swapData.pickItem || swapData.newItem || entry.pickItem || '').trim();
+      const cleanNew = (rawNew && rawNew !== '—' && rawNew !== '-') ? rawNew : '';
+
+      const rawType = String(swapData.type || entry.type || '').trim();
+      const label = rawType.replace(/\s*(Swap|Reclaim)\s*/i, '').trim() || 'Equipment';
+
+      const isReclaim = Boolean(
+        swapData.isReclaim ||
+        entry.isReclaim ||
+        swapData.daysLeft === 'PREV EMP' ||
+        String(swapData.daysLeft || '').includes('PREV') ||
+        String(swapData.status || '').toLowerCase().includes('return to shelf') ||
+        !cleanNew
+      );
+
+      const dedupe = `${label}_${empClean}_${cleanNew}_${oldItem}`.toLowerCase();
+      if (!seenSwapKeys.has(dedupe)) {
+        seenSwapKeys.add(dedupe);
+
+        const empInfo = empMap[empClean.toLowerCase()] || {};
+        const swapLoc = entry.location || swapData.location || empInfo.loc || 'Helena';
+        const swapCrew = entry.crewId || swapData.crewId || swapData.jobNum || empInfo.crew || '';
+
+        const swapObj = {
+          type: isReclaim ? `${label} Reclaim` : `${label} Swap`,
+          label: label,
+          isReclaim: isReclaim,
+          employee: empClean,
+          oldItem: oldItem,
+          newItem: cleanNew,
+          size: swapData.size || '',
+          itemClass: swapData.itemClass || swapData.class || '',
+          kv: swapData.kv || '',
+          model: swapData.model || '',
+          length: swapData.length || '',
+          location: swapLoc,
+          crew: swapCrew,
+          status: 'Delivered'
+        };
+
+        let attached = false;
+        for (const lKey of Object.keys(daysMap[dKey].locations)) {
+          const locObj = daysMap[dKey].locations[lKey];
+          const locNameClean = lKey.toLowerCase();
+          const swapLocClean = swapObj.location.toLowerCase();
+          const swapSigCrew = this.getSignificantJobNumber(swapObj.crew);
+          const locCrewsSig = (locObj.crews || []).map(c => this.getSignificantJobNumber(c));
+
+          if (swapLocClean === locNameClean || swapLocClean.includes(locNameClean) || locNameClean.includes(swapLocClean) || (swapSigCrew && locCrewsSig.includes(swapSigCrew))) {
+            locObj.swaps.push(swapObj);
+            attached = true;
+            break;
+          }
+        }
+
+        if (!attached) {
+          daysMap[dKey].tasks.push(swapObj);
+        }
       }
     });
 
@@ -493,7 +588,7 @@ class TimeBreakdownEngine {
           lines.push(`  🚗 Field Visit: ${loc.name}${crewStr}`);
 
           if (loc.swaps && loc.swaps.length > 0) {
-            lines.push(`     • Completed Equipment Swaps (${loc.swaps.length}):`);
+            lines.push(`     • Completed Equipment Swaps & Reclaims (${loc.swaps.length}):`);
             loc.swaps.forEach(sw => {
               totalSwaps++;
               const crewTag = sw.crew ? ` (Crew ${this.getSignificantJobNumber(sw.crew)})` : '';
@@ -504,8 +599,18 @@ class TimeBreakdownEngine {
               if (sw.model) specParts.push(`Model ${sw.model}`);
               if (sw.length) specParts.push(`${sw.length}`);
               const specs = specParts.join(', ');
-              const swapDetails = sw.oldItem ? `#${sw.oldItem} ➔ #${sw.newItem}` : `#${sw.newItem}`;
-              lines.push(`       - ${sw.employee}${crewTag}: ${sw.label} ${swapDetails}${specs ? ' (' + specs + ')' : ''}`);
+
+              const isReclaim = Boolean(sw.isReclaim || (!sw.newItem || sw.newItem === '—' || sw.newItem === '-'));
+              const swapAction = isReclaim ? `${sw.label} Reclaim` : `${sw.label} Swap`;
+              let swapDetails = '';
+              if (isReclaim) {
+                swapDetails = `#${sw.oldItem} ➔ ${sw.location || 'Helena'}`;
+              } else if (sw.oldItem && sw.newItem) {
+                swapDetails = `#${sw.oldItem} ➔ #${sw.newItem}`;
+              } else {
+                swapDetails = `#${sw.newItem || sw.oldItem}`;
+              }
+              lines.push(`       - ${sw.employee}${crewTag}: ${swapAction} ${swapDetails}${specs ? ' (' + specs + ')' : ''}`);
             });
           }
         });
@@ -544,12 +649,17 @@ class TimeBreakdownEngine {
         day.tasks.forEach(t => {
           totalSwaps++;
           const emp = t.employee || t['Assigned To'] || t['Employee'] || 'Unassigned';
-          const type = t.label ? `${t.label} Swap` : (t.type || t['Task Type'] || t['Type'] || 'Task');
           const crewTag = t.crew ? ` (Crew ${this.getSignificantJobNumber(t.crew)})` : (t.job ? ` (Job ${t.job})` : '');
-          
+
+          const isReclaim = Boolean(t.isReclaim || ((t.oldItem || t.newItem) && (!t.newItem || t.newItem === '—' || t.newItem === '-')));
+          const cleanLabel = t.label || String(t.type || 'Equipment').replace(/\s*(Swap|Reclaim)\s*/i, '');
+          const type = isReclaim ? `${cleanLabel} Reclaim` : (t.label ? `${t.label} Swap` : (t.type || t['Task Type'] || t['Type'] || 'Task'));
+
           let swapDetails = '';
-          if (t.oldItem || t.newItem) {
-            swapDetails = t.oldItem ? `#${t.oldItem} ➔ #${t.newItem}` : `#${t.newItem}`;
+          if (isReclaim) {
+            swapDetails = `#${t.oldItem} ➔ ${t.location || 'Helena'}`;
+          } else if (t.oldItem || t.newItem) {
+            swapDetails = (t.oldItem && t.newItem && t.newItem !== '—' && t.newItem !== '-') ? `#${t.oldItem} ➔ #${t.newItem}` : `#${t.newItem || t.oldItem}`;
           } else {
             swapDetails = t.item || t['Description'] || t['Item'] || '';
           }
@@ -675,7 +785,7 @@ class TimeBreakdownEngine {
 
     const days = this.collectAccomplishments();
     const activeDateKey = this.formatDateKey(this.startDate);
-    const day = days[activeDateKey] || (Object.values(days)[0] || {});
+    const day = (Array.isArray(days) ? days.find(d => d.dateKey === activeDateKey) : null) || (Array.isArray(days) ? days[0] : null) || {};
 
     const visitedCrews = [];
     const visitedCities = [];

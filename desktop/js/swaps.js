@@ -2384,7 +2384,7 @@ class SwapGenerationEngine {
   /**
    * Stage 3 & Stage 4: Handles Date Changed entry (Stage 3) and Date Changed removal (Stage 4)
    */
-  async handleDateChangedEdit(swapSheetKey, rowIdxOrObj, dateVal) {
+  async handleDateChangedEdit(swapSheetKey, rowIdxOrObj, dateVal, fallbackEmpName = null, fallbackCurrentItem = null) {
     const swapTable = this.db.getTable(swapSheetKey);
     if (!swapTable) return;
 
@@ -2409,8 +2409,34 @@ class SwapGenerationEngine {
       row = rowIdxOrObj;
     }
 
-    if (!row && !gridRow) return;
+    // Fallback: If row/gridRow was not found by index, look up by employee name & item number
+    const targetEmpClean = String(fallbackEmpName || (typeof rowIdxOrObj === 'string' ? rowIdxOrObj : '')).trim().toLowerCase();
+    const targetItmClean = String(fallbackCurrentItem || '').trim().toLowerCase();
+    if (!row && !gridRow && targetEmpClean) {
+      if (swapTable.rows) {
+        row = swapTable.rows.find(r => {
+          const emp = String(r['Employee'] || r['Crew Lead / Employee'] || '').trim().toLowerCase();
+          const matchEmp = emp === targetEmpClean || (window.employeeResolver && typeof window.employeeResolver.areSameEmployee === 'function' && window.employeeResolver.areSameEmployee(emp, targetEmpClean));
+          if (!matchEmp) return false;
+          if (!targetItmClean) return true;
+          const itm = String(r['Current Glove #'] || r['Current Sleeve #'] || r['Current Blanket #'] || r['Current Item #'] || r['Serial #'] || '').trim().toLowerCase();
+          return itm === targetItmClean;
+        });
+      }
+      if (!gridRow && swapTable.rawGrid) {
+        gridRow = swapTable.rawGrid.find((gr, gIdx) => {
+          if (gIdx === 0 || !Array.isArray(gr)) return false;
+          const emp = String(gr[0] || '').trim().toLowerCase();
+          const matchEmp = emp === targetEmpClean || (window.employeeResolver && typeof window.employeeResolver.areSameEmployee === 'function' && window.employeeResolver.areSameEmployee(emp, targetEmpClean));
+          if (!matchEmp) return false;
+          if (!targetItmClean) return true;
+          const itm = String(gr[1] || '').trim().toLowerCase();
+          return itm === targetItmClean;
+        });
+      }
+    }
 
+    // Extract item and employee identifiers
     const pickNum = String(
       (row && (row['Pick List Item #'] || row['Pick List Glove #'] || row['Pick List Sleeve #'] || row['Pick List Blanket #'] || row['Pick List MACK #'] || row['Pick List HV Tester #'] || row['Pick List Phasing Set #'] || row['Pick List AED #'] || row['Pick List Serial #'] || row['Pick List'])) ||
       (gridRow && gridRow[6]) || ''
@@ -2418,12 +2444,12 @@ class SwapGenerationEngine {
 
     const oldItemNum = String(
       (row && (row['Current Glove #'] || row['Current Sleeve #'] || row['Current Blanket #'] || row['Current MACK #'] || row['Current HV Tester #'] || row['Current Phasing Set #'] || row['Current AED #'] || row['Current Item #'] || row['Serial #'])) ||
-      (gridRow && gridRow[1]) || ''
+      (gridRow && gridRow[1]) || fallbackCurrentItem || ''
     ).trim();
 
     const empName = String(
       (row && (row['Employee'] || row['Crew Lead / Employee'])) ||
-      (gridRow && gridRow[0]) || ''
+      (gridRow && gridRow[0]) || fallbackEmpName || (typeof rowIdxOrObj === 'string' ? rowIdxOrObj : '') || ''
     ).trim();
 
     const invMap = {
@@ -2442,6 +2468,9 @@ class SwapGenerationEngine {
     if (!invTable || !invTable.rows) return;
 
     const isReclaimOnly = !pickNum || pickNum === '—' || pickNum === '-';
+
+    // If neither swap sheet row nor gridRow exists and this is NOT a reclaim with a known old item, abort
+    if (!row && !gridRow && (!isReclaimOnly || !oldItemNum)) return;
 
     const oldRow = oldItemNum && oldItemNum !== '—' ? invTable.rows.find(it => {
       const itNum = String(it['Item #'] || it['Glove'] || it['Sleeve'] || it['Blanket'] || it['MACK'] || it['Serial #'] || it['ESL ID'] || Object.values(it)[0] || '').trim();

@@ -4243,10 +4243,8 @@ class TripPlannerApp {
     }
 
     const sm = window.swapEngine || window.swapsManager;
-    if (swRow && sm && typeof sm.handleDateChangedEdit === 'function') {
-      await sm.handleDateChangedEdit(tableKey, swRow, dateFormatted);
-    } else if (sm && typeof sm.handleDateChangedEdit === 'function') {
-      await sm.handleDateChangedEdit(tableKey, rowIdxOrEmp, dateFormatted);
+    if (sm && typeof sm.handleDateChangedEdit === 'function') {
+      await sm.handleDateChangedEdit(tableKey, swRow || rowIdxOrEmp, dateFormatted, empName, currentItem);
     }
 
     // Update scheduledSwaps to marked completed instead of deleting
@@ -4313,10 +4311,8 @@ class TripPlannerApp {
     }
 
     const sm = window.swapEngine || window.swapsManager;
-    if (swRow && sm && typeof sm.handleDateChangedEdit === 'function') {
-      await sm.handleDateChangedEdit(tableKey, swRow, '');
-    } else if (sm && typeof sm.handleDateChangedEdit === 'function') {
-      await sm.handleDateChangedEdit(tableKey, rowIdxOrEmp, '');
+    if (sm && typeof sm.handleDateChangedEdit === 'function') {
+      await sm.handleDateChangedEdit(tableKey, swRow || rowIdxOrEmp, '', empName, currentItem);
     }
 
     // Revert scheduledSwaps back to pending
