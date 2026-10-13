@@ -1608,8 +1608,13 @@ class SafetyEmailsEngine {
   /**
    * Opens the In-App PDF Document Viewer Modal to render the attached safety PDF immediately.
    */
-  async openPdfViewer(logId) {
-    const log = (this.currentLogs || []).find(l => (l.id === logId || (l.sheetName + '_' + l.rowIndex) === logId));
+  async openPdfViewer(logOrId) {
+    let log = null;
+    if (typeof logOrId === 'object' && logOrId !== null) {
+      log = logOrId;
+    } else {
+      log = (this.currentLogs || []).find(l => (l.id === logOrId || (l.sheetName + '_' + l.rowIndex) === logOrId));
+    }
     if (!log) {
       alert('Log record not found.');
       return;
@@ -1626,20 +1631,35 @@ class SafetyEmailsEngine {
     if (!modal || !body) return;
 
     modal.style.display = 'flex';
+    modal.classList.remove('hidden');
 
-    if (titleEl) titleEl.textContent = `${log.type} · Job ${log.jobNumber || 'N/A'}`;
-    if (subtitleEl) subtitleEl.textContent = `Foreman: ${log.foreman || 'UNKNOWN'} | Report Date: ${log.date || 'N/A'} | Received: ${log.dateReceived || 'N/A'}`;
+    const logType = log.type || log.reportType || 'Safety Document';
+    const logJob = log.jobNumber || log.crewId || 'N/A';
+    const logForeman = log.foreman || 'UNKNOWN';
+    const logDate = log.date || log.reportDate || 'N/A';
+    const logDateRec = log.dateReceived || log.receivedDate || logDate;
+    const logUnit = log.vehicleNumber || log.unit || '';
+    const logGmailUrl = log.gmailUrl || (log.emailId ? ('https://mail.google.com/mail/#all/' + String(log.emailId).trim().split('_')[0]) : '');
+
+    if (titleEl) titleEl.textContent = `${logType} · Crew ${logJob}${logUnit ? ` (Unit ${logUnit})` : ''}`;
+    if (subtitleEl) subtitleEl.textContent = `Foreman: ${logForeman}${logUnit ? ` | Unit: ${logUnit}` : ''} | Report Date: ${logDate} | Received: ${logDateRec}`;
 
     if (gmailBtn) {
-      gmailBtn.href = log.gmailUrl || '#';
-      gmailBtn.style.display = log.gmailUrl ? 'inline-flex' : 'none';
+      gmailBtn.href = logGmailUrl || '#';
+      gmailBtn.style.display = logGmailUrl ? 'inline-flex' : 'none';
+      gmailBtn.onclick = (e) => {
+        if (logGmailUrl && window.desktopAPI && typeof window.desktopAPI.openExternal === 'function') {
+          e.preventDefault();
+          window.desktopAPI.openExternal(logGmailUrl);
+        }
+      };
     }
 
     body.innerHTML = `
       <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; color: var(--text-secondary); padding: 40px;">
         <div class="loading-spinner" style="width: 40px; height: 40px; border: 3px solid rgba(16, 185, 129, 0.2); border-top-color: #10b981; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
         <div style="font-size: 13.5px; font-weight: 700; color: #f8fafc;">Retrieving attached PDF directly from Gmail...</div>
-        <div style="font-size: 11.5px; color: #94a3b8;">${this.escapeHtml(log.subject || log.jobNumber)}</div>
+        <div style="font-size: 11.5px; color: #94a3b8;">${this.escapeHtml(log.subject || logJob)}</div>
       </div>
     `;
 
@@ -1700,11 +1720,11 @@ class SafetyEmailsEngine {
 
       if (downloadBtn) {
         downloadBtn.href = blobUrl;
-        downloadBtn.download = pdfData.filename || `${log.type.replace(/\s+/g, '_')}_${log.jobNumber}.pdf`;
+        downloadBtn.download = pdfData.filename || `${(logType || 'Safety_Document').replace(/\s+/g, '_')}_${logJob}.pdf`;
         downloadBtn.onclick = async (e) => {
           if (window.desktopAPI && typeof window.desktopAPI.savePdfToFile === 'function') {
             e.preventDefault();
-            await window.desktopAPI.savePdfToFile(pdfData.base64, pdfData.filename || `${log.type.replace(/\s+/g, '_')}_${log.jobNumber}.pdf`);
+            await window.desktopAPI.savePdfToFile(pdfData.base64, pdfData.filename || `${(logType || 'Safety_Document').replace(/\s+/g, '_')}_${logJob}.pdf`);
           }
         };
       }
@@ -1720,18 +1740,18 @@ class SafetyEmailsEngine {
       }
 
       if (gmailBtn) {
-        gmailBtn.href = log.gmailUrl || '#';
-        gmailBtn.style.display = log.gmailUrl ? 'inline-flex' : 'none';
+        gmailBtn.href = logGmailUrl || '#';
+        gmailBtn.style.display = logGmailUrl ? 'inline-flex' : 'none';
         gmailBtn.onclick = (e) => {
-          if (log.gmailUrl && window.desktopAPI && typeof window.desktopAPI.openExternal === 'function') {
+          if (logGmailUrl && window.desktopAPI && typeof window.desktopAPI.openExternal === 'function') {
             e.preventDefault();
-            window.desktopAPI.openExternal(log.gmailUrl);
+            window.desktopAPI.openExternal(logGmailUrl);
           }
         };
       }
 
       if (subtitleEl) {
-        subtitleEl.textContent = `${pdfData.filename || 'Document.pdf'} (${Math.round((pdfData.sizeBytes || 0)/1024)} KB) · Foreman: ${log.foreman || 'UNKNOWN'} · Date: ${log.date || 'N/A'} · Received: ${log.dateReceived || 'N/A'}`;
+        subtitleEl.textContent = `${pdfData.filename || 'Document.pdf'} (${Math.round((pdfData.sizeBytes || 0)/1024)} KB) · Foreman: ${logForeman}${logUnit ? ` · Unit: ${logUnit}` : ''} · Date: ${logDate} · Received: ${logDateRec}`;
       }
 
       body.innerHTML = `
@@ -1751,8 +1771,8 @@ class SafetyEmailsEngine {
           <div style="font-size: 32px; margin-bottom: 12px;">⚠️</div>
           <div style="font-size: 14px; font-weight: 700; margin-bottom: 6px;">Could not load PDF document directly</div>
           <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 20px; line-height: 1.5;">${this.escapeHtml(err.message || 'Unknown error')}</div>
-          ${log.gmailUrl ? `
-            <button onclick="if (window.desktopAPI) { window.desktopAPI.openExternal('${this.escapeHtml(log.gmailUrl)}'); } else { window.open('${this.escapeHtml(log.gmailUrl)}', '_blank'); }" class="btn btn-primary" style="font-weight: 700; background: #10b981; border: none; display: inline-flex; align-items: center; gap: 6px; padding: 8px 18px; cursor: pointer; color: white; border-radius: 6px;">
+          ${logGmailUrl ? `
+            <button onclick="if (window.desktopAPI) { window.desktopAPI.openExternal('${this.escapeHtml(logGmailUrl)}'); } else { window.open('${this.escapeHtml(logGmailUrl)}', '_blank'); }" class="btn btn-primary" style="font-weight: 700; background: #10b981; border: none; display: inline-flex; align-items: center; gap: 6px; padding: 8px 18px; cursor: pointer; color: white; border-radius: 6px;">
               <span>✉️</span> Open Email in Gmail Instead
             </button>
           ` : ''}
@@ -1763,7 +1783,10 @@ class SafetyEmailsEngine {
 
   closePdfModal() {
     const modal = document.getElementById('safety-pdf-modal');
-    if (modal) modal.style.display = 'none';
+    if (modal) {
+      modal.style.display = 'none';
+      modal.classList.add('hidden');
+    }
   }
 
   /**

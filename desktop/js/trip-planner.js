@@ -7173,7 +7173,7 @@ class TripPlannerApp {
                   const isFa = (item.equipmentType || '').toLowerCase().includes('aid') || (item.equipmentType || '').toLowerCase().includes('eye');
                   const icon = isAed ? '⚡' : (isFe ? '🧯' : (isFa ? '🩹' : '🚗'));
                   return `
-                    <div class="scheduled-equipment-card" style="background: var(--bg-primary); border: 1px solid rgba(245, 158, 11, 0.35); border-left: 4px solid #f59e0b; border-radius: 6px; padding: 7px 9px; box-shadow: 0 1px 4px rgba(0,0,0,0.25);">
+                    <div class="scheduled-equipment-card" style="background: var(--bg-primary); border: 1px solid rgba(245, 158, 11, 0.35); border-left: 4px solid #f59e0b; border-radius: 6px; padding: 7px 9px; box-shadow: 0 1px 4px rgba(0,0,0,0.25); cursor: pointer; transition: border-color 0.15s ease, transform 0.15s ease;" onclick="window.tripPlanner.openEquipmentNeedPdf(${JSON.stringify(item).replace(/"/g, '&quot;')})" onmouseover="this.style.borderColor='#fbbf24'; this.style.transform='translateY(-1px)';" onmouseout="this.style.borderColor='rgba(245, 158, 11, 0.35)'; this.style.transform='translateY(0)';" title="Click to view source Checklist PDF">
                       <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 6px;">
                         <div style="flex: 1; min-width: 0;">
                           <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 2px;">
@@ -7193,6 +7193,9 @@ class TripPlannerApp {
                             <span style="color: #60a5fa;">👷 Crew ${this.escapeHtml(item.crewId)}</span>
                             ${item.foreman ? `<span style="color: #94a3b8;">(${this.escapeHtml(item.foreman)})</span>` : ''}
                             ${item.location ? `<span style="color: #93c5fd;">📍 ${this.escapeHtml(item.location)}</span>` : ''}
+                            <span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.3); font-size: 8.5px; padding: 1px 4px; border-radius: 3px; font-weight: 700;" title="Click to view source Checklist PDF">
+                              📄 View PDF
+                            </span>
                           </div>
                         </div>
                         <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 5px; margin-left: 4px;">
@@ -8357,6 +8360,11 @@ class TripPlannerApp {
           }
         }
 
+        const sourceEmailId = String(r['Source Email ID'] || r['Email ID'] || '').trim();
+        const emailSubject = String(r['Email Subject'] || r['Subject'] || '').trim();
+        const reportType = String(r['Report Type'] || 'Safety Checklist').trim();
+        const receivedDate = String(r['Received Date'] || '').trim();
+
         items.push({
           id: eqKey,
           tableKey: 'safety_equipment_needs',
@@ -8368,6 +8376,10 @@ class TripPlannerApp {
           equipmentType: equipType,
           notes: notes,
           reportDate: reportDate,
+          receivedDate: receivedDate,
+          sourceEmailId: sourceEmailId,
+          emailSubject: emailSubject,
+          reportType: reportType,
           status: status || 'Needs Attention',
           isSynthesized: false
         });
@@ -8397,7 +8409,11 @@ class TripPlannerApp {
           vehicleNumber: '2108',
           equipmentType: 'AED',
           notes: 'Battery Low - Needs Replacement',
-          reportDate: '10/12/2026',
+          reportDate: '10/06/2026',
+          receivedDate: '10/06/2026 15:35',
+          sourceEmailId: '1a112b7424e8e989',
+          emailSubject: 'Safety Checklist Report  2108-019-27 10-06-2026',
+          reportType: 'Safety Checklist',
           status: 'Needs Attention',
           isSynthesized: true
         });
@@ -8533,18 +8549,29 @@ class TripPlannerApp {
       cg.items.forEach(item => {
         const itemCard = document.createElement('div');
         itemCard.draggable = true;
-        itemCard.style.cssText = 'background: var(--bg-primary); border: 1px solid var(--border-color); border-left: 3px solid #f59e0b; border-radius: 5px; padding: 8px 9px; margin-bottom: 6px; cursor: grab; user-select: none; transition: border-color 0.15s ease, transform 0.15s ease; box-shadow: 0 1px 3px rgba(0,0,0,0.2);';
-        itemCard.title = `Drag to calendar to schedule delivery to ${cg.location}`;
+        itemCard.style.cssText = 'background: var(--bg-primary); border: 1px solid var(--border-color); border-left: 3px solid #f59e0b; border-radius: 5px; padding: 8px 9px; margin-bottom: 6px; cursor: pointer; user-select: none; transition: border-color 0.15s ease, transform 0.15s ease; box-shadow: 0 1px 3px rgba(0,0,0,0.2); position: relative;';
+        itemCard.title = 'Click to view source Checklist PDF · Drag to calendar to schedule delivery';
         itemCard.onmouseover = () => { itemCard.style.borderColor = '#fbbf24'; itemCard.style.transform = 'translateY(-1px)'; };
         itemCard.onmouseout = () => { itemCard.style.borderColor = 'var(--border-color)'; itemCard.style.borderLeftColor = '#f59e0b'; itemCard.style.transform = 'translateY(0)'; };
 
+        let isDragging = false;
         itemCard.addEventListener('dragstart', (e) => {
+          isDragging = true;
           e.dataTransfer.setData('application/json', JSON.stringify({
             type: 'equipment_need',
             item: item,
             location: cg.location
           }));
           e.dataTransfer.setData('text/plain', cg.location || '');
+        });
+        itemCard.addEventListener('dragend', () => {
+          setTimeout(() => { isDragging = false; }, 100);
+        });
+
+        itemCard.addEventListener('click', (e) => {
+          if (e.target.closest('button')) return;
+          if (isDragging) return;
+          window.tripPlanner.openEquipmentNeedPdf(item);
         });
 
         const isAed = (item.equipmentType || '').toLowerCase().includes('aed');
@@ -8569,7 +8596,12 @@ class TripPlannerApp {
                 ${this.escapeHtml(item.notes || 'Equipment defect / replacement needed')}
               </div>
               <div style="display: flex; justify-content: space-between; align-items: center; font-size: 9.5px; color: #94a3b8;">
-                <span>📅 ${this.escapeHtml(item.reportDate || 'Recent')}</span>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <span>📅 ${this.escapeHtml(item.reportDate || 'Recent')}</span>
+                  <span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.3); font-size: 8.5px; padding: 1px 5px; border-radius: 3px; font-weight: 700; cursor: pointer;" title="Click to view original PDF checklist">
+                    📄 View PDF
+                  </span>
+                </div>
                 <span style="color: #f87171; font-weight: 600;">⚠️ ${this.escapeHtml(item.status || 'Needs Attention')}</span>
               </div>
             </div>
@@ -8585,6 +8617,56 @@ class TripPlannerApp {
 
       list.appendChild(crewSection);
     });
+  }
+
+  /**
+   * Opens the source Safety Checklist PDF for an Equipment Need
+   */
+  openEquipmentNeedPdf(item) {
+    if (!item) return;
+
+    let emailId = item.sourceEmailId || item.emailId || '';
+    let subject = item.emailSubject || item.subject || '';
+
+    // If missing, try resolving from monthly_checklist_log
+    if ((!emailId || !subject) && this.db) {
+      const mcl = this.db.getTable('monthly_checklist_log');
+      if (mcl && mcl.rows) {
+        const match = mcl.rows.filter(r => {
+          const vMatch = item.vehicleNumber && String(r['Vehicle Number'] || '').includes(String(item.vehicleNumber));
+          const jMatch = item.crewId && String(r['Job Number'] || '').includes(String(item.crewId));
+          return vMatch || jMatch;
+        }).reverse()[0];
+        if (match) {
+          if (!emailId) emailId = String(match['Email ID'] || '').trim();
+          if (!subject) subject = String(match['Email Subject'] || '').trim();
+        }
+      }
+    }
+
+    const log = {
+      type: item.reportType || 'Safety Checklist',
+      jobNumber: item.crewId || '',
+      foreman: item.foreman || '',
+      vehicleNumber: item.vehicleNumber || '',
+      date: item.reportDate || '',
+      dateReceived: item.receivedDate || item.reportDate || '',
+      emailId: emailId,
+      subject: subject,
+      gmailUrl: emailId ? ('https://mail.google.com/mail/#all/' + emailId.split('_')[0]) : ''
+    };
+
+    if (window.safetyEmailsEngine && typeof window.safetyEmailsEngine.openPdfViewer === 'function') {
+      window.safetyEmailsEngine.openPdfViewer(log);
+    } else if (log.gmailUrl) {
+      if (window.desktopAPI && typeof window.desktopAPI.openExternal === 'function') {
+        window.desktopAPI.openExternal(log.gmailUrl);
+      } else {
+        window.open(log.gmailUrl, '_blank');
+      }
+    } else {
+      alert('Source email or checklist PDF not available for this record.');
+    }
   }
 
   /**
