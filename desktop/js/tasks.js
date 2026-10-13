@@ -165,6 +165,15 @@ class TaskManagerApp {
         if (crewId) jobLookup[crewId] = jObj;
         if (sigCrew) jobLookup[sigCrew] = jObj;
       });
+      const aliasMap = (this.db && this.db.snapshot && this.db.snapshot.configs && this.db.snapshot.configs['FY_TRANSITION_ALIAS_MAP']) || {};
+      Object.entries(aliasMap).forEach(([oldJ, newJ]) => {
+        const target = jobLookup[newJ] || jobLookup[this.getSignificantJobNumber(newJ)];
+        if (target) {
+          if (!jobLookup[oldJ]) jobLookup[oldJ] = target;
+          const oldSig = this.getSignificantJobNumber(oldJ);
+          if (oldSig && !jobLookup[oldSig]) jobLookup[oldSig] = target;
+        }
+      });
     }
 
     // Build Safety Equipment Needs lookup cache by SourceRow / _rowIdx
@@ -612,8 +621,15 @@ class TaskManagerApp {
         const notes = String(r['Notes'] || r['Issue Description'] || r['Comments'] || '').trim();
 
         const empInfo = empLookup[worker.toLowerCase()] || {};
-        const loc = empInfo.location || (jobLookup[crewId]?.location) || 'Helena';
-        const foreman = empInfo.foreman || (jobLookup[crewId]?.foreman) || worker;
+        const aliasMap = (this.db && this.db.snapshot && this.db.snapshot.configs && this.db.snapshot.configs['FY_TRANSITION_ALIAS_MAP']) || {};
+        const mappedCrew = aliasMap[crewId] || aliasMap[this.getSignificantJobNumber(crewId)] || crewId;
+        const jobInfo = jobLookup[crewId] || jobLookup[mappedCrew] || jobLookup[this.getSignificantJobNumber(crewId)] || {};
+        let loc = (jobInfo.location && !this.isStatusLocation?.(jobInfo.location)) ? jobInfo.location : '';
+        if (!loc && empInfo.location && !this.isStatusLocation?.(empInfo.location)) {
+          loc = empInfo.location;
+        }
+        if (!loc) loc = (jobInfo.location || empInfo.location || 'Helena');
+        const foreman = jobInfo.foreman || empInfo.foreman || worker;
 
         const truckNumber = vehNum ? (vehNum.toLowerCase().startsWith('unit') ? vehNum : `Unit ${vehNum}`) : '';
         const taskKey = `safety_equipment_${crewId}_${worker}_${equipType}_${vehNum}_${reportDate}`.toLowerCase();

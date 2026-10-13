@@ -434,6 +434,16 @@ class TripPlannerApp {
           };
         }
       });
+      const aliasMap = (this.db && this.db.snapshot && this.db.snapshot.configs && this.db.snapshot.configs['FY_TRANSITION_ALIAS_MAP']) || {};
+      Object.entries(aliasMap).forEach(([oldJ, newJ]) => {
+        const oldSig = this.getSignificantJobNumber(oldJ) || oldJ;
+        const newSig = this.getSignificantJobNumber(newJ) || newJ;
+        const target = crewMap[newSig] || crewMap[newJ];
+        if (target) {
+          if (!crewMap[oldSig]) crewMap[oldSig] = target;
+          if (!crewMap[oldJ]) crewMap[oldJ] = target;
+        }
+      });
     }
 
     const invLookup = {};
@@ -3766,55 +3776,73 @@ class TripPlannerApp {
       }
     } else if (payload.type === 'equipment_need' && payload.item) {
       const item = payload.item;
+      const targetLoc = location || item.location || '';
       const eqKey = item.id || `equip_${item.crewId}_${item._rowIdx || item.vehicleNumber}_${item.equipmentType}`;
       this.scheduledEquipmentNeeds[eqKey] = {
         dateKey: dateKey,
-        location: location || item.location || '',
+        location: targetLoc,
         crewId: item.crewId || '',
-        item: item
+        item: { ...item, location: targetLoc }
       };
       this.saveScheduledEquipmentNeeds();
+      if (targetLoc && targetLoc.toLowerCase() !== 'helena') {
+        this.addTrip(dateKey, targetLoc);
+      }
       this.renderPlanner();
       this.renderEquipmentNeedsList();
       this.showToast(`🧰 Scheduled ${item.equipmentType} (${item.vehicleNumber || item.crewId}) for delivery on ${dateKey}`);
     } else if (payload.type === 'equipment_crew' && Array.isArray(payload.items)) {
+      const targetLoc = location || (payload.items[0] && payload.items[0].location) || '';
       payload.items.forEach(item => {
+        const itemLoc = item.location || targetLoc;
         const eqKey = item.id || `equip_${item.crewId}_${item._rowIdx || item.vehicleNumber}_${item.equipmentType}`;
         this.scheduledEquipmentNeeds[eqKey] = {
           dateKey: dateKey,
-          location: location || item.location || '',
+          location: itemLoc,
           crewId: item.crewId || '',
-          item: item
+          item: { ...item, location: itemLoc }
         };
       });
       this.saveScheduledEquipmentNeeds();
+      if (targetLoc && targetLoc.toLowerCase() !== 'helena') {
+        this.addTrip(dateKey, targetLoc);
+      }
       this.renderPlanner();
       this.renderEquipmentNeedsList();
       this.showToast(`🧰 Scheduled ${payload.items.length} equipment need(s) for Crew ${payload.crewId} on ${dateKey}`);
     } else if (payload.type === 'training_need' && payload.training) {
       const tr = payload.training;
+      const targetLoc = location || tr.location || '';
       const trKey = tr.id || `train_${tr.crewId}_${tr._rowIdx || 0}_${tr.topic}`;
       this.scheduledTrainingNeeds[trKey] = {
         dateKey: dateKey,
-        location: location || tr.location || '',
+        location: targetLoc,
         crewId: tr.crewId || '',
-        training: tr
+        training: { ...tr, location: targetLoc }
       };
       this.saveScheduledTrainingNeeds();
+      if (targetLoc && targetLoc.toLowerCase() !== 'helena') {
+        this.addTrip(dateKey, targetLoc);
+      }
       this.renderPlanner();
       this.renderTrainingNeedsList();
       this.showToast(`🎓 Scheduled Training "${tr.topic}" for Crew ${tr.crewId} on ${dateKey}`);
     } else if (payload.type === 'training_crew' && Array.isArray(payload.trainings)) {
+      const targetLoc = location || (payload.trainings[0] && payload.trainings[0].location) || '';
       payload.trainings.forEach(tr => {
+        const trLoc = tr.location || targetLoc;
         const trKey = tr.id || `train_${tr.crewId}_${tr._rowIdx || 0}_${tr.topic}`;
         this.scheduledTrainingNeeds[trKey] = {
           dateKey: dateKey,
-          location: location || tr.location || '',
+          location: trLoc,
           crewId: tr.crewId || '',
-          training: tr
+          training: { ...tr, location: trLoc }
         };
       });
       this.saveScheduledTrainingNeeds();
+      if (targetLoc && targetLoc.toLowerCase() !== 'helena') {
+        this.addTrip(dateKey, targetLoc);
+      }
       this.renderPlanner();
       this.renderTrainingNeedsList();
       this.showToast(`🎓 Scheduled ${payload.trainings.length} training topic(s) for Crew ${payload.crewId} on ${dateKey}`);
@@ -6364,6 +6392,150 @@ class TripPlannerApp {
     return match ? match[1] : str;
   }
 
+  /**
+   * Resolves crew information including active crew ID, foreman, and true physical location.
+   * Leverages job_tracking, FY_TRANSITION_ALIAS_MAP, employees, and employee_history tables.
+   */
+  getCrewInfo(rawCrew, workerName, rowLoc) {
+    let rowLocation = '';
+    if (rowLoc) {
+      const cleanLoc = this.cleanPhysicalLocation(rowLoc);
+      if (cleanLoc && !this.isStatusLocation(cleanLoc)) {
+        rowLocation = cleanLoc;
+      }
+    }
+
+    const sigCrew = this.getSignificantJobNumber(rawCrew);
+    const cleanCrew = String(rawCrew || '').trim();
+    const cleanWorker = String(workerName || '').trim();
+    const cleanWorkerLower = cleanWorker.toLowerCase();
+
+    const jobTable = this.db ? (this.db.getTable('job_tracking') || this.db.getTable('Job Tracking')) : null;
+    const empTable = this.db ? (this.db.getTable('employees') || this.db.getTable('Employees')) : null;
+    const empHistTable = this.db ? (this.db.getTable('employee_history') || this.db.getTable('Employee History')) : null;
+    const aliasMap = (this.db && this.db.snapshot && this.db.snapshot.configs && this.db.snapshot.configs['FY_TRANSITION_ALIAS_MAP']) || {};
+
+    let matchedJob = null;
+    let matchedEmp = null;
+
+    if (jobTable && jobTable.rows) {
+      const candidates = new Set();
+      if (sigCrew) candidates.add(sigCrew);
+      if (cleanCrew) candidates.add(cleanCrew);
+      if (aliasMap[cleanCrew]) candidates.add(aliasMap[cleanCrew]);
+      if (aliasMap[sigCrew]) candidates.add(aliasMap[sigCrew]);
+      for (const [k, v] of Object.entries(aliasMap)) {
+        if (v === cleanCrew || v === sigCrew) candidates.add(k);
+      }
+      const rootMatch = cleanCrew.match(/^(\d{2,4})/);
+      const rootNum = rootMatch ? rootMatch[1] : '';
+
+      // 1. Direct or alias match
+      for (const r of jobTable.rows) {
+        const jNum = String(r['Job Number'] || r['Crew'] || r['Job #'] || '').trim();
+        const jSig = this.getSignificantJobNumber(jNum);
+        if (candidates.has(jNum) || candidates.has(jSig)) {
+          matchedJob = r;
+          break;
+        }
+      }
+
+      // 2. Root match (e.g. 019 from 019-26 -> 019-27)
+      if (!matchedJob && rootNum) {
+        for (const r of jobTable.rows) {
+          const jNum = String(r['Job Number'] || r['Crew'] || r['Job #'] || '').trim();
+          if (jNum.startsWith(rootNum + '-')) {
+            matchedJob = r;
+            break;
+          }
+        }
+      }
+
+      // 3. Match by worker / foreman name in jobTable
+      if (!matchedJob && cleanWorkerLower && cleanWorkerLower !== 'foreman' && cleanWorkerLower !== 'lead') {
+        for (const r of jobTable.rows) {
+          const fName = String(r['Foreman'] || r['Crew Lead'] || r['Lead'] || '').trim().toLowerCase();
+          if (fName && (fName === cleanWorkerLower || fName.includes(cleanWorkerLower) || cleanWorkerLower.includes(fName))) {
+            matchedJob = r;
+            break;
+          }
+        }
+      }
+    }
+
+    // 4. Match in employees table
+    if (empTable && empTable.rows && cleanWorkerLower && cleanWorkerLower !== 'foreman' && cleanWorkerLower !== 'lead') {
+      for (const e of empTable.rows) {
+        const eName = String(e['Employee Name'] || e['Name'] || '').trim().toLowerCase();
+        if (eName && (eName === cleanWorkerLower || eName.includes(cleanWorkerLower) || cleanWorkerLower.includes(eName))) {
+          matchedEmp = e;
+          break;
+        }
+      }
+    }
+
+    // 5. Match in employee_history table as fallback
+    if (!matchedEmp && empHistTable && empHistTable.rows && cleanWorkerLower && cleanWorkerLower !== 'foreman' && cleanWorkerLower !== 'lead') {
+      for (let i = empHistTable.rows.length - 1; i >= 0; i--) {
+        const h = empHistTable.rows[i];
+        const hName = String(h['Employee Name'] || h['Name'] || '').trim().toLowerCase();
+        if (hName && (hName === cleanWorkerLower || hName.includes(cleanWorkerLower) || cleanWorkerLower.includes(hName))) {
+          matchedEmp = h;
+          break;
+        }
+      }
+    }
+
+    // Resolve location
+    let location = rowLocation;
+    if (!location && matchedJob) {
+      const jLoc = this.cleanPhysicalLocation(matchedJob['Location']);
+      if (jLoc && !this.isStatusLocation(jLoc)) {
+        location = jLoc;
+      }
+    }
+    if (!location && matchedEmp) {
+      const eLoc = this.cleanPhysicalLocation(matchedEmp['Location']);
+      if (eLoc && !this.isStatusLocation(eLoc)) {
+        location = eLoc;
+      }
+    }
+    if (!location) {
+      location = 'Helena';
+    }
+
+    // Resolve foreman
+    let foreman = cleanWorker;
+    if (matchedJob) {
+      const jForeman = String(matchedJob['Foreman'] || matchedJob['Crew Lead'] || matchedJob['Lead'] || '').trim();
+      if (jForeman) {
+        if (!foreman || foreman.toLowerCase() === 'foreman' || foreman.toLowerCase() === 'lead') {
+          foreman = jForeman;
+        }
+      }
+    }
+
+    // Resolve crew ID
+    let resolvedCrewId = sigCrew || cleanCrew;
+    if (matchedJob) {
+      const jNum = String(matchedJob['Job Number'] || matchedJob['Crew'] || matchedJob['Job #'] || '').trim();
+      const jSig = this.getSignificantJobNumber(jNum) || jNum;
+      if (jSig) resolvedCrewId = jSig;
+    } else if (aliasMap[cleanCrew]) {
+      resolvedCrewId = aliasMap[cleanCrew];
+    } else if (aliasMap[sigCrew]) {
+      resolvedCrewId = aliasMap[sigCrew];
+    }
+
+    return {
+      crewId: resolvedCrewId || 'Unassigned',
+      rawCrewId: cleanCrew,
+      foreman: foreman || 'Foreman',
+      location: location,
+      jobName: matchedJob ? String(matchedJob['Job Name'] || '').trim() : ''
+    };
+  }
+
   cleanPhysicalLocation(loc) {
     if (!loc) return '';
     let clean = String(loc).trim();
@@ -7690,6 +7862,16 @@ class TripPlannerApp {
           };
         }
       });
+      const aliasMap = (this.db && this.db.snapshot && this.db.snapshot.configs && this.db.snapshot.configs['FY_TRANSITION_ALIAS_MAP']) || {};
+      Object.entries(aliasMap).forEach(([oldJ, newJ]) => {
+        const oldSig = this.getSignificantJobNumber(oldJ) || oldJ;
+        const newSig = this.getSignificantJobNumber(newJ) || newJ;
+        const target = crewMap[newSig] || crewMap[newJ];
+        if (target) {
+          if (!crewMap[oldSig]) crewMap[oldSig] = target;
+          if (!crewMap[oldJ]) crewMap[oldJ] = target;
+        }
+      });
     }
 
     const empHistoryTable = this.db.getTable('employee_history') || this.db.getTable('Employee History');
@@ -8296,22 +8478,6 @@ class TripPlannerApp {
     const safetyEquipTable = this.db.getTable('safety_equipment_needs');
     const jobTable = this.db.getTable('job_tracking') || this.db.getTable('Job Tracking');
 
-    const crewMap = {};
-    if (jobTable && jobTable.rows) {
-      jobTable.rows.forEach(r => {
-        const rawCrew = String(r['Job Number'] || r['Crew'] || r['Job #'] || '').trim();
-        const sig = this.getSignificantJobNumber(rawCrew);
-        if (sig && !crewMap[sig]) {
-          crewMap[sig] = {
-            crewId: sig,
-            foreman: String(r['Foreman'] || r['Crew Lead'] || r['Lead'] || '').trim(),
-            location: this.cleanPhysicalLocation(String(r['Location'] || '').trim()),
-            jobName: String(r['Job Name'] || '').trim()
-          };
-        }
-      });
-    }
-
     const today = new Date();
     const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
@@ -8333,7 +8499,6 @@ class TripPlannerApp {
         const equipType = String(r['Equipment Type'] || r['Equipment'] || r['Type'] || '').trim();
         const vehNum = String(r['Vehicle Number'] || r['Vehicle #'] || r['Truck'] || r['Unit'] || '').trim();
         const rawCrew = String(r['Job Number'] || r['Job #'] || r['Crew'] || '').trim();
-        const crewId = this.getSignificantJobNumber(rawCrew) || rawCrew || 'Unassigned';
         const worker = String(r['Foreman'] || r['Worker'] || r['Employee'] || r['Name'] || '').trim();
         const notes = String(r['Notes'] || r['Issue Description'] || r['Comments'] || '').trim();
         const reportDate = String(r['Report Date'] || r['Date'] || '').trim();
@@ -8346,9 +8511,12 @@ class TripPlannerApp {
         if (isResolved) return;
         if (!equipType || equipType.toLowerCase() === 'no issues') return;
 
-        const crewInfo = crewMap[crewId] || {};
-        const foreman = worker || crewInfo.foreman || 'Foreman';
-        const location = this.cleanPhysicalLocation(crewInfo.location) || 'Helena';
+        // Use comprehensive getCrewInfo resolver for active crew, foreman, and true physical location
+        const crewInfo = this.getCrewInfo(rawCrew, worker, r['Location']);
+        const crewId = rawCrew || crewInfo.crewId || 'Unassigned';
+        const activeCrewId = crewInfo.crewId || crewId;
+        const foreman = crewInfo.foreman || worker || 'Foreman';
+        const location = crewInfo.location || 'Helena';
 
         const eqKey = `equip_${crewId}_${rowIdx}_${equipType}`;
         if (this.scheduledEquipmentNeeds && this.scheduledEquipmentNeeds[eqKey]) {
@@ -8370,6 +8538,8 @@ class TripPlannerApp {
           tableKey: 'safety_equipment_needs',
           rowIdx: rowIdx,
           crewId: crewId,
+          activeCrewId: activeCrewId,
+          rawCrewId: rawCrew,
           foreman: foreman,
           location: location,
           vehicleNumber: vehNum,
@@ -8399,13 +8569,16 @@ class TripPlannerApp {
       }
 
       if (!isScheduled) {
+        const c2108 = this.getCrewInfo('019-27', 'Jimmy Bailey');
         items.push({
           id: eqKey,
           tableKey: 'safety_equipment_needs',
           rowIdx: null,
           crewId: '019-27',
-          foreman: (crewMap['019-27'] && crewMap['019-27'].foreman) || 'Jimmy Bailey',
-          location: (crewMap['019-27'] && crewMap['019-27'].location) || 'Ennis',
+          activeCrewId: c2108.crewId || '019-27',
+          rawCrewId: '019-27',
+          foreman: c2108.foreman || 'Jimmy Bailey',
+          location: c2108.location || 'Ennis',
           vehicleNumber: '2108',
           equipmentType: 'AED',
           notes: 'Battery Low - Needs Replacement',
@@ -8446,9 +8619,11 @@ class TripPlannerApp {
 
     // Apply search filter
     if (this.equipmentSearchTerm) {
-      const q = this.equipmentSearchTerm;
+      const q = this.equipmentSearchTerm.toLowerCase();
       filteredItems = filteredItems.filter(i => {
         return (i.crewId || '').toLowerCase().includes(q) ||
+          (i.rawCrewId || '').toLowerCase().includes(q) ||
+          (i.activeCrewId || '').toLowerCase().includes(q) ||
           (i.foreman || '').toLowerCase().includes(q) ||
           (i.location || '').toLowerCase().includes(q) ||
           (i.vehicleNumber || '').toLowerCase().includes(q) ||
@@ -8464,10 +8639,19 @@ class TripPlannerApp {
       if (!crewGroups[cId]) {
         crewGroups[cId] = {
           crewId: cId,
+          activeCrewId: item.activeCrewId,
+          rawCrewId: item.rawCrewId,
           foreman: item.foreman,
           location: item.location,
           items: []
         };
+      }
+      // If a group has multiple items and one item resolved a better location/foreman
+      if (item.location && item.location !== 'Helena' && crewGroups[cId].location === 'Helena') {
+        crewGroups[cId].location = item.location;
+      }
+      if (item.foreman && item.foreman !== 'Foreman' && (!crewGroups[cId].foreman || crewGroups[cId].foreman === 'Foreman')) {
+        crewGroups[cId].foreman = item.foreman;
       }
       crewGroups[cId].items.push(item);
     });
@@ -8787,6 +8971,16 @@ class TripPlannerApp {
           };
         }
       });
+      const aliasMap = (this.db && this.db.snapshot && this.db.snapshot.configs && this.db.snapshot.configs['FY_TRANSITION_ALIAS_MAP']) || {};
+      Object.entries(aliasMap).forEach(([oldJ, newJ]) => {
+        const oldSig = this.getSignificantJobNumber(oldJ) || oldJ;
+        const newSig = this.getSignificantJobNumber(newJ) || newJ;
+        const target = crewMap[newSig] || crewMap[newJ];
+        if (target) {
+          if (!crewMap[oldSig]) crewMap[oldSig] = target;
+          if (!crewMap[oldJ]) crewMap[oldJ] = target;
+        }
+      });
     }
 
     const monthNames = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
@@ -8826,10 +9020,12 @@ class TripPlannerApp {
         if (!topic) return;
 
         const rawCrew = String(r['Crew #'] || r['Crew'] || r['Job Number'] || r['Job #'] || '').trim();
-        const crewId = this.getSignificantJobNumber(rawCrew) || rawCrew || 'Unassigned';
-        const activeForeman = (crewMap[crewId] && crewMap[crewId].foreman) || '';
-        const lead = activeForeman || String(r['Crew Lead'] || r['Lead'] || r['Foreman'] || '').trim() || 'Lead';
-        const location = (crewMap[crewId] && crewMap[crewId].location) || 'Helena';
+        const rawLead = String(r['Crew Lead'] || r['Lead'] || r['Foreman'] || '').trim();
+        const cInfo = this.getCrewInfo(rawCrew, rawLead, r['Location']);
+        const crewId = rawCrew || cInfo.crewId || 'Unassigned';
+        const activeCrewId = cInfo.crewId || crewId;
+        const lead = cInfo.foreman || rawLead || 'Lead';
+        const location = cInfo.location || 'Helena';
         const status = String(r['Status'] || r['Training Status'] || '').trim();
         const isCompleted = status.toLowerCase() === 'completed' || status.toLowerCase() === 'complete';
         const dateDone = String(r['Completion Date'] || r['Date Completed'] || r['Date'] || '').trim();
