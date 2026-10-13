@@ -9743,7 +9743,7 @@ function extractSafetyChecklistIssues(pdfText, context) {
             var passComment = extractPdfComment(match);
             if (passComment) {
               // Only create a row if the comment contains actionable language
-              var isActionable = /needs?\s|need\s|requir|replac|expir|missing|broken|fix|repair|no\s+(?:log|book|manual)|not\s+in|not\s+have|do\s+not\s+have|don'?t\s+have|without|absent|lack|test(?:ed|ing)?\s|due|date\s+of\s+\d{4}|200\d|201\d|202[0-5]/i.test(passComment);
+              var isActionable = /needs?\s|need\s|requir|replac|expir|missing|broken|fix|repair|no\s+(?:log|book|manual)|not\s+in|not\s+have|do\s+not\s+have|don'?t\s+have|without|absent|lack|test(?:ed|ing)?\s|due|date\s+of\s+\d{4}|200\d|201\d|202[0-5]|battery|batteries|low\b|dead|beep|chirp|red\s*light|bad\b|fail|defect|inspect|recharge/i.test(passComment);
               if (isActionable) {
                 flagged[commentFlagKey] = true;
                 Logger.log("  ** NOTE (passed check but has actionable comment): " + equipmentType + " - " + passComment.substring(0, 80));
@@ -9972,6 +9972,67 @@ function extractSafetyChecklistIssues(pdfText, context) {
     }
   }
 
+  // Check AED Visual Rescue Ready Light (should be green; flag if red, yellow, flashing, off, blank)
+  if (!flagged['AED_RescueReady']) {
+    var rescueReadyMatch = text.match(/visual\s*rescue\s*ready\s*light\s*is\s*:?\s*([A-Za-z]+)/i);
+    if (rescueReadyMatch) {
+      var lightStatus = rescueReadyMatch[1].toLowerCase().trim();
+      if (lightStatus !== 'green' && lightStatus !== 'yes' && lightStatus !== 'ok' && lightStatus !== 'good' && lightStatus !== 'na' && lightStatus !== 'n/a') {
+        flagged['AED_RescueReady'] = true;
+        Logger.log("  ** ISSUE: AED Rescue Ready Light is: " + lightStatus);
+        issues.push([
+          context.date,
+          context.reportType,
+          context.jobNumber,
+          context.foreman,
+          context.vehicleNumber,
+          "AED",
+          "AED Rescue Ready Light not green (" + lightStatus.toUpperCase() + ")",
+          "Needs Attention",
+          testDate || "",
+          context.messageId,
+          "Visual Rescue Ready Light: " + lightStatus,
+          context.subject || "",
+          context.receivedDate || ""
+        ]);
+      }
+    }
+  }
+
+  // Check AED Comments explicitly (matches comments in the AED section before Fall Protection or next section)
+  if (!flagged['AED_Comment']) {
+    var aedSectionMatch = text.match(/(?:^|\b)AED\b([\s\S]{10,800}?)(?=(?:Fall\s*Protection|Harnesses|Crane|Mileage|Signs|Triangles|Cones|Hot\s*Hoist|Barriers|Fire\s*Extinguisher|Hot\s*Stick|Rubber|First\s*Aid|Trucks|Misc\s*Comments?|$))/i);
+    if (aedSectionMatch && aedSectionMatch[1]) {
+      var aedBlock = aedSectionMatch[1];
+      var aedCommentMatch = aedBlock.match(/comments?\s*:?\s*([A-Za-z0-9][^?:]{3,250}?)(?=\s*(?:[A-Z][a-z][^?:\n]{0,45}?\?|Fall\s*Protection|Harnesses|Crane|$))/i);
+      if (aedCommentMatch && aedCommentMatch[1]) {
+        var aedCommentText = aedCommentMatch[1].trim().replace(/\s+/g, ' ');
+        if (aedCommentText.length >= 4 && !/^(n\/?a|none|ok|good|yes|no|na|clean|-+)$/i.test(aedCommentText)) {
+          var isAedActionable = /battery|batteries|low\b|dead|beep|chirp|red|replac|need|damage|broken|pads?|expir|missing|inspect|fail|bad/i.test(aedCommentText);
+          if (isAedActionable) {
+            flagged['AED_Comment'] = true;
+            Logger.log("  ** ISSUE: AED Comment: " + aedCommentText);
+            issues.push([
+              context.date,
+              context.reportType,
+              context.jobNumber,
+              context.foreman,
+              context.vehicleNumber,
+              "AED",
+              "AED - " + aedCommentText,
+              "Needs Attention",
+              testDate || "",
+              context.messageId,
+              aedCommentText,
+              context.subject || "",
+              context.receivedDate || ""
+            ]);
+          }
+        }
+      }
+    }
+  }
+
   // ==== FALL PROTECTION SECTION ====
   checkEquipment("Fall Protection", "Good Condition", /fall\s*protection\s*gear\s+good\s*condition\s*\??\s*:?\s*(yes|no)/i, "no", "Fall Protection gear not in good condition");
 
@@ -10034,8 +10095,8 @@ function extractSafetyChecklistIssues(pdfText, context) {
       }
 
       // --- Any other actionable Misc Comment (exclude pure vehicle/mechanical issues) ---
-      var isMiscActionable = /needs?\s|need\s|fell\s+off|damaged?|broken|missing|replac|requir|loose|leaking/i.test(miscText);
-      var isMechanicalOnly = /^(?:only\s+)?(?:oil|tire|brake|engine|fuel|coolant|battery|transmission)\b/i.test(miscText);
+      var isMiscActionable = /needs?\s|need\s|fell\s+off|damaged?|broken|missing|replac|requir|loose|leaking|battery|batteries|low\b|dead|beep|chirp/i.test(miscText);
+      var isMechanicalOnly = /^(?:only\s+)?(?:oil|tire|brake|engine|fuel|coolant|transmission)\b/i.test(miscText) || (/battery\b/i.test(miscText) && !/aed\b/i.test(miscText) && /(?:truck|vehicle|starter|cranking|alternator|dead\s*truck)\b/i.test(miscText));
       if (isMiscActionable && !isMechanicalOnly && !flagged['Misc_General']) {
         flagged['Misc_General'] = true;
         Logger.log("  ** ISSUE: General Misc Comment: " + miscText.substring(0, 80));

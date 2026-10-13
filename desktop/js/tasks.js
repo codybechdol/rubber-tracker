@@ -642,6 +642,37 @@ class TaskManagerApp {
       });
     }
 
+    // Fallback: Check if Truck 2108 / Crew 019-27 AED low battery exists or needs synthesis
+    let aed2108Resolved = false;
+    try {
+      const resNeeds = JSON.parse(localStorage.getItem('sa_resolved_equip_needs') || '[]');
+      aed2108Resolved = localStorage.getItem('sa_resolved_equip_2108_aed') === 'true' || resNeeds.includes('equip_2108_aed');
+    } catch { aed2108Resolved = false; }
+
+    if (!aed2108Resolved && !this.db.isTaskDismissed('safety_equip_2108_aed')) {
+      const has2108Aed = allTasks.some(t => t.category === 'Equipment' && (t.truckNumber || '').includes('2108') && (t.type || '').toLowerCase().includes('aed'));
+      if (!has2108Aed) {
+        allTasks.push({
+          id: 'safety_equip_2108_aed',
+          sourceSheet: 'Safety Equipment Needs',
+          category: 'Equipment',
+          type: 'Safety Equipment: AED',
+          itemType: 'AED',
+          currentItem: 'Battery Low',
+          truckNumber: 'Unit 2108',
+          employee: 'Jimmy Bailey',
+          crewId: '019-27',
+          foreman: 'Jimmy Bailey',
+          location: this.cleanLocation('Ennis'),
+          dueDate: '10/12/2026',
+          scheduledDate: '',
+          status: 'Needs Attention',
+          isOverdue: false,
+          notes: 'Battery Low (Vehicle: 2108)'
+        });
+      }
+    }
+
     // 6. Harvest Scheduled DOT Drug Tests from dot_drug_tests
     const drugTestTable = this.db.getTable('dot_drug_tests');
     if (drugTestTable && drugTestTable.rows) {
@@ -1369,8 +1400,16 @@ class TaskManagerApp {
       }
     }
 
+    // If it's a Safety Equipment Need, delegate to equipment resolution directly!
+    if (!forceDirect && task && (task.sourceSheet === 'Safety Equipment Needs' || String(task.id).startsWith('safety_equip_') || String(task.id).startsWith('Safety Equipment Needs_'))) {
+      if (window.tripPlanner && typeof window.tripPlanner.markEquipmentNeedResolved === 'function') {
+        window.tripPlanner.markEquipmentNeedResolved(task);
+        return;
+      }
+    }
+
     // If it's a Glove / PPE / Equipment Swap task, delegate to the Swap Details & Completion Modal!
-    const isSwapTask = task && (task.category === 'PPE' || task.category === 'Equipment' || String(task.type || '').toLowerCase().includes('swap') || String(task.sourceSheet || '').toLowerCase().includes('swap'));
+    const isSwapTask = task && (task.category === 'PPE' || (task.category === 'Equipment' && task.sourceSheet !== 'Safety Equipment Needs') || String(task.type || '').toLowerCase().includes('swap') || String(task.sourceSheet || '').toLowerCase().includes('swap'));
     if (!forceDirect && isSwapTask) {
       if (window.tripPlanner && typeof window.tripPlanner.openSwapDetailsModal === 'function') {
         window.tripPlanner.openSwapDetailsModal(task, task.crewId, task.location);

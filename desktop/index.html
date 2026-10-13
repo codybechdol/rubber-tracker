@@ -596,7 +596,73 @@
             <div id="picked-swaps-list" style="flex: 1; padding: 12px; overflow-y: auto;"></div>
           </div>
 
-          <!-- 5. Main Calendar Board -->
+          <!-- 5. Collapsed Bar for Equipment Needs (Visible when equipment sidebar is collapsed) -->
+          <div id="trip-equipment-collapsed-bar" onclick="window.tripPlanner.toggleEquipmentSidebar()" style="display: none; width: 34px; min-width: 34px; background: var(--bg-secondary); border-right: 1px solid var(--border-color); cursor: pointer; flex-direction: column; align-items: center; padding: 14px 0; gap: 12px; user-select: none; transition: background 0.15s ease;" onmouseover="this.style.background='rgba(245, 158, 11, 0.08)'" onmouseout="this.style.background='var(--bg-secondary)'" title="Click to expand Equipment Needs">
+            <span style="font-size: 11px; color: #fbbf24;">▶</span>
+            <span style="writing-mode: vertical-rl; transform: rotate(180deg); font-size: 11px; font-weight: 800; color: #fbbf24; text-transform: uppercase; letter-spacing: 1.5px;">Equipment</span>
+            <span class="badge" id="collapsed-equipment-count-badge" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 8px;">0</span>
+          </div>
+
+          <!-- 6. Equipment Needs Sidebar Column -->
+          <div id="trip-equipment-sidebar" style="width: 290px; min-width: 290px; background-color: var(--bg-secondary); border-right: 1px solid var(--border-color); display: flex; flex-direction: column; overflow: hidden;">
+            <div style="padding: 12px 14px; border-bottom: 1px solid var(--border-color); background: rgba(0,0,0,0.1);">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <span style="font-weight: 800; font-size: 12px; color: #fbbf24; text-transform: uppercase; display: flex; align-items: center; gap: 5px;">
+                  🧰 Equipment Needs
+                </span>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <span class="badge" id="equipment-needs-count-badge" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 10px;">0 Needs</span>
+                  <button type="button" class="btn-icon" onclick="window.tripPlanner.toggleEquipmentSidebar()" title="Collapse Equipment Needs column" style="background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); color: var(--text-muted); border-radius: 4px; padding: 1px 6px; font-size: 11px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.15s ease;" onmouseover="this.style.color='#fbbf24'; this.style.borderColor='rgba(245, 158, 11, 0.4)'" onmouseout="this.style.color='var(--text-muted)'; this.style.borderColor='var(--border-color)'">◀</button>
+                </div>
+              </div>
+              <input type="text" id="trip-equipment-search" placeholder="🔍 Search crew, truck, or equipment..." oninput="window.tripPlanner.handleEquipmentSearch(this.value)" style="width: 100%; box-sizing: border-box; padding: 6px 10px; font-size: 11.5px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
+              <div style="display: flex; gap: 4px; margin-top: 8px;">
+                <button class="btn btn-secondary active" id="btn-filter-equip-all" style="flex: 1; padding: 3px 6px; font-size: 10px; font-weight: 700;" onclick="window.tripPlanner.setEquipmentFilter('all')">All</button>
+                <button class="btn btn-secondary" id="btn-filter-equip-fe" style="flex: 1; padding: 3px 6px; font-size: 10px;" onclick="window.tripPlanner.setEquipmentFilter('extinguishers')">🧯 Fire Ext</button>
+                <button class="btn btn-secondary" id="btn-filter-equip-aed" style="flex: 1; padding: 3px 6px; font-size: 10px;" onclick="window.tripPlanner.setEquipmentFilter('aed')">⚡ AED</button>
+                <button class="btn btn-secondary" id="btn-filter-equip-firstaid" style="flex: 1; padding: 3px 6px; font-size: 10px;" onclick="window.tripPlanner.setEquipmentFilter('firstaid')">🩹 1st Aid</button>
+                <button class="btn btn-secondary" id="btn-filter-equip-vehicle" style="flex: 1; padding: 3px 6px; font-size: 10px;" onclick="window.tripPlanner.setEquipmentFilter('vehicle')">🚗 Truck</button>
+              </div>
+            </div>
+            <div id="equipment-needs-list" style="flex: 1; padding: 12px; overflow-y: auto;"></div>
+          </div>
+
+          <!-- 7. Collapsed Bar for Training Needs (Visible when training sidebar is collapsed) -->
+          <div id="trip-training-collapsed-bar" onclick="window.tripPlanner.toggleTrainingSidebar()" style="display: none; width: 34px; min-width: 34px; background: var(--bg-secondary); border-right: 1px solid var(--border-color); cursor: pointer; flex-direction: column; align-items: center; padding: 14px 0; gap: 12px; user-select: none; transition: background 0.15s ease;" onmouseover="this.style.background='rgba(16, 185, 129, 0.08)'" onmouseout="this.style.background='var(--bg-secondary)'" title="Click to expand Training Needs">
+            <span style="font-size: 11px; color: #34d399;">▶</span>
+            <span style="writing-mode: vertical-rl; transform: rotate(180deg); font-size: 11px; font-weight: 800; color: #34d399; text-transform: uppercase; letter-spacing: 1.5px;">Training</span>
+            <span class="badge" id="collapsed-training-count-badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 8px;">0</span>
+          </div>
+
+          <!-- 8. Training Needs Sidebar Column -->
+          <div id="trip-training-sidebar" style="width: 290px; min-width: 290px; background-color: var(--bg-secondary); border-right: 1px solid var(--border-color); display: flex; flex-direction: column; overflow: hidden;">
+            <div style="padding: 12px 14px; border-bottom: 1px solid var(--border-color); background: rgba(0,0,0,0.1);">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <span style="font-weight: 800; font-size: 12px; color: #34d399; text-transform: uppercase; display: flex; align-items: center; gap: 5px;">
+                  🎓 Training Needs
+                </span>
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <span class="badge" id="training-needs-count-badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 10px;">0 Due</span>
+                  <button type="button" class="btn-icon" onclick="window.tripPlanner.toggleTrainingSidebar()" title="Collapse Training Needs column" style="background: rgba(255,255,255,0.05); border: 1px solid var(--border-color); color: var(--text-muted); border-radius: 4px; padding: 1px 6px; font-size: 11px; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.15s ease;" onmouseover="this.style.color='#34d399'; this.style.borderColor='rgba(16, 185, 129, 0.4)'" onmouseout="this.style.color='var(--text-muted)'; this.style.borderColor='var(--border-color)'">◀</button>
+                </div>
+              </div>
+              <!-- Month Navigator -->
+              <div style="display: flex; align-items: center; justify-content: space-between; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; padding: 4px 8px; margin-bottom: 8px;">
+                <button type="button" class="btn btn-secondary" style="padding: 2px 7px; font-size: 10px; cursor: pointer;" onclick="window.tripPlanner.prevTrainingMonth()" title="Previous Month">◀</button>
+                <span id="training-month-label" style="font-size: 11px; font-weight: 800; color: #f8fafc; letter-spacing: 0.5px;">October 2026</span>
+                <button type="button" class="btn btn-secondary" style="padding: 2px 7px; font-size: 10px; cursor: pointer;" onclick="window.tripPlanner.nextTrainingMonth()" title="Next Month">▶</button>
+              </div>
+              <input type="text" id="trip-training-search" placeholder="🔍 Search crew or topic..." oninput="window.tripPlanner.handleTrainingSearch(this.value)" style="width: 100%; box-sizing: border-box; padding: 6px 10px; font-size: 11.5px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;">
+              <div style="display: flex; gap: 4px; margin-top: 8px;">
+                <button class="btn btn-secondary active" id="btn-filter-train-pending" style="flex: 1; padding: 3px 6px; font-size: 10px; font-weight: 700;" onclick="window.tripPlanner.setTrainingFilter('pending')">⏳ Pending</button>
+                <button class="btn btn-secondary" id="btn-filter-train-all" style="flex: 1; padding: 3px 6px; font-size: 10px;" onclick="window.tripPlanner.setTrainingFilter('all')">🌐 All</button>
+                <button class="btn btn-secondary" id="btn-filter-train-completed" style="flex: 1; padding: 3px 6px; font-size: 10px;" onclick="window.tripPlanner.setTrainingFilter('completed')">✅ Done</button>
+              </div>
+            </div>
+            <div id="training-needs-list" style="flex: 1; padding: 12px; overflow-y: auto;"></div>
+          </div>
+
+          <!-- 9. Main Calendar Board -->
           <div class="trip-planner-board" id="trip-planner-board"></div>
         </div>
 
@@ -2703,8 +2769,8 @@
   <script src="js/history.js?v=20261002_01"></script>
   <script src="js/history-issues.js?v=20260924_01"></script>
   <script src="js/previous-employees.js?v=20260914_2"></script>
-  <script src="js/tasks.js?v=20261002_01"></script>
-  <script src="js/trip-planner.js?v=20261002_04"></script>
+  <script src="js/tasks.js?v=20261013_01"></script>
+  <script src="js/trip-planner.js?v=20261013_01"></script>
   <script src="js/vendor/leaflet.js"></script>
   <script src="js/trip-route-map.js?v=20260918_07"></script>
   <script src="js/lookup.js?v=20260901_25"></script>
