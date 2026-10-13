@@ -7352,7 +7352,7 @@ class TripPlannerApp {
                         <div style="flex: 1; min-width: 0;">
                           <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 2px;">
                             <span style="font-weight: 700; font-size: 12px; color: #f8fafc; display: flex; align-items: center; gap: 4px;">
-                              <span>${icon}</span> ${item.equipmentType === 'AED' && (/needs\s*aed\s*pads/i.test(item.notes) || (item.desc || '').toLowerCase() === 'needs aed pads') ? 'Needs AED Pads' : this.escapeHtml(item.equipmentType)}
+                              <span>${icon}</span> ${item.equipmentType === 'AED' && (/needs\s*aed\s*pads/i.test(item.notes || '') || (item.desc || '').toLowerCase() === 'needs aed pads') ? 'Needs AED Pads' : this.escapeHtml(item.equipmentType)}
                             </span>
                             ${item.vehicleNumber ? `
                               <span class="badge" style="background: rgba(234, 179, 8, 0.2); color: #fde047; font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px;">
@@ -8829,7 +8829,7 @@ class TripPlannerApp {
             <div style="flex: 1; min-width: 0;">
               <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 3px;">
                 <span style="font-size: 11.5px; font-weight: 700; color: #f8fafc; display: flex; align-items: center; gap: 4px;">
-                  <span>${icon}</span> ${item.equipmentType === 'AED' && (/needs\s*aed\s*pads/i.test(item.notes) || (item.desc || '').toLowerCase() === 'needs aed pads') ? 'Needs AED Pads' : this.escapeHtml(item.equipmentType)}
+                  <span>${icon}</span> ${item.equipmentType === 'AED' && (/needs\s*aed\s*pads/i.test(item.notes || '') || (item.desc || '').toLowerCase() === 'needs aed pads') ? 'Needs AED Pads' : this.escapeHtml(item.equipmentType)}
                 </span>
                 ${item.vehicleNumber ? `
                   <span class="badge" style="background: rgba(234, 179, 8, 0.18); color: #fde047; font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px;">

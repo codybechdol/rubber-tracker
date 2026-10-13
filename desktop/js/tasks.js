@@ -647,6 +647,7 @@ class TaskManagerApp {
         const worker = String(r['Foreman'] || r['Worker'] || r['Employee'] || r['Name'] || '').trim();
         const crewId = String(r['Job Number'] || r['Job #'] || r['Crew'] || '').trim() || 'Unassigned Crew';
         const vehNum = String(r['Vehicle Number'] || r['Vehicle #'] || r['Truck'] || r['Unit'] || '').trim();
+        const reportDate = String(r['Report Date'] || r['Date'] || '').trim();
         let notes = String(r['Notes'] || r['Issue Description'] || r['Comments'] || '').trim();
         if (notes.includes('[PDF #') || notes.includes('CONTENT]')) {
           notes = notes.replace(/\s*\[PDF\s*#\d+\s*CONTENT\].*$/is, '').trim();
