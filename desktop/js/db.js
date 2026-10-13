@@ -1551,7 +1551,7 @@ class LocalDatabase {
       if (isEquipmentTable && table.headers.length > 0) {
         const firstH = table.headers[0];
         let repaired = false;
-        table.rows.forEach((r, i) => {
+        table.rows.forEach(r => {
           const curVal = r[firstH];
           if (curVal === undefined || curVal === null || String(curVal).trim() === '') {
             let aliasVal = r['Item #'] || r['HV Tester'] || r['HVT #'] || r['HVT'] || r['Phasing Set'] || r['PS #'] || r['AED'] || r['AED #'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['MACK'] || r['Serial #'] || '';
@@ -2075,35 +2075,72 @@ class LocalDatabase {
   /**
    * Updates an existing history row in a history table and syncs to rawGrid and Google Sheets mutation outbox
    */
-  async updateHistoryRow(sheetKey, targetRowOrPredicate, updatedFields) {
-    if (!this.snapshot || !this.snapshot.tables || !targetRowOrPredicate || !updatedFields) return false;
+  async updateHistoryRow(sheetKey, matchFnOrRowObj, updatedFields = {}) {
+    if (!this.snapshot || !this.snapshot.tables || !matchFnOrRowObj || !updatedFields || Object.keys(updatedFields).length === 0) return false;
     const cleanKey = String(sheetKey || '').toLowerCase().trim();
     const histKey = cleanKey.endsWith('_history') ? cleanKey : `${cleanKey}_history`;
     const table = this.snapshot.tables[histKey] || this.getTable(histKey);
     if (!table || !table.rows) return false;
 
     let targetRow = null;
-    if (typeof targetRowOrPredicate === 'function') {
-      targetRow = table.rows.find(targetRowOrPredicate);
-    } else if (typeof targetRowOrPredicate === 'object') {
-      targetRow = table.rows.find(r => r === targetRowOrPredicate);
-      if (!targetRow && targetRowOrPredicate._rowIdx) {
-        targetRow = table.rows.find(r => r._rowIdx === targetRowOrPredicate._rowIdx);
+    let rowIdx = -1;
+
+    if (typeof matchFnOrRowObj === 'function') {
+      rowIdx = table.rows.findIndex(matchFnOrRowObj);
+      if (rowIdx !== -1) targetRow = table.rows[rowIdx];
+    } else if (typeof matchFnOrRowObj === 'object') {
+      rowIdx = table.rows.indexOf(matchFnOrRowObj);
+      if (rowIdx !== -1) {
+        targetRow = table.rows[rowIdx];
+      } else if (matchFnOrRowObj._rowIdx) {
+        rowIdx = table.rows.findIndex(r => r._rowIdx === matchFnOrRowObj._rowIdx);
+        if (rowIdx !== -1) targetRow = table.rows[rowIdx];
       }
+
       if (!targetRow) {
-        const itemVal = String(targetRowOrPredicate['Item #'] || targetRowOrPredicate['Serial #'] || targetRowOrPredicate['Model'] || Object.values(targetRowOrPredicate)[1] || Object.values(targetRowOrPredicate)[0] || '').trim().toLowerCase();
-        const dateVal = String(targetRowOrPredicate['Date Assigned'] || targetRowOrPredicate['Date'] || '').trim();
-        const assignedVal = String(targetRowOrPredicate['Assigned To'] || targetRowOrPredicate['Employee Name'] || '').trim().toLowerCase();
-        targetRow = table.rows.find(r => {
-          const rItem = String(r['Item #'] || r['Serial #'] || r['Model'] || Object.values(r)[1] || Object.values(r)[0] || '').trim().toLowerCase();
-          const rDate = String(r['Date Assigned'] || r['Date'] || '').trim();
-          const rAssigned = String(r['Assigned To'] || r['Employee Name'] || '').trim().toLowerCase();
-          return (!itemVal || rItem === itemVal) && (!dateVal || rDate === dateVal) && (!assignedVal || rAssigned === assignedVal);
+        const obj = matchFnOrRowObj;
+        const oDate = String(obj['Date Assigned'] || obj['Date'] || obj['Action Date'] || '').trim();
+        const oItem = String(obj['Item #'] || obj['Item'] || obj['Serial #'] || obj['Glove'] || obj['Sleeve'] || obj['Blanket'] || '').trim();
+        const oAssigned = String(obj['Assigned To'] || obj['Employee Name'] || obj['Employee'] || '').trim();
+        const oNotes = String(obj['Notes'] || obj['Note'] || '').trim();
+
+        const oNum = parseInt(oItem, 10);
+        const isPureONum = !isNaN(oNum) && String(oNum) === oItem;
+
+        rowIdx = table.rows.findIndex(r => {
+          const rDate = String(r['Date Assigned'] || r['Date'] || r['Action Date'] || '').trim();
+          const rItem = String(r['Item #'] || r['Item'] || r['Serial #'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || '').trim();
+          const rAssigned = String(r['Assigned To'] || r['Employee Name'] || r['Employee'] || '').trim();
+          const rNotes = String(r['Notes'] || r['Note'] || '').trim();
+
+          let itemMatches = rItem.toLowerCase() === oItem.toLowerCase();
+          if (!itemMatches && isPureONum) {
+            const rNum = parseInt(rItem, 10);
+            if (!isNaN(rNum) && String(rNum) === rItem && rNum === oNum) itemMatches = true;
+          }
+          return rDate === oDate && itemMatches && (oAssigned ? rAssigned.toLowerCase() === oAssigned.toLowerCase() : true) && (oNotes ? rNotes === oNotes : true);
         });
+
+        if (rowIdx === -1) {
+          rowIdx = table.rows.findIndex(r => {
+            const rDate = String(r['Date Assigned'] || r['Date'] || r['Action Date'] || '').trim();
+            const rItem = String(r['Item #'] || r['Item'] || r['Serial #'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || '').trim();
+            const rAssigned = String(r['Assigned To'] || r['Employee Name'] || r['Employee'] || '').trim();
+
+            let itemMatches = rItem.toLowerCase() === oItem.toLowerCase();
+            if (!itemMatches && isPureONum) {
+              const rNum = parseInt(rItem, 10);
+              if (!isNaN(rNum) && String(rNum) === rItem && rNum === oNum) itemMatches = true;
+            }
+            return rDate === oDate && itemMatches && (oAssigned ? rAssigned.toLowerCase() === oAssigned.toLowerCase() : true);
+          });
+        }
+
+        if (rowIdx !== -1) targetRow = table.rows[rowIdx];
       }
     }
 
-    if (!targetRow) return false;
+    if (!targetRow || rowIdx === -1) return false;
 
     // Apply updatedFields to row object
     for (const [k, v] of Object.entries(updatedFields)) {
@@ -2116,31 +2153,131 @@ class LocalDatabase {
       }
     }
 
-    // Sync to rawGrid
-    this.syncRowToRawGrid(table, targetRow);
+    const itemNum = String(targetRow['Item #'] || targetRow['Item'] || targetRow['Serial #'] || targetRow['Glove'] || targetRow['Sleeve'] || targetRow['Blanket'] || '').trim();
 
-    // Queue UPDATE_CELL mutations for sync
-    const rIdx = targetRow._rowIdx || (table.rows.indexOf(targetRow) !== -1 ? table.rows.indexOf(targetRow) + 2 : null);
-    if (rIdx && table.headers) {
-      const itemIdentifier = String(targetRow['Item #'] || targetRow['Serial #'] || targetRow['Model'] || Object.values(targetRow)[1] || Object.values(targetRow)[0] || '');
-      for (const [k, v] of Object.entries(updatedFields)) {
-        const colIdx = table.headers.findIndex(h => h.toLowerCase() === k.toLowerCase());
-        if (colIdx !== -1) {
-          await this.addMutation({
-            action: 'UPDATE_CELL',
-            sheetName: table.name,
-            row: rIdx,
-            col: colIdx + 1,
-            header: table.headers[colIdx],
-            itemIdentifier: itemIdentifier,
-            value: v
+    // Determine grid row index (1-indexed for sheet)
+    let gridIdx = -1;
+    if (table.rawGrid) {
+      let itemColIdx = -1;
+      let dateColIdx = -1;
+      let assignedColIdx = -1;
+      let locationColIdx = -1;
+
+      if (table.headers) {
+        itemColIdx = table.headers.findIndex(h => /^(item(\s*#)?|serial(\s*#)?|glove|sleeve|blanket|mack|hv\s*tester|phasing)/i.test(String(h).trim()));
+        dateColIdx = table.headers.findIndex(h => /^(date(\s*assigned)?|action\s*date|date)/i.test(String(h).trim()));
+        assignedColIdx = table.headers.findIndex(h => /^(assigned\s*to|employee(\s*name)?|employee|holder)/i.test(String(h).trim()));
+        locationColIdx = table.headers.findIndex(h => /^location$/i.test(String(h).trim()));
+      }
+      if (itemColIdx === -1) itemColIdx = 1;
+      if (dateColIdx === -1) dateColIdx = 0;
+
+      const oDate = String(targetRow['Date Assigned'] || targetRow['Date'] || targetRow['Action Date'] || '').trim();
+      const oAssigned = String(targetRow['Assigned To'] || targetRow['Employee Name'] || targetRow['Employee'] || '').trim();
+      const oLocation = String(targetRow['Location'] || '').trim();
+
+      // Only trust targetRow._rowIdx if it exists, is in bounds, AND matches this item in rawGrid
+      if (targetRow._rowIdx && targetRow._rowIdx >= 2 && targetRow._rowIdx <= table.rawGrid.length) {
+        const candidateIdx = targetRow._rowIdx - 1;
+        const candidateRow = table.rawGrid[candidateIdx];
+        if (candidateRow) {
+          const candidateItem = itemColIdx !== -1 ? String(candidateRow[itemColIdx] || '').trim() : '';
+          const candidateDate = dateColIdx !== -1 ? String(candidateRow[dateColIdx] || '').trim() : '';
+          const itemMatches = !itemNum || candidateItem.toLowerCase() === itemNum.toLowerCase();
+          const dateMatches = !oDate || candidateDate === oDate;
+          if (itemMatches && dateMatches) {
+            gridIdx = candidateIdx;
+          }
+        }
+      }
+
+      // If targetRow._rowIdx did not match rawGrid, search rawGrid
+      if (gridIdx === -1) {
+        // 1. Strict match: Item + Date + Assigned + Location
+        gridIdx = table.rawGrid.findIndex((gr, idx) => {
+          if (idx === 0) return false;
+          const grItem = itemColIdx !== -1 ? String(gr[itemColIdx] || '').trim() : String(gr[1] || '').trim();
+          const grDate = dateColIdx !== -1 ? String(gr[dateColIdx] || '').trim() : String(gr[0] || '').trim();
+          const grAssigned = assignedColIdx !== -1 ? String(gr[assignedColIdx] || '').trim() : '';
+          const grLocation = locationColIdx !== -1 ? String(gr[locationColIdx] || '').trim() : '';
+          return (!itemNum || grItem.toLowerCase() === itemNum.toLowerCase()) &&
+                 (!oDate || grDate === oDate) &&
+                 (!oAssigned || grAssigned.toLowerCase() === oAssigned.toLowerCase()) &&
+                 (!oLocation || grLocation.toLowerCase() === oLocation.toLowerCase());
+        });
+
+        // 2. Match: Item + Date + Assigned
+        if (gridIdx === -1) {
+          gridIdx = table.rawGrid.findIndex((gr, idx) => {
+            if (idx === 0) return false;
+            const grItem = itemColIdx !== -1 ? String(gr[itemColIdx] || '').trim() : String(gr[1] || '').trim();
+            const grDate = dateColIdx !== -1 ? String(gr[dateColIdx] || '').trim() : String(gr[0] || '').trim();
+            const grAssigned = assignedColIdx !== -1 ? String(gr[assignedColIdx] || '').trim() : '';
+            return (!itemNum || grItem.toLowerCase() === itemNum.toLowerCase()) &&
+                   (!oDate || grDate === oDate) &&
+                   (!oAssigned || grAssigned.toLowerCase() === oAssigned.toLowerCase());
           });
         }
+
+        // 3. Match: Item + Date
+        if (gridIdx === -1 && oDate) {
+          gridIdx = table.rawGrid.findIndex((gr, idx) => {
+            if (idx === 0) return false;
+            const grItem = itemColIdx !== -1 ? String(gr[itemColIdx] || '').trim() : String(gr[1] || '').trim();
+            const grDate = dateColIdx !== -1 ? String(gr[dateColIdx] || '').trim() : String(gr[0] || '').trim();
+            return (!itemNum || grItem.toLowerCase() === itemNum.toLowerCase()) && grDate === oDate;
+          });
+        }
+
+        // 4. Match: Item alone
+        if (gridIdx === -1 && itemNum) {
+          gridIdx = table.rawGrid.findIndex((gr, idx) => {
+            if (idx === 0) return false;
+            const grItem = itemColIdx !== -1 ? String(gr[itemColIdx] || '').trim() : String(gr[1] || '').trim();
+            return grItem.toLowerCase() === itemNum.toLowerCase();
+          });
+        }
+      }
+
+      if (gridIdx !== -1) {
+        targetRow._rowIdx = gridIdx + 1;
+      }
+    }
+
+    const actualRowIdx = gridIdx !== -1 ? gridIdx + 1 : (rowIdx + 2);
+
+    for (const [key, newVal] of Object.entries(updatedFields)) {
+      const oldVal = targetRow[key];
+
+      let colIdx = -1;
+      if (table.headers) {
+        colIdx = table.headers.indexOf(key);
+        if (colIdx === -1) {
+          colIdx = table.headers.findIndex(h => h.toLowerCase() === key.toLowerCase());
+        }
+      }
+
+      if (gridIdx !== -1 && colIdx !== -1 && table.rawGrid && table.rawGrid[gridIdx]) {
+        table.rawGrid[gridIdx][colIdx] = newVal;
+      }
+
+      if (colIdx !== -1) {
+        await this.addMutation({
+          action: 'UPDATE_CELL',
+          sheetName: table.name,
+          row: actualRowIdx,
+          col: colIdx + 1,
+          header: table.headers[colIdx],
+          itemIdentifier: itemNum,
+          oldValue: oldVal,
+          value: newVal
+        });
       }
     }
 
     this.schedulePersistSnapshot(this.snapshot, 400);
     this.notify();
+    this._invalidateHistoryEngines(histKey);
     return true;
   }
 
@@ -2557,199 +2694,6 @@ class LocalDatabase {
       rowData: removedRow
     });
 
-    this._invalidateHistoryEngines(historyTableKey);
-    return true;
-  }
-
-  /**
-   * Updates fields of a single history record in a history table and queues UPDATE_CELL mutations
-   */
-  async updateHistoryRow(historyTableKey, matchFnOrRowObj, updatedFields = {}) {
-    const table = this.getTable(historyTableKey);
-    if (!table || !table.rows || !updatedFields || Object.keys(updatedFields).length === 0) return false;
-
-    let targetRow = null;
-    let rowIdx = -1;
-
-    if (typeof matchFnOrRowObj === 'function') {
-      rowIdx = table.rows.findIndex(matchFnOrRowObj);
-      if (rowIdx !== -1) targetRow = table.rows[rowIdx];
-    } else if (typeof matchFnOrRowObj === 'object') {
-      rowIdx = table.rows.indexOf(matchFnOrRowObj);
-      if (rowIdx !== -1) {
-        targetRow = table.rows[rowIdx];
-      } else {
-        const obj = matchFnOrRowObj;
-        const oDate = String(obj['Date Assigned'] || obj['Date'] || obj['Action Date'] || '').trim();
-        const oItem = String(obj['Item #'] || obj['Item'] || obj['Serial #'] || obj['Glove'] || obj['Sleeve'] || obj['Blanket'] || '').trim();
-        const oAssigned = String(obj['Assigned To'] || obj['Employee Name'] || obj['Employee'] || '').trim();
-        const oNotes = String(obj['Notes'] || obj['Note'] || '').trim();
-
-        const oNum = parseInt(oItem, 10);
-        const isPureONum = !isNaN(oNum) && String(oNum) === oItem;
-
-        rowIdx = table.rows.findIndex(r => {
-          const rDate = String(r['Date Assigned'] || r['Date'] || r['Action Date'] || '').trim();
-          const rItem = String(r['Item #'] || r['Item'] || r['Serial #'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || '').trim();
-          const rAssigned = String(r['Assigned To'] || r['Employee Name'] || r['Employee'] || '').trim();
-          const rNotes = String(r['Notes'] || r['Note'] || '').trim();
-
-          let itemMatches = rItem.toLowerCase() === oItem.toLowerCase();
-          if (!itemMatches && isPureONum) {
-            const rNum = parseInt(rItem, 10);
-            if (!isNaN(rNum) && String(rNum) === rItem && rNum === oNum) itemMatches = true;
-          }
-          return rDate === oDate && itemMatches && (oAssigned ? rAssigned.toLowerCase() === oAssigned.toLowerCase() : true) && (oNotes ? rNotes === oNotes : true);
-        });
-
-        if (rowIdx === -1) {
-          rowIdx = table.rows.findIndex(r => {
-            const rDate = String(r['Date Assigned'] || r['Date'] || r['Action Date'] || '').trim();
-            const rItem = String(r['Item #'] || r['Item'] || r['Serial #'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || '').trim();
-            const rAssigned = String(r['Assigned To'] || r['Employee Name'] || r['Employee'] || '').trim();
-
-            let itemMatches = rItem.toLowerCase() === oItem.toLowerCase();
-            if (!itemMatches && isPureONum) {
-              const rNum = parseInt(rItem, 10);
-              if (!isNaN(rNum) && String(rNum) === rItem && rNum === oNum) itemMatches = true;
-            }
-            return rDate === oDate && itemMatches && (oAssigned ? rAssigned.toLowerCase() === oAssigned.toLowerCase() : true);
-          });
-        }
-
-        if (rowIdx !== -1) targetRow = table.rows[rowIdx];
-      }
-    }
-
-    if (!targetRow || rowIdx === -1) return false;
-
-    const itemNum = String(targetRow['Item #'] || targetRow['Item'] || targetRow['Serial #'] || targetRow['Glove'] || targetRow['Sleeve'] || targetRow['Blanket'] || '').trim();
-
-    // Determine grid row index (1-indexed for sheet)
-    let gridIdx = -1;
-    if (table.rawGrid) {
-      let itemColIdx = -1;
-      let dateColIdx = -1;
-      let assignedColIdx = -1;
-      let locationColIdx = -1;
-
-      if (table.headers) {
-        itemColIdx = table.headers.findIndex(h => /^(item(\s*#)?|serial(\s*#)?|glove|sleeve|blanket|mack|hv\s*tester|phasing)/i.test(String(h).trim()));
-        dateColIdx = table.headers.findIndex(h => /^(date(\s*assigned)?|action\s*date|date)/i.test(String(h).trim()));
-        assignedColIdx = table.headers.findIndex(h => /^(assigned\s*to|employee(\s*name)?|employee|holder)/i.test(String(h).trim()));
-        locationColIdx = table.headers.findIndex(h => /^location$/i.test(String(h).trim()));
-      }
-      if (itemColIdx === -1) itemColIdx = 1;
-      if (dateColIdx === -1) dateColIdx = 0;
-
-      const oDate = String(targetRow['Date Assigned'] || targetRow['Date'] || targetRow['Action Date'] || '').trim();
-      const oAssigned = String(targetRow['Assigned To'] || targetRow['Employee Name'] || targetRow['Employee'] || '').trim();
-      const oLocation = String(targetRow['Location'] || '').trim();
-
-      // Only trust targetRow._rowIdx if it exists, is in bounds, AND matches this item in rawGrid
-      if (targetRow._rowIdx && targetRow._rowIdx >= 2 && targetRow._rowIdx <= table.rawGrid.length) {
-        const candidateIdx = targetRow._rowIdx - 1;
-        const candidateRow = table.rawGrid[candidateIdx];
-        if (candidateRow) {
-          const candidateItem = itemColIdx !== -1 ? String(candidateRow[itemColIdx] || '').trim() : '';
-          const candidateDate = dateColIdx !== -1 ? String(candidateRow[dateColIdx] || '').trim() : '';
-          const itemMatches = !itemNum || candidateItem.toLowerCase() === itemNum.toLowerCase();
-          const dateMatches = !oDate || candidateDate === oDate;
-          if (itemMatches && dateMatches) {
-            gridIdx = candidateIdx;
-          }
-        }
-      }
-
-      // If targetRow._rowIdx did not match rawGrid, search rawGrid
-      if (gridIdx === -1) {
-        // 1. Strict match: Item + Date + Assigned + Location
-        gridIdx = table.rawGrid.findIndex((gr, idx) => {
-          if (idx === 0) return false;
-          const grItem = itemColIdx !== -1 ? String(gr[itemColIdx] || '').trim() : String(gr[1] || '').trim();
-          const grDate = dateColIdx !== -1 ? String(gr[dateColIdx] || '').trim() : String(gr[0] || '').trim();
-          const grAssigned = assignedColIdx !== -1 ? String(gr[assignedColIdx] || '').trim() : '';
-          const grLocation = locationColIdx !== -1 ? String(gr[locationColIdx] || '').trim() : '';
-          return (!itemNum || grItem.toLowerCase() === itemNum.toLowerCase()) &&
-                 (!oDate || grDate === oDate) &&
-                 (!oAssigned || grAssigned.toLowerCase() === oAssigned.toLowerCase()) &&
-                 (!oLocation || grLocation.toLowerCase() === oLocation.toLowerCase());
-        });
-
-        // 2. Match: Item + Date + Assigned
-        if (gridIdx === -1) {
-          gridIdx = table.rawGrid.findIndex((gr, idx) => {
-            if (idx === 0) return false;
-            const grItem = itemColIdx !== -1 ? String(gr[itemColIdx] || '').trim() : String(gr[1] || '').trim();
-            const grDate = dateColIdx !== -1 ? String(gr[dateColIdx] || '').trim() : String(gr[0] || '').trim();
-            const grAssigned = assignedColIdx !== -1 ? String(gr[assignedColIdx] || '').trim() : '';
-            return (!itemNum || grItem.toLowerCase() === itemNum.toLowerCase()) &&
-                   (!oDate || grDate === oDate) &&
-                   (!oAssigned || grAssigned.toLowerCase() === oAssigned.toLowerCase());
-          });
-        }
-
-        // 3. Match: Item + Date
-        if (gridIdx === -1 && oDate) {
-          gridIdx = table.rawGrid.findIndex((gr, idx) => {
-            if (idx === 0) return false;
-            const grItem = itemColIdx !== -1 ? String(gr[itemColIdx] || '').trim() : String(gr[1] || '').trim();
-            const grDate = dateColIdx !== -1 ? String(gr[dateColIdx] || '').trim() : String(gr[0] || '').trim();
-            return (!itemNum || grItem.toLowerCase() === itemNum.toLowerCase()) && grDate === oDate;
-          });
-        }
-
-        // 4. Match: Item alone
-        if (gridIdx === -1 && itemNum) {
-          gridIdx = table.rawGrid.findIndex((gr, idx) => {
-            if (idx === 0) return false;
-            const grItem = itemColIdx !== -1 ? String(gr[itemColIdx] || '').trim() : String(gr[1] || '').trim();
-            return grItem.toLowerCase() === itemNum.toLowerCase();
-          });
-        }
-      }
-
-      if (gridIdx !== -1) {
-        targetRow._rowIdx = gridIdx + 1;
-      }
-    }
-
-    const actualRowIdx = gridIdx !== -1 ? gridIdx + 1 : (rowIdx + 2);
-
-    for (const [key, newVal] of Object.entries(updatedFields)) {
-      const oldVal = targetRow[key];
-      targetRow[key] = newVal;
-
-      let colIdx = -1;
-      if (table.headers) {
-        colIdx = table.headers.indexOf(key);
-        if (colIdx === -1) {
-          colIdx = table.headers.findIndex(h => h.toLowerCase() === key.toLowerCase());
-        }
-      }
-
-      if (gridIdx !== -1 && colIdx !== -1 && table.rawGrid && table.rawGrid[gridIdx]) {
-        table.rawGrid[gridIdx][colIdx] = newVal;
-      }
-
-      if (colIdx !== -1) {
-        await this.addMutation({
-          action: 'UPDATE_CELL',
-          sheetName: table.name,
-          row: actualRowIdx,
-          col: colIdx + 1,
-          header: table.headers[colIdx],
-          itemIdentifier: itemNum,
-          oldValue: oldVal,
-          value: newVal
-        });
-      }
-    }
-
-    this.schedulePersistSnapshot(this.snapshot, 600);
-    this.notify();
-    this._invalidateHistoryEngines(historyTableKey);
-    return true;
   }
 
   /**

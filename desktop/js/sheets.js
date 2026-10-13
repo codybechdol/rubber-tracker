@@ -1221,7 +1221,7 @@ class SheetNavigator {
 
   promptTrainingDate(td) {
     if (!td || window.currentRoleMode === 'view_only') return;
-    const currentText = (td.textContent || '').trim().replace(/^[📅➕\s]+/, '').replace(/^Set Date/i, '').trim();
+    const currentText = (td.textContent || '').trim().replace(/^(?:📅|➕|\s)+/gu, '').replace(/^Set Date/i, '').trim();
     let isoVal = '';
     if (/^\d{4}-\d{2}-\d{2}$/.test(currentText)) {
       isoVal = currentText;
@@ -6237,16 +6237,16 @@ class SheetNavigator {
         if (cellTextSpan) {
           initialVal = cellTextSpan.textContent.trim();
         } else {
-          initialVal = targetCell.textContent.trim().replace(/^👤\s*/, '').replace(/^[✅⏳⏸️❌🚫\s]+/, '').replace(/[▾▲\s]+$/, '').trim();
+          initialVal = targetCell.textContent.trim().replace(/^👤\s*/, '').replace(/^(?:✅|⏳|⏸️?|❌|🚫|\s)+/gu, '').replace(/[▾▲\s]+$/, '').trim();
         }
         if (hasAutocomplete) {
-          const currentText = (cellTextSpan ? cellTextSpan.textContent : td.textContent).trim().replace(/^👤\s*/, '').replace(/^[✅⏳⏸️❌🚫\s]+/, '').replace(/[▾▲\s]+$/, '').trim();
+          const currentText = (cellTextSpan ? cellTextSpan.textContent : td.textContent).trim().replace(/^👤\s*/, '').replace(/^(?:✅|⏳|⏸️?|❌|🚫|\s)+/gu, '').replace(/[▾▲\s]+$/, '').trim();
           this.showCellAutocomplete(td, currentText);
         }
       });
 
       if (isLocationApprovalCol || isTrainingStatusCol) {
-        td.addEventListener('click', (e) => {
+        td.addEventListener('click', () => {
           this.showCellAutocomplete(td, '');
         });
       }
@@ -6373,7 +6373,7 @@ class SheetNavigator {
           const isDateCol = hLower.includes('date') || hLower.includes('expiration') || hLower.includes('calibration');
 
           if (this.currentSheetKey === 'training_tracking' && (hLower === 'status' || hLower === 'training status')) {
-            newVal = newVal.replace(/^[✅⏳⏸️❌🚫\s]+/, '').replace(/[▾▲\s]+$/, '').trim();
+            newVal = newVal.replace(/^(?:✅|⏳|⏸️?|❌|🚫|\s)+/gu, '').replace(/[▾▲\s]+$/, '').trim();
             if (/^completed?$/i.test(newVal)) newVal = 'Complete';
             else if (/^scheduled?|^pending$/i.test(newVal)) newVal = 'Scheduled';
             else if (/^on\s*hold|^postponed$/i.test(newVal)) newVal = 'On Hold';
@@ -6382,7 +6382,7 @@ class SheetNavigator {
           }
 
           if (this.currentSheetKey === 'training_tracking' && (hLower === 'completion date' || hLower === 'date completed')) {
-            newVal = newVal.replace(/^[📅➕\s]+/, '').replace(/^Set Date/i, '').trim();
+            newVal = newVal.replace(/^(?:📅|➕|\s)+/gu, '').replace(/^Set Date/i, '').trim();
           }
 
           if (isDateCol && newVal) {
