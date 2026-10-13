@@ -8501,7 +8501,16 @@ class TripPlannerApp {
         const vehNum = String(r['Vehicle Number'] || r['Vehicle #'] || r['Truck'] || r['Unit'] || '').trim();
         const rawCrew = String(r['Job Number'] || r['Job #'] || r['Crew'] || '').trim();
         const worker = String(r['Foreman'] || r['Worker'] || r['Employee'] || r['Name'] || '').trim();
-        const notes = String(r['Notes'] || r['Issue Description'] || r['Comments'] || '').trim();
+        let notes = String(r['Notes'] || r['Issue Description'] || r['Comments'] || '').trim();
+        if (notes.includes('[PDF #') || notes.includes('CONTENT]')) {
+          notes = notes.replace(/\s*\[PDF\s*#\d+\s*CONTENT\].*$/is, '').trim();
+        }
+        if (/wheel chock/i.test(equipType) && /missing.*wheel\s*chock/i.test(notes)) {
+          const m = notes.match(/(?:missing\s*(?:\d+\s*)?wheel\s*chocks?|wheel\s*chocks?\s*missing)/i);
+          if (m) {
+            notes = m[0].charAt(0).toUpperCase() + m[0].slice(1);
+          }
+        }
         const reportDate = String(r['Report Date'] || r['Date'] || '').trim();
         const rowIdx = r._rowIdx || (idx + 2);
 

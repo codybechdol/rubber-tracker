@@ -8211,7 +8211,14 @@ function parseSafetyEmail(message, skipPdfExtraction, startTime, maxExecutionMs)
 
     if (reportType === "Safety Checklist") {
       // Parse Safety Checklist PDF content for actual equipment issues
-      issues = extractSafetyChecklistIssues(fullText, reportMeta);
+      // If PDF text was successfully extracted, parse the PDF content directly so the email body
+      // summary notes don't bleed into specific checklist questions
+      var checklistText = fullText;
+      var pdfMarkerIdx = fullText.indexOf("[PDF #1 CONTENT]");
+      if (pdfMarkerIdx !== -1) {
+        checklistText = fullText.substring(pdfMarkerIdx);
+      }
+      issues = extractSafetyChecklistIssues(checklistText, reportMeta);
     } else if (reportType === "Fleet Checklist") {
       // Extract actual equipment issues reported in Fleet Checklist
       issues = extractEquipmentIssues(fullText, reportMeta);
@@ -9642,7 +9649,7 @@ function extractSafetyChecklistIssues(pdfText, context) {
 
     // Form field & section boundary pattern:
     // Stops before subsequent form questions, field labels, or section headers
-    var BOUNDARY_REGEX = /\s*(?:Test\s*Date\s*:?|Trucks\b(?:\s*Are\s+the\s+following)?|Are\s+the\s+following\s+in\s+good\s+repair\??|(?:Tires|Reflectors|Wipers|Wheel\s*chocks?|Warning\s*Lights?|Horn|Brakes|Windows|Heater|Lights|Defrost|Seat\s*Belts?|Mirrors|Windshield|Others)\s*:?\s*(?:Yes|No|NA|Comments:)|General\b|First\s*Aid\s*Kits?:?|Fully\s*Stocked:?|Cones\s+Good\s*condition|Triangles\s+(?:Good\s*condition|Need\s*more)|Signs\s+(?:Good\s*condition|Full\s*set)|Crane\s*log\s*books?|Log\s*book\s*in\s*unit:?|Mileage\s*books?|Need\s*new\s*book:?|White\s*slips\s*to\s*foreman:?|Hot\s*Sticks?\s+Good\s*condition|Insulated\s*Jumpers:?|Manuf(?:\.|\s+operation)?\s*manual|Manual\s*in\s*unit:?|Fire\s*Extinguisher\b|Properly\s*charged:?|Monthly\s*inspection(?:\s*done)?:?|Tag\s*signed\s*off:?|AED\b|Any\s*damage\s*visible:?|2\s*sets?\s*of\s*defibrillation|Expiration\s*date\s*of\s*pads|Visual\s*Rescue\s*Ready|Fall\s*Protection(?:\s*gear)?|Harnesses(?:\s*\/?\s*lanyards?)?|Tools\b|Hot\s*Hoist\s+Good|Chains?,?\s*chokers?,?\s*slings?\s+tagged|Barriers\s+Good|Misc\s*Comments?\b|Date\s*:\s*[A-Z][a-z]{2}|Unit\s*#\s*:|Job\s*#\s*:|Odometer\s*:|Inspected\s*by\s*:|\[PDF\s*#\d+\s*CONTENT\])\b/i;
+    var BOUNDARY_REGEX = /\s*(?:Test\s*Date\s*:?|\bTrucks\b(?:\s*Are\s+the\s+following)?|Are\s+the\s+following\s+in\s+good\s+repair\??|(?:Tires|Reflectors|Wipers|Wheel\s*chocks?|Warning\s*Lights?|Horn|Brakes|Windows|Heater|Lights|Defrost|Seat\s*Belts?|Mirrors|Windshield|Others)\s*:?\s*(?:Yes|No|NA|Comments:)?|\bGeneral\b|First\s*Aid\s*Kits?:?|Fully\s*Stocked:?|Cones\s+Good\s*condition|Triangles\s+(?:Good\s*condition|Need\s*more)|Signs\s+(?:Good\s*condition|Full\s*set)|Crane\s*log\s*books?|Log\s*book\s*in\s*unit:?|Mileage\s*books?|Need\s*new\s*book:?|White\s*slips\s*to\s*foreman:?|Hot\s*Sticks?\s+Good\s*condition|Insulated\s*Jumpers:?|Manuf(?:\.|\s+operation)?\s*manual|Manual\s*in\s*unit:?|Fire\s*Extinguisher\b|Properly\s*charged:?|Monthly\s*inspection(?:\s*done)?:?|Tag\s*signed\s*off:?|AED\b|Any\s*damage\s*visible:?|2\s*sets?\s*of\s*defibrillation|Expiration\s*date\s*of\s*pads|Visual\s*Rescue\s*Ready|Fall\s*Protection(?:\s*gear)?|Harnesses(?:\s*\/?\s*lanyards?)?|\bTools\b|Hot\s*Hoist\s+Good|Chains?,?\s*chokers?,?\s*slings?\s+tagged|Barriers\s+Good|Misc\s*Comments?\b|Date\s*:\s*[A-Z][a-z]{2}|Unit\s*#\s*:|Job\s*#\s*:|Odometer\s*:|Inspected\s*by\s*:|\[PDF\s*#\d+\s*CONTENT\])/i;
 
     var stopMatch = afterLabel.match(BOUNDARY_REGEX);
     var nextCmIdx = afterLabel.search(/\s+comments?\s*:/i);
@@ -9656,6 +9663,12 @@ function extractSafetyChecklistIssues(pdfText, context) {
     // Strip trailing "Test Date:?" if it leaked into the end of comment
     rawComment = rawComment.replace(/\s*Test\s*Date\s*:?\s*$/i, '').trim();
 
+    // Strip [PDF #1 CONTENT] and anything after it if it leaked in
+    var pdfCutIdx = rawComment.search(/\[PDF\s*#\d+\s*CONTENT\]/i);
+    if (pdfCutIdx !== -1) {
+      rawComment = rawComment.substring(0, pdfCutIdx).trim();
+    }
+
     if (rawComment.length < 4) return '';
     // Reject if it captures a form question rather than actual comment text
     if (/\?:/.test(rawComment)) return '';
@@ -9663,7 +9676,6 @@ function extractSafetyChecklistIssues(pdfText, context) {
     if (/^[\w\/]+$/.test(rawComment)) return '';
     if (/^(n\/?a|none|ok|good|yes|no|na|-+)$/i.test(rawComment)) return '';
     if (/^(?:test\s*date|trucks|are\s+the\s+following|white\s*slips|log\s*book|mileage|signs|cones|triangles)/i.test(rawComment)) return '';
-    if (/\[PDF\s*#\d+\s*CONTENT\]/i.test(rawComment)) return '';
 
     return rawComment;
   }
