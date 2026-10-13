@@ -7352,7 +7352,7 @@ class TripPlannerApp {
                         <div style="flex: 1; min-width: 0;">
                           <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 2px;">
                             <span style="font-weight: 700; font-size: 12px; color: #f8fafc; display: flex; align-items: center; gap: 4px;">
-                              <span>${icon}</span> ${this.escapeHtml(item.equipmentType)}
+                              <span>${icon}</span> ${item.equipmentType === 'AED' && (/needs\s*aed\s*pads/i.test(item.notes) || (item.desc || '').toLowerCase() === 'needs aed pads') ? 'Needs AED Pads' : this.escapeHtml(item.equipmentType)}
                             </span>
                             ${item.vehicleNumber ? `
                               <span class="badge" style="background: rgba(234, 179, 8, 0.2); color: #fde047; font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px;">
@@ -8511,6 +8511,23 @@ class TripPlannerApp {
             notes = m[0].charAt(0).toUpperCase() + m[0].slice(1);
           }
         }
+        if (/aed/i.test(equipType)) {
+          if (/2\s*sets?\s*of\s*defibrillation/i.test(notes) || /expiration\s*date\s*of\s*pads/i.test(notes)) {
+            const pad1Match = notes.match(/expiration\s*date\s*of\s*pads\s*set\s*1\s*:?\s*([A-Za-z]{3,9}\s+\d{1,2},?\s+\d{4}|\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/i);
+            if (pad1Match) {
+              const padDateStr = pad1Match[1];
+              const pDate = new Date(padDateStr);
+              const now = new Date();
+              if (!isNaN(pDate.getTime()) && pDate < now) {
+                notes = `Set 1 pads expired on ${padDateStr}. Needs replacement AED pads.`;
+              } else {
+                notes = `Set 1 pads expire on ${padDateStr}. Needs replacement AED pads.`;
+              }
+            } else {
+              notes = 'Needs replacement AED pads.';
+            }
+          }
+        }
         const reportDate = String(r['Report Date'] || r['Date'] || '').trim();
         const rowIdx = r._rowIdx || (idx + 2);
 
@@ -8539,6 +8556,18 @@ class TripPlannerApp {
               /^(?:windshield|wipers|horn|heater|seat\s*belts?|others):/i.test(rawNotes) ||
               (/\[PDF\s*#\d+\s*CONTENT\]/i.test(rawNotes) && !/chock/i.test(rawNotes))) {
             return;
+          }
+        }
+        // 4. AED items where Set 1 pad expiration is valid (> 1 month in future) and no other defect
+        if (/aed/i.test(equipType)) {
+          const pad1Match = (rawNotes + ' ' + desc).match(/expiration\s*date\s*of\s*pads\s*set\s*1\s*:?\s*([A-Za-z]{3,9}\s+\d{1,2},?\s+\d{4}|\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/i);
+          if (pad1Match) {
+            const pDate = new Date(pad1Match[1]);
+            const oneMonthFuture = new Date();
+            oneMonthFuture.setMonth(oneMonthFuture.getMonth() + 1);
+            if (!isNaN(pDate.getTime()) && pDate > oneMonthFuture && !/damage|battery|red|chirp|dead|broken/i.test(rawNotes + ' ' + desc)) {
+              return;
+            }
           }
         }
 
@@ -8575,6 +8604,7 @@ class TripPlannerApp {
           location: location,
           vehicleNumber: vehNum,
           equipmentType: equipType,
+          desc: desc,
           notes: notes,
           reportDate: reportDate,
           receivedDate: receivedDate,
@@ -8799,7 +8829,7 @@ class TripPlannerApp {
             <div style="flex: 1; min-width: 0;">
               <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 3px;">
                 <span style="font-size: 11.5px; font-weight: 700; color: #f8fafc; display: flex; align-items: center; gap: 4px;">
-                  <span>${icon}</span> ${this.escapeHtml(item.equipmentType)}
+                  <span>${icon}</span> ${item.equipmentType === 'AED' && (/needs\s*aed\s*pads/i.test(item.notes) || (item.desc || '').toLowerCase() === 'needs aed pads') ? 'Needs AED Pads' : this.escapeHtml(item.equipmentType)}
                 </span>
                 ${item.vehicleNumber ? `
                   <span class="badge" style="background: rgba(234, 179, 8, 0.18); color: #fde047; font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px;">

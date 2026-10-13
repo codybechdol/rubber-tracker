@@ -627,6 +627,18 @@ class TaskManagerApp {
             return;
           }
         }
+        // AED items where Set 1 pad expiration is valid (> 1 month in future) and no other defect
+        if (/aed/i.test(equipType)) {
+          const pad1Match = (rawNotes + ' ' + desc).match(/expiration\s*date\s*of\s*pads\s*set\s*1\s*:?\s*([A-Za-z]{3,9}\s+\d{1,2},?\s+\d{4}|\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/i);
+          if (pad1Match) {
+            const pDate = new Date(pad1Match[1]);
+            const oneMonthFuture = new Date();
+            oneMonthFuture.setMonth(oneMonthFuture.getMonth() + 1);
+            if (!isNaN(pDate.getTime()) && pDate > oneMonthFuture && !/damage|battery|red|chirp|dead|broken/i.test(rawNotes + ' ' + desc)) {
+              return;
+            }
+          }
+        }
 
         const rowKey = `Safety Equipment Needs_${idx + 2}`;
         const taskId = `safety_equip_${idx + 2}`;
@@ -643,6 +655,23 @@ class TaskManagerApp {
           const m = notes.match(/(?:missing\s*(?:\d+\s*)?wheel\s*chocks?|wheel\s*chocks?\s*missing)/i);
           if (m) {
             notes = m[0].charAt(0).toUpperCase() + m[0].slice(1);
+          }
+        }
+        if (/aed/i.test(equipType)) {
+          if (/2\s*sets?\s*of\s*defibrillation/i.test(notes) || /expiration\s*date\s*of\s*pads/i.test(notes)) {
+            const pad1Match = notes.match(/expiration\s*date\s*of\s*pads\s*set\s*1\s*:?\s*([A-Za-z]{3,9}\s+\d{1,2},?\s+\d{4}|\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/i);
+            if (pad1Match) {
+              const padDateStr = pad1Match[1];
+              const pDate = new Date(padDateStr);
+              const now = new Date();
+              if (!isNaN(pDate.getTime()) && pDate < now) {
+                notes = `Set 1 pads expired on ${padDateStr}. Needs replacement AED pads.`;
+              } else {
+                notes = `Set 1 pads expire on ${padDateStr}. Needs replacement AED pads.`;
+              }
+            } else {
+              notes = 'Needs replacement AED pads.';
+            }
           }
         }
 
@@ -667,8 +696,8 @@ class TaskManagerApp {
             id: rowKey,
             sourceSheet: 'Safety Equipment Needs',
             category: 'Equipment',
-            type: `Safety Equipment: ${equipType}`,
-            itemType: equipType,
+            type: (equipType === 'AED' && (/needs\s*aed\s*pads/i.test(notes) || (desc || '').toLowerCase() === 'needs aed pads')) ? 'Safety Equipment: Needs AED Pads' : `Safety Equipment: ${equipType}`,
+            itemType: (equipType === 'AED' && (/needs\s*aed\s*pads/i.test(notes) || (desc || '').toLowerCase() === 'needs aed pads')) ? 'Needs AED Pads' : equipType,
             currentItem: notes || equipType,
             truckNumber: truckNumber,
             employee: worker || 'Unassigned',

@@ -9751,6 +9751,10 @@ function extractSafetyChecklistIssues(pdfText, context) {
               if (equipmentType === "Barriers" && /trucks|repair/i.test(passComment)) {
                 isActionable = false;
               }
+              // For AED, comments on Damage Visible must not capture form bleed-through or pad questions
+              if (equipmentType === "AED" && (/2\s*sets?\s*of\s*defibrillation|expiration\s*date|visual\s*rescue|defibrillation/i.test(passComment))) {
+                isActionable = false;
+              }
 
               if (isActionable) {
                 flagged[commentFlagKey] = true;
@@ -9954,59 +9958,19 @@ function extractSafetyChecklistIssues(pdfText, context) {
 
   // ==== AED SECTION ====
   checkEquipment("AED", "Damage Visible", /any\s*damage\s*visible\s*\??\s*:?\s*(yes|no)/i, "yes", "AED has visible damage");
-  
-  // We can ignore 2 sets of defibrillation pads and Expiration date of pads Set 2 line items per user request
-  // checkEquipment("AED", "2 Sets of Pads", /2\s*sets?\s*of\s*defibrillation\s*pads\s*\.?\s*:?\s*(yes|no)/i, "no", "AED does not have 2 sets of pads");
 
-  // Check AED Pad Set 1 Expiration Date (Set 1 is the only pad date we need to look at)
-  var aedPad1Match = text.match(/expiration\s*date\s*of\s*pads\s*set\s*1\s*:?\s*([A-Za-z]{3,9}\s+\d{1,2},?\s+\d{4})/i);
-  if (!aedPad1Match) {
-    aedPad1Match = text.match(/expiration\s*date\s*of\s*pads\s*set\s*1\s*:?\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/i);
-  }
+  // Per user requirements:
+  // 1. The 2nd set of pads is completely ignored (both question and expiration date).
+  // 2. The 1st set of pads needs an expiration date at least 1 month in the future of the current date.
+  // 3. If not (expired, within 1 month, or missing/invalid), a task with "Needs AED Pads" is added for that vehicle number.
+  // 4. Note gives clear, informative details explaining the pad status and requirement.
 
-  var aedPad1Date = null;
-  var aedPad1IsExpired = false;
-
-  if (aedPad1Match) {
-    var aedPad1DateStr = aedPad1Match[1];
-    Logger.log("  Found AED Pad Set 1 Expiration Date: " + aedPad1DateStr);
-    try {
-      var parsedDate = new Date(aedPad1DateStr);
-      if (!isNaN(parsedDate.getTime())) {
-        aedPad1Date = new Date(parsedDate.getFullYear(), parsedDate.getMonth(), parsedDate.getDate(), 12, 0, 0);
-        aedPad1IsExpired = (new Date() > aedPad1Date);
-        Logger.log("  AED Pad Set 1 Date: " + aedPad1Date.toDateString() + ", Expired: " + aedPad1IsExpired);
-      }
-    } catch (e) {
-      Logger.log("  Could not parse AED Pad Set 1 Expiration Date: " + e);
-    }
-  }
-
-  if (aedPad1IsExpired && !flagged["AED_Pads_Expired"]) {
-    flagged["AED_Pads_Expired"] = true;
-    issues.push([
-      context.date,
-      context.reportType,
-      context.jobNumber,
-      context.foreman,
-      context.vehicleNumber,
-      "AED",
-      "AED Pads EXPIRED - Set 1 Expiration: " + Utilities.formatDate(aedPad1Date, Session.getScriptTimeZone(), "MMM dd, yyyy"),
-      "Needs Attention",
-      aedPad1Date,  // Column I: Test/Expiration Date
-      context.messageId,
-      "", // Note
-      context.subject || "",
-      context.receivedDate || ""
-    ]);
-    Logger.log("  ** ISSUE: AED Pads Expired (Set 1)");
-  }
-
-  // AED = NA means the vehicle does not have an AED at all — flag it
-  // Pattern: "Any damage visible?:NA" indicates no AED present on this vehicle
-  if (!flagged['AED_Not Present']) {
-    var aedNaMatch = text.match(/any\s*damage\s*visible\s*\??\s*:?\s*(na|n\/a)/i);
-    if (aedNaMatch) {
+  // First check if AED is reported as not present on the vehicle (NA)
+  var isAedNotPresent = false;
+  var aedNaMatch = text.match(/any\s*damage\s*visible\s*\??\s*:?\s*(na|n\/a)/i);
+  if (aedNaMatch) {
+    isAedNotPresent = true;
+    if (!flagged['AED_Not Present']) {
       flagged['AED_Not Present'] = true;
       Logger.log("  ** ISSUE: AED - Not present on vehicle (NA)");
       issues.push([
@@ -10027,8 +9991,77 @@ function extractSafetyChecklistIssues(pdfText, context) {
     }
   }
 
+  // Only check pad expiration if AED is present on the vehicle
+  if (!isAedNotPresent) {
+    var aedPad1Match = text.match(/expiration\s*date\s*of\s*pads\s*set\s*1\s*:?\s*([A-Za-z]{3,9}\s+\d{1,2},?\s+\d{4})/i);
+    if (!aedPad1Match) {
+      aedPad1Match = text.match(/expiration\s*date\s*of\s*pads\s*set\s*1\s*:?\s*(\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/i);
+    }
+
+    var aedPad1Date = null;
+    if (aedPad1Match) {
+      var aedPad1DateStr = aedPad1Match[1].trim();
+      Logger.log("  Found AED Pad Set 1 Expiration Date: " + aedPad1DateStr);
+      try {
+        var parsedDate = new Date(aedPad1DateStr);
+        if (!isNaN(parsedDate.getTime())) {
+          aedPad1Date = new Date(parsedDate.getFullYear(), parsedDate.getMonth(), parsedDate.getDate(), 12, 0, 0);
+        }
+      } catch (e) {
+        Logger.log("  Could not parse AED Pad Set 1 Expiration Date: " + e);
+      }
+    }
+
+    // Check if 1st set of pads has a date at least 1 month in the future of the current date
+    var now = new Date();
+    var oneMonthFuture = new Date(now.getFullYear(), now.getMonth() + 1, now.getDate(), 23, 59, 59);
+
+    var aedNeedsPads = false;
+    var aedPadNote = "";
+
+    if (aedPad1Date) {
+      var formattedPadDate = Utilities.formatDate(aedPad1Date, Session.getScriptTimeZone(), "MMM dd, yyyy");
+      if (aedPad1Date < now) {
+        aedNeedsPads = true;
+        aedPadNote = "Set 1 pads expired on " + formattedPadDate + ". Needs replacement AED pads.";
+      } else if (aedPad1Date <= oneMonthFuture) {
+        aedNeedsPads = true;
+        aedPadNote = "Set 1 pads expire soon on " + formattedPadDate + " (within 1 month). Needs replacement AED pads.";
+      } else {
+        Logger.log("  AED Pad Set 1 Date is valid: " + formattedPadDate + " (> 1 month in future)");
+      }
+    } else {
+      // Set 1 date was missing or could not be parsed, but AED section was reported
+      var hasAedSection = /(?:^|\b)AED\b/i.test(text);
+      if (hasAedSection) {
+        aedNeedsPads = true;
+        aedPadNote = "Set 1 pad expiration date missing or invalid on report. Needs replacement AED pads.";
+      }
+    }
+
+    if (aedNeedsPads && !flagged["AED_Needs_Pads"]) {
+      flagged["AED_Needs_Pads"] = true;
+      issues.push([
+        context.date,
+        context.reportType,
+        context.jobNumber,
+        context.foreman,
+        context.vehicleNumber,
+        "AED",
+        "Needs AED Pads",
+        "Needs Attention",
+        aedPad1Date || "",  // Column I: Test/Expiration Date
+        context.messageId,
+        aedPadNote,         // Column K: Informative note
+        context.subject || "",
+        context.receivedDate || ""
+      ]);
+      Logger.log("  ** ISSUE: Needs AED Pads (" + aedPadNote + ")");
+    }
+  }
+
   // Check AED Visual Rescue Ready Light (should be green; flag if red, yellow, flashing, off, blank)
-  if (!flagged['AED_RescueReady']) {
+  if (!flagged['AED_RescueReady'] && !isAedNotPresent) {
     var rescueReadyMatch = text.match(/visual\s*rescue\s*ready\s*light\s*is\s*:?\s*([A-Za-z]+)/i);
     if (rescueReadyMatch) {
       var lightStatus = rescueReadyMatch[1].toLowerCase().trim();
@@ -10055,15 +10088,23 @@ function extractSafetyChecklistIssues(pdfText, context) {
   }
 
   // Check AED Comments explicitly (matches comments in the AED section before Fall Protection or next section)
-  if (!flagged['AED_Comment']) {
+  if (!flagged['AED_Comment'] && !isAedNotPresent) {
     var aedSectionMatch = text.match(/(?:^|\b)AED\b([\s\S]{10,800}?)(?=(?:Fall\s*Protection|Harnesses|Crane|Mileage|Signs|Triangles|Cones|Hot\s*Hoist|Barriers|Fire\s*Extinguisher|Hot\s*Stick|Rubber|First\s*Aid|Trucks|Misc\s*Comments?|$))/i);
     if (aedSectionMatch && aedSectionMatch[1]) {
       var aedBlock = aedSectionMatch[1];
-      var aedCommentMatch = aedBlock.match(/comments?\s*:?\s*([A-Za-z0-9][^?:]{3,250}?)(?=\s*(?:[A-Z][a-z][^?:\n]{0,45}?\?|Fall\s*Protection|Harnesses|Crane|$))/i);
+      var aedCommentMatch = aedBlock.match(/comments?\s*:?\s*([A-Za-z0-9][^?:]{3,250}?)(?=\s*(?:[A-Z][a-z][^?:\n]{0,45}?\?|2\s*sets?\s*of\s*defibrillation|expiration\s*date|visual\s*rescue|Fall\s*Protection|Harnesses|Crane|$))/i);
       if (aedCommentMatch && aedCommentMatch[1]) {
         var aedCommentText = aedCommentMatch[1].trim().replace(/\s+/g, ' ');
+        // Reject form labels/prompts
+        if (/2\s*sets?\s*of\s*defibrillation|expiration\s*date\s*of\s*pads|visual\s*rescue\s*ready|any\s*damage\s*visible/i.test(aedCommentText)) {
+          aedCommentText = '';
+        }
+        // Reject pad questions/expiration mentions since pads are handled in dedicated check above and Set 2 is ignored
+        if (/pads?\s*set|expiration\s*date|defibrillation/i.test(aedCommentText)) {
+          aedCommentText = '';
+        }
         if (aedCommentText.length >= 4 && !/^(n\/?a|none|ok|good|yes|no|na|clean|-+)$/i.test(aedCommentText)) {
-          var isAedActionable = /battery|batteries|low\b|dead|beep|chirp|red|replac|need|damage|broken|pads?|expir|missing|inspect|fail|bad/i.test(aedCommentText);
+          var isAedActionable = /battery|batteries|low\b|dead|beep|chirp|red|replac|need|damage|broken|missing|inspect|fail|bad/i.test(aedCommentText);
           if (isAedActionable) {
             flagged['AED_Comment'] = true;
             Logger.log("  ** ISSUE: AED Comment: " + aedCommentText);
