@@ -1165,6 +1165,11 @@ class TaskManagerApp {
     return a.startsWith(b) || b.startsWith(a);
   }
 
+  clearTasksCache() {
+    this._tasksCache = null;
+    this._tasksCacheTime = 0;
+  }
+
   getAllTasksCached(targetDate = new Date()) {
     const now = Date.now();
     if (this._tasksCache && (now - (this._tasksCacheTime || 0) < 5000)) {
@@ -1421,7 +1426,7 @@ class TaskManagerApp {
 
   async completeTask(taskId, forceDirect = false) {
     if (window.currentRoleMode === 'view_only') {
-      if (typeof showToast === 'function') showToast('App is in View Only mode. Edits are disabled.', 'warning');
+      if (typeof window.showToast === 'function') window.showToast('App is in View Only mode. Edits are disabled.', true);
       return;
     }
     const allTasks = this.collectAllTasks();
@@ -1438,7 +1443,7 @@ class TaskManagerApp {
     // If it's a Safety Equipment Need, delegate to equipment resolution directly!
     if (!forceDirect && task && (task.sourceSheet === 'Safety Equipment Needs' || String(task.id).startsWith('safety_equip_') || String(task.id).startsWith('Safety Equipment Needs_'))) {
       if (window.tripPlanner && typeof window.tripPlanner.markEquipmentNeedResolved === 'function') {
-        window.tripPlanner.markEquipmentNeedResolved(task);
+        await window.tripPlanner.markEquipmentNeedResolved(task);
         return;
       }
     }
@@ -1531,7 +1536,7 @@ class TaskManagerApp {
 
   deleteTask(taskId, sourceSheet = '') {
     if (window.currentRoleMode === 'view_only') {
-      if (typeof showToast === 'function') showToast('App is in View Only mode. Edits are disabled.', 'warning');
+      if (typeof window.showToast === 'function') window.showToast('App is in View Only mode. Edits are disabled.', true);
       return;
     }
     if (!window.confirm('Are you sure you want to delete this task? It will be removed from all task lists.')) {

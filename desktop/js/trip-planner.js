@@ -245,7 +245,9 @@ class TripPlannerApp {
   saveDismissedSwaps() {
     try {
       localStorage.setItem('TRIP_PLANNER_DISMISSED_SWAPS', JSON.stringify(this.dismissedSwaps || {}));
-    } catch {}
+    } catch (e) {
+      console.warn('Failed to save dismissed swaps:', e);
+    }
   }
 
   isSwapDismissed(sKey) {
@@ -4059,7 +4061,7 @@ class TripPlannerApp {
     const dateChangedVal = String(
       (swRow && (swRow['Date Changed'] || swRow['Delivered Date'])) || ''
     ).trim();
-    const isAlreadyCompleted = !!dateChangedVal || swStatus.toLowerCase().includes('delivered');
+    let isAlreadyCompleted = !!dateChangedVal || swStatus.toLowerCase().includes('delivered');
 
     const swDueDate = String(
       (swRow && (swRow['Change Out Date'] || swRow['Due Date'])) ||
@@ -4500,7 +4502,7 @@ class TripPlannerApp {
 
   async revertSwapFromModal(tableKey, rowIdxOrEmp, empName, currentItem) {
     if (window.currentRoleMode === 'view_only') {
-      if (typeof showToast === 'function') showToast('App is in View Only mode. Swaps cannot be reverted.', 'warning');
+      this.showToast('App is in View Only mode. Swaps cannot be reverted.', true);
       return;
     }
     if (!confirm(`Revert swap for ${empName} back to pending/ready for delivery? This will restore the previous inventory assignments.`)) {
@@ -8476,7 +8478,6 @@ class TripPlannerApp {
    */
   getEquipmentNeedsData() {
     const safetyEquipTable = this.db.getTable('safety_equipment_needs');
-    const jobTable = this.db.getTable('job_tracking') || this.db.getTable('Job Tracking');
 
     const today = new Date();
     const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
@@ -8484,7 +8485,7 @@ class TripPlannerApp {
     let resolvedSynthesized = [];
     try {
       resolvedSynthesized = JSON.parse(localStorage.getItem('sa_resolved_equip_needs') || '[]');
-    } catch (e) {
+    } catch (_err) {
       resolvedSynthesized = [];
     }
 
@@ -8887,7 +8888,7 @@ class TripPlannerApp {
       let resolvedKeys = [];
       try {
         resolvedKeys = JSON.parse(localStorage.getItem('sa_resolved_equip_needs') || '[]');
-      } catch (e) {
+      } catch (_err) {
         resolvedKeys = [];
       }
       if (item.id) resolvedKeys.push(item.id);
@@ -8897,10 +8898,19 @@ class TripPlannerApp {
       }
       localStorage.setItem('sa_resolved_equip_needs', JSON.stringify(resolvedKeys));
 
+      let rowIdx = item.rowIdx || item._rowIdx || item.sourceRow;
+      if (!rowIdx && item.id) {
+        const match = String(item.id).match(/(?:safety_equip_|Safety Equipment Needs_)(\d+)/i);
+        if (match) rowIdx = parseInt(match[1], 10);
+      }
+
       // Dismiss task so taskManager hides it too
       if (this.db && typeof this.db.addDismissedTask === 'function') {
         if (item.id) this.db.addDismissedTask(item.id);
-        if (item.rowIdx) this.db.addDismissedTask(`Safety Equipment Needs_${item.rowIdx}`);
+        if (rowIdx) {
+          this.db.addDismissedTask(`Safety Equipment Needs_${rowIdx}`);
+          this.db.addDismissedTask(`safety_equip_${rowIdx}`);
+        }
         this.db.addDismissedTask('safety_equip_2108_aed');
       }
 
@@ -8908,7 +8918,7 @@ class TripPlannerApp {
       if (this.scheduledEquipmentNeeds) {
         Object.keys(this.scheduledEquipmentNeeds).forEach(k => {
           const entry = this.scheduledEquipmentNeeds[k];
-          if (entry && (k === item.id || (entry.item && entry.item.id === item.id) || (entry.item && entry.item.rowIdx === item.rowIdx))) {
+          if (entry && (k === item.id || (entry.item && entry.item.id === item.id) || (entry.item && (entry.item.rowIdx === rowIdx || entry.item._rowIdx === rowIdx)))) {
             delete this.scheduledEquipmentNeeds[k];
           }
         });
@@ -8916,19 +8926,20 @@ class TripPlannerApp {
       }
 
       const eqTable = this.db.getTable('safety_equipment_needs');
-      if (eqTable && eqTable.rows && item.rowIdx) {
-        const targetRow = eqTable.rows.find(r => r._rowIdx === item.rowIdx || eqTable.rows.indexOf(r) + 2 === item.rowIdx);
+      if (eqTable && eqTable.rows && rowIdx) {
+        const targetRow = eqTable.rows.find(r => r._rowIdx === rowIdx || eqTable.rows.indexOf(r) + 2 === rowIdx);
         if (targetRow) {
           targetRow['Status'] = 'Resolved';
           targetRow['Resolved On'] = todayFormatted;
-          if (eqTable.rawGrid && eqTable.rawGrid[item.rowIdx - 1]) {
-            eqTable.rawGrid[item.rowIdx - 1][7] = 'Resolved'; // Col H
-            eqTable.rawGrid[item.rowIdx - 1][13] = todayFormatted; // Col N
+          if (eqTable.rawGrid && eqTable.rawGrid[rowIdx - 1]) {
+            eqTable.rawGrid[rowIdx - 1][7] = 'Resolved'; // Col H
+            eqTable.rawGrid[rowIdx - 1][13] = todayFormatted; // Col N
           }
           await this.db.addMutation({
             action: 'UPDATE_CELL',
             sheetName: 'Safety Equipment Needs',
-            row: item.rowIdx,
+            tableKey: 'safety_equipment_needs',
+            row: rowIdx,
             col: 8,
             header: 'Status',
             oldValue: item.status || 'Needs Attention',
@@ -8937,7 +8948,8 @@ class TripPlannerApp {
           await this.db.addMutation({
             action: 'UPDATE_CELL',
             sheetName: 'Safety Equipment Needs',
-            row: item.rowIdx,
+            tableKey: 'safety_equipment_needs',
+            row: rowIdx,
             col: 14,
             header: 'Resolved On',
             oldValue: '',
@@ -8948,16 +8960,25 @@ class TripPlannerApp {
 
       await this.db.persistSnapshot(this.db.snapshot);
 
-      if (window.taskManager) window.taskManager.clearTasksCache();
+      if (window.taskManager) {
+        if (typeof window.taskManager.clearTasksCache === 'function') {
+          window.taskManager.clearTasksCache();
+        }
+        if (typeof window.taskManager.renderTasks === 'function') {
+          window.taskManager.renderTasks();
+        }
+      }
       this.renderEquipmentNeedsList();
       this.renderPlanner();
       if (this.activeModalCrewId) {
         this.openCrewTasksModal(this.activeModalCrewId, this.activeModalLocation, this.activeModalCat, this.activeModalDateKey);
       }
-      this.showToast(`✅ Marked ${item.equipmentType} (Unit ${item.vehicleNumber || item.crewId}) as Resolved`);
+      const label = item.equipmentType || item.itemType || 'Equipment Need';
+      const unit = item.vehicleNumber || item.truckNumber || item.crewId || '';
+      this.showToast(`✅ Marked ${label}${unit ? ` (${unit})` : ''} as Resolved`);
     } catch (err) {
       console.error('Error marking equipment need resolved:', err);
-      this.showToast('Error updating equipment status', 'error');
+      this.showToast('Error updating equipment status', true);
     }
   }
 
@@ -9088,6 +9109,7 @@ class TripPlannerApp {
           month: rowMonth || `${curMonthName} ${curYear}`,
           topic: topic,
           crewId: crewId,
+          activeCrewId: activeCrewId,
           lead: lead,
           location: location,
           status: status || 'Pending',
