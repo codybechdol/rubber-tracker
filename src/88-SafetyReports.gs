@@ -8901,40 +8901,32 @@ function backfillEquipmentNotes() {
     // DEBUG: log what immediately follows the yes/no match
     Logger.log('backfillEquipmentNotes: segment[0:280]="' + segment.substring(0, 280) + '"');
 
-    // — Strategy 1: original lookahead regex —
-    var cm = segment.match(/comments?\s*:?\s*([A-Za-z0-9][^?]{4,300}?)(?=\s*(?:[A-Z][a-z][^?:\n]{0,45}?\?|$))/i);
-    if (cm && cm[1]) {
-      var c1 = cm[1].trim().replace(/\s+/g, ' ');
-      if (c1.length >= 10 && !/^(n\/?a|none|ok|good|yes|no|na|-+)$/i.test(c1)) {
-        return c1;
-      }
-    }
-
-    // — Strategy 2: find first "Comments:" then grab to next "Comments:" OR field terminator —
     var labelMatch = segment.match(/comments?\s*:?\s*/i);
     if (!labelMatch) return '';
     var afterLabel = segment.substring(labelMatch.index + labelMatch[0].length);
 
-    // Stop at the next "Comments:" (next section) OR a common multi-word field header
-    var nextCmIdx  = afterLabel.search(/\s+comments?\s*:/i);
-    var fieldStop  = afterLabel.search(/\s+(?:Test Date|Insulated Jumpers|Good condition|Fully Stocked|Properly charged|Monthly inspection|Expiration|AED|Fall Protection|Harnesses|Crane|Mileage|Signs|Triangles|Cones|Hot Hoist|Barriers|Fire Extinguisher|Hot Stick|Rubber|First Aid|Manuf)\s*[?:]/i);
-    // Stop on AED-specific line items to prevent them from bleeding into previous comments
-    var aedStop    = afterLabel.search(/\s*(?:2\s*sets?\s*of\s*defibrillation\s*pads|Expiration\s*date\s*of\s*pads\s*Set\s*[1-2]|Visual\s*Rescue\s*Ready\s*Light\s*is)\b/i);
+    var BOUNDARY_REGEX = /\s*(?:Test\s*Date\s*:?|Trucks\b(?:\s*Are\s+the\s+following)?|Are\s+the\s+following\s+in\s+good\s+repair\??|(?:Tires|Reflectors|Wipers|Wheel\s*chocks?|Warning\s*Lights?|Horn|Brakes|Windows|Heater|Lights|Defrost|Seat\s*Belts?|Mirrors|Windshield|Others)\s*:?\s*(?:Yes|No|NA|Comments:)|General\b|First\s*Aid\s*Kits?:?|Fully\s*Stocked:?|Cones\s+Good\s*condition|Triangles\s+(?:Good\s*condition|Need\s*more)|Signs\s+(?:Good\s*condition|Full\s*set)|Crane\s*log\s*books?|Log\s*book\s*in\s*unit:?|Mileage\s*books?|Need\s*new\s*book:?|White\s*slips\s*to\s*foreman:?|Hot\s*Sticks?\s+Good\s*condition|Insulated\s*Jumpers:?|Manuf(?:\.|\s+operation)?\s*manual|Manual\s*in\s*unit:?|Fire\s*Extinguisher\b|Properly\s*charged:?|Monthly\s*inspection(?:\s*done)?:?|Tag\s*signed\s*off:?|AED\b|Any\s*damage\s*visible:?|2\s*sets?\s*of\s*defibrillation|Expiration\s*date\s*of\s*pads|Visual\s*Rescue\s*Ready|Fall\s*Protection(?:\s*gear)?|Harnesses(?:\s*\/?\s*lanyards?)?|Tools\b|Hot\s*Hoist\s+Good|Chains?,?\s*chokers?,?\s*slings?\s+tagged|Barriers\s+Good|Misc\s*Comments?\b|Date\s*:\s*[A-Z][a-z]{2}|Unit\s*#\s*:|Job\s*#\s*:|Odometer\s*:|Inspected\s*by\s*:|\[PDF\s*#\d+\s*CONTENT\])\b/i;
 
-    var stopAt = afterLabel.length; // default: take everything up to 500 chars
-    if (nextCmIdx  >= 0) stopAt = Math.min(stopAt, nextCmIdx);
-    if (fieldStop  >= 0) stopAt = Math.min(stopAt, fieldStop);
-    if (aedStop   >= 0) stopAt = Math.min(stopAt, aedStop);
+    var stopMatch = afterLabel.match(BOUNDARY_REGEX);
+    var nextCmIdx = afterLabel.search(/\s+comments?\s*:/i);
+
+    var stopAt = afterLabel.length;
+    if (stopMatch && stopMatch.index !== undefined) stopAt = Math.min(stopAt, stopMatch.index);
+    if (nextCmIdx >= 0) stopAt = Math.min(stopAt, nextCmIdx);
     stopAt = Math.min(stopAt, 500);
 
     var rawComment = afterLabel.substring(0, stopAt).trim().replace(/\s+/g, ' ');
-    if (rawComment.length < 10) return '';
-    // Reject if it contains "?:" — we captured the next form question, not actual comment text
-    // e.g. "White slips to foreman?: Yes" or "Full set?: No" are next questions, not comments
+    rawComment = rawComment.replace(/\s*Test\s*Date\s*:?\s*$/i, '').trim();
+
+    if (rawComment.length < 5) return '';
+    // Reject if it contains "?:" — captured next form question, not actual comment text
     if (/\?:/.test(rawComment)) return '';
-    // Reject standalone section labels like "Harnesses/Lanyards" (only word chars and slashes)
+    // Reject standalone section labels
     if (/^[\w\/]+$/.test(rawComment)) return '';
     if (/^(n\/?a|none|ok|good|yes|no|na|-+)$/i.test(rawComment)) return '';
+    if (/^(?:test\s*date|trucks|are\s+the\s+following|white\s*slips|log\s*book|mileage|signs|cones|triangles)/i.test(rawComment)) return '';
+    if (/\[PDF\s*#\d+\s*CONTENT\]/i.test(rawComment)) return '';
+
     return rawComment;
   }
 
@@ -9643,49 +9635,36 @@ function extractSafetyChecklistIssues(pdfText, context) {
     var afterPos = matchObj.index + matchObj[0].length;
     var windowText = text.substring(afterPos, Math.min(afterPos + 700, text.length));
 
-    // Strategy 1: original lookahead regex (stops before next capitalized section with "?")
-    var cm = windowText.match(/comments?\s*:?\s*([A-Za-z0-9][^?]{4,300}?)(?=\s*(?:[A-Z][a-z][^?:\n]{0,45}?\?|$))/i);
-    if (cm && cm[1]) {
-      var c1 = cm[1].trim().replace(/\s+/g, ' ');
-      // Reject trivial/non-actionable values and section header words
-      if (c1.length >= 5 && !/^(n\/?a|none|ok|good|yes|no|na|-+)$/i.test(c1) && !/\?:/.test(c1)
-          && !/^(?:Trucks?|Misc\s*Comments?|Tools?|General|Are\s+the)$/i.test(c1)) {
-        return c1;
-      }
-    }
-
-    // Strategy 2: find first "Comments:" then grab to next "Comments:" OR known field/section header
+    // Find the "Comments:" label directly following the Yes/No match
     var labelMatch = windowText.match(/comments?\s*:?\s*/i);
     if (!labelMatch) return '';
     var afterLabel = windowText.substring(labelMatch.index + labelMatch[0].length);
 
+    // Form field & section boundary pattern:
+    // Stops before subsequent form questions, field labels, or section headers
+    var BOUNDARY_REGEX = /\s*(?:Test\s*Date\s*:?|Trucks\b(?:\s*Are\s+the\s+following)?|Are\s+the\s+following\s+in\s+good\s+repair\??|(?:Tires|Reflectors|Wipers|Wheel\s*chocks?|Warning\s*Lights?|Horn|Brakes|Windows|Heater|Lights|Defrost|Seat\s*Belts?|Mirrors|Windshield|Others)\s*:?\s*(?:Yes|No|NA|Comments:)|General\b|First\s*Aid\s*Kits?:?|Fully\s*Stocked:?|Cones\s+Good\s*condition|Triangles\s+(?:Good\s*condition|Need\s*more)|Signs\s+(?:Good\s*condition|Full\s*set)|Crane\s*log\s*books?|Log\s*book\s*in\s*unit:?|Mileage\s*books?|Need\s*new\s*book:?|White\s*slips\s*to\s*foreman:?|Hot\s*Sticks?\s+Good\s*condition|Insulated\s*Jumpers:?|Manuf(?:\.|\s+operation)?\s*manual|Manual\s*in\s*unit:?|Fire\s*Extinguisher\b|Properly\s*charged:?|Monthly\s*inspection(?:\s*done)?:?|Tag\s*signed\s*off:?|AED\b|Any\s*damage\s*visible:?|2\s*sets?\s*of\s*defibrillation|Expiration\s*date\s*of\s*pads|Visual\s*Rescue\s*Ready|Fall\s*Protection(?:\s*gear)?|Harnesses(?:\s*\/?\s*lanyards?)?|Tools\b|Hot\s*Hoist\s+Good|Chains?,?\s*chokers?,?\s*slings?\s+tagged|Barriers\s+Good|Misc\s*Comments?\b|Date\s*:\s*[A-Z][a-z]{2}|Unit\s*#\s*:|Job\s*#\s*:|Odometer\s*:|Inspected\s*by\s*:|\[PDF\s*#\d+\s*CONTENT\])\b/i;
+
+    var stopMatch = afterLabel.match(BOUNDARY_REGEX);
     var nextCmIdx = afterLabel.search(/\s+comments?\s*:/i);
-    // Stop at known question-style headers (e.g. "Good condition?:")
-    // Also stop at Trucks section and Misc Comments to prevent comment bleed-through
-    var fieldStop = afterLabel.search(/\s+(?:Test Date|Insulated Jumpers|Good condition|Fully Stocked|Properly charged|Monthly inspection|Expiration|AED|Fall Protection|Harnesses|Crane|Mileage|Signs|Triangles|Cones|Hot Hoist|Barriers|Fire Extinguisher|Hot Stick|Rubber|First Aid|Manuf|Trucks|Misc\s*Comments?|Tires|Wheel\s*chocks?|Brakes?|Wipers?|Horn\b|Heater|Seat\s*Belts?|Reflectors?|Warning\s*Lights?)\s*[?:.]?\s*(?:Yes|No|NA|Are\s)/i);
-    // Stop on AED-specific line items to prevent them from bleeding into previous comments
-    var aedStop = afterLabel.search(/\s*(?:2\s*sets?\s*of\s*defibrillation\s*pads|Expiration\s*date\s*of\s*pads\s*Set\s*[1-2]|Visual\s*Rescue\s*Ready\s*Light\s*is)\b/i);
-    // Also stop at standalone section-header words at the start of a line (no ? or : required)
-    // This prevents comment text from one section bleeding into the next section's header
-    var lineHeaderStop = afterLabel.search(/\n\s*(?:Cones|Triangles|Signs|Barriers|Hot Hoist|Hot Stick|Chains|Chokers|AED|Fall Protection|Harnesses|Crane|Mileage|Fire Extinguisher|Insulated Jumpers|First Aid|Rubber Goods|Trucks)\s*\n/i);
-    // Also stop at inline section headers (for normalized text without newlines)
-    var inlineStop = afterLabel.search(/\s+(?:Trucks|Misc\s*Comments?)\s+(?:Are\s|Comments?\s*:)/i);
-    if (inlineStop >= 0) fieldStop = (fieldStop >= 0) ? Math.min(fieldStop, inlineStop) : inlineStop;
 
     var stopAt = afterLabel.length;
-    if (nextCmIdx  >= 0) stopAt = Math.min(stopAt, nextCmIdx);
-    if (fieldStop  >= 0) stopAt = Math.min(stopAt, fieldStop);
-    if (aedStop   >= 0) stopAt = Math.min(stopAt, aedStop);
-    if (lineHeaderStop >= 0) stopAt = Math.min(stopAt, lineHeaderStop);
+    if (stopMatch && stopMatch.index !== undefined) stopAt = Math.min(stopAt, stopMatch.index);
+    if (nextCmIdx >= 0) stopAt = Math.min(stopAt, nextCmIdx);
     stopAt = Math.min(stopAt, 500);
 
     var rawComment = afterLabel.substring(0, stopAt).trim().replace(/\s+/g, ' ');
-    if (rawComment.length < 5) return '';
+    // Strip trailing "Test Date:?" if it leaked into the end of comment
+    rawComment = rawComment.replace(/\s*Test\s*Date\s*:?\s*$/i, '').trim();
+
+    if (rawComment.length < 4) return '';
     // Reject if it captures a form question rather than actual comment text
     if (/\?:/.test(rawComment)) return '';
     // Reject standalone section labels (only word chars and slashes, no spaces or punctuation)
     if (/^[\w\/]+$/.test(rawComment)) return '';
     if (/^(n\/?a|none|ok|good|yes|no|na|-+)$/i.test(rawComment)) return '';
+    if (/^(?:test\s*date|trucks|are\s+the\s+following|white\s*slips|log\s*book|mileage|signs|cones|triangles)/i.test(rawComment)) return '';
+    if (/\[PDF\s*#\d+\s*CONTENT\]/i.test(rawComment)) return '';
+
     return rawComment;
   }
 
@@ -9743,7 +9722,24 @@ function extractSafetyChecklistIssues(pdfText, context) {
             var passComment = extractPdfComment(match);
             if (passComment) {
               // Only create a row if the comment contains actionable language
-              var isActionable = /needs?\s|need\s|requir|replac|expir|missing|broken|fix|repair|no\s+(?:log|book|manual)|not\s+in|not\s+have|do\s+not\s+have|don'?t\s+have|without|absent|lack|test(?:ed|ing)?\s|due|date\s+of\s+\d{4}|200\d|201\d|202[0-5]|battery|batteries|low\b|dead|beep|chirp|red\s*light|bad\b|fail|defect|inspect|recharge/i.test(passComment);
+              var isActionable = /needs?\s+(?:to\s+be\s+)?(?:re-?test|replac|fix|repair|inspect)|re-?test(?:ed|ing)?\b|out\s+of\s+test\b|testing\s+due\b|replac|expir|missing\b|broken\b|fix\b|damaged?\b|no\s+(?:log|book|manual)|not\s+in\b|not\s+have\b|do\s+not\s+have\b|don'?t\s+have\b|without\b|absent\b|lack\b|battery|batteries|low\b|dead\b|beep|chirp|red\s*light|bad\b|fail\b|defect|recharge/i.test(passComment);
+
+              // Reject false positives: form headers / instructions / non-issues
+              if (/^(?:test\s*date:?|trucks|are\s+the\s+following|white\s*slips|log\s*book|mileage|signs|cones|triangles)/i.test(passComment)) {
+                isActionable = false;
+              }
+              if (/(?:good\s*repair|inspected\s*by|^test\s*date)/i.test(passComment)) {
+                isActionable = false;
+              }
+              // For Wheel Chocks, comments must specifically reference wheel chocks
+              if (equipmentType === "Wheel Chocks" && !/chock/i.test(passComment)) {
+                isActionable = false;
+              }
+              // For Barriers, comments mentioning trucks / repair questions are form bleed-through
+              if (equipmentType === "Barriers" && /trucks|repair/i.test(passComment)) {
+                isActionable = false;
+              }
+
               if (isActionable) {
                 flagged[commentFlagKey] = true;
                 Logger.log("  ** NOTE (passed check but has actionable comment): " + equipmentType + " - " + passComment.substring(0, 80));
@@ -9791,6 +9787,53 @@ function extractSafetyChecklistIssues(pdfText, context) {
 
   // Hot Sticks
   checkEquipment("Hot Sticks", "Good Condition", /hot\s*sticks?\s+good\s*condition\s*\??\s*:?\s*(yes|no)/i, "no", "Hot Sticks not in good condition");
+
+  // Hot Sticks Test Date validation (24-month OSHA interval per OSHA 1910.269 / ASTM F711)
+  // Pattern: "Hot Sticks ... Test Date: Jan 01, 2027" or "Test Date: 01/01/2027"
+  var hsTestMatch = text.match(/hot\s*sticks?[\s\S]{0,350}?test\s*date\s*:?\s*([A-Za-z]{3,9}\s+\d{1,2},?\s+\d{4}|\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/i);
+  var hsTestDate = null;
+  var hsIsExpired = false;
+
+  if (hsTestMatch && hsTestMatch[1]) {
+    var hsTestDateStr = hsTestMatch[1].trim();
+    try {
+      var parsedHsDate = new Date(hsTestDateStr);
+      if (!isNaN(parsedHsDate.getTime())) {
+        hsTestDate = new Date(parsedHsDate.getFullYear(), parsedHsDate.getMonth(), parsedHsDate.getDate(), 12, 0, 0);
+        var hsCompareDate = context.date || new Date();
+        var hsExpirationDate = new Date(hsTestDate);
+        hsExpirationDate.setMonth(hsExpirationDate.getMonth() + 24);
+
+        // If test date is in the future, it is valid and NOT expired.
+        // If in the past, it is only expired if hsExpirationDate < hsCompareDate.
+        if (hsTestDate < hsCompareDate && hsExpirationDate < hsCompareDate) {
+          hsIsExpired = true;
+        }
+        Logger.log("  Hot Sticks Test Date: " + hsTestDateStr + ", Expires: " + hsExpirationDate.toDateString() + ", Expired: " + hsIsExpired);
+      }
+    } catch (e) {
+      Logger.log("  Could not parse Hot Sticks test date: " + e);
+    }
+  }
+
+  if (hsIsExpired && !flagged["Hot Sticks_Expired"] && !flagged["Hot Sticks_Good Condition"]) {
+    flagged["Hot Sticks_Expired"] = true;
+    issues.push([
+      context.date,
+      context.reportType,
+      context.jobNumber,
+      context.foreman,
+      context.vehicleNumber,
+      "Hot Sticks",
+      "Hot Sticks EXPIRED / Due for Testing - Last test: " + Utilities.formatDate(hsTestDate, Session.getScriptTimeZone(), "MMM dd, yyyy"),
+      "Needs Attention",
+      hsTestDate,
+      context.messageId,
+      "",
+      context.subject || "",
+      context.receivedDate || ""
+    ]);
+  }
 
   // Insulated Jumpers (note: PDF form has "Insulated Jumpers:" with colon before "Good condition?")
   checkEquipment("Insulated Jumpers", "Good Condition", /insulated\s*jumpers?[\s:]+good\s*condition\s*\??\s*:?\s*(yes|no)/i, "no", "Insulated Jumpers not in good condition");
@@ -20348,3 +20391,69 @@ function scanForUncreditedLogs() {
 
   return result;
 }
+
+/**
+ * Scans the Safety Equipment Needs sheet and marks any false-positive rows as 'Resolved':
+ * - Hot Sticks / Insulated Jumpers where the issue note is simply "Test Date:"
+ * - Barriers where the issue is "Trucks Are the following in good repair?"
+ * - Wheel Chocks where the issue captured non-wheel-chock truck checklist fields
+ */
+function cleanupFalsePositiveEquipmentNeeds() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sheet = ss.getSheetByName(SAFETY_EQUIPMENT_SHEET_NAME) || ss.getSheetByName('Safety Equipment Needs');
+  if (!sheet) {
+    Logger.log('cleanupFalsePositiveEquipmentNeeds: Sheet not found');
+    return { cleaned: 0 };
+  }
+
+  var lastRow = sheet.getLastRow();
+  if (lastRow <= 1) return { cleaned: 0 };
+
+  var data = sheet.getRange(2, 1, lastRow - 1, 14).getValues();
+  var cleanedCount = 0;
+
+  for (var i = 0; i < data.length; i++) {
+    var rowNum = i + 2;
+    var equipType = String(data[i][5] || '').trim(); // Col F (index 5)
+    var desc = String(data[i][6] || '').trim();      // Col G (index 6)
+    var status = String(data[i][7] || '').trim();    // Col H (index 7)
+    var notes = String(data[i][10] || '').trim();    // Col K (index 10)
+
+    if (status.toLowerCase().indexOf('resolve') !== -1) continue;
+
+    var isFp = false;
+    // 1. Hot Sticks / Jumpers where note is just "Test Date:"
+    if (/hot stick|insulated jumper/i.test(equipType)) {
+      if (/note:\s*test\s*date:?\s*$/i.test(desc) || /^test\s*date:?\s*$/i.test(notes)) {
+        isFp = true;
+      }
+    }
+
+    // 2. Barriers capturing "Trucks Are the following in good repair?"
+    if (/barrier/i.test(equipType)) {
+      if (/trucks\s+are\s+the\s+following/i.test(desc) || /trucks\s+are\s+the\s+following/i.test(notes)) {
+        isFp = true;
+      }
+    }
+
+    // 3. Wheel Chocks capturing truck checklist fields
+    if (/wheel chock/i.test(equipType)) {
+      if (/note:\s*(?:windshield|wipers|horn|heater|seat\s*belts?|others):/i.test(desc) ||
+          /^(?:windshield|wipers|horn|heater|seat\s*belts?|others):/i.test(notes) ||
+          (/\[PDF\s*#\d+\s*CONTENT\]/i.test(notes) && !/chock/i.test(notes))) {
+        isFp = true;
+      }
+    }
+
+    if (isFp) {
+      cleanedCount++;
+      sheet.getRange(rowNum, 8).setValue('Resolved'); // Col H: Status
+      sheet.getRange(rowNum, 14).setValue(Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'MM/dd/yyyy')); // Col N: Resolved On
+      Logger.log('Cleaned FP row ' + rowNum + ': ' + equipType + ' - ' + desc);
+    }
+  }
+
+  Logger.log('cleanupFalsePositiveEquipmentNeeds: Cleaned ' + cleanedCount + ' false positive rows.');
+  return { cleaned: cleanedCount };
+}
+

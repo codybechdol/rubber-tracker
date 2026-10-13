@@ -8511,6 +8511,27 @@ class TripPlannerApp {
         if (isResolved) return;
         if (!equipType || equipType.toLowerCase() === 'no issues') return;
 
+        const desc = String(r['Issue Description'] || '').trim();
+        const rawNotes = String(r['Notes'] || '').trim();
+
+        // Defensive filter for known false positives from Safety Checklist:
+        // 1. Hot Sticks / Jumpers where note is just "Test Date:"
+        if (/hot stick|insulated jumper/i.test(equipType)) {
+          if (/note:\s*test\s*date:?\s*$/i.test(desc) || /^test\s*date:?\s*$/i.test(rawNotes)) return;
+        }
+        // 2. Barriers capturing form prompt "Trucks Are the following in good repair?"
+        if (/barrier/i.test(equipType) && (/trucks\s+are\s+the\s+following/i.test(desc) || /trucks\s+are\s+the\s+following/i.test(rawNotes))) {
+          return;
+        }
+        // 3. Wheel Chocks capturing truck checklist fields
+        if (/wheel chock/i.test(equipType)) {
+          if (/note:\s*(?:windshield|wipers|horn|heater|seat\s*belts?|others):/i.test(desc) ||
+              /^(?:windshield|wipers|horn|heater|seat\s*belts?|others):/i.test(rawNotes) ||
+              (/\[PDF\s*#\d+\s*CONTENT\]/i.test(rawNotes) && !/chock/i.test(rawNotes))) {
+            return;
+          }
+        }
+
         // Use comprehensive getCrewInfo resolver for active crew, foreman, and true physical location
         const crewInfo = this.getCrewInfo(rawCrew, worker, r['Location']);
         const crewId = rawCrew || crewInfo.crewId || 'Unassigned';

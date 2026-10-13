@@ -610,6 +610,24 @@ class TaskManagerApp {
         const equipType = String(r['Equipment Type'] || r['Equipment'] || r['Type'] || '').trim();
         if (!equipType || equipType.toLowerCase() === 'no issues') return;
 
+        const desc = String(r['Issue Description'] || '').trim();
+        const rawNotes = String(r['Notes'] || '').trim();
+
+        // Defensive filter for known false positives from Safety Checklist:
+        if (/hot stick|insulated jumper/i.test(equipType)) {
+          if (/note:\s*test\s*date:?\s*$/i.test(desc) || /^test\s*date:?\s*$/i.test(rawNotes)) return;
+        }
+        if (/barrier/i.test(equipType) && (/trucks\s+are\s+the\s+following/i.test(desc) || /trucks\s+are\s+the\s+following/i.test(rawNotes))) {
+          return;
+        }
+        if (/wheel chock/i.test(equipType)) {
+          if (/note:\s*(?:windshield|wipers|horn|heater|seat\s*belts?|others):/i.test(desc) ||
+              /^(?:windshield|wipers|horn|heater|seat\s*belts?|others):/i.test(rawNotes) ||
+              (/\[PDF\s*#\d+\s*CONTENT\]/i.test(rawNotes) && !/chock/i.test(rawNotes))) {
+            return;
+          }
+        }
+
         const rowKey = `Safety Equipment Needs_${idx + 2}`;
         const taskId = `safety_equip_${idx + 2}`;
         if (this.db.isTaskDismissed(taskId) || this.db.isTaskDismissed(rowKey)) return;
