@@ -167,7 +167,7 @@ class SMSDialogEngine {
             </span>
           </div>
         </div>
-        <div>
+        <div style="display: flex; align-items: center; gap: 8px;">
           ${ctx.phone ? `
             <div style="font-size: 14px; font-weight: 700; color: #60a5fa; background: rgba(59, 130, 246, 0.15); padding: 4px 10px; border-radius: 6px; border: 1px solid rgba(59, 130, 246, 0.3);">
               📞 ${this.escapeHtml(ctx.phone)}
@@ -177,6 +177,11 @@ class SMSDialogEngine {
               ⚠️ No Phone on File
             </div>
           `}
+          ${ctx.isFirstAidCpr ? `
+            <button class="btn btn-secondary" style="font-size: 11px; padding: 4px 8px; display: inline-flex; align-items: center; gap: 4px; color: #34d399; border-color: rgba(16, 185, 129, 0.4); background: rgba(16, 185, 129, 0.15); cursor: pointer;" title="Switch to Class Instructions (Stage 2)" onclick="window.smsDialogEngine.openClassInstructionsSms('${this.escapeJs(ctx.employeeName)}', '${this.escapeJs(ctx.certType)}', '${this.escapeJs(ctx.expirationDate)}', ${ctx.rowIdx}, ${ctx.colIdx}, '${this.escapeJs(ctx.sheetName)}');">
+              📅 Class Instructions
+            </button>
+          ` : ''}
         </div>
       </div>
 
@@ -449,7 +454,8 @@ class SMSDialogEngine {
     if (!ctx) return;
 
     const todayStr = new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
-    const notifStatus = `Sent ${todayStr}`;
+    const isInstructions = ctx.type === 'instructions';
+    const notifStatus = isInstructions ? `Instructions Sent ${todayStr}` : `Sent ${todayStr}`;
 
     const snap = (this.db && typeof this.db.getSnapshot === 'function') ? this.db.getSnapshot() : (this.db ? this.db.snapshot : null);
     const certsTable = snap && snap.tables ? (snap.tables['expiring_certs'] || snap.tables['Expiring Certs']) : null;
@@ -476,6 +482,7 @@ class SMSDialogEngine {
 
       if (matchedRow) {
         const targetRowIdx = matchedRow._rowIdx || ctx.rowIdx;
+        const oldSmsVal = matchedRow['SMS'] || '💬 Send SMS';
         matchedRow['SMS'] = notifStatus;
         if (certsTable.rawGrid && targetRowIdx && certsTable.rawGrid[targetRowIdx - 1]) {
           certsTable.rawGrid[targetRowIdx - 1][colIdx - 1] = notifStatus;
@@ -489,7 +496,7 @@ class SMSDialogEngine {
             row: targetRowIdx,
             col: colIdx,
             header: headers[colIdx - 1] || 'SMS',
-            oldValue: '💬 Send SMS',
+            oldValue: oldSmsVal,
             value: notifStatus
           });
         }
@@ -524,7 +531,8 @@ class SMSDialogEngine {
     }
 
     if (typeof window.showToast === 'function') {
-      window.showToast(`✅ Recorded SMS notification for ${ctx.employeeName} (${ctx.certType})`);
+      const actionName = isInstructions ? 'class instructions SMS' : 'SMS notification';
+      window.showToast(`✅ Recorded ${actionName} for ${ctx.employeeName} (${ctx.certType})`);
     }
 
     setTimeout(() => {
@@ -535,7 +543,349 @@ class SMSDialogEngine {
   closeSmsModal() {
     const modal = document.getElementById('sms-notification-modal');
     if (modal) modal.classList.remove('active');
+    const titleEl = document.getElementById('sms-notification-modal-title');
+    if (titleEl) titleEl.innerHTML = '<span style="font-weight: 700;">Send SMS Notification</span>';
+    const modalHeader = modal ? modal.querySelector('.modal-header') : null;
+    if (modalHeader) {
+      modalHeader.style.background = 'linear-gradient(135deg, #f59e0b 0%, #d97706 100%)';
+    }
+    const markBtn = modal ? modal.querySelector('.modal-footer .btn-success') : null;
+    if (markBtn) {
+      markBtn.innerHTML = '<span>✅</span> Mark as Notified';
+      markBtn.title = 'Mark this employee as notified without opening messaging app';
+    }
     this.currentContext = null;
+  }
+
+  /**
+   * Opens the Class Instructions / Registration SMS modal (Stage 2)
+   */
+  openClassInstructionsSms(employeeName, certType, expirationDate, rowIdx = null, colIdx = null, sheetName = 'Expiring Certs') {
+    const modal = document.getElementById('sms-notification-modal');
+    const body = document.getElementById('sms-notification-modal-body');
+    const titleEl = document.getElementById('sms-notification-modal-title');
+    if (!modal || !body) return;
+
+    if (titleEl) {
+      titleEl.innerHTML = '<span style="font-size: 18px;">📅</span> <span style="font-weight: 700;">Send Class Instructions & Registration</span>';
+    }
+    const modalHeader = modal.querySelector('.modal-header');
+    if (modalHeader) {
+      modalHeader.style.background = 'linear-gradient(135deg, #059669 0%, #047857 100%)';
+    }
+    const markBtn = modal.querySelector('.modal-footer .btn-success');
+    if (markBtn) {
+      markBtn.innerHTML = '<span>📋</span> Mark Instructions Sent';
+      markBtn.title = 'Mark class instructions as sent without opening messaging app';
+    }
+
+    const phone = this.getEmployeePhone(employeeName);
+    let cleanPhone = phone.replace(/[^0-9]/g, '');
+    if (cleanPhone.length === 10) cleanPhone = '1' + cleanPhone;
+
+    const firstName = String(employeeName || '').trim().split(' ')[0] || 'there';
+
+    let dateStr = '';
+    let isExpired = false;
+    if (expirationDate && expirationDate !== 'N/A' && expirationDate !== '—') {
+      dateStr = String(expirationDate).trim();
+      const d = new Date(expirationDate);
+      if (!isNaN(d.getTime())) {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        isExpired = d < today;
+      }
+    }
+
+    this.currentContext = {
+      type: 'instructions',
+      employeeName,
+      firstName,
+      certType: certType || 'CPR',
+      expirationDate: dateStr,
+      isExpired,
+      phone,
+      cleanPhone,
+      rowIdx,
+      colIdx,
+      sheetName,
+      classType: 'Online'
+    };
+
+    this.renderInstructionsModalUI(body);
+    modal.classList.add('active');
+
+    setTimeout(() => this.updateInstructionsMessage(), 50);
+  }
+
+  /**
+   * Renders the Stage 2 Class Instructions modal content
+   */
+  renderInstructionsModalUI(container) {
+    const ctx = this.currentContext;
+    if (!ctx) return;
+
+    let html = `
+      <!-- Employee Info Summary Card -->
+      <div style="background-color: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 8px; padding: 14px; margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+        <div>
+          <div style="font-size: 16px; font-weight: 800; color: var(--text-primary); display: flex; align-items: center; gap: 6px;">
+            <span>👤</span> ${this.escapeHtml(ctx.employeeName)}
+          </div>
+          <div style="font-size: 13px; color: var(--text-secondary); margin-top: 2px;">
+            <strong>${this.escapeHtml(ctx.certType)}</strong> &nbsp;·&nbsp;
+            <span style="color: ${ctx.isExpired ? '#ef4444' : '#f59e0b'}; font-weight: 700;">
+              ${ctx.isExpired ? '⚠️ Expired: ' : '⏳ Expires: '} ${this.escapeHtml(ctx.expirationDate || 'N/A')}
+            </span>
+          </div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+          ${ctx.phone ? `
+            <div style="font-size: 14px; font-weight: 700; color: #60a5fa; background: rgba(59, 130, 246, 0.15); padding: 4px 10px; border-radius: 6px; border: 1px solid rgba(59, 130, 246, 0.3);">
+              📞 ${this.escapeHtml(ctx.phone)}
+            </div>
+          ` : `
+            <div style="font-size: 12px; color: #ef4444; background: rgba(239, 68, 68, 0.15); padding: 4px 10px; border-radius: 6px; border: 1px solid rgba(239, 68, 68, 0.3);">
+              ⚠️ No Phone on File
+            </div>
+          `}
+          <button class="btn btn-secondary" style="font-size: 11px; padding: 4px 8px; display: inline-flex; align-items: center; gap: 4px; color: #f59e0b; border-color: rgba(245, 158, 11, 0.4); background: rgba(245, 158, 11, 0.15); cursor: pointer;" title="Switch back to initial notification (Stage 1)" onclick="window.smsDialogEngine.openCertSms('${this.escapeJs(ctx.employeeName)}', '${this.escapeJs(ctx.certType)}', '${this.escapeJs(ctx.expirationDate)}', ${ctx.rowIdx}, ${ctx.colIdx}, '${this.escapeJs(ctx.sheetName)}');">
+            ↩️ Initial Notification
+          </button>
+        </div>
+      </div>
+
+      <!-- Class Type & Registration Details Card -->
+      <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 14px; margin-bottom: 16px;">
+        <div style="font-size: 13px; font-weight: 700; color: #34d399; margin-bottom: 10px; display: flex; align-items: center; gap: 6px;">
+          <span>🎓</span> Select Class Type & Schedule Details:
+        </div>
+
+        <!-- Class Type Selection -->
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; margin-bottom: 14px;">
+          <label style="border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 12px; background: var(--bg-primary); display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none;">
+            <input type="radio" name="dt-sms-inst-classtype" value="Online" checked onchange="window.smsDialogEngine.onInstructionsClassTypeChange()" style="accent-color: #10b981; width: 16px; height: 16px;">
+            <span style="font-size: 12.5px; font-weight: 700;">💻 Online Class</span>
+          </label>
+          <label style="border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 12px; background: var(--bg-primary); display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none;">
+            <input type="radio" name="dt-sms-inst-classtype" value="InPersonMPC" onchange="window.smsDialogEngine.onInstructionsClassTypeChange()" style="accent-color: #10b981; width: 16px; height: 16px;">
+            <span style="font-size: 12.5px; font-weight: 700;">🧑‍🏫 In Person with Me</span>
+          </label>
+          <label style="border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 12px; background: var(--bg-primary); display: flex; align-items: center; gap: 8px; cursor: pointer; user-select: none;">
+            <input type="radio" name="dt-sms-inst-classtype" value="InPersonMSLCAT" onchange="window.smsDialogEngine.onInstructionsClassTypeChange()" style="accent-color: #10b981; width: 16px; height: 16px;">
+            <span style="font-size: 12.5px; font-weight: 700;">🏢 In Person MSLCAT</span>
+          </label>
+        </div>
+
+        <!-- Inputs for Online Class -->
+        <div id="dt-sms-inst-online-fields" style="display: block;">
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 8px;">
+            <div>
+              <label style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px; font-weight: 600;">Class Start Date *</label>
+              <input type="date" id="dt-sms-inst-start" onchange="window.smsDialogEngine.updateInstructionsMessage()" style="width: 100%; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 7px 10px; font-size: 13px;">
+            </div>
+            <div>
+              <label style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px; font-weight: 600;">Last Day (End Date) *</label>
+              <input type="date" id="dt-sms-inst-end" onchange="window.smsDialogEngine.updateInstructionsMessage()" style="width: 100%; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 7px 10px; font-size: 13px;">
+            </div>
+            <div>
+              <label style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px; font-weight: 600;">Other Classmates *</label>
+              <input type="number" id="dt-sms-inst-size" min="1" value="1" onchange="window.smsDialogEngine.updateInstructionsMessage()" onkeyup="window.smsDialogEngine.updateInstructionsMessage()" style="width: 100%; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 7px 10px; font-size: 13px;">
+            </div>
+          </div>
+          <div style="font-size: 11.5px; color: #94a3b8; line-height: 1.4;">
+            💡 <em>Red Cross online course reminder: Email invitation will come from <strong>"Sales Force"</strong>.</em>
+          </div>
+        </div>
+
+        <!-- Inputs for In Person with Me -->
+        <div id="dt-sms-inst-inperson-fields" style="display: none;">
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-bottom: 8px;">
+            <div>
+              <label style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px; font-weight: 600;">Class Date *</label>
+              <input type="date" id="dt-sms-inst-ip-date" onchange="window.smsDialogEngine.updateInstructionsMessage()" style="width: 100%; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 7px 10px; font-size: 13px;">
+            </div>
+            <div>
+              <label style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px; font-weight: 600;">Start Time</label>
+              <input type="time" id="dt-sms-inst-ip-start" onchange="window.smsDialogEngine.updateInstructionsMessage()" style="width: 100%; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 7px 10px; font-size: 13px;">
+            </div>
+            <div>
+              <label style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px; font-weight: 600;">End Time</label>
+              <input type="time" id="dt-sms-inst-ip-end" onchange="window.smsDialogEngine.updateInstructionsMessage()" style="width: 100%; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 7px 10px; font-size: 13px;">
+            </div>
+            <div>
+              <label style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px; font-weight: 600;">Location</label>
+              <input type="text" id="dt-sms-inst-ip-loc" placeholder="e.g. Helena Shop" onkeyup="window.smsDialogEngine.updateInstructionsMessage()" style="width: 100%; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 7px 10px; font-size: 13px;">
+            </div>
+          </div>
+        </div>
+
+        <!-- Inputs for In Person MSLCAT -->
+        <div id="dt-sms-inst-mslcat-fields" style="display: none;">
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 8px;">
+            <div>
+              <label style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px; font-weight: 600;">Class Start Date *</label>
+              <input type="date" id="dt-sms-inst-mslcat-start" onchange="window.smsDialogEngine.updateInstructionsMessage()" style="width: 100%; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 7px 10px; font-size: 13px;">
+            </div>
+            <div>
+              <label style="font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px; font-weight: 600;">Class End Date</label>
+              <input type="date" id="dt-sms-inst-mslcat-end" onchange="window.smsDialogEngine.updateInstructionsMessage()" style="width: 100%; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 7px 10px; font-size: 13px;">
+            </div>
+          </div>
+          <div style="font-size: 11.5px; color: #94a3b8; line-height: 1.4;">
+            💡 <em>MSLCAT Training Center located in Helena.</em>
+          </div>
+        </div>
+      </div>
+
+      <!-- Message Editor / Preview Box -->
+      <div style="margin-bottom: 16px;">
+        <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <label style="font-size: 12px; font-weight: 700; color: var(--text-secondary); margin: 0;">💬 Text Message Content</label>
+            <span id="dt-sms-inst-char-count" style="font-size: 11px; color: var(--text-muted);">(0 characters)</span>
+          </div>
+          <label style="display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-muted); cursor: pointer; margin: 0;">
+            <input type="checkbox" id="dt-sms-inst-edit-toggle" onchange="window.smsDialogEngine.toggleInstructionsEditMode()" style="accent-color: #10b981;">
+            <span>Edit message text manually</span>
+          </label>
+        </div>
+        <textarea id="dt-sms-message-text" rows="6" onkeyup="window.smsDialogEngine.updateInstructionsCharCount()" style="width: 100%; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 10px; font-family: sans-serif; font-size: 13px; line-height: 1.45; resize: vertical;"></textarea>
+      </div>
+
+      <!-- Action notice -->
+      <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 6px; padding: 8px 12px; font-size: 12px; color: #a7f3d0; display: flex; align-items: center; gap: 8px; margin-bottom: 16px;">
+        <span>💡</span> Clicking <strong>Launch SMS App</strong> opens your messaging application with recipient and text pre-filled. You can also copy to clipboard.
+      </div>
+    `;
+
+    container.innerHTML = html;
+  }
+
+  onInstructionsClassTypeChange() {
+    const selected = this.getSelectedInstructionsClassType();
+
+    const onlineFields = document.getElementById('dt-sms-inst-online-fields');
+    const ipFields = document.getElementById('dt-sms-inst-inperson-fields');
+    const mslcatFields = document.getElementById('dt-sms-inst-mslcat-fields');
+
+    if (onlineFields) onlineFields.style.display = selected === 'Online' ? 'block' : 'none';
+    if (ipFields) ipFields.style.display = selected === 'InPersonMPC' ? 'block' : 'none';
+    if (mslcatFields) mslcatFields.style.display = selected === 'InPersonMSLCAT' ? 'block' : 'none';
+
+    this.updateInstructionsMessage();
+  }
+
+  getSelectedInstructionsClassType() {
+    const radios = document.getElementsByName('dt-sms-inst-classtype');
+    for (const r of radios) {
+      if (r.checked) return r.value;
+    }
+    return 'Online';
+  }
+
+  toggleInstructionsEditMode() {
+    const isEdit = document.getElementById('dt-sms-inst-edit-toggle')?.checked;
+    const textarea = document.getElementById('dt-sms-message-text');
+    if (textarea) textarea.readOnly = !isEdit;
+    if (!isEdit) {
+      this.updateInstructionsMessage();
+    }
+  }
+
+  updateInstructionsCharCount() {
+    const textarea = document.getElementById('dt-sms-message-text');
+    const countEl = document.getElementById('dt-sms-inst-char-count');
+    if (!textarea || !countEl) return;
+    const len = textarea.value.length;
+    countEl.textContent = `(${len} characters)`;
+    if (len > 320) {
+      countEl.style.color = '#ef4444';
+      countEl.style.fontWeight = '700';
+    } else if (len > 160) {
+      countEl.style.color = '#f59e0b';
+      countEl.style.fontWeight = '700';
+    } else {
+      countEl.style.color = 'var(--text-muted)';
+      countEl.style.fontWeight = 'normal';
+    }
+  }
+
+  updateInstructionsMessage() {
+    const ctx = this.currentContext;
+    if (!ctx || ctx.type !== 'instructions') return;
+
+    const isManual = document.getElementById('dt-sms-inst-edit-toggle')?.checked;
+    if (isManual) {
+      this.updateInstructionsCharCount();
+      return;
+    }
+
+    const classType = this.getSelectedInstructionsClassType();
+    const firstName = ctx.firstName || 'there';
+    let message = '';
+
+    if (classType === 'Online') {
+      const rawStart = document.getElementById('dt-sms-inst-start')?.value;
+      const rawEnd = document.getElementById('dt-sms-inst-end')?.value;
+      const startStr = rawStart ? this.formatDateMMDDYYYY(rawStart) : '';
+      const endStr = rawEnd ? this.formatDateMMDDYYYY(rawEnd) : '';
+      const rawSize = document.getElementById('dt-sms-inst-size')?.value;
+      const classSize = parseInt(rawSize, 10) || 1;
+
+      message = `Hi ${firstName}, I have you registered for the Online Class. `;
+      if (startStr && endStr) {
+        message += `Class starts on ${startStr} and the last day is ${endStr}. `;
+      } else if (startStr) {
+        message += `Class starts on ${startStr}. `;
+      } else {
+        message += `Class starts on (start date) and the last day is (end date). `;
+      }
+      const empText = classSize === 1 ? '1 other employee' : `${classSize} other employees`;
+      message += `There will be ${empText} in the class with you and I cannot complete the class until everyone has finished with the online portion. `;
+      message += `Don't be the guy that makes everyone else wait. `;
+      message += `The class is through Red Cross but the invitation email will come from "Sales Force". `;
+      message += `If you don't see it double check your spam folder. If you still don't see it, let me know.`;
+    } else if (classType === 'InPersonMPC') {
+      const rawDate = document.getElementById('dt-sms-inst-ip-date')?.value;
+      const dateStr = rawDate ? this.formatDateMMDDYYYY(rawDate) : '';
+      const start = document.getElementById('dt-sms-inst-ip-start')?.value;
+      const end = document.getElementById('dt-sms-inst-ip-end')?.value;
+      const loc = document.getElementById('dt-sms-inst-ip-loc')?.value.trim();
+
+      message = `Hi ${firstName}, I have you scheduled for the In Person class with me. `;
+      if (dateStr) {
+        message += `Class is on ${dateStr}`;
+        if (start) {
+          message += ` from ${this.formatTimeAMPM(start)}`;
+          if (end) message += ` - ${this.formatTimeAMPM(end)}`;
+        }
+        if (loc) message += ` in ${loc}`;
+        message += `. `;
+      } else {
+        message += `Class is on (date). `;
+      }
+      message += `Let me know if you have any questions!`;
+    } else if (classType === 'InPersonMSLCAT') {
+      const rawStart = document.getElementById('dt-sms-inst-mslcat-start')?.value;
+      const rawEnd = document.getElementById('dt-sms-inst-mslcat-end')?.value;
+      const startStr = rawStart ? this.formatDateMMDDYYYY(rawStart) : '';
+      const endStr = rawEnd ? this.formatDateMMDDYYYY(rawEnd) : '';
+
+      message = `Hi ${firstName}, I have you registered for the In Person class at the MSLCAT Training Center in Helena. `;
+      if (startStr && endStr) {
+        message += `Class starts on ${startStr} and ends on ${endStr}. `;
+      } else if (startStr) {
+        message += `Class is on ${startStr}. `;
+      } else {
+        message += `Class is on (date). `;
+      }
+      message += `Let me know if you have any questions!`;
+    }
+
+    const textarea = document.getElementById('dt-sms-message-text');
+    if (textarea) textarea.value = message;
+    this.updateInstructionsCharCount();
   }
 
   formatDateMMDDYYYY(dateStr) {
@@ -566,6 +916,17 @@ class SMSDialogEngine {
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#039;');
   }
+
+  escapeJs(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+      .replace(/\\/g, '\\\\')
+      .replace(/'/g, "\\'")
+      .replace(/"/g, '\\"')
+      .replace(/\n/g, '\\n')
+      .replace(/\r/g, '\\r');
+  }
 }
 
 window.smsDialogEngine = new SMSDialogEngine(window.localDB);
+

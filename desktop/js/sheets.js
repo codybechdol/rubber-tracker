@@ -5868,21 +5868,47 @@ class SheetNavigator {
             const rowEmp = String(row['Employee Name'] || row['Employee'] || row['Name'] || '').trim();
             const certType = String(row['Item Type'] || row['Cert Type'] || row['Type'] || '').trim();
             const expDate = String(row['Expiration Date'] || row['Expiration'] || '').trim();
+            const ctLower = certType.toLowerCase();
+            const isClassCert = ctLower.includes('cpr') || ctLower.includes('1st aid') || ctLower.includes('first aid');
 
-            if (vStr.includes('Sent') || vStr.includes('Notified')) {
-              const displayDate = vStr.replace(/^sent\s*/i, '').replace(/^notified\s*:?\s*/i, '').trim();
+            const hasNotif = vStr.includes('Sent') || vStr.includes('Notified') || vStr.includes('Instruction') || vStr.includes('Registered');
+
+            if (hasNotif) {
+              const isInstructionsSent = vStr.toLowerCase().includes('instruction') || vStr.toLowerCase().includes('registered');
+              const displayDate = vStr.replace(/^instructions?\s*sent\s*:?\s*/i, '')
+                                      .replace(/^sent\s*/i, '')
+                                      .replace(/^notified\s*:?\s*/i, '')
+                                      .replace(/^registered\s*:?\s*/i, '')
+                                      .trim();
+              const badgeLabel = isInstructionsSent ? '📋 Instructions' : '✅ Notified';
+              const badgeBg = isInstructionsSent ? 'rgba(5, 150, 105, 0.2)' : 'rgba(16, 185, 129, 0.2)';
+              const badgeColor = isInstructionsSent ? '#34d399' : '#4ade80';
+              const badgeBorder = isInstructionsSent ? 'rgba(5, 150, 105, 0.4)' : 'rgba(16, 185, 129, 0.4)';
+
               customCellHtml = `
                 <div style="display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex-wrap: wrap;">
-                  <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #4ade80; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 11px; padding: 2px 7px; border-radius: 4px; font-weight: 700; display: inline-flex; align-items: center; gap: 4px;" title="Notification logged (${this.escapeHtml(vStr)})">
-                    ✅ Notified${displayDate ? `: ${this.escapeHtml(displayDate)}` : ''}
+                  <span class="badge" style="background: ${badgeBg}; color: ${badgeColor}; border: 1px solid ${badgeBorder}; font-size: 11px; padding: 2px 7px; border-radius: 4px; font-weight: 700; display: inline-flex; align-items: center; gap: 4px;" title="Notification logged (${this.escapeHtml(vStr)})">
+                    ${badgeLabel}${displayDate ? `: ${this.escapeHtml(displayDate)}` : ''}
                   </span>
-                  <button class="btn btn-secondary" style="font-size: 11px; padding: 2px 7px; display: inline-flex; align-items: center; gap: 4px; color: #93c5fd; border-color: rgba(59, 130, 246, 0.4); background: rgba(59, 130, 246, 0.15); cursor: pointer; border-radius: 4px;" title="Send another SMS reminder to ${this.escapeHtml(rowEmp)}" onclick="if(window.smsDialogEngine){window.smsDialogEngine.openCertSms('${this.escapeJs(rowEmp)}', '${this.escapeJs(certType)}', '${this.escapeJs(expDate)}', ${sheetRowIdx}, ${colIdx + 1});}">
+                  <button class="btn btn-secondary" style="font-size: 11px; padding: 2px 7px; display: inline-flex; align-items: center; gap: 4px; color: #93c5fd; border-color: rgba(59, 130, 246, 0.4); background: rgba(59, 130, 246, 0.15); cursor: pointer; border-radius: 4px;" title="Resend initial SMS notification to ${this.escapeHtml(rowEmp)}" onclick="if(window.smsDialogEngine){window.smsDialogEngine.openCertSms('${this.escapeJs(rowEmp)}', '${this.escapeJs(certType)}', '${this.escapeJs(expDate)}', ${sheetRowIdx}, ${colIdx + 1});}">
                     💬 Resend
                   </button>
+                  ${isClassCert ? `
+                    <button class="btn btn-primary" style="font-size: 11px; padding: 2px 7px; background: linear-gradient(135deg, #059669 0%, #047857 100%); border: 1px solid #059669; color: #fff; font-weight: 700; cursor: pointer; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.2);" title="Send class instructions and registration details to ${this.escapeHtml(rowEmp)}" onclick="if(window.smsDialogEngine){window.smsDialogEngine.openClassInstructionsSms('${this.escapeJs(rowEmp)}', '${this.escapeJs(certType)}', '${this.escapeJs(expDate)}', ${sheetRowIdx}, ${colIdx + 1});}">
+                      📅 Class Instructions
+                    </button>
+                  ` : ''}
                 </div>
               `;
             } else {
-              customCellHtml = `<button class="btn btn-primary" style="font-size: 11px; padding: 2px 8px; background-color: #f59e0b; border: 1px solid #d97706; color: #fff; font-weight: 700; cursor: pointer; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.2);" title="Send SMS reminder to ${this.escapeHtml(rowEmp)}" onclick="if(window.smsDialogEngine){window.smsDialogEngine.openCertSms('${this.escapeJs(rowEmp)}', '${this.escapeJs(certType)}', '${this.escapeJs(expDate)}', ${sheetRowIdx}, ${colIdx + 1});}">💬 Send SMS</button>`;
+              customCellHtml = `
+                <div style="display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex-wrap: wrap;">
+                  <button class="btn btn-primary" style="font-size: 11px; padding: 2px 8px; background-color: #f59e0b; border: 1px solid #d97706; color: #fff; font-weight: 700; cursor: pointer; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.2);" title="Send SMS reminder to ${this.escapeHtml(rowEmp)}" onclick="if(window.smsDialogEngine){window.smsDialogEngine.openCertSms('${this.escapeJs(rowEmp)}', '${this.escapeJs(certType)}', '${this.escapeJs(expDate)}', ${sheetRowIdx}, ${colIdx + 1});}">💬 Send SMS</button>
+                  ${isClassCert ? `
+                    <button class="btn btn-secondary" style="font-size: 11px; padding: 2px 7px; display: inline-flex; align-items: center; gap: 4px; color: #34d399; border-color: rgba(16, 185, 129, 0.4); background: rgba(16, 185, 129, 0.15); cursor: pointer; border-radius: 4px;" title="Send class instructions directly to ${this.escapeHtml(rowEmp)}" onclick="if(window.smsDialogEngine){window.smsDialogEngine.openClassInstructionsSms('${this.escapeJs(rowEmp)}', '${this.escapeJs(certType)}', '${this.escapeJs(expDate)}', ${sheetRowIdx}, ${colIdx + 1});}">📅 Class Instructions</button>
+                  ` : ''}
+                </div>
+              `;
             }
           }
         }

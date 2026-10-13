@@ -3040,17 +3040,27 @@ class EmployeeProfileEngine {
                 <button class="btn btn-secondary" style="font-size: 11px; padding: 2px 7px; display: inline-flex; align-items: center; gap: 4px; border-color: rgba(59, 130, 246, 0.4); color: #93c5fd;" title="Edit Date Acquired and Expiration Date for ${this.escapeHtml(c.certType)}" onclick="window.employeeProfileEngine.openEditCertModal('${this.escapeHtml(data.displayName)}', '${this.escapeHtml(c.certType)}')">
                   <span>✏️</span> Edit
                 </button>
-                ${c.smsStatus && (c.smsStatus.includes('Sent') || c.smsStatus.includes('Notified')) ? `
-                  <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #4ade80; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 11px; padding: 2px 7px; border-radius: 4px; font-weight: 700; display: inline-flex; align-items: center; gap: 4px;" title="Notification logged (${this.escapeHtml(c.smsStatus)})">
-                    ✅ Notified${c.smsStatus.replace(/^sent\s*/i, '').replace(/^notified\s*:?\s*/i, '').trim() ? `: ${this.escapeHtml(c.smsStatus.replace(/^sent\s*/i, '').replace(/^notified\s*:?\s*/i, '').trim())}` : ''}
+                ${c.smsStatus && (c.smsStatus.includes('Sent') || c.smsStatus.includes('Notified') || c.smsStatus.includes('Instruction') || c.smsStatus.includes('Registered')) ? `
+                  <span class="badge" style="background: ${c.smsStatus.toLowerCase().includes('instruction') ? 'rgba(5, 150, 105, 0.2)' : 'rgba(16, 185, 129, 0.2)'}; color: ${c.smsStatus.toLowerCase().includes('instruction') ? '#34d399' : '#4ade80'}; border: 1px solid ${c.smsStatus.toLowerCase().includes('instruction') ? 'rgba(5, 150, 105, 0.4)' : 'rgba(16, 185, 129, 0.4)'}; font-size: 11px; padding: 2px 7px; border-radius: 4px; font-weight: 700; display: inline-flex; align-items: center; gap: 4px;" title="Notification logged (${this.escapeHtml(c.smsStatus)})">
+                    ${c.smsStatus.toLowerCase().includes('instruction') ? '📋 Instructions' : '✅ Notified'}${c.smsStatus.replace(/^instructions?\s*sent\s*:?\s*/i, '').replace(/^sent\s*/i, '').replace(/^notified\s*:?\s*/i, '').replace(/^registered\s*:?\s*/i, '').trim() ? `: ${this.escapeHtml(c.smsStatus.replace(/^instructions?\s*sent\s*:?\s*/i, '').replace(/^sent\s*/i, '').replace(/^notified\s*:?\s*/i, '').replace(/^registered\s*:?\s*/i, '').trim())}` : ''}
                   </span>
-                  <button class="btn btn-secondary" style="font-size: 11px; padding: 2px 7px; display: inline-flex; align-items: center; gap: 4px; color: #93c5fd; border-color: rgba(59, 130, 246, 0.4); background: rgba(59, 130, 246, 0.15); cursor: pointer; border-radius: 4px;" title="Send another SMS reminder to ${this.escapeHtml(data.displayName)}" onclick="if(window.smsDialogEngine){window.smsDialogEngine.openCertSms('${this.escapeHtml(data.displayName)}', '${this.escapeHtml(c.certType)}', '${this.escapeHtml(c.expDate)}');}">
+                  <button class="btn btn-secondary" style="font-size: 11px; padding: 2px 7px; display: inline-flex; align-items: center; gap: 4px; color: #93c5fd; border-color: rgba(59, 130, 246, 0.4); background: rgba(59, 130, 246, 0.15); cursor: pointer; border-radius: 4px;" title="Send another SMS reminder to ${this.escapeHtml(data.displayName)}" onclick="if(window.smsDialogEngine){window.smsDialogEngine.openCertSms('${this.escapeJs(data.displayName)}', '${this.escapeJs(c.certType)}', '${this.escapeJs(c.expDate)}');}">
                     💬 Resend
                   </button>
+                  ${(c.certType && (c.certType.toLowerCase().includes('cpr') || c.certType.toLowerCase().includes('1st aid') || c.certType.toLowerCase().includes('first aid'))) ? `
+                    <button class="btn btn-primary" style="font-size: 11px; padding: 2px 7px; background: linear-gradient(135deg, #059669 0%, #047857 100%); border: 1px solid #059669; color: #fff; font-weight: 700; cursor: pointer; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px;" title="Send class instructions to ${this.escapeHtml(data.displayName)}" onclick="if(window.smsDialogEngine){window.smsDialogEngine.openClassInstructionsSms('${this.escapeJs(data.displayName)}', '${this.escapeJs(c.certType)}', '${this.escapeJs(c.expDate)}');}">
+                      📅 Class Instructions
+                    </button>
+                  ` : ''}
                 ` : `
-                  <button class="btn btn-primary" style="font-size: 11px; padding: 2px 8px; background-color: #f59e0b; border: 1px solid #d97706; color: #fff; font-weight: 700; cursor: pointer; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.2);" title="Send SMS reminder to ${this.escapeHtml(data.displayName)}" onclick="if(window.smsDialogEngine){window.smsDialogEngine.openCertSms('${this.escapeHtml(data.displayName)}', '${this.escapeHtml(c.certType)}', '${this.escapeHtml(c.expDate)}');}">
+                  <button class="btn btn-primary" style="font-size: 11px; padding: 2px 8px; background-color: #f59e0b; border: 1px solid #d97706; color: #fff; font-weight: 700; cursor: pointer; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px; box-shadow: 0 1px 3px rgba(0,0,0,0.2);" title="Send SMS reminder to ${this.escapeHtml(data.displayName)}" onclick="if(window.smsDialogEngine){window.smsDialogEngine.openCertSms('${this.escapeJs(data.displayName)}', '${this.escapeJs(c.certType)}', '${this.escapeJs(c.expDate)}');}">
                     💬 Send SMS
                   </button>
+                  ${(c.certType && (c.certType.toLowerCase().includes('cpr') || c.certType.toLowerCase().includes('1st aid') || c.certType.toLowerCase().includes('first aid'))) ? `
+                    <button class="btn btn-secondary" style="font-size: 11px; padding: 2px 7px; display: inline-flex; align-items: center; gap: 4px; color: #34d399; border-color: rgba(16, 185, 129, 0.4); background: rgba(16, 185, 129, 0.15); cursor: pointer; border-radius: 4px;" title="Send class instructions directly to ${this.escapeHtml(data.displayName)}" onclick="if(window.smsDialogEngine){window.smsDialogEngine.openClassInstructionsSms('${this.escapeJs(data.displayName)}', '${this.escapeJs(c.certType)}', '${this.escapeJs(c.expDate)}');}">
+                      📅 Class Instructions
+                    </button>
+                  ` : ''}
                 `}
               </div>
             </td>
