@@ -494,7 +494,8 @@ class TaskManagerApp {
         const sigCrew = this.getSignificantJobNumber(crewId);
         const lead = String(r['Lead'] || r['Crew Lead'] || r['Foreman'] || '').trim();
         const attendees = String(r['Attendees'] || r['Crew Members'] || '').trim();
-        const crewForeman = lead || (jobLookup[sigCrew]?.foreman) || (jobLookup[crewId]?.foreman) || 'Lead';
+        const activeForeman = (jobLookup[sigCrew]?.foreman) || (jobLookup[crewId]?.foreman) || '';
+        const crewForeman = activeForeman || lead || 'Lead';
 
         // Skip completed or N/A
         if (status.toLowerCase() === 'complete' || status.toLowerCase() === 'n/a') return;

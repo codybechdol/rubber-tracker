@@ -8745,12 +8745,25 @@ class TripPlannerApp {
 
         const rawCrew = String(r['Crew #'] || r['Crew'] || r['Job Number'] || r['Job #'] || '').trim();
         const crewId = this.getSignificantJobNumber(rawCrew) || rawCrew || 'Unassigned';
-        const lead = String(r['Crew Lead'] || r['Lead'] || r['Foreman'] || '').trim() || (crewMap[crewId] && crewMap[crewId].foreman) || 'Lead';
+        const activeForeman = (crewMap[crewId] && crewMap[crewId].foreman) || '';
+        const lead = activeForeman || String(r['Crew Lead'] || r['Lead'] || r['Foreman'] || '').trim() || 'Lead';
         const location = (crewMap[crewId] && crewMap[crewId].location) || 'Helena';
         const status = String(r['Status'] || r['Training Status'] || '').trim();
         const isCompleted = status.toLowerCase() === 'completed' || status.toLowerCase() === 'complete';
         const dateDone = String(r['Completion Date'] || r['Date Completed'] || r['Date'] || '').trim();
-        const attendees = String(r['Attendees'] || '').trim();
+        let attendees = String(r['Attendees'] || '').trim();
+
+        // Ensure active foreman / lead is listed first in attendees if present
+        if (lead && lead !== 'Lead' && attendees) {
+          const parts = attendees.split(',').map(s => s.trim()).filter(Boolean);
+          const leadIdx = parts.findIndex(p => p.toLowerCase() === lead.toLowerCase());
+          if (leadIdx > 0) {
+            const [leadName] = parts.splice(leadIdx, 1);
+            parts.unshift(leadName);
+            attendees = parts.join(', ');
+          }
+        }
+
         const rowIdx = r._rowIdx || (idx + 2);
 
         const trKey = `train_${crewId}_${rowIdx}_${topic}`;
@@ -8806,7 +8819,7 @@ class TripPlannerApp {
       if (!crewGroups[cId]) {
         crewGroups[cId] = {
           crewId: cId,
-          lead: tr.lead,
+          lead: (crewMap[cId] && crewMap[cId].foreman) || tr.lead,
           location: tr.location,
           trainings: []
         };
