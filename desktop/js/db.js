@@ -3827,7 +3827,7 @@ class LocalDatabase {
       if (table && table.rows && table.headers) {
         let row = null;
         const sheetNameLower = (mut.sheetName || table.name || '').toLowerCase();
-        const isMultiItemTable = sheetNameLower.includes('history') || sheetNameLower.includes('log') || sheetNameLower.includes('swaps');
+        const isMultiItemTable = sheetNameLower.includes('history') || sheetNameLower.includes('log') || sheetNameLower.includes('swaps') || sheetNameLower.includes('tracking') || sheetNameLower.includes('training') || sheetNameLower.includes('compliance') || sheetNameLower.includes('drug') || sheetNameLower.includes('certs');
 
         // Only use itemIdentifier alone for primary tables where each item appears exactly once
         if (!isMultiItemTable && mut.itemIdentifier && String(mut.itemIdentifier).trim() !== '') {

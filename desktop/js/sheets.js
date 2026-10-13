@@ -1219,6 +1219,145 @@ class SheetNavigator {
     this.renderStandardTable(container, countBadge, tableData);
   }
 
+  promptTrainingDate(td) {
+    if (!td || window.currentRoleMode === 'view_only') return;
+    const currentText = (td.textContent || '').trim().replace(/^[📅➕\s]+/, '').replace(/^Set Date/i, '').trim();
+    let isoVal = '';
+    if (/^\d{4}-\d{2}-\d{2}$/.test(currentText)) {
+      isoVal = currentText;
+    } else if (currentText.includes('/')) {
+      const p = currentText.split('/');
+      if (p.length === 3) {
+        const m = String(parseInt(p[0], 10)).padStart(2, '0');
+        const d = String(parseInt(p[1], 10)).padStart(2, '0');
+        let y = parseInt(p[2], 10);
+        if (y < 100) y = 2000 + y;
+        isoVal = `${y}-${m}-${d}`;
+      }
+    }
+    const todayIso = new Date().toISOString().split('T')[0];
+
+    const picker = document.createElement('input');
+    picker.type = 'date';
+    picker.value = isoVal || todayIso;
+    picker.style.position = 'fixed';
+    picker.style.zIndex = '99999';
+    const rect = td.getBoundingClientRect();
+    picker.style.left = `${Math.max(10, rect.left)}px`;
+    picker.style.top = `${Math.min(window.innerHeight - 40, rect.bottom + 2)}px`;
+    picker.style.opacity = '0';
+    document.body.appendChild(picker);
+
+    let resolved = false;
+    const cleanup = () => {
+      if (picker.parentNode) picker.remove();
+    };
+
+    picker.addEventListener('change', async () => {
+      if (picker.value && !resolved) {
+        resolved = true;
+        const p = picker.value.split('-');
+        const mdY = `${p[1]}/${p[2]}/${p[0]}`;
+        await this.commitTrainingDateEdit(td, mdY);
+      }
+      cleanup();
+    });
+
+    picker.addEventListener('blur', () => {
+      setTimeout(cleanup, 250);
+    });
+
+    if (typeof picker.showPicker === 'function') {
+      try { picker.showPicker(); } catch { picker.click(); }
+    } else {
+      picker.click();
+    }
+  }
+
+  async commitTrainingDateEdit(td, newDateStr) {
+    if (!td || !this.db) return;
+    const rowIdx = parseInt(td.dataset.row, 10);
+    const tableData = this.db.getTable('training_tracking');
+    if (!tableData || !tableData.rows || !rowIdx) return;
+
+    let tableRow = tableData.rows.find(r => r._rowIdx === rowIdx);
+    if (!tableRow && rowIdx >= 2 && tableData.rows[rowIdx - 2]) {
+      tableRow = tableData.rows[rowIdx - 2];
+    }
+    if (!tableRow) return;
+
+    const headers = tableData.headers || [];
+    const dateColIdx = headers.findIndex(h => /completion|date completed/i.test(h));
+    const statusColIdx = headers.findIndex(h => /^status$|^training status$/i.test(h));
+    const dateHeader = dateColIdx !== -1 ? headers[dateColIdx] : 'Completion Date';
+    const statusHeader = statusColIdx !== -1 ? headers[statusColIdx] : 'Status';
+
+    const oldDate = tableRow[dateHeader] || '';
+    tableRow[dateHeader] = newDateStr;
+    if (tableData.rawGrid && tableData.rawGrid[rowIdx - 1] && dateColIdx !== -1) {
+      tableData.rawGrid[rowIdx - 1][dateColIdx] = newDateStr;
+    }
+
+    const itemIdentifier = `${tableRow['Month'] || ''} | ${tableRow['Crew #'] || tableRow['Crew'] || ''} | ${tableRow['Training Topic'] || ''}`;
+
+    // Queue mutation for Completion Date
+    await this.db.addMutation({
+      action: 'UPDATE_CELL',
+      sheetName: 'Training Tracking',
+      row: rowIdx,
+      col: dateColIdx !== -1 ? (dateColIdx + 1) : 6,
+      header: dateHeader,
+      itemIdentifier: itemIdentifier,
+      oldValue: oldDate,
+      value: newDateStr
+    });
+
+    // Update screen UI for Date cell
+    td.innerHTML = `
+      <div style="display: inline-flex; align-items: center; gap: 6px;">
+        <span class="cell-text" style="font-weight: 600; color: #60a5fa; font-family: monospace;">📅 ${this.escapeHtml(newDateStr)}</span>
+        <button class="btn btn-secondary btn-pick-training-date" style="padding: 1px 5px; font-size: 10px; border-radius: 3px; cursor: pointer; color: #93c5fd;" title="Pick or change completion date" onclick="event.stopPropagation(); window.sheetNavigator.promptTrainingDate(this.closest('td'));">📅</button>
+      </div>
+    `;
+
+    // Auto-complete status if currently Scheduled or Pending
+    const curStatus = String(tableRow[statusHeader] || '').trim().toLowerCase();
+    if (newDateStr && curStatus !== 'complete' && curStatus !== 'completed') {
+      const oldStatus = tableRow[statusHeader] || 'Scheduled';
+      tableRow[statusHeader] = 'Complete';
+      if (tableData.rawGrid && tableData.rawGrid[rowIdx - 1] && statusColIdx !== -1) {
+        tableData.rawGrid[rowIdx - 1][statusColIdx] = 'Complete';
+      }
+
+      await this.db.addMutation({
+        action: 'UPDATE_CELL',
+        sheetName: 'Training Tracking',
+        row: rowIdx,
+        col: statusColIdx !== -1 ? (statusColIdx + 1) : 10,
+        header: statusHeader,
+        itemIdentifier: itemIdentifier,
+        oldValue: oldStatus,
+        value: 'Complete'
+      });
+
+      const parentTr = td.closest('tr');
+      if (parentTr) {
+        const sCell = parentTr.querySelector(`td[data-header="${statusHeader}"]`);
+        if (sCell) {
+          sCell.innerHTML = `<span class="badge badge-training-status-clickable" style="background-color: #15803d; color: #fff; padding: 3px 9px; border-radius: 4px; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; user-select: none;" title="Click to change training status"><span>✅ Complete</span> <span style="font-size: 10px; opacity: 0.7;">▾</span></span>`;
+        }
+      }
+    }
+
+    if (typeof this.db.schedulePersistSnapshot === 'function') {
+      this.db.schedulePersistSnapshot(this.db.snapshot, 300);
+    }
+
+    td.style.transition = 'background-color 0.2s ease';
+    td.style.backgroundColor = 'rgba(34, 197, 94, 0.25)';
+    setTimeout(() => { td.style.backgroundColor = ''; }, 450);
+  }
+
   async syncAttendees() {
     if (!confirm('🔄 Synchronize training attendees and crew leads with current active crew rosters?')) return;
     
@@ -5918,14 +6057,42 @@ class SheetNavigator {
           const vStr = String(val || '').trim();
           const sLower = vStr.toLowerCase();
           if (hLower === 'status' || hLower === 'training status') {
-            if (sLower === 'completed' || sLower === 'complete' || sLower === 'done') {
-              customCellHtml = `<span class="badge" style="background-color: #15803d; color: #fff; padding: 2px 8px; border-radius: 4px; font-weight: 700;">✅ Completed</span>`;
+            let bBg = '#d97706';
+            let bText = '⏳ Scheduled';
+            if (sLower === 'complete' || sLower === 'completed' || sLower === 'done') {
+              bBg = '#15803d';
+              bText = '✅ Complete';
             } else if (sLower === 'scheduled' || sLower === 'pending') {
-              customCellHtml = `<span class="badge" style="background-color: #d97706; color: #fff; padding: 2px 8px; border-radius: 4px; font-weight: 700;">⏳ Scheduled</span>`;
+              bBg = '#d97706';
+              bText = '⏳ Scheduled';
             } else if (sLower === 'on hold' || sLower === 'postponed') {
-              customCellHtml = `<span class="badge" style="background-color: #7c3aed; color: #fff; padding: 2px 8px; border-radius: 4px; font-weight: 600;">⏸️ On Hold</span>`;
+              bBg = '#7c3aed';
+              bText = '⏸️ On Hold';
             } else if (sLower === 'cancelled' || sLower === 'canceled') {
-              customCellHtml = `<span class="badge" style="background-color: #475569; color: #cbd5e1; padding: 2px 8px; border-radius: 4px; font-weight: 600;">❌ Cancelled</span>`;
+              bBg = '#475569';
+              bText = '❌ Cancelled';
+            } else if (sLower === 'n/a' || sLower === 'na') {
+              bBg = '#334155';
+              bText = '🚫 N/A';
+            } else if (vStr) {
+              bText = vStr;
+            }
+            customCellHtml = `<span class="badge badge-training-status-clickable" style="background-color: ${bBg}; color: #fff; padding: 3px 9px; border-radius: 4px; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; user-select: none;" title="Click to change training status"><span>${this.escapeHtml(bText)}</span> <span style="font-size: 10px; opacity: 0.7;">▾</span></span>`;
+          } else if (hLower === 'completion date' || hLower === 'date completed') {
+            const dStr = String(val || '').trim();
+            if (dStr && dStr !== '—' && dStr !== '-') {
+              customCellHtml = `
+                <div style="display: inline-flex; align-items: center; gap: 6px;">
+                  <span class="cell-text" style="font-weight: 600; color: #60a5fa; font-family: monospace;">📅 ${this.escapeHtml(dStr)}</span>
+                  <button class="btn btn-secondary btn-pick-training-date" style="padding: 1px 5px; font-size: 10px; border-radius: 3px; cursor: pointer; color: #93c5fd;" title="Pick or change completion date" onclick="event.stopPropagation(); window.sheetNavigator.promptTrainingDate(this.closest('td'));">📅</button>
+                </div>
+              `;
+            } else {
+              customCellHtml = `
+                <button class="btn btn-secondary btn-pick-training-date" style="padding: 2px 8px; font-size: 11px; border-radius: 4px; cursor: pointer; color: #94a3b8; border-style: dashed;" title="Set training completion date" onclick="event.stopPropagation(); window.sheetNavigator.promptTrainingDate(this.closest('td'));">
+                  ➕ Set Date
+                </button>
+              `;
             }
           } else if (hLower.includes('lead') || hLower.includes('foreman')) {
             const leadName = String(val).trim();
@@ -6022,16 +6189,19 @@ class SheetNavigator {
         const isLocationNameCol = (this.currentSheetKey === 'locations' && (colIdx === 0 || hLower === 'location'));
         const isCrewTypeCol = ['crew type', 'crew discipline', 'discipline'].includes(hLower);
         const isBlankPrimary = isPrimaryItemCol && (!val || String(val).trim() === '' || String(val).trim() === '—' || String(val).trim() === '-');
+        const isTrainingStatusCol = this.currentSheetKey === 'training_tracking' && (hLower === 'status' || hLower === 'training status');
         const isEditable = (!isPrimaryItemCol || isBlankPrimary) && !isEmployeeNameCol && !isLocationNameCol && !isSmsCol && !isCrewTypeCol && !hLower.includes('change out') && !hLower.startsWith('skip ') && window.currentRoleMode !== 'view_only';
         let itemIdentifier = '';
         if (this.currentSheetKey === 'expiring_certs') {
           itemIdentifier = `${row['Employee Name'] || row['Name'] || ''} | ${row['Item Type'] || row['Cert Type'] || ''}`;
+        } else if (this.currentSheetKey === 'training_tracking') {
+          itemIdentifier = `${row['Month'] || ''} | ${row['Crew #'] || row['Crew'] || ''} | ${row['Training Topic'] || ''}`;
         } else {
           itemIdentifier = String(row['Item #'] || row['HVT #'] || row['Phasing Set #'] || row['AED #'] || row['Glove'] || row['Sleeve'] || row['Blanket'] || row['MACK'] || row['Serial #'] || row['Name'] || row['Employee Name'] || row['Job Number'] || Object.values(row)[0] || '').trim();
         }
 
         html += `<td class="${isEditable ? 'editable' : ''}" 
-                     contenteditable="${isEditable}" 
+                     contenteditable="${isEditable && !isTrainingStatusCol}" 
                      data-row="${sheetRowIdx}" 
                      data-col="${colIdx + 1}" 
                      data-header="${this.escapeHtml(h)}"
@@ -6058,7 +6228,8 @@ class SheetNavigator {
       const isAssignedCol = (header.includes('assigned') || header === 'holder') && !header.includes('date');
       const isEmpDepartureCol = this.currentSheetKey === 'employees' && (header === 'location' || header === 'last day reason');
       const isLocationApprovalCol = this.currentSheetKey === 'locations' && (header.includes('rubber class') || header.includes('approval') || header === 'direction');
-      const hasAutocomplete = isAssignedCol || isEmpDepartureCol || isLocationApprovalCol;
+      const isTrainingStatusCol = this.currentSheetKey === 'training_tracking' && (header === 'status' || header === 'training status');
+      const hasAutocomplete = isAssignedCol || isEmpDepartureCol || isLocationApprovalCol || isTrainingStatusCol;
 
       td.addEventListener('focus', () => {
         const targetCell = td;
@@ -6066,15 +6237,15 @@ class SheetNavigator {
         if (cellTextSpan) {
           initialVal = cellTextSpan.textContent.trim();
         } else {
-          initialVal = targetCell.textContent.trim().replace(/^👤\s*/, '').trim();
+          initialVal = targetCell.textContent.trim().replace(/^👤\s*/, '').replace(/^[✅⏳⏸️❌🚫\s]+/, '').replace(/[▾▲\s]+$/, '').trim();
         }
         if (hasAutocomplete) {
-          const currentText = (cellTextSpan ? cellTextSpan.textContent : td.textContent).trim().replace(/^👤\s*/, '').trim();
+          const currentText = (cellTextSpan ? cellTextSpan.textContent : td.textContent).trim().replace(/^👤\s*/, '').replace(/^[✅⏳⏸️❌🚫\s]+/, '').replace(/[▾▲\s]+$/, '').trim();
           this.showCellAutocomplete(td, currentText);
         }
       });
 
-      if (isLocationApprovalCol) {
+      if (isLocationApprovalCol || isTrainingStatusCol) {
         td.addEventListener('click', (e) => {
           this.showCellAutocomplete(td, '');
         });
@@ -6146,7 +6317,6 @@ class SheetNavigator {
               const p = picker.value.split('-');
               const mdY = `${p[1]}/${p[2]}/${p[0]}`;
               targetCell.textContent = mdY;
-              targetCell.focus();
               targetCell.blur();
             }
             picker.remove();
@@ -6201,6 +6371,19 @@ class SheetNavigator {
           const header = targetCell.dataset.header || '';
           const hLower = header.toLowerCase();
           const isDateCol = hLower.includes('date') || hLower.includes('expiration') || hLower.includes('calibration');
+
+          if (this.currentSheetKey === 'training_tracking' && (hLower === 'status' || hLower === 'training status')) {
+            newVal = newVal.replace(/^[✅⏳⏸️❌🚫\s]+/, '').replace(/[▾▲\s]+$/, '').trim();
+            if (/^completed?$/i.test(newVal)) newVal = 'Complete';
+            else if (/^scheduled?|^pending$/i.test(newVal)) newVal = 'Scheduled';
+            else if (/^on\s*hold|^postponed$/i.test(newVal)) newVal = 'On Hold';
+            else if (/^cancelled?|^canceled$/i.test(newVal)) newVal = 'Cancelled';
+            else if (/^n\/?a$/i.test(newVal)) newVal = 'N/A';
+          }
+
+          if (this.currentSheetKey === 'training_tracking' && (hLower === 'completion date' || hLower === 'date completed')) {
+            newVal = newVal.replace(/^[📅➕\s]+/, '').replace(/^Set Date/i, '').trim();
+          }
 
           if (isDateCol && newVal) {
             // Normalize date to MM/DD/YYYY format
@@ -6366,6 +6549,35 @@ class SheetNavigator {
               const isHoldCol = (hNameLower.includes('assigned') || hNameLower === 'holder') && !hNameLower.includes('date');
               if (isHoldCol && v && !['on shelf', 'in testing', 'packed for testing', 'packed for delivery', 'failed rubber', 'failed', 'lost', 'destroyed', 'new', 'unassigned', 'n/a', '—', '-'].includes(v.toLowerCase())) {
                 c.innerHTML = `<span class="profile-link-badge" style="color: #60a5fa; cursor: pointer; margin-right: 4px; display: inline-block;" title="Click to view assignments & certs for ${this.escapeHtml(v)}" onclick="event.stopPropagation(); if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(v)}');}">👤</span><span class="cell-text" style="font-weight: 600; color: #93c5fd;">${this.escapeHtml(v)}</span>`;
+              } else if (this.currentSheetKey === 'training_tracking' && (hNameLower === 'completion date' || hNameLower === 'date completed')) {
+                if (v && v !== '—' && v !== '-') {
+                  c.innerHTML = `<div style="display: inline-flex; align-items: center; gap: 6px;"><span class="cell-text" style="font-weight: 600; color: #60a5fa; font-family: monospace;">📅 ${this.escapeHtml(v)}</span><button class="btn btn-secondary btn-pick-training-date" style="padding: 1px 5px; font-size: 10px; border-radius: 3px; cursor: pointer; color: #93c5fd;" title="Pick or change completion date" onclick="event.stopPropagation(); window.sheetNavigator.promptTrainingDate(this.closest('td'));">📅</button></div>`;
+                } else {
+                  c.innerHTML = `<button class="btn btn-secondary btn-pick-training-date" style="padding: 2px 8px; font-size: 11px; border-radius: 4px; cursor: pointer; color: #94a3b8; border-style: dashed;" title="Set training completion date" onclick="event.stopPropagation(); window.sheetNavigator.promptTrainingDate(this.closest('td'));">➕ Set Date</button>`;
+                }
+              } else if (this.currentSheetKey === 'training_tracking' && (hNameLower === 'status' || hNameLower === 'training status')) {
+                const sLower = String(v || '').toLowerCase();
+                let bBg = '#d97706';
+                let bText = '⏳ Scheduled';
+                if (sLower === 'complete' || sLower === 'completed' || sLower === 'done') {
+                  bBg = '#15803d';
+                  bText = '✅ Complete';
+                } else if (sLower === 'scheduled' || sLower === 'pending') {
+                  bBg = '#d97706';
+                  bText = '⏳ Scheduled';
+                } else if (sLower === 'on hold' || sLower === 'postponed') {
+                  bBg = '#7c3aed';
+                  bText = '⏸️ On Hold';
+                } else if (sLower === 'cancelled' || sLower === 'canceled') {
+                  bBg = '#475569';
+                  bText = '❌ Cancelled';
+                } else if (sLower === 'n/a' || sLower === 'na') {
+                  bBg = '#334155';
+                  bText = '🚫 N/A';
+                } else if (v) {
+                  bText = v;
+                }
+                c.innerHTML = `<span class="badge badge-training-status-clickable" style="background-color: ${bBg}; color: #fff; padding: 3px 9px; border-radius: 4px; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; user-select: none;" title="Click to change training status"><span>${this.escapeHtml(bText)}</span> <span style="font-size: 10px; opacity: 0.7;">▾</span></span>`;
               } else {
                 c.textContent = v;
               }
@@ -7220,6 +7432,90 @@ class SheetNavigator {
 
             if (window.procurementEngine && typeof window.procurementEngine.buildPurchaseNeeds === 'function') {
               window.procurementEngine.buildPurchaseNeeds();
+            }
+          } else if (this.currentSheetKey === 'training_tracking' && (hLower === 'status' || hLower === 'training status')) {
+            const sLower = newVal.toLowerCase();
+            let bBg = '#d97706';
+            let bText = '⏳ Scheduled';
+            if (sLower === 'complete' || sLower === 'completed' || sLower === 'done') {
+              bBg = '#15803d';
+              bText = '✅ Complete';
+            } else if (sLower === 'scheduled' || sLower === 'pending') {
+              bBg = '#d97706';
+              bText = '⏳ Scheduled';
+            } else if (sLower === 'on hold' || sLower === 'postponed') {
+              bBg = '#7c3aed';
+              bText = '⏸️ On Hold';
+            } else if (sLower === 'cancelled' || sLower === 'canceled') {
+              bBg = '#475569';
+              bText = '❌ Cancelled';
+            } else if (sLower === 'n/a' || sLower === 'na') {
+              bBg = '#334155';
+              bText = '🚫 N/A';
+            } else {
+              bText = newVal;
+            }
+            targetCell.innerHTML = `<span class="badge badge-training-status-clickable" style="background-color: ${bBg}; color: #fff; padding: 3px 9px; border-radius: 4px; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; user-select: none;" title="Click to change training status"><span>${this.escapeHtml(bText)}</span> <span style="font-size: 10px; opacity: 0.7;">▾</span></span>`;
+
+            // Auto-populate Completion Date if marked Complete and Date is empty!
+            if ((sLower === 'complete' || sLower === 'completed') && tableRow) {
+              const curDate = String(tableRow['Completion Date'] || tableRow['Date Completed'] || '').trim();
+              if (!curDate || curDate === '—' || curDate === '-') {
+                const today = new Date();
+                const todayFormatted = `${String(today.getMonth() + 1).padStart(2, '0')}/${String(today.getDate()).padStart(2, '0')}/${today.getFullYear()}`;
+                tableRow['Completion Date'] = todayFormatted;
+                const cIdx = (tableData.headers || []).findIndex(h => /completion|date completed/i.test(h));
+                if (cIdx !== -1) {
+                  if (tableData.rawGrid && actualRowIdx && tableData.rawGrid[actualRowIdx - 1]) {
+                    tableData.rawGrid[actualRowIdx - 1][cIdx] = todayFormatted;
+                  }
+                  await queueCell(tableData.headers[cIdx], todayFormatted);
+                  updateRowCell(tableData.headers[cIdx], todayFormatted);
+                }
+              }
+            } else if ((sLower === 'scheduled' || sLower === 'pending') && tableRow) {
+              const curDate = String(tableRow['Completion Date'] || tableRow['Date Completed'] || '').trim();
+              if (curDate) {
+                tableRow['Completion Date'] = '';
+                const cIdx = (tableData.headers || []).findIndex(h => /completion|date completed/i.test(h));
+                if (cIdx !== -1) {
+                  if (tableData.rawGrid && actualRowIdx && tableData.rawGrid[actualRowIdx - 1]) {
+                    tableData.rawGrid[actualRowIdx - 1][cIdx] = '';
+                  }
+                  await queueCell(tableData.headers[cIdx], '');
+                  updateRowCell(tableData.headers[cIdx], '');
+                }
+              }
+            }
+          } else if (this.currentSheetKey === 'training_tracking' && (hLower === 'completion date' || hLower === 'date completed')) {
+            const dStr = String(newVal || '').trim();
+            if (dStr && dStr !== '—' && dStr !== '-') {
+              targetCell.innerHTML = `
+                <div style="display: inline-flex; align-items: center; gap: 6px;">
+                  <span class="cell-text" style="font-weight: 600; color: #60a5fa; font-family: monospace;">📅 ${this.escapeHtml(dStr)}</span>
+                  <button class="btn btn-secondary btn-pick-training-date" style="padding: 1px 5px; font-size: 10px; border-radius: 3px; cursor: pointer; color: #93c5fd;" title="Pick or change completion date" onclick="event.stopPropagation(); window.sheetNavigator.promptTrainingDate(this.closest('td'));">📅</button>
+                </div>
+              `;
+              if (tableRow) {
+                const curStat = String(tableRow['Status'] || '').toLowerCase().trim();
+                if (curStat !== 'complete' && curStat !== 'completed') {
+                  tableRow['Status'] = 'Complete';
+                  const sIdx = (tableData.headers || []).findIndex(h => /status/i.test(h));
+                  if (sIdx !== -1) {
+                    if (tableData.rawGrid && actualRowIdx && tableData.rawGrid[actualRowIdx - 1]) {
+                      tableData.rawGrid[actualRowIdx - 1][sIdx] = 'Complete';
+                    }
+                    await queueCell(tableData.headers[sIdx], 'Complete');
+                    updateRowCell(tableData.headers[sIdx], 'Complete');
+                  }
+                }
+              }
+            } else {
+              targetCell.innerHTML = `
+                <button class="btn btn-secondary btn-pick-training-date" style="padding: 2px 8px; font-size: 11px; border-radius: 4px; cursor: pointer; color: #94a3b8; border-style: dashed;" title="Set training completion date" onclick="event.stopPropagation(); window.sheetNavigator.promptTrainingDate(this.closest('td'));">
+                  ➕ Set Date
+                </button>
+              `;
             }
           } else if (targetCell.dataset.primary === 'true' && newVal) {
             const itemKey = String(newVal).trim();
@@ -8271,6 +8567,21 @@ class SheetNavigator {
         { name: 'Office', subText: 'Non-field Location', icon: '🏢' }
       ];
       results = qLower ? directions.filter(d => d.name.toLowerCase().includes(qLower) || d.subText.toLowerCase().includes(qLower)) : directions;
+    } else if (this.currentSheetKey === 'training_tracking' && (h === 'status' || h === 'training status')) {
+      const statusOptions = [
+        { name: 'Complete', subText: 'Training completed & verified', icon: '✅' },
+        { name: 'Scheduled', subText: 'Upcoming scheduled session', icon: '⏳' },
+        { name: 'On Hold', subText: 'Training paused or postponed', icon: '⏸️' },
+        { name: 'Cancelled', subText: 'Session cancelled', icon: '❌' },
+        { name: 'N/A', subText: 'Not applicable for this crew', icon: '🚫' }
+      ];
+      const qClean = String(query || '').replace(/[^\w\s&]/g, '').trim().toLowerCase();
+      if (!qClean) {
+        results = statusOptions;
+      } else {
+        results = statusOptions.filter(o => o.name.toLowerCase().includes(qClean) || o.subText.toLowerCase().includes(qClean));
+        if (results.length === 0) results = statusOptions;
+      }
     } else {
       if (!window.employeeResolver) return;
       results = window.employeeResolver.search(query, 10);
