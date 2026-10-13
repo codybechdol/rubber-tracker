@@ -566,9 +566,29 @@ class RubberPpeTrackingEngine {
     const gloveRows = (glovesTable && glovesTable.rows) ? glovesTable.rows : [];
     const sleeveRows = (sleevesTable && sleevesTable.rows) ? sleevesTable.rows : [];
 
-    // Pre-build sets of employees who already have gloves or sleeves queued in Purchase Needs
+    // Pre-build sets of employees who already have gloves or sleeves queued in Purchase Needs or Ordered
     const gloveNeedsSet = new Set();
     const sleeveNeedsSet = new Set();
+    const gloveOrderedMap = new Map();
+    const sleeveOrderedMap = new Map();
+
+    const parseOrderNotes = (notesStr) => {
+      if (!notesStr) return null;
+      const str = String(notesStr);
+      const poMatch = str.match(/PO:\s*([^|;\n]+)/i);
+      const dateMatch = str.match(/Date:\s*([^|;\n]+)/i);
+      const vendorMatch = str.match(/Vendor:\s*([^|;\n]+)/i);
+      const priceMatch = str.match(/Price:\s*\$?([0-9.,]+)/i);
+      if (poMatch || dateMatch || vendorMatch) {
+        return {
+          orderNumber: poMatch ? poMatch[1].trim() : '',
+          orderDate: dateMatch ? dateMatch[1].trim() : '',
+          vendor: vendorMatch ? vendorMatch[1].trim() : '',
+          price: priceMatch ? parseFloat(priceMatch[1].trim().replace(/,/g, '')) || 0 : 0
+        };
+      }
+      return null;
+    };
 
     if (gloveSwapsTable) {
       const gRows = gloveSwapsTable.rows || gloveSwapsTable.rawGrid || [];
@@ -576,6 +596,7 @@ class RubberPpeTrackingEngine {
         let rEmp = '';
         let rStatus = '';
         let rPick = '';
+        let rNotes = '';
         if (Array.isArray(r)) {
           const firstCell = String(r[0] || '').trim();
           if (firstCell.includes('📍') || firstCell.includes('👤') || firstCell.includes('👷') ||
@@ -585,12 +606,17 @@ class RubberPpeTrackingEngine {
           rEmp = firstCell;
           rPick = String(r[6] || '').trim();
           rStatus = String(r[7] || '').trim().toLowerCase();
+          rNotes = String(r[11] || '').trim();
         } else if (r && typeof r === 'object') {
           rEmp = String(r['Employee'] || r['Employee Name'] || '').trim();
           rStatus = String(r['Status'] || '').trim().toLowerCase();
           rPick = String(r['Pick List Item #'] || '').trim();
+          rNotes = String(r['Notes'] || '').trim();
         }
-        if (rEmp && (rStatus.includes('purchase') || rPick === '—')) {
+        if (rEmp && rStatus.includes('ordered')) {
+          const ord = parseOrderNotes(rNotes) || { orderNumber: 'Pending', orderDate: '', vendor: '', price: 0 };
+          gloveOrderedMap.set(this.normalizeName(rEmp), ord);
+        } else if (rEmp && (rStatus.includes('purchase') || rPick === '—')) {
           gloveNeedsSet.add(this.normalizeName(rEmp));
         }
       });
@@ -602,6 +628,7 @@ class RubberPpeTrackingEngine {
         let rEmp = '';
         let rStatus = '';
         let rPick = '';
+        let rNotes = '';
         if (Array.isArray(r)) {
           const firstCell = String(r[0] || '').trim();
           if (firstCell.includes('📍') || firstCell.includes('👤') || firstCell.includes('👷') ||
@@ -611,12 +638,17 @@ class RubberPpeTrackingEngine {
           rEmp = firstCell;
           rPick = String(r[6] || '').trim();
           rStatus = String(r[7] || '').trim().toLowerCase();
+          rNotes = String(r[11] || '').trim();
         } else if (r && typeof r === 'object') {
           rEmp = String(r['Employee'] || r['Employee Name'] || '').trim();
           rStatus = String(r['Status'] || '').trim().toLowerCase();
           rPick = String(r['Pick List Item #'] || '').trim();
+          rNotes = String(r['Notes'] || '').trim();
         }
-        if (rEmp && (rStatus.includes('purchase') || rPick === '—')) {
+        if (rEmp && rStatus.includes('ordered')) {
+          const ord = parseOrderNotes(rNotes) || { orderNumber: 'Pending', orderDate: '', vendor: '', price: 0 };
+          sleeveOrderedMap.set(this.normalizeName(rEmp), ord);
+        } else if (rEmp && (rStatus.includes('purchase') || rPick === '—')) {
           sleeveNeedsSet.add(this.normalizeName(rEmp));
         }
       });
@@ -628,8 +660,14 @@ class RubberPpeTrackingEngine {
         const rType = String(r['Item Type'] || '').trim().toLowerCase();
         const rStatus = String(r['Status'] || '').trim().toLowerCase();
         if (rEmp && !rStatus.includes('received') && !rStatus.includes('fulfilled')) {
-          if (rType.includes('glove')) gloveNeedsSet.add(this.normalizeName(rEmp));
-          if (rType.includes('sleeve')) sleeveNeedsSet.add(this.normalizeName(rEmp));
+          if (rStatus.includes('ordered')) {
+            const ord = { orderNumber: 'Pending', orderDate: '', vendor: '', price: 0 };
+            if (rType.includes('glove')) gloveOrderedMap.set(this.normalizeName(rEmp), ord);
+            if (rType.includes('sleeve')) sleeveOrderedMap.set(this.normalizeName(rEmp), ord);
+          } else {
+            if (rType.includes('glove')) gloveNeedsSet.add(this.normalizeName(rEmp));
+            if (rType.includes('sleeve')) sleeveNeedsSet.add(this.normalizeName(rEmp));
+          }
         }
       });
     }
@@ -761,7 +799,21 @@ class RubberPpeTrackingEngine {
       const isMissingAny = missingGloves || missingSleeves;
       const isFullyEquipped = !isMissingAny;
 
-      // Purchase Needs status
+      // Purchase Needs & Ordered status
+      let gloveOrdered = gloveOrderedMap.get(nameNorm) || null;
+      if (!gloveOrdered) {
+        for (const [k, v] of gloveOrderedMap.entries()) {
+          if (this.isNameMatch(k, nameNorm)) { gloveOrdered = v; break; }
+        }
+      }
+
+      let sleeveOrdered = sleeveOrderedMap.get(nameNorm) || null;
+      if (!sleeveOrdered) {
+        for (const [k, v] of sleeveOrderedMap.entries()) {
+          if (this.isNameMatch(k, nameNorm)) { sleeveOrdered = v; break; }
+        }
+      }
+
       let gloveInNeeds = gloveNeedsSet.has(nameNorm);
       if (!gloveInNeeds) {
         for (const k of gloveNeedsSet.keys()) {
@@ -776,8 +828,8 @@ class RubberPpeTrackingEngine {
         }
       }
 
-      const needsGlovesToPurchase = missingGloves && !gloveInNeeds;
-      const needsSleevesToPurchase = missingSleeves && !sleeveInNeeds;
+      const needsGlovesToPurchase = missingGloves && !gloveInNeeds && !gloveOrdered;
+      const needsSleevesToPurchase = missingSleeves && !sleeveInNeeds && !sleeveOrdered;
 
       if (isExcluded) {
         totalExcluded++;
@@ -791,12 +843,14 @@ class RubberPpeTrackingEngine {
         if (isMissingAny) totalMissingAny++;
         if (missingGloves) {
           totalMissingGloves++;
-          if (gloveInNeeds) totalGlovesInNeeds++;
+          if (gloveOrdered) totalGlovesInNeeds++;
+          else if (gloveInNeeds) totalGlovesInNeeds++;
           else totalGlovesToQueue++;
         }
         if (missingSleeves) {
           totalMissingSleeves++;
-          if (sleeveInNeeds) totalSleevesInNeeds++;
+          if (sleeveOrdered) totalSleevesInNeeds++;
+          else if (sleeveInNeeds) totalSleevesInNeeds++;
           else totalSleevesToQueue++;
         }
         if (isMissingBoth) totalMissingBoth++;
@@ -830,6 +884,8 @@ class RubberPpeTrackingEngine {
         exclusionReason,
         gloveInNeeds,
         sleeveInNeeds,
+        gloveOrdered,
+        sleeveOrdered,
         needsGlovesToPurchase,
         needsSleevesToPurchase,
         empRow: emp
@@ -1403,6 +1459,33 @@ class RubberPpeTrackingEngine {
           </button>
         </div>
       `;
+    } else if (r.gloveOrdered) {
+      const gOrd = r.gloveOrdered;
+      const poText = gOrd.orderNumber ? `PO: ${this.escapeHtml(gOrd.orderNumber)}` : 'Ordered';
+      const vendorText = gOrd.vendor ? ` · ${this.escapeHtml(gOrd.vendor)}` : '';
+      const dateText = gOrd.orderDate ? ` · ${this.escapeHtml(gOrd.orderDate)}` : '';
+      glovesCell = `
+        <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+          <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px;" title="Order: ${poText}${vendorText}${dateText}">
+            <span>📦</span> ${poText}${vendorText}
+          </span>
+          <span style="font-size: 11px; color: #94a3b8;" title="Preferred Glove Size on file">
+            Size: <strong style="color: #f1f5f9;">${this.escapeHtml(r.gloveSize)}</strong>
+          </span>
+          <button class="btn btn-xs" 
+                  onclick="window.procurementEngine ? window.procurementEngine.openDeliverForEmployee('${this.escapeJs(r.name)}', 'gloves', '${this.escapeJs(r.gloveSize)}') : alert('Procurement engine not loaded')"
+                  style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.35); color: #6ee7b7; padding: 2px 7px; font-size: 11px; border-radius: 3px; cursor: pointer; display: inline-flex; align-items: center; gap: 3px;"
+                  title="Mark this ordered glove as delivered and enter item #">
+            <span>🚚</span> Deliver
+          </button>
+          <button class="btn btn-xs" 
+                  onclick="window.ppeTrackingEngine.promptQuickAssign('${this.escapeJs(r.name)}', 'gloves', '${this.escapeJs(r.gloveSize)}', '${this.escapeJs(r.location)}')"
+                  style="background: rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.35); color: #93c5fd; padding: 2px 7px; font-size: 11px; border-radius: 3px; cursor: pointer;"
+                  title="Assign an on-shelf glove instead">
+            ➕ Assign
+          </button>
+        </div>
+      `;
     } else {
       glovesCell = `
         <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
@@ -1424,6 +1507,12 @@ class RubberPpeTrackingEngine {
               <span>🛒</span> + Need
             </button>
           `}
+          <button class="btn btn-xs" 
+                  onclick="window.ppeTrackingEngine.promptMarkOrdered('${this.escapeJs(r.name)}', 'gloves', '${this.escapeJs(r.gloveSize)}')"
+                  style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.35); color: #6ee7b7; padding: 2px 7px; font-size: 11px; border-radius: 3px; cursor: pointer; display: inline-flex; align-items: center; gap: 3px;"
+                  title="Mark rubber gloves as Ordered for ${this.escapeHtml(r.name)}">
+            <span>📦</span> Order
+          </button>
           <button class="btn btn-xs" 
                   onclick="window.ppeTrackingEngine.promptQuickAssign('${this.escapeJs(r.name)}', 'gloves', '${this.escapeJs(r.gloveSize)}', '${this.escapeJs(r.location)}')"
                   style="background: rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.35); color: #93c5fd; padding: 2px 7px; font-size: 11px; border-radius: 3px; cursor: pointer;"
@@ -1485,6 +1574,33 @@ class RubberPpeTrackingEngine {
           </button>
         </div>
       `;
+    } else if (r.sleeveOrdered) {
+      const sOrd = r.sleeveOrdered;
+      const poText = sOrd.orderNumber ? `PO: ${this.escapeHtml(sOrd.orderNumber)}` : 'Ordered';
+      const vendorText = sOrd.vendor ? ` · ${this.escapeHtml(sOrd.vendor)}` : '';
+      const dateText = sOrd.orderDate ? ` · ${this.escapeHtml(sOrd.orderDate)}` : '';
+      sleevesCell = `
+        <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+          <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px;" title="Order: ${poText}${vendorText}${dateText}">
+            <span>📦</span> ${poText}${vendorText}
+          </span>
+          <span style="font-size: 11px; color: #94a3b8;" title="Preferred Sleeve Size on file">
+            Size: <strong style="color: #f1f5f9;">${this.escapeHtml(r.sleeveSize)}</strong>
+          </span>
+          <button class="btn btn-xs" 
+                  onclick="window.procurementEngine ? window.procurementEngine.openDeliverForEmployee('${this.escapeJs(r.name)}', 'sleeves', '${this.escapeJs(r.sleeveSize)}') : alert('Procurement engine not loaded')"
+                  style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.35); color: #6ee7b7; padding: 2px 7px; font-size: 11px; border-radius: 3px; cursor: pointer; display: inline-flex; align-items: center; gap: 3px;"
+                  title="Mark this ordered sleeve as delivered and enter item #">
+            <span>🚚</span> Deliver
+          </button>
+          <button class="btn btn-xs" 
+                  onclick="window.ppeTrackingEngine.promptQuickAssign('${this.escapeJs(r.name)}', 'sleeves', '${this.escapeJs(r.sleeveSize)}', '${this.escapeJs(r.location)}')"
+                  style="background: rgba(168, 85, 247, 0.15); border: 1px solid rgba(168, 85, 247, 0.35); color: #d8b4fe; padding: 2px 7px; font-size: 11px; border-radius: 3px; cursor: pointer;"
+                  title="Assign an on-shelf sleeve to ${this.escapeHtml(r.name)}">
+            ➕ Assign
+          </button>
+        </div>
+      `;
     } else {
       sleevesCell = `
         <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
@@ -1506,6 +1622,12 @@ class RubberPpeTrackingEngine {
               <span>🛒</span> + Need
             </button>
           `}
+          <button class="btn btn-xs" 
+                  onclick="window.ppeTrackingEngine.promptMarkOrdered('${this.escapeJs(r.name)}', 'sleeves', '${this.escapeJs(r.sleeveSize)}')"
+                  style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.35); color: #6ee7b7; padding: 2px 7px; font-size: 11px; border-radius: 3px; cursor: pointer; display: inline-flex; align-items: center; gap: 3px;"
+                  title="Mark rubber sleeves as Ordered for ${this.escapeHtml(r.name)}">
+            <span>📦</span> Order
+          </button>
           <button class="btn btn-xs" 
                   onclick="window.ppeTrackingEngine.promptQuickAssign('${this.escapeJs(r.name)}', 'sleeves', '${this.escapeJs(r.sleeveSize)}', '${this.escapeJs(r.location)}')"
                   style="background: rgba(168, 85, 247, 0.15); border: 1px solid rgba(168, 85, 247, 0.35); color: #d8b4fe; padding: 2px 7px; font-size: 11px; border-radius: 3px; cursor: pointer;"
@@ -1997,6 +2119,32 @@ class RubberPpeTrackingEngine {
     if (typeof window.showToast === 'function') {
       window.showToast(`🛒 Queued ${itemsQueued.join(' and ')} for ${empName} in Purchase Needs (Urgency: Immediate)`, 'success');
     }
+  }
+
+  /**
+   * Opens the Mark as Ordered modal in ProcurementEngine for an employee's PPE item.
+   */
+  promptMarkOrdered(empName, itemType, preferredSize) {
+    if (!window.procurementEngine) {
+      alert('Procurement Engine is not loaded.');
+      return;
+    }
+    const isGlove = itemType === 'gloves';
+    const targetCategory = isGlove ? 'Gloves' : 'Sleeves';
+    const classVal = this.getPreferredPpeClass(empName, itemType);
+    const item = {
+      section: 'compliance_missing',
+      itemType: targetCategory,
+      typeLabel: isGlove ? '🧤 Gloves' : '🦺 Sleeves',
+      size: (preferredSize && preferredSize !== '—') ? preferredSize : (isGlove ? '10' : 'Regular'),
+      hasNoSize: !preferredSize || preferredSize === '—',
+      classVal: classVal,
+      quantity: 1,
+      employees: [{ name: empName, label: empName, checked: true }],
+      selected: true,
+      price: 0
+    };
+    window.procurementEngine.openMarkOrderedModal([item]);
   }
 
   /**

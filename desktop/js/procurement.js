@@ -60,6 +60,18 @@ class ProcurementEngine {
         headerBg: 'rgba(45, 20, 30, 0.95)',
         accentBorder: '#ef4444',
         desc: 'Active mandated personnel (SUP, GF, F, JRY, AP 1-7) missing rubber gloves or sleeves'
+      },
+      ordered_pending: {
+        key: 'ordered_pending',
+        title: 'Ordered — Awaiting Delivery',
+        shortTitle: 'Ordered (Pending)',
+        icon: '📦',
+        badgeColor: 'rgba(16, 185, 129, 0.2)',
+        badgeBorder: 'rgba(16, 185, 129, 0.4)',
+        badgeText: '#34d399',
+        headerBg: 'rgba(6, 78, 59, 0.95)',
+        accentBorder: '#10b981',
+        desc: 'Items placed on order with suppliers awaiting arrival, inspection & inventory assignment'
       }
     };
   }
@@ -747,6 +759,312 @@ class ProcurementEngine {
     return 'Electric';
   }
 
+  escapeHtml(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  escapeJs(str) {
+    if (!str) return '';
+    return String(str)
+      .replace(/\\/g, '\\\\')
+      .replace(/'/g, "\\'")
+      .replace(/"/g, '\\"')
+      .replace(/\n/g, '\\n')
+      .replace(/\r/g, '\\r');
+  }
+
+  cleanSize(val) {
+    if (val === null || val === undefined) return '';
+    const s = String(val).trim();
+    const lower = s.toLowerCase();
+    if (!s || s === '—' || s === '-' || lower === 'n/a' || lower === 'none' || lower === 'unknown' || lower === 'null') {
+      return '';
+    }
+    return s;
+  }
+
+  isNeedToOrderStat(stat) {
+    if (!stat) return false;
+    const lower = String(stat).toLowerCase();
+    return lower.includes('need to purchase') || lower.includes('purchase') || lower.includes('size up') || lower.includes('unassigned');
+  }
+
+  parseOrderInfoFromNotes(notesStr) {
+    if (!notesStr) return null;
+    const s = String(notesStr).trim();
+    let orderNumber = '';
+    let vendor = '';
+    let orderDate = '';
+    let price = 0;
+
+    // Extract PO Number (e.g. "PO: 002-26", "PO #002-26", "Order #1234", "Order: 1234")
+    // Use word boundaries so "Ordered" is never mistaken as "Order"
+    const poMatch = s.match(/(?:\bpo\b|\border\b)\s*(?:#|num|number)?\s*[:#-]?\s*([A-Za-z0-9\-_.]+)/i);
+    if (poMatch && !/^(?:on|by|at|for)$/i.test(poMatch[1])) {
+      orderNumber = poMatch[1].trim();
+    }
+
+    // Extract Vendor
+    const vMatch = s.match(/(?:vendor|from|supplier)\s*[:=]\s*([^,;·\n]+)/i);
+    if (vMatch) vendor = vMatch[1].trim();
+
+    // Extract Date (e.g. 10/12/2026 or 2026-10-12)
+    const dMatch = s.match(/(?:date|ordered(?:\s*on)?)\s*[:=]?\s*(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}|\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2})/i);
+    if (dMatch) orderDate = dMatch[1].trim();
+
+    // Extract Price
+    const pMatch = s.match(/(?:price|cost|unit)\s*[:=]?\s*\$?\s*([\d,]+\.?\d{0,2})|\$\s*([\d,]+\.?\d{0,2})/i);
+    if (pMatch) {
+      const val = pMatch[1] || pMatch[2];
+      price = parseFloat(val.replace(/,/g, '')) || 0;
+    }
+
+    return (orderNumber || vendor || orderDate || price) ? { orderNumber, vendor, orderDate, price } : null;
+  }
+
+  lookupOrderForEmployee(empName, itemType) {
+    if (!empName) return null;
+    const snap = (this.db && typeof this.db.getSnapshot === 'function')
+      ? this.db.getSnapshot()
+      : (window.localDB ? window.localDB.getSnapshot() : null);
+
+    // 1. Check purchase_orders table for open orders
+    const poTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('purchase_orders') : null) || snap?.tables?.['purchase_orders'];
+    if (poTable && poTable.rows) {
+      for (const po of poTable.rows) {
+        const stat = String(po['Status'] || po['status'] || '').toLowerCase();
+        if (stat.includes('received') || stat.includes('fulfilled') || stat.includes('cancel')) continue;
+        const notes = String(po['Notes'] || '');
+        const items = String(po['Items'] || '');
+        if (this.isNameMatch(notes, empName) || this.isNameMatch(items, empName)) {
+          return {
+            orderNumber: String(po['PO Number'] || po['PO #'] || ''),
+            vendor: String(po['Vendor'] || ''),
+            orderDate: String(po['Date'] || ''),
+            price: parseFloat(po['Total Price'] || po['Price'] || 0) || 0
+          };
+        }
+      }
+    }
+
+    // 2. Check safety_equipment_needs table
+    const needsTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('safety_equipment_needs') : null) || snap?.tables?.['safety_equipment_needs'];
+    if (needsTable && needsTable.rows) {
+      const match = needsTable.rows.find(r => {
+        const emp = String(r['Employee'] || '').trim();
+        const stat = String(r['Status'] || '').toLowerCase();
+        const type = String(r['Item Type'] || '').toLowerCase();
+        const isTypeMatch = !itemType || type.includes(itemType.toLowerCase().slice(0, 4));
+        return this.isNameMatch(emp, empName) && stat.includes('ordered') && isTypeMatch;
+      });
+      if (match) {
+        const parsed = this.parseOrderInfoFromNotes(match['Notes']);
+        if (parsed) return parsed;
+        return {
+          orderNumber: '',
+          vendor: '',
+          orderDate: String(match['Date Requested'] || ''),
+          price: 0
+        };
+      }
+    }
+
+    return null;
+  }
+
+  parsePoItemsString(itemsStr) {
+    if (!itemsStr) return [];
+    const result = [];
+    const chunks = itemsStr.split(';').map(c => c.trim()).filter(Boolean);
+    chunks.forEach(chunk => {
+      let qty = 1;
+      const qtyMatch = chunk.match(/^\((\d+)\)/) || chunk.match(/^(\d+)\s+x/i) || chunk.match(/^(\d+)\s+/);
+      if (qtyMatch) {
+        qty = parseInt(qtyMatch[1], 10) || 1;
+      }
+
+      let category = 'Gloves';
+      const lower = chunk.toLowerCase();
+      if (lower.includes('sleeve')) category = 'Sleeves';
+      else if (lower.includes('blanket')) category = 'Blankets';
+      else if (lower.includes('mack')) category = 'MACKs';
+      else if (lower.includes('glove')) category = 'Gloves';
+      else if (lower.includes('tester')) category = 'HV Testers';
+      else if (lower.includes('phasing')) category = 'Phasing Sets';
+      else if (lower.includes('ground')) category = 'Grounds';
+      else if (lower.includes('stick')) category = 'Hot Sticks';
+      else if (lower.includes('aed')) category = 'AED';
+
+      let classVal = 'Class 2';
+      const classMatch = chunk.match(/class\s*([0-4])/i);
+      if (classMatch) {
+        classVal = `Class ${classMatch[1]}`;
+      } else if (category === 'Blankets' || category === 'MACKs') {
+        classVal = 'Class 4';
+      }
+
+      let size = 'Standard';
+      const sizeMatch = chunk.match(/size\s*[:\s]*([0-9.]+|regular|small|large|x-large|2x-large|lg|xl|2xl|xxl)/i);
+      if (sizeMatch) {
+        size = sizeMatch[1].trim();
+      }
+
+      let unitPrice = 0;
+      const priceMatch = chunk.match(/@\s*\$?\s*([\d,]+\.?\d{0,2})/);
+      if (priceMatch) {
+        unitPrice = parseFloat(priceMatch[1].replace(/,/g, '')) || 0;
+      }
+
+      result.push({
+        quantity: qty,
+        category: category,
+        classVal: classVal,
+        size: size,
+        unitPrice: unitPrice
+      });
+    });
+    return result;
+  }
+
+  suggestNextItemNumber(category) {
+    const cat = String(category || '').toLowerCase();
+    let tableKey = 'gloves';
+    let prefix = '';
+    let defaultStart = 1001;
+
+    if (cat.includes('glove')) {
+      tableKey = 'gloves';
+      defaultStart = 2000;
+    } else if (cat.includes('sleeve')) {
+      tableKey = 'sleeves';
+      defaultStart = 3000;
+    } else if (cat.includes('blanket')) {
+      tableKey = 'blankets';
+      prefix = 'B';
+      defaultStart = 100;
+    } else if (cat.includes('mack')) {
+      tableKey = 'macks';
+      prefix = 'M';
+      defaultStart = 1;
+    } else if (cat.includes('hv') || cat.includes('tester')) {
+      tableKey = 'hv_testers';
+      prefix = 'HV';
+      defaultStart = 1;
+    } else if (cat.includes('phasing')) {
+      tableKey = 'phasing_sets';
+      prefix = 'PS';
+      defaultStart = 1;
+    } else if (cat.includes('ground')) {
+      tableKey = 'grounds';
+      prefix = 'GR';
+      defaultStart = 1;
+    } else if (cat.includes('hot') || cat.includes('stick')) {
+      tableKey = 'hot_sticks';
+      prefix = 'HS';
+      defaultStart = 1;
+    } else if (cat.includes('aed')) {
+      tableKey = 'aed';
+      prefix = 'AED';
+      defaultStart = 1;
+    }
+
+    const table = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable(tableKey) : null) || (window.localDB ? window.localDB.getTable(tableKey) : null);
+    if (!table) return prefix ? `${prefix}${defaultStart}` : String(defaultStart);
+
+    const rows = table.rows || table.rawGrid || [];
+    let maxNum = defaultStart - 1;
+
+    rows.forEach(r => {
+      let numStr = '';
+      if (Array.isArray(r)) {
+        numStr = String(r[0] || '').trim();
+      } else if (r && typeof r === 'object') {
+        numStr = String(r['Item #'] || r['Item Number'] || r['Serial #'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['MACK'] || Object.values(r)[0] || '').trim();
+      }
+      if (!numStr) return;
+      const digits = numStr.replace(/^[A-Za-z#\s\-_]+/, '').trim();
+      const parsed = parseInt(digits, 10);
+      if (!isNaN(parsed) && parsed > maxNum) {
+        maxNum = parsed;
+      }
+    });
+
+    const nextVal = maxNum + 1;
+    return prefix ? `${prefix}${nextVal}` : String(nextVal);
+  }
+
+  async syncVendorPrice(vendorName, itemCategory, size, classVal, newPrice) {
+    if (!vendorName || !newPrice || isNaN(newPrice) || newPrice <= 0) return false;
+    const vNorm = String(vendorName).trim().toLowerCase();
+    let vendor = this.vendors.find(v => (v.name || '').trim().toLowerCase() === vNorm);
+    if (!vendor) {
+      vendor = {
+        name: vendorName.trim(),
+        contact: '',
+        email: '',
+        phone: '',
+        notes: '',
+        items: []
+      };
+      this.vendors.push(vendor);
+    }
+    if (!vendor.items) vendor.items = [];
+
+    const tClassNum = (classVal || '').replace(/[^0-9]/g, '').trim();
+    const tType = (itemCategory || '').toLowerCase();
+    const tSize = (size || '').toLowerCase().trim();
+
+    let matchedItem = null;
+    if (tSize && tSize !== '—' && !tSize.includes('needs size')) {
+      matchedItem = vendor.items.find(ci => {
+        const name = (ci.item || '').toLowerCase();
+        const typeMatch = name.includes(tType.slice(0, 4));
+        const classMatch = !tClassNum || name.includes(`class ${tClassNum}`) || name.includes(`cl${tClassNum}`);
+        const sizeMatch = name.includes(tSize);
+        return typeMatch && classMatch && sizeMatch;
+      });
+    }
+    if (!matchedItem) {
+      matchedItem = vendor.items.find(ci => {
+        const name = (ci.item || '').toLowerCase();
+        const typeMatch = name.includes(tType.slice(0, 4));
+        const classMatch = !tClassNum || name.includes(`class ${tClassNum}`) || name.includes(`cl${tClassNum}`);
+        return typeMatch && classMatch;
+      });
+    }
+
+    let updated = false;
+    if (matchedItem) {
+      if (Math.abs(matchedItem.price - newPrice) > 0.009) {
+        matchedItem.price = newPrice;
+        updated = true;
+      }
+    } else {
+      const itemName = `${classVal ? classVal + ' ' : ''}${itemCategory}${size && size !== '—' && !size.includes('Needs') ? ' Size ' + size : ''}`.trim();
+      vendor.items.push({
+        item: itemName,
+        itemNumber: '',
+        price: newPrice
+      });
+      updated = true;
+    }
+
+    if (updated) {
+      console.log(`[Procurement] Auto-synced vendor price for ${vendorName} - ${itemCategory} ${classVal} ${size}: $${newPrice}`);
+      await this.saveVendorsToDB(true);
+      if (this.selectedVendor && this.selectedVendor.name.toLowerCase() === vNorm) {
+        this.updatePricing();
+      }
+    }
+    return updated;
+  }
+
   scanPurchaseNeeds() {
     this.loadPreviousEmployees();
 
@@ -942,7 +1260,7 @@ class ProcurementEngine {
       return 'Class 2';
     };
 
-    const addItem = (section, itemType, typeLabel, size, hasNoSize, classVal, empLabel, minDaysLeft, isImmediate) => {
+    const addItem = (section, itemType, typeLabel, size, hasNoSize, classVal, empLabel, minDaysLeft, isImmediate, orderInfo = null) => {
       const aggKey = `${section}|${itemType}|${size}|${classVal}`;
       if (!aggregated[aggKey]) {
         aggregated[aggKey] = {
@@ -959,9 +1277,17 @@ class ProcurementEngine {
           minDaysLeft: minDaysLeft !== undefined ? minDaysLeft : 30,
           isImmediate: !!isImmediate,
           selected: true,
-          price: 0,
-          partNumber: ''
+          price: (orderInfo && orderInfo.price) ? parseFloat(orderInfo.price) : 0,
+          partNumber: '',
+          orderInfo: orderInfo || null
         };
+      }
+
+      if (orderInfo && !aggregated[aggKey].orderInfo) {
+        aggregated[aggKey].orderInfo = orderInfo;
+        if (orderInfo.price && !aggregated[aggKey].price) {
+          aggregated[aggKey].price = parseFloat(orderInfo.price) || 0;
+        }
       }
 
       if (empLabel) {
@@ -981,7 +1307,8 @@ class ProcurementEngine {
             name: empName,
             label: empLabel,
             detail: empDetail,
-            checked: true
+            checked: true,
+            orderInfo: orderInfo || null
           });
           aggregated[aggKey].quantity += 1;
         }
@@ -1093,9 +1420,34 @@ class ProcurementEngine {
         const isSizeUp = statLower.includes('size up');
         const isShelfStock = emp.toLowerCase().includes('on shelf') || emp.toLowerCase() === 'shelf';
 
-        // Filter out return/reclaim/former employee indicators or already ordered items
+        // Check if item is already ordered (awaiting delivery)
+        if (statLower.includes('ordered')) {
+          if (this.isDepartedOrPreviousEmployee(emp)) return;
+          const notesText = Array.isArray(row) ? String(row[11] || '') : String(row['Notes'] || '');
+          const orderInfo = this.parseOrderInfoFromNotes(status) ||
+                            this.parseOrderInfoFromNotes(notesText) ||
+                            this.lookupOrderForEmployee(emp, s.type) ||
+                            { orderNumber: '', vendor: '', orderDate: '', price: 0 };
+          const validRowSize = cleanSize(size);
+          const empRec = getEmpRecord(emp);
+          let neededSize = validRowSize;
+          if (!neededSize && !isShelfStock) {
+            const prefSize = s.type === 'Gloves' ? cleanSize(empRec?.gloveSize) : (s.type === 'Sleeves' ? cleanSize(empRec?.sleeveSize) : '');
+            neededSize = prefSize || 'Standard';
+          }
+          if (!neededSize && isShelfStock) neededSize = 'Standard';
+
+          let poLabel = orderInfo.orderNumber ? `PO: ${orderInfo.orderNumber}` : 'Ordered';
+          if (orderInfo.vendor) poLabel += ` · ${orderInfo.vendor}`;
+          const empLabel = `${emp} (📦 ${poLabel})`;
+
+          addItem('ordered_pending', s.type, s.label, neededSize, false, rowClass, empLabel, daysLeft, isImmediateRow, orderInfo);
+          markCovered(s.type, emp);
+          return;
+        }
+
+        // Filter out return/reclaim/former employee indicators
         const isPrevEmpIndicator = daysRaw.toUpperCase().includes('PREV') ||
-                                   statLower.includes('ordered') ||
                                    statLower.includes('return to shelf') ||
                                    statLower.includes('reclaim') ||
                                    statLower.includes('previous') ||
@@ -1112,7 +1464,7 @@ class ProcurementEngine {
                                  (pickItem === '—' && !statLower.includes('return') && !statLower.includes('reclaim')) ||
                                  (pickItem === '' && statLower.includes('unassigned'));
 
-        if (!isNeedToPurchase || !emp || statLower.includes('ordered')) return;
+        if (!isNeedToPurchase || !emp) return;
 
         // Filter out former / previous employees
         if (this.isDepartedOrPreviousEmployee(emp)) return;
@@ -1234,7 +1586,21 @@ class ProcurementEngine {
           status = String(row['Status'] || '').trim().toLowerCase();
         }
 
-        if (!emp || status.includes('received') || status.includes('fulfilled') || status.includes('ordered')) return;
+        if (!emp || status.includes('received') || status.includes('fulfilled')) return;
+
+        if (status.includes('ordered')) {
+          if (this.isDepartedOrPreviousEmployee(emp)) return;
+          const orderInfo = this.parseOrderInfoFromNotes(row['Notes']) ||
+                            this.lookupOrderForEmployee(emp, itemType) ||
+                            { orderNumber: '', vendor: '', orderDate: '', price: 0 };
+          let poLabel = orderInfo.orderNumber ? `PO: ${orderInfo.orderNumber}` : 'Ordered';
+          if (orderInfo.vendor) poLabel += ` · ${orderInfo.vendor}`;
+          const empLabel = `${emp} (📦 ${poLabel})`;
+          addItem('ordered_pending', itemType, typeLabel, cleanSize(size) || 'Standard', false, rowClass, empLabel, 15, false, orderInfo);
+          markCovered(itemType, emp);
+          return;
+        }
+
         if (this.isDepartedOrPreviousEmployee(emp)) return;
 
         // If the employee already holds active inventory for this item type, their need is already met
@@ -1259,6 +1625,66 @@ class ProcurementEngine {
 
         addItem(section, itemType, typeLabel, cleanS, hasNoSize, rowClass, empLabel, isImmediate ? 0 : 15, isImmediate);
         markCovered(itemType, emp);
+      });
+    }
+
+    // =========================================================================
+    // SECTION: ACTIVE PURCHASE ORDERS (Open POs Awaiting Delivery)
+    // =========================================================================
+    const poTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('purchase_orders') : null) || snap?.tables?.['purchase_orders'];
+    if (poTable) {
+      const poRows = poTable.rows || poTable.rawGrid || [];
+      poRows.forEach(poRow => {
+        let poNum = '';
+        let vendor = '';
+        let dateStr = '';
+        let itemsStr = '';
+        let totalPrice = 0;
+        let status = '';
+        let notes = '';
+
+        if (Array.isArray(poRow)) {
+          if (String(poRow[0] || '').toLowerCase() === 'date') return;
+          dateStr = String(poRow[0] || '').trim();
+          poNum = String(poRow[1] || '').trim();
+          vendor = String(poRow[2] || '').trim();
+          itemsStr = String(poRow[3] || '').trim();
+          totalPrice = parseFloat(poRow[4]) || 0;
+          status = String(poRow[6] || '').trim().toLowerCase();
+          notes = String(poRow[7] || '').trim();
+        } else if (poRow && typeof poRow === 'object') {
+          dateStr = String(poRow['Date'] || '').trim();
+          poNum = String(poRow['PO Number'] || poRow['PO #'] || '').trim();
+          vendor = String(poRow['Vendor'] || '').trim();
+          itemsStr = String(poRow['Items'] || '').trim();
+          totalPrice = parseFloat(poRow['Total Price'] || poRow['Price'] || 0) || 0;
+          status = String(poRow['Status'] || '').trim().toLowerCase();
+          notes = String(poRow['Notes'] || '').trim();
+        }
+
+        if (!status || status.includes('received') || status.includes('fulfilled') || status.includes('cancel')) {
+          return;
+        }
+
+        const parsedItems = this.parsePoItemsString(itemsStr);
+        parsedItems.forEach(pi => {
+          const aggKey = `ordered_pending|${pi.category}|${pi.size}|${pi.classVal}`;
+          const currentQty = aggregated[aggKey] ? aggregated[aggKey].quantity : 0;
+          if (currentQty < pi.quantity) {
+            const neededQty = pi.quantity - currentQty;
+            const typeLabel = pi.category === 'Gloves' ? '🧤 Gloves' : (pi.category === 'Sleeves' ? '🦺 Sleeves' : (pi.category === 'Blankets' ? '🧱 Blankets' : (pi.category === 'MACKs' ? '🧱 MACKs' : `📦 ${pi.category}`)));
+            const orderInfo = {
+              orderNumber: poNum,
+              vendor: vendor,
+              orderDate: dateStr,
+              price: pi.unitPrice || (totalPrice / (pi.quantity || 1))
+            };
+            for (let q = 0; q < neededQty; q++) {
+              const label = `Stock Order (PO: ${poNum || 'Pending'} · ${vendor || 'Vendor'})`;
+              addItem('ordered_pending', pi.category, typeLabel, pi.size, false, pi.classVal, label, 15, false, orderInfo);
+            }
+          }
+        });
       });
     }
 
@@ -1475,10 +1901,11 @@ class ProcurementEngine {
 
     // Sort order: Group by Section first, then by Urgency, then Quantity
     const sectionOrder = {
-      'swaps_need': 1,
-      'swaps_size_up': 2,
-      'assigned_size_up': 3,
-      'compliance_missing': 4
+      'ordered_pending': 1,
+      'swaps_need': 2,
+      'swaps_size_up': 3,
+      'assigned_size_up': 4,
+      'compliance_missing': 5
     };
     const priorityOrder = { 'HIGH': 1, 'MEDIUM': 2, 'LOW': 3 };
 
@@ -1592,6 +2019,8 @@ class ProcurementEngine {
     // Calculate section counts
     const counts = {
       all: this.items.length,
+      needs: this.items.filter(i => i.section !== 'ordered_pending').length,
+      ordered_pending: this.items.filter(i => i.section === 'ordered_pending').length,
       swaps_need: this.items.filter(i => i.section === 'swaps_need').length,
       swaps_size_up: this.items.filter(i => i.section === 'swaps_size_up').length,
       assigned_size_up: this.items.filter(i => i.section === 'assigned_size_up').length,
@@ -1600,9 +2029,19 @@ class ProcurementEngine {
 
     // Filter items based on active section filter
     const activeFilter = this.currentSectionFilter || 'all';
-    const displayItems = activeFilter === 'all'
-      ? this.items
-      : this.items.filter(i => i.section === activeFilter);
+
+    // If History tab is selected, render dedicated purchase orders history view
+    if (activeFilter === 'history') {
+      this.renderOrdersHistory(container);
+      return;
+    }
+
+    let displayItems = this.items;
+    if (activeFilter === 'needs') {
+      displayItems = this.items.filter(i => i.section !== 'ordered_pending');
+    } else if (activeFilter !== 'all') {
+      displayItems = this.items.filter(i => i.section === activeFilter);
+    }
 
     // Group display items by section
     const grouped = {};
@@ -1620,11 +2059,22 @@ class ProcurementEngine {
       <div class="procurement-section-tabs" style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; align-items: center; padding-bottom: 10px; border-bottom: 1px solid var(--border-color);">
         <span style="font-size: 12px; color: var(--text-muted); font-weight: 700; margin-right: 4px;">VIEW SECTION:</span>
         <button type="button" class="btn ${activeFilter === 'all' ? 'btn-primary' : 'btn-secondary'}" style="font-size: 11.5px; padding: 4px 10px; display: inline-flex; align-items: center; gap: 6px;" onclick="window.procurementEngine.setSectionFilter('all')">
-          <span>📋 All Sections</span>
+          <span>📋 All Needs & Orders</span>
           <span style="background: rgba(255,255,255,0.15); padding: 1px 6px; border-radius: 10px; font-size: 10.5px;">${counts.all}</span>
         </button>
+        <button type="button" class="btn ${activeFilter === 'needs' ? 'btn-primary' : 'btn-secondary'}" style="font-size: 11.5px; padding: 4px 10px; display: inline-flex; align-items: center; gap: 6px;" onclick="window.procurementEngine.setSectionFilter('needs')">
+          <span>🛒 Needs to Order</span>
+          <span style="background: rgba(255,255,255,0.15); padding: 1px 6px; border-radius: 10px; font-size: 10.5px;">${counts.needs}</span>
+        </button>
+        <button type="button" class="btn ${activeFilter === 'ordered_pending' ? 'btn-primary' : 'btn-secondary'}" style="font-size: 11.5px; padding: 4px 10px; display: inline-flex; align-items: center; gap: 6px; border-color: #10b981; color: ${activeFilter === 'ordered_pending' ? '#fff' : '#6ee7b7'};" onclick="window.procurementEngine.setSectionFilter('ordered_pending')">
+          <span>📦 Ordered (Awaiting Delivery)</span>
+          <span style="background: rgba(16,185,129,0.25); padding: 1px 6px; border-radius: 10px; font-size: 10.5px; color: #34d399; font-weight: 700;">${counts.ordered_pending}</span>
+        </button>
+        <button type="button" class="btn ${activeFilter === 'history' ? 'btn-primary' : 'btn-secondary'}" style="font-size: 11.5px; padding: 4px 10px; display: inline-flex; align-items: center; gap: 6px;" onclick="window.procurementEngine.setSectionFilter('history')">
+          <span>📜 Orders Tracking & History</span>
+        </button>
         <button type="button" class="btn ${activeFilter === 'swaps_need' ? 'btn-primary' : 'btn-secondary'}" style="font-size: 11.5px; padding: 4px 10px; display: inline-flex; align-items: center; gap: 6px;" onclick="window.procurementEngine.setSectionFilter('swaps_need')">
-          <span>🛒 Swaps: Need to Purchase</span>
+          <span>🛒 Swaps: Need</span>
           <span style="background: rgba(255,255,255,0.15); padding: 1px 6px; border-radius: 10px; font-size: 10.5px;">${counts.swaps_need}</span>
         </button>
         <button type="button" class="btn ${activeFilter === 'swaps_size_up' ? 'btn-primary' : 'btn-secondary'}" style="font-size: 11.5px; padding: 4px 10px; display: inline-flex; align-items: center; gap: 6px;" onclick="window.procurementEngine.setSectionFilter('swaps_size_up')">
@@ -1636,7 +2086,7 @@ class ProcurementEngine {
           <span style="background: rgba(255,255,255,0.15); padding: 1px 6px; border-radius: 10px; font-size: 10.5px;">${counts.assigned_size_up}</span>
         </button>
         <button type="button" class="btn ${activeFilter === 'compliance_missing' ? 'btn-primary' : 'btn-secondary'}" style="font-size: 11.5px; padding: 4px 10px; display: inline-flex; align-items: center; gap: 6px;" onclick="window.procurementEngine.setSectionFilter('compliance_missing')">
-          <span>🛡️ PPE Compliance: Missing</span>
+          <span>🛡️ Missing Equipment</span>
           <span style="background: rgba(255,255,255,0.15); padding: 1px 6px; border-radius: 10px; font-size: 10.5px;">${counts.compliance_missing}</span>
         </button>
       </div>
@@ -1649,9 +2099,10 @@ class ProcurementEngine {
             <th style="padding: 10px; text-align: center; width: 95px;">Size</th>
             <th style="padding: 10px; text-align: center; width: 90px;">Class / KV</th>
             <th style="padding: 10px; text-align: center; width: 80px;">Qty</th>
-            <th style="padding: 10px; text-align: center; width: 150px;">Urgency</th>
-            <th style="padding: 10px; text-align: right; width: 100px;">Unit Price</th>
-            <th style="padding: 10px; text-align: right; width: 110px;">Est. Total</th>
+            <th style="padding: 10px; text-align: center; width: 145px;">Urgency / Status</th>
+            <th style="padding: 10px; text-align: right; width: 95px;">Unit Price</th>
+            <th style="padding: 10px; text-align: right; width: 105px;">Est. Total</th>
+            <th style="padding: 10px; text-align: center; width: 90px;">Action</th>
           </tr>
         </thead>
         <tbody>
@@ -1672,7 +2123,7 @@ class ProcurementEngine {
           <td style="padding: 8px; text-align: center;">
             <input type="checkbox" class="procurement-section-check" data-section="${secKey}" ${secAllChecked ? 'checked' : ''} title="Select/Deselect all in ${secConfig.title}">
           </td>
-          <td colspan="7" style="padding: 10px 12px;">
+          <td colspan="8" style="padding: 10px 12px;">
             <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
               <div style="display: flex; align-items: center; gap: 8px;">
                 <span style="font-size: 16px;">${secConfig.icon}</span>
@@ -1728,13 +2179,24 @@ class ProcurementEngine {
                   ${emp.checked ? '1' : '0'}
                 </td>
                 <td style="padding: 6px 8px; text-align: center; font-size: 11px; color: var(--text-muted);">
-                  ${item.timeframe}
+                  ${item.section === 'ordered_pending' ? '📦 Ordered' : item.timeframe}
                 </td>
                 <td style="padding: 6px 8px; text-align: right; font-family: monospace; font-size: 11.5px; color: var(--text-muted);">
                   ${item.price > 0 ? `$${item.price.toFixed(2)}` : '—'}
                 </td>
                 <td style="padding: 6px 8px; text-align: right; font-family: monospace; font-size: 11.5px; color: ${emp.checked && item.price > 0 ? '#4ade80' : 'var(--text-muted)'}; font-weight: ${emp.checked ? '600' : 'normal'};">
                   ${empTotal}
+                </td>
+                <td style="padding: 6px 8px; text-align: center;">
+                  ${item.section === 'ordered_pending' ? `
+                    <button type="button" class="btn btn-xs" onclick="window.procurementEngine.openDeliverForEmployee('${this.escapeJs(emp.name)}', '${this.escapeJs(item.itemType)}', '${this.escapeJs(item.size)}')" style="background: rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.35); color: #93c5fd; padding: 2px 6px; font-size: 10.5px; border-radius: 3px; cursor: pointer;">
+                      <span>🚚</span> Deliver
+                    </button>
+                  ` : `
+                    <button type="button" class="btn btn-xs" onclick="window.procurementEngine.openMarkOrderedModal([{ ...window.procurementEngine.items[${item._globalIdx}], quantity: 1, employees: [{ name: '${this.escapeJs(emp.name)}', label: '${this.escapeJs(emp.label)}', checked: true }] }])" style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.35); color: #6ee7b7; padding: 2px 6px; font-size: 10.5px; border-radius: 3px; cursor: pointer;">
+                      <span>📦</span> Order
+                    </button>
+                  `}
                 </td>
               </tr>
             `;
@@ -1759,6 +2221,7 @@ class ProcurementEngine {
                 ` : ''}
               </div>
               ${item.partNumber ? `<div style="font-size: 11px; color: #3b82f6; margin-top: 1px;">PN: ${item.partNumber}</div>` : ''}
+              ${item.orderInfo?.orderNumber ? `<div style="font-size: 11px; color: #34d399; margin-top: 1px; font-weight: 600;">PO: ${this.escapeHtml(item.orderInfo.orderNumber)}${item.orderInfo.vendor ? ' · ' + this.escapeHtml(item.orderInfo.vendor) : ''}</div>` : ''}
             </td>
             <td style="padding: 8px; text-align: center;">
               ${item.hasNoSize ? `
@@ -1774,15 +2237,32 @@ class ProcurementEngine {
               <input type="number" min="0" value="${item.quantity}" data-idx="${item._globalIdx}" class="procurement-qty-input" style="width: 55px; padding: 4px 6px; text-align: center; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); font-weight: 600;">
             </td>
             <td style="padding: 8px; text-align: center;">
-              <span class="badge ${item.priority === 'HIGH' ? 'badge-danger' : (item.priority === 'MEDIUM' ? 'badge-warning' : 'badge-success')}">
-                ${item.priorityEmoji} ${item.timeframe}
-              </span>
+              ${item.section === 'ordered_pending' ? `
+                <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 4px;">
+                  📦 Ordered
+                </span>
+              ` : `
+                <span class="badge ${item.priority === 'HIGH' ? 'badge-danger' : (item.priority === 'MEDIUM' ? 'badge-warning' : 'badge-success')}">
+                  ${item.priorityEmoji} ${item.timeframe}
+                </span>
+              `}
             </td>
             <td style="padding: 8px; text-align: right; font-family: monospace;">
               ${item.price > 0 ? `$${item.price.toFixed(2)}` : '—'}
             </td>
             <td style="padding: 8px; text-align: right; font-weight: 600; font-family: monospace;">
               ${totalCost > 0 ? `$${totalCost.toFixed(2)}` : '—'}
+            </td>
+            <td style="padding: 8px; text-align: center;">
+              ${item.section === 'ordered_pending' ? `
+                <button type="button" class="btn btn-xs" onclick="window.procurementEngine.openBatchDeliveryModal([window.procurementEngine.items[${item._globalIdx}]])" style="background: rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.4); color: #93c5fd; padding: 3px 8px; font-size: 11px; border-radius: 3px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;" title="Receive this delivered item into inventory">
+                  <span>🚚</span> Deliver
+                </button>
+              ` : `
+                <button type="button" class="btn btn-xs" onclick="window.procurementEngine.openMarkOrderedModal([window.procurementEngine.items[${item._globalIdx}]])" style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); color: #6ee7b7; padding: 3px 8px; font-size: 11px; border-radius: 3px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;" title="Mark this item as Ordered">
+                  <span>📦</span> Order
+                </button>
+              `}
             </td>
           </tr>
           ${empRowsHtml}
@@ -2657,9 +3137,9 @@ class ProcurementEngine {
     }
   }
 
-  async saveVendorsToDB() {
+  async saveVendorsToDB(silent = false) {
     const saveBtn = document.getElementById('btn-save-vendors');
-    if (saveBtn) saveBtn.textContent = '⏳ Saving...';
+    if (saveBtn && !silent) saveBtn.textContent = '⏳ Saving...';
 
     try {
       const headers = ['Vendor Name', 'Contact Name', 'Email', 'Phone', 'Notes', 'Item', 'Item Number', 'Price'];
@@ -2712,15 +3192,1167 @@ class ProcurementEngine {
 
       this.updatePricing();
       this.render();
-      this.closeManageVendorsModal();
-
-      alert('✅ Vendor catalog saved successfully! Click "Push Changes to Sheets" at the top whenever you wish to sync changes back to Google Sheets.');
+      if (!silent) {
+        this.closeManageVendorsModal();
+        alert('✅ Vendor catalog saved successfully! Click "Push Changes to Sheets" at the top whenever you wish to sync changes back to Google Sheets.');
+      }
     } catch (err) {
       console.error('Error saving vendor catalog:', err);
-      alert('❌ Failed to save vendor changes: ' + (err.message || err));
+      if (!silent) {
+        alert('❌ Failed to save vendor changes: ' + (err.message || err));
+      }
     } finally {
-      if (saveBtn) saveBtn.innerHTML = '<span>💾</span> Save Vendor Changes';
+      if (saveBtn && !silent) saveBtn.innerHTML = '<span>💾</span> Save Vendor Changes';
     }
+  }
+
+  // =========================================================================
+  // MARK AS ORDERED MODAL & WORKFLOW
+  // =========================================================================
+
+  openMarkOrderedModal(itemsToOrder = null) {
+    let items = itemsToOrder;
+    if (!items || !items.length) {
+      items = (this.items || []).filter(i => i.selected && i.quantity > 0 && i.section !== 'ordered_pending');
+    }
+    if (!items || !items.length) {
+      alert('⚠️ Please select at least one item to mark as Ordered.');
+      return;
+    }
+
+    this.pendingMarkOrderedItems = items;
+    const modal = document.getElementById('mark-ordered-modal');
+    const body = document.getElementById('mark-ordered-modal-body');
+    if (!modal || !body) return;
+
+    const poNumber = this.getPurchaseOrderNumber();
+    const today = new Date();
+    const todayYmd = today.toISOString().split('T')[0];
+    const defaultDelivery = new Date(today.getTime() + 14 * 86400000).toISOString().split('T')[0];
+
+    const currentVendorName = this.selectedVendor ? this.selectedVendor.name : (this.vendors[0]?.name || '');
+
+    let vendorOptions = this.vendors.map(v => `<option value="${this.escapeHtml(v.name)}" ${v.name === currentVendorName ? 'selected' : ''}>${this.escapeHtml(v.name)}</option>`).join('');
+    vendorOptions += '<option value="__custom__">➕ New / Custom Vendor...</option>';
+
+    let rowsHtml = '';
+    let totalEst = 0;
+
+    items.forEach((item, idx) => {
+      const unitPrice = item.price > 0 ? item.price : 0;
+      const subtotal = unitPrice * item.quantity;
+      totalEst += subtotal;
+
+      const empNames = (item.employees && item.employees.length > 0)
+        ? item.employees.filter(e => e.checked).map(e => e.name).join(', ')
+        : (item.employees?.[0]?.name || 'Shelf Stock');
+
+      rowsHtml += `
+        <tr class="mark-ordered-item-row" data-idx="${idx}">
+          <td style="padding: 8px 10px; font-weight: 600; color: #f1f5f9;">
+            ${this.escapeHtml(item.typeLabel || item.itemType)}
+          </td>
+          <td style="padding: 8px 10px; text-align: center;">
+            <input type="text" class="mark-ordered-size-input batch-delivery-input" value="${this.escapeHtml(item.size || 'Standard')}" style="width: 80px; text-align: center;">
+          </td>
+          <td style="padding: 8px 10px; text-align: center; color: #94a3b8;">
+            ${this.escapeHtml(item.classVal || 'Class 2')}
+          </td>
+          <td style="padding: 8px 10px; text-align: center;">
+            <input type="number" min="1" class="mark-ordered-qty-input batch-delivery-input" value="${item.quantity}" style="width: 60px; text-align: center;" onchange="window.procurementEngine.recalcMarkOrderedModal()">
+          </td>
+          <td style="padding: 8px 10px; text-align: right;">
+            <div style="display: flex; align-items: center; justify-content: flex-end; gap: 4px;">
+              <span style="color: #64748b;">$</span>
+              <input type="number" step="0.01" min="0" class="mark-ordered-price-input batch-delivery-input" value="${unitPrice > 0 ? unitPrice.toFixed(2) : ''}" placeholder="0.00" style="width: 85px; text-align: right;" onchange="window.procurementEngine.recalcMarkOrderedModal()">
+            </div>
+          </td>
+          <td style="padding: 8px 10px; text-align: right; font-weight: 700; color: #34d399;" class="mark-ordered-subtotal">
+            $${subtotal.toFixed(2)}
+          </td>
+          <td style="padding: 8px 10px; font-size: 11.5px; color: #cbd5e1;">
+            ${this.escapeHtml(empNames)}
+          </td>
+        </tr>
+      `;
+    });
+
+    body.innerHTML = `
+      <div style="margin-bottom: 18px; background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 8px; padding: 14px 18px;">
+        <div style="font-weight: 700; font-size: 14px; color: #34d399; margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">
+          <span>📦</span> Order Information
+        </div>
+        <div style="font-size: 12px; color: #cbd5e1;">
+          Items marked as Ordered will remain on the Purchase Needs page under <strong>"Ordered — Awaiting Delivery"</strong> and will display an <strong>"Ordered"</strong> status badge on the PPE Tracker until delivered into inventory.
+        </div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-bottom: 20px;">
+        <div>
+          <label style="display: block; font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 5px;">PO / Order Number *</label>
+          <input type="text" id="mark-order-po-num" class="batch-delivery-input" value="${this.escapeHtml(poNumber)}" style="font-weight: 700; color: #38bdf8;">
+        </div>
+        <div>
+          <label style="display: block; font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 5px;">Vendor *</label>
+          <select id="mark-order-vendor-select" class="batch-delivery-input" onchange="window.procurementEngine.onMarkOrderVendorChange(this.value)">
+            ${vendorOptions}
+          </select>
+          <input type="text" id="mark-order-custom-vendor" class="batch-delivery-input" placeholder="Enter vendor name..." style="display: none; margin-top: 6px;">
+        </div>
+        <div>
+          <label style="display: block; font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 5px;">Order Date *</label>
+          <input type="date" id="mark-order-date" class="batch-delivery-input" value="${todayYmd}">
+        </div>
+        <div>
+          <label style="display: block; font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 5px;">Expected Delivery Date</label>
+          <input type="date" id="mark-order-delivery-date" class="batch-delivery-input" value="${defaultDelivery}">
+        </div>
+      </div>
+
+      <div style="margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
+        <span style="font-size: 12.5px; font-weight: 700; color: #cbd5e1; text-transform: uppercase; letter-spacing: 0.5px;">Items in this Order (${items.length})</span>
+        <span style="font-size: 11.5px; color: #64748b;">Prices entered will auto-update vendor catalog</span>
+      </div>
+
+      <div style="overflow-x: auto; border: 1px solid var(--border-color); border-radius: 6px; margin-bottom: 16px;">
+        <table style="width: 100%; border-collapse: collapse; font-size: 12.5px;">
+          <thead>
+            <tr style="background: rgba(30, 41, 59, 0.85); border-bottom: 2px solid var(--border-color); text-align: left; color: #94a3b8; font-size: 11px; text-transform: uppercase;">
+              <th style="padding: 8px 10px;">Item / Equipment</th>
+              <th style="padding: 8px 10px; text-align: center; width: 90px;">Size</th>
+              <th style="padding: 8px 10px; text-align: center; width: 85px;">Class</th>
+              <th style="padding: 8px 10px; text-align: center; width: 70px;">Qty</th>
+              <th style="padding: 8px 10px; text-align: right; width: 105px;">Unit Price</th>
+              <th style="padding: 8px 10px; text-align: right; width: 95px;">Subtotal</th>
+              <th style="padding: 8px 10px;">Assigned Linemen</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rowsHtml}
+          </tbody>
+        </table>
+      </div>
+
+      <div style="display: flex; justify-content: flex-end; align-items: center; gap: 14px; padding: 12px 16px; background: rgba(15, 23, 42, 0.6); border-radius: 6px; border: 1px solid var(--border-color);">
+        <span style="font-size: 13px; color: #94a3b8; font-weight: 600;">Estimated Order Total:</span>
+        <span id="mark-order-grand-total" style="font-size: 20px; font-weight: 800; color: #34d399; font-family: monospace;">
+          $${totalEst.toFixed(2)}
+        </span>
+      </div>
+    `;
+
+    modal.style.display = 'flex';
+  }
+
+  closeMarkOrderedModal() {
+    const modal = document.getElementById('mark-ordered-modal');
+    if (modal) modal.style.display = 'none';
+  }
+
+  recalcMarkOrderedModal() {
+    const rows = document.querySelectorAll('.mark-ordered-item-row');
+    let grandTotal = 0;
+    rows.forEach(r => {
+      const qtyInput = r.querySelector('.mark-ordered-qty-input');
+      const priceInput = r.querySelector('.mark-ordered-price-input');
+      const subtotalEl = r.querySelector('.mark-ordered-subtotal');
+      const qty = parseInt(qtyInput?.value, 10) || 0;
+      const price = parseFloat(priceInput?.value) || 0;
+      const sub = qty * price;
+      grandTotal += sub;
+      if (subtotalEl) subtotalEl.textContent = `$${sub.toFixed(2)}`;
+    });
+    const totalEl = document.getElementById('mark-order-grand-total');
+    if (totalEl) totalEl.textContent = `$${grandTotal.toFixed(2)}`;
+  }
+
+  onMarkOrderVendorChange(val) {
+    const customInput = document.getElementById('mark-order-custom-vendor');
+    if (!customInput) return;
+    if (val === '__custom__') {
+      customInput.style.display = 'block';
+      customInput.focus();
+    } else {
+      customInput.style.display = 'none';
+      const v = this.vendors.find(vend => vend.name === val);
+      if (v && v.items && this.pendingMarkOrderedItems) {
+        const rows = document.querySelectorAll('.mark-ordered-item-row');
+        rows.forEach((r, idx) => {
+          const item = this.pendingMarkOrderedItems[idx];
+          if (!item) return;
+          const priceInput = r.querySelector('.mark-ordered-price-input');
+          const tType = (item.itemType || '').toLowerCase();
+          const tClassNum = (item.classVal || '').replace(/[^0-9]/g, '').trim();
+          const tSize = (item.size || '').toLowerCase().trim();
+
+          const match = v.items.find(ci => {
+            const name = (ci.item || '').toLowerCase();
+            return name.includes(tType.slice(0, 4)) && (!tClassNum || name.includes(`class ${tClassNum}`)) && (!tSize || name.includes(tSize));
+          }) || v.items.find(ci => ci.item.toLowerCase().includes(tType.slice(0, 4)));
+
+          if (match && match.price > 0 && priceInput) {
+            priceInput.value = match.price.toFixed(2);
+          }
+        });
+        this.recalcMarkOrderedModal();
+      }
+    }
+  }
+
+  async confirmMarkOrdered() {
+    const poNumInput = document.getElementById('mark-order-po-num');
+    const poNum = poNumInput ? poNumInput.value.trim() : '';
+    if (!poNum) {
+      alert('⚠️ Please enter a PO / Order Number.');
+      if (poNumInput) poNumInput.focus();
+      return;
+    }
+
+    const vSelect = document.getElementById('mark-order-vendor-select');
+    let vendorName = vSelect ? vSelect.value : '';
+    if (vendorName === '__custom__') {
+      const customV = document.getElementById('mark-order-custom-vendor');
+      vendorName = customV ? customV.value.trim() : '';
+    }
+    if (!vendorName) {
+      alert('⚠️ Please select or enter a Vendor.');
+      return;
+    }
+
+    const orderDateInput = document.getElementById('mark-order-date');
+    const orderDate = orderDateInput ? orderDateInput.value : '';
+    const deliveryDateInput = document.getElementById('mark-order-delivery-date');
+    const expectedDelivery = deliveryDateInput ? deliveryDateInput.value : '';
+
+    const confirmBtn = document.getElementById('btn-confirm-mark-ordered');
+    if (confirmBtn) confirmBtn.textContent = '⏳ Saving Order...';
+
+    try {
+      const snap = (this.db && typeof this.db.getSnapshot === 'function')
+        ? this.db.getSnapshot()
+        : (window.localDB ? window.localDB.getSnapshot() : null);
+
+      const itemsSummaryList = [];
+      let grandTotal = 0;
+      let totalUnits = 0;
+
+      const rows = document.querySelectorAll('.mark-ordered-item-row');
+
+      for (let i = 0; i < rows.length; i++) {
+        const r = rows[i];
+        const origItem = this.pendingMarkOrderedItems[i];
+        if (!origItem) continue;
+
+        const sizeInput = r.querySelector('.mark-ordered-size-input');
+        const qtyInput = r.querySelector('.mark-ordered-qty-input');
+        const priceInput = r.querySelector('.mark-ordered-price-input');
+
+        const resolvedSize = sizeInput ? sizeInput.value.trim() : (origItem.size || 'Standard');
+        const qty = parseInt(qtyInput?.value, 10) || origItem.quantity || 1;
+        const unitPrice = parseFloat(priceInput?.value) || 0;
+        const subtotal = qty * unitPrice;
+
+        grandTotal += subtotal;
+        totalUnits += qty;
+
+        const summaryStr = `(${qty}) ${origItem.classVal || ''} ${origItem.itemType}, Size ${resolvedSize}${unitPrice > 0 ? ' @ $' + unitPrice.toFixed(2) : ''}`;
+        itemsSummaryList.push(summaryStr);
+
+        // Auto-sync vendor price if entered
+        if (unitPrice > 0) {
+          await this.syncVendorPrice(vendorName, origItem.itemType, resolvedSize, origItem.classVal, unitPrice);
+        }
+
+        const checkedEmps = (origItem.employees && origItem.employees.length > 0)
+          ? origItem.employees.filter(e => e.checked).map(e => e.name)
+          : (origItem.employees?.map(e => e.name) || []);
+
+        const catKey = (origItem.itemType || '').toLowerCase();
+        let swapKey = '';
+        if (catKey.includes('glove')) swapKey = 'glove_swaps';
+        else if (catKey.includes('sleeve')) swapKey = 'sleeve_swaps';
+        else if (catKey.includes('blanket')) swapKey = 'blanket_swaps';
+        else if (catKey.includes('mack')) swapKey = 'mack_swaps';
+
+        const swapTable = swapKey ? ((this.db && typeof this.db.getTable === 'function' ? this.db.getTable(swapKey) : null) || snap?.tables?.[swapKey]) : null;
+
+        for (const empName of checkedEmps) {
+          if (!empName) continue;
+          const orderNote = `Ordered on ${orderDate || new Date().toLocaleDateString()}, PO: ${poNum}, Vendor: ${vendorName}${unitPrice > 0 ? ', Price: $' + unitPrice.toFixed(2) : ''}`;
+
+          if (swapTable && swapTable.rows) {
+            const sRow = swapTable.rows.find(sr => {
+              const name = String(sr['Employee'] || sr['Employee Name'] || sr['Assigned To'] || Object.values(sr)[0] || '').trim();
+              return this.isNameMatch(name, empName);
+            });
+            if (sRow) {
+              sRow['Status'] = `Ordered (PO: ${poNum})`;
+              if (sRow['Notes']) {
+                sRow['Notes'] = `${sRow['Notes']}; ${orderNote}`;
+              } else {
+                sRow['Notes'] = orderNote;
+              }
+              this.db.syncRowToRawGrid(swapTable, sRow);
+              const rIdx = sRow._rowIdx || (swapTable.rows.indexOf(sRow) + 2);
+              await this.db.addMutation({
+                action: 'UPDATE_CELL',
+                sheetName: swapTable.name,
+                tableKey: swapKey,
+                row: rIdx,
+                col: 8,
+                value: `Ordered (PO: ${poNum})`
+              });
+            }
+          }
+
+          const needsTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('safety_equipment_needs') : null) || snap?.tables?.['safety_equipment_needs'];
+          if (needsTable && needsTable.rows) {
+            const nRow = needsTable.rows.find(nr => {
+              const name = String(nr['Employee'] || '').trim();
+              const type = String(nr['Item Type'] || '').trim().toLowerCase();
+              return this.isNameMatch(name, empName) && type.includes(catKey.slice(0, 4));
+            });
+            if (nRow) {
+              nRow['Status'] = 'Ordered';
+              nRow['Notes'] = orderNote;
+              this.db.syncRowToRawGrid(needsTable, nRow);
+              const nrIdx = nRow._rowIdx || (needsTable.rows.indexOf(nRow) + 2);
+              await this.db.addMutation({
+                action: 'UPDATE_ROW',
+                sheetName: needsTable.name || 'Safety Equipment Needs',
+                tableKey: 'safety_equipment_needs',
+                row: nrIdx,
+                rowData: nRow
+              });
+            } else {
+              const newNeed = {
+                'Employee': empName,
+                'Item Type': origItem.typeLabel || origItem.itemType,
+                'Size': resolvedSize,
+                'Class': origItem.classVal || 'Class 2',
+                'Urgency': 'Immediate',
+                'Status': 'Ordered',
+                'Date Requested': orderDate || new Date().toLocaleDateString(),
+                'Notes': orderNote
+              };
+              await this.db.addRow('safety_equipment_needs', newNeed, 'Purchase Order');
+            }
+          }
+        }
+      }
+
+      const formatToMdY = (dStr) => {
+        if (!dStr) return '';
+        if (dStr.includes('/')) return dStr;
+        const parts = dStr.split('-');
+        if (parts.length === 3) return `${parts[1]}/${parts[2]}/${parts[0]}`;
+        return dStr;
+      };
+
+      const poRowObj = {
+        'Date': formatToMdY(orderDate) || new Date().toLocaleDateString(),
+        'PO Number': poNum,
+        'Vendor': vendorName,
+        'Items': itemsSummaryList.join('; '),
+        'Total Price': grandTotal > 0 ? grandTotal : 0,
+        'Expected Delivery': formatToMdY(expectedDelivery) || 'Pending',
+        'Status': 'Ordered',
+        'Notes': `Ordered ${totalUnits} units for Mountain Power Operations`
+      };
+
+      await this.db.addRow('purchase_orders', poRowObj, 'Purchase Order');
+
+      this.closeMarkOrderedModal();
+      await this.loadData();
+
+      if (window.ppeTrackingEngine && typeof window.ppeTrackingEngine.refresh === 'function') {
+        window.ppeTrackingEngine.refresh();
+      }
+
+      alert(`✅ Successfully marked ${totalUnits} item(s) as Ordered under PO #${poNum} with ${vendorName}!`);
+    } catch (err) {
+      console.error('Error confirming mark ordered:', err);
+      alert('❌ Failed to mark items as ordered: ' + (err.message || err));
+    } finally {
+      if (confirmBtn) confirmBtn.innerHTML = '<span>📦</span> Confirm & Save Order';
+    }
+  }
+
+  // =========================================================================
+  // BATCH DELIVERY TO INVENTORY MODAL & WORKFLOW
+  // =========================================================================
+
+  openBatchDeliveryModal(itemsToDeliver = null) {
+    let items = itemsToDeliver;
+    if (!items || !items.length) {
+      items = (this.items || []).filter(i => i.selected && i.quantity > 0 && i.section === 'ordered_pending');
+      if (!items || !items.length) {
+        items = (this.items || []).filter(i => i.section === 'ordered_pending');
+      }
+    }
+    if (!items || !items.length) {
+      alert('⚠️ No ordered items found awaiting delivery. Mark items as Ordered first.');
+      return;
+    }
+
+    this.pendingBatchDeliveryItems = items;
+    const modal = document.getElementById('batch-delivery-modal');
+    const body = document.getElementById('batch-delivery-modal-body');
+    if (!modal || !body) return;
+
+    const today = new Date();
+    const todayYmd = today.toISOString().split('T')[0];
+
+    const units = [];
+    const catCounters = {};
+
+    items.forEach(item => {
+      const cat = item.itemType || 'Gloves';
+      const cleanCat = cat.toLowerCase();
+      if (!catCounters[cleanCat]) {
+        catCounters[cleanCat] = 0;
+      }
+
+      const emps = (item.employees && item.employees.length > 0)
+        ? item.employees.filter(e => e.checked).map(e => e.name)
+        : (item.employees?.map(e => e.name) || []);
+
+      const count = Math.max(item.quantity, emps.length, 1);
+
+      for (let u = 0; u < count; u++) {
+        const empName = emps[u] || '';
+        const baseSuggested = this.suggestNextItemNumber(cat);
+        let suggestedNum = baseSuggested;
+        const prefixMatch = baseSuggested.match(/^([A-Za-z#\s\-_]+)(\d+)$/);
+        const numOnlyMatch = baseSuggested.match(/^(\d+)$/);
+
+        if (prefixMatch) {
+          const pref = prefixMatch[1];
+          const val = parseInt(prefixMatch[2], 10) + catCounters[cleanCat];
+          suggestedNum = `${pref}${val}`;
+        } else if (numOnlyMatch) {
+          const val = parseInt(numOnlyMatch[1], 10) + catCounters[cleanCat];
+          suggestedNum = String(val);
+        }
+        catCounters[cleanCat]++;
+
+        units.push({
+          category: cat,
+          size: item.size || 'Standard',
+          classVal: item.classVal || 'Class 2',
+          empName: empName,
+          suggestedNum: suggestedNum,
+          orderInfo: item.orderInfo || null,
+          origItem: item
+        });
+      }
+    });
+
+    let unitRowsHtml = units.map((u, idx) => {
+      const isAssigned = !!u.empName && !u.empName.toLowerCase().includes('shelf') && !u.empName.toLowerCase().includes('stock');
+      const defaultStatus = isAssigned ? 'Assigned' : 'On Shelf';
+      const defaultLoc = 'Helena';
+
+      return `
+        <tr class="batch-delivery-unit-row" data-unit-idx="${idx}" style="border-bottom: 1px solid var(--border-color);">
+          <td style="padding: 10px; font-weight: 700; color: #38bdf8; text-align: center;">
+            #${idx + 1}
+          </td>
+          <td style="padding: 10px;">
+            <div style="font-weight: 600; color: #f1f5f9; font-size: 13px;">${this.escapeHtml(u.category)}</div>
+            <div style="font-size: 11px; color: #94a3b8;">${this.escapeHtml(u.classVal)} • Size: <strong style="color: #e2e8f0;">${this.escapeHtml(u.size)}</strong></div>
+            ${u.orderInfo?.orderNumber ? `<div style="font-size: 10.5px; color: #34d399;">PO: ${this.escapeHtml(u.orderInfo.orderNumber)}</div>` : ''}
+          </td>
+          <td style="padding: 10px;">
+            <input type="text" class="batch-delivery-input batch-assigned-to" value="${this.escapeHtml(u.empName || '')}" placeholder="Lineman Name or leave blank for Shelf">
+          </td>
+          <td style="padding: 10px; width: 140px;">
+            <input type="text" class="batch-delivery-input batch-item-num" value="${this.escapeHtml(u.suggestedNum)}" style="font-weight: 700; color: #4ade80;" placeholder="Item # *">
+          </td>
+          <td style="padding: 10px; width: 130px;">
+            <input type="text" class="batch-delivery-input batch-esl-id" placeholder="Optional ESL ID">
+          </td>
+          <td style="padding: 10px; width: 130px;">
+            <input type="date" class="batch-delivery-input batch-test-date" value="${todayYmd}">
+          </td>
+          <td style="padding: 10px; width: 120px;">
+            <input type="text" class="batch-delivery-input batch-location" value="${defaultLoc}" placeholder="Helena">
+          </td>
+          <td style="padding: 10px; width: 110px;">
+            <select class="batch-delivery-input batch-status">
+              <option value="Assigned" ${defaultStatus === 'Assigned' ? 'selected' : ''}>Assigned</option>
+              <option value="On Shelf" ${defaultStatus === 'On Shelf' ? 'selected' : ''}>On Shelf</option>
+            </select>
+          </td>
+        </tr>
+      `;
+    }).join('');
+
+    body.innerHTML = `
+      <div style="margin-bottom: 16px; background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.25); border-radius: 8px; padding: 14px 18px;">
+        <div style="font-weight: 700; font-size: 14px; color: #60a5fa; margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">
+          <span>🚚</span> Batch Delivery Receiving
+        </div>
+        <div style="font-size: 12px; color: #cbd5e1;">
+          Enter the new stamped <strong>Item #</strong> (pre-filled with the next sequential available numbers) and details for each arriving unit. 
+          When confirmed, these items will automatically be inserted into their respective tracking sheets (<strong>Gloves, Sleeves, Blankets, MACKs, etc.</strong>), change-out dates will be calculated, swap rows marked complete, and PO status resolved.
+        </div>
+      </div>
+
+      <div style="overflow-x: auto; border: 1px solid var(--border-color); border-radius: 6px; margin-bottom: 16px;">
+        <table style="width: 100%; border-collapse: collapse; font-size: 12.5px;">
+          <thead>
+            <tr style="background: rgba(30, 41, 59, 0.85); border-bottom: 2px solid var(--border-color); text-align: left; color: #94a3b8; font-size: 11px; text-transform: uppercase;">
+              <th style="padding: 10px; text-align: center; width: 45px;">#</th>
+              <th style="padding: 10px; width: 180px;">Item / Spec</th>
+              <th style="padding: 10px;">Assign To Lineman</th>
+              <th style="padding: 10px; width: 140px;">New Item # *</th>
+              <th style="padding: 10px; width: 130px;">ESL ID</th>
+              <th style="padding: 10px; width: 130px;">Test Date *</th>
+              <th style="padding: 10px; width: 120px;">Location</th>
+              <th style="padding: 10px; width: 110px;">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${unitRowsHtml}
+          </tbody>
+        </table>
+      </div>
+    `;
+
+    this._pendingDeliveryUnits = units;
+    modal.style.display = 'flex';
+  }
+
+  closeBatchDeliveryModal() {
+    const modal = document.getElementById('batch-delivery-modal');
+    if (modal) modal.style.display = 'none';
+  }
+
+  async confirmBatchDelivery() {
+    const rows = document.querySelectorAll('.batch-delivery-unit-row');
+    if (!rows.length || !this._pendingDeliveryUnits) {
+      alert('⚠️ No delivery units found.');
+      return;
+    }
+
+    const confirmBtn = document.getElementById('btn-confirm-batch-delivery');
+    if (confirmBtn) confirmBtn.textContent = '⏳ Adding to Inventory...';
+
+    try {
+      const snap = (this.db && typeof this.db.getSnapshot === 'function')
+        ? this.db.getSnapshot()
+        : (window.localDB ? window.localDB.getSnapshot() : null);
+
+      const addedItemsSummary = [];
+      const formatToMdY = (dStr) => {
+        if (!dStr) return '';
+        if (dStr.includes('/')) return dStr;
+        const parts = dStr.split('-');
+        if (parts.length === 3) return `${parts[1]}/${parts[2]}/${parts[0]}`;
+        return dStr;
+      };
+
+      const todayStr = formatToMdY(new Date().toISOString().split('T')[0]);
+
+      for (let i = 0; i < rows.length; i++) {
+        const r = rows[i];
+        const u = this._pendingDeliveryUnits[i];
+        if (!u) continue;
+
+        const itemNumInput = r.querySelector('.batch-item-num');
+        const itemNum = itemNumInput ? itemNumInput.value.trim() : '';
+        if (!itemNum) {
+          alert(`⚠️ Please provide an Item # for unit #${i + 1} (${u.category}).`);
+          if (itemNumInput) itemNumInput.focus();
+          return;
+        }
+
+        const assignedInput = r.querySelector('.batch-assigned-to');
+        const assignedTo = assignedInput ? assignedInput.value.trim() : u.empName || '';
+        const eslInput = r.querySelector('.batch-esl-id');
+        const eslId = eslInput ? eslInput.value.trim() : '';
+        const testDateInput = r.querySelector('.batch-test-date');
+        const testDate = formatToMdY(testDateInput?.value) || todayStr;
+        const locInput = r.querySelector('.batch-location');
+        const location = locInput ? locInput.value.trim() : 'Helena';
+        const statSelect = r.querySelector('.batch-status');
+        const status = statSelect ? statSelect.value : (assignedTo ? 'Assigned' : 'On Shelf');
+
+        const cat = u.category.toLowerCase();
+        let catKey = 'gloves';
+        if (cat.includes('glove')) catKey = 'gloves';
+        else if (cat.includes('sleeve')) catKey = 'sleeves';
+        else if (cat.includes('blanket')) catKey = 'blankets';
+        else if (cat.includes('mack')) catKey = 'macks';
+        else if (cat.includes('hv') || cat.includes('tester')) catKey = 'hv_testers';
+        else if (cat.includes('phasing')) catKey = 'phasing_sets';
+        else if (cat.includes('ground')) catKey = 'grounds';
+        else if (cat.includes('hot') || cat.includes('stick')) catKey = 'hot_sticks';
+        else if (cat.includes('aed')) catKey = 'aed';
+
+        let changeOutDate = '';
+        if (window.inventoryManager && typeof window.inventoryManager.calculateChangeOutDate === 'function') {
+          changeOutDate = window.inventoryManager.calculateChangeOutDate(todayStr, location, assignedTo, catKey, { testDate: testDate });
+        } else {
+          const d = new Date();
+          d.setMonth(d.getMonth() + 6);
+          changeOutDate = `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${d.getFullYear()}`;
+        }
+
+        let newRow = {};
+        if (catKey === 'gloves' || catKey === 'sleeves') {
+          const itemHeader = catKey === 'gloves' ? 'Glove' : 'Sleeve';
+          newRow = {
+            [itemHeader]: itemNum,
+            'Item #': itemNum,
+            'ESL ID': eslId,
+            'Size': u.size,
+            'Class': (u.classVal || 'Class 2').replace(/[^0-9]/g, '') || '2',
+            'Test Date': testDate,
+            'Date Assigned': assignedTo ? todayStr : '',
+            'Location': location,
+            'Status': status,
+            'Assigned To': assignedTo,
+            'Change Out Date': changeOutDate,
+            'Picked For': '',
+            'Notes': 'New'
+          };
+        } else if (catKey === 'blankets') {
+          newRow = {
+            'Blanket': itemNum,
+            'Item #': itemNum,
+            'Type': u.size || 'Regular',
+            'Class': (u.classVal || 'Class 4').replace(/[^0-9]/g, '') || '4',
+            'Test Date': testDate,
+            'Date Assigned': assignedTo ? todayStr : testDate,
+            'Location': location,
+            'Status': status,
+            'Assigned To': assignedTo,
+            'Change Out Date': changeOutDate,
+            'Picked For': '',
+            'Notes': 'New'
+          };
+        } else if (catKey === 'macks') {
+          newRow = {
+            'MACK': itemNum,
+            'Item #': itemNum,
+            'ESL ID': eslId || itemNum,
+            'KV': '15KV',
+            'Size': u.size || '1/0',
+            'Length': '8 ft',
+            'Test Date': testDate,
+            'Date Assigned': assignedTo ? todayStr : testDate,
+            'Location': location,
+            'Status': status,
+            'Assigned To': assignedTo,
+            'Change Out Date': changeOutDate,
+            'Picked For': '',
+            'Notes': 'New'
+          };
+        } else {
+          newRow = {
+            'Item #': itemNum,
+            'Location': location,
+            'Status': status,
+            'Assigned To': assignedTo,
+            'Test Date': testDate,
+            'Date Assigned': assignedTo ? todayStr : '',
+            'Change Out Date': changeOutDate,
+            'Notes': 'New'
+          };
+        }
+
+        await this.db.addRow(catKey, newRow, 'New Purchase');
+        addedItemsSummary.push(`${u.category} #${itemNum} (${assignedTo || 'Shelf'})`);
+
+        if (assignedTo) {
+          let swapKey = '';
+          if (catKey === 'gloves') swapKey = 'glove_swaps';
+          else if (catKey === 'sleeves') swapKey = 'sleeve_swaps';
+          else if (catKey === 'blankets') swapKey = 'blanket_swaps';
+          else if (catKey === 'macks') swapKey = 'mack_swaps';
+
+          const swapTable = swapKey ? ((this.db && typeof this.db.getTable === 'function' ? this.db.getTable(swapKey) : null) || snap?.tables?.[swapKey]) : null;
+          if (swapTable && swapTable.rows) {
+            const sRow = swapTable.rows.find(sr => {
+              const name = String(sr['Employee'] || sr['Employee Name'] || sr['Assigned To'] || Object.values(sr)[0] || '').trim();
+              return this.isNameMatch(name, assignedTo);
+            });
+            if (sRow) {
+              sRow['Status'] = 'Complete';
+              sRow['Pick List Item #'] = itemNum;
+              sRow['Picked For'] = itemNum;
+              this.db.syncRowToRawGrid(swapTable, sRow);
+              const rIdx = sRow._rowIdx || (swapTable.rows.indexOf(sRow) + 2);
+              await this.db.addMutation({
+                action: 'UPDATE_CELL',
+                sheetName: swapTable.name,
+                tableKey: swapKey,
+                row: rIdx,
+                col: 7,
+                value: itemNum
+              });
+              await this.db.addMutation({
+                action: 'UPDATE_CELL',
+                sheetName: swapTable.name,
+                tableKey: swapKey,
+                row: rIdx,
+                col: 8,
+                value: 'Complete'
+              });
+            }
+          }
+
+          const needsTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('safety_equipment_needs') : null) || snap?.tables?.['safety_equipment_needs'];
+          if (needsTable && needsTable.rows) {
+            const nRow = needsTable.rows.find(nr => {
+              const name = String(nr['Employee'] || '').trim();
+              const type = String(nr['Item Type'] || '').trim().toLowerCase();
+              return this.isNameMatch(name, assignedTo) && type.includes(catKey.slice(0, 4));
+            });
+            if (nRow) {
+              nRow['Status'] = 'Fulfilled';
+              nRow['Notes'] = `Delivered & added as #${itemNum} on ${todayStr}`;
+              this.db.syncRowToRawGrid(needsTable, nRow);
+              const nrIdx = nRow._rowIdx || (needsTable.rows.indexOf(nRow) + 2);
+              await this.db.addMutation({
+                action: 'UPDATE_ROW',
+                sheetName: needsTable.name || 'Safety Equipment Needs',
+                tableKey: 'safety_equipment_needs',
+                row: nrIdx,
+                rowData: nRow
+              });
+            }
+          }
+        }
+      }
+
+      const poTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('purchase_orders') : null) || snap?.tables?.['purchase_orders'];
+      if (poTable && poTable.rows) {
+        for (const po of poTable.rows) {
+          const stat = String(po['Status'] || '').toLowerCase();
+          if (stat.includes('ordered')) {
+            const poNum = String(po['PO Number'] || po['PO #'] || '');
+            const matchedUnit = this._pendingDeliveryUnits.find(u => u.orderInfo?.orderNumber === poNum);
+            if (matchedUnit) {
+              po['Status'] = 'Received';
+              po['Notes'] = `${po['Notes'] || ''}; Delivered and added to inventory on ${todayStr}`.trim().replace(/^;\s*/, '');
+              this.db.syncRowToRawGrid(poTable, po);
+              const rIdx = po._rowIdx || (poTable.rows.indexOf(po) + 2);
+              await this.db.addMutation({
+                action: 'UPDATE_ROW',
+                sheetName: poTable.name || 'Purchase Orders',
+                tableKey: 'purchase_orders',
+                row: rIdx,
+                rowData: po
+              });
+            }
+          }
+        }
+      }
+
+      this.closeBatchDeliveryModal();
+      await this.loadData();
+
+      if (window.ppeTrackingEngine && typeof window.ppeTrackingEngine.refresh === 'function') {
+        window.ppeTrackingEngine.refresh();
+      }
+      if (window.inventoryManager && typeof window.inventoryManager.loadData === 'function') {
+        window.inventoryManager.loadData();
+      }
+
+      alert(`✅ Successfully received and created ${addedItemsSummary.length} inventory item(s)!\n\n` + addedItemsSummary.join('\n'));
+    } catch (err) {
+      console.error('Error confirming batch delivery:', err);
+      alert('❌ Failed to process batch delivery: ' + (err.message || err));
+    } finally {
+      if (confirmBtn) confirmBtn.innerHTML = '<span>✅</span> Add to Inventory & Complete Delivery';
+    }
+  }
+
+  openDeliverForEmployee(empName, itemType, preferredSize) {
+    const norm = this.cleanEmployeeName(empName);
+    const cat = (itemType || '').toLowerCase();
+    const isGlove = cat.includes('glove');
+    const targetType = isGlove ? 'Gloves' : 'Sleeves';
+
+    const match = this.items.find(i => {
+      if (i.section !== 'ordered_pending') return false;
+      if (!i.itemType.toLowerCase().includes(cat.slice(0, 4))) return false;
+      if (i.employees && i.employees.some(e => this.isNameMatch(e.name, norm))) return true;
+      return false;
+    });
+
+    if (match) {
+      this.openBatchDeliveryModal([match]);
+    } else {
+      const classVal = (window.ppeTrackingEngine && typeof window.ppeTrackingEngine.getPreferredPpeClass === 'function')
+        ? window.ppeTrackingEngine.getPreferredPpeClass(empName, isGlove ? 'gloves' : 'sleeves')
+        : 'Class 2';
+
+      const singleItem = {
+        section: 'ordered_pending',
+        itemType: targetType,
+        typeLabel: isGlove ? '🧤 Gloves' : '🦺 Sleeves',
+        size: (preferredSize && preferredSize !== '—') ? preferredSize : (isGlove ? '10' : 'Regular'),
+        classVal: classVal,
+        quantity: 1,
+        employees: [{ name: empName, label: empName, checked: true }],
+        orderInfo: this.lookupOrderForEmployee(empName, targetType) || { orderNumber: '', vendor: '' }
+      };
+      this.openBatchDeliveryModal([singleItem]);
+    }
+  }
+
+  // =========================================================================
+  // ADD PAST ORDER MODAL & ORDERS HISTORY
+  // =========================================================================
+
+  openAddPastOrderModal() {
+    const modal = document.getElementById('add-past-order-modal');
+    const body = document.getElementById('add-past-order-modal-body');
+    if (!modal || !body) return;
+
+    const todayYmd = new Date().toISOString().split('T')[0];
+    const vendorOptions = this.vendors.map(v => `<option value="${this.escapeHtml(v.name)}">${this.escapeHtml(v.name)}</option>`).join('');
+
+    body.innerHTML = `
+      <div style="margin-bottom: 16px; background: rgba(71, 85, 105, 0.15); border: 1px solid rgba(71, 85, 105, 0.35); border-radius: 8px; padding: 12px 16px;">
+        <div style="font-weight: 700; font-size: 13.5px; color: #cbd5e1; margin-bottom: 3px; display: flex; align-items: center; gap: 8px;">
+          <span>➕</span> Manually Log Past or External Purchase Order
+        </div>
+        <div style="font-size: 12px; color: #94a3b8;">
+          Record past purchase orders into the system tracking log. If you enter purchase prices for items, they will automatically synchronize with the vendor catalog.
+        </div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px;">
+        <div>
+          <label style="display: block; font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 5px;">PO / Order Number *</label>
+          <input type="text" id="past-order-po-num" class="batch-delivery-input" placeholder="e.g. 002-26 or PO-9811" style="font-weight: 700; color: #38bdf8;">
+        </div>
+        <div>
+          <label style="display: block; font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 5px;">Vendor *</label>
+          <select id="past-order-vendor-select" class="batch-delivery-input" onchange="window.procurementEngine.onPastOrderVendorChange(this.value)">
+            ${vendorOptions}
+            <option value="__custom__">➕ New / Custom Vendor...</option>
+          </select>
+          <input type="text" id="past-order-custom-vendor" class="batch-delivery-input" placeholder="Enter vendor name..." style="display: none; margin-top: 6px;">
+        </div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; margin-bottom: 14px;">
+        <div>
+          <label style="display: block; font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 5px;">Order Date *</label>
+          <input type="date" id="past-order-date" class="batch-delivery-input" value="${todayYmd}">
+        </div>
+        <div>
+          <label style="display: block; font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 5px;">Delivery Date</label>
+          <input type="date" id="past-order-deliv-date" class="batch-delivery-input" value="${todayYmd}">
+        </div>
+        <div>
+          <label style="display: block; font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 5px;">Status *</label>
+          <select id="past-order-status" class="batch-delivery-input">
+            <option value="Received" selected>Received (Delivered)</option>
+            <option value="Ordered">Ordered (Awaiting Delivery)</option>
+            <option value="Partially Received">Partially Received</option>
+            <option value="Cancelled">Cancelled</option>
+          </select>
+        </div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px;">
+        <div>
+          <label style="display: block; font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 5px;">Total Order Cost ($)</label>
+          <input type="number" step="0.01" min="0" id="past-order-total-price" class="batch-delivery-input" placeholder="0.00" style="font-weight: 700; color: #34d399;">
+        </div>
+        <div>
+          <label style="display: block; font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 5px;">Item Summary / Description *</label>
+          <input type="text" id="past-order-items" class="batch-delivery-input" placeholder="e.g. (4) Class 2 Gloves, Size 10; (2) Class 2 Sleeves, Regular">
+        </div>
+      </div>
+
+      <div style="margin-bottom: 10px;">
+        <label style="display: block; font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 5px;">Notes & Reference Info</label>
+        <textarea id="past-order-notes" class="batch-delivery-input" rows="3" placeholder="Additional details, invoice number, or recipient notes..."></textarea>
+      </div>
+    `;
+
+    modal.style.display = 'flex';
+  }
+
+  closeAddPastOrderModal() {
+    const modal = document.getElementById('add-past-order-modal');
+    if (modal) modal.style.display = 'none';
+  }
+
+  onPastOrderVendorChange(val) {
+    const custom = document.getElementById('past-order-custom-vendor');
+    if (!custom) return;
+    if (val === '__custom__') {
+      custom.style.display = 'block';
+      custom.focus();
+    } else {
+      custom.style.display = 'none';
+    }
+  }
+
+  async confirmAddPastOrder() {
+    const poNumInput = document.getElementById('past-order-po-num');
+    const poNum = poNumInput ? poNumInput.value.trim() : '';
+    if (!poNum) {
+      alert('⚠️ Please enter a PO / Order Number.');
+      if (poNumInput) poNumInput.focus();
+      return;
+    }
+
+    const vSelect = document.getElementById('past-order-vendor-select');
+    let vendorName = vSelect ? vSelect.value : '';
+    if (vendorName === '__custom__') {
+      const customV = document.getElementById('past-order-custom-vendor');
+      vendorName = customV ? customV.value.trim() : '';
+    }
+    if (!vendorName) {
+      alert('⚠️ Please select or enter a Vendor.');
+      return;
+    }
+
+    const orderDateInput = document.getElementById('past-order-date');
+    const orderDate = orderDateInput ? orderDateInput.value : '';
+    const delivDateInput = document.getElementById('past-order-deliv-date');
+    const delivDate = delivDateInput ? delivDateInput.value : '';
+    const statusSelect = document.getElementById('past-order-status');
+    const status = statusSelect ? statusSelect.value : 'Received';
+    const priceInput = document.getElementById('past-order-total-price');
+    const totalPrice = parseFloat(priceInput?.value) || 0;
+    const itemsInput = document.getElementById('past-order-items');
+    const itemsStr = itemsInput ? itemsInput.value.trim() : '';
+    if (!itemsStr) {
+      alert('⚠️ Please enter an item summary or description.');
+      if (itemsInput) itemsInput.focus();
+      return;
+    }
+    const notesInput = document.getElementById('past-order-notes');
+    const notes = notesInput ? notesInput.value.trim() : '';
+
+    const formatToMdY = (dStr) => {
+      if (!dStr) return '';
+      if (dStr.includes('/')) return dStr;
+      const parts = dStr.split('-');
+      if (parts.length === 3) return `${parts[1]}/${parts[2]}/${parts[0]}`;
+      return dStr;
+    };
+
+    const confirmBtn = document.getElementById('btn-confirm-add-past-order');
+    if (confirmBtn) confirmBtn.textContent = '⏳ Saving...';
+
+    try {
+      const rowObj = {
+        'Date': formatToMdY(orderDate) || new Date().toLocaleDateString(),
+        'PO Number': poNum,
+        'Vendor': vendorName,
+        'Items': itemsStr,
+        'Total Price': totalPrice > 0 ? totalPrice : 0,
+        'Expected Delivery': formatToMdY(delivDate) || 'Delivered',
+        'Status': status,
+        'Notes': notes || 'Manually logged past order'
+      };
+
+      const parsedItems = this.parsePoItemsString(itemsStr);
+      for (const pi of parsedItems) {
+        if (pi.unitPrice > 0) {
+          await this.syncVendorPrice(vendorName, pi.category, pi.size, pi.classVal, pi.unitPrice);
+        }
+      }
+
+      await this.db.addRow('purchase_orders', rowObj, 'Manual Past Order');
+
+      this.closeAddPastOrderModal();
+      await this.loadData();
+
+      alert(`✅ Past Purchase Order #${poNum} logged successfully!`);
+    } catch (err) {
+      console.error('Error logging past order:', err);
+      alert('❌ Failed to save past order: ' + (err.message || err));
+    } finally {
+      if (confirmBtn) confirmBtn.innerHTML = '<span>💾</span> Save Order to Tracking Log';
+    }
+  }
+
+  renderOrdersHistory(container) {
+    const snap = (this.db && typeof this.db.getSnapshot === 'function')
+      ? this.db.getSnapshot()
+      : (window.localDB ? window.localDB.getSnapshot() : null);
+
+    const poTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('purchase_orders') : null) || snap?.tables?.['purchase_orders'];
+    const rows = poTable ? (poTable.rows || poTable.rawGrid || []) : [];
+
+    let totalSpend = 0;
+    let openCount = 0;
+    let completedCount = 0;
+
+    const poList = [];
+    rows.forEach(r => {
+      let date = '';
+      let poNum = '';
+      let vendor = '';
+      let items = '';
+      let price = 0;
+      let expDeliv = '';
+      let status = '';
+      let notes = '';
+
+      if (Array.isArray(r)) {
+        if (String(r[0] || '').toLowerCase() === 'date') return;
+        date = String(r[0] || '').trim();
+        poNum = String(r[1] || '').trim();
+        vendor = String(r[2] || '').trim();
+        items = String(r[3] || '').trim();
+        price = parseFloat(r[4]) || 0;
+        expDeliv = String(r[5] || '').trim();
+        status = String(r[6] || '').trim();
+        notes = String(r[7] || '').trim();
+      } else if (r && typeof r === 'object') {
+        date = String(r['Date'] || '').trim();
+        poNum = String(r['PO Number'] || r['PO #'] || '').trim();
+        vendor = String(r['Vendor'] || '').trim();
+        items = String(r['Items'] || '').trim();
+        price = parseFloat(r['Total Price'] || r['Price'] || 0) || 0;
+        expDeliv = String(r['Expected Delivery'] || '').trim();
+        status = String(r['Status'] || '').trim();
+        notes = String(r['Notes'] || '').trim();
+      }
+
+      if (!poNum && !vendor && !items) return;
+
+      totalSpend += price;
+      const statLower = status.toLowerCase();
+      if (statLower.includes('received') || statLower.includes('fulfilled')) {
+        completedCount++;
+      } else if (statLower.includes('ordered') || statLower.includes('pending')) {
+        openCount++;
+      }
+
+      poList.push({ date, poNum, vendor, items, price, expDeliv, status, notes, raw: r });
+    });
+
+    poList.reverse();
+
+    let tableRows = '';
+    if (poList.length === 0) {
+      tableRows = `
+        <tr>
+          <td colspan="7" style="padding: 30px; text-align: center; color: #64748b;">
+            No purchase orders currently recorded in history. Click <strong>"➕ Add Past Order"</strong> above to record orders.
+          </td>
+        </tr>
+      `;
+    } else {
+      tableRows = poList.map(po => {
+        const statLower = po.status.toLowerCase();
+        let badgeStyle = 'background: rgba(100, 116, 139, 0.2); color: #94a3b8; border: 1px solid rgba(100, 116, 139, 0.4);';
+        let badgeIcon = '📄';
+
+        if (statLower.includes('received') || statLower.includes('fulfilled')) {
+          badgeStyle = 'background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4);';
+          badgeIcon = '✅';
+        } else if (statLower.includes('ordered')) {
+          badgeStyle = 'background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4);';
+          badgeIcon = '📦';
+        } else if (statLower.includes('partial')) {
+          badgeStyle = 'background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4);';
+          badgeIcon = '🔄';
+        }
+
+        const isDeliverable = statLower.includes('ordered') || statLower.includes('partial');
+
+        return `
+          <tr style="border-bottom: 1px solid var(--border-color);">
+            <td style="padding: 10px 12px; font-family: monospace; font-size: 12px; color: #94a3b8;">
+              ${this.escapeHtml(po.date)}
+            </td>
+            <td style="padding: 10px 12px; font-weight: 700; color: #38bdf8; font-size: 13px;">
+              ${this.escapeHtml(po.poNum || '—')}
+            </td>
+            <td style="padding: 10px 12px; font-weight: 600; color: #f1f5f9;">
+              ${this.escapeHtml(po.vendor || '—')}
+            </td>
+            <td style="padding: 10px 12px; font-size: 12px; max-width: 380px;">
+              <div style="color: #cbd5e1;">${this.escapeHtml(po.items)}</div>
+              ${po.notes ? `<div style="font-size: 11px; color: #64748b; margin-top: 2px;">${this.escapeHtml(po.notes)}</div>` : ''}
+            </td>
+            <td style="padding: 10px 12px; text-align: right; font-weight: 700; font-family: monospace; color: ${po.price > 0 ? '#34d399' : '#64748b'};">
+              ${po.price > 0 ? `$${po.price.toFixed(2)}` : '—'}
+            </td>
+            <td style="padding: 10px 12px; text-align: center;">
+              <span class="badge" style="${badgeStyle} font-size: 11px; padding: 3px 8px; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px;">
+                <span>${badgeIcon}</span> ${this.escapeHtml(po.status || 'Ordered')}
+              </span>
+            </td>
+            <td style="padding: 10px 12px; text-align: center;">
+              ${isDeliverable ? `
+                <button class="btn btn-xs" onclick="window.procurementEngine.openBatchDeliveryModal()" style="background: rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.4); color: #93c5fd; padding: 3px 8px; font-size: 11px; border-radius: 3px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;">
+                  <span>🚚</span> Receive
+                </button>
+              ` : `
+                <span style="font-size: 11px; color: #64748b;">Completed</span>
+              `}
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
+    container.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; padding: 14px 18px; background: rgba(30, 41, 59, 0.7); border: 1px solid var(--border-color); border-radius: 8px;">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <span style="font-size: 20px;">📜</span>
+          <div>
+            <div style="font-weight: 800; font-size: 15px; color: #f1f5f9;">PURCHASE ORDERS TRACKING & HISTORY</div>
+            <div style="font-size: 12px; color: #94a3b8;">Full historical log of placed, delivered, and past purchase orders with suppliers</div>
+          </div>
+        </div>
+        <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+          <div style="display: flex; gap: 8px;">
+            <span class="brand-badge" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.35); font-size: 11.5px; padding: 4px 10px;">
+              Total Orders: <strong>${poList.length}</strong>
+            </span>
+            <span class="brand-badge" style="background: rgba(245, 158, 11, 0.15); color: #fcd34d; border: 1px solid rgba(245, 158, 11, 0.35); font-size: 11.5px; padding: 4px 10px;">
+              Open: <strong>${openCount}</strong>
+            </span>
+            <span class="brand-badge" style="background: rgba(16, 185, 129, 0.15); color: #6ee7b7; border: 1px solid rgba(16, 185, 129, 0.35); font-size: 11.5px; padding: 4px 10px;">
+              Delivered: <strong>${completedCount}</strong>
+            </span>
+            <span class="brand-badge" style="background: rgba(168, 85, 247, 0.15); color: #d8b4fe; border: 1px solid rgba(168, 85, 247, 0.35); font-size: 11.5px; padding: 4px 10px;">
+              Total Spend: <strong>$${totalSpend.toFixed(2)}</strong>
+            </span>
+          </div>
+          <button class="btn btn-secondary" onclick="window.procurementEngine.openAddPastOrderModal()" style="display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 6px 12px;">
+            <span>➕</span> Log Past Order
+          </button>
+        </div>
+      </div>
+
+      <div style="overflow-x: auto; border: 1px solid var(--border-color); border-radius: 6px;">
+        <table class="procurement-orders-table" style="width: 100%; border-collapse: collapse; font-size: 12.5px;">
+          <thead>
+            <tr>
+              <th style="width: 95px;">Date</th>
+              <th style="width: 110px;">PO #</th>
+              <th style="width: 150px;">Vendor</th>
+              <th>Items & Order Details</th>
+              <th style="text-align: right; width: 110px;">Total Price</th>
+              <th style="text-align: center; width: 120px;">Status</th>
+              <th style="text-align: center; width: 100px;">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${tableRows}
+          </tbody>
+        </table>
+      </div>
+    `;
   }
 
   /**
