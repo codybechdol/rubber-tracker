@@ -3448,6 +3448,73 @@ class ProcurementEngine {
   // MARK AS ORDERED MODAL & WORKFLOW
   // =========================================================================
 
+  /**
+   * Consolidates items by itemType, normalized size, and class.
+   * Groups duplicate requirements across sections into a single line item with combined quantity.
+   */
+  consolidateItemsBySizeAndClass(itemsList) {
+    if (!itemsList || !itemsList.length) return [];
+
+    const cleanSize = (sizeVal, hasNoSize) => {
+      if (hasNoSize) return '⚠️ Needs Size';
+      if (!sizeVal) return 'Standard';
+      let s = String(sizeVal).trim();
+      s = s.replace(/\s*\(\s*Class\s*[^)]*\)/i, '').trim();
+      return s || 'Standard';
+    };
+
+    const cleanClass = (classVal) => {
+      if (!classVal) return 'Class 2';
+      let c = String(classVal).trim();
+      return /^class\b/i.test(c) ? c : `Class ${c}`;
+    };
+
+    const consolidatedMap = new Map();
+    itemsList.forEach(item => {
+      const type = (item.itemType || 'Equipment').trim();
+      const normSize = cleanSize(item.size, item.hasNoSize);
+      const normClass = cleanClass(item.classVal);
+      const groupKey = `${type.toLowerCase()}|${normSize.toLowerCase()}|${normClass.toLowerCase()}`;
+
+      let itemEmps = [];
+      if (item.employees && item.employees.length > 0) {
+        const checkedOnly = item.employees.filter(e => e.checked !== false);
+        itemEmps = checkedOnly.length > 0 ? checkedOnly : item.employees;
+      }
+
+      const qty = parseInt(item.quantity, 10) || 1;
+
+      if (consolidatedMap.has(groupKey)) {
+        const existing = consolidatedMap.get(groupKey);
+        existing.quantity += qty;
+
+        itemEmps.forEach(emp => {
+          if (!existing.employees.some(e => this.isNameMatch(e.name, emp.name))) {
+            existing.employees.push({ ...emp, checked: true });
+          }
+        });
+
+        if (item.price > existing.price) {
+          existing.price = item.price;
+        }
+        if (item.partNumber && !existing.partNumber) {
+          existing.partNumber = item.partNumber;
+        }
+      } else {
+        consolidatedMap.set(groupKey, {
+          ...item,
+          size: normSize,
+          classVal: normClass,
+          quantity: qty,
+          price: parseFloat(item.price) || 0,
+          employees: itemEmps.map(e => ({ ...e, checked: true }))
+        });
+      }
+    });
+
+    return Array.from(consolidatedMap.values());
+  }
+
   openMarkOrderedModal(itemsToOrder = null) {
     let items = itemsToOrder;
     if (!items || !items.length) {
@@ -3458,7 +3525,8 @@ class ProcurementEngine {
       return;
     }
 
-    this.pendingMarkOrderedItems = items;
+    const consolidatedItems = this.consolidateItemsBySizeAndClass(items);
+    this.pendingMarkOrderedItems = consolidatedItems;
     const modal = document.getElementById('mark-ordered-modal');
     const body = document.getElementById('mark-ordered-modal-body');
     if (!modal || !body) return;
@@ -3475,11 +3543,13 @@ class ProcurementEngine {
 
     let rowsHtml = '';
     let totalEst = 0;
+    let totalUnitsCount = 0;
 
-    items.forEach((item, idx) => {
+    consolidatedItems.forEach((item, idx) => {
       const unitPrice = item.price > 0 ? item.price : 0;
       const subtotal = unitPrice * item.quantity;
       totalEst += subtotal;
+      totalUnitsCount += item.quantity;
 
       const empNames = (item.employees && item.employees.length > 0)
         ? item.employees.filter(e => e.checked).map(e => e.name).join(', ')
@@ -3554,7 +3624,7 @@ class ProcurementEngine {
       </div>
 
       <div style="margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
-        <span style="font-size: 12.5px; font-weight: 700; color: #cbd5e1; text-transform: uppercase; letter-spacing: 0.5px;">Items in this Order (${items.length})</span>
+        <span id="mark-order-items-count-heading" style="font-size: 12.5px; font-weight: 700; color: #cbd5e1; text-transform: uppercase; letter-spacing: 0.5px;">Items in this Order (${consolidatedItems.length} lines · ${totalUnitsCount} total units)</span>
         <span style="font-size: 11.5px; color: #64748b;">Prices entered will auto-update vendor catalog</span>
       </div>
 
@@ -3596,6 +3666,7 @@ class ProcurementEngine {
   recalcMarkOrderedModal() {
     const rows = document.querySelectorAll('.mark-ordered-item-row');
     let grandTotal = 0;
+    let totalUnits = 0;
     rows.forEach(r => {
       const qtyInput = r.querySelector('.mark-ordered-qty-input');
       const priceInput = r.querySelector('.mark-ordered-price-input');
@@ -3604,10 +3675,13 @@ class ProcurementEngine {
       const price = parseFloat(priceInput?.value) || 0;
       const sub = qty * price;
       grandTotal += sub;
+      totalUnits += qty;
       if (subtotalEl) subtotalEl.textContent = `$${sub.toFixed(2)}`;
     });
     const totalEl = document.getElementById('mark-order-grand-total');
     if (totalEl) totalEl.textContent = `$${grandTotal.toFixed(2)}`;
+    const headingEl = document.getElementById('mark-order-items-count-heading');
+    if (headingEl) headingEl.textContent = `Items in this Order (${rows.length} lines · ${totalUnits} total units)`;
   }
 
   onMarkOrderVendorChange(val) {
@@ -5424,22 +5498,23 @@ class ProcurementEngine {
       return;
     }
 
+    const consolidatedItems = this.consolidateItemsBySizeAndClass(activeItems);
+
     const v = this.selectedVendor;
     const recipient = v ? v.email : '';
     const subject = encodeURIComponent(`Purchase Order Request - PPE & Equipment (${new Date().toLocaleDateString()})`);
 
     let bodyText = `Dear ${v ? (v.contact || v.name) : 'Vendor'},\n\nPlease process the following purchase order for Mountain Power:\n\n`;
     bodyText += `========================================================\n`;
-    bodyText += `SECTION | ITEM | SPEC / SIZE | PART # | QTY | UNIT | TOTAL\n`;
+    bodyText += `ITEM | SPEC / SIZE | PART # | QTY | UNIT | TOTAL\n`;
     bodyText += `========================================================\n`;
 
     let grandTotal = 0;
-    activeItems.forEach(item => {
+    consolidatedItems.forEach(item => {
       const lineTotal = item.price > 0 ? (item.price * item.quantity) : 0;
       grandTotal += lineTotal;
       const sizeDisplay = item.hasNoSize ? '⚠️ NEEDS SIZE (VERIFY)' : item.size;
-      const secTag = item.sectionTitle || item.section;
-      bodyText += `[${secTag}] ${item.itemType} | Size: ${sizeDisplay} (${item.classVal}) | Part: ${item.partNumber || 'N/A'} | Qty: ${item.quantity} | Unit: $${item.price.toFixed(2)} | Total: $${lineTotal.toFixed(2)}\n`;
+      bodyText += `${item.itemType} | Size: ${sizeDisplay} (${item.classVal}) | Part: ${item.partNumber || 'N/A'} | Qty: ${item.quantity} | Unit: $${item.price.toFixed(2)} | Total: $${lineTotal.toFixed(2)}\n`;
     });
 
     bodyText += `========================================================\n`;
@@ -5460,14 +5535,15 @@ class ProcurementEngine {
       return;
     }
 
-    const lines = ['Section,Item Category,Size,Class / KV,Part Number,Quantity,Unit Price,Subtotal,Assigned Personnel'];
-    activeItems.forEach(i => {
+    const consolidatedItems = this.consolidateItemsBySizeAndClass(activeItems);
+
+    const lines = ['Item Category,Size,Class / KV,Part Number,Quantity,Unit Price,Subtotal,Assigned Personnel'];
+    consolidatedItems.forEach(i => {
       const sub = (i.price * i.quantity).toFixed(2);
       const checkedEmps = (i.employees || []).filter(e => e.checked).map(e => e.name || e.label);
       const emps = checkedEmps.length > 0 ? `"${checkedEmps.join('; ')}"` : '""';
       const sizeDisplay = i.hasNoSize ? '⚠️ Needs Size' : i.size;
-      const secName = i.sectionTitle || i.section;
-      lines.push(`"${secName}","${i.itemType}","${sizeDisplay}","${i.classVal}","${i.partNumber}",${i.quantity},$${i.price.toFixed(2)},$${sub},${emps}`);
+      lines.push(`"${i.itemType}","${sizeDisplay}","${i.classVal}","${i.partNumber || ''}",${i.quantity},$${i.price.toFixed(2)},$${sub},${emps}`);
     });
 
     const csvContent = lines.join('\r\n');
