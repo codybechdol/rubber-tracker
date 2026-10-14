@@ -2126,6 +2126,57 @@ class ProcurementEngine {
     });
   }
 
+  matchVendorItem(itemType, size, classVal, specificVendorName = null) {
+    if (!this.vendors || !this.vendors.length) return null;
+
+    let vendorList = this.vendors;
+    if (specificVendorName) {
+      const v = this.vendors.find(vend => vend.name.toLowerCase() === specificVendorName.toLowerCase());
+      if (v) vendorList = [v];
+    } else if (this.selectedVendor) {
+      vendorList = [this.selectedVendor, ...this.vendors.filter(v => v.name !== this.selectedVendor.name)];
+    }
+
+    const tClassNum = (classVal || '').replace(/[^0-9]/g, '').trim();
+    const tType = (itemType || '').toLowerCase();
+    const tSize = (size || '').toLowerCase().trim();
+
+    for (const v of vendorList) {
+      if (!v.items || !v.items.length) continue;
+      const catalog = v.items;
+
+      // 1. Exact match (Type + Class + Size)
+      if (tSize && tSize !== '—' && !tSize.includes('needs size') && tSize !== 'standard') {
+        const match = catalog.find(ci => {
+          const name = (ci.item || '').toLowerCase();
+          const typeMatch = name.includes(tType.slice(0, 4)) || (tType.startsWith('glove') && name.includes('glove')) || (tType.startsWith('sleeve') && name.includes('sleeve')) || (tType.startsWith('blanket') && name.includes('blanket'));
+          const classMatch = !tClassNum || name.includes(`cl${tClassNum}`) || name.includes(`class ${tClassNum}`) || name.includes(`class${tClassNum}`) || name.includes(` ${tClassNum} `) || name.endsWith(` ${tClassNum}`);
+          const sizeMatch = name.endsWith(` ${tSize}`) || name.includes(` ${tSize} `) || name.includes(` ${tSize}`) || name.includes(`size ${tSize}`) || name.includes(` ${tSize}h`) || name.includes(tSize);
+          return typeMatch && classMatch && sizeMatch;
+        });
+        if (match) return { price: match.price || 0, partNumber: match.itemNumber || '', vendor: v.name };
+      }
+
+      // 2. Type + Class match
+      const classMatchItem = catalog.find(ci => {
+        const name = (ci.item || '').toLowerCase();
+        const typeMatch = name.includes(tType.slice(0, 4)) || (tType.startsWith('glove') && name.includes('glove')) || (tType.startsWith('sleeve') && name.includes('sleeve')) || (tType.startsWith('blanket') && name.includes('blanket'));
+        const classMatch = !tClassNum || name.includes(`cl${tClassNum}`) || name.includes(`class ${tClassNum}`) || name.includes(`class${tClassNum}`);
+        return typeMatch && classMatch;
+      });
+      if (classMatchItem) return { price: classMatchItem.price || 0, partNumber: classMatchItem.itemNumber || '', vendor: v.name };
+
+      // 3. Fallback Type match
+      const typeMatchItem = catalog.find(ci => {
+        const name = (ci.item || '').toLowerCase();
+        return name.includes(tType.slice(0, 4));
+      });
+      if (typeMatchItem) return { price: typeMatchItem.price || 0, partNumber: typeMatchItem.itemNumber || '', vendor: v.name };
+    }
+
+    return null;
+  }
+
   getSectionTabsHtml(activeFilter = 'all', counts = null) {
     const c = counts || {
       all: this.items ? this.items.length : 0,
