@@ -795,19 +795,55 @@ class ProcurementEngine {
     return lower.includes('need to purchase') || lower.includes('purchase') || lower.includes('size up') || lower.includes('unassigned');
   }
 
+  getActiveEmployeeNames() {
+    const snap = (this.db && typeof this.db.getSnapshot === 'function')
+      ? this.db.getSnapshot()
+      : (window.localDB ? window.localDB.getSnapshot() : null);
+    const empTable = snap?.tables?.employees || (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('employees') : null);
+    const empRows = empTable ? (empTable.rows || empTable.rawGrid || []) : [];
+    const names = new Set();
+    empRows.forEach(r => {
+      let name = '';
+      let loc = '';
+      if (Array.isArray(r)) {
+        if (String(r[0] || '').toLowerCase().includes('employee')) return;
+        name = String(r[0] || '').trim();
+        loc = String(r[1] || '').trim();
+      } else if (r && typeof r === 'object') {
+        name = String(r['Employee Name'] || r['Name'] || r['Worker'] || '').trim();
+        loc = String(r['Location'] || r['City'] || '').trim();
+      }
+      if (!name || name.toLowerCase().includes('previous') || loc.toLowerCase().includes('previous')) return;
+      names.add(name);
+    });
+    return Array.from(names).sort();
+  }
+
   parseOrderInfoFromNotes(notesStr) {
     if (!notesStr) return null;
     const s = String(notesStr).trim();
-    let orderNumber = '';
+    let poNumber = '';
+    let vendorOrderNumber = '';
     let vendor = '';
     let orderDate = '';
     let price = 0;
 
-    // Extract PO Number (e.g. "PO: 002-26", "PO #002-26", "Order #1234", "Order: 1234")
-    // Use word boundaries so "Ordered" is never mistaken as "Order"
-    const poMatch = s.match(/(?:\bpo\b|\border\b)\s*(?:#|num|number)?\s*[:#-]?\s*([A-Za-z0-9\-_.]+)/i);
+    // Extract PO / Job Number (e.g. "PO: 002-27", "Job #: 002-27", "PO #002-27")
+    const poMatch = s.match(/(?:\bpo\b|job(?:\s*#|\s*num)?)\s*(?:#|num|number)?\s*[:#-]?\s*([A-Za-z0-9\-_.]+)/i);
     if (poMatch && !/^(?:on|by|at|for)$/i.test(poMatch[1])) {
-      orderNumber = poMatch[1].trim();
+      poNumber = poMatch[1].trim();
+    }
+
+    // Extract Vendor Order # / Invoice # (e.g. "Vendor Order #: WS-123", "Order #: 9812", "Invoice #: 554")
+    const voMatch = s.match(/(?:vendor\s*order|invoice|inv|sales\s*order)\s*(?:#|num|number)?\s*[:#-]?\s*([A-Za-z0-9\-_.]+)/i);
+    if (voMatch && !/^(?:on|by|at|for)$/i.test(voMatch[1])) {
+      vendorOrderNumber = voMatch[1].trim();
+    } else {
+      // Fallback: if "order #12345" was used and poMatch wasn't "order"
+      const ordMatch = s.match(/\border\s*(?:#|num|number)\s*[:#-]?\s*([A-Za-z0-9\-_.]+)/i);
+      if (ordMatch && ordMatch[1] !== poNumber && !/^(?:on|by|at|for)$/i.test(ordMatch[1])) {
+        vendorOrderNumber = ordMatch[1].trim();
+      }
     }
 
     // Extract Vendor
@@ -830,7 +866,45 @@ class ProcurementEngine {
     const delivMatch = s.match(/(?:expected(?:\s*delivery)?|deliv(?:ery)?(?:\s*date)?|eta)\s*[:=]?\s*(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}|\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2})/i);
     if (delivMatch) expectedDelivery = delivMatch[1].trim();
 
-    return (orderNumber || vendor || orderDate || price || expectedDelivery) ? { orderNumber, vendor, orderDate, price, expectedDelivery } : null;
+    const orderNumber = poNumber || vendorOrderNumber;
+    return (orderNumber || vendor || orderDate || price || expectedDelivery) ? {
+      orderNumber,
+      poNumber: poNumber || orderNumber,
+      vendorOrderNumber,
+      vendor,
+      orderDate,
+      price,
+      expectedDelivery
+    } : null;
+  }
+
+  lookupOrderByPoNumber(poNumber) {
+    if (!poNumber) return null;
+    const snap = (this.db && typeof this.db.getSnapshot === 'function')
+      ? this.db.getSnapshot()
+      : (window.localDB ? window.localDB.getSnapshot() : null);
+
+    const poTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('purchase_orders') : null) || snap?.tables?.['purchase_orders'];
+    if (poTable && poTable.rows) {
+      for (const po of poTable.rows) {
+        const pNum = String(po['PO Number'] || po['PO #'] || '').trim();
+        if (pNum && pNum.toLowerCase() === String(poNumber).trim().toLowerCase()) {
+          const notes = String(po['Notes'] || '');
+          const parsedNotes = this.parseOrderInfoFromNotes(notes);
+          return {
+            orderNumber: pNum,
+            poNumber: pNum,
+            vendorOrderNumber: parsedNotes?.vendorOrderNumber || '',
+            vendor: String(po['Vendor'] || ''),
+            orderDate: String(po['Date'] || ''),
+            expectedDelivery: String(po['Expected Delivery'] || po['Delivery Date'] || ''),
+            price: parseFloat(po['Total Price'] || po['Price'] || 0) || 0,
+            rawRow: po
+          };
+        }
+      }
+    }
+    return null;
   }
 
   lookupOrderForEmployee(empName, itemType) {
@@ -848,8 +922,12 @@ class ProcurementEngine {
         const notes = String(po['Notes'] || '');
         const items = String(po['Items'] || '');
         if (this.isNameMatch(notes, empName) || this.isNameMatch(items, empName)) {
+          const parsedNotes = this.parseOrderInfoFromNotes(notes);
+          const pNum = String(po['PO Number'] || po['PO #'] || '');
           return {
-            orderNumber: String(po['PO Number'] || po['PO #'] || ''),
+            orderNumber: pNum,
+            poNumber: pNum,
+            vendorOrderNumber: parsedNotes?.vendorOrderNumber || '',
             vendor: String(po['Vendor'] || ''),
             orderDate: String(po['Date'] || ''),
             expectedDelivery: String(po['Expected Delivery'] || po['Delivery Date'] || ''),
@@ -1302,10 +1380,19 @@ class ProcurementEngine {
         };
       }
 
-      if (orderInfo && !aggregated[aggKey].orderInfo) {
-        aggregated[aggKey].orderInfo = orderInfo;
+      if (orderInfo) {
+        if (!aggregated[aggKey].orderInfo) aggregated[aggKey].orderInfo = orderInfo;
         if (orderInfo.price && !aggregated[aggKey].price) {
           aggregated[aggKey].price = parseFloat(orderInfo.price) || 0;
+        }
+      }
+      if (!aggregated[aggKey].price) {
+        const catMatch = this.matchVendorItem(itemType, size, classVal);
+        if (catMatch && catMatch.price > 0) {
+          aggregated[aggKey].price = catMatch.price;
+          if (catMatch.partNumber && !aggregated[aggKey].partNumber) {
+            aggregated[aggKey].partNumber = catMatch.partNumber;
+          }
         }
       }
 
@@ -1443,10 +1530,21 @@ class ProcurementEngine {
         if (statLower.includes('ordered')) {
           if (this.isDepartedOrPreviousEmployee(emp)) return;
           const notesText = Array.isArray(row) ? String(row[11] || '') : String(row['Notes'] || '');
-          const orderInfo = this.parseOrderInfoFromNotes(status) ||
+          let orderInfo = this.parseOrderInfoFromNotes(status) ||
                             this.parseOrderInfoFromNotes(notesText) ||
                             this.lookupOrderForEmployee(emp, s.type) ||
                             { orderNumber: '', vendor: '', orderDate: '', price: 0 };
+
+          if (orderInfo && orderInfo.orderNumber) {
+            const enriched = this.lookupOrderByPoNumber(orderInfo.orderNumber);
+            if (enriched) {
+              if (!orderInfo.vendor && enriched.vendor) orderInfo.vendor = enriched.vendor;
+              if ((!orderInfo.price || orderInfo.price <= 0) && enriched.price > 0) orderInfo.price = enriched.price;
+              if (!orderInfo.orderDate && enriched.orderDate) orderInfo.orderDate = enriched.orderDate;
+              if (!orderInfo.expectedDelivery && enriched.expectedDelivery) orderInfo.expectedDelivery = enriched.expectedDelivery;
+              if (!orderInfo.vendorOrderNumber && enriched.vendorOrderNumber) orderInfo.vendorOrderNumber = enriched.vendorOrderNumber;
+            }
+          }
           const validRowSize = cleanSize(size);
           const empRec = getEmpRecord(emp);
           let neededSize = validRowSize;
@@ -1609,9 +1707,20 @@ class ProcurementEngine {
 
         if (status.includes('ordered')) {
           if (this.isDepartedOrPreviousEmployee(emp)) return;
-          const orderInfo = this.parseOrderInfoFromNotes(row['Notes']) ||
+          let orderInfo = this.parseOrderInfoFromNotes(row['Notes']) ||
                             this.lookupOrderForEmployee(emp, itemType) ||
                             { orderNumber: '', vendor: '', orderDate: '', price: 0 };
+
+          if (orderInfo && orderInfo.orderNumber) {
+            const enriched = this.lookupOrderByPoNumber(orderInfo.orderNumber);
+            if (enriched) {
+              if (!orderInfo.vendor && enriched.vendor) orderInfo.vendor = enriched.vendor;
+              if ((!orderInfo.price || orderInfo.price <= 0) && enriched.price > 0) orderInfo.price = enriched.price;
+              if (!orderInfo.orderDate && enriched.orderDate) orderInfo.orderDate = enriched.orderDate;
+              if (!orderInfo.expectedDelivery && enriched.expectedDelivery) orderInfo.expectedDelivery = enriched.expectedDelivery;
+              if (!orderInfo.vendorOrderNumber && enriched.vendorOrderNumber) orderInfo.vendorOrderNumber = enriched.vendorOrderNumber;
+            }
+          }
           let poLabel = orderInfo.orderNumber ? `PO: ${orderInfo.orderNumber}` : 'Ordered';
           if (orderInfo.vendor) poLabel += ` · ${orderInfo.vendor}`;
           const empLabel = `${emp} (📦 ${poLabel})`;
@@ -2244,9 +2353,14 @@ class ProcurementEngine {
                 </td>
                 <td style="padding: 6px 8px; text-align: center;">
                   ${item.section === 'ordered_pending' ? `
-                    <button type="button" class="btn btn-xs" onclick="window.procurementEngine.openDeliverForEmployee('${this.escapeJs(emp.name)}', '${this.escapeJs(item.itemType)}', '${this.escapeJs(item.size)}')" style="background: rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.35); color: #93c5fd; padding: 2px 6px; font-size: 10.5px; border-radius: 3px; cursor: pointer;">
-                      <span>🚚</span> Deliver
-                    </button>
+                    <div style="display: flex; align-items: center; justify-content: center; gap: 3px; flex-wrap: wrap;">
+                      <button type="button" class="btn btn-xs" onclick="window.procurementEngine.openDeliverForEmployee('${this.escapeJs(emp.name)}', '${this.escapeJs(item.itemType)}', '${this.escapeJs(item.size)}')" style="background: rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.35); color: #93c5fd; padding: 2px 6px; font-size: 10.5px; border-radius: 3px; cursor: pointer;">
+                        <span>🚚</span> Deliver
+                      </button>
+                      <button type="button" class="btn btn-xs" onclick="window.procurementEngine.openEditPendingOrderItem(${item._globalIdx}, ${empIdx})" style="background: rgba(148, 163, 184, 0.15); border: 1px solid rgba(148, 163, 184, 0.35); color: #cbd5e1; padding: 2px 5px; font-size: 10.5px; border-radius: 3px; cursor: pointer;" title="Edit who this is ordered for, PO #, Vendor Order #, Price">
+                        <span>✏️</span> Edit
+                      </button>
+                    </div>
                   ` : `
                     <button type="button" class="btn btn-xs" onclick="window.procurementEngine.openMarkOrderedModal([{ ...window.procurementEngine.items[${item._globalIdx}], quantity: 1, employees: [{ name: '${this.escapeJs(emp.name)}', label: '${this.escapeJs(emp.label)}', checked: true }] }])" style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.35); color: #6ee7b7; padding: 2px 6px; font-size: 10.5px; border-radius: 3px; cursor: pointer;">
                       <span>📦</span> Order
@@ -2277,9 +2391,14 @@ class ProcurementEngine {
               </div>
               ${item.section === 'ordered_pending' && item.orderInfo ? `
                 <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 4px; font-size: 11px;">
-                  <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); font-weight: 700; padding: 2px 6px; border-radius: 4px;">
-                    PO: ${this.escapeHtml(item.orderInfo.orderNumber || 'Pending')}
+                  <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); font-weight: 700; padding: 2px 6px; border-radius: 4px;" title="Internal PO / Job Number">
+                    PO (Job #): ${this.escapeHtml(item.orderInfo.poNumber || item.orderInfo.orderNumber || 'Pending')}
                   </span>
+                  ${item.orderInfo.vendorOrderNumber ? `
+                    <span class="badge" style="background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4); font-weight: 700; padding: 2px 6px; border-radius: 4px;" title="Vendor Order / Invoice Number">
+                      Order #: ${this.escapeHtml(item.orderInfo.vendorOrderNumber)}
+                    </span>
+                  ` : ''}
                   ${item.orderInfo.vendor ? `<span style="color: #cbd5e1; font-weight: 600;">🏢 ${this.escapeHtml(item.orderInfo.vendor)}</span>` : ''}
                   ${item.orderInfo.orderDate ? `<span style="color: #94a3b8;">📅 Ordered: <strong>${this.escapeHtml(item.orderInfo.orderDate)}</strong></span>` : ''}
                   ${item.orderInfo.expectedDelivery && item.orderInfo.expectedDelivery !== 'Pending' ? `<span style="color: #38bdf8;">🚚 Est. Delivery: <strong>${this.escapeHtml(item.orderInfo.expectedDelivery)}</strong></span>` : ''}
@@ -2318,9 +2437,14 @@ class ProcurementEngine {
             </td>
             <td style="padding: 8px; text-align: center;">
               ${item.section === 'ordered_pending' ? `
-                <button type="button" class="btn btn-xs" onclick="window.procurementEngine.openBatchDeliveryModal([window.procurementEngine.items[${item._globalIdx}]])" style="background: rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.4); color: #93c5fd; padding: 3px 8px; font-size: 11px; border-radius: 3px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;" title="Receive this delivered item into inventory">
-                  <span>🚚</span> Deliver
-                </button>
+                <div style="display: flex; align-items: center; justify-content: center; gap: 4px; flex-wrap: wrap;">
+                  <button type="button" class="btn btn-xs" onclick="window.procurementEngine.openBatchDeliveryModal([window.procurementEngine.items[${item._globalIdx}]])" style="background: rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.4); color: #93c5fd; padding: 3px 7px; font-size: 11px; border-radius: 3px; cursor: pointer; display: inline-flex; align-items: center; gap: 3px;" title="Receive this delivered item into inventory">
+                    <span>🚚</span> Deliver
+                  </button>
+                  <button type="button" class="btn btn-xs" onclick="window.procurementEngine.openEditPendingOrderItem(${item._globalIdx})" style="background: rgba(148, 163, 184, 0.15); border: 1px solid rgba(148, 163, 184, 0.35); color: #cbd5e1; padding: 3px 7px; font-size: 11px; border-radius: 3px; cursor: pointer; display: inline-flex; align-items: center; gap: 3px;" title="Edit PO #, Vendor Order #, Price, and Assigned Lineman">
+                    <span>✏️</span> Edit
+                  </button>
+                </div>
               ` : `
                 <button type="button" class="btn btn-xs" onclick="window.procurementEngine.openMarkOrderedModal([window.procurementEngine.items[${item._globalIdx}]])" style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); color: #6ee7b7; padding: 3px 8px; font-size: 11px; border-radius: 3px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;" title="Mark this item as Ordered">
                   <span>📦</span> Order
@@ -3350,10 +3474,16 @@ class ProcurementEngine {
         </div>
       </div>
 
-      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 14px; margin-bottom: 20px;">
+      <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-bottom: 20px;">
         <div>
-          <label style="display: block; font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 5px;">PO / Order Number *</label>
-          <input type="text" id="mark-order-po-num" class="batch-delivery-input" value="${this.escapeHtml(poNumber)}" style="font-weight: 700; color: #38bdf8;">
+          <label style="display: block; font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 5px;">PO # (Job Number) *</label>
+          <input type="text" id="mark-order-po-num" class="batch-delivery-input" value="${this.escapeHtml(poNumber)}" placeholder="e.g. 002-27" style="font-weight: 700; color: #38bdf8;">
+          <div style="font-size: 11px; color: #64748b; margin-top: 2px;">This year's job / PO number</div>
+        </div>
+        <div>
+          <label style="display: block; font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 5px;">Vendor Order # / Invoice #</label>
+          <input type="text" id="mark-order-vendor-order-num" class="batch-delivery-input" placeholder="e.g. from vendor invoice" style="font-weight: 600; color: #f1f5f9;">
+          <div style="font-size: 11px; color: #64748b; margin-top: 2px;">Order # on vendor invoice</div>
         </div>
         <div>
           <label style="display: block; font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 5px;">Vendor *</label>
@@ -3466,10 +3596,13 @@ class ProcurementEngine {
     const poNumInput = document.getElementById('mark-order-po-num');
     const poNum = poNumInput ? poNumInput.value.trim() : '';
     if (!poNum) {
-      alert('⚠️ Please enter a PO / Order Number.');
+      alert('⚠️ Please enter a PO # (Job Number).');
       if (poNumInput) poNumInput.focus();
       return;
     }
+
+    const vendorOrderNumInput = document.getElementById('mark-order-vendor-order-num');
+    const vendorOrderNum = vendorOrderNumInput ? vendorOrderNumInput.value.trim() : '';
 
     const vSelect = document.getElementById('mark-order-vendor-select');
     let vendorName = vSelect ? vSelect.value : '';
@@ -3545,7 +3678,7 @@ class ProcurementEngine {
 
         for (const empName of checkedEmps) {
           if (!empName) continue;
-          const orderNote = `Ordered on ${orderDate || new Date().toLocaleDateString()}, PO: ${poNum}, Vendor: ${vendorName}${expectedDelivery ? ', Est. Delivery: ' + expectedDelivery : ''}${unitPrice > 0 ? ', Price: $' + unitPrice.toFixed(2) : ''}`;
+          const orderNote = `Ordered on ${orderDate || new Date().toLocaleDateString()}, PO: ${poNum}${vendorOrderNum ? ', Vendor Order #: ' + vendorOrderNum : ''}, Vendor: ${vendorName}${expectedDelivery ? ', Est. Delivery: ' + expectedDelivery : ''}${unitPrice > 0 ? ', Price: $' + unitPrice.toFixed(2) : ''}`;
 
           if (swapTable && swapTable.rows) {
             const sRow = swapTable.rows.find(sr => {
@@ -3625,9 +3758,12 @@ class ProcurementEngine {
       };
 
       const uniqueEmps = Array.from(new Set(allCheckedEmps)).filter(Boolean);
-      const empNoteStr = uniqueEmps.length > 0
+      let empNoteStr = uniqueEmps.length > 0
         ? `Ordered ${totalUnits} units (For: ${uniqueEmps.join(', ')})`
         : `Ordered ${totalUnits} units for Mountain Power Operations`;
+      if (vendorOrderNum) {
+        empNoteStr += `; Vendor Order #: ${vendorOrderNum}`;
+      }
 
       const poRowObj = {
         'Date': formatToMdY(orderDate) || new Date().toLocaleDateString(),
@@ -4657,6 +4793,10 @@ class ProcurementEngine {
     ).join('');
     vendorOptions += `<option value="__custom__" ${(!vendorExists && currentVendor) ? 'selected' : ''}>➕ New / Custom Vendor...</option>`;
 
+    const notes = po.notes || '';
+    const parsedNotes = this.parseOrderInfoFromNotes(notes);
+    const vendorOrderNum = parsedNotes?.vendorOrderNumber || '';
+
     body.innerHTML = `
       <div style="margin-bottom: 16px; background: rgba(30, 58, 138, 0.2); border: 1px solid rgba(59, 130, 246, 0.35); border-radius: 8px; padding: 12px 16px;">
         <div style="font-weight: 700; font-size: 13.5px; color: #93c5fd; margin-bottom: 3px; display: flex; align-items: center; gap: 8px;">
@@ -4667,10 +4807,14 @@ class ProcurementEngine {
         </div>
       </div>
 
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px;">
+      <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; margin-bottom: 14px;">
         <div>
-          <label style="display: block; font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 5px;">PO / Order Number *</label>
-          <input type="text" id="edit-order-po-num" class="batch-delivery-input" value="${this.escapeHtml(po.poNum || '')}" style="font-weight: 700; color: #38bdf8;">
+          <label style="display: block; font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 5px;">PO # (Job Number) *</label>
+          <input type="text" id="edit-order-po-num" class="batch-delivery-input" value="${this.escapeHtml(po.poNum || '')}" placeholder="e.g. 002-27" style="font-weight: 700; color: #38bdf8;">
+        </div>
+        <div>
+          <label style="display: block; font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 5px;">Vendor Order # / Invoice #</label>
+          <input type="text" id="edit-order-vendor-order-num" class="batch-delivery-input" value="${this.escapeHtml(vendorOrderNum)}" placeholder="e.g. from vendor invoice" style="font-weight: 600; color: #f1f5f9;">
         </div>
         <div>
           <label style="display: block; font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 5px;">Vendor *</label>
@@ -4777,6 +4921,18 @@ class ProcurementEngine {
     const notesInput = document.getElementById('edit-order-notes');
     const notes = notesInput ? notesInput.value.trim() : '';
 
+    const vendorOrderNumInput = document.getElementById('edit-order-vendor-order-num');
+    const vendorOrderNum = vendorOrderNumInput ? vendorOrderNumInput.value.trim() : '';
+
+    let finalNotes = notes;
+    if (vendorOrderNum) {
+      if (finalNotes.toLowerCase().includes('vendor order #:')) {
+        finalNotes = finalNotes.replace(/vendor order #:\s*[^;,]+/i, `Vendor Order #: ${vendorOrderNum}`);
+      } else {
+        finalNotes = finalNotes ? `${finalNotes}; Vendor Order #: ${vendorOrderNum}` : `Vendor Order #: ${vendorOrderNum}`;
+      }
+    }
+
     const formatToMdY = (dStr) => {
       if (!dStr) return '';
       if (dStr.includes('/')) return dStr;
@@ -4804,7 +4960,7 @@ class ProcurementEngine {
         'Total Price': totalPrice > 0 ? totalPrice : 0,
         'Expected Delivery': formatToMdY(delivDate) || (status === 'Received' ? 'Delivered' : 'Pending'),
         'Status': status,
-        'Notes': notes
+        'Notes': finalNotes
       };
 
       const targetRowIdx = this.editingOrder.rowIdx;
@@ -4829,6 +4985,33 @@ class ProcurementEngine {
         row: targetRowIdx,
         rowData: updatedRowObj
       });
+
+      // Cascade PO change to swap tables if PO number was modified
+      const oldPoNum = this.editingOrder.poNum;
+      if (oldPoNum && oldPoNum !== poNum) {
+        const swapKeys = ['glove_swaps', 'sleeve_swaps', 'blanket_swaps', 'mack_swaps'];
+        for (const sk of swapKeys) {
+          const sTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable(sk) : null) || snap?.tables?.[sk];
+          if (sTable && sTable.rows) {
+            for (const sr of sTable.rows) {
+              const stat = String(sr['Status'] || '');
+              if (stat.includes(oldPoNum)) {
+                sr['Status'] = stat.replace(oldPoNum, poNum);
+                this.db.syncRowToRawGrid(sTable, sr);
+                const rIdx = sr._rowIdx || (sTable.rows.indexOf(sr) + 2);
+                await this.db.addMutation({
+                  action: 'UPDATE_CELL',
+                  sheetName: sTable.name,
+                  tableKey: sk,
+                  row: rIdx,
+                  col: 8,
+                  value: sr['Status']
+                });
+              }
+            }
+          }
+        }
+      }
 
       const parsedItems = this.parsePoItemsString(itemsStr);
       for (const pi of parsedItems) {
@@ -4889,6 +5072,294 @@ class ProcurementEngine {
     } catch (err) {
       console.error('Error deleting order:', err);
       alert('❌ Failed to delete order: ' + (err.message || err));
+    }
+  }
+
+  openEditPendingOrderItem(itemIdx, empIdx = null) {
+    const item = (this.items || [])[itemIdx];
+    if (!item) return;
+
+    let targetEmp = null;
+    if (empIdx !== null && item.employees && item.employees[empIdx]) {
+      targetEmp = item.employees[empIdx];
+    } else if (item.employees && item.employees.length === 1) {
+      targetEmp = item.employees[0];
+    }
+
+    this.editingPendingItem = {
+      itemIdx,
+      empIdx,
+      item,
+      targetEmp
+    };
+
+    const modal = document.getElementById('edit-pending-order-item-modal');
+    const body = document.getElementById('edit-pending-item-modal-body');
+    const title = document.getElementById('edit-pending-item-modal-title');
+    if (!modal || !body) return;
+
+    if (title) {
+      title.textContent = `Edit Pending Order: ${item.typeLabel || item.itemType} (${item.size}, ${item.classVal})`;
+    }
+
+    const orderInfo = item.orderInfo || {};
+    const poNum = orderInfo.poNumber || orderInfo.orderNumber || '';
+    const vendorOrderNum = orderInfo.vendorOrderNumber || '';
+    const vendorName = orderInfo.vendor || '';
+    const orderDate = orderInfo.orderDate || '';
+    const expDelivery = orderInfo.expectedDelivery || '';
+    const price = item.price > 0 ? item.price.toFixed(2) : (orderInfo.price > 0 ? orderInfo.price.toFixed(2) : '');
+
+    const currentAssignee = targetEmp ? targetEmp.name : (item.employees?.map(e => e.name).join(', ') || 'On Shelf');
+
+    // Get active employees list for selection
+    const snap = (this.db && typeof this.db.getSnapshot === 'function')
+      ? this.db.getSnapshot()
+      : (window.localDB ? window.localDB.getSnapshot() : null);
+    const empTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('employees') : null) || snap?.tables?.['employees'];
+    const activeEmployees = [];
+    if (empTable && empTable.rows) {
+      for (const er of empTable.rows) {
+        const name = String(er['Name'] || er['Employee'] || Object.values(er)[0] || '').trim();
+        const stat = String(er['Status'] || er['Employment Status'] || '').toLowerCase();
+        if (name && !stat.includes('inactive') && !stat.includes('term') && !stat.includes('prev')) {
+          activeEmployees.push(name);
+        }
+      }
+    }
+    activeEmployees.sort();
+
+    let empOptions = `<option value="On Shelf" ${currentAssignee.toLowerCase().includes('shelf') ? 'selected' : ''}>📦 On Shelf (Stock / Spare)</option>`;
+    for (const name of activeEmployees) {
+      const isSelected = this.isNameMatch(currentAssignee, name);
+      empOptions += `<option value="${this.escapeHtml(name)}" ${isSelected ? 'selected' : ''}>👤 ${this.escapeHtml(name)}</option>`;
+    }
+    if (!activeEmployees.some(n => this.isNameMatch(currentAssignee, n)) && !currentAssignee.toLowerCase().includes('shelf')) {
+      empOptions += `<option value="${this.escapeHtml(currentAssignee)}" selected>👤 ${this.escapeHtml(currentAssignee)} (Current)</option>`;
+    }
+
+    const currentVendor = vendorName || (this.vendors[0]?.name || '');
+    const vendorExists = this.vendors.some(v => v.name.toLowerCase() === currentVendor.toLowerCase());
+
+    let vendorOptions = this.vendors.map(v => 
+      `<option value="${this.escapeHtml(v.name)}" ${v.name.toLowerCase() === currentVendor.toLowerCase() ? 'selected' : ''}>${this.escapeHtml(v.name)}</option>`
+    ).join('');
+    vendorOptions += `<option value="__custom__" ${(!vendorExists && currentVendor) ? 'selected' : ''}>➕ New / Custom Vendor...</option>`;
+
+    body.innerHTML = `
+      <div style="margin-bottom: 16px; background: rgba(13, 148, 136, 0.12); border: 1px solid rgba(13, 148, 136, 0.35); border-radius: 8px; padding: 12px 16px;">
+        <div style="font-weight: 700; font-size: 13.5px; color: #5eead4; margin-bottom: 3px; display: flex; align-items: center; gap: 8px;">
+          <span>✏️</span> Edit Ordered Item & Lineman Assignment
+        </div>
+        <div style="font-size: 12px; color: #cbd5e1;">
+          Update who this item was ordered for (e.g. assign to a specific lineman or move to shelf stock), modify the internal PO # (job number), vendor invoice/order #, price, or estimated delivery date.
+        </div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px;">
+        <div>
+          <label style="display: block; font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 5px;">👤 Ordered For (Lineman / Shelf) *</label>
+          <select id="edit-pending-assignee" class="batch-delivery-input" style="font-weight: 600; color: #f8fafc;">
+            ${empOptions}
+          </select>
+        </div>
+        <div>
+          <label style="display: block; font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 5px;">PO # (Internal Job Number) *</label>
+          <input type="text" id="edit-pending-po-num" class="batch-delivery-input" value="${this.escapeHtml(poNum)}" placeholder="e.g. 002-27" style="font-weight: 700; color: #38bdf8;">
+        </div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px;">
+        <div>
+          <label style="display: block; font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 5px;">Vendor Order # / Invoice #</label>
+          <input type="text" id="edit-pending-vendor-order-num" class="batch-delivery-input" value="${this.escapeHtml(vendorOrderNum)}" placeholder="e.g. from vendor confirmation" style="font-weight: 600; color: #f1f5f9;">
+        </div>
+        <div>
+          <label style="display: block; font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 5px;">Vendor</label>
+          <select id="edit-pending-vendor-select" class="batch-delivery-input" onchange="window.procurementEngine.onEditPendingVendorChange(this.value)">
+            ${vendorOptions}
+          </select>
+          <input type="text" id="edit-pending-custom-vendor" class="batch-delivery-input" value="${this.escapeHtml(!vendorExists ? currentVendor : '')}" placeholder="Enter vendor name..." style="display: ${(!vendorExists && currentVendor) ? 'block' : 'none'}; margin-top: 6px;">
+        </div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; margin-bottom: 14px;">
+        <div>
+          <label style="display: block; font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 5px;">Size</label>
+          <input type="text" id="edit-pending-size" class="batch-delivery-input" value="${this.escapeHtml(item.size || 'Standard')}" style="text-align: center; font-weight: 600;">
+        </div>
+        <div>
+          <label style="display: block; font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 5px;">Class / KV</label>
+          <input type="text" id="edit-pending-class" class="batch-delivery-input" value="${this.escapeHtml(item.classVal || 'Class 2')}" style="text-align: center; color: #94a3b8;">
+        </div>
+        <div>
+          <label style="display: block; font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 5px;">Unit Price ($)</label>
+          <input type="number" step="0.01" min="0" id="edit-pending-price" class="batch-delivery-input" value="${price}" placeholder="0.00" style="text-align: right; font-weight: 600; color: #34d399;">
+        </div>
+      </div>
+
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px;">
+        <div>
+          <label style="display: block; font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 5px;">Order Date</label>
+          <input type="date" id="edit-pending-order-date" class="batch-delivery-input" value="${orderDate || new Date().toISOString().split('T')[0]}">
+        </div>
+        <div>
+          <label style="display: block; font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 5px;">Expected Delivery Date</label>
+          <input type="date" id="edit-pending-deliv-date" class="batch-delivery-input" value="${expDelivery}">
+        </div>
+      </div>
+    `;
+
+    modal.style.display = 'flex';
+  }
+
+  closeEditPendingOrderItemModal() {
+    const modal = document.getElementById('edit-pending-order-item-modal');
+    if (modal) modal.style.display = 'none';
+    this.editingPendingItem = null;
+  }
+
+  onEditPendingVendorChange(val) {
+    const custom = document.getElementById('edit-pending-custom-vendor');
+    if (!custom) return;
+    if (val === '__custom__') {
+      custom.style.display = 'block';
+      custom.focus();
+    } else {
+      custom.style.display = 'none';
+    }
+  }
+
+  async confirmSaveEditPendingOrderItem() {
+    if (!this.editingPendingItem) return;
+    const { item, targetEmp } = this.editingPendingItem;
+
+    const assigneeSelect = document.getElementById('edit-pending-assignee');
+    const newAssignee = assigneeSelect ? assigneeSelect.value.trim() : '';
+    const poNumInput = document.getElementById('edit-pending-po-num');
+    const poNum = poNumInput ? poNumInput.value.trim() : '';
+    if (!poNum) {
+      alert('⚠️ Please enter a PO # (Job Number).');
+      if (poNumInput) poNumInput.focus();
+      return;
+    }
+
+    const vendorOrderNumInput = document.getElementById('edit-pending-vendor-order-num');
+    const vendorOrderNum = vendorOrderNumInput ? vendorOrderNumInput.value.trim() : '';
+
+    const vSelect = document.getElementById('edit-pending-vendor-select');
+    let vendorName = vSelect ? vSelect.value : '';
+    if (vendorName === '__custom__') {
+      const customV = document.getElementById('edit-pending-custom-vendor');
+      vendorName = customV ? customV.value.trim() : '';
+    }
+
+    const sizeInput = document.getElementById('edit-pending-size');
+    const newSize = sizeInput ? sizeInput.value.trim() : (item.size || 'Standard');
+    const classInput = document.getElementById('edit-pending-class');
+    const newClass = classInput ? classInput.value.trim() : (item.classVal || 'Class 2');
+    const priceInput = document.getElementById('edit-pending-price');
+    const unitPrice = parseFloat(priceInput?.value) || 0;
+    const orderDateInput = document.getElementById('edit-pending-order-date');
+    const orderDate = orderDateInput ? orderDateInput.value : '';
+    const delivDateInput = document.getElementById('edit-pending-deliv-date');
+    const delivDate = delivDateInput ? delivDateInput.value : '';
+
+    const saveBtn = document.getElementById('btn-save-edit-pending-item');
+    if (saveBtn) saveBtn.textContent = '⏳ Saving...';
+
+    try {
+      const snap = (this.db && typeof this.db.getSnapshot === 'function')
+        ? this.db.getSnapshot()
+        : (window.localDB ? window.localDB.getSnapshot() : null);
+
+      const catKey = (item.itemType || '').toLowerCase();
+      let swapKey = '';
+      if (catKey.includes('glove')) swapKey = 'glove_swaps';
+      else if (catKey.includes('sleeve')) swapKey = 'sleeve_swaps';
+      else if (catKey.includes('blanket')) swapKey = 'blanket_swaps';
+      else if (catKey.includes('mack')) swapKey = 'mack_swaps';
+
+      const oldAssignee = targetEmp ? targetEmp.name : (item.employees?.[0]?.name || '');
+      const orderNote = `Ordered on ${orderDate || new Date().toLocaleDateString()}, PO: ${poNum}${vendorOrderNum ? ', Vendor Order #: ' + vendorOrderNum : ''}${vendorName ? ', Vendor: ' + vendorName : ''}${delivDate ? ', Est. Delivery: ' + delivDate : ''}${unitPrice > 0 ? ', Price: $' + unitPrice.toFixed(2) : ''}`;
+
+      const swapTable = swapKey ? ((this.db && typeof this.db.getTable === 'function' ? this.db.getTable(swapKey) : null) || snap?.tables?.[swapKey]) : null;
+      if (swapTable && swapTable.rows) {
+        const sRow = swapTable.rows.find(sr => {
+          const name = String(sr['Employee'] || sr['Employee Name'] || sr['Assigned To'] || Object.values(sr)[0] || '').trim();
+          return this.isNameMatch(name, oldAssignee) || (oldAssignee.toLowerCase().includes('shelf') && name.toLowerCase().includes('shelf'));
+        });
+        if (sRow) {
+          if (newAssignee && newAssignee !== oldAssignee) {
+            sRow['Employee'] = newAssignee;
+          }
+          if (newSize) {
+            sRow['Size'] = newSize;
+          }
+          sRow['Status'] = `Ordered (PO: ${poNum})`;
+          sRow['Notes'] = orderNote;
+
+          this.db.syncRowToRawGrid(swapTable, sRow);
+          const rIdx = sRow._rowIdx || (swapTable.rows.indexOf(sRow) + 2);
+
+          if (newAssignee && newAssignee !== oldAssignee) {
+            await this.db.addMutation({
+              action: 'UPDATE_CELL',
+              sheetName: swapTable.name,
+              tableKey: swapKey,
+              row: rIdx,
+              col: 1,
+              value: newAssignee
+            });
+          }
+          if (newSize) {
+            await this.db.addMutation({
+              action: 'UPDATE_CELL',
+              sheetName: swapTable.name,
+              tableKey: swapKey,
+              row: rIdx,
+              col: 3,
+              value: newSize
+            });
+          }
+          await this.db.addMutation({
+            action: 'UPDATE_CELL',
+            sheetName: swapTable.name,
+            tableKey: swapKey,
+            row: rIdx,
+            col: 8,
+            value: `Ordered (PO: ${poNum})`
+          });
+          await this.db.addMutation({
+            action: 'UPDATE_CELL',
+            sheetName: swapTable.name,
+            tableKey: swapKey,
+            row: rIdx,
+            col: 12,
+            value: orderNote
+          });
+        }
+      }
+
+      // Also sync vendor pricing if price updated
+      if (unitPrice > 0 && vendorName) {
+        await this.syncVendorPrice(vendorName, item.itemType, newSize, newClass, unitPrice);
+      }
+
+      this.closeEditPendingOrderItemModal();
+      await this.loadData();
+      this.render();
+
+      if (window.ppeTrackingEngine && typeof window.ppeTrackingEngine.refresh === 'function') {
+        window.ppeTrackingEngine.refresh();
+      }
+
+      alert('✅ Ordered item updated successfully!');
+    } catch (err) {
+      console.error('Error saving pending order item:', err);
+      alert('❌ Failed to update item: ' + (err.message || err));
+    } finally {
+      if (saveBtn) saveBtn.innerHTML = '<span>💾</span> Save Changes';
     }
   }
 
