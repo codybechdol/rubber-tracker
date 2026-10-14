@@ -2039,11 +2039,16 @@
       <div class="modal-body" id="batch-delivery-modal-body" style="max-height: 75vh; overflow-y: auto; padding: 20px;">
         <!-- Injected dynamically by procurement.js -->
       </div>
-      <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center;">
+      <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
         <button class="btn btn-secondary" onclick="window.procurementEngine.closeBatchDeliveryModal()">Cancel</button>
-        <button class="btn btn-primary" id="btn-confirm-batch-delivery" onclick="window.procurementEngine.confirmBatchDelivery()" style="font-weight: 700; display: inline-flex; align-items: center; gap: 6px; background: #2563eb; border: none; box-shadow: 0 2px 8px rgba(37, 99, 235, 0.4);">
-          <span>✅</span> Add to Inventory & Complete Delivery
-        </button>
+        <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+          <button class="btn btn-secondary" id="btn-mark-delivered-no-inv" onclick="window.procurementEngine.confirmMarkDeliveredWithoutInventory()" style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); color: #6ee7b7; font-weight: 600; display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; font-size: 12.5px; border-radius: 4px; cursor: pointer;" title="Mark this order as received/delivered without adding duplicate item numbers to Gloves or Sleeves sheets">
+            <span>✅</span> Mark Delivered Only (Already Added to Inventory)
+          </button>
+          <button class="btn btn-primary" id="btn-confirm-batch-delivery" onclick="window.procurementEngine.confirmBatchDelivery()" style="font-weight: 700; display: inline-flex; align-items: center; gap: 6px; background: #2563eb; border: none; box-shadow: 0 2px 8px rgba(37, 99, 235, 0.4); padding: 6px 14px; font-size: 12.5px;">
+            <span>📦</span> Add to Inventory & Complete Delivery
+          </button>
+        </div>
       </div>
     </div>
   </div>
@@ -2877,7 +2882,7 @@
   <script src="js/vendor/leaflet.js"></script>
   <script src="js/trip-route-map.js?v=20260918_07"></script>
   <script src="js/lookup.js?v=20260901_25"></script>
-  <script src="js/procurement.js?v=20261014_04"></script>
+  <script src="js/procurement.js?v=20261014_05"></script>
   <script src="js/aging.js?v=20260901_25"></script>
   <script src="js/drug-testing.js?v=20260902_1"></script>
   <script src="js/ppe-tracking.js?v=20260929_01"></script>

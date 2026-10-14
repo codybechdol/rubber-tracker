@@ -4051,6 +4051,113 @@ class ProcurementEngine {
     }
   }
 
+  async confirmMarkDeliveredWithoutInventory() {
+    if (!this._pendingDeliveryUnits || !this._pendingDeliveryUnits.length) {
+      alert('⚠️ No delivery units found.');
+      return;
+    }
+
+    if (!confirm('Mark this order as Received / Delivered WITHOUT adding new items to the inventory sheets?\n\nUse this when the items have already been manually entered into the Gloves/Sleeves sheets previously. It will resolve the PO in tracking history and clear it from Awaiting Delivery.')) {
+      return;
+    }
+
+    const noInvBtn = document.getElementById('btn-mark-delivered-no-inv');
+    if (noInvBtn) noInvBtn.textContent = '⏳ Marking Delivered...';
+
+    try {
+      const snap = (this.db && typeof this.db.getSnapshot === 'function')
+        ? this.db.getSnapshot()
+        : (window.localDB ? window.localDB.getSnapshot() : null);
+
+      const formatToMdY = (dStr) => {
+        if (!dStr) return '';
+        if (dStr.includes('/')) return dStr;
+        const parts = dStr.split('-');
+        if (parts.length === 3) return `${parts[1]}/${parts[2]}/${parts[0]}`;
+        return dStr;
+      };
+
+      const todayStr = formatToMdY(new Date().toISOString().split('T')[0]);
+
+      // Collect all PO numbers and assigned employees from pending units
+      const poNums = new Set();
+      for (const u of this._pendingDeliveryUnits) {
+        if (u.orderInfo?.orderNumber) {
+          poNums.add(String(u.orderInfo.orderNumber).trim());
+        }
+        const assignedTo = u.empName;
+        if (assignedTo && !assignedTo.toLowerCase().includes('shelf') && !assignedTo.toLowerCase().includes('stock')) {
+          const cat = (u.category || '').toLowerCase();
+          let swapKey = '';
+          if (cat.includes('glove')) swapKey = 'glove_swaps';
+          else if (cat.includes('sleeve')) swapKey = 'sleeve_swaps';
+          else if (cat.includes('blanket')) swapKey = 'blanket_swaps';
+          else if (cat.includes('mack')) swapKey = 'mack_swaps';
+
+          const swapTable = swapKey ? ((this.db && typeof this.db.getTable === 'function' ? this.db.getTable(swapKey) : null) || snap?.tables?.[swapKey]) : null;
+          if (swapTable && swapTable.rows) {
+            const sRow = swapTable.rows.find(sr => {
+              const name = String(sr['Employee'] || sr['Employee Name'] || sr['Assigned To'] || Object.values(sr)[0] || '').trim();
+              return this.isNameMatch(name, assignedTo);
+            });
+            if (sRow && String(sRow['Status'] || '').toLowerCase().includes('ordered')) {
+              sRow['Status'] = 'Complete';
+              this.db.syncRowToRawGrid(swapTable, sRow);
+              const rIdx = sRow._rowIdx || (swapTable.rows.indexOf(sRow) + 2);
+              await this.db.addMutation({
+                action: 'UPDATE_CELL',
+                sheetName: swapTable.name,
+                tableKey: swapKey,
+                row: rIdx,
+                col: 8,
+                value: 'Complete'
+              });
+            }
+          }
+        }
+      }
+
+      // Update purchase_orders table
+      const poTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('purchase_orders') : null) || snap?.tables?.['purchase_orders'];
+      if (poTable && poTable.rows) {
+        for (const po of poTable.rows) {
+          const pNum = String(po['PO Number'] || po['PO #'] || '').trim();
+          const stat = String(po['Status'] || '').toLowerCase();
+          if (poNums.has(pNum) || (poNums.size === 0 && stat.includes('ordered'))) {
+            po['Status'] = 'Received';
+            if (!po['Expected Delivery'] || po['Expected Delivery'] === 'Pending') {
+              po['Expected Delivery'] = todayStr;
+            }
+            this.db.syncRowToRawGrid(poTable, po);
+            const rIdx = po._rowIdx || (poTable.rows.indexOf(po) + 2);
+            await this.db.addMutation({
+              action: 'UPDATE_ROW',
+              sheetName: poTable.name || 'Purchase Orders',
+              tableKey: 'purchase_orders',
+              row: rIdx,
+              rowData: po
+            });
+          }
+        }
+      }
+
+      this.closeBatchDeliveryModal();
+      await this.loadData();
+      this.render();
+
+      if (window.ppeTrackingEngine && typeof window.ppeTrackingEngine.refresh === 'function') {
+        window.ppeTrackingEngine.refresh();
+      }
+
+      alert('✅ Order marked as Received/Delivered. No duplicate items were added to the Gloves inventory page.');
+    } catch (err) {
+      console.error('Error marking delivered without inventory:', err);
+      alert('❌ Failed to update order: ' + (err.message || err));
+    } finally {
+      if (noInvBtn) noInvBtn.innerHTML = '<span>✅</span> Mark Delivered Only (Already Added to Inventory)';
+    }
+  }
+
   openDeliverForEmployee(empName, itemType, preferredSize) {
     const norm = this.cleanEmployeeName(empName);
     const cat = (itemType || '').toLowerCase();
