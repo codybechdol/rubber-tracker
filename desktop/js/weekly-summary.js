@@ -25,6 +25,7 @@ class WeeklySummaryEngine {
     this.db = db;
     this.selectedLocation = 'all';
     this.selectedWeek = 'previous';
+    this.tasksWeekOffset = 0;
     this.cachedData = null;
     this.selectedRecipients = new Set();
     window.weeklySummaryEngine = this;
@@ -680,6 +681,169 @@ class WeeklySummaryEngine {
     // 7. Notification Recipients (from Notification Emails column on Employees page)
     const recipientsData = this.getNotificationRecipients();
 
+    // 8. Planned Tasks & Field Itinerary for the Week (from Trip Planner)
+    const tasksMon = new Date(currentMon);
+    tasksMon.setDate(currentMon.getDate() + (this.tasksWeekOffset * 7));
+    tasksMon.setHours(12, 0, 0, 0);
+
+    const tasksSun = new Date(tasksMon);
+    tasksSun.setDate(tasksMon.getDate() + 6);
+    tasksSun.setHours(23, 59, 59, 999);
+
+    const rawManualTasks = (this.db && typeof this.db.getManualTasks === 'function')
+      ? this.db.getManualTasks()
+      : (this.db?.snapshot?.configs?.manual_tasks || []);
+
+    const rawPlannedTrips = (this.db && typeof this.db.getPlannedTrips === 'function')
+      ? this.db.getPlannedTrips()
+      : (this.db?.snapshot?.configs?.plannedTrips || {});
+
+    const rawScheduledSwaps = (this.db && typeof this.db.getScheduledSwaps === 'function')
+      ? this.db.getScheduledSwaps()
+      : (this.db?.snapshot?.configs?.scheduled_swaps || {});
+
+    const plannedDays = [];
+    const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
+    const dayAbbrs = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
+    let weekTotalTasks = 0;
+    let weekPendingTasks = 0;
+    let weekCompletedTasks = 0;
+    let weekFieldDaysCount = 0;
+    let weekTotalTrips = 0;
+    let weekTotalSwaps = 0;
+
+    const swapIcons = {
+      glove_swaps: '🧤',
+      sleeve_swaps: '🦾',
+      blanket_swaps: '🛏️',
+      mack_swaps: '⚡',
+      hv_tester_swaps: '⚡',
+      phasing_set_swaps: '⚡',
+      ground_swaps: '🧰',
+      hot_stick_swaps: '🔴'
+    };
+
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(tasksMon);
+      d.setDate(tasksMon.getDate() + i);
+      const yyyy = d.getFullYear();
+      const mm = String(d.getMonth() + 1).padStart(2, '0');
+      const dd = String(d.getDate()).padStart(2, '0');
+      const dateKey = `${yyyy}-${mm}-${dd}`;
+
+      const isToday = (dateKey === `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`);
+
+      // Trips
+      const dayTripsRaw = rawPlannedTrips[dateKey];
+      let trips = Array.isArray(dayTripsRaw) ? dayTripsRaw : (dayTripsRaw ? [dayTripsRaw] : []);
+      if (this.selectedLocation !== 'all') {
+        trips = trips.filter(t => t.location && t.location.toLowerCase().includes(this.selectedLocation.toLowerCase()));
+      }
+      if (trips.length > 0) {
+        weekFieldDaysCount++;
+        weekTotalTrips += trips.length;
+      }
+
+      // Tasks
+      let dayTasks = rawManualTasks.filter(t => (t.dateKey === dateKey || t.date === dateKey));
+      if (this.selectedLocation !== 'all') {
+        dayTasks = dayTasks.filter(t => {
+          const loc = (t.location || '').toLowerCase();
+          return loc.includes(this.selectedLocation.toLowerCase()) || (this.selectedLocation.toLowerCase() === 'helena' && (!loc || loc.includes('office') || loc.includes('base')));
+        });
+      }
+
+      // Sort day tasks chronologically by time
+      dayTasks.sort((a, b) => {
+        const parseTime = (tStr) => {
+          if (!tStr) return 9999;
+          const m = String(tStr).toLowerCase();
+          if (m === 'morning') return 480;
+          if (m === 'noon') return 720;
+          if (m === 'afternoon') return 780;
+          const match = m.match(/(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/);
+          if (!match) return 9999;
+          let h = parseInt(match[1], 10);
+          const min = match[2] ? parseInt(match[2], 10) : 0;
+          const mod = match[3];
+          if (mod === 'pm' && h < 12) h += 12;
+          if (mod === 'am' && h === 12) h = 0;
+          return h * 60 + min;
+        };
+        const tA = parseTime(a.time);
+        const tB = parseTime(b.time);
+        if (tA !== tB) return tA - tB;
+        const aDone = a.status === 'Complete' ? 1 : 0;
+        const bDone = b.status === 'Complete' ? 1 : 0;
+        if (aDone !== bDone) return aDone - bDone;
+        return (a.title || a.certType || '').localeCompare(b.title || b.certType || '');
+      });
+
+      dayTasks.forEach(t => {
+        weekTotalTasks++;
+        if (t.status === 'Complete') weekCompletedTasks++;
+        else weekPendingTasks++;
+      });
+
+      // Scheduled Swaps
+      const daySwaps = [];
+      Object.keys(rawScheduledSwaps).forEach(sKey => {
+        const s = rawScheduledSwaps[sKey];
+        if (s && (s.dateKey === dateKey || s.date === dateKey)) {
+          if (this.selectedLocation !== 'all') {
+            const sLoc = (s.location || '').toLowerCase();
+            if (!sLoc.includes(this.selectedLocation.toLowerCase())) return;
+          }
+          const parts = sKey.split('|');
+          const catKey = parts[0] || '';
+          const emp = parts[1] || 'Lineman';
+          const itemType = parts[2] || 'Item';
+          const itemNum = parts[3] || '';
+          const icon = swapIcons[catKey] || '🔄';
+
+          daySwaps.push({
+            key: sKey,
+            catKey,
+            icon,
+            employee: emp,
+            itemType,
+            itemNum,
+            location: s.location || '—'
+          });
+          weekTotalSwaps++;
+        }
+      });
+
+      plannedDays.push({
+        dateKey,
+        dayName: dayNames[i],
+        dayAbbr: dayAbbrs[i],
+        formattedDate: `${d.getMonth() + 1}/${d.getDate()}`,
+        fullDateLabel: `${dayNames[i]}, ${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`,
+        isToday,
+        isWeekend: (i >= 5),
+        trips,
+        tasks: dayTasks,
+        swaps: daySwaps,
+        hasContent: (trips.length > 0 || dayTasks.length > 0 || daySwaps.length > 0)
+      });
+    }
+
+    const plannedWeek = {
+      offset: this.tasksWeekOffset,
+      monday: tasksMon,
+      sunday: tasksSun,
+      weekRangeStr: `${this.formatDateOnly(tasksMon)} – ${this.formatDateOnly(tasksSun)}`,
+      days: plannedDays,
+      totalTasks: weekTotalTasks,
+      pendingTasks: weekPendingTasks,
+      completedTasks: weekCompletedTasks,
+      fieldDaysCount: weekFieldDaysCount,
+      totalTrips: weekTotalTrips,
+      totalSwaps: weekTotalSwaps
+    };
+
     return {
       today,
       currentMon,
@@ -688,6 +852,7 @@ class WeeklySummaryEngine {
       locations: Array.from(activeLocations).sort(),
       recipients: recipientsData,
       crewMembersMap,
+      plannedWeek,
       compliance: {
         weeks: compWeeks,
         targetWeek,
@@ -781,7 +946,21 @@ class WeeklySummaryEngine {
         </div>
 
         <!-- Executive KPI Stat Cards Bar -->
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px;">
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px;">
+          <!-- Planned Tasks Card -->
+          <div onclick="document.getElementById('weekly-planned-tasks-section')?.scrollIntoView({ behavior: 'smooth' });" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 8px; padding: 14px 16px; cursor: pointer; transition: transform 0.15s, border-color 0.15s;" onmouseover="this.style.borderColor='#38bdf8'" onmouseout="this.style.borderColor='var(--border-color)'" title="Scroll to Planned Tasks & Itinerary">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+              <span style="font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">Planned Tasks</span>
+              <span style="font-size: 16px;">📋</span>
+            </div>
+            <div style="font-size: 24px; font-weight: 800; color: ${data.plannedWeek.pendingTasks > 0 ? '#38bdf8' : '#34d399'};">
+              ${data.plannedWeek.totalTasks > 0 ? `${data.plannedWeek.pendingTasks} Pending` : '0 Tasks'}
+            </div>
+            <div style="font-size: 11px; color: #64748b; margin-top: 4px;">
+              ${data.plannedWeek.completedTasks} done · ${data.plannedWeek.fieldDaysCount} travel day${data.plannedWeek.fieldDaysCount === 1 ? '' : 's'}
+            </div>
+          </div>
+
           <!-- Compliance Card -->
           <div onclick="if(window.navigateToView){window.navigateToView('safety-compliance-view');}" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 8px; padding: 14px 16px; cursor: pointer; transition: transform 0.15s, border-color 0.15s;" onmouseover="this.style.borderColor='#3b82f6'" onmouseout="this.style.borderColor='var(--border-color)'">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
@@ -850,6 +1029,59 @@ class WeeklySummaryEngine {
             <div style="font-size: 11px; color: #64748b; margin-top: 4px;">
               Past 14 days (tablet reports)
             </div>
+          </div>
+        </div>
+
+        <!-- Section 0: Planned Tasks & Field Itinerary (Trip Planner) -->
+        <div id="weekly-planned-tasks-section" style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 8px; overflow: hidden; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.12);">
+          <div style="padding: 14px 18px; background: rgba(30, 41, 59, 0.7); border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+            <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+              <span style="font-size: 16px;">📋</span>
+              <h3 style="font-size: 14px; font-weight: 700; margin: 0; color: #f8fafc;">Planned Tasks & Field Itinerary</h3>
+              <span class="brand-badge" style="background: rgba(56, 189, 248, 0.18); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.35);">
+                Trip Planner
+              </span>
+              <span style="font-size: 12px; color: #94a3b8; font-weight: 600;">
+                Week: <strong style="color: #60a5fa;">${data.plannedWeek.weekRangeStr}</strong>
+              </span>
+              ${data.plannedWeek.totalTasks > 0 ? `
+                <span class="brand-badge" style="background: ${data.plannedWeek.pendingTasks > 0 ? 'rgba(245, 158, 11, 0.2)' : 'rgba(16, 185, 129, 0.2)'}; color: ${data.plannedWeek.pendingTasks > 0 ? '#fbbf24' : '#34d399'}; border: 1px solid ${data.plannedWeek.pendingTasks > 0 ? 'rgba(245, 158, 11, 0.4)' : 'rgba(16, 185, 129, 0.4)'};">
+                  ${data.plannedWeek.pendingTasks} Pending · ${data.plannedWeek.completedTasks} Complete
+                </span>
+              ` : ''}
+              ${data.plannedWeek.fieldDaysCount > 0 ? `
+                <span class="brand-badge" style="background: rgba(139, 92, 246, 0.18); color: #c084fc; border: 1px solid rgba(139, 92, 246, 0.35);">
+                  🚗 ${data.plannedWeek.fieldDaysCount} Field Trip Days
+                </span>
+              ` : ''}
+            </div>
+
+            <!-- Week Navigation & Actions -->
+            <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+              <div style="display: inline-flex; border: 1px solid var(--border-color); border-radius: 6px; overflow: hidden; background: var(--bg-secondary);">
+                <button onclick="window.weeklySummaryEngine.setTasksWeekOffset(${data.plannedWeek.offset - 1})" class="btn btn-secondary" style="border: none; border-radius: 0; padding: 4px 8px; font-size: 11px; font-weight: 700; color: #94a3b8; cursor: pointer;" title="Previous Week">
+                  ◀ Prev
+                </button>
+                <button onclick="window.weeklySummaryEngine.setTasksWeekOffset(0)" class="btn btn-secondary" style="border: none; border-left: 1px solid var(--border-color); border-right: 1px solid var(--border-color); border-radius: 0; padding: 4px 10px; font-size: 11px; font-weight: 700; cursor: pointer; ${data.plannedWeek.offset === 0 ? 'background: #2563eb; color: #ffffff;' : 'color: #94a3b8;'}" title="Current Week">
+                  This Week
+                </button>
+                <button onclick="window.weeklySummaryEngine.setTasksWeekOffset(${data.plannedWeek.offset + 1})" class="btn btn-secondary" style="border: none; border-radius: 0; padding: 4px 8px; font-size: 11px; font-weight: 700; color: #94a3b8; cursor: pointer;" title="Next Week">
+                  Next ▶
+                </button>
+              </div>
+
+              <button class="btn btn-secondary" onclick="window.weeklySummaryEngine.openAddTaskModal('${data.plannedWeek.days[0].dateKey}')" style="font-size: 11.5px; font-weight: 700; display: inline-flex; align-items: center; gap: 5px; border-color: rgba(56, 189, 248, 0.4); color: #38bdf8; background: rgba(56, 189, 248, 0.1);" title="Schedule new personal task or training class">
+                <span>➕</span> Add Task
+              </button>
+
+              <button class="btn btn-secondary" onclick="window.weeklySummaryEngine.openTripPlanner('${data.plannedWeek.days[0].dateKey}')" style="font-size: 11.5px; font-weight: 600; display: inline-flex; align-items: center; gap: 5px;" title="Open full Trip Planner workspace">
+                <span>🗓️</span> Open Trip Planner
+              </button>
+            </div>
+          </div>
+
+          <div style="padding: 16px;">
+            ${this.renderPlannedTasksSectionHtml(data.plannedWeek)}
           </div>
         </div>
 
@@ -949,6 +1181,143 @@ class WeeklySummaryEngine {
 
       </div>
     `;
+  }
+
+  renderPlannedTasksSectionHtml(plannedWeek) {
+    if (!plannedWeek || !plannedWeek.days) {
+      return `<div style="text-align: center; padding: 20px; color: #94a3b8; font-size: 12.5px;">No planned task data available.</div>`;
+    }
+
+    const hasAnyContent = plannedWeek.days.some(d => d.hasContent);
+    if (!hasAnyContent) {
+      return `
+        <div style="text-align: center; padding: 28px 16px; background: var(--bg-secondary); border: 1px dashed var(--border-color); border-radius: 8px;">
+          <div style="font-size: 28px; margin-bottom: 8px;">🗓️</div>
+          <div style="font-weight: 700; font-size: 14px; color: #f8fafc; margin-bottom: 4px;">No Planned Tasks or Travel Scheduled for ${this.escapeHtml(plannedWeek.weekRangeStr)}</div>
+          <div style="font-size: 12px; color: #94a3b8; max-width: 480px; margin: 0 auto 14px auto;">
+            Use the Trip Planner to schedule field visits, equipment deliveries, personal tasks, or certification training classes.
+          </div>
+          <div style="display: flex; gap: 8px; justify-content: center; flex-wrap: wrap;">
+            <button class="btn btn-primary" onclick="window.weeklySummaryEngine.openAddTaskModal('${plannedWeek.days[0]?.dateKey || ''}')" style="font-size: 12px; font-weight: 700; background: #2563eb; color: #fff;">
+              ➕ Schedule Task
+            </button>
+            <button class="btn btn-secondary" onclick="window.weeklySummaryEngine.openTripPlanner('${plannedWeek.days[0]?.dateKey || ''}')" style="font-size: 12px; font-weight: 600;">
+              🗓️ Open Trip Planner
+            </button>
+          </div>
+        </div>
+      `;
+    }
+
+    // Include Saturday / Sunday only if they have content
+    const displayDays = plannedWeek.days.filter((d, idx) => idx < 5 || d.hasContent);
+
+    let html = `<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;">`;
+
+    displayDays.forEach(day => {
+      const isToday = day.isToday;
+      const todayBorder = isToday ? 'border: 1px solid #3b82f6; box-shadow: 0 0 10px rgba(59, 130, 246, 0.25);' : 'border: 1px solid var(--border-color);';
+      const todayHeaderBg = isToday ? 'background: rgba(59, 130, 246, 0.18); border-bottom: 1px solid rgba(59, 130, 246, 0.4);' : 'background: rgba(15, 23, 42, 0.6); border-bottom: 1px solid var(--border-color);';
+
+      html += `
+        <div style="background: var(--bg-secondary); ${todayBorder} border-radius: 8px; overflow: hidden; display: flex; flex-direction: column; min-height: 200px;">
+          
+          <!-- Day Header -->
+          <div style="padding: 8px 10px; ${todayHeaderBg} display: flex; justify-content: space-between; align-items: center;">
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <span style="font-weight: 800; font-size: 13px; color: ${isToday ? '#60a5fa' : '#f8fafc'};">${day.dayName}</span>
+              <span style="font-size: 11px; color: #94a3b8; font-weight: 600;">${day.formattedDate}</span>
+              ${isToday ? '<span style="font-size: 9px; font-weight: 800; background: #2563eb; color: #fff; padding: 1px 5px; border-radius: 3px;">TODAY</span>' : ''}
+            </div>
+            <button onclick="window.weeklySummaryEngine.openAddTaskModal('${day.dateKey}')" style="background: none; border: none; color: #94a3b8; font-size: 14px; cursor: pointer; padding: 0 4px; line-height: 1;" onmouseover="this.style.color='#38bdf8'" onmouseout="this.style.color='#94a3b8'" title="Add task on ${day.dayName}">➕</button>
+          </div>
+
+          <!-- Travel Bar (if trips planned) -->
+          ${day.trips.length > 0 ? `
+            <div style="padding: 6px 10px; background: rgba(245, 158, 11, 0.12); border-bottom: 1px solid rgba(245, 158, 11, 0.25); font-size: 11px; font-weight: 700; color: #fbbf24; display: flex; align-items: center; gap: 6px;">
+              <span>🚗</span>
+              <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${this.escapeHtml(day.trips.map(t => t.location).join(' → '))}">${this.escapeHtml(day.trips.map(t => t.location).join(' → '))}</span>
+            </div>
+          ` : ''}
+
+          <!-- Content List -->
+          <div style="padding: 8px; display: flex; flex-direction: column; gap: 6px; flex: 1;">
+      `;
+
+      if (!day.hasContent) {
+        html += `
+          <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; min-height: 90px; color: #64748b; font-size: 11.5px; text-align: center; gap: 6px;">
+            <span>No tasks or travel</span>
+            <button class="btn btn-secondary" onclick="window.weeklySummaryEngine.openAddTaskModal('${day.dateKey}')" style="font-size: 10px; padding: 2px 8px; color: #94a3b8;">+ Add</button>
+          </div>
+        `;
+      } else {
+        // Render Manual Tasks
+        day.tasks.forEach(t => {
+          const isDone = (t.status === 'Complete');
+          const isCert = (t.taskCategory === 'cert_class' || !!t.certType);
+          const isHighPrio = (t.priority === 'High' || t.priority === 'Urgent');
+
+          let cardBorder = 'border-left: 3px solid #3b82f6;';
+          if (isDone) cardBorder = 'border-left: 3px solid #10b981; opacity: 0.65;';
+          else if (isCert) cardBorder = 'border-left: 3px solid #10b981;';
+          else if (isHighPrio) cardBorder = 'border-left: 3px solid #ef4444;';
+
+          html += `
+            <div style="background: var(--bg-card); border: 1px solid var(--border-color); ${cardBorder} border-radius: 6px; padding: 7px 9px; display: flex; flex-direction: column; gap: 4px; transition: border-color 0.15s ease;">
+              <div style="display: flex; align-items: flex-start; gap: 7px;">
+                <input type="checkbox" ${isDone ? 'checked' : ''} onchange="window.weeklySummaryEngine.togglePlannedTask('${this.escapeJs(t.id)}')" style="cursor: pointer; width: 14px; height: 14px; accent-color: #10b981; margin-top: 2px;" title="${isDone ? 'Mark as Pending' : 'Mark as Complete'}">
+                <div style="flex: 1; min-width: 0;">
+                  <div style="font-size: 12px; font-weight: 700; color: ${isDone ? '#94a3b8' : '#f8fafc'}; line-height: 1.3; ${isDone ? 'text-decoration: line-through;' : ''} word-break: break-word;">
+                    ${isCert ? '🎓 ' : ''}${this.escapeHtml(t.title || t.certType || 'Task')}
+                  </div>
+                </div>
+                <button onclick="window.weeklySummaryEngine.openEditTaskModal('${this.escapeJs(t.id)}')" style="background: none; border: none; color: #64748b; font-size: 11px; cursor: pointer; padding: 0 2px; line-height: 1;" onmouseover="this.style.color='#93c5fd'" onmouseout="this.style.color='#64748b'" title="Edit Task">✏️</button>
+              </div>
+
+              <!-- Metadata row (time, location, crew, notes) -->
+              <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 10px; margin-top: 1px;">
+                ${t.time ? `<span style="color: #60a5fa; font-weight: 700;">🕒 ${this.escapeHtml(t.time)}</span>` : ''}
+                ${t.location ? `<span style="color: #94a3b8;">📍 ${this.escapeHtml(t.location)}</span>` : ''}
+                ${isCert ? `<span style="color: #34d399; font-weight: 700;">Class</span>` : ''}
+                ${t.crewId ? `<span style="color: #cbd5e1; font-weight: 600;">🚚 Crew ${this.escapeHtml(t.crewId)}</span>` : ''}
+                ${isHighPrio ? `<span style="background: rgba(239, 68, 68, 0.2); color: #f87171; padding: 1px 4px; border-radius: 3px; font-weight: 700;">${this.escapeHtml(t.priority)}</span>` : ''}
+              </div>
+
+              ${t.notes ? `<div style="font-size: 10.5px; color: #64748b; line-height: 1.25; font-style: italic; margin-top: 2px;">${this.escapeHtml(t.notes)}</div>` : ''}
+            </div>
+          `;
+        });
+
+        // Render Scheduled Swaps (if any)
+        if (day.swaps.length > 0) {
+          html += `
+            <div style="background: rgba(139, 92, 246, 0.08); border: 1px solid rgba(139, 92, 246, 0.25); border-radius: 6px; padding: 6px 8px; margin-top: 2px;">
+              <div style="font-size: 10.5px; font-weight: 700; color: #c084fc; margin-bottom: 4px; display: flex; align-items: center; justify-content: space-between;">
+                <span>🔄 Swaps Due (${day.swaps.length})</span>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 3px;">
+                ${day.swaps.slice(0, 4).map(s => `
+                  <div style="font-size: 10.5px; color: #cbd5e1; display: flex; justify-content: space-between; gap: 4px;">
+                    <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${s.icon} ${this.escapeHtml(s.employee)}</span>
+                    <span style="font-family: monospace; color: #a78bfa; flex-shrink: 0;">#${this.escapeHtml(s.itemNum || s.itemType)}</span>
+                  </div>
+                `).join('')}
+                ${day.swaps.length > 4 ? `<div style="font-size: 9.5px; color: #94a3b8; font-style: italic;">+ ${day.swaps.length - 4} more swaps</div>` : ''}
+              </div>
+            </div>
+          `;
+        }
+      }
+
+      html += `
+          </div>
+        </div>
+      `;
+    });
+
+    html += `</div>`;
+    return html;
   }
 
   renderComplianceSectionHtml(compliance) {
@@ -1219,6 +1588,57 @@ class WeeklySummaryEngine {
   setWeekFilter(wk) {
     this.selectedWeek = wk;
     this.render();
+  }
+
+  setTasksWeekOffset(offset) {
+    this.tasksWeekOffset = offset;
+    this.render();
+  }
+
+  async togglePlannedTask(taskId) {
+    try {
+      if (window.tripPlanner && typeof window.tripPlanner.toggleManualTask === 'function') {
+        await window.tripPlanner.toggleManualTask(taskId);
+      } else {
+        const tasks = (this.db && typeof this.db.getManualTasks === 'function')
+          ? this.db.getManualTasks()
+          : (this.db?.snapshot?.configs?.manual_tasks || []);
+        const task = tasks.find(t => t.id === taskId);
+        if (task) {
+          task.status = (task.status === 'Complete') ? 'Pending' : 'Complete';
+          task.completedAt = (task.status === 'Complete') ? new Date().toISOString() : null;
+          if (this.db && typeof this.db.saveManualTasks === 'function') {
+            await this.db.saveManualTasks(tasks);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('Error toggling planned task:', e);
+    }
+    this.render();
+  }
+
+  openAddTaskModal(dateKey) {
+    if (window.tripPlanner && typeof window.tripPlanner.openAddManualTaskModal === 'function') {
+      window.tripPlanner.openAddManualTaskModal(dateKey || '', '', 'personal_task');
+    } else if (window.navigateToView) {
+      window.navigateToView('trip-planner-view');
+    }
+  }
+
+  openEditTaskModal(taskId) {
+    if (window.tripPlanner && typeof window.tripPlanner.openEditManualTaskModal === 'function') {
+      window.tripPlanner.openEditManualTaskModal(taskId);
+    }
+  }
+
+  openTripPlanner(dateKey) {
+    if (window.navigateToView) {
+      window.navigateToView('trip-planner-view');
+      if (dateKey && window.tripPlanner && typeof window.tripPlanner.goToDate === 'function') {
+        window.tripPlanner.goToDate(dateKey);
+      }
+    }
   }
 
   /**
@@ -1785,6 +2205,10 @@ class WeeklySummaryEngine {
     <!-- Quick Stats Bar -->
     <div style="display: flex; background: #f8fafc; border-bottom: 1px solid #e2e8f0; padding: 14px 20px; justify-content: space-around; text-align: center;">
       <div style="flex: 1;">
+        <div style="font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase;">Planned Tasks</div>
+        <div style="font-size: 20px; font-weight: 800; color: #0284c7;">${data.plannedWeek.totalTasks}</div>
+      </div>
+      <div style="flex: 1; border-left: 1px solid #e2e8f0;">
         <div style="font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase;">Compliance</div>
         <div style="font-size: 20px; font-weight: 800; color: ${data.compliance.stats.ratePercent >= 90 ? '#16a34a' : '#ea580c'};">${data.compliance.stats.ratePercent}%</div>
       </div>
@@ -1804,8 +2228,67 @@ class WeeklySummaryEngine {
 
     <div style="padding: 24px;">
       
+      <!-- Planned Tasks & Field Itinerary Section -->
+      <h2 style="font-size: 15px; font-weight: 700; color: #0f172a; border-bottom: 2px solid #2563eb; padding-bottom: 6px; margin-top: 0;">📋 1. Planned Tasks & Field Itinerary (${this.escapeHtml(data.plannedWeek.weekRangeStr)})</h2>
+      <p style="font-size: 12.5px; color: #475569; margin: 6px 0 12px 0;">Scheduled personal tasks, safety training classes, and field travel from the Trip Planner:</p>
+      
+      ${(() => {
+        const hasAny = data.plannedWeek.days.some(d => d.hasContent);
+        if (!hasAny) {
+          return `<p style="font-size: 12px; color: #64748b; font-style: italic; margin-bottom: 24px;">No field travel or manual tasks scheduled for this week.</p>`;
+        }
+        let tbl = `
+          <table style="width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 24px;">
+            <thead>
+              <tr style="background: #f1f5f9; color: #334155; font-weight: 700; text-align: left;">
+                <th style="padding: 8px 10px; border: 1px solid #cbd5e1; width: 18%;">Day / Date</th>
+                <th style="padding: 8px 10px; border: 1px solid #cbd5e1; width: 22%;">Field Travel</th>
+                <th style="padding: 8px 10px; border: 1px solid #cbd5e1; width: 45%;">Planned Tasks & Courses</th>
+                <th style="padding: 8px 10px; border: 1px solid #cbd5e1; width: 15%; text-align: right;">Swaps Due</th>
+              </tr>
+            </thead>
+            <tbody>
+        `;
+        const activeDays = data.plannedWeek.days.filter((d, idx) => idx < 5 || d.hasContent);
+        activeDays.forEach(d => {
+          let tasksHtml = '';
+          if (d.tasks.length === 0) {
+            tasksHtml = '<span style="color: #94a3b8; font-style: italic;">No tasks scheduled</span>';
+          } else {
+            tasksHtml = d.tasks.map(t => {
+              const mark = t.status === 'Complete' ? '✅' : '⏳';
+              const isDone = t.status === 'Complete';
+              const timeStr = t.time ? ` (${this.escapeHtml(t.time)})` : '';
+              const locStr = t.location ? ` [${this.escapeHtml(t.location)}]` : '';
+              const catStr = (t.taskCategory === 'cert_class' || t.certType) ? ' 🎓' : '';
+              return `<div style="margin-bottom: 4px; ${isDone ? 'color: #64748b; text-decoration: line-through;' : 'color: #0f172a; font-weight: 600;'}">${mark}${catStr} ${this.escapeHtml(t.title || t.certType)}${timeStr}${locStr}</div>`;
+            }).join('');
+          }
+          const travelHtml = d.trips.length > 0
+            ? `<span style="font-weight: 700; color: #d97706;">🚗 ${this.escapeHtml(d.trips.map(t => t.location).join(' → '))}</span>`
+            : '<span style="color: #94a3b8;">—</span>';
+          const swapsHtml = d.swaps.length > 0
+            ? `<span style="font-weight: 700; color: #7c3aed;">🔄 ${d.swaps.length} Swaps</span>`
+            : '<span style="color: #94a3b8;">—</span>';
+
+          tbl += `
+            <tr style="background: ${d.isToday ? '#eff6ff' : '#ffffff'};">
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; font-weight: 700; color: #0f172a;">${d.dayName} <span style="font-weight: normal; color: #64748b;">(${d.formattedDate})</span></td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0;">${travelHtml}</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0;">${tasksHtml}</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: right;">${swapsHtml}</td>
+            </tr>
+          `;
+        });
+        tbl += `
+            </tbody>
+          </table>
+        `;
+        return tbl;
+      })()}
+
       <!-- Compliance Section -->
-      <h2 style="font-size: 15px; font-weight: 700; color: #0f172a; border-bottom: 2px solid #2563eb; padding-bottom: 6px; margin-top: 0;">🛡️ 1. Safety Compliance Pulse</h2>
+      <h2 style="font-size: 15px; font-weight: 700; color: #0f172a; border-bottom: 2px solid #2563eb; padding-bottom: 6px; margin-top: 24px;">🛡️ 2. Safety Compliance Pulse</h2>
       <p style="font-size: 12.5px; color: #475569; margin: 6px 0 12px 0;">Active crews completion of daily JHAs, weekly safety meeting, and monthly checklist:</p>
       
       <table style="width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 24px;">
@@ -1846,7 +2329,7 @@ class WeeklySummaryEngine {
       </table>
 
       <!-- Equipment Swaps Section -->
-      <h2 style="font-size: 15px; font-weight: 700; color: #0f172a; border-bottom: 2px solid #2563eb; padding-bottom: 6px;">🧤 2. PPE & Equipment Swaps Required (${data.swaps.totalActionRequired})</h2>
+      <h2 style="font-size: 15px; font-weight: 700; color: #0f172a; border-bottom: 2px solid #2563eb; padding-bottom: 6px;">🧤 3. PPE & Equipment Swaps Required (${data.swaps.totalActionRequired})</h2>
     `;
 
     const allSwaps = [...data.swaps.overdue, ...data.swaps.dueThisWeek];
@@ -1887,7 +2370,7 @@ class WeeklySummaryEngine {
 
     emailHtml += `
       <!-- Certifications & Training -->
-      <h2 style="font-size: 15px; font-weight: 700; color: #0f172a; border-bottom: 2px solid #2563eb; padding-bottom: 6px;">📜 3. Urgent Certifications & Training</h2>
+      <h2 style="font-size: 15px; font-weight: 700; color: #0f172a; border-bottom: 2px solid #2563eb; padding-bottom: 6px;">📜 4. Urgent Certifications & Training</h2>
       <p style="font-size: 12px; color: #475569;">Employees with credentials expiring within 30 days:</p>
     `;
 
@@ -1926,7 +2409,7 @@ class WeeklySummaryEngine {
 
     emailHtml += `
       <!-- Training Section -->
-      <h2 style="font-size: 15px; font-weight: 700; color: #0f172a; border-bottom: 2px solid #2563eb; padding-bottom: 6px; margin-top: 24px;">🎓 4. Scheduled Safety Training (${data.training.length})</h2>
+      <h2 style="font-size: 15px; font-weight: 700; color: #0f172a; border-bottom: 2px solid #2563eb; padding-bottom: 6px; margin-top: 24px;">🎓 5. Scheduled Safety Training (${data.training.length})</h2>
     `;
 
     if (data.training.length === 0) {
@@ -1964,7 +2447,7 @@ class WeeklySummaryEngine {
 
     emailHtml += `
       <!-- Incident Reports Section -->
-      <h2 style="font-size: 15px; font-weight: 700; color: #0f172a; border-bottom: 2px solid #2563eb; padding-bottom: 6px;">⚠️ 5. Recent Incident Reports (Past 14 Days: ${data.incidents.length})</h2>
+      <h2 style="font-size: 15px; font-weight: 700; color: #0f172a; border-bottom: 2px solid #2563eb; padding-bottom: 6px;">⚠️ 6. Recent Incident Reports (Past 14 Days: ${data.incidents.length})</h2>
     `;
 
     if (data.incidents.length === 0) {
@@ -2022,11 +2505,38 @@ class WeeklySummaryEngine {
       text += `Notification Distribution: ${data.recipients.emails.join(', ')}\n`;
     }
     text += `\nKEY METRICS:\n`;
+    text += `- Planned Tasks & Field Travel: ${data.plannedWeek.totalTasks} tasks (${data.plannedWeek.pendingTasks} pending, ${data.plannedWeek.completedTasks} completed) across ${data.plannedWeek.fieldDaysCount} field travel days [Week: ${data.plannedWeek.weekRangeStr}]\n`;
     text += `- Safety Compliance Rate: ${data.compliance.stats.ratePercent}% (${data.compliance.stats.completeCount}/${data.compliance.stats.totalCrews} crews complete) [Target: ${data.compliance.targetWeekRangeStr || data.weekRangeStr}]\n`;
     text += `- Equipment Swaps Action Required: ${data.swaps.totalActionRequired} (${data.swaps.overdue.length} overdue, ${data.swaps.dueThisWeek.length} due this week)\n`;
     text += `- Urgent Cert Expirations (< 30d): ${data.certs.urgent.length}\n`;
     text += `- Scheduled Training Sessions: ${data.training.length}\n`;
     text += `- Incidents Reported (Past 14d): ${data.incidents.length}\n\n`;
+
+    text += `PLANNED TASKS & FIELD ITINERARY (${data.plannedWeek.weekRangeStr}):\n`;
+    let hasAnyPlanned = false;
+    data.plannedWeek.days.forEach(d => {
+      if (d.hasContent) {
+        hasAnyPlanned = true;
+        text += `• ${d.dayName} (${d.formattedDate}):\n`;
+        if (d.trips.length > 0) {
+          text += `   🚗 Travel: ${d.trips.map(t => t.location).join(' → ')}\n`;
+        }
+        d.tasks.forEach(t => {
+          const mark = t.status === 'Complete' ? '[✓]' : '[ ]';
+          const timeStr = t.time ? ` (${t.time})` : '';
+          const locStr = t.location ? ` [${t.location}]` : '';
+          const catStr = (t.taskCategory === 'cert_class' || t.certType) ? ' [Class]' : '';
+          text += `   ${mark}${catStr} ${t.title || t.certType}${timeStr}${locStr}\n`;
+        });
+        if (d.swaps.length > 0) {
+          text += `   🔄 Swaps Scheduled: ${d.swaps.length} equipment items\n`;
+        }
+      }
+    });
+    if (!hasAnyPlanned) {
+      text += `  No field travel or manual tasks scheduled in the Trip Planner for this week.\n`;
+    }
+    text += `\n`;
 
     if (data.swaps.overdue.length > 0) {
       text += `OVERDUE SWAPS:\n`;
