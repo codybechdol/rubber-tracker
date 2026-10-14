@@ -436,10 +436,14 @@ class WeeklySummaryEngine {
           const dueDateRaw = r['Change Out Date'] || r['Due Date'] || r['Test Date'] || r['Pad Expiration'];
           const dueDt = this.parseDate(dueDateRaw);
 
+          const dl = String(r['Days Left'] || '').toUpperCase();
+          const isReclaim = dl.includes('PREV') || stage.toLowerCase().includes('return to shelf') || resolvedLoc.toLowerCase().includes('previous');
+
           const itemRecord = {
             categoryKey: sw.key,
             categoryLabel: sw.label,
             icon: sw.icon,
+            isReclaim,
             employee: employee || 'On Shelf',
             crew,
             currentItem,
@@ -690,17 +694,65 @@ class WeeklySummaryEngine {
     tasksSun.setDate(tasksMon.getDate() + 6);
     tasksSun.setHours(23, 59, 59, 999);
 
-    const rawManualTasks = (this.db && typeof this.db.getManualTasks === 'function')
-      ? this.db.getManualTasks()
-      : (this.db?.snapshot?.configs?.manual_tasks || []);
+    const rawManualTasks = (window.tripPlanner && Array.isArray(window.tripPlanner.manualTasks))
+      ? window.tripPlanner.manualTasks
+      : ((this.db && typeof this.db.getManualTasks === 'function')
+          ? this.db.getManualTasks()
+          : (() => {
+              try {
+                return JSON.parse(localStorage.getItem('TRIP_PLANNER_MANUAL_TASKS') || '[]');
+              } catch {
+                return (this.db?.snapshot?.configs?.manual_tasks || []);
+              }
+            })());
 
-    const rawPlannedTrips = (this.db && typeof this.db.getPlannedTrips === 'function')
-      ? this.db.getPlannedTrips()
-      : (this.db?.snapshot?.configs?.plannedTrips || {});
+    const rawPlannedTrips = (window.tripPlanner && window.tripPlanner.plannedTrips)
+      ? window.tripPlanner.plannedTrips
+      : ((this.db && typeof this.db.getPlannedTrips === 'function')
+          ? this.db.getPlannedTrips()
+          : (() => {
+              try {
+                return JSON.parse(localStorage.getItem('TRIP_PLANNER_PLANNED_TRIPS') || '{}');
+              } catch {
+                return (this.db?.snapshot?.configs?.plannedTrips || {});
+              }
+            })());
 
-    const rawScheduledSwaps = (this.db && typeof this.db.getScheduledSwaps === 'function')
-      ? this.db.getScheduledSwaps()
-      : (this.db?.snapshot?.configs?.scheduled_swaps || {});
+    const rawScheduledSwaps = (window.tripPlanner && window.tripPlanner.scheduledSwaps)
+      ? window.tripPlanner.scheduledSwaps
+      : ((this.db && typeof this.db.getScheduledSwaps === 'function')
+          ? this.db.getScheduledSwaps()
+          : (() => {
+              try {
+                return JSON.parse(localStorage.getItem('TRIP_PLANNER_SCHEDULED_SWAPS') || localStorage.getItem('sa_trip_scheduled_swaps') || '{}');
+              } catch {
+                return (this.db?.snapshot?.configs?.scheduled_swaps || {});
+              }
+            })());
+
+    const rawScheduledTraining = (window.tripPlanner && window.tripPlanner.scheduledTrainingNeeds)
+      ? window.tripPlanner.scheduledTrainingNeeds
+      : (() => {
+          try {
+            return JSON.parse(localStorage.getItem('TRIP_PLANNER_SCHEDULED_TRAINING') || localStorage.getItem('sa_trip_scheduled_training') || '{}');
+          } catch {
+            return (this.db?.snapshot?.configs?.scheduled_training || {});
+          }
+        })();
+
+    const rawScheduledEquipment = (window.tripPlanner && window.tripPlanner.scheduledEquipmentNeeds)
+      ? window.tripPlanner.scheduledEquipmentNeeds
+      : (() => {
+          try {
+            return JSON.parse(localStorage.getItem('TRIP_PLANNER_SCHEDULED_EQUIPMENT') || localStorage.getItem('sa_trip_scheduled_equipment') || '{}');
+          } catch {
+            return (this.db?.snapshot?.configs?.scheduled_equipment || {});
+          }
+        })();
+
+    const allPickedItems = (window.tripPlanner && typeof window.tripPlanner.getPickedSwapsData === 'function')
+      ? (window.tripPlanner.getPickedSwapsData().items || [])
+      : [];
 
     const plannedDays = [];
     const dayNames = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
@@ -712,6 +764,9 @@ class WeeklySummaryEngine {
     let weekFieldDaysCount = 0;
     let weekTotalTrips = 0;
     let weekTotalSwaps = 0;
+    let weekTotalReclaims = 0;
+    let weekTotalTrainings = 0;
+    let weekTotalEquipment = 0;
 
     const swapIcons = {
       glove_swaps: '🧤',
@@ -734,7 +789,7 @@ class WeeklySummaryEngine {
 
       const isToday = (dateKey === `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`);
 
-      // Trips
+      // 1. Trips
       const dayTripsRaw = rawPlannedTrips[dateKey];
       let trips = Array.isArray(dayTripsRaw) ? dayTripsRaw : (dayTripsRaw ? [dayTripsRaw] : []);
       if (this.selectedLocation !== 'all') {
@@ -745,17 +800,227 @@ class WeeklySummaryEngine {
         weekTotalTrips += trips.length;
       }
 
-      // Tasks
-      let dayTasks = rawManualTasks.filter(t => (t.dateKey === dateKey || t.date === dateKey));
+      // 2. Scheduled Training (Classes Cody teaches + Scheduled Monthly Crew Trainings)
+      const dayTrainings = [];
+
+      // a) Scheduled Monthly Crew Trainings (from Training Needs sidebar / scheduledTrainingNeeds)
+      if (rawScheduledTraining) {
+        Object.keys(rawScheduledTraining).forEach(trKey => {
+          const entry = rawScheduledTraining[trKey];
+          const trDate = typeof entry === 'object' ? entry.dateKey : entry;
+          if (trDate === dateKey && entry && entry.training) {
+            const trLoc = (entry.training.location || '').toLowerCase();
+            if (this.selectedLocation !== 'all' && !trLoc.includes(this.selectedLocation.toLowerCase())) {
+              return;
+            }
+            const isDone = !!entry.training.isCompleted;
+            dayTrainings.push({
+              _trKey: trKey,
+              topic: entry.training.topic || 'Crew Safety Training',
+              crewId: entry.training.crewId || '',
+              lead: entry.training.lead || '',
+              location: entry.training.location || '',
+              month: entry.training.month || '',
+              attendees: entry.training.attendees || '',
+              isCompleted: isDone,
+              isCrewTraining: true
+            });
+            weekTotalTrainings++;
+            weekTotalTasks++;
+            if (isDone) weekCompletedTasks++;
+            else weekPendingTasks++;
+          }
+        });
+      }
+
+      // b) Cert Classes scheduled via "+ Class" or manual tasks
+      const certClasses = rawManualTasks.filter(t => (t.dateKey === dateKey || t.date === dateKey) && (t.taskCategory === 'cert_class' || !!t.certType));
+      certClasses.forEach(t => {
+        const cLoc = (t.location || '').toLowerCase();
+        if (this.selectedLocation !== 'all' && !cLoc.includes(this.selectedLocation.toLowerCase())) {
+          return;
+        }
+        const isDone = (t.status === 'Complete');
+        dayTrainings.push({
+          id: t.id,
+          topic: t.title || t.certType || 'Certification Class',
+          crewId: t.crewId || '',
+          lead: t.instructor || '',
+          location: t.location || '',
+          time: t.time || '',
+          notes: t.notes || '',
+          priority: t.priority || '',
+          isCompleted: isDone,
+          isCertClass: true
+        });
+        weekTotalTrainings++;
+        weekTotalTasks++;
+        if (isDone) weekCompletedTasks++;
+        else weekPendingTasks++;
+      });
+
+      // 3. Scheduled Equipment Deliveries (checklist defects / supplies)
+      const dayEquipment = [];
+      if (rawScheduledEquipment) {
+        Object.keys(rawScheduledEquipment).forEach(eqKey => {
+          const entry = rawScheduledEquipment[eqKey];
+          const eqDate = typeof entry === 'object' ? entry.dateKey : entry;
+          if (eqDate === dateKey && entry && entry.item) {
+            const eqLoc = (entry.item.location || '').toLowerCase();
+            if (this.selectedLocation !== 'all' && !eqLoc.includes(this.selectedLocation.toLowerCase())) {
+              return;
+            }
+            const eqType = entry.item.equipmentType || 'Equipment Need';
+            const isAed = eqType.toLowerCase().includes('aed');
+            const isFe = eqType.toLowerCase().includes('extinguisher') || eqType.toLowerCase().includes('fire');
+            const isFa = eqType.toLowerCase().includes('aid') || eqType.toLowerCase().includes('eye');
+            const icon = isAed ? '⚡' : (isFe ? '🧯' : (isFa ? '🩹' : '🚗'));
+            const isDone = !!(entry.item.resolved || entry.item.isResolved || entry.item.completed);
+
+            dayEquipment.push({
+              _eqKey: eqKey,
+              icon,
+              equipmentType: (eqType === 'AED' && (/needs\s*aed\s*pads/i.test(entry.item.notes || '') || (entry.item.desc || '').toLowerCase() === 'needs aed pads')) ? 'Needs AED Pads' : eqType,
+              notes: entry.item.notes || entry.item.desc || '',
+              vehicleNumber: entry.item.vehicleNumber || '',
+              crewId: entry.item.crewId || '',
+              location: entry.item.location || '',
+              foreman: entry.item.foreman || '',
+              isResolved: isDone,
+              item: entry.item
+            });
+            weekTotalEquipment++;
+            weekTotalTasks++;
+            if (isDone) weekCompletedTasks++;
+            else weekPendingTasks++;
+          }
+        });
+      }
+
+      // 4. Scheduled Swaps and Reclaims (Categorized Accurately)
+      const daySwaps = [];
+      const dayReclaims = [];
+
+      if (rawScheduledSwaps) {
+        Object.keys(rawScheduledSwaps).forEach(sKey => {
+          const s = rawScheduledSwaps[sKey];
+          if (!s) return;
+          const sDate = typeof s === 'object' ? (s.dateKey || s.date) : s;
+          if (sDate !== dateKey) return;
+
+          const matchedPicked = (allPickedItems || []).find(p => (window.tripPlanner && typeof window.tripPlanner.getSwapKey === 'function' ? window.tripPlanner.getSwapKey(p) === sKey : false)) || (s && s.swap ? s.swap : null);
+          const sObj = matchedPicked || s.swap || (typeof s === 'object' ? s : {});
+          const parts = sKey.split('|');
+          const catKey = parts[0] || (sObj.tableKey || 'glove_swaps');
+          const rawEmp = sObj.employeeName || s.employeeName || parts[1] || 'Lineman';
+          const rawType = sObj.type || s.type || parts[2] || 'Item';
+          const rawItemNum = sObj.currentItem || s.currentItem || parts[3] || '';
+
+          // Determine if Reclaim vs Swap
+          const isReclaim = !!(
+            s.isReclaim ||
+            sObj.isReclaim ||
+            (sObj.daysLeft && String(sObj.daysLeft).toUpperCase().includes('PREV')) ||
+            (s.daysLeft && String(s.daysLeft).toUpperCase().includes('PREV')) ||
+            (sObj.status && String(sObj.status).toLowerCase().includes('return to shelf')) ||
+            (s.status && String(s.status).toLowerCase().includes('return to shelf')) ||
+            (sObj.location && String(sObj.location).toLowerCase().includes('previous')) ||
+            (s.location && String(s.location).toLowerCase().includes('previous'))
+          );
+
+          // Item Kind & Class
+          let itemType = sObj.type || rawType;
+          if (itemType.toLowerCase() === 'glove') itemType = 'Glove';
+          else if (itemType.toLowerCase() === 'sleeve') itemType = 'Sleeve';
+          else if (itemType.toLowerCase() === 'blanket') itemType = 'Blanket';
+          else if (itemType.toLowerCase() === 'mack') itemType = 'MACK';
+          else if (itemType.toLowerCase() === 'hv_tester' || itemType.toLowerCase() === 'hvt') itemType = 'HV Tester';
+          else if (itemType.toLowerCase() === 'phasing_set') itemType = 'Phasing Set';
+
+          const itemClassRaw = sObj.itemClass || sObj.class || sObj.Class || s.itemClass || '';
+          let itemClassStr = '';
+          if (itemClassRaw) {
+            const cleanCl = String(itemClassRaw).replace(/^(class|cl)\s*/i, '').trim();
+            itemClassStr = `CL ${cleanCl}`;
+          }
+
+          const sizeStr = sObj.size || sObj.Size || s.size || '';
+          let kindLabel = itemType;
+          if (itemClassStr) {
+            kindLabel = `${itemType} (${itemClassStr})`;
+          }
+
+          const currentItem = String(sObj.currentItem || rawItemNum || '').trim();
+          const pickItem = String(sObj.pickItem || s.pickItem || '').trim();
+
+          // Resolve Town
+          let town = sObj.location || s.location || '';
+          if (town) town = town.replace(/\s*\(.*?\)\s*/g, '').trim();
+          if (!town || town.toLowerCase() === 'helena' || town.toLowerCase() === 'unknown' || town === '—') {
+            const empData = empMap.get(rawEmp.toLowerCase());
+            if (empData && empData.loc && !empData.loc.toLowerCase().includes('vacation') && !empData.loc.toLowerCase().includes('light duty')) {
+              town = empData.loc.replace(/\s*\(.*?\)\s*/g, '').trim();
+            }
+          }
+          if (!town) town = 'Helena';
+
+          // Apply Location filter
+          if (this.selectedLocation !== 'all' && !town.toLowerCase().includes(this.selectedLocation.toLowerCase())) {
+            return;
+          }
+
+          const isDone = !!(s.completed || sObj.completed || sObj.isCompleted);
+          const completedDate = s.completedDate || sObj.completedDate || '';
+          const icon = (itemType.toLowerCase().includes('glove')) ? '🧤' : ((itemType.toLowerCase().includes('sleeve')) ? '🦾' : (swapIcons[catKey] || '🔄'));
+
+          const itemPayload = {
+            key: sKey,
+            catKey,
+            icon,
+            isReclaim,
+            employee: rawEmp,
+            classification: sObj.classification || '',
+            crewId: sObj.crewId || s.crewId || '',
+            foreman: sObj.foreman || s.foreman || '',
+            itemType,
+            itemClass: itemClassStr,
+            kindLabel,
+            size: sizeStr,
+            currentItem,
+            pickItem: (pickItem && pickItem !== '—' && pickItem !== '-') ? pickItem : '',
+            location: town,
+            isCompleted: isDone,
+            completedDate,
+            rawSwap: sObj
+          };
+
+          if (isReclaim) {
+            dayReclaims.push(itemPayload);
+            weekTotalReclaims++;
+            weekTotalTasks++;
+            if (isDone) weekCompletedTasks++;
+            else weekPendingTasks++;
+          } else {
+            daySwaps.push(itemPayload);
+            weekTotalSwaps++;
+            weekTotalTasks++;
+            if (isDone) weekCompletedTasks++;
+            else weekPendingTasks++;
+          }
+        });
+      }
+
+      // 5. Personal Tasks (Manually added office/field tasks excluding cert classes)
+      let dayPersonalTasks = rawManualTasks.filter(t => (t.dateKey === dateKey || t.date === dateKey) && t.taskCategory !== 'cert_class' && !t.certType);
       if (this.selectedLocation !== 'all') {
-        dayTasks = dayTasks.filter(t => {
+        dayPersonalTasks = dayPersonalTasks.filter(t => {
           const loc = (t.location || '').toLowerCase();
           return loc.includes(this.selectedLocation.toLowerCase()) || (this.selectedLocation.toLowerCase() === 'helena' && (!loc || loc.includes('office') || loc.includes('base')));
         });
       }
 
       // Sort day tasks chronologically by time
-      dayTasks.sort((a, b) => {
+      dayPersonalTasks.sort((a, b) => {
         const parseTime = (tStr) => {
           if (!tStr) return 9999;
           const m = String(tStr).toLowerCase();
@@ -777,42 +1042,13 @@ class WeeklySummaryEngine {
         const aDone = a.status === 'Complete' ? 1 : 0;
         const bDone = b.status === 'Complete' ? 1 : 0;
         if (aDone !== bDone) return aDone - bDone;
-        return (a.title || a.certType || '').localeCompare(b.title || b.certType || '');
+        return (a.title || '').localeCompare(b.title || '');
       });
 
-      dayTasks.forEach(t => {
+      dayPersonalTasks.forEach(t => {
         weekTotalTasks++;
         if (t.status === 'Complete') weekCompletedTasks++;
         else weekPendingTasks++;
-      });
-
-      // Scheduled Swaps
-      const daySwaps = [];
-      Object.keys(rawScheduledSwaps).forEach(sKey => {
-        const s = rawScheduledSwaps[sKey];
-        if (s && (s.dateKey === dateKey || s.date === dateKey)) {
-          if (this.selectedLocation !== 'all') {
-            const sLoc = (s.location || '').toLowerCase();
-            if (!sLoc.includes(this.selectedLocation.toLowerCase())) return;
-          }
-          const parts = sKey.split('|');
-          const catKey = parts[0] || '';
-          const emp = parts[1] || 'Lineman';
-          const itemType = parts[2] || 'Item';
-          const itemNum = parts[3] || '';
-          const icon = swapIcons[catKey] || '🔄';
-
-          daySwaps.push({
-            key: sKey,
-            catKey,
-            icon,
-            employee: emp,
-            itemType,
-            itemNum,
-            location: s.location || '—'
-          });
-          weekTotalSwaps++;
-        }
       });
 
       plannedDays.push({
@@ -824,9 +1060,12 @@ class WeeklySummaryEngine {
         isToday,
         isWeekend: (i >= 5),
         trips,
-        tasks: dayTasks,
+        trainings: dayTrainings,
+        equipment: dayEquipment,
+        reclaims: dayReclaims,
         swaps: daySwaps,
-        hasContent: (trips.length > 0 || dayTasks.length > 0 || daySwaps.length > 0)
+        tasks: dayPersonalTasks,
+        hasContent: (trips.length > 0 || dayTrainings.length > 0 || dayEquipment.length > 0 || dayReclaims.length > 0 || daySwaps.length > 0 || dayPersonalTasks.length > 0)
       });
     }
 
@@ -841,7 +1080,10 @@ class WeeklySummaryEngine {
       completedTasks: weekCompletedTasks,
       fieldDaysCount: weekFieldDaysCount,
       totalTrips: weekTotalTrips,
-      totalSwaps: weekTotalSwaps
+      totalSwaps: weekTotalSwaps,
+      totalReclaims: weekTotalReclaims,
+      totalTrainings: weekTotalTrainings,
+      totalEquipment: weekTotalEquipment
     };
 
     return {
@@ -1212,7 +1454,7 @@ class WeeklySummaryEngine {
     // Include Saturday / Sunday only if they have content
     const displayDays = plannedWeek.days.filter((d, idx) => idx < 5 || d.hasContent);
 
-    let html = `<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px;">`;
+    let html = `<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px;">`;
 
     displayDays.forEach(day => {
       const isToday = day.isToday;
@@ -1220,7 +1462,7 @@ class WeeklySummaryEngine {
       const todayHeaderBg = isToday ? 'background: rgba(59, 130, 246, 0.18); border-bottom: 1px solid rgba(59, 130, 246, 0.4);' : 'background: rgba(15, 23, 42, 0.6); border-bottom: 1px solid var(--border-color);';
 
       html += `
-        <div style="background: var(--bg-secondary); ${todayBorder} border-radius: 8px; overflow: hidden; display: flex; flex-direction: column; min-height: 200px;">
+        <div style="background: var(--bg-secondary); ${todayBorder} border-radius: 8px; overflow: hidden; display: flex; flex-direction: column; min-height: 220px;">
           
           <!-- Day Header -->
           <div style="padding: 8px 10px; ${todayHeaderBg} display: flex; justify-content: space-between; align-items: center;">
@@ -1229,7 +1471,10 @@ class WeeklySummaryEngine {
               <span style="font-size: 11px; color: #94a3b8; font-weight: 600;">${day.formattedDate}</span>
               ${isToday ? '<span style="font-size: 9px; font-weight: 800; background: #2563eb; color: #fff; padding: 1px 5px; border-radius: 3px;">TODAY</span>' : ''}
             </div>
-            <button onclick="window.weeklySummaryEngine.openAddTaskModal('${day.dateKey}')" style="background: none; border: none; color: #94a3b8; font-size: 14px; cursor: pointer; padding: 0 4px; line-height: 1;" onmouseover="this.style.color='#38bdf8'" onmouseout="this.style.color='#94a3b8'" title="Add task on ${day.dayName}">➕</button>
+            <div style="display: flex; align-items: center; gap: 4px;">
+              <button onclick="window.weeklySummaryEngine.openTripPlanner('${day.dateKey}')" style="background: none; border: none; color: #94a3b8; font-size: 12px; cursor: pointer; padding: 0 3px; line-height: 1;" onmouseover="this.style.color='#60a5fa'" onmouseout="this.style.color='#94a3b8'" title="Open in Trip Planner">🗓️</button>
+              <button onclick="window.weeklySummaryEngine.openAddTaskModal('${day.dateKey}')" style="background: none; border: none; color: #94a3b8; font-size: 13px; cursor: pointer; padding: 0 3px; line-height: 1;" onmouseover="this.style.color='#38bdf8'" onmouseout="this.style.color='#94a3b8'" title="Add task on ${day.dayName}">➕</button>
+            </div>
           </div>
 
           <!-- Travel Bar (if trips planned) -->
@@ -1252,59 +1497,219 @@ class WeeklySummaryEngine {
           </div>
         `;
       } else {
-        // Render Manual Tasks
-        day.tasks.forEach(t => {
-          const isDone = (t.status === 'Complete');
-          const isCert = (t.taskCategory === 'cert_class' || !!t.certType);
-          const isHighPrio = (t.priority === 'High' || t.priority === 'Urgent');
-
-          let cardBorder = 'border-left: 3px solid #3b82f6;';
-          if (isDone) cardBorder = 'border-left: 3px solid #10b981; opacity: 0.65;';
-          else if (isCert) cardBorder = 'border-left: 3px solid #10b981;';
-          else if (isHighPrio) cardBorder = 'border-left: 3px solid #ef4444;';
-
+        // 1. Scheduled Trainings (Crew Trainings + Cert Classes Cody teaches)
+        if (day.trainings && day.trainings.length > 0) {
+          const pendingTrainings = day.trainings.filter(t => !t.isCompleted).length;
           html += `
-            <div style="background: var(--bg-card); border: 1px solid var(--border-color); ${cardBorder} border-radius: 6px; padding: 7px 9px; display: flex; flex-direction: column; gap: 4px; transition: border-color 0.15s ease;">
-              <div style="display: flex; align-items: flex-start; gap: 7px;">
-                <input type="checkbox" ${isDone ? 'checked' : ''} onchange="window.weeklySummaryEngine.togglePlannedTask('${this.escapeJs(t.id)}')" style="cursor: pointer; width: 14px; height: 14px; accent-color: #10b981; margin-top: 2px;" title="${isDone ? 'Mark as Pending' : 'Mark as Complete'}">
-                <div style="flex: 1; min-width: 0;">
-                  <div style="font-size: 12px; font-weight: 700; color: ${isDone ? '#94a3b8' : '#f8fafc'}; line-height: 1.3; ${isDone ? 'text-decoration: line-through;' : ''} word-break: break-word;">
-                    ${isCert ? '🎓 ' : ''}${this.escapeHtml(t.title || t.certType || 'Task')}
-                  </div>
-                </div>
-                <button onclick="window.weeklySummaryEngine.openEditTaskModal('${this.escapeJs(t.id)}')" style="background: none; border: none; color: #64748b; font-size: 11px; cursor: pointer; padding: 0 2px; line-height: 1;" onmouseover="this.style.color='#93c5fd'" onmouseout="this.style.color='#64748b'" title="Edit Task">✏️</button>
+            <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.28); border-left: 4px solid #10b981; border-radius: 6px; padding: 6px 8px;">
+              <div style="font-size: 10.5px; font-weight: 800; color: #34d399; margin-bottom: 5px; display: flex; align-items: center; justify-content: space-between;">
+                <span style="display: flex; align-items: center; gap: 4px;">
+                  <span>🎓</span>
+                  <span>Training (${pendingTrainings}/${day.trainings.length})</span>
+                </span>
+                <span style="font-size: 9px; color: #6ee7b7; cursor: pointer;" onclick="window.weeklySummaryEngine.openTripPlanner('${day.dateKey}')" title="View in Trip Planner">Trip Planner ➔</span>
               </div>
-
-              <!-- Metadata row (time, location, crew, notes) -->
-              <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap; font-size: 10px; margin-top: 1px;">
-                ${t.time ? `<span style="color: #60a5fa; font-weight: 700;">🕒 ${this.escapeHtml(t.time)}</span>` : ''}
-                ${t.location ? `<span style="color: #94a3b8;">📍 ${this.escapeHtml(t.location)}</span>` : ''}
-                ${isCert ? `<span style="color: #34d399; font-weight: 700;">Class</span>` : ''}
-                ${t.crewId ? `<span style="color: #cbd5e1; font-weight: 600;">🚚 Crew ${this.escapeHtml(t.crewId)}</span>` : ''}
-                ${isHighPrio ? `<span style="background: rgba(239, 68, 68, 0.2); color: #f87171; padding: 1px 4px; border-radius: 3px; font-weight: 700;">${this.escapeHtml(t.priority)}</span>` : ''}
+              <div style="display: flex; flex-direction: column; gap: 5px;">
+                ${day.trainings.map(tr => {
+                  const isDone = !!tr.isCompleted;
+                  return `
+                    <div style="background: var(--bg-primary); border: 1px solid ${isDone ? 'rgba(16, 185, 129, 0.2)' : 'rgba(52, 211, 153, 0.3)'}; border-radius: 5px; padding: 5px 7px; opacity: ${isDone ? '0.75' : '1'};">
+                      <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 2px; flex-wrap: wrap;">
+                        <span class="badge" style="background: rgba(16, 185, 129, 0.18); color: #34d399; font-size: 9px; font-weight: 800; padding: 1px 4px; border-radius: 3px;">
+                          ${tr.isCrewTraining ? '🎓 Crew Training' : '🎓 Cert Class'}
+                        </span>
+                        ${tr.crewId ? `<span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; font-size: 9px; font-weight: 700; padding: 1px 4px; border-radius: 3px;">🚚 Crew ${this.escapeHtml(tr.crewId)}</span>` : ''}
+                        ${tr.month ? `<span class="badge" style="background: rgba(168, 85, 247, 0.15); color: #c084fc; font-size: 9px; padding: 1px 4px; border-radius: 3px;">📅 ${this.escapeHtml(tr.month)}</span>` : ''}
+                        <span class="badge" style="background: ${isDone ? 'rgba(16, 185, 129, 0.25)' : 'rgba(234, 179, 8, 0.2)'}; color: ${isDone ? '#a7f3d0' : '#facc15'}; font-size: 8.5px; font-weight: 700; padding: 1px 4px; margin-left: auto;">
+                          ${isDone ? '✅ Done' : '⏳ Scheduled'}
+                        </span>
+                      </div>
+                      <div style="font-size: 11.5px; font-weight: 800; color: ${isDone ? '#94a3b8' : '#f8fafc'}; text-decoration: ${isDone ? 'line-through' : 'none'}; line-height: 1.25;">
+                        ${this.escapeHtml(tr.topic)}
+                      </div>
+                      <div style="font-size: 10px; color: #cbd5e1; margin-top: 2px; display: flex; align-items: center; gap: 5px; flex-wrap: wrap;">
+                        ${tr.lead ? `<span>👤 <strong>Lead:</strong> ${this.escapeHtml(tr.lead)}</span>` : ''}
+                        ${tr.location ? `<span style="color: #93c5fd;">📍 ${this.escapeHtml(tr.location)}</span>` : ''}
+                        ${tr.time ? `<span style="color: #6ee7b7;">🕒 ${this.escapeHtml(tr.time)}</span>` : ''}
+                      </div>
+                      ${tr.attendees ? `
+                        <div style="font-size: 9.5px; color: #94a3b8; margin-top: 2px; line-height: 1.2; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${this.escapeHtml(tr.attendees)}">
+                          👥 ${this.escapeHtml(tr.attendees)}
+                        </div>
+                      ` : ''}
+                    </div>
+                  `;
+                }).join('')}
               </div>
-
-              ${t.notes ? `<div style="font-size: 10.5px; color: #64748b; line-height: 1.25; font-style: italic; margin-top: 2px;">${this.escapeHtml(t.notes)}</div>` : ''}
             </div>
           `;
-        });
+        }
 
-        // Render Scheduled Swaps (if any)
-        if (day.swaps.length > 0) {
+        // 2. Scheduled Equipment Deliveries (supplies, AED pads, extinguishers)
+        if (day.equipment && day.equipment.length > 0) {
           html += `
-            <div style="background: rgba(139, 92, 246, 0.08); border: 1px solid rgba(139, 92, 246, 0.25); border-radius: 6px; padding: 6px 8px; margin-top: 2px;">
-              <div style="font-size: 10.5px; font-weight: 700; color: #c084fc; margin-bottom: 4px; display: flex; align-items: center; justify-content: space-between;">
-                <span>🔄 Swaps Due (${day.swaps.length})</span>
+            <div style="background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.3); border-left: 4px solid #f59e0b; border-radius: 6px; padding: 6px 8px;">
+              <div style="font-size: 10.5px; font-weight: 800; color: #fbbf24; margin-bottom: 5px; display: flex; align-items: center; justify-content: space-between;">
+                <span style="display: flex; align-items: center; gap: 4px;">
+                  <span>🧰</span>
+                  <span>Equipment Deliveries (${day.equipment.length})</span>
+                </span>
+                <span style="font-size: 9px; color: #fde047;">Supplies</span>
               </div>
-              <div style="display: flex; flex-direction: column; gap: 3px;">
-                ${day.swaps.slice(0, 4).map(s => `
-                  <div style="font-size: 10.5px; color: #cbd5e1; display: flex; justify-content: space-between; gap: 4px;">
-                    <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${s.icon} ${this.escapeHtml(s.employee)}</span>
-                    <span style="font-family: monospace; color: #a78bfa; flex-shrink: 0;">#${this.escapeHtml(s.itemNum || s.itemType)}</span>
+              <div style="display: flex; flex-direction: column; gap: 4px;">
+                ${day.equipment.map(eq => {
+                  return `
+                    <div style="background: var(--bg-primary); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 5px; padding: 5px 7px;">
+                      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 2px;">
+                        <span style="font-weight: 700; font-size: 11px; color: #f8fafc; display: flex; align-items: center; gap: 4px;">
+                          <span>${eq.icon}</span> ${this.escapeHtml(eq.equipmentType)}
+                        </span>
+                        ${eq.vehicleNumber ? `<span class="badge" style="background: rgba(234, 179, 8, 0.2); color: #fde047; font-size: 8.5px; font-weight: 700; padding: 1px 4px; border-radius: 3px;">🚛 Unit ${this.escapeHtml(eq.vehicleNumber)}</span>` : ''}
+                      </div>
+                      ${eq.notes ? `<div style="font-size: 10px; color: #cbd5e1; line-height: 1.25; margin-bottom: 2px;">${this.escapeHtml(eq.notes)}</div>` : ''}
+                      <div style="font-size: 9.5px; color: #94a3b8; display: flex; align-items: center; gap: 5px; flex-wrap: wrap;">
+                        ${eq.crewId ? `<span style="color: #60a5fa;">👷 Crew ${this.escapeHtml(eq.crewId)}</span>` : ''}
+                        ${eq.location ? `<span style="color: #93c5fd;">📍 ${this.escapeHtml(eq.location)}</span>` : ''}
+                        ${eq.isResolved ? '<span style="color: #34d399; font-weight: 700; margin-left: auto;">✅ Delivered</span>' : '<span style="color: #fbbf24; margin-left: auto;">⏳ Pending</span>'}
+                      </div>
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            </div>
+          `;
+        }
+
+        // 3. Field Reclaims (from employees that quit - SEPARATE from Swaps Due!)
+        if (day.reclaims && day.reclaims.length > 0) {
+          html += `
+            <div style="background: rgba(245, 158, 11, 0.09); border: 1px solid rgba(245, 158, 11, 0.35); border-left: 4px solid #f59e0b; border-radius: 6px; padding: 6px 8px;">
+              <div style="font-size: 10.5px; font-weight: 800; color: #fbbf24; margin-bottom: 5px; display: flex; align-items: center; justify-content: space-between;">
+                <span style="display: flex; align-items: center; gap: 4px;">
+                  <span>📦</span>
+                  <span>Reclaims Due (${day.reclaims.length})</span>
+                </span>
+                <span style="font-size: 9px; color: #f87171; font-weight: 700;">Former Employees</span>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 4px;">
+                ${day.reclaims.map(r => {
+                  const isDone = !!r.isCompleted;
+                  return `
+                    <div style="background: var(--bg-primary); border: 1px solid ${isDone ? 'rgba(16, 185, 129, 0.25)' : 'rgba(245, 158, 11, 0.3)'}; border-radius: 5px; padding: 5px 7px; opacity: ${isDone ? '0.72' : '1'};">
+                      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
+                        <span style="font-weight: 700; font-size: 11.5px; color: ${isDone ? '#94a3b8' : '#f8fafc'}; text-decoration: ${isDone ? 'line-through' : 'none'}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                          ${this.escapeHtml(r.employee)}
+                          <span style="font-size: 9px; color: #f87171; font-weight: 700; margin-left: 3px;">(Prev Emp)</span>
+                        </span>
+                        <span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; font-size: 9px; padding: 1px 4px; border-radius: 3px;">
+                          📍 ${this.escapeHtml(r.location)}
+                        </span>
+                      </div>
+                      <div style="display: flex; justify-content: space-between; align-items: center; font-size: 10.5px; color: #cbd5e1; margin-top: 2px;">
+                        <span class="badge" style="background: rgba(245, 158, 11, 0.18); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.35); font-size: 9px; font-weight: 700; padding: 1px 4px; border-radius: 3px;">
+                          📦 Reclaim ${r.icon} ${this.escapeHtml(r.kindLabel)}
+                        </span>
+                        <span>
+                          ${isDone ? `
+                            <strong style="color: #94a3b8; text-decoration: line-through;">#${this.escapeHtml(r.currentItem || '—')}</strong> ➔ <strong style="color: #34d399;">Helena 🏢</strong>
+                          ` : `
+                            <strong style="color: #fca5a5;">#${this.escapeHtml(r.currentItem || '—')}</strong> ➔ <strong style="color: #fbbf24;">Helena 🏢</strong>
+                          `}
+                          ${r.size ? `<span style="color: #94a3b8; font-size: 9px;"> (${this.escapeHtml(r.size)})</span>` : ''}
+                        </span>
+                      </div>
+                      ${isDone ? `<div style="font-size: 9px; color: #34d399; font-weight: 700; margin-top: 2px; text-align: right;">✅ Reclaimed to Shelf</div>` : ''}
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            </div>
+          `;
+        }
+
+        // 4. Regular Swaps Due (with Item Kind, Town, and Replacement Pick)
+        if (day.swaps && day.swaps.length > 0) {
+          const pendingSwaps = day.swaps.filter(s => !s.isCompleted).length;
+          html += `
+            <div style="background: rgba(139, 92, 246, 0.08); border: 1px solid rgba(139, 92, 246, 0.3); border-left: 4px solid #8b5cf6; border-radius: 6px; padding: 6px 8px;">
+              <div style="font-size: 10.5px; font-weight: 800; color: #c084fc; margin-bottom: 5px; display: flex; align-items: center; justify-content: space-between;">
+                <span style="display: flex; align-items: center; gap: 4px;">
+                  <span>🔄</span>
+                  <span>Swaps Due (${pendingSwaps}/${day.swaps.length})</span>
+                </span>
+                <span style="font-size: 9px; color: #a78bfa;">PPE Swaps</span>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 4px;">
+                ${day.swaps.map(s => {
+                  const isDone = !!s.isCompleted;
+                  return `
+                    <div style="background: var(--bg-primary); border: 1px solid ${isDone ? 'rgba(16, 185, 129, 0.25)' : 'rgba(139, 92, 246, 0.3)'}; border-radius: 5px; padding: 5px 7px; opacity: ${isDone ? '0.72' : '1'};">
+                      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 2px;">
+                        <span style="font-weight: 700; font-size: 11.5px; color: ${isDone ? '#94a3b8' : '#f8fafc'}; text-decoration: ${isDone ? 'line-through' : 'none'}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                          ${this.escapeHtml(s.employee)}
+                          ${s.classification ? `<span style="font-size: 9px; color: #94a3b8; font-weight: normal; margin-left: 3px;">[${this.escapeHtml(s.classification)}]</span>` : ''}
+                        </span>
+                        <div style="display: flex; gap: 3px; align-items: center;">
+                          <span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; font-size: 9px; padding: 1px 4px; border-radius: 3px;">
+                            📍 ${this.escapeHtml(s.location)}
+                          </span>
+                          ${s.crewId ? `<span class="badge" style="background: rgba(148, 163, 184, 0.15); color: #cbd5e1; font-size: 9px; padding: 1px 4px; border-radius: 3px;">Crew ${this.escapeHtml(s.crewId)}</span>` : ''}
+                        </div>
+                      </div>
+                      <div style="display: flex; justify-content: space-between; align-items: center; font-size: 10.5px; color: #cbd5e1; margin-top: 2px;">
+                        <span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.3); font-size: 9px; font-weight: 700; padding: 1px 4px; border-radius: 3px;">
+                          ${s.icon} ${this.escapeHtml(s.kindLabel)}
+                        </span>
+                        <span>
+                          ${isDone ? `
+                            <strong style="color: #94a3b8; text-decoration: line-through;">#${this.escapeHtml(s.currentItem || '—')}</strong> ➔ Assigned: <strong style="color: #34d399;">#${this.escapeHtml(s.pickItem || '—')}</strong>
+                          ` : `
+                            Current: <strong style="color: #fca5a5;">#${this.escapeHtml(s.currentItem || '—')}</strong> ➔ Pick: <strong style="color: #34d399;">#${this.escapeHtml(s.pickItem || '—')}</strong>
+                          `}
+                          ${s.size ? `<span style="color: #94a3b8; font-size: 9px;"> (${this.escapeHtml(s.size)})</span>` : ''}
+                        </span>
+                      </div>
+                      ${isDone ? `<div style="font-size: 9px; color: #34d399; font-weight: 700; margin-top: 2px; text-align: right;">✅ Completed${s.completedDate ? ` (${this.escapeHtml(s.completedDate)})` : ''}</div>` : ''}
+                    </div>
+                  `;
+                }).join('')}
+              </div>
+            </div>
+          `;
+        }
+
+        // 5. Personal / Office Tasks (manually added)
+        if (day.tasks && day.tasks.length > 0) {
+          html += `
+            <div style="display: flex; flex-direction: column; gap: 4px;">
+              ${day.tasks.map(t => {
+                const isDone = (t.status === 'Complete');
+                const isHighPrio = (t.priority === 'High' || t.priority === 'Urgent');
+                let cardBorder = isDone ? 'border-left: 3px solid #10b981; opacity: 0.65;' : (isHighPrio ? 'border-left: 3px solid #ef4444;' : 'border-left: 3px solid #3b82f6;');
+
+                return `
+                  <div style="background: var(--bg-card); border: 1px solid var(--border-color); ${cardBorder} border-radius: 6px; padding: 6px 8px; display: flex; flex-direction: column; gap: 3px;">
+                    <div style="display: flex; align-items: flex-start; gap: 6px;">
+                      <input type="checkbox" ${isDone ? 'checked' : ''} onchange="window.weeklySummaryEngine.togglePlannedTask('${this.escapeJs(t.id)}')" style="cursor: pointer; width: 13px; height: 13px; accent-color: #10b981; margin-top: 2px;" title="${isDone ? 'Mark as Pending' : 'Mark as Complete'}">
+                      <div style="flex: 1; min-width: 0;">
+                        <div style="font-size: 11.5px; font-weight: 700; color: ${isDone ? '#94a3b8' : '#f8fafc'}; line-height: 1.3; ${isDone ? 'text-decoration: line-through;' : ''} word-break: break-word;">
+                          ${this.escapeHtml(t.title || 'Task')}
+                        </div>
+                      </div>
+                      <button onclick="window.weeklySummaryEngine.openEditTaskModal('${this.escapeJs(t.id)}')" style="background: none; border: none; color: #64748b; font-size: 10px; cursor: pointer; padding: 0 2px; line-height: 1;" onmouseover="this.style.color='#93c5fd'" onmouseout="this.style.color='#64748b'" title="Edit Task">✏️</button>
+                    </div>
+
+                    <div style="display: flex; align-items: center; gap: 5px; flex-wrap: wrap; font-size: 9.5px; margin-top: 1px;">
+                      ${t.time ? `<span style="color: #60a5fa; font-weight: 700;">🕒 ${this.escapeHtml(t.time)}</span>` : ''}
+                      ${t.location ? `<span style="color: #94a3b8;">📍 ${this.escapeHtml(t.location)}</span>` : ''}
+                      ${t.crewId ? `<span style="color: #cbd5e1; font-weight: 600;">🚚 Crew ${this.escapeHtml(t.crewId)}</span>` : ''}
+                      ${isHighPrio ? `<span style="background: rgba(239, 68, 68, 0.2); color: #f87171; padding: 1px 3px; border-radius: 2px; font-weight: 700;">${this.escapeHtml(t.priority)}</span>` : ''}
+                    </div>
+
+                    ${t.notes ? `<div style="font-size: 10px; color: #64748b; line-height: 1.2; font-style: italic; margin-top: 2px;">${this.escapeHtml(t.notes)}</div>` : ''}
                   </div>
-                `).join('')}
-                ${day.swaps.length > 4 ? `<div style="font-size: 9.5px; color: #94a3b8; font-style: italic;">+ ${day.swaps.length - 4} more swaps</div>` : ''}
-              </div>
+                `;
+              }).join('')}
             </div>
           `;
         }
@@ -1434,11 +1839,13 @@ class WeeklySummaryEngine {
         <tr style="border-bottom: 1px solid var(--border-color); background: ${item.isOverdue ? 'rgba(239, 68, 68, 0.08)' : 'transparent'};">
           <td style="padding: 10px 12px; font-weight: 600; color: #93c5fd;">
             ${item.icon} ${this.escapeHtml(item.categoryLabel)}
+            ${item.isReclaim ? '<span class="badge" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; font-size: 9px; padding: 1px 5px; border-radius: 3px; font-weight: 700; margin-left: 4px; border: 1px solid rgba(245, 158, 11, 0.4);">📦 Reclaim</span>' : ''}
           </td>
           <td style="padding: 10px 12px; font-weight: 700; color: #f8fafc;">
             <a href="javascript:void(0)" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfile('${this.escapeJs(item.employee)}');}" style="color: #f8fafc; text-decoration: none;">
               ${this.escapeHtml(item.employee)}
             </a>
+            ${item.isReclaim ? '<span style="color: #f87171; font-size: 9.5px; font-weight: 700; margin-left: 4px;">(Prev Emp)</span>' : ''}
           </td>
           <td style="padding: 10px 12px; color: #60a5fa; font-weight: 600;">${this.escapeHtml(item.crew || '—')}</td>
           <td style="padding: 10px 12px; font-family: monospace; font-weight: 700; color: #cbd5e1;">${this.escapeHtml(item.currentItem)}</td>
@@ -2241,10 +2648,10 @@ class WeeklySummaryEngine {
           <table style="width: 100%; border-collapse: collapse; font-size: 12px; margin-bottom: 24px;">
             <thead>
               <tr style="background: #f1f5f9; color: #334155; font-weight: 700; text-align: left;">
-                <th style="padding: 8px 10px; border: 1px solid #cbd5e1; width: 18%;">Day / Date</th>
-                <th style="padding: 8px 10px; border: 1px solid #cbd5e1; width: 22%;">Field Travel</th>
-                <th style="padding: 8px 10px; border: 1px solid #cbd5e1; width: 45%;">Planned Tasks & Courses</th>
-                <th style="padding: 8px 10px; border: 1px solid #cbd5e1; width: 15%; text-align: right;">Swaps Due</th>
+                <th style="padding: 8px 10px; border: 1px solid #cbd5e1; width: 16%;">Day / Date</th>
+                <th style="padding: 8px 10px; border: 1px solid #cbd5e1; width: 18%;">Field Travel</th>
+                <th style="padding: 8px 10px; border: 1px solid #cbd5e1; width: 34%;">Planned Tasks & Courses</th>
+                <th style="padding: 8px 10px; border: 1px solid #cbd5e1; width: 32%;">Swaps & Reclaims</th>
               </tr>
             </thead>
             <tbody>
@@ -2252,31 +2659,82 @@ class WeeklySummaryEngine {
         const activeDays = data.plannedWeek.days.filter((d, idx) => idx < 5 || d.hasContent);
         activeDays.forEach(d => {
           let tasksHtml = '';
-          if (d.tasks.length === 0) {
-            tasksHtml = '<span style="color: #94a3b8; font-style: italic;">No tasks scheduled</span>';
-          } else {
-            tasksHtml = d.tasks.map(t => {
+          const taskItems = [];
+
+          // Scheduled Training
+          if (d.trainings && d.trainings.length > 0) {
+            d.trainings.forEach(tr => {
+              const isDone = !!tr.isCompleted;
+              const mark = isDone ? '✅' : '⏳';
+              taskItems.push(`
+                <div style="margin-bottom: 3px; font-size: 11px; ${isDone ? 'color: #64748b;' : 'color: #065f46; font-weight: 600;'}">
+                  ${mark} 🎓 <strong>${this.escapeHtml(tr.topic)}</strong>${tr.crewId ? ` · Crew ${this.escapeHtml(tr.crewId)}` : ''}${tr.lead ? ` (Lead: ${this.escapeHtml(tr.lead)})` : ''}${tr.location ? ` [📍 ${this.escapeHtml(tr.location)}]` : ''}
+                </div>
+              `);
+            });
+          }
+
+          // Equipment Deliveries
+          if (d.equipment && d.equipment.length > 0) {
+            d.equipment.forEach(eq => {
+              taskItems.push(`
+                <div style="margin-bottom: 3px; font-size: 11px; color: #92400e;">
+                  ${eq.isResolved ? '✅' : '⏳'} 🧰 <strong>${this.escapeHtml(eq.equipmentType)}</strong>${eq.vehicleNumber ? ` (Unit ${this.escapeHtml(eq.vehicleNumber)})` : ''}${eq.crewId ? ` · Crew ${this.escapeHtml(eq.crewId)}` : ''}${eq.location ? ` [📍 ${this.escapeHtml(eq.location)}]` : ''}
+                </div>
+              `);
+            });
+          }
+
+          // Personal / Office Tasks
+          if (d.tasks && d.tasks.length > 0) {
+            d.tasks.forEach(t => {
               const mark = t.status === 'Complete' ? '✅' : '⏳';
               const isDone = t.status === 'Complete';
               const timeStr = t.time ? ` (${this.escapeHtml(t.time)})` : '';
               const locStr = t.location ? ` [${this.escapeHtml(t.location)}]` : '';
-              const catStr = (t.taskCategory === 'cert_class' || t.certType) ? ' 🎓' : '';
-              return `<div style="margin-bottom: 4px; ${isDone ? 'color: #64748b; text-decoration: line-through;' : 'color: #0f172a; font-weight: 600;'}">${mark}${catStr} ${this.escapeHtml(t.title || t.certType)}${timeStr}${locStr}</div>`;
-            }).join('');
+              taskItems.push(`
+                <div style="margin-bottom: 3px; font-size: 11px; ${isDone ? 'color: #64748b; text-decoration: line-through;' : 'color: #0f172a; font-weight: 600;'}">
+                  ${mark} ${this.escapeHtml(t.title || 'Task')}${timeStr}${locStr}
+                </div>
+              `);
+            });
           }
+
+          tasksHtml = taskItems.length > 0 ? taskItems.join('') : '<span style="color: #94a3b8; font-style: italic;">No tasks scheduled</span>';
+
+          // Field Travel
           const travelHtml = d.trips.length > 0
             ? `<span style="font-weight: 700; color: #d97706;">🚗 ${this.escapeHtml(d.trips.map(t => t.location).join(' → '))}</span>`
             : '<span style="color: #94a3b8;">—</span>';
-          const swapsHtml = d.swaps.length > 0
-            ? `<span style="font-weight: 700; color: #7c3aed;">🔄 ${d.swaps.length} Swaps</span>`
-            : '<span style="color: #94a3b8;">—</span>';
+
+          // Swaps & Reclaims
+          const swapItems = [];
+          if (d.reclaims && d.reclaims.length > 0) {
+            d.reclaims.forEach(r => {
+              swapItems.push(`
+                <div style="margin-bottom: 3px; font-size: 11px; color: #b45309;">
+                  ${r.isCompleted ? '✅' : '📦'} <strong>Reclaim:</strong> ${this.escapeHtml(r.kindLabel)} #${this.escapeHtml(r.currentItem)} ➔ Helena · <strong>${this.escapeHtml(r.employee)}</strong> (Prev Emp) · 📍 ${this.escapeHtml(r.location)}
+                </div>
+              `);
+            });
+          }
+          if (d.swaps && d.swaps.length > 0) {
+            d.swaps.forEach(s => {
+              swapItems.push(`
+                <div style="margin-bottom: 3px; font-size: 11px; color: #6b21a8;">
+                  ${s.isCompleted ? '✅' : '🔄'} <strong>Swap:</strong> ${this.escapeHtml(s.kindLabel)} #${this.escapeHtml(s.currentItem)} ➔ #${this.escapeHtml(s.pickItem || 'Needed')} · <strong>${this.escapeHtml(s.employee)}</strong> · 📍 ${this.escapeHtml(s.location)}${s.crewId ? ` (Crew ${this.escapeHtml(s.crewId)})` : ''}
+                </div>
+              `);
+            });
+          }
+          const swapsHtml = swapItems.length > 0 ? swapItems.join('') : '<span style="color: #94a3b8;">—</span>';
 
           tbl += `
             <tr style="background: ${d.isToday ? '#eff6ff' : '#ffffff'};">
               <td style="padding: 6px 10px; border: 1px solid #e2e8f0; font-weight: 700; color: #0f172a;">${d.dayName} <span style="font-weight: normal; color: #64748b;">(${d.formattedDate})</span></td>
               <td style="padding: 6px 10px; border: 1px solid #e2e8f0;">${travelHtml}</td>
               <td style="padding: 6px 10px; border: 1px solid #e2e8f0;">${tasksHtml}</td>
-              <td style="padding: 6px 10px; border: 1px solid #e2e8f0; text-align: right;">${swapsHtml}</td>
+              <td style="padding: 6px 10px; border: 1px solid #e2e8f0;">${swapsHtml}</td>
             </tr>
           `;
         });
@@ -2521,15 +2979,33 @@ class WeeklySummaryEngine {
         if (d.trips.length > 0) {
           text += `   🚗 Travel: ${d.trips.map(t => t.location).join(' → ')}\n`;
         }
-        d.tasks.forEach(t => {
-          const mark = t.status === 'Complete' ? '[✓]' : '[ ]';
-          const timeStr = t.time ? ` (${t.time})` : '';
-          const locStr = t.location ? ` [${t.location}]` : '';
-          const catStr = (t.taskCategory === 'cert_class' || t.certType) ? ' [Class]' : '';
-          text += `   ${mark}${catStr} ${t.title || t.certType}${timeStr}${locStr}\n`;
-        });
-        if (d.swaps.length > 0) {
-          text += `   🔄 Swaps Scheduled: ${d.swaps.length} equipment items\n`;
+        if (d.trainings && d.trainings.length > 0) {
+          d.trainings.forEach(tr => {
+            text += `   🎓 Training: ${tr.topic}${tr.crewId ? ` — Crew ${tr.crewId}` : ''}${tr.lead ? ` (Lead: ${tr.lead})` : ''} [📍 ${tr.location}] ${tr.isCompleted ? '[Done]' : '[Scheduled]'}\n`;
+          });
+        }
+        if (d.equipment && d.equipment.length > 0) {
+          d.equipment.forEach(eq => {
+            text += `   🧰 Equipment: ${eq.equipmentType}${eq.vehicleNumber ? ` (Unit ${eq.vehicleNumber})` : ''}${eq.crewId ? ` — Crew ${eq.crewId}` : ''} [📍 ${eq.location}] ${eq.isResolved ? '[Delivered]' : '[Pending]'}\n`;
+          });
+        }
+        if (d.reclaims && d.reclaims.length > 0) {
+          d.reclaims.forEach(r => {
+            text += `   📦 Reclaim: ${r.kindLabel} #${r.currentItem} ➔ Helena — ${r.employee} (Prev Emp) [📍 ${r.location}] ${r.isCompleted ? '[Done]' : ''}\n`;
+          });
+        }
+        if (d.swaps && d.swaps.length > 0) {
+          d.swaps.forEach(s => {
+            text += `   🔄 Swap: ${s.kindLabel} #${s.currentItem} ➔ #${s.pickItem || 'Needed'} — ${s.employee} [📍 ${s.location}]${s.crewId ? ` (Crew ${s.crewId})` : ''} ${s.isCompleted ? '[Done]' : ''}\n`;
+          });
+        }
+        if (d.tasks && d.tasks.length > 0) {
+          d.tasks.forEach(t => {
+            const mark = t.status === 'Complete' ? '[✓]' : '[ ]';
+            const timeStr = t.time ? ` (${t.time})` : '';
+            const locStr = t.location ? ` [${t.location}]` : '';
+            text += `   ${mark} ${t.title || 'Task'}${timeStr}${locStr}\n`;
+          });
         }
       }
     });
