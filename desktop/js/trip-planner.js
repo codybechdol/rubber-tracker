@@ -6796,8 +6796,13 @@ class TripPlannerApp {
             const entry = this.scheduledTrainingNeeds[trKey];
             const trDate = typeof entry === 'object' ? entry.dateKey : entry;
             if (trDate === dateKey && entry && entry.training) {
+              const isCompleted = !!(entry.completed || entry.isCompleted || (entry.training && (entry.training.isCompleted || entry.training.completed)));
+              const completedDate = entry.completedDate || (entry.training && entry.training.completedDate) || '';
               dayScheduledTrainings.push({
                 ...entry.training,
+                isCompleted: isCompleted,
+                completed: isCompleted,
+                completedDate: completedDate,
                 _trKey: trKey
               });
             }
@@ -6963,42 +6968,45 @@ class TripPlannerApp {
                 ${dayScheduledTrainings.map(tr => {
                   const isDone = !!tr.isCompleted;
                   return `
-                    <div class="manual-task-card scheduled-training-card" style="background: var(--bg-primary); border: 1px solid ${isDone ? 'rgba(16, 185, 129, 0.3)' : 'rgba(52, 211, 153, 0.35)'}; border-left: 4px solid ${isDone ? '#10b981' : '#34d399'}; border-radius: 6px; padding: 7px 9px; box-shadow: 0 1px 4px rgba(0,0,0,0.25); opacity: ${isDone ? '0.7' : '1'};">
+                    <div class="manual-task-card scheduled-training-card ${isDone ? 'completed-training-card' : ''}" style="background: var(--bg-primary); border: 1px solid ${isDone ? 'rgba(16, 185, 129, 0.3)' : 'rgba(52, 211, 153, 0.35)'}; border-left: 4px solid ${isDone ? '#10b981' : '#34d399'}; border-radius: 6px; padding: 7px 9px; box-shadow: 0 1px 4px rgba(0,0,0,0.25); opacity: ${isDone ? '0.72' : '1'}; transition: all 0.15s ease;">
                       <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 6px;">
-                        <div style="flex: 1; min-width: 0;">
-                          <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 3px; flex-wrap: wrap;">
-                            <span class="badge" style="background: rgba(16, 185, 129, 0.18); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.35); font-size: 9px; font-weight: 800; padding: 1px 5px; border-radius: 3px;">
-                              🎓 Crew Training
-                            </span>
-                            <span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); font-size: 9px; font-weight: 700; padding: 1px 4px; border-radius: 3px;">
-                              🚚 Crew ${this.escapeHtml(tr.crewId)}
-                            </span>
-                            ${tr.month ? `
-                              <span class="badge" style="background: rgba(168, 85, 247, 0.15); color: #c084fc; font-size: 9px; padding: 1px 4px; border-radius: 3px;">
-                                📅 ${this.escapeHtml(tr.month)}
+                        <div style="display: flex; align-items: flex-start; gap: 7px; flex: 1; min-width: 0;">
+                          <input type="checkbox" ${isDone ? 'checked' : ''} onclick="event.stopPropagation(); window.tripPlanner.toggleScheduledTraining('${this.escapeJs(tr._trKey || tr.id)}', '${dateKey}')" style="cursor: pointer; margin-top: 3px; accent-color: #10b981; width: 14px; height: 14px;" title="${isDone ? 'Completed (click to revert)' : 'Click to mark complete'}">
+                          <div style="flex: 1; min-width: 0;">
+                            <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 3px; flex-wrap: wrap;">
+                              <span class="badge" style="background: rgba(16, 185, 129, 0.18); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.35); font-size: 9px; font-weight: 800; padding: 1px 5px; border-radius: 3px;">
+                                🎓 Crew Training
                               </span>
-                            ` : ''}
-                            ${isDone ? `
-                              <span class="badge" style="background: rgba(16, 185, 129, 0.25); color: #a7f3d0; font-size: 9px; padding: 1px 4px;">
-                                ✅ Completed
+                              <span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); font-size: 9px; font-weight: 700; padding: 1px 4px; border-radius: 3px;">
+                                🚚 Crew ${this.escapeHtml(tr.crewId)}
                               </span>
-                            ` : `
-                              <span class="badge" style="background: rgba(234, 179, 8, 0.2); color: #facc15; font-size: 9px; padding: 1px 4px;">
-                                ⏳ Scheduled
-                              </span>
-                            `}
-                          </div>
-                          <div style="font-size: 12px; font-weight: 800; color: ${isDone ? '#94a3b8' : '#f8fafc'}; text-decoration: ${isDone ? 'line-through' : 'none'}; word-break: break-word; line-height: 1.3;">
-                            ${this.escapeHtml(tr.topic)}
-                          </div>
-                          <div style="font-size: 11px; margin-top: 3px; color: #cbd5e1; line-height: 1.3;">
-                            <span>👤 <strong>Lead:</strong> ${this.escapeHtml(tr.lead || 'Lead')}</span>
-                            ${tr.location ? `<span style="color: #93c5fd; margin-left: 6px;">📍 ${this.escapeHtml(tr.location)}</span>` : ''}
-                            ${tr.attendees ? `
-                              <div style="font-size: 10px; color: #94a3b8; margin-top: 2px;">
-                                👥 <strong>Crew:</strong> ${this.escapeHtml(tr.attendees)}
-                              </div>
-                            ` : ''}
+                              ${tr.month ? `
+                                <span class="badge" style="background: rgba(168, 85, 247, 0.15); color: #c084fc; font-size: 9px; padding: 1px 4px; border-radius: 3px;">
+                                  📅 ${this.escapeHtml(tr.month)}
+                                </span>
+                              ` : ''}
+                              ${isDone ? `
+                                <span class="badge" style="background: rgba(16, 185, 129, 0.25); color: #a7f3d0; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 9px; font-weight: 800; padding: 1px 5px; border-radius: 3px;">
+                                  ✅ Completed${tr.completedDate ? ` (${this.escapeHtml(tr.completedDate)})` : ''}
+                                </span>
+                              ` : `
+                                <span class="badge" style="background: rgba(234, 179, 8, 0.2); color: #facc15; font-size: 9px; padding: 1px 4px;">
+                                  ⏳ Scheduled
+                                </span>
+                              `}
+                            </div>
+                            <div style="font-size: 12px; font-weight: 800; color: ${isDone ? '#94a3b8' : '#f8fafc'}; text-decoration: ${isDone ? 'line-through' : 'none'}; word-break: break-word; line-height: 1.3;">
+                              ${this.escapeHtml(tr.topic)}
+                            </div>
+                            <div style="font-size: 11px; margin-top: 3px; color: #cbd5e1; line-height: 1.3;">
+                              <span>👤 <strong>Lead:</strong> ${this.escapeHtml(tr.lead || 'Lead')}</span>
+                              ${tr.location ? `<span style="color: #93c5fd; margin-left: 6px;">📍 ${this.escapeHtml(tr.location)}</span>` : ''}
+                              ${tr.attendees ? `
+                                <div style="font-size: 10px; color: #94a3b8; margin-top: 2px;">
+                                  👥 <strong>Crew:</strong> ${this.escapeHtml(tr.attendees)}
+                                </div>
+                              ` : ''}
+                            </div>
                           </div>
                         </div>
                         <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
@@ -7006,7 +7014,11 @@ class TripPlannerApp {
                             <button class="btn btn-primary" style="padding: 2px 7px; font-size: 10px; background: #10b981; border: none; font-weight: 700; cursor: pointer; border-radius: 3px; white-space: nowrap;" onclick="event.stopPropagation(); window.tripPlanner.completeTrainingNeed(${JSON.stringify(tr).replace(/"/g, '&quot;')}, '${dateKey}')" title="Mark Training Complete">
                               ✅ Done
                             </button>
-                          ` : ''}
+                          ` : `
+                            <button class="btn btn-secondary" style="padding: 2px 6px; font-size: 9px; color: #a7f3d0; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.35); font-weight: 700; cursor: pointer; border-radius: 3px; white-space: nowrap;" onclick="event.stopPropagation(); window.tripPlanner.toggleScheduledTraining('${this.escapeJs(tr._trKey || tr.id)}', '${dateKey}')" title="Click to re-open">
+                              ✓ Done
+                            </button>
+                          `}
                           <button class="admin-only-control" style="background: none; border: none; color: #64748b; cursor: pointer; padding: 1px 4px; font-size: 12px; line-height: 1; border-radius: 3px;" onmouseover="this.style.color='#f87171'" onmouseout="this.style.color='#64748b'" onclick="event.stopPropagation(); window.tripPlanner.unscheduleTrainingNeed('${this.escapeJs(tr._trKey)}')" title="Remove from this day and return to sidebar">
                             ✕
                           </button>
@@ -7016,7 +7028,7 @@ class TripPlannerApp {
                   `;
                 }).join('')}
                 ${monthlyTrainings.map(tr => {
-                  const isDone = tr.status === 'Complete';
+                  const isDone = tr.status === 'Complete' || tr.status === 'Completed' || !!tr.isCompleted;
                   return `
                     <div class="manual-task-card monthly-training-card" style="background: var(--bg-primary); border: 1px solid ${isDone ? 'rgba(16, 185, 129, 0.3)' : 'rgba(59, 130, 246, 0.35)'}; border-left: 4px solid ${isDone ? '#10b981' : '#3b82f6'}; border-radius: 6px; padding: 7px 9px; box-shadow: 0 1px 4px rgba(0,0,0,0.25); opacity: ${isDone ? '0.65' : '1'}; transition: opacity 0.2s;">
                       <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 6px;">
@@ -7320,8 +7332,14 @@ class TripPlannerApp {
             const entry = this.scheduledEquipmentNeeds[eqKey];
             const eqDate = typeof entry === 'object' ? entry.dateKey : entry;
             if (eqDate === dateKey && entry && entry.item) {
+              const isResolved = !!(entry.completed || entry.isCompleted || (entry.item && (entry.item.resolved || entry.item.isResolved || entry.item.completed)));
+              const completedDate = entry.completedDate || (entry.item && entry.item.completedDate) || '';
               dayScheduledEquipment.push({
                 ...entry.item,
+                resolved: isResolved,
+                isResolved: isResolved,
+                completed: isResolved,
+                completedDate: completedDate,
                 _eqKey: eqKey
               });
             }
@@ -7346,36 +7364,53 @@ class TripPlannerApp {
                   const isFe = (item.equipmentType || '').toLowerCase().includes('extinguisher') || (item.equipmentType || '').toLowerCase().includes('fire');
                   const isFa = (item.equipmentType || '').toLowerCase().includes('aid') || (item.equipmentType || '').toLowerCase().includes('eye');
                   const icon = isAed ? '⚡' : (isFe ? '🧯' : (isFa ? '🩹' : '🚗'));
+                  const isDone = !!(item.resolved || item.isResolved || item.completed || item.isCompleted);
                   return `
-                    <div class="scheduled-equipment-card" style="background: var(--bg-primary); border: 1px solid rgba(245, 158, 11, 0.35); border-left: 4px solid #f59e0b; border-radius: 6px; padding: 7px 9px; box-shadow: 0 1px 4px rgba(0,0,0,0.25); cursor: pointer; transition: border-color 0.15s ease, transform 0.15s ease;" onclick="window.tripPlanner.openEquipmentNeedPdf(${JSON.stringify(item).replace(/"/g, '&quot;')})" onmouseover="this.style.borderColor='#fbbf24'; this.style.transform='translateY(-1px)';" onmouseout="this.style.borderColor='rgba(245, 158, 11, 0.35)'; this.style.transform='translateY(0)';" title="Click to view source Checklist PDF">
+                    <div class="scheduled-equipment-card ${isDone ? 'completed-equipment-card' : ''}" style="background: var(--bg-primary); border: 1px solid ${isDone ? 'rgba(16, 185, 129, 0.3)' : 'rgba(245, 158, 11, 0.35)'}; border-left: 4px solid ${isDone ? '#10b981' : '#f59e0b'}; border-radius: 6px; padding: 7px 9px; box-shadow: 0 1px 4px rgba(0,0,0,0.25); cursor: pointer; opacity: ${isDone ? '0.72' : '1'}; transition: all 0.15s ease;" onclick="window.tripPlanner.openEquipmentNeedPdf(${JSON.stringify(item).replace(/"/g, '&quot;')})" onmouseover="this.style.borderColor='${isDone ? '#34d399' : '#fbbf24'}';" onmouseout="this.style.borderColor='${isDone ? 'rgba(16, 185, 129, 0.3)' : 'rgba(245, 158, 11, 0.35)'}';" title="Click to view source Checklist PDF">
                       <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 6px;">
-                        <div style="flex: 1; min-width: 0;">
-                          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 2px;">
-                            <span style="font-weight: 700; font-size: 12px; color: #f8fafc; display: flex; align-items: center; gap: 4px;">
-                              <span>${icon}</span> ${item.equipmentType === 'AED' && (/needs\s*aed\s*pads/i.test(item.notes || '') || (item.desc || '').toLowerCase() === 'needs aed pads') ? 'Needs AED Pads' : this.escapeHtml(item.equipmentType)}
-                            </span>
-                            ${item.vehicleNumber ? `
-                              <span class="badge" style="background: rgba(234, 179, 8, 0.2); color: #fde047; font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px;">
-                                🚛 Unit ${this.escapeHtml(item.vehicleNumber)}
+                        <div style="display: flex; align-items: flex-start; gap: 7px; flex: 1; min-width: 0;">
+                          <input type="checkbox" ${isDone ? 'checked' : ''} onclick="event.stopPropagation(); window.tripPlanner.toggleScheduledEquipment('${this.escapeJs(item._eqKey || item.id)}')" style="cursor: pointer; margin-top: 3px; accent-color: #10b981; width: 14px; height: 14px;" title="${isDone ? 'Delivered (click to revert)' : 'Click to mark delivered'}">
+                          <div style="flex: 1; min-width: 0;">
+                            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 2px;">
+                              <span style="font-weight: 700; font-size: 12px; color: ${isDone ? '#94a3b8' : '#f8fafc'}; text-decoration: ${isDone ? 'line-through' : 'none'}; display: flex; align-items: center; gap: 4px;">
+                                <span>${icon}</span> ${item.equipmentType === 'AED' && (/needs\s*aed\s*pads/i.test(item.notes || '') || (item.desc || '').toLowerCase() === 'needs aed pads') ? 'Needs AED Pads' : this.escapeHtml(item.equipmentType)}
                               </span>
-                            ` : ''}
-                          </div>
-                          <div style="font-size: 11px; color: #cbd5e1; margin-bottom: 3px; line-height: 1.3;">
-                            ${this.escapeHtml(item.notes || 'Equipment defect / need')}
-                          </div>
-                          <div style="font-size: 10px; color: #94a3b8; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
-                            <span style="color: #60a5fa;">👷 Crew ${this.escapeHtml(item.crewId)}</span>
-                            ${item.foreman ? `<span style="color: #94a3b8;">(${this.escapeHtml(item.foreman)})</span>` : ''}
-                            ${item.location ? `<span style="color: #93c5fd;">📍 ${this.escapeHtml(item.location)}</span>` : ''}
-                            <span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.3); font-size: 8.5px; padding: 1px 4px; border-radius: 3px; font-weight: 700;" title="Click to view source Checklist PDF">
-                              📄 View PDF
-                            </span>
+                              <div style="display: flex; align-items: center; gap: 4px;">
+                                ${isDone ? `
+                                  <span class="badge" style="background: rgba(16, 185, 129, 0.25); color: #a7f3d0; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 9px; font-weight: 800; padding: 1px 5px; border-radius: 3px;">
+                                    ✅ Delivered${item.completedDate ? ` (${this.escapeHtml(item.completedDate)})` : ''}
+                                  </span>
+                                ` : ''}
+                                ${item.vehicleNumber ? `
+                                  <span class="badge" style="background: rgba(234, 179, 8, 0.2); color: #fde047; font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px;">
+                                    🚛 Unit ${this.escapeHtml(item.vehicleNumber)}
+                                  </span>
+                                ` : ''}
+                              </div>
+                            </div>
+                            <div style="font-size: 11px; color: ${isDone ? '#94a3b8' : '#cbd5e1'}; text-decoration: ${isDone ? 'line-through' : 'none'}; margin-bottom: 3px; line-height: 1.3;">
+                              ${this.escapeHtml(item.notes || 'Equipment defect / need')}
+                            </div>
+                            <div style="font-size: 10px; color: #94a3b8; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                              <span style="color: #60a5fa;">👷 Crew ${this.escapeHtml(item.crewId)}</span>
+                              ${item.foreman ? `<span style="color: #94a3b8;">(${this.escapeHtml(item.foreman)})</span>` : ''}
+                              ${item.location ? `<span style="color: #93c5fd;">📍 ${this.escapeHtml(item.location)}</span>` : ''}
+                              <span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.3); font-size: 8.5px; padding: 1px 4px; border-radius: 3px; font-weight: 700;" title="Click to view source Checklist PDF">
+                                📄 View PDF
+                              </span>
+                            </div>
                           </div>
                         </div>
                         <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 5px; margin-left: 4px;">
-                          <button class="btn btn-secondary" style="padding: 2px 6px; font-size: 9px; color: #a7f3d0; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.35); font-weight: 700; cursor: pointer; border-radius: 3px; white-space: nowrap;" onclick="event.stopPropagation(); window.tripPlanner.markEquipmentNeedResolved(${JSON.stringify(item).replace(/"/g, '&quot;')})" title="Mark Delivered & Resolved">
-                            ✅ Delivered
-                          </button>
+                          ${!isDone ? `
+                            <button class="btn btn-secondary" style="padding: 2px 6px; font-size: 9px; color: #a7f3d0; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.35); font-weight: 700; cursor: pointer; border-radius: 3px; white-space: nowrap;" onclick="event.stopPropagation(); window.tripPlanner.markEquipmentNeedResolved(${JSON.stringify(item).replace(/"/g, '&quot;')})" title="Mark Delivered & Resolved">
+                              ✅ Delivered
+                            </button>
+                          ` : `
+                            <button class="btn btn-secondary" style="padding: 2px 6px; font-size: 9px; color: #a7f3d0; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.35); font-weight: 700; cursor: pointer; border-radius: 3px; white-space: nowrap;" onclick="event.stopPropagation(); window.tripPlanner.toggleScheduledEquipment('${this.escapeJs(item._eqKey || item.id)}')" title="Click to revert">
+                              ✓ Done
+                            </button>
+                          `}
                           <button class="admin-only-control" style="background: none; border: none; color: #64748b; cursor: pointer; padding: 1px 4px; font-size: 12px; line-height: 1; border-radius: 3px;" onmouseover="this.style.color='#f87171'" onmouseout="this.style.color='#64748b'" onclick="event.stopPropagation(); window.tripPlanner.unscheduleEquipmentNeed('${this.escapeJs(item._eqKey)}')" title="Remove from this day and return to sidebar">
                             ✕
                           </button>
@@ -8953,14 +8988,40 @@ class TripPlannerApp {
         this.db.addDismissedTask('safety_equip_2108_aed');
       }
 
-      // If scheduled in calendar, remove from scheduled list
+      // If scheduled in calendar, DO NOT delete - mark resolved/completed and preserve on trip planner
       if (this.scheduledEquipmentNeeds) {
+        let matched = false;
         Object.keys(this.scheduledEquipmentNeeds).forEach(k => {
           const entry = this.scheduledEquipmentNeeds[k];
-          if (entry && (k === item.id || (entry.item && entry.item.id === item.id) || (entry.item && (entry.item.rowIdx === rowIdx || entry.item._rowIdx === rowIdx)))) {
-            delete this.scheduledEquipmentNeeds[k];
+          const itm = (entry && entry.item) ? entry.item : {};
+          const isMatch = (k === item.id || k === item._eqKey || itm.id === item.id || itm._eqKey === item._eqKey || itm.rowIdx === rowIdx || itm._rowIdx === rowIdx || (itm.crewId === item.crewId && itm.vehicleNumber === item.vehicleNumber && itm.equipmentType === item.equipmentType));
+          if (entry && isMatch) {
+            entry.completed = true;
+            entry.isCompleted = true;
+            entry.completedDate = todayFormatted;
+            if (entry.item) {
+              entry.item.resolved = true;
+              entry.item.isResolved = true;
+              entry.item.completed = true;
+              entry.item.completedDate = todayFormatted;
+            }
+            matched = true;
           }
         });
+        if (!matched && (item._eqKey || item.id)) {
+          const k = item._eqKey || item.id;
+          if (this.scheduledEquipmentNeeds[k]) {
+            this.scheduledEquipmentNeeds[k].completed = true;
+            this.scheduledEquipmentNeeds[k].isCompleted = true;
+            this.scheduledEquipmentNeeds[k].completedDate = todayFormatted;
+            if (this.scheduledEquipmentNeeds[k].item) {
+              this.scheduledEquipmentNeeds[k].item.resolved = true;
+              this.scheduledEquipmentNeeds[k].item.isResolved = true;
+              this.scheduledEquipmentNeeds[k].item.completed = true;
+              this.scheduledEquipmentNeeds[k].item.completedDate = todayFormatted;
+            }
+          }
+        }
         this.saveScheduledEquipmentNeeds();
       }
 
@@ -9009,6 +9070,7 @@ class TripPlannerApp {
       }
       this.renderEquipmentNeedsList();
       this.renderPlanner();
+      this.notifyAccomplishmentsModal();
       if (this.activeModalCrewId) {
         this.openCrewTasksModal(this.activeModalCrewId, this.activeModalLocation, this.activeModalCat, this.activeModalDateKey);
       }
@@ -9027,7 +9089,87 @@ class TripPlannerApp {
       this.saveScheduledEquipmentNeeds();
       this.renderPlanner();
       this.renderEquipmentNeedsList();
+      this.notifyAccomplishmentsModal();
       this.showToast('Unscheduled equipment delivery');
+    }
+  }
+
+  async toggleScheduledEquipment(key) {
+    if (!this.scheduledEquipmentNeeds || !this.scheduledEquipmentNeeds[key]) return;
+    const entry = this.scheduledEquipmentNeeds[key];
+    const item = entry.item || entry;
+    const isCurrentlyDone = !!(entry.completed || entry.isCompleted || (entry.item && (entry.item.resolved || entry.item.isResolved || entry.item.completed)));
+
+    if (!isCurrentlyDone) {
+      await this.markEquipmentNeedResolved(item);
+    } else {
+      entry.completed = false;
+      entry.isCompleted = false;
+      delete entry.completedDate;
+      if (entry.item) {
+        entry.item.resolved = false;
+        entry.item.isResolved = false;
+        entry.item.completed = false;
+        delete entry.item.completedDate;
+      }
+      this.saveScheduledEquipmentNeeds();
+
+      let rowIdx = item.rowIdx || item._rowIdx || item.sourceRow;
+      if (!rowIdx && item.id) {
+        const match = String(item.id).match(/(?:safety_equip_|Safety Equipment Needs_)(\d+)/i);
+        if (match) rowIdx = parseInt(match[1], 10);
+      }
+
+      const eqTable = this.db ? this.db.getTable('safety_equipment_needs') : null;
+      if (eqTable && eqTable.rows && rowIdx) {
+        const targetRow = eqTable.rows.find(r => r._rowIdx === rowIdx || eqTable.rows.indexOf(r) + 2 === rowIdx);
+        if (targetRow) {
+          const oldStatus = targetRow['Status'] || '';
+          targetRow['Status'] = 'Pending';
+          targetRow['Resolved On'] = '';
+          if (eqTable.rawGrid && eqTable.rawGrid[rowIdx - 1]) {
+            eqTable.rawGrid[rowIdx - 1][7] = 'Pending';
+            eqTable.rawGrid[rowIdx - 1][13] = '';
+          }
+          await this.db.addMutation({
+            action: 'UPDATE_CELL',
+            sheetName: 'Safety Equipment Needs',
+            tableKey: 'safety_equipment_needs',
+            row: rowIdx,
+            col: 8,
+            header: 'Status',
+            oldValue: oldStatus,
+            value: 'Pending'
+          });
+          await this.db.addMutation({
+            action: 'UPDATE_CELL',
+            sheetName: 'Safety Equipment Needs',
+            tableKey: 'safety_equipment_needs',
+            row: rowIdx,
+            col: 14,
+            header: 'Resolved On',
+            oldValue: targetRow['Resolved On'] || '',
+            value: ''
+          });
+        }
+      }
+
+      try {
+        let resolvedKeys = JSON.parse(localStorage.getItem('sa_resolved_equip_needs') || '[]');
+        resolvedKeys = resolvedKeys.filter(k => k !== item.id && k !== `safety_equip_${rowIdx}`);
+        localStorage.setItem('sa_resolved_equip_needs', JSON.stringify(resolvedKeys));
+        if (item.vehicleNumber && String(item.vehicleNumber).includes('2108')) {
+          localStorage.removeItem('sa_resolved_equip_2108_aed');
+        }
+      } catch { /* ignore */ }
+
+      if (this.db && this.db.snapshot) {
+        await this.db.persistSnapshot(this.db.snapshot);
+      }
+      this.renderEquipmentNeedsList();
+      this.renderPlanner();
+      this.notifyAccomplishmentsModal();
+      this.showToast(`Equipment task for Crew ${item.crewId || ''} re-opened.`);
     }
   }
 
@@ -9328,6 +9470,7 @@ class TripPlannerApp {
       this.saveScheduledTrainingNeeds();
       this.renderPlanner();
       this.renderTrainingNeedsList();
+      this.notifyAccomplishmentsModal();
       this.showToast('Unscheduled training');
     }
   }
@@ -9390,14 +9533,38 @@ class TripPlannerApp {
         }
       }
 
-      // If scheduled in calendar, remove or mark complete
+      // If scheduled in calendar, DO NOT delete - mark complete and preserve on trip planner
       if (this.scheduledTrainingNeeds) {
+        let matched = false;
         Object.keys(this.scheduledTrainingNeeds).forEach(k => {
           const entry = this.scheduledTrainingNeeds[k];
-          if (entry && (k === tr.id || (entry.training && entry.training.id === tr.id) || (entry.training && entry.training.rowIdx === tr.rowIdx))) {
-            delete this.scheduledTrainingNeeds[k];
+          const tObj = (entry && entry.training) ? entry.training : {};
+          const isMatch = (k === tr._trKey || k === tr.id || tObj.id === tr.id || tObj._trKey === tr._trKey || tObj.rowIdx === tr.rowIdx || (tObj.crewId === tr.crewId && tObj.topic === tr.topic));
+          if (entry && isMatch) {
+            entry.completed = true;
+            entry.isCompleted = true;
+            entry.completedDate = dateFormatted;
+            if (entry.training) {
+              entry.training.isCompleted = true;
+              entry.training.completed = true;
+              entry.training.completedDate = dateFormatted;
+            }
+            matched = true;
           }
         });
+        if (!matched && (tr._trKey || tr.id)) {
+          const k = tr._trKey || tr.id;
+          if (this.scheduledTrainingNeeds[k]) {
+            this.scheduledTrainingNeeds[k].completed = true;
+            this.scheduledTrainingNeeds[k].isCompleted = true;
+            this.scheduledTrainingNeeds[k].completedDate = dateFormatted;
+            if (this.scheduledTrainingNeeds[k].training) {
+              this.scheduledTrainingNeeds[k].training.isCompleted = true;
+              this.scheduledTrainingNeeds[k].training.completed = true;
+              this.scheduledTrainingNeeds[k].training.completedDate = dateFormatted;
+            }
+          }
+        }
         this.saveScheduledTrainingNeeds();
       }
 
@@ -9405,10 +9572,86 @@ class TripPlannerApp {
 
       this.renderTrainingNeedsList();
       this.renderPlanner();
+      this.notifyAccomplishmentsModal();
       this.showToast(`🎓 Synced "${tr.topic}" completion for Crew ${tr.crewId} to Training Tracking`);
     } catch (err) {
       console.error('Error completing training need:', err);
       this.showToast('Error completing training', 'error');
+    }
+  }
+
+  async toggleScheduledTraining(key, dateKey) {
+    if (!this.scheduledTrainingNeeds || !this.scheduledTrainingNeeds[key]) return;
+    const entry = this.scheduledTrainingNeeds[key];
+    const tr = entry.training || entry;
+    const isCurrentlyDone = !!(entry.completed || entry.isCompleted || (entry.training && (entry.training.isCompleted || entry.training.completed)));
+
+    if (!isCurrentlyDone) {
+      await this.completeTrainingNeed(tr, dateKey);
+    } else {
+      entry.completed = false;
+      entry.isCompleted = false;
+      delete entry.completedDate;
+      if (entry.training) {
+        entry.training.isCompleted = false;
+        entry.training.completed = false;
+        delete entry.training.completedDate;
+      }
+      this.saveScheduledTrainingNeeds();
+
+      const rowIdx = tr.rowIdx || (entry.training && entry.training.rowIdx);
+      const trainTable = this.db ? this.db.getTable('training_tracking') : null;
+      if (trainTable && trainTable.rows && rowIdx) {
+        const targetRow = trainTable.rows.find(r => r._rowIdx === rowIdx || trainTable.rows.indexOf(r) + 2 === rowIdx);
+        if (targetRow) {
+          const oldStatus = targetRow['Status'] || targetRow['Training Status'] || '';
+          targetRow['Status'] = 'Scheduled';
+          targetRow['Training Status'] = 'Scheduled';
+          targetRow['Completion Date'] = '';
+          targetRow['Date Completed'] = '';
+
+          const headers = trainTable.headers || ['Month', 'Training Topic', 'Crew #', 'Crew Lead', 'Crew Size', 'Completion Date', 'Attendees', 'Hours', 'Trainer', 'Status', 'Notes'];
+          let colStatus = -1, colDate = -1;
+          headers.forEach((h, idx) => {
+            const hl = String(h || '').toLowerCase().trim();
+            if ((hl === 'status' || hl === 'training status') && colStatus === -1) colStatus = idx + 1;
+            else if ((hl.includes('date') || hl.includes('completion')) && colDate === -1) colDate = idx + 1;
+          });
+          if (colStatus === -1) colStatus = 10;
+          if (colDate === -1) colDate = 6;
+
+          if (trainTable.rawGrid && trainTable.rawGrid[rowIdx - 1]) {
+            if (colStatus !== -1) trainTable.rawGrid[rowIdx - 1][colStatus - 1] = 'Scheduled';
+            if (colDate !== -1) trainTable.rawGrid[rowIdx - 1][colDate - 1] = '';
+          }
+
+          await this.db.addMutation({
+            action: 'UPDATE_CELL',
+            sheetName: 'Training Tracking',
+            row: rowIdx,
+            col: colStatus,
+            header: headers[colStatus - 1] || 'Status',
+            oldValue: oldStatus,
+            value: 'Scheduled'
+          });
+          await this.db.addMutation({
+            action: 'UPDATE_CELL',
+            sheetName: 'Training Tracking',
+            row: rowIdx,
+            col: colDate,
+            header: headers[colDate - 1] || 'Completion Date',
+            oldValue: targetRow['Completion Date'] || '',
+            value: ''
+          });
+        }
+      }
+      if (this.db && this.db.snapshot) {
+        await this.db.persistSnapshot(this.db.snapshot);
+      }
+      this.renderTrainingNeedsList();
+      this.renderPlanner();
+      this.notifyAccomplishmentsModal();
+      this.showToast(`Training "${tr.topic}" re-opened as Scheduled.`);
     }
   }
 

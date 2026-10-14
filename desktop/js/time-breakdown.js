@@ -176,7 +176,8 @@ class TimeBreakdownEngine {
         trainings: [],
         classes: [],
         officeTasks: [],
-        drugTests: []
+        drugTests: [],
+        equipmentDeliveries: []
       };
       cur.setDate(cur.getDate() + 1);
     }
@@ -509,12 +510,120 @@ class TimeBreakdownEngine {
     if (trainTable && trainTable.rows) {
       trainTable.rows.forEach(tr => {
         const status = String(tr['Status'] || tr['Training Status'] || '').toLowerCase();
-        if (status !== 'complete') return;
+        if (status !== 'complete' && status !== 'completed' && status !== 'done') return;
 
         const rawDate = tr['Completion Date'] || tr['Date Completed'] || tr['Date'] || tr['Date Done'];
         const dKey = this.normalizeDateKey(rawDate);
         if (daysMap[dKey]) {
           daysMap[dKey].trainings.push(tr);
+        }
+      });
+    }
+
+    // 7a. Also collect completed trainings directly from Trip Planner scheduled_training
+    const schedTrainings = {};
+    if (window.tripPlanner && window.tripPlanner.scheduledTrainingNeeds) {
+      Object.assign(schedTrainings, window.tripPlanner.scheduledTrainingNeeds);
+    }
+    try {
+      const localTrain = JSON.parse(localStorage.getItem('TRIP_PLANNER_SCHEDULED_TRAINING') || localStorage.getItem('sa_trip_scheduled_training') || '{}');
+      Object.assign(schedTrainings, localTrain);
+    } catch { /* ignore */ }
+
+    Object.keys(schedTrainings).forEach(k => {
+      const entry = schedTrainings[k];
+      if (!entry) return;
+      const isDone = !!(entry.completed || entry.isCompleted || (entry.training && (entry.training.isCompleted || entry.training.completed)));
+      if (!isDone) return;
+
+      const rawDate = entry.completedDate || (entry.training && entry.training.completedDate) || entry.dateKey || entry.date;
+      const dKey = this.normalizeDateKey(rawDate);
+      if (!daysMap[dKey]) return;
+
+      const trData = entry.training || entry;
+      const topic = String(trData.topic || trData['Topic'] || trData['Training Topic'] || '').trim();
+      const crew = String(trData.crewId || trData['Crew #'] || '').trim();
+
+      const already = daysMap[dKey].trainings.some(t => {
+        const tTopic = String(t['Topic'] || t['Training Topic'] || t.topic || '').trim().toLowerCase();
+        const tCrew = String(t['Crew #'] || t.crewId || '').trim().toLowerCase();
+        return tTopic === topic.toLowerCase() && tCrew === crew.toLowerCase();
+      });
+
+      if (!already) {
+        daysMap[dKey].trainings.push({
+          'Training Topic': topic,
+          'Topic': topic,
+          'Crew #': crew,
+          'Crew Lead': trData.lead || trData['Crew Lead'] || '',
+          'Attendees': trData.attendees || '',
+          'Location': trData.location || '',
+          'Status': 'Completed',
+          'Date Completed': rawDate
+        });
+      }
+    });
+
+    // 7b. Collect Completed Equipment Deliveries (from scheduledEquipmentNeeds and safety_equipment_needs)
+    const schedEquip = {};
+    if (window.tripPlanner && window.tripPlanner.scheduledEquipmentNeeds) {
+      Object.assign(schedEquip, window.tripPlanner.scheduledEquipmentNeeds);
+    }
+    try {
+      const localEq = JSON.parse(localStorage.getItem('TRIP_PLANNER_SCHEDULED_EQUIPMENT') || localStorage.getItem('sa_trip_scheduled_equipment') || '{}');
+      Object.assign(schedEquip, localEq);
+    } catch { /* ignore */ }
+
+    const seenEquipDedupe = new Set();
+    Object.keys(schedEquip).forEach(k => {
+      const entry = schedEquip[k];
+      if (!entry) return;
+      const item = entry.item || entry;
+      const isResolved = !!(entry.completed || entry.isCompleted || item.resolved || item.isResolved || item.completed);
+      if (!isResolved) return;
+
+      const rawDate = entry.completedDate || item.completedDate || entry.dateKey || entry.date;
+      const dKey = this.normalizeDateKey(rawDate);
+      if (!daysMap[dKey]) return;
+
+      const dedupe = `${item.crewId}_${item.vehicleNumber}_${item.equipmentType}_${item.notes}`.toLowerCase();
+      if (!seenEquipDedupe.has(dedupe)) {
+        seenEquipDedupe.add(dedupe);
+        daysMap[dKey].equipmentDeliveries.push({
+          crewId: item.crewId || '',
+          vehicleNumber: item.vehicleNumber || '',
+          equipmentType: item.equipmentType || 'Equipment',
+          notes: item.notes || item.desc || '',
+          location: item.location || '',
+          foreman: item.foreman || ''
+        });
+      }
+    });
+
+    const eqTable = this.db ? this.db.getTable('safety_equipment_needs') : null;
+    if (eqTable && eqTable.rows) {
+      eqTable.rows.forEach(r => {
+        const stat = String(r['Status'] || '').toLowerCase();
+        if (stat !== 'resolved' && stat !== 'complete' && stat !== 'completed') return;
+        const rawDate = r['Resolved On'] || r['Date Resolved'] || r['Date'];
+        const dKey = this.normalizeDateKey(rawDate);
+        if (!daysMap[dKey]) return;
+
+        const crewId = String(r['Crew #'] || r['Crew'] || '').trim();
+        const veh = String(r['Vehicle #'] || r['Unit #'] || '').trim();
+        const eqType = String(r['Equipment Type'] || r['Type'] || 'Equipment').trim();
+        const notes = String(r['Notes'] || r['Defect'] || '').trim();
+        const dedupe = `${crewId}_${veh}_${eqType}_${notes}`.toLowerCase();
+        if (!seenEquipDedupe.has(dedupe)) {
+          seenEquipDedupe.add(dedupe);
+          daysMap[dKey].equipmentDeliveries.push({
+            crewId: crewId,
+            vehicleNumber: veh,
+            equipmentType: eqType,
+            notes: notes,
+            location: r['Location'] || '',
+            foreman: r['Crew Lead'] || r['Lead'] || ''
+          });
         }
       });
     }
@@ -555,6 +664,7 @@ class TimeBreakdownEngine {
     let totalOfficeTasks = 0;
     let totalTrainings = 0;
     let totalDrugTests = 0;
+    let totalEquipDeliveries = 0;
     let daysWithContent = 0;
 
     days.forEach(day => {
@@ -565,6 +675,7 @@ class TimeBreakdownEngine {
       const hasTasks = day.tasks && day.tasks.length > 0;
       const hasTrainings = day.trainings && day.trainings.length > 0;
       const hasDrugTests = day.drugTests && day.drugTests.length > 0;
+      const hasEquip = day.equipmentDeliveries && day.equipmentDeliveries.length > 0;
       const hasLocations = locKeys.length > 0;
 
       let locSwapsCount = 0;
@@ -572,7 +683,7 @@ class TimeBreakdownEngine {
         if (day.locations[lk].swaps) locSwapsCount += day.locations[lk].swaps.length;
       });
 
-      const hasContent = hasLocations || hasClasses || hasOffice || hasTasks || hasTrainings || hasDrugTests || locSwapsCount > 0;
+      const hasContent = hasLocations || hasClasses || hasOffice || hasTasks || hasTrainings || hasDrugTests || hasEquip || locSwapsCount > 0;
       if (!hasContent) return;
 
       daysWithContent++;
@@ -688,6 +799,19 @@ class TimeBreakdownEngine {
         });
       }
 
+      // Completed Equipment Deliveries
+      if (hasEquip) {
+        lines.push(`  🧰 Completed Equipment Deliveries (${day.equipmentDeliveries.length}):`);
+        day.equipmentDeliveries.forEach(eq => {
+          totalEquipDeliveries++;
+          const crew = eq.crewId ? ` · Crew ${this.getSignificantJobNumber(eq.crewId)}` : '';
+          const unit = eq.vehicleNumber ? ` [Unit ${eq.vehicleNumber}]` : '';
+          const loc = eq.location ? ` (📍 ${eq.location})` : '';
+          const notes = eq.notes ? ` · ${eq.notes}` : '';
+          lines.push(`     • ${eq.equipmentType}${unit}${crew}${loc}${notes}`);
+        });
+      }
+
       // Completed DOT Drug Tests
       if (hasDrugTests) {
         lines.push(`  🧪 Completed DOT Drug Tests (${day.drugTests.length}):`);
@@ -713,6 +837,7 @@ class TimeBreakdownEngine {
     if (totalClasses > 0) summaryParts.push(`${totalClasses} Classes Taught`);
     if (totalOfficeTasks > 0) summaryParts.push(`${totalOfficeTasks} Office Tasks`);
     if (totalTrainings > 0) summaryParts.push(`${totalTrainings} Trainings`);
+    if (totalEquipDeliveries > 0) summaryParts.push(`${totalEquipDeliveries} Equipment Deliveries`);
     if (totalDrugTests > 0) summaryParts.push(`${totalDrugTests} Drug Tests`);
 
     lines.push(`=======================================================`);

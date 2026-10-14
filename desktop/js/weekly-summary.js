@@ -813,7 +813,7 @@ class WeeklySummaryEngine {
             if (this.selectedLocation !== 'all' && !trLoc.includes(this.selectedLocation.toLowerCase())) {
               return;
             }
-            const isDone = !!entry.training.isCompleted;
+            const isDone = !!(entry.completed || entry.isCompleted || (entry.training && (entry.training.isCompleted || entry.training.completed)));
             dayTrainings.push({
               _trKey: trKey,
               topic: entry.training.topic || 'Crew Safety Training',
@@ -875,7 +875,7 @@ class WeeklySummaryEngine {
             const isFe = eqType.toLowerCase().includes('extinguisher') || eqType.toLowerCase().includes('fire');
             const isFa = eqType.toLowerCase().includes('aid') || eqType.toLowerCase().includes('eye');
             const icon = isAed ? '⚡' : (isFe ? '🧯' : (isFa ? '🩹' : '🚗'));
-            const isDone = !!(entry.item.resolved || entry.item.isResolved || entry.item.completed);
+            const isDone = !!(entry.completed || entry.isCompleted || (entry.item && (entry.item.resolved || entry.item.isResolved || entry.item.completed)));
 
             dayEquipment.push({
               _eqKey: eqKey,
@@ -1558,19 +1558,20 @@ class WeeklySummaryEngine {
               </div>
               <div style="display: flex; flex-direction: column; gap: 4px;">
                 ${day.equipment.map(eq => {
+                  const isDone = !!eq.isResolved;
                   return `
-                    <div style="background: var(--bg-primary); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 5px; padding: 5px 7px;">
+                    <div style="background: var(--bg-primary); border: 1px solid ${isDone ? 'rgba(16, 185, 129, 0.25)' : 'rgba(245, 158, 11, 0.25)'}; border-radius: 5px; padding: 5px 7px; opacity: ${isDone ? '0.72' : '1'};">
                       <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 2px;">
-                        <span style="font-weight: 700; font-size: 11px; color: #f8fafc; display: flex; align-items: center; gap: 4px;">
+                        <span style="font-weight: 700; font-size: 11px; color: ${isDone ? '#94a3b8' : '#f8fafc'}; text-decoration: ${isDone ? 'line-through' : 'none'}; display: flex; align-items: center; gap: 4px;">
                           <span>${eq.icon}</span> ${this.escapeHtml(eq.equipmentType)}
                         </span>
                         ${eq.vehicleNumber ? `<span class="badge" style="background: rgba(234, 179, 8, 0.2); color: #fde047; font-size: 8.5px; font-weight: 700; padding: 1px 4px; border-radius: 3px;">🚛 Unit ${this.escapeHtml(eq.vehicleNumber)}</span>` : ''}
                       </div>
-                      ${eq.notes ? `<div style="font-size: 10px; color: #cbd5e1; line-height: 1.25; margin-bottom: 2px;">${this.escapeHtml(eq.notes)}</div>` : ''}
+                      ${eq.notes ? `<div style="font-size: 10px; color: ${isDone ? '#94a3b8' : '#cbd5e1'}; text-decoration: ${isDone ? 'line-through' : 'none'}; line-height: 1.25; margin-bottom: 2px;">${this.escapeHtml(eq.notes)}</div>` : ''}
                       <div style="font-size: 9.5px; color: #94a3b8; display: flex; align-items: center; gap: 5px; flex-wrap: wrap;">
                         ${eq.crewId ? `<span style="color: #60a5fa;">👷 Crew ${this.escapeHtml(eq.crewId)}</span>` : ''}
                         ${eq.location ? `<span style="color: #93c5fd;">📍 ${this.escapeHtml(eq.location)}</span>` : ''}
-                        ${eq.isResolved ? '<span style="color: #34d399; font-weight: 700; margin-left: auto;">✅ Delivered</span>' : '<span style="color: #fbbf24; margin-left: auto;">⏳ Pending</span>'}
+                        ${isDone ? '<span style="color: #34d399; font-weight: 700; margin-left: auto;">✅ Delivered</span>' : '<span style="color: #fbbf24; margin-left: auto;">⏳ Pending</span>'}
                       </div>
                     </div>
                   `;
@@ -2677,9 +2678,10 @@ class WeeklySummaryEngine {
           // Equipment Deliveries
           if (d.equipment && d.equipment.length > 0) {
             d.equipment.forEach(eq => {
+              const isDone = !!eq.isResolved;
               taskItems.push(`
-                <div style="margin-bottom: 3px; font-size: 11px; color: #92400e;">
-                  ${eq.isResolved ? '✅' : '⏳'} 🧰 <strong>${this.escapeHtml(eq.equipmentType)}</strong>${eq.vehicleNumber ? ` (Unit ${this.escapeHtml(eq.vehicleNumber)})` : ''}${eq.crewId ? ` · Crew ${this.escapeHtml(eq.crewId)}` : ''}${eq.location ? ` [📍 ${this.escapeHtml(eq.location)}]` : ''}
+                <div style="margin-bottom: 3px; font-size: 11px; ${isDone ? 'color: #64748b; text-decoration: line-through;' : 'color: #92400e;'}">
+                  ${isDone ? '✅' : '⏳'} 🧰 <strong>${this.escapeHtml(eq.equipmentType)}</strong>${eq.vehicleNumber ? ` (Unit ${this.escapeHtml(eq.vehicleNumber)})` : ''}${eq.crewId ? ` · Crew ${this.escapeHtml(eq.crewId)}` : ''}${eq.location ? ` [📍 ${this.escapeHtml(eq.location)}]` : ''}
                 </div>
               `);
             });
