@@ -2827,6 +2827,38 @@ class SwapGenerationEngine {
     return obj;
   }
 
+  closeSwapSummaryModal() {
+    const modal = document.getElementById('swap-summary-modal');
+    if (modal) {
+      modal.classList.remove('active');
+      modal.style.display = 'none';
+    }
+  }
+
+  viewSwaps() {
+    this.closeSwapSummaryModal();
+    if (typeof window !== 'undefined' && window.sheetNavigator) {
+      if (typeof window.navigateToView === 'function') {
+        window.navigateToView('sheets-view');
+      } else {
+        document.querySelectorAll('.view-container').forEach(v => v.classList.remove('active'));
+        document.getElementById('sheets-view')?.classList.add('active');
+        document.querySelectorAll('.nav-item').forEach(n => {
+          n.classList.toggle('active', n.dataset.view === 'sheets-view');
+        });
+      }
+      window.sheetNavigator.currentSheetKey = 'glove_swaps';
+      window.sheetNavigator.filterSize = 'all';
+      window.sheetNavigator.filterClass = 'all';
+      window.sheetNavigator.filterLocation = 'all';
+      window.sheetNavigator.filterStatus = 'all';
+      window.sheetNavigator.searchTerm = '';
+      window.sheetNavigator.sortCol = null;
+      window.sheetNavigator.renderTabsBar();
+      window.sheetNavigator.renderCurrentSheet();
+    }
+  }
+
   showSwapSummaryModal(stats, elapsed) {
     if (typeof document === 'undefined') return;
     let modal = document.getElementById('swap-summary-modal');
@@ -2834,57 +2866,75 @@ class SwapGenerationEngine {
       modal = document.createElement('div');
       modal.id = 'swap-summary-modal';
       modal.className = 'modal-overlay';
+      modal.style.display = 'none';
       document.body.appendChild(modal);
     }
 
-    modal.innerHTML = `
-      <div class="modal-card" style="max-width: 540px; border-radius: 12px; overflow: hidden; box-shadow: 0 20px 40px rgba(0,0,0,0.5);">
-        <div class="modal-header" style="background: linear-gradient(135deg, #1e293b, #0f172a); border-bottom: 1px solid var(--border-color); padding: 16px 20px;">
-          <div style="display: flex; align-items: center; gap: 10px;">
-            <div style="font-size: 20px;">⚡</div>
-            <div>
-              <h3 style="margin: 0; font-size: 15px; font-weight: 700; color: #f8fafc;">Swap Reports Generated</h3>
-              <div style="font-size: 11px; color: #94a3b8;">Completed in <strong style="color: #60a5fa;">${elapsed}ms</strong></div>
-            </div>
-          </div>
-          <button class="modal-close" onclick="document.getElementById('swap-summary-modal').classList.remove('active')">✕</button>
+    const elapsedEl = document.getElementById('swap-summary-elapsed');
+    if (elapsedEl) {
+      elapsedEl.innerHTML = `Completed in <strong style="color: #60a5fa;">${elapsed}ms</strong>`;
+    }
+
+    const bodyContent = `
+      <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 16px;">
+        <div style="background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 12px; text-align: center;">
+          <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 2px;">🧤 Gloves</div>
+          <div style="font-size: 16px; font-weight: 700; color: #60a5fa;">${stats.gloves || 0} due</div>
         </div>
-        <div style="padding: 20px; background-color: var(--bg-secondary);">
-          <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 16px;">
-            <div style="background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 12px; text-align: center;">
-              <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 2px;">🧤 Gloves</div>
-              <div style="font-size: 16px; font-weight: 700; color: #60a5fa;">${stats.gloves} due</div>
-            </div>
-            <div style="background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 12px; text-align: center;">
-              <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 2px;">💪 Sleeves</div>
-              <div style="font-size: 16px; font-weight: 700; color: #34d399;">${stats.sleeves} due</div>
-            </div>
-            <div style="background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 12px; text-align: center;">
-              <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 2px;">🧱 Blankets</div>
-              <div style="font-size: 16px; font-weight: 700; color: #fbbf24;">${stats.blankets} due</div>
-            </div>
-            <div style="background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 12px; text-align: center;">
-              <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 2px;">🧱 MACKs</div>
-              <div style="font-size: 16px; font-weight: 700; color: #38bdf8;">${stats.macks} due</div>
-            </div>
-            <div style="background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 12px; text-align: center;">
-              <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 2px;">⚡ HV / Phasing</div>
-              <div style="font-size: 16px; font-weight: 700; color: #c084fc;">${stats.hv_testers + stats.phasing_sets} due</div>
-            </div>
-            <div style="background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 12px; text-align: center;">
-              <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 2px;">🏥 AED / Grounds / Sticks</div>
-              <div style="font-size: 16px; font-weight: 700; color: #f87171;">${stats.aed + stats.grounds + stats.hot_sticks} due</div>
-            </div>
-          </div>
-          <div style="background: rgba(96, 165, 250, 0.08); border: 1px solid rgba(96, 165, 250, 0.2); border-radius: 8px; padding: 12px 14px; font-size: 12px; color: #cbd5e1; line-height: 1.5;">
-            ✅ All swap reports are fully generated with 23-column hidden stage tracking and location/foreman groupings.
-          </div>
+        <div style="background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 12px; text-align: center;">
+          <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 2px;">💪 Sleeves</div>
+          <div style="font-size: 16px; font-weight: 700; color: #34d399;">${stats.sleeves || 0} due</div>
         </div>
-        <div class="modal-footer" style="padding: 12px 20px; background: var(--bg-primary); border-top: 1px solid var(--border-color); display: flex; justify-content: flex-end;">
-          <button class="btn btn-primary" onclick="document.getElementById('swap-summary-modal').classList.remove('active')">View Swaps</button>
+        <div style="background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 12px; text-align: center;">
+          <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 2px;">🧱 Blankets</div>
+          <div style="font-size: 16px; font-weight: 700; color: #fbbf24;">${stats.blankets || 0} due</div>
+        </div>
+        <div style="background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 12px; text-align: center;">
+          <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 2px;">🧱 MACKs</div>
+          <div style="font-size: 16px; font-weight: 700; color: #38bdf8;">${stats.macks || 0} due</div>
+        </div>
+        <div style="background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 12px; text-align: center;">
+          <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 2px;">⚡ HV / Phasing</div>
+          <div style="font-size: 16px; font-weight: 700; color: #c084fc;">${(stats.hv_testers || 0) + (stats.phasing_sets || 0)} due</div>
+        </div>
+        <div style="background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: 8px; padding: 10px 12px; text-align: center;">
+          <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 2px;">🏥 AED / Grounds / Sticks</div>
+          <div style="font-size: 16px; font-weight: 700; color: #f87171;">${(stats.aed || 0) + (stats.grounds || 0) + (stats.hot_sticks || 0)} due</div>
         </div>
       </div>
+      <div style="background: rgba(96, 165, 250, 0.08); border: 1px solid rgba(96, 165, 250, 0.2); border-radius: 8px; padding: 12px 14px; font-size: 12px; color: #cbd5e1; line-height: 1.5;">
+        ✅ All swap reports are fully generated with 23-column hidden stage tracking and location/foreman groupings.
+      </div>
     `;
+
+    const bodyEl = document.getElementById('swap-summary-modal-body');
+    if (bodyEl) {
+      bodyEl.innerHTML = bodyContent;
+    } else {
+      modal.innerHTML = `
+        <div class="modal-box modal-card" style="max-width: 560px; width: 95%; border-radius: 12px; overflow: hidden; box-shadow: 0 20px 40px rgba(0,0,0,0.5); pointer-events: auto;">
+          <div class="modal-header" style="background: linear-gradient(135deg, #1e293b, #0f172a); border-bottom: 1px solid var(--border-color); padding: 16px 20px; display: flex; justify-content: space-between; align-items: center; cursor: move;">
+            <div style="display: flex; align-items: center; gap: 10px;">
+              <div style="font-size: 20px;">⚡</div>
+              <div>
+                <h3 style="margin: 0; font-size: 15px; font-weight: 700; color: #f8fafc;">Swap Reports Generated</h3>
+                <div style="font-size: 11px; color: #94a3b8;">Completed in <strong style="color: #60a5fa;">${elapsed}ms</strong></div>
+              </div>
+            </div>
+            <button type="button" class="btn btn-secondary" style="padding: 2px 8px; font-size: 12px; background: rgba(0,0,0,0.25); border: none; color: white; cursor: pointer;" onclick="window.swapEngine.closeSwapSummaryModal()">✕</button>
+          </div>
+          <div class="modal-body" style="padding: 20px; background-color: var(--bg-secondary);">
+            ${bodyContent}
+          </div>
+          <div class="modal-footer" style="padding: 12px 20px; background: var(--bg-primary); border-top: 1px solid var(--border-color); display: flex; justify-content: flex-end; gap: 10px;">
+            <button type="button" class="btn btn-secondary" onclick="window.swapEngine.closeSwapSummaryModal()">Close</button>
+            <button type="button" class="btn btn-primary" onclick="window.swapEngine.viewSwaps()">View Swaps</button>
+          </div>
+        </div>
+      `;
+    }
+
+    modal.style.display = 'flex';
     modal.classList.add('active');
   }
 }

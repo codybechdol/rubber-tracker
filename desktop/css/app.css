@@ -555,13 +555,15 @@ body {
 
 /* Modal boxes catch all mouse interactions */
 .modal-box,
+.modal-card,
 .dossier-modal-box,
 .history-issues-modal-box {
   pointer-events: auto;
   transition: box-shadow 0.15s ease, border-color 0.15s ease;
 }
 
-/* Procurement sub-modals must always sit on top of the parent procurement dialog */
+/* Modal overlays that must always sit on top and catch all interactions */
+#swap-summary-modal,
 #edit-order-modal,
 #edit-pending-order-item-modal,
 #mark-ordered-modal,
@@ -572,6 +574,7 @@ body {
   pointer-events: auto !important;
 }
 
+#swap-summary-modal.active,
 #edit-order-modal.active,
 #edit-pending-order-item-modal.active,
 #mark-ordered-modal.active,
@@ -581,6 +584,8 @@ body {
   display: flex !important;
 }
 
+#swap-summary-modal .modal-card,
+#swap-summary-modal .modal-box,
 #edit-order-modal .modal-box,
 #edit-pending-order-item-modal .modal-box,
 #mark-ordered-modal .modal-box,
@@ -605,6 +610,7 @@ body {
 
 /* Active / Topmost Window Elevation Highlight */
 .modal-overlay.is-topmost .modal-box,
+.modal-overlay.is-topmost .modal-card,
 .modal-overlay.is-topmost .dossier-modal-box,
 .modal-overlay.is-topmost .history-issues-modal-box {
   box-shadow: 0 16px 45px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(96, 165, 250, 0.35) !important;

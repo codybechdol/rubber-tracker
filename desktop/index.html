@@ -2075,6 +2075,29 @@
     </div>
   </div>
 
+  <!-- Swap Summary Modal -->
+  <div id="swap-summary-modal" class="modal-overlay" style="display: none;">
+    <div class="modal-box modal-card" style="max-width: 560px; width: 95%; border-radius: 12px; overflow: hidden; box-shadow: 0 20px 40px rgba(0,0,0,0.5); pointer-events: auto;">
+      <div class="modal-header" style="background: linear-gradient(135deg, #1e293b, #0f172a); border-bottom: 1px solid var(--border-color); padding: 16px 20px; display: flex; justify-content: space-between; align-items: center; cursor: move;">
+        <div style="display: flex; align-items: center; gap: 10px;">
+          <div style="font-size: 20px;">⚡</div>
+          <div>
+            <h3 style="margin: 0; font-size: 15px; font-weight: 700; color: #f8fafc;">Swap Reports Generated</h3>
+            <div style="font-size: 11px; color: #94a3b8;" id="swap-summary-elapsed">Completed</div>
+          </div>
+        </div>
+        <button type="button" class="btn btn-secondary" style="padding: 2px 8px; font-size: 12px; background: rgba(0,0,0,0.25); border: none; color: white; cursor: pointer;" onclick="window.swapEngine.closeSwapSummaryModal()">✕</button>
+      </div>
+      <div class="modal-body" id="swap-summary-modal-body" style="padding: 20px; background-color: var(--bg-secondary);">
+        <!-- Injected dynamically by swaps.js -->
+      </div>
+      <div class="modal-footer" style="padding: 12px 20px; background: var(--bg-primary); border-top: 1px solid var(--border-color); display: flex; justify-content: flex-end; gap: 10px;">
+        <button type="button" class="btn btn-secondary" onclick="window.swapEngine.closeSwapSummaryModal()">Close</button>
+        <button type="button" class="btn btn-primary" onclick="window.swapEngine.viewSwaps()">View Swaps</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Edit Order Modal -->
   <div id="edit-order-modal" class="modal-overlay" style="display: none;">
     <div class="modal-box" style="max-width: 840px; width: 95%; max-height: 92vh;">
