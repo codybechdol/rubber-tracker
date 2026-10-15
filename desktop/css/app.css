@@ -541,6 +541,48 @@ body {
   transition: box-shadow 0.15s ease, border-color 0.15s ease;
 }
 
+/* Procurement sub-modals must always sit on top of the parent procurement dialog */
+#edit-order-modal,
+#edit-pending-order-item-modal,
+#mark-ordered-modal,
+#batch-delivery-modal,
+#add-past-order-modal,
+#manage-vendors-modal {
+  z-index: 13500 !important;
+  pointer-events: auto !important;
+}
+
+#edit-order-modal.active,
+#edit-pending-order-item-modal.active,
+#mark-ordered-modal.active,
+#batch-delivery-modal.active,
+#add-past-order-modal.active,
+#manage-vendors-modal.active {
+  display: flex !important;
+}
+
+#edit-order-modal .modal-box,
+#edit-pending-order-item-modal .modal-box,
+#mark-ordered-modal .modal-box,
+#batch-delivery-modal .modal-box,
+#add-past-order-modal .modal-box,
+#manage-vendors-modal .modal-box {
+  pointer-events: auto !important;
+  position: relative;
+  z-index: 13501 !important;
+}
+
+#edit-order-modal input,
+#edit-order-modal select,
+#edit-order-modal textarea,
+#edit-pending-order-item-modal input,
+#edit-pending-order-item-modal select,
+#edit-pending-order-item-modal textarea {
+  pointer-events: auto !important;
+  user-select: text !important;
+  -webkit-user-select: text !important;
+}
+
 /* Active / Topmost Window Elevation Highlight */
 .modal-overlay.is-topmost .modal-box,
 .modal-overlay.is-topmost .dossier-modal-box,
