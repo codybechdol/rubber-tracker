@@ -604,8 +604,8 @@ body {
 #edit-pending-order-item-modal select,
 #edit-pending-order-item-modal textarea {
   pointer-events: auto !important;
-  user-select: text !important;
   -webkit-user-select: text !important;
+  user-select: text !important;
 }
 
 /* Active / Topmost Window Elevation Highlight */
@@ -619,8 +619,8 @@ body {
 /* Window Header Dragging */
 .wm-draggable-header {
   cursor: grab !important;
-  user-select: none !important;
   -webkit-user-select: none !important;
+  user-select: none !important;
 }
 
 .wm-draggable-header:active,
@@ -631,6 +631,7 @@ body {
 .modal-box.is-dragging,
 .dossier-modal-box.is-dragging,
 .history-issues-modal-box.is-dragging {
+  -webkit-user-select: none !important;
   user-select: none !important;
   box-shadow: 0 20px 50px rgba(0, 0, 0, 0.85), 0 0 0 2px rgba(96, 165, 250, 0.6) !important;
   transition: none !important;
@@ -641,8 +642,8 @@ body {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.55);
-  backdrop-filter: blur(2px);
   -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
   z-index: 11990;
   opacity: 0;
   pointer-events: none;
@@ -2668,6 +2669,7 @@ body.view-only-mode .card-drop-zone {
   position: fixed;
   inset: 0;
   background: rgba(0, 0, 0, 0.5);
+  -webkit-backdrop-filter: blur(2px);
   backdrop-filter: blur(2px);
   z-index: 99990;
   opacity: 0;

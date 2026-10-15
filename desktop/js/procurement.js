@@ -4437,7 +4437,6 @@ class ProcurementEngine {
     const body = document.getElementById('mark-ordered-modal-body');
     if (!modal || !body) return;
 
-    const poNumber = this.getPurchaseOrderNumber();
     const today = new Date();
     const todayYmd = today.toISOString().split('T')[0];
     const defaultDelivery = new Date(today.getTime() + 14 * 86400000).toISOString().split('T')[0];
@@ -4633,7 +4632,6 @@ class ProcurementEngine {
       if (poNumInput) poNumInput.focus();
       return;
     }
-    const poNum = orderNum;
 
     const vSelect = document.getElementById('mark-order-vendor-select');
     let vendorName = vSelect ? vSelect.value : '';
@@ -5613,7 +5611,7 @@ class ProcurementEngine {
       await this.loadData();
       this.render();
 
-      alert(`✅ Past Purchase Order #${poNum}${vendorOrderNum ? ' (Order #' + vendorOrderNum + ')' : ''} logged successfully!`);
+      alert(`✅ Past Purchase Order #${poNum} logged successfully!`);
     } catch (err) {
       console.error('Error logging past order:', err);
       alert('❌ Failed to save past order: ' + (err.message || err));
@@ -5805,7 +5803,7 @@ class ProcurementEngine {
                 <button class="btn btn-xs" onclick="window.procurementEngine.openEditOrderModal(${poHistoryIdx})" style="background: rgba(148, 163, 184, 0.15); border: 1px solid rgba(148, 163, 184, 0.35); color: #cbd5e1; padding: 3px 7px; font-size: 11px; border-radius: 3px; cursor: pointer; display: inline-flex; align-items: center; gap: 3px;" title="Edit Order #, Vendor, Dates, or Details">
                   <span>✏️</span> Edit
                 </button>
-                <button class="btn btn-xs" onclick="window.procurementEngine.deleteOrder(${po.rowIdx}, '${this.escapeJs(po.vendorOrderNum || po.poNum)}', ${poHistoryIdx})" style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.35); color: #f87171; padding: 3px 7px; font-size: 11px; border-radius: 3px; cursor: pointer; display: inline-flex; align-items: center; gap: 3px;" title="Delete this order from tracking history">
+                <button class="btn btn-xs" onclick="window.procurementEngine.deleteOrder(${po.rowIdx}, '${this.escapeJs(po.vendorOrderNum || po.poNum)}')" style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.35); color: #f87171; padding: 3px 7px; font-size: 11px; border-radius: 3px; cursor: pointer; display: inline-flex; align-items: center; gap: 3px;" title="Delete this order from tracking history">
                   <span>🗑️</span> Delete
                 </button>
               </div>
@@ -6757,7 +6755,7 @@ class ProcurementEngine {
     }
   }
 
-  async deleteOrder(rowIdx, poNum, poHistoryIdx = null) {
+  async deleteOrder(rowIdx, poNum) {
     if (!confirm(`Are you sure you want to permanently delete Order #${poNum || 'Unknown'} from the tracking history?\n\nThis will also revert any pending items for this order back to "Needs to Order".`)) {
       return;
     }
