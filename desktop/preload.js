@@ -10,5 +10,6 @@ contextBridge.exposeInMainWorld('desktopAPI', {
   openExternal: (url) => ipcRenderer.invoke('open-external', url),
   openPdfExternally: (base64Data, filename) => ipcRenderer.invoke('open-pdf-externally', { base64Data, filename }),
   savePdfToFile: (base64Data, defaultFilename) => ipcRenderer.invoke('save-pdf-to-file', { base64Data, defaultFilename }),
-  saveHtmlToPdf: (htmlContent, defaultFilename) => ipcRenderer.invoke('save-html-to-pdf', { htmlContent, defaultFilename })
+  saveHtmlToPdf: (htmlContent, defaultFilename) => ipcRenderer.invoke('save-html-to-pdf', { htmlContent, defaultFilename }),
+  forceFocusWindow: () => ipcRenderer.invoke('force-focus-window')
 });

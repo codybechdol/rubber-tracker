@@ -102,14 +102,18 @@ class WindowManager {
 
     // 1. Click/Pointerdown inside modal box elevates to front
     document.addEventListener('pointerdown', (e) => {
-      const modal = e.target.closest('.modal-overlay');
+      // Do not alter styles or mutate DOM if interacting with form inputs / editable elements
+      if (e.target && e.target.closest && e.target.closest('input, textarea, select, [contenteditable], [contenteditable="true"], .editable, td.editable')) {
+        return;
+      }
+      const modal = e.target.closest ? e.target.closest('.modal-overlay') : null;
       if (modal && this.isModalActive(modal)) {
         const box = this.getModalBox(modal);
         if (box && (box === e.target || box.contains(e.target))) {
           this.bringToFront(modal);
         }
       }
-    }, { capture: true });
+    });
 
     // 2. Drag pointermove handler
     window.addEventListener('pointermove', (e) => {
@@ -139,23 +143,30 @@ class WindowManager {
 
     // 3. Drag pointerup / cancel handler
     const endDrag = (e) => {
-      if (!this.dragState) return;
-      const { box, header, pointerId } = this.dragState;
-      if (header && typeof header.releasePointerCapture === 'function' && pointerId !== undefined) {
-        try { header.releasePointerCapture(pointerId); } catch (err) {}
-      }
-      if (box) {
-        box.classList.remove('is-dragging');
-      }
-      if (header) {
-        header.classList.remove('is-dragging');
+      if (this.dragState) {
+        const { box, header, pointerId } = this.dragState;
+        if (header && typeof header.releasePointerCapture === 'function' && pointerId !== undefined) {
+          try { header.releasePointerCapture(pointerId); } catch (err) {}
+        }
+        if (box) {
+          box.classList.remove('is-dragging');
+        }
+        if (header) {
+          header.classList.remove('is-dragging');
+        }
+        this.dragState = null;
       }
       document.body.style.userSelect = '';
-      this.dragState = null;
+      if (document.body.style.removeProperty) {
+        document.body.style.removeProperty('user-select');
+        document.body.style.removeProperty('-webkit-user-select');
+      }
     };
 
     window.addEventListener('pointerup', endDrag);
     window.addEventListener('pointercancel', endDrag);
+    window.addEventListener('mouseup', endDrag);
+    window.addEventListener('blur', endDrag);
 
     // 4. Keyboard Escape key closes topmost modal
     window.addEventListener('keydown', (e) => {
@@ -401,13 +412,18 @@ class WindowManager {
   bringToFront(modal) {
     if (!modal) return;
     const isAlreadyTop = this.getTopmostModal() === modal;
+    if (isAlreadyTop && modal.classList.contains('is-topmost')) {
+      return; // Already topmost, avoid redundant DOM class/style mutations
+    }
     if (!modal.style.zIndex || !isAlreadyTop) {
       this.currentZIndex++;
       modal.style.zIndex = String(this.currentZIndex);
     }
 
     // Update topmost styling class
-    this.activeModals.forEach(m => m.classList.remove('is-topmost'));
+    this.activeModals.forEach(m => {
+      if (m !== modal) m.classList.remove('is-topmost');
+    });
     modal.classList.add('is-topmost');
   }
 

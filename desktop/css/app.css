@@ -26,6 +26,26 @@
   user-select: none;
 }
 
+/* Ensure all form controls, inputs, textareas, and editable fields always allow text cursor and selection */
+input,
+textarea,
+select,
+[contenteditable],
+[contenteditable="true"],
+.editable,
+td.editable,
+.batch-delivery-input,
+.cell-text {
+  -webkit-user-select: text !important;
+  user-select: text !important;
+  pointer-events: auto !important;
+}
+
+select {
+  cursor: pointer !important;
+}
+
+
 body {
   background-color: var(--bg-primary);
   color: var(--text-primary);

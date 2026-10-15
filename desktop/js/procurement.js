@@ -4050,6 +4050,7 @@ class ProcurementEngine {
       }
       this.setPOFormat('clean');
       modal.style.display = 'flex';
+      modal.classList.add('active');
     }
   }
 
@@ -4057,12 +4058,18 @@ class ProcurementEngine {
     this.activeModalVendorIdx = (this.activeModalVendorIdx !== undefined && this.activeModalVendorIdx < this.vendors.length) ? this.activeModalVendorIdx : 0;
     this.renderVendorModal();
     const modal = document.getElementById('manage-vendors-modal');
-    if (modal) modal.style.display = 'flex';
+    if (modal) {
+      modal.style.display = 'flex';
+      modal.classList.add('active');
+    }
   }
 
   closeManageVendorsModal() {
     const modal = document.getElementById('manage-vendors-modal');
-    if (modal) modal.style.display = 'none';
+    if (modal) {
+      modal.style.display = 'none';
+      modal.classList.remove('active');
+    }
   }
 
   renderVendorModal() {
@@ -4550,11 +4557,15 @@ class ProcurementEngine {
     `;
 
     modal.style.display = 'flex';
+    modal.classList.add('active');
   }
 
   closeMarkOrderedModal() {
     const modal = document.getElementById('mark-ordered-modal');
-    if (modal) modal.style.display = 'none';
+    if (modal) {
+      modal.style.display = 'none';
+      modal.classList.remove('active');
+    }
   }
 
   recalcMarkOrderedModal() {
@@ -4961,11 +4972,15 @@ class ProcurementEngine {
 
     this._pendingDeliveryUnits = units;
     modal.style.display = 'flex';
+    modal.classList.add('active');
   }
 
   closeBatchDeliveryModal() {
     const modal = document.getElementById('batch-delivery-modal');
-    if (modal) modal.style.display = 'none';
+    if (modal) {
+      modal.style.display = 'none';
+      modal.classList.remove('active');
+    }
   }
 
   async confirmBatchDelivery() {
@@ -5491,11 +5506,15 @@ class ProcurementEngine {
     `;
 
     modal.style.display = 'flex';
+    modal.classList.add('active');
   }
 
   closeAddPastOrderModal() {
     const modal = document.getElementById('add-past-order-modal');
-    if (modal) modal.style.display = 'none';
+    if (modal) {
+      modal.style.display = 'none';
+      modal.classList.remove('active');
+    }
   }
 
   onPastOrderVendorChange(val) {
@@ -6256,6 +6275,7 @@ class ProcurementEngine {
     `;
 
     modal.style.display = 'flex';
+    modal.classList.add('active');
     this.renderEditOrderItemsContainer();
     this.onAddOrderItemChange();
     this.syncEditOrderSummaryFromItems();
@@ -6460,7 +6480,10 @@ class ProcurementEngine {
 
   closeEditOrderModal() {
     const modal = document.getElementById('edit-order-modal');
-    if (modal) modal.style.display = 'none';
+    if (modal) {
+      modal.style.display = 'none';
+      modal.classList.remove('active');
+    }
     this.editingOrder = null;
     this.editingOrderItems = [];
   }
@@ -7167,6 +7190,7 @@ class ProcurementEngine {
     `;
 
     modal.style.display = 'flex';
+    modal.classList.add('active');
   }
 
   openEditOrderFromCurrentPendingItem() {
@@ -7181,7 +7205,10 @@ class ProcurementEngine {
 
   closeEditPendingOrderItemModal() {
     const modal = document.getElementById('edit-pending-order-item-modal');
-    if (modal) modal.style.display = 'none';
+    if (modal) {
+      modal.style.display = 'none';
+      modal.classList.remove('active');
+    }
     this.editingPendingItem = null;
   }
 

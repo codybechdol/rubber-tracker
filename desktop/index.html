@@ -3110,6 +3110,68 @@
       });
     }
 
+    // Global Focus & Caret Recovery Guard:
+    // Prevents Chromium/Electron from dropping text caret or keyboard focus after alerts, modals, or window blurs
+    (function initFocusRecoveryGuard() {
+      const origAlert = window.alert;
+      window.alert = function(msg) {
+        try {
+          return origAlert.call(window, msg);
+        } finally {
+          document.body.style.userSelect = '';
+          if (document.body.style.removeProperty) {
+            document.body.style.removeProperty('user-select');
+            document.body.style.removeProperty('-webkit-user-select');
+          }
+          if (window.desktopAPI && typeof window.desktopAPI.forceFocusWindow === 'function') {
+            window.desktopAPI.forceFocusWindow();
+          }
+          setTimeout(() => {
+            window.focus();
+            if (document.activeElement && typeof document.activeElement.focus === 'function') {
+              document.activeElement.focus();
+            }
+          }, 30);
+        }
+      };
+
+      const origConfirm = window.confirm;
+      window.confirm = function(msg) {
+        try {
+          return origConfirm.call(window, msg);
+        } finally {
+          document.body.style.userSelect = '';
+          if (document.body.style.removeProperty) {
+            document.body.style.removeProperty('user-select');
+            document.body.style.removeProperty('-webkit-user-select');
+          }
+          if (window.desktopAPI && typeof window.desktopAPI.forceFocusWindow === 'function') {
+            window.desktopAPI.forceFocusWindow();
+          }
+          setTimeout(() => {
+            window.focus();
+          }, 30);
+        }
+      };
+
+      // Ensure clicking any input or editable field explicitly activates it and restores caret
+      document.addEventListener('click', (e) => {
+        const editable = e.target.closest('input, textarea, select, [contenteditable="true"], .editable, td.editable');
+        if (editable) {
+          if (document.body.style.userSelect === 'none') {
+            document.body.style.userSelect = '';
+            if (document.body.style.removeProperty) {
+              document.body.style.removeProperty('user-select');
+              document.body.style.removeProperty('-webkit-user-select');
+            }
+          }
+          if (document.activeElement !== editable && typeof editable.focus === 'function') {
+            editable.focus();
+          }
+        }
+      }, true);
+    })();
+
     // App Initialization
     window.addEventListener('DOMContentLoaded', async () => {
       try {

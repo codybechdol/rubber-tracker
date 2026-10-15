@@ -149,6 +149,16 @@ ipcMain.handle('save-local-outbox', async (event, outbox) => {
   }
 });
 
+ipcMain.handle('force-focus-window', () => {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.focus();
+    if (mainWindow.webContents) {
+      mainWindow.webContents.focus();
+    }
+  }
+  return true;
+});
+
 ipcMain.handle('select-snapshot-file', async () => {
   const result = await dialog.showOpenDialog(mainWindow, {
     properties: ['openFile'],
