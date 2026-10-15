@@ -132,12 +132,128 @@ class SheetNavigator {
     return headers[0] || null;
   }
 
+  getPendingEmployeesMap() {
+    const map = new Map();
+    const empTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('employees') : null);
+    if (!empTable || !empTable.rows) return map;
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    empTable.rows.forEach(r => {
+      const name = String(r['Employee Name'] || r['Name'] || Object.values(r)[0] || '').trim();
+      if (!name) return;
+      const status = String(r['Status'] || '').trim().toLowerCase();
+      const hireDateStr = String(r['Hire Date'] || r['HireDate'] || '').trim();
+      let isFutureHire = false;
+      let hireDateObj = null;
+
+      if (hireDateStr) {
+        const parts = hireDateStr.split(/[-/]/);
+        if (parts.length === 3) {
+          let y, m, d;
+          if (parts[0].length === 4) {
+            y = parseInt(parts[0], 10);
+            m = parseInt(parts[1], 10) - 1;
+            d = parseInt(parts[2], 10);
+          } else {
+            m = parseInt(parts[0], 10) - 1;
+            d = parseInt(parts[1], 10);
+            y = parseInt(parts[2], 10);
+          }
+          hireDateObj = new Date(y, m, d, 12, 0, 0);
+          if (hireDateObj > today) isFutureHire = true;
+        }
+      }
+
+      if (status === 'pending' || isFutureHire) {
+        const clean = name.replace(/\s*\([^)]*\)/g, '').toLowerCase().trim();
+        map.set(clean, {
+          name,
+          status,
+          hireDate: hireDateStr,
+          hireDateObj
+        });
+      }
+    });
+
+    return map;
+  }
+
+  async autoActivatePendingEmployees() {
+    try {
+      if (!this.db || typeof this.db.getTable !== 'function') return;
+      const empTable = this.db.getTable('employees');
+      if (!empTable || !empTable.rows) return;
+
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+
+      const headers = empTable.headers || [];
+      let statusColIdx = headers.findIndex(h => String(h).trim().toLowerCase() === 'status') + 1;
+      if (statusColIdx <= 0) return;
+
+      const activatedNames = [];
+
+      for (let i = 0; i < empTable.rows.length; i++) {
+        const r = empTable.rows[i];
+        const status = String(r['Status'] || '').trim().toLowerCase();
+        if (status !== 'pending') continue;
+
+        const hireDateStr = String(r['Hire Date'] || r['HireDate'] || '').trim();
+        if (!hireDateStr) continue;
+
+        const parts = hireDateStr.split(/[-/]/);
+        if (parts.length !== 3) continue;
+
+        let y, m, d;
+        if (parts[0].length === 4) {
+          y = parseInt(parts[0], 10);
+          m = parseInt(parts[1], 10) - 1;
+          d = parseInt(parts[2], 10);
+        } else {
+          m = parseInt(parts[0], 10) - 1;
+          d = parseInt(parts[1], 10);
+          y = parseInt(parts[2], 10);
+        }
+        const hDate = new Date(y, m, d, 12, 0, 0);
+        if (today >= hDate) {
+          const empName = String(r['Employee Name'] || r['Name'] || Object.values(r)[0] || '').trim();
+          r['Status'] = 'Active';
+          const rIdx = r._rowIdx || (i + 2);
+          if (empTable.rawGrid && empTable.rawGrid[rIdx - 1]) {
+            empTable.rawGrid[rIdx - 1][statusColIdx - 1] = 'Active';
+          }
+          await this.db.addMutation({
+            action: 'UPDATE_CELL',
+            sheetName: empTable.name || 'Employees',
+            tableKey: 'employees',
+            row: rIdx,
+            col: statusColIdx,
+            header: 'Status',
+            itemIdentifier: empName,
+            value: 'Active'
+          });
+          activatedNames.push(empName);
+        }
+      }
+
+      if (activatedNames.length > 0) {
+        await this.db.persistSnapshot(this.db.snapshot);
+        console.log(`[AutoActivate] Promoted ${activatedNames.length} pending employee(s) to Active: ${activatedNames.join(', ')}`);
+      }
+    } catch (err) {
+      console.warn('[AutoActivate] Failed to check pending employees:', err);
+    }
+  }
+
   init() {
     this.renderTabsBar();
     this.setupSearch();
     this.setupEmployeeViewToggle();
     this.renderCurrentSheet();
     this.runOneTimeVacationRepair();
+    this.autoActivatePendingEmployees();
   }
 
   setSizeFilter(val) {
@@ -2287,6 +2403,29 @@ class SheetNavigator {
       const phone = String(r['Phone Number'] || '').trim();
       const email = String(r['Email Address'] || r['Email'] || '').trim();
       const notes = String(r['Notes'] || '').trim();
+      const hireDate = String(r['Hire Date'] || r['HireDate'] || '').trim();
+      const status = String(r['Status'] || '').trim();
+
+      let isPending = status.toLowerCase() === 'pending';
+      if (!isPending && hireDate) {
+        const parts = hireDate.split(/[-/]/);
+        if (parts.length === 3) {
+          let y, m, d;
+          if (parts[0].length === 4) {
+            y = parseInt(parts[0], 10);
+            m = parseInt(parts[1], 10) - 1;
+            d = parseInt(parts[2], 10);
+          } else {
+            m = parseInt(parts[0], 10) - 1;
+            d = parseInt(parts[1], 10);
+            y = parseInt(parts[2], 10);
+          }
+          const hDate = new Date(y, m, d, 12, 0, 0);
+          const today = new Date();
+          today.setHours(0, 0, 0, 0);
+          if (hDate > today) isPending = true;
+        }
+      }
 
       const empObj = {
         raw: r,
@@ -2298,7 +2437,10 @@ class SheetNavigator {
         alternateNames: altNames,
         phone,
         email,
-        notes
+        notes,
+        hireDate,
+        status,
+        isPending
       };
 
       if (locLower.includes('(vacation)') || locLower === 'vacation') {
@@ -2598,6 +2740,19 @@ class SheetNavigator {
 
     // Helper for rendering a single employee row inside a card
     const renderMemberRow = (e, isLead = false, baseJob = '') => {
+      let pendingBadge = '';
+      if (e.isPending) {
+        let shortDate = '';
+        if (e.hireDate) {
+          const parts = e.hireDate.split(/[-/]/);
+          if (parts.length === 3) {
+            shortDate = parts[0].length === 4 ? `${parts[1]}/${parts[2]}` : `${parts[0]}/${parts[1]}`;
+          }
+        }
+        const badgeLabel = shortDate ? `⏳ Starts ${shortDate}` : `⏳ Pending`;
+        pendingBadge = `<span class="badge" style="background: rgba(245, 158, 11, 0.18); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); font-size: 9.5px; font-weight: 700; padding: 1px 5px; border-radius: 3px;" title="Pending New Hire — Starts ${this.escapeHtml(e.hireDate || 'future')}">${badgeLabel}</span>`;
+      }
+
       return `
         <div class="crew-member-row"
              draggable="true"
@@ -2629,6 +2784,7 @@ class SheetNavigator {
               ${isLead ? '<span title="Crew Foreman / Lead" style="margin-right: 2px;">👑</span>' : ''}
               <span>${this.escapeHtml(e.name)}</span>
             </a>
+            ${pendingBadge}
             ${window.ppeTrackingEngine ? window.ppeTrackingEngine.getMemberRowBadge(e.name, e.classification) : ''}
             ${e.isSecondaryMember && e.primaryJobNumber ? `
               <span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); font-size: 9.5px; font-weight: 700; padding: 1px 5px; border-radius: 3px;" title="Primary Job: ${this.escapeHtml(e.primaryJobNumber)}">
@@ -2707,6 +2863,11 @@ class SheetNavigator {
                      title="Open Employee Profile for ${this.escapeHtml(e.name)}">
                     ${this.escapeHtml(e.name)}
                   </a>
+                  ${e.isPending ? (() => {
+                    const sp = String(e.hireDate || '').split(/[-/]/);
+                    const dt = sp.length === 3 ? (sp[0].length === 4 ? `${sp[1]}/${sp[2]}` : `${sp[0]}/${sp[1]}`) : '';
+                    return `<span class="badge" style="background: rgba(245, 158, 11, 0.18); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); font-size: 9.5px; font-weight: 700; padding: 1px 5px; border-radius: 3px;" title="Pending New Hire — Starts ${this.escapeHtml(e.hireDate || 'future')}">⏳ Starts ${dt || 'Soon'}</span>`;
+                  })() : ''}
                   ${window.ppeTrackingEngine ? window.ppeTrackingEngine.getMemberRowBadge(e.name, e.classification) : ''}
                   <span class="badge" style="background: rgba(255,255,255,0.05); color: var(--text-muted); font-size: 10px; padding: 1px 5px; border-radius: 4px;">
                     📍 ${this.escapeHtml(e.location)}
@@ -2928,7 +3089,10 @@ class SheetNavigator {
             <!-- Member List inside edit mode -->
             <div style="border-top: 1px solid var(--border-color); padding-top: 10px;">
               <div style="font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px;">
-                Crew Members (${crew.members.length}):
+                Crew Members (${crew.members.length})${(() => {
+                  const pCount = crew.members.filter(m => m.isPending).length;
+                  return pCount > 0 ? ` <span style="color: #fbbf24; font-weight: 700;">(${pCount} pending)</span>` : '';
+                })()}:
               </div>
               ${crew.members.length > 0 ? crew.members.map(e => renderMemberRow(e, crew.nameMatchesForeman(e, crew.foreman), crew.baseJob)).join('') : '<div style="color: var(--text-muted); font-size: 12px; font-style: italic;">No members</div>'}
             </div>
@@ -2979,7 +3143,10 @@ class SheetNavigator {
               </button>
 
               <span class="badge" style="background: var(--bg-primary); color: var(--text-muted); font-size: 11px; font-weight: 700; padding: 2px 7px; border-radius: 12px; border: 1px solid var(--border-color); flex-shrink: 0;">
-                ${crew.members.length} ${crew.members.length === 1 ? 'member' : 'members'}
+                ${crew.members.length} ${crew.members.length === 1 ? 'member' : 'members'}${(() => {
+                  const pCount = crew.members.filter(m => m.isPending).length;
+                  return pCount > 0 ? ` <span style="color: #fbbf24; font-weight: 700;">(${pCount} pending)</span>` : '';
+                })()}
               </span>
             </div>
           </div>
@@ -4749,6 +4916,7 @@ class SheetNavigator {
     }
     const headers = tableData.headers || [];
     let rows = [...(tableData.rows || [])];
+    const pendingEmps = isEquipmentSheet ? this.getPendingEmployeesMap() : null;
 
     if (!headers.length && !rows.length) {
       const sheetName = tableData.name || (this.currentSheetKey === 'safety_compliance' ? 'Safety Compliance' : (this.currentSheetKey === 'expiring_certs' ? 'Expiring Certs' : (this.currentSheetKey === 'training_tracking' ? 'Training Tracking' : 'this sheet')));
@@ -6153,6 +6321,67 @@ class SheetNavigator {
           }
         }
 
+        // Equipment Sheet Status Formatting (Assigned, Pre-Assigned, On Shelf, etc.)
+        if (isEquipmentSheet && hLower === 'status') {
+          const sVal = String(val || '').trim();
+          const sLower = sVal.toLowerCase();
+
+          // Check if date assigned is in the future
+          const dateAssignedStr = String(row['Date Assigned'] || row['Assigned Date'] || '').trim();
+          let isFutureAssignedDate = false;
+          if (dateAssignedStr) {
+            const parts = dateAssignedStr.split(/[-/]/);
+            if (parts.length === 3) {
+              let y, m, d;
+              if (parts[0].length === 4) {
+                y = parseInt(parts[0], 10);
+                m = parseInt(parts[1], 10) - 1;
+                d = parseInt(parts[2], 10);
+              } else {
+                m = parseInt(parts[0], 10) - 1;
+                d = parseInt(parts[1], 10);
+                y = parseInt(parts[2], 10);
+              }
+              const aDate = new Date(y, m, d, 12, 0, 0);
+              const today = new Date();
+              today.setHours(0, 0, 0, 0);
+              if (aDate > today) isFutureAssignedDate = true;
+            }
+          }
+
+          const holderRaw = String(row['Assigned To'] || row['Holder'] || '').trim();
+          const cleanHolder = holderRaw.replace(/\s*\([^)]*\)/g, '').toLowerCase().trim();
+          const isPendingHolder = Boolean(pendingEmps && pendingEmps.has(cleanHolder));
+
+          if (sLower === 'assigned' && (isFutureAssignedDate || isPendingHolder)) {
+            const pendingInfo = isPendingHolder ? pendingEmps.get(cleanHolder) : null;
+            const startDateStr = dateAssignedStr || pendingInfo?.hireDate || '';
+            let shortDate = '';
+            if (startDateStr) {
+              const sp = startDateStr.split(/[-/]/);
+              if (sp.length === 3) {
+                shortDate = sp[0].length === 4 ? `${sp[1]}/${sp[2]}` : `${sp[0]}/${sp[1]}`;
+              }
+            }
+            const label = shortDate ? `⏳ Pre-Assigned (${shortDate})` : `⏳ Pre-Assigned`;
+            customCellHtml = `<span class="cell-text" style="display:none;">${this.escapeHtml(val)}</span><span class="badge" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.5); padding: 2px 8px; border-radius: 4px; font-weight: 700; white-space: nowrap;" title="Pre-assigned to pending hire starting ${this.escapeHtml(startDateStr || 'in future')}. Underlying database status remains 'Assigned'.">${label}</span>`;
+          } else if (sLower === 'assigned') {
+            customCellHtml = `<span class="cell-text" style="display:none;">${this.escapeHtml(val)}</span><span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.35); padding: 2px 8px; border-radius: 4px; font-weight: 700;">🟢 Assigned</span>`;
+          } else if (sLower === 'on shelf') {
+            customCellHtml = `<span class="cell-text" style="display:none;">${this.escapeHtml(val)}</span><span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.35); padding: 2px 8px; border-radius: 4px; font-weight: 700;">📦 On Shelf</span>`;
+          } else if (sLower.includes('in testing')) {
+            customCellHtml = `<span class="cell-text" style="display:none;">${this.escapeHtml(val)}</span><span class="badge" style="background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.35); padding: 2px 8px; border-radius: 4px; font-weight: 700;">🔬 In Testing</span>`;
+          } else if (sLower.includes('delivery')) {
+            customCellHtml = `<span class="cell-text" style="display:none;">${this.escapeHtml(val)}</span><span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.35); padding: 2px 8px; border-radius: 4px; font-weight: 700;">🚚 ${this.escapeHtml(sVal)}</span>`;
+          } else if (sLower.includes('lost')) {
+            customCellHtml = `<span class="cell-text" style="display:none;">${this.escapeHtml(val)}</span><span class="badge" style="background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4); padding: 2px 8px; border-radius: 4px; font-weight: 700;">❌ Lost</span>`;
+          } else if (sLower.includes('destroyed')) {
+            customCellHtml = `<span class="cell-text" style="display:none;">${this.escapeHtml(val)}</span><span class="badge" style="background: rgba(100, 116, 139, 0.2); color: #94a3b8; border: 1px solid rgba(100, 116, 139, 0.4); padding: 2px 8px; border-radius: 4px; font-weight: 700;">💥 Destroyed</span>`;
+          } else if (sLower.includes('failed')) {
+            customCellHtml = `<span class="cell-text" style="display:none;">${this.escapeHtml(val)}</span><span class="badge" style="background: rgba(220, 38, 38, 0.2); color: #fca5a5; border: 1px solid rgba(220, 38, 38, 0.4); padding: 2px 8px; border-radius: 4px; font-weight: 700;">⚠️ Failed</span>`;
+          }
+        }
+
         // Employee Sheet Formatting
         const isEmployeeNameCol = (this.currentSheetKey === 'employees' && (colIdx === 0 || hLower === 'employee name' || hLower === 'name' || hLower === 'employee'));
         if (this.currentSheetKey === 'employees') {
@@ -6395,6 +6624,19 @@ class SheetNavigator {
 
           if (this.currentSheetKey === 'training_tracking' && (hLower === 'completion date' || hLower === 'date completed')) {
             newVal = newVal.replace(/^(?:📅|➕|\s)+/gu, '').replace(/^Set Date/i, '').trim();
+          }
+
+          if (isEquipmentSheet && hLower === 'status') {
+            newVal = newVal.replace(/^(?:✅|⏳|🟢|📦|🔬|🚚|❌|💥|⚠️|\s)+/gu, '').replace(/[▾▲\s]+$/, '').trim();
+            if (/^pre-assigned/i.test(newVal) || /^preassigned/i.test(newVal)) newVal = 'Assigned';
+            else if (/^assigned/i.test(newVal)) newVal = 'Assigned';
+            else if (/^on\s*shelf/i.test(newVal)) newVal = 'On Shelf';
+            else if (/^in\s*testing/i.test(newVal)) newVal = 'In Testing';
+            else if (/^packed\s*for\s*delivery|^ready\s*for\s*delivery/i.test(newVal)) newVal = 'Ready For Delivery';
+            else if (/^packed\s*for\s*testing/i.test(newVal)) newVal = 'Packed For Testing';
+            else if (/^lost/i.test(newVal)) newVal = 'Lost';
+            else if (/^destroyed/i.test(newVal)) newVal = 'Destroyed';
+            else if (/^failed/i.test(newVal)) newVal = 'Failed';
           }
 
           if (isDateCol && newVal) {
@@ -9133,6 +9375,7 @@ class SheetNavigator {
 
     const hireDateStr = hireDateInput.value;
     let isPending = false;
+    let formattedDate = '';
     if (hireDateStr) {
       const parts = hireDateStr.split('-');
       if (parts.length === 3) {
@@ -9140,10 +9383,14 @@ class SheetNavigator {
         const today = new Date();
         today.setHours(0, 0, 0, 0);
         isPending = hireDate > today;
+        formattedDate = `${parts[1]}/${parts[2]}/${parts[0]}`;
       }
     }
 
     pendingBanner.style.display = isPending ? 'block' : 'none';
+    if (isPending) {
+      pendingBanner.innerHTML = `⏳ <strong>Pending New Hire:</strong> Starts on <strong>${formattedDate}</strong>. Equipment can be pre-assigned without triggering history warnings.`;
+    }
     if (locHint) {
       locHint.textContent = isPending
         ? '✓ Future start date: "Unknown" is available if location is TBD'

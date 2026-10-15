@@ -122,12 +122,52 @@ class HistoryIssuesEngine {
     return s.toLowerCase();
   }
 
+  cleanHolderName(raw) {
+    if (!raw) return '';
+    let s = String(raw).trim().toLowerCase();
+    s = s.replace(/\s*\([^)]*\)/g, '').trim();
+    s = s.replace(/^assigned\s+to\s+/i, '').trim();
+    return s;
+  }
+
+  getPendingEmployeesMap() {
+    const empTable = this.db ? this.db.getTable('employees') : null;
+    const pendingMap = new Map();
+    if (!empTable || !empTable.rows) return pendingMap;
+
+    const today = new Date();
+    const todayNum = today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate();
+
+    empTable.rows.forEach(r => {
+      const name = String(r['Employee Name'] || r['Name'] || Object.values(r)[0] || '').trim().toLowerCase();
+      if (!name) return;
+      const stat = String(r['Status'] || '').trim().toLowerCase();
+      const hireDateStr = String(r['Hire Date'] || r['Hire'] || '').trim();
+      const hireDateNum = this.toDateNum(hireDateStr);
+
+      const isPending = stat === 'pending' || (hireDateNum > todayNum);
+      if (isPending) {
+        pendingMap.set(name, { hireDateNum, status: stat });
+        const altNames = String(r['Alternate Names'] || '').trim();
+        if (altNames) {
+          altNames.split(/[;,/|]+/).forEach(alt => {
+            const cleanAlt = alt.trim().toLowerCase();
+            if (cleanAlt) pendingMap.set(cleanAlt, { hireDateNum, status: stat });
+          });
+        }
+      }
+    });
+
+    return pendingMap;
+  }
+
   /**
    * Ultra-fast single-pass calculation of discrepancy counts across all equipment tables (~3-4ms total)
    */
   refreshCountsFast() {
     const today = new Date();
     const todayNum = today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate() + 1;
+    const pendingEmpMap = this.getPendingEmployeesMap();
 
     const counts = {};
     for (const eq of this.equipmentList) {
@@ -152,12 +192,16 @@ class HistoryIssuesEngine {
 
         const dRaw = String(r[dateH] || r['Date Assigned'] || '').trim();
         const dNum = this.toDateNum(dRaw);
+        const aRaw = String(r[assignedH] || r['Assigned To'] || '').trim().toLowerCase();
 
         if (dNum > todayNum) {
-          itemIssues.add(item);
+          const cleanHolder = this.cleanHolderName(aRaw);
+          // If holder is a recognized future new hire, exclude from being flagged as a discrepancy
+          if (!pendingEmpMap.has(cleanHolder)) {
+            itemIssues.add(item);
+          }
         }
 
-        const aRaw = String(r[assignedH] || r['Assigned To'] || '').trim().toLowerCase();
         const k = `${item}::${dNum}::${aRaw}`;
         if (seenExact.has(k)) {
           itemIssues.add(item);
@@ -238,6 +282,7 @@ class HistoryIssuesEngine {
 
     const today = new Date();
     const todayNum = today.getFullYear() * 10000 + (today.getMonth() + 1) * 100 + today.getDate() + 1;
+    const pendingEmpMap = this.getPendingEmployeesMap();
     const itemsWithIssues = [];
     let totalIssuesAcrossTable = 0;
 
@@ -249,11 +294,17 @@ class HistoryIssuesEngine {
       let futureCount = 0;
       let consecCount = 0;
 
-      // 1. Future dates
+      // 1. Future dates (excluding intentional pre-assignments for pending new hires)
       const futureRows = [];
       for (const r of rows) {
         const dNum = this.toDateNum(r[dateH] || r['Date Assigned']);
-        if (dNum > todayNum) futureRows.push(r);
+        if (dNum > todayNum) {
+          const rawHolder = String(r[assignedH] || r['Assigned To'] || '');
+          const cleanHolder = this.cleanHolderName(rawHolder);
+          if (!pendingEmpMap.has(cleanHolder)) {
+            futureRows.push(r);
+          }
+        }
       }
       if (futureRows.length > 0) {
         futureCount = futureRows.length;

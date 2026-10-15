@@ -568,7 +568,9 @@ class ItemStatsEngine {
       let endDate;
       if (next) {
         const nextDateStr = next['Date Assigned'] || next['Date'] || Object.values(next)[0];
-        endDate = this.parseDate(nextDateStr) || startDate;
+        const rawNextDate = this.parseDate(nextDateStr) || startDate;
+        // If next assignment date is in the future, do not let past shelf/storage project into the future!
+        endDate = (rawNextDate.getTime() > now.getTime()) ? (startDate.getTime() > now.getTime() ? startDate : now) : rawNextDate;
       } else {
         if (state.key === 'RETIRED') {
           endDate = startDate;
@@ -576,15 +578,28 @@ class ItemStatsEngine {
           retiredDate = startDate;
           retiredReason = notes || assignedTo || 'Retired';
         } else {
-          endDate = now;
+          endDate = (startDate.getTime() > now.getTime()) ? startDate : now;
         }
       }
 
+      const isUpcomingFutureAssignment = startDate.getTime() > now.getTime();
+
       // Calculate days spent in this transition
       let diffMs = endDate.getTime() - startDate.getTime();
-      let days = Math.max(0, Math.round(diffMs / (1000 * 60 * 60 * 24)));
-      if (i === sorted.length - 1 && !isRetired && days === 0) {
+      let days = isUpcomingFutureAssignment ? 0 : Math.max(0, Math.round(diffMs / (1000 * 60 * 60 * 24)));
+      if (i === sorted.length - 1 && !isRetired && !isUpcomingFutureAssignment && days === 0) {
         days = 1; // At least 1 day active today
+      }
+
+      if (isUpcomingFutureAssignment && state.key === 'FIELD') {
+        state = {
+          key: 'PRE_ASSIGNED',
+          label: 'Field Service (Pre-Assigned)',
+          badgeClass: 'badge-pre-assigned',
+          color: '#f59e0b',
+          icon: '⏳',
+          isPreAssigned: true
+        };
       }
 
       // Tally state durations
@@ -635,6 +650,11 @@ class ItemStatsEngine {
       }
 
       const isFutureDate = startDate.getTime() > (Date.now() + 30 * 86400000);
+      const isPreAssigned = isUpcomingFutureAssignment;
+      const daysUntilStart = isPreAssigned ? Math.max(1, Math.ceil((startDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24))) : 0;
+      const durationFormatted = isPreAssigned
+        ? `Starts in ${daysUntilStart} day${daysUntilStart === 1 ? '' : 's'}`
+        : this.formatDuration(days);
 
       let assignedDisplay = assignedTo;
       if (state.key === 'NEW_PURCHASE') {
@@ -653,13 +673,15 @@ class ItemStatsEngine {
         startDateFormatted: this.formatDate(startDate),
         endDateFormatted: this.formatDate(endDate),
         days: days,
-        durationFormatted: this.formatDuration(days),
+        durationFormatted: durationFormatted,
         state: state,
         assignedTo: assignedDisplay,
         location: location || 'Helena',
         notes: notes,
         isCurrent: i === milestoneSource.length - 1 && !isRetired,
         isFutureDate: isFutureDate,
+        isPreAssigned: isPreAssigned,
+        daysUntilStart: daysUntilStart,
         isOriginRecord: i === 0,
         isPurchaseOrigin: i === 0 && isPurchaseOrigin,
         rawRow: current
@@ -2278,8 +2300,9 @@ class ItemStatsEngine {
               <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
                 <span style="font-size: 15px;">${m.state.icon}</span>
                 <span style="font-weight: 700; font-size: 13px; color: var(--text-primary);">${m.state.label}</span>
-                ${m.isCurrent ? `<span class="brand-badge" style="background: rgba(234, 179, 8, 0.2); color: #facc15; font-size: 10px;">Current</span>` : ''}
-                ${m.isFutureDate ? `<span class="brand-badge" style="background: rgba(239, 68, 68, 0.25); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4); font-size: 10px; font-weight: 700;">⚠️ Future Date (${m.startDateFormatted})</span>` : ''}
+                ${m.isCurrent && !m.isPreAssigned ? `<span class="brand-badge" style="background: rgba(234, 179, 8, 0.2); color: #facc15; font-size: 10px;">Current</span>` : ''}
+                ${m.isPreAssigned ? `<span class="brand-badge" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); font-size: 10px; font-weight: 700;">⏳ Pre-Assigned (Starts ${m.startDateFormatted})</span>` : ''}
+                ${m.isFutureDate && !m.isPreAssigned ? `<span class="brand-badge" style="background: rgba(239, 68, 68, 0.25); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4); font-size: 10px; font-weight: 700;">⚠️ Future Date (${m.startDateFormatted})</span>` : ''}
                 ${isPurchaseOrigin ? `<span class="brand-badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; font-size: 10px; font-weight: 700;">✨ Lifecycle Origin (Purchased New)</span>` : ''}
                 ${isOrigin && !stats.hasKnownPurchaseDate ? `<span class="brand-badge" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; font-size: 10px;">⏳ Tracking Baseline (Purchase Unknown)</span>` : ''}
               </div>
@@ -2295,7 +2318,7 @@ class ItemStatsEngine {
             </div>
 
             <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px;">
-              <strong>Date:</strong> ${m.startDateFormatted} ${m.isCurrent ? '→ Present' : (m.endDateFormatted !== m.startDateFormatted ? '→ ' + m.endDateFormatted : '')}
+              <strong>Date:</strong> ${m.isPreAssigned ? `Starts <strong>${m.startDateFormatted}</strong> (in ${m.daysUntilStart} day${m.daysUntilStart === 1 ? '' : 's'})` : (m.startDateFormatted + (m.isCurrent ? ' → Present' : (m.endDateFormatted !== m.startDateFormatted ? ' → ' + m.endDateFormatted : '')))}
             </div>
 
             ${m.assignedTo ? `
@@ -2346,12 +2369,12 @@ class ItemStatsEngine {
             <div>
               <div style="font-weight: 600; font-size: 12px; color: var(--text-primary); display: flex; align-items: center; gap: 6px;">
                 <span>${l.name}</span>
-                ${l.isCurrent ? `<span class="brand-badge" style="font-size: 9px; padding: 1px 4px; background: rgba(34, 197, 94, 0.2); color: #4ade80;">Active</span>` : ''}
+                ${l.isCurrent ? (l.days === 0 ? `<span class="brand-badge" style="font-size: 9px; padding: 1px 5px; background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4);">⏳ Pre-Assigned</span>` : `<span class="brand-badge" style="font-size: 9px; padding: 1px 4px; background: rgba(34, 197, 94, 0.2); color: #4ade80;">Active</span>`) : ''}
               </div>
-              <div style="font-size: 10px; color: var(--text-muted);">${l.pct}% of total field time</div>
+              <div style="font-size: 10px; color: var(--text-muted);">${l.days > 0 ? `${l.pct}% of total field time` : 'Scheduled start date'}</div>
             </div>
             <div style="text-align: right; font-weight: 700; font-size: 12px; color: #60a5fa;">
-              ${l.durationFormatted}
+              ${l.days === 0 ? 'Upcoming' : l.durationFormatted}
             </div>
           </div>
         `;
