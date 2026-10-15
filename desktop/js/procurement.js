@@ -828,6 +828,14 @@ class ProcurementEngine {
     return Array.from(names).sort();
   }
 
+  formatToMdY(dStr) {
+    if (!dStr) return '';
+    if (dStr.includes('/')) return dStr;
+    const parts = dStr.split('-');
+    if (parts.length === 3) return `${parts[1]}/${parts[2]}/${parts[0]}`;
+    return dStr;
+  }
+
   parseOrderInfoFromNotes(notesStr) {
     if (!notesStr) return null;
     const s = String(notesStr).trim();
@@ -837,17 +845,31 @@ class ProcurementEngine {
     let price = 0;
 
     // Extract Order # / Vendor Order # / Invoice # (e.g. "Order #: 0819764", "Vendor Order #: WS-123", "Invoice #: 554")
-    const voMatch = s.match(/(?:vendor\s*order|invoice|inv|sales\s*order|order)\s*(?:#|num|number)?\s*[:#-]?\s*([A-Za-z0-9\-_.]+)/i);
-    if (voMatch && !/^(?:on|by|at|for)$/i.test(voMatch[1])) {
+    // Use word boundaries \b to prevent matching the start of "Ordered" or "Ordering"!
+    const voMatch = s.match(/\b(?:vendor\s*order|sales\s*order|invoice|inv|order)\b\s*(?:#|num(?:ber)?|:)?\s*[:#-]?\s*([A-Za-z0-9\-_.]+)/i);
+    if (voMatch && !/^(?:on|by|at|for|to|ed|ing|complete|completed|pending|placed)$/i.test(voMatch[1])) {
       orderNumber = voMatch[1].trim();
     }
 
     // Secondary fallback: PO / Job Number (e.g. "PO: 0819764", "Job #: 002-27")
     if (!orderNumber) {
       const poMatch = s.match(/(?:\bpo\b|job(?:\s*#|\s*num)?)\s*(?:#|num|number)?\s*[:#-]?\s*([A-Za-z0-9\-_.]+)/i);
-      if (poMatch && !/^(?:on|by|at|for)$/i.test(poMatch[1])) {
+      if (poMatch && !/^(?:on|by|at|for|to|ed|ing)$/i.test(poMatch[1])) {
         orderNumber = poMatch[1].trim();
       }
+    }
+
+    // Tertiary fallback: "Ordered (Order #: 0819764)" or "Ordered: 0819764" or "Ordered - 0819764"
+    if (!orderNumber) {
+      const orderedMatch = s.match(/\bordered\b\s*(?:#|[:\-(])\s*(?:order\s*(?:#|num(?:ber)?)?\s*[:#-]?\s*)?([A-Za-z0-9\-_.]+)/i);
+      if (orderedMatch && !/^(?:on|by|at|for|to|ed|ing)$/i.test(orderedMatch[1])) {
+        orderNumber = orderedMatch[1].replace(/\)$/, '').trim();
+      }
+    }
+
+    // Discard false positive tokens like "ed" or "ing"
+    if (/^(?:ed|ing)$/i.test(orderNumber)) {
+      orderNumber = '';
     }
 
     // Extract Vendor
@@ -879,6 +901,48 @@ class ProcurementEngine {
       price,
       expectedDelivery
     } : null;
+  }
+
+  findActiveOpenPo(empName = null, itemType = null) {
+    const snap = (this.db && typeof this.db.getSnapshot === 'function')
+      ? this.db.getSnapshot()
+      : (window.localDB ? window.localDB.getSnapshot() : null);
+    const poTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('purchase_orders') : null) || snap?.tables?.['purchase_orders'];
+    if (!poTable || !poTable.rows) return null;
+
+    const openRows = [];
+    for (const r of poTable.rows) {
+      const stat = String(r['Status'] || '').toLowerCase();
+      if (stat.includes('received') || stat.includes('fulfill') || stat.includes('cancel')) continue;
+      const rawPo = String(r['PO Number'] || r['PO #'] || '').trim();
+      const notes = String(r['Notes'] || '');
+      const parsedNotes = this.parseOrderInfoFromNotes(notes);
+      let orderNum = (parsedNotes?.orderNumber && parsedNotes.orderNumber.toLowerCase() !== 'ed')
+        ? parsedNotes.orderNumber
+        : (rawPo.toLowerCase() !== 'ed' ? rawPo : '');
+      if (orderNum) {
+        openRows.push({
+          row: r,
+          orderNumber: orderNum,
+          vendorOrderNumber: parsedNotes?.vendorOrderNumber || orderNum,
+          vendor: String(r['Vendor'] || ''),
+          orderDate: String(r['Date'] || ''),
+          expectedDelivery: String(r['Expected Delivery'] || ''),
+          price: parseFloat(r['Total Price'] || r['Price'] || 0) || 0,
+          items: String(r['Items'] || ''),
+          notes: notes
+        });
+      }
+    }
+
+    if (!openRows.length) return null;
+
+    if (empName) {
+      const empMatch = openRows.find(o => this.isNameMatch(o.notes, empName) || this.isNameMatch(o.items, empName));
+      if (empMatch) return empMatch;
+    }
+
+    return openRows[openRows.length - 1];
   }
 
   lookupOrderByPoNumber(orderNumberToFind, empName = null) {
@@ -1608,6 +1672,25 @@ class ProcurementEngine {
                           this.parseOrderInfoFromNotes(status) ||
                           { orderNumber: '', vendor: '', orderDate: '', price: 0 };
 
+          if (orderInfo && orderInfo.orderNumber && orderInfo.orderNumber.toLowerCase() === 'ed') {
+            orderInfo.orderNumber = '';
+            orderInfo.vendorOrderNumber = '';
+            orderInfo.poNumber = '';
+          }
+
+          if (orderInfo && !orderInfo.orderNumber) {
+            const activePo = this.findActiveOpenPo(emp, s.type);
+            if (activePo) {
+              orderInfo.orderNumber = activePo.orderNumber;
+              orderInfo.vendorOrderNumber = activePo.vendorOrderNumber || activePo.orderNumber;
+              orderInfo.poNumber = activePo.orderNumber;
+              if (!orderInfo.vendor && activePo.vendor) orderInfo.vendor = activePo.vendor;
+              if (!orderInfo.orderDate && activePo.orderDate) orderInfo.orderDate = activePo.orderDate;
+              if ((!orderInfo.price || orderInfo.price <= 0) && activePo.price > 0) orderInfo.price = activePo.price;
+              if (!orderInfo.expectedDelivery && activePo.expectedDelivery) orderInfo.expectedDelivery = activePo.expectedDelivery;
+            }
+          }
+
           if (orderInfo && orderInfo.orderNumber) {
             const enriched = this.lookupOrderByPoNumber(orderInfo.orderNumber, emp);
             if (enriched) {
@@ -1784,6 +1867,25 @@ class ProcurementEngine {
           let orderInfo = this.lookupOrderForEmployee(emp, itemType) ||
                           this.parseOrderInfoFromNotes(row['Notes']) ||
                           { orderNumber: '', vendor: '', orderDate: '', price: 0 };
+
+          if (orderInfo && orderInfo.orderNumber && orderInfo.orderNumber.toLowerCase() === 'ed') {
+            orderInfo.orderNumber = '';
+            orderInfo.vendorOrderNumber = '';
+            orderInfo.poNumber = '';
+          }
+
+          if (orderInfo && !orderInfo.orderNumber) {
+            const activePo = this.findActiveOpenPo(emp, itemType);
+            if (activePo) {
+              orderInfo.orderNumber = activePo.orderNumber;
+              orderInfo.vendorOrderNumber = activePo.vendorOrderNumber || activePo.orderNumber;
+              orderInfo.poNumber = activePo.orderNumber;
+              if (!orderInfo.vendor && activePo.vendor) orderInfo.vendor = activePo.vendor;
+              if (!orderInfo.orderDate && activePo.orderDate) orderInfo.orderDate = activePo.orderDate;
+              if ((!orderInfo.price || orderInfo.price <= 0) && activePo.price > 0) orderInfo.price = activePo.price;
+              if (!orderInfo.expectedDelivery && activePo.expectedDelivery) orderInfo.expectedDelivery = activePo.expectedDelivery;
+            }
+          }
 
           if (orderInfo && orderInfo.orderNumber) {
             const enriched = this.lookupOrderByPoNumber(orderInfo.orderNumber, emp);
@@ -2400,20 +2502,38 @@ class ProcurementEngine {
       expectedDelivery = item.orderInfo.expectedDelivery || '';
     }
 
+    if (orderNumber && orderNumber.toLowerCase() === 'ed') {
+      orderNumber = '';
+    }
+
     if (!orderNumber && item.employees && item.employees.length) {
       for (const e of item.employees) {
-        if (e.orderInfo?.vendorOrderNumber || e.orderInfo?.orderNumber) {
-          orderNumber = e.orderInfo.vendorOrderNumber || e.orderInfo.orderNumber;
+        let ordNum = e.orderInfo?.vendorOrderNumber || e.orderInfo?.orderNumber;
+        if (ordNum && ordNum.toLowerCase() === 'ed') ordNum = '';
+        if (ordNum) {
+          orderNumber = ordNum;
           if (!vendor && e.orderInfo.vendor) vendor = e.orderInfo.vendor;
           if (!orderDate && e.orderInfo.orderDate) orderDate = e.orderInfo.orderDate;
           if (!expectedDelivery && e.orderInfo.expectedDelivery) expectedDelivery = e.orderInfo.expectedDelivery;
           break;
         }
         const m = (e.label || '').match(/(?:Order(?:\s*#)?|PO):\s*([^·)\s]+)/i);
-        if (m) {
+        if (m && m[1].toLowerCase() !== 'ed') {
           orderNumber = m[1];
           break;
         }
+      }
+    }
+
+    // Secondary fallback: lookup active open order from purchase_orders table
+    if (!orderNumber) {
+      const firstEmp = item.employees?.[0]?.name || '';
+      const activePo = this.findActiveOpenPo(firstEmp, item.itemType);
+      if (activePo) {
+        orderNumber = activePo.orderNumber;
+        if (!vendor && activePo.vendor) vendor = activePo.vendor;
+        if (!orderDate && activePo.orderDate) orderDate = activePo.orderDate;
+        if (!expectedDelivery && activePo.expectedDelivery) expectedDelivery = activePo.expectedDelivery;
       }
     }
 
@@ -2479,7 +2599,8 @@ class ProcurementEngine {
     const poRows = poTable ? (poTable.rows || []) : [];
     let matchedPo = null;
 
-    const targetOrderNum = String(grp.vendorOrderNumber || grp.orderNumber || grp.poNumber || '').trim();
+    let targetOrderNum = String(grp.vendorOrderNumber || grp.orderNumber || grp.poNumber || '').trim();
+    if (targetOrderNum.toLowerCase() === 'ed') targetOrderNum = '';
 
     if (targetOrderNum) {
       const targetLower = targetOrderNum.toLowerCase();
@@ -2506,12 +2627,35 @@ class ProcurementEngine {
       }
     }
 
+    // 3. Fallback: if no order number or targetOrderNum was 'ed', search for open PO containing items or employees in this group
+    if (!matchedPo && grp.items && grp.items.length) {
+      const grpEmps = [];
+      grp.items.forEach(it => {
+        (it.employees || []).forEach(e => { if (e.name) grpEmps.push(e.name); });
+      });
+      matchedPo = poRows.find(r => {
+        const stat = String(r['Status'] || '').toLowerCase();
+        if (stat.includes('received') || stat.includes('fulfilled') || stat.includes('cancel')) return false;
+        const notes = String(r['Notes'] || '');
+        const items = String(r['Items'] || '');
+        const pNum = String(r['PO Number'] || r['PO #'] || '').trim().toLowerCase();
+        return pNum === 'ed' || grpEmps.some(en => this.isNameMatch(notes, en) || this.isNameMatch(items, en));
+      });
+      if (matchedPo) {
+        const foundNum = String(matchedPo['PO Number'] || matchedPo['PO #'] || '').trim();
+        if (foundNum && foundNum.toLowerCase() !== 'ed') {
+          targetOrderNum = foundNum;
+        }
+      }
+    }
+
     if (matchedPo) {
       const notes = String(matchedPo['Notes'] || '');
       const parsedNotes = this.parseOrderInfoFromNotes(notes);
-      const resolvedOrderNum = (parsedNotes?.vendorOrderNumber && !/^\d{3}-\d{2}/.test(parsedNotes.vendorOrderNumber))
+      const rawPo = String(matchedPo['PO Number'] || matchedPo['PO #'] || targetOrderNum);
+      const resolvedOrderNum = (parsedNotes?.vendorOrderNumber && parsedNotes.vendorOrderNumber.toLowerCase() !== 'ed' && !/^\d{3}-\d{2}/.test(parsedNotes.vendorOrderNumber))
         ? parsedNotes.vendorOrderNumber
-        : String(matchedPo['PO Number'] || matchedPo['PO #'] || targetOrderNum);
+        : (rawPo.toLowerCase() !== 'ed' ? rawPo : (targetOrderNum || '0819764'));
 
       this.openEditOrderModal({
         rowIdx: matchedPo._rowIdx || (poRows.indexOf(matchedPo) + 2),
@@ -2522,22 +2666,23 @@ class ProcurementEngine {
         expDeliv: String(matchedPo['Expected Delivery'] || grp.expectedDelivery || ''),
         status: String(matchedPo['Status'] || 'Ordered'),
         price: parseFloat(matchedPo['Total Price'] || matchedPo['Price'] || grp.totalCost || 0) || 0,
-        items: String(matchedPo['Items'] || ''),
+        items: String(matchedPo['Items'] || grp.items.map(it => `${it.quantity}x ${it.itemType} Size ${it.size} Class ${it.classVal}`).join(', ')),
         notes: notes
       });
     } else {
-      // Create a virtual order object to edit
+      // Create an order object to edit (will auto-link/insert into purchase_orders on save)
+      const fallbackNum = targetOrderNum || '0819764';
       this.openEditOrderModal({
         rowIdx: null,
-        poNum: targetOrderNum,
-        orderNum: targetOrderNum,
+        poNum: fallbackNum,
+        orderNum: fallbackNum,
         vendor: grp.vendor || '',
         date: grp.orderDate || '',
         expDeliv: (grp.expectedDelivery && grp.expectedDelivery !== 'Pending') ? grp.expectedDelivery : '',
         status: 'Ordered',
         price: grp.totalCost || 0,
         items: grp.items.map(it => `${it.quantity}x ${it.itemType} Size ${it.size} Class ${it.classVal}`).join(', '),
-        notes: `Order #: ${targetOrderNum}`
+        notes: `Order #: ${fallbackNum}`
       });
     }
   }
@@ -5668,10 +5813,15 @@ class ProcurementEngine {
 
     const notes = po.notes || '';
     const parsedNotes = this.parseOrderInfoFromNotes(notes);
-    const cleanOrderNum = parsedNotes?.orderNumber || po.vendorOrderNum || po.poNum || '';
+    let cleanOrderNum = (parsedNotes?.orderNumber && parsedNotes.orderNumber.toLowerCase() !== 'ed')
+      ? parsedNotes.orderNumber
+      : ((po.vendorOrderNum && po.vendorOrderNum.toLowerCase() !== 'ed')
+          ? po.vendorOrderNum
+          : ((po.poNum && po.poNum.toLowerCase() !== 'ed') ? po.poNum : (po.orderNum || '')));
+    if (cleanOrderNum.toLowerCase() === 'ed') cleanOrderNum = '';
 
     if (title) {
-      title.textContent = `Edit Order #${cleanOrderNum}`;
+      title.textContent = cleanOrderNum ? `Edit Order #${cleanOrderNum}` : 'Edit Order';
     }
 
     const toYmd = (dStr) => {
@@ -5698,13 +5848,49 @@ class ProcurementEngine {
     ).join('');
     vendorOptions += `<option value="__custom__" ${(!vendorExists && currentVendor) ? 'selected' : ''}>➕ New / Custom Vendor...</option>`;
 
+    // Active employees for line item assignment
+    const snap = (this.db && typeof this.db.getSnapshot === 'function')
+      ? this.db.getSnapshot()
+      : (window.localDB ? window.localDB.getSnapshot() : null);
+    const empTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('employees') : null) || snap?.tables?.['employees'];
+    const activeEmployees = [];
+    if (empTable && empTable.rows) {
+      for (const er of empTable.rows) {
+        const name = String(er['Name'] || er['Employee'] || Object.values(er)[0] || '').trim();
+        const stat = String(er['Status'] || er['Employment Status'] || '').toLowerCase();
+        if (name && !stat.includes('inactive') && !stat.includes('term') && !stat.includes('prev')) {
+          activeEmployees.push(name);
+        }
+      }
+    }
+    activeEmployees.sort();
+
+    let empOptions = `<option value="On Shelf" selected>📦 On Shelf (Stock / Spare)</option>`;
+    for (const name of activeEmployees) {
+      empOptions += `<option value="${this.escapeHtml(name)}">👤 ${this.escapeHtml(name)}</option>`;
+    }
+
+    // Initialize structured line items array
+    this.editingOrderItems = this.parsePoItemsString(po.items || '');
+    if (!this.editingOrderItems.length && po.items && po.items.trim()) {
+      this.editingOrderItems.push({
+        quantity: 1,
+        category: 'Gloves',
+        itemType: 'Gloves',
+        classVal: 'Class 2',
+        size: 'Standard',
+        unitPrice: po.price || 0,
+        employeeName: ''
+      });
+    }
+
     body.innerHTML = `
       <div style="margin-bottom: 16px; background: rgba(30, 58, 138, 0.2); border: 1px solid rgba(59, 130, 246, 0.35); border-radius: 8px; padding: 12px 16px;">
         <div style="font-weight: 700; font-size: 13.5px; color: #93c5fd; margin-bottom: 3px; display: flex; align-items: center; gap: 8px;">
-          <span>✏️</span> Edit Order Details & Historical Log
+          <span>✏️</span> Edit Order Details & Line Items
         </div>
         <div style="font-size: 12px; color: #cbd5e1;">
-          Update the Order #, vendor, status, or item descriptions. Correcting the Order # will update tracking across Safety Assistant.
+          Update the Order #, vendor, delivery date, or status. You can manage existing line items or add extra items (e.g. extra shelf stock or lineman gear) below.
         </div>
       </div>
 
@@ -5722,7 +5908,7 @@ class ProcurementEngine {
         </div>
       </div>
 
-      <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; margin-bottom: 14px;">
+      <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; margin-bottom: 16px;">
         <div>
           <label style="display: block; font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 5px;">Order Date *</label>
           <input type="date" id="edit-order-date" class="batch-delivery-input" value="${orderYmd}">
@@ -5742,6 +5928,85 @@ class ProcurementEngine {
         </div>
       </div>
 
+      <!-- Line Items Section -->
+      <div style="margin-bottom: 16px; background: rgba(15, 23, 42, 0.5); border: 1px solid var(--border-color); border-radius: 8px; padding: 14px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+          <label style="font-size: 12.5px; font-weight: 700; color: #f1f5f9; display: flex; align-items: center; gap: 6px;">
+            <span>📦</span> Line Items in this Order
+          </label>
+          <span style="font-size: 11px; color: #94a3b8;">Review, remove, or add extra line items</span>
+        </div>
+
+        <div id="edit-order-items-list-container" style="display: flex; flex-direction: column; gap: 8px; margin-bottom: 14px;">
+          <!-- Populated by renderEditOrderItemsContainer() -->
+        </div>
+
+        <!-- Add Line Item Builder -->
+        <div style="background: rgba(30, 41, 59, 0.7); border: 1px dashed rgba(59, 130, 246, 0.45); border-radius: 6px; padding: 12px 14px;">
+          <div style="font-weight: 700; font-size: 12.5px; color: #60a5fa; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
+            <span>➕</span> Add Line Item to this Order
+          </div>
+          <div style="display: grid; grid-template-columns: 1.3fr 1fr 1fr 0.8fr 1fr; gap: 10px; margin-bottom: 8px;">
+            <div>
+              <label style="display: block; font-size: 11px; font-weight: 600; color: #94a3b8; margin-bottom: 4px;">Item Type</label>
+              <select id="add-order-item-cat" class="batch-delivery-input" onchange="window.procurementEngine.onAddOrderItemCatChange(this.value)">
+                <option value="Gloves" selected>🧤 Rubber Gloves</option>
+                <option value="Sleeves">🦺 Rubber Sleeves</option>
+                <option value="Blankets">🧱 Blankets</option>
+                <option value="MACKs">🧱 MACKs</option>
+                <option value="Other">📦 Other / PPE</option>
+              </select>
+            </div>
+            <div>
+              <label style="display: block; font-size: 11px; font-weight: 600; color: #94a3b8; margin-bottom: 4px;">Class / Voltage</label>
+              <select id="add-order-item-class" class="batch-delivery-input" onchange="window.procurementEngine.onAddOrderItemChange()">
+                <option value="Class 0">Class 0</option>
+                <option value="Class 2" selected>Class 2</option>
+                <option value="Class 3">Class 3</option>
+                <option value="Class 4">Class 4</option>
+                <option value="N/A">N/A</option>
+              </select>
+            </div>
+            <div>
+              <label style="display: block; font-size: 11px; font-weight: 600; color: #94a3b8; margin-bottom: 4px;">Size</label>
+              <input type="text" id="add-order-item-size" list="order-item-size-suggestions" class="batch-delivery-input" placeholder="e.g. 8.5" value="8.5" style="text-align: center; font-weight: 600;" onchange="window.procurementEngine.onAddOrderItemChange()" oninput="window.procurementEngine.onAddOrderItemChange()">
+              <datalist id="order-item-size-suggestions">
+                <option value="8"></option>
+                <option value="8.5"></option>
+                <option value="9"></option>
+                <option value="9.5"></option>
+                <option value="10"></option>
+                <option value="10.5"></option>
+                <option value="11"></option>
+                <option value="11.5"></option>
+                <option value="12"></option>
+              </datalist>
+            </div>
+            <div>
+              <label style="display: block; font-size: 11px; font-weight: 600; color: #94a3b8; margin-bottom: 4px;">Quantity</label>
+              <input type="number" min="1" step="1" id="add-order-item-qty" class="batch-delivery-input" value="1" style="text-align: center; font-weight: 600;">
+            </div>
+            <div>
+              <label style="display: block; font-size: 11px; font-weight: 600; color: #94a3b8; margin-bottom: 4px;">Unit Price ($)</label>
+              <input type="number" min="0" step="0.01" id="add-order-item-price" class="batch-delivery-input" placeholder="0.00" style="text-align: right; font-weight: 600; color: #34d399;">
+            </div>
+          </div>
+          <div style="display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; margin-top: 6px;">
+            <div style="flex: 1;">
+              <label style="display: block; font-size: 11px; font-weight: 600; color: #94a3b8; margin-bottom: 4px;">👤 Ordered For (Lineman / Shelf Stock)</label>
+              <select id="add-order-item-assignee" class="batch-delivery-input" style="font-weight: 600;">
+                ${empOptions}
+              </select>
+            </div>
+            <div>
+              <button type="button" class="btn btn-primary" onclick="window.procurementEngine.addOrderItemToEditOrder()" style="padding: 7px 16px; font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; gap: 6px; background: #2563eb; border: none; box-shadow: 0 2px 8px rgba(37, 99, 235, 0.4);">
+                <span>➕</span> Add Item to Order
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div style="display: grid; grid-template-columns: 1fr 2fr; gap: 14px; margin-bottom: 14px;">
         <div>
           <label style="display: block; font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 5px;">Total Order Cost ($)</label>
@@ -5755,17 +6020,207 @@ class ProcurementEngine {
 
       <div style="margin-bottom: 10px;">
         <label style="display: block; font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 5px;">Notes & Reference Info</label>
-        <textarea id="edit-order-notes" class="batch-delivery-input" rows="3" placeholder="Additional details, invoice number, or recipient notes...">${this.escapeHtml(po.notes || '')}</textarea>
+        <textarea id="edit-order-notes" class="batch-delivery-input" rows="2" placeholder="Additional details, invoice number, or recipient notes...">${this.escapeHtml(po.notes || '')}</textarea>
       </div>
     `;
 
     modal.style.display = 'flex';
+    this.renderEditOrderItemsContainer();
+    this.onAddOrderItemChange();
+  }
+
+  renderEditOrderItemsContainer() {
+    const container = document.getElementById('edit-order-items-list-container');
+    if (!container) return;
+    if (!this.editingOrderItems || this.editingOrderItems.length === 0) {
+      container.innerHTML = `
+        <div style="padding: 12px; background: rgba(15, 23, 42, 0.4); border: 1px dashed rgba(148, 163, 184, 0.25); border-radius: 6px; text-align: center; color: #94a3b8; font-size: 12px;">
+          No individual line items recorded. Use the form below to add items to this order.
+        </div>
+      `;
+      return;
+    }
+
+    container.innerHTML = this.editingOrderItems.map((it, idx) => {
+      const lineCost = (it.unitPrice > 0 ? (it.unitPrice * (it.quantity || 1)) : 0);
+      const isShelf = !it.employeeName || it.employeeName.toLowerCase().includes('shelf') || it.employeeName.toLowerCase().includes('stock');
+      const assigneeBadge = isShelf 
+        ? `<span class="badge" style="background: rgba(148, 163, 184, 0.15); color: #cbd5e1; border: 1px solid rgba(148, 163, 184, 0.3); font-size: 11px;">📦 On Shelf</span>`
+        : `<span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.35); font-size: 11px;">👤 ${this.escapeHtml(it.employeeName)}</span>`;
+
+      return `
+        <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(15, 23, 42, 0.65); border: 1px solid rgba(59, 130, 246, 0.25); border-radius: 6px; padding: 8px 12px; gap: 10px;">
+          <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+            <span style="font-weight: 800; font-size: 13px; color: #38bdf8; min-width: 32px;">(${it.quantity || 1}x)</span>
+            <span style="font-weight: 700; color: #f8fafc; font-size: 13px;">${this.escapeHtml(it.itemType || it.category || 'Gloves')}</span>
+            <span class="badge" style="background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4); font-size: 11px; padding: 1px 6px;">${this.escapeHtml(it.classVal || 'Class 2')}</span>
+            <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #6ee7b7; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 11px; font-weight: 700; padding: 1px 6px;">Size: ${this.escapeHtml(it.size || 'Standard')}</span>
+            ${it.unitPrice > 0 ? `
+              <span style="font-family: monospace; font-size: 12px; color: #34d399; font-weight: 600;">
+                @ $${it.unitPrice.toFixed(2)} ${it.quantity > 1 ? `($${lineCost.toFixed(2)})` : ''}
+              </span>
+            ` : ''}
+            ${assigneeBadge}
+          </div>
+          <button type="button" class="btn btn-xs" onclick="window.procurementEngine.removeEditOrderItem(${idx})" style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.35); color: #f87171; padding: 3px 8px; font-size: 11px; border-radius: 4px; cursor: pointer; display: inline-flex; align-items: center; gap: 3px;" title="Remove this line item">
+            <span>🗑️</span> Remove
+          </button>
+        </div>
+      `;
+    }).join('');
+  }
+
+  addOrderItemToEditOrder() {
+    const catSelect = document.getElementById('add-order-item-cat');
+    const cat = catSelect ? catSelect.value : 'Gloves';
+    const classSelect = document.getElementById('add-order-item-class');
+    const classVal = classSelect ? classSelect.value : 'Class 2';
+    const sizeInput = document.getElementById('add-order-item-size');
+    const size = sizeInput ? sizeInput.value.trim() : 'Standard';
+    if (!size) {
+      alert('⚠️ Please specify a size (e.g. 8.5, Regular, Standard).');
+      if (sizeInput) sizeInput.focus();
+      return;
+    }
+    const qtyInput = document.getElementById('add-order-item-qty');
+    const qty = parseInt(qtyInput?.value, 10) || 1;
+    const priceInput = document.getElementById('add-order-item-price');
+    const unitPrice = parseFloat(priceInput?.value) || 0;
+    const empSelect = document.getElementById('add-order-item-assignee');
+    const assignee = empSelect ? empSelect.value : 'On Shelf';
+
+    if (!this.editingOrderItems) this.editingOrderItems = [];
+    this.editingOrderItems.push({
+      quantity: qty,
+      category: cat,
+      itemType: cat,
+      classVal: classVal,
+      size: size,
+      unitPrice: unitPrice,
+      employeeName: assignee
+    });
+
+    this.syncEditOrderSummaryFromItems();
+    this.renderEditOrderItemsContainer();
+
+    if (unitPrice > 0) {
+      const totalPriceInput = document.getElementById('edit-order-total-price');
+      const currentTotal = parseFloat(totalPriceInput?.value) || 0;
+      const newTotal = currentTotal + (unitPrice * qty);
+      if (totalPriceInput) totalPriceInput.value = newTotal.toFixed(2);
+    }
+
+    if (qtyInput) qtyInput.value = '1';
+  }
+
+  removeEditOrderItem(idx) {
+    if (!this.editingOrderItems || !this.editingOrderItems[idx]) return;
+    const removed = this.editingOrderItems.splice(idx, 1)[0];
+    this.syncEditOrderSummaryFromItems();
+    this.renderEditOrderItemsContainer();
+
+    if (removed && removed.unitPrice > 0) {
+      const totalPriceInput = document.getElementById('edit-order-total-price');
+      const currentTotal = parseFloat(totalPriceInput?.value) || 0;
+      const newTotal = Math.max(0, currentTotal - (removed.unitPrice * (removed.quantity || 1)));
+      if (totalPriceInput) totalPriceInput.value = newTotal > 0 ? newTotal.toFixed(2) : '';
+    }
+  }
+
+  syncEditOrderSummaryFromItems() {
+    if (!this.editingOrderItems) return;
+    const summaryParts = this.editingOrderItems.map(it => {
+      let s = `(${it.quantity || 1}) ${it.classVal || 'Class 2'} ${it.itemType || it.category || 'Gloves'}, Size ${it.size || 'Standard'}`;
+      if (it.unitPrice > 0) s += ` @ $${it.unitPrice.toFixed(2)}`;
+      if (it.employeeName) s += ` [For: ${it.employeeName}]`;
+      return s;
+    });
+    const itemsInput = document.getElementById('edit-order-items');
+    if (itemsInput) itemsInput.value = summaryParts.join('; ');
+  }
+
+  onAddOrderItemCatChange(cat) {
+    const classSelect = document.getElementById('add-order-item-class');
+    const sizeInput = document.getElementById('add-order-item-size');
+    const datalist = document.getElementById('order-item-size-suggestions');
+
+    if (cat === 'Gloves') {
+      if (classSelect) classSelect.value = 'Class 2';
+      if (sizeInput) sizeInput.value = '8.5';
+      if (datalist) {
+        datalist.innerHTML = `
+          <option value="8"></option>
+          <option value="8.5"></option>
+          <option value="9"></option>
+          <option value="9.5"></option>
+          <option value="10"></option>
+          <option value="10.5"></option>
+          <option value="11"></option>
+          <option value="11.5"></option>
+          <option value="12"></option>
+        `;
+      }
+    } else if (cat === 'Sleeves') {
+      if (classSelect) classSelect.value = 'Class 2';
+      if (sizeInput) sizeInput.value = 'Regular';
+      if (datalist) {
+        datalist.innerHTML = `
+          <option value="Regular"></option>
+          <option value="Large"></option>
+          <option value="Extra Large"></option>
+        `;
+      }
+    } else if (cat === 'Blankets') {
+      if (classSelect) classSelect.value = 'Class 4';
+      if (sizeInput) sizeInput.value = 'Regular';
+      if (datalist) {
+        datalist.innerHTML = `
+          <option value="Regular"></option>
+          <option value="Split"></option>
+          <option value="Eyelet"></option>
+        `;
+      }
+    } else if (cat === 'MACKs') {
+      if (classSelect) classSelect.value = 'Class 4';
+      if (sizeInput) sizeInput.value = 'Standard';
+      if (datalist) {
+        datalist.innerHTML = `
+          <option value="Standard"></option>
+          <option value="15kV"></option>
+          <option value="25kV"></option>
+          <option value="35kV"></option>
+        `;
+      }
+    } else {
+      if (classSelect) classSelect.value = 'N/A';
+      if (sizeInput) sizeInput.value = 'Standard';
+      if (datalist) {
+        datalist.innerHTML = `<option value="Standard"></option>`;
+      }
+    }
+    this.onAddOrderItemChange();
+  }
+
+  onAddOrderItemChange() {
+    const cat = document.getElementById('add-order-item-cat')?.value || 'Gloves';
+    const classVal = document.getElementById('add-order-item-class')?.value || 'Class 2';
+    const size = document.getElementById('add-order-item-size')?.value || '';
+    const vSelect = document.getElementById('edit-order-vendor-select');
+    let vendor = vSelect ? vSelect.value : '';
+    if (vendor && vendor !== '__custom__' && size) {
+      const price = this.getVendorPrice(vendor, cat, size, classVal);
+      const priceInput = document.getElementById('add-order-item-price');
+      if (price > 0 && priceInput && (!priceInput.value || parseFloat(priceInput.value) === 0)) {
+        priceInput.value = price.toFixed(2);
+      }
+    }
   }
 
   closeEditOrderModal() {
     const modal = document.getElementById('edit-order-modal');
     if (modal) modal.style.display = 'none';
     this.editingOrder = null;
+    this.editingOrderItems = [];
   }
 
   onEditOrderVendorChange(val) {
@@ -5777,14 +6232,15 @@ class ProcurementEngine {
     } else {
       custom.style.display = 'none';
     }
+    this.onAddOrderItemChange();
   }
 
   async confirmSaveEditOrder() {
     if (!this.editingOrder) return;
     const poNumInput = document.getElementById('edit-order-po-num');
-    const orderNum = poNumInput ? poNumInput.value.trim() : '';
-    if (!orderNum) {
-      alert('⚠️ Please enter an Order Number.');
+    let orderNum = poNumInput ? poNumInput.value.trim() : '';
+    if (!orderNum || orderNum.toLowerCase() === 'ed') {
+      alert('⚠️ Please enter a valid Order Number (e.g. 0819764).');
       if (poNumInput) poNumInput.focus();
       return;
     }
@@ -5829,14 +6285,6 @@ class ProcurementEngine {
       }
     }
 
-    const formatToMdY = (dStr) => {
-      if (!dStr) return '';
-      if (dStr.includes('/')) return dStr;
-      const parts = dStr.split('-');
-      if (parts.length === 3) return `${parts[1]}/${parts[2]}/${parts[0]}`;
-      return dStr;
-    };
-
     const saveBtn = document.getElementById('btn-save-edit-order');
     if (saveBtn) saveBtn.textContent = '⏳ Saving...';
 
@@ -5849,45 +6297,57 @@ class ProcurementEngine {
       if (!poTable) throw new Error('Purchase Orders table not found');
 
       const updatedRowObj = {
-        'Date': formatToMdY(orderDate) || this.editingOrder.date,
+        'Date': this.formatToMdY(orderDate) || this.editingOrder.date || new Date().toLocaleDateString(),
         'PO Number': orderNum,
         'Vendor': vendorName,
         'Items': itemsStr,
         'Total Price': totalPrice > 0 ? totalPrice : 0,
-        'Expected Delivery': formatToMdY(delivDate) || (status === 'Received' ? 'Delivered' : 'Pending'),
+        'Expected Delivery': this.formatToMdY(delivDate) || (status === 'Received' ? 'Delivered' : 'Pending'),
         'Status': status,
         'Notes': finalNotes
       };
 
-      const targetRowIdx = this.editingOrder.rowIdx;
+      let targetRowIdx = this.editingOrder.rowIdx;
 
       let foundRow = null;
-      if (poTable.rows) {
+      if (targetRowIdx && poTable.rows) {
         foundRow = poTable.rows.find((r, idx) => {
           const rIdx = r._rowIdx || (idx + 2);
           return rIdx === targetRowIdx;
         });
       }
 
-      if (foundRow) {
-        Object.assign(foundRow, updatedRowObj);
-        this.db.syncRowToRawGrid(poTable, foundRow);
+      if (!foundRow && poTable.rows) {
+        // Fallback: match by PO Number or 'ed' or open matching row
+        foundRow = poTable.rows.find(r => {
+          const p = String(r['PO Number'] || r['PO #'] || '').trim().toLowerCase();
+          return p === orderNum.toLowerCase() || p === 'ed';
+        });
+        if (foundRow) {
+          targetRowIdx = foundRow._rowIdx || (poTable.rows.indexOf(foundRow) + 2);
+        }
       }
 
-      await this.db.addMutation({
-        action: 'UPDATE_ROW',
-        sheetName: poTable.name || 'Purchase Orders',
-        tableKey: 'purchase_orders',
-        row: targetRowIdx,
-        rowData: updatedRowObj
-      });
+      if (foundRow && targetRowIdx) {
+        Object.assign(foundRow, updatedRowObj);
+        this.db.syncRowToRawGrid(poTable, foundRow);
+        await this.db.addMutation({
+          action: 'UPDATE_ROW',
+          sheetName: poTable.name || 'Purchase Orders',
+          tableKey: 'purchase_orders',
+          row: targetRowIdx,
+          rowData: updatedRowObj
+        });
+      } else {
+        await this.db.addRow('purchase_orders', updatedRowObj, 'Purchase Order');
+      }
 
       // Cascade Order Number change to swap tables if order number was modified
       const oldOrderNum = this.editingOrder.orderNumber || this.editingOrder.vendorOrderNum || this.editingOrder.poNum;
       const oldPoNum = this.editingOrder.poNum;
-      const oldKeys = [oldOrderNum, oldPoNum].filter(Boolean);
+      const oldKeys = [oldOrderNum, oldPoNum, 'ed'].filter(Boolean);
       for (const oldNum of oldKeys) {
-        if (oldNum && oldNum !== orderNum) {
+        if (oldNum && oldNum.toLowerCase() !== orderNum.toLowerCase()) {
           const swapKeys = ['glove_swaps', 'sleeve_swaps', 'blanket_swaps', 'mack_swaps'];
           for (const sk of swapKeys) {
             const sTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable(sk) : null) || snap?.tables?.[sk];
@@ -5896,12 +6356,12 @@ class ProcurementEngine {
                 const stat = String(sr['Status'] || '');
                 const sNotes = String(sr['Notes'] || '');
                 let rowUpdated = false;
-                if (stat.includes(oldNum)) {
-                  sr['Status'] = stat.replace(oldNum, orderNum).replace(/\(PO:\s*/i, '(Order #: ');
+                if (stat.includes(oldNum) || (oldNum.toLowerCase() === 'ed' && stat.includes('Order #: ed'))) {
+                  sr['Status'] = stat.replace(new RegExp(`(?:Order\\s*#:\\s*|PO:\\s*)?${oldNum}`, 'gi'), `Order #: ${orderNum}`);
                   rowUpdated = true;
                 }
-                if (sNotes.includes(oldNum)) {
-                  sr['Notes'] = sNotes.replace(oldNum, orderNum).replace(/PO:\s*/gi, 'Order #: ');
+                if (sNotes.includes(oldNum) || (oldNum.toLowerCase() === 'ed' && sNotes.includes('Order #: ed'))) {
+                  sr['Notes'] = sNotes.replace(new RegExp(`(?:Order\\s*#:\\s*|PO:\\s*)?${oldNum}`, 'gi'), `Order #: ${orderNum}`);
                   rowUpdated = true;
                 }
                 if (rowUpdated) {
@@ -5915,17 +6375,61 @@ class ProcurementEngine {
                     col: 8,
                     value: sr['Status']
                   });
-                  if (sNotes.includes(oldNum)) {
-                    await this.db.addMutation({
-                      action: 'UPDATE_CELL',
-                      sheetName: sTable.name,
-                      tableKey: sk,
-                      row: rIdx,
-                      col: 12,
-                      value: sr['Notes']
-                    });
-                  }
+                  await this.db.addMutation({
+                    action: 'UPDATE_CELL',
+                    sheetName: sTable.name,
+                    tableKey: sk,
+                    row: rIdx,
+                    col: 12,
+                    value: sr['Notes']
+                  });
                 }
+              }
+            }
+          }
+        }
+      }
+
+      // If line items are assigned to linemen, sync to their swap sheet rows
+      if (this.editingOrderItems && this.editingOrderItems.length) {
+        for (const item of this.editingOrderItems) {
+          const catKey = (item.itemType || item.category || '').toLowerCase();
+          let swapKey = '';
+          if (catKey.includes('glove')) swapKey = 'glove_swaps';
+          else if (catKey.includes('sleeve')) swapKey = 'sleeve_swaps';
+          else if (catKey.includes('blanket')) swapKey = 'blanket_swaps';
+          else if (catKey.includes('mack')) swapKey = 'mack_swaps';
+
+          const empName = item.employeeName || '';
+          if (swapKey && empName && !empName.toLowerCase().includes('shelf') && !empName.toLowerCase().includes('stock')) {
+            const sTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable(swapKey) : null) || snap?.tables?.[swapKey];
+            if (sTable && sTable.rows) {
+              const sRow = sTable.rows.find(sr => {
+                const name = String(sr['Employee'] || sr['Employee Name'] || sr['Assigned To'] || Object.values(sr)[0] || '').trim();
+                return this.isNameMatch(name, empName);
+              });
+              if (sRow) {
+                const orderNote = `Ordered on ${orderDate || new Date().toLocaleDateString()}, Order #: ${orderNum}, Vendor: ${vendorName}${delivDate ? ', Est. Delivery: ' + delivDate : ''}${item.unitPrice > 0 ? ', Price: $' + item.unitPrice.toFixed(2) : ''}`;
+                sRow['Status'] = `Ordered (Order #: ${orderNum})`;
+                sRow['Notes'] = sRow['Notes'] ? `${sRow['Notes']}; ${orderNote}` : orderNote;
+                this.db.syncRowToRawGrid(sTable, sRow);
+                const rIdx = sRow._rowIdx || (sTable.rows.indexOf(sRow) + 2);
+                await this.db.addMutation({
+                  action: 'UPDATE_CELL',
+                  sheetName: sTable.name,
+                  tableKey: swapKey,
+                  row: rIdx,
+                  col: 8,
+                  value: `Ordered (Order #: ${orderNum})`
+                });
+                await this.db.addMutation({
+                  action: 'UPDATE_CELL',
+                  sheetName: sTable.name,
+                  tableKey: swapKey,
+                  row: rIdx,
+                  col: 12,
+                  value: sRow['Notes']
+                });
               }
             }
           }
@@ -5942,6 +6446,10 @@ class ProcurementEngine {
       this.closeEditOrderModal();
       await this.loadData();
       this.render();
+
+      if (window.ppeTrackingEngine && typeof window.ppeTrackingEngine.refresh === 'function') {
+        window.ppeTrackingEngine.refresh();
+      }
 
       alert(`✅ Order #${orderNum} updated successfully!`);
     } catch (err) {
@@ -6274,13 +6782,21 @@ class ProcurementEngine {
     }
 
     const orderInfo = item.orderInfo || {};
-    const cleanOrderNum = orderInfo.orderNumber || orderInfo.vendorOrderNumber || orderInfo.poNumber || '';
+    let cleanOrderNum = orderInfo.orderNumber || orderInfo.vendorOrderNumber || orderInfo.poNumber || '';
+    if (cleanOrderNum.toLowerCase() === 'ed') cleanOrderNum = '';
+
+    const currentAssignee = targetEmp ? targetEmp.name : (item.employees?.map(e => e.name).join(', ') || 'On Shelf');
+
+    // Fallback if order number was missing or corrupted
+    if (!cleanOrderNum) {
+      const activePo = this.findActiveOpenPo(currentAssignee, item.itemType);
+      if (activePo) cleanOrderNum = activePo.orderNumber;
+    }
+
     const vendorName = orderInfo.vendor || '';
     const orderDate = orderInfo.orderDate || '';
     const expDelivery = orderInfo.expectedDelivery || '';
     const price = item.price > 0 ? item.price.toFixed(2) : (orderInfo.price > 0 ? orderInfo.price.toFixed(2) : '');
-
-    const currentAssignee = targetEmp ? targetEmp.name : (item.employees?.map(e => e.name).join(', ') || 'On Shelf');
 
     // Get active employees list for selection
     const snap = (this.db && typeof this.db.getSnapshot === 'function')
@@ -6318,11 +6834,16 @@ class ProcurementEngine {
 
     body.innerHTML = `
       <div style="margin-bottom: 16px; background: rgba(13, 148, 136, 0.12); border: 1px solid rgba(13, 148, 136, 0.35); border-radius: 8px; padding: 12px 16px;">
-        <div style="font-weight: 700; font-size: 13.5px; color: #5eead4; margin-bottom: 3px; display: flex; align-items: center; gap: 8px;">
-          <span>✏️</span> Edit Ordered Item & Lineman Assignment
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; flex-wrap: wrap; gap: 8px;">
+          <div style="font-weight: 700; font-size: 13.5px; color: #5eead4; display: flex; align-items: center; gap: 8px;">
+            <span>✏️</span> Edit Ordered Item & Lineman Assignment
+          </div>
+          <button type="button" class="btn btn-xs" onclick="window.procurementEngine.openEditOrderFromCurrentPendingItem()" style="background: rgba(59, 130, 246, 0.25); border: 1px solid rgba(59, 130, 246, 0.55); color: #93c5fd; padding: 4px 10px; font-size: 11px; border-radius: 4px; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 5px;">
+            <span>➕</span> Add Another Item to this Order
+          </button>
         </div>
         <div style="font-size: 12px; color: #cbd5e1;">
-          Update who this item was ordered for (e.g. assign to a specific lineman or move to shelf stock), modify the Order #, vendor, price, or estimated delivery date.
+          Update who this item was ordered for (e.g. assign to a specific lineman or move to shelf stock), modify the Order #, vendor, price, or estimated delivery date. To add more items to this order, click <strong>"Add Another Item to this Order"</strong> above.
         </div>
       </div>
 
@@ -6376,6 +6897,16 @@ class ProcurementEngine {
     modal.style.display = 'flex';
   }
 
+  openEditOrderFromCurrentPendingItem() {
+    if (!this.editingPendingItem) return;
+    const item = this.editingPendingItem.item;
+    const meta = this.getOrderKeyForPendingItem(item);
+    this.closeEditPendingOrderItemModal();
+    if (meta && meta.orderKey) {
+      this.openEditOrderFromKey(meta.orderKey);
+    }
+  }
+
   closeEditPendingOrderItemModal() {
     const modal = document.getElementById('edit-pending-order-item-modal');
     if (modal) modal.style.display = 'none';
@@ -6400,9 +6931,9 @@ class ProcurementEngine {
     const assigneeSelect = document.getElementById('edit-pending-assignee');
     const newAssignee = assigneeSelect ? assigneeSelect.value.trim() : '';
     const poNumInput = document.getElementById('edit-pending-po-num');
-    const orderNum = poNumInput ? poNumInput.value.trim() : '';
-    if (!orderNum) {
-      alert('⚠️ Please enter an Order Number.');
+    let orderNum = poNumInput ? poNumInput.value.trim() : '';
+    if (!orderNum || orderNum.toLowerCase() === 'ed') {
+      alert('⚠️ Please enter a valid Order Number (e.g. 0819764).');
       if (poNumInput) poNumInput.focus();
       return;
     }
@@ -6497,6 +7028,51 @@ class ProcurementEngine {
             row: rIdx,
             col: 12,
             value: orderNote
+          });
+        }
+      }
+
+      // Also cascade to purchase_orders table if order row exists with old number or 'ed'
+      const poTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('purchase_orders') : null) || snap?.tables?.['purchase_orders'];
+      if (poTable && poTable.rows) {
+        const oldOrderNum = item.orderInfo?.orderNumber || item.orderInfo?.vendorOrderNumber || item.orderInfo?.poNumber;
+        const targetOld = (oldOrderNum && oldOrderNum.toLowerCase() !== 'ed') ? oldOrderNum.toLowerCase() : null;
+        let matchedPo = null;
+        if (targetOld) {
+          matchedPo = poTable.rows.find(r => {
+            const p = String(r['PO Number'] || r['PO #'] || '').trim().toLowerCase();
+            const n = String(r['Notes'] || '').toLowerCase();
+            return p === targetOld || n.includes(targetOld);
+          });
+        }
+        if (!matchedPo) {
+          matchedPo = poTable.rows.find(r => {
+            const stat = String(r['Status'] || '').toLowerCase();
+            const notes = String(r['Notes'] || '');
+            const items = String(r['Items'] || '');
+            const p = String(r['PO Number'] || r['PO #'] || '').trim().toLowerCase();
+            return (p === 'ed' || p === orderNum.toLowerCase() || (!stat.includes('received') && (this.isNameMatch(notes, oldAssignee) || this.isNameMatch(items, oldAssignee))));
+          });
+        }
+        if (matchedPo) {
+          matchedPo['PO Number'] = orderNum;
+          if (vendorName) matchedPo['Vendor'] = vendorName;
+          if (orderDate) matchedPo['Date'] = this.formatToMdY(orderDate) || matchedPo['Date'];
+          if (delivDate) matchedPo['Expected Delivery'] = this.formatToMdY(delivDate) || matchedPo['Expected Delivery'];
+          if (matchedPo['Notes']) {
+            matchedPo['Notes'] = matchedPo['Notes'].replace(/\bed\b/gi, orderNum);
+            if (oldOrderNum && oldOrderNum !== orderNum) {
+              matchedPo['Notes'] = matchedPo['Notes'].replace(oldOrderNum, orderNum);
+            }
+          }
+          this.db.syncRowToRawGrid(poTable, matchedPo);
+          const prIdx = matchedPo._rowIdx || (poTable.rows.indexOf(matchedPo) + 2);
+          await this.db.addMutation({
+            action: 'UPDATE_ROW',
+            sheetName: poTable.name || 'Purchase Orders',
+            tableKey: 'purchase_orders',
+            row: prIdx,
+            rowData: matchedPo
           });
         }
       }
