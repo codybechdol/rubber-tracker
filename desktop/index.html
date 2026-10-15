@@ -140,7 +140,7 @@
           <span class="nav-item-icon">🔍</span> Lookup & Search
         </div>
         <div class="nav-item" data-view="procurement-view">
-          <span class="nav-item-icon">🛒</span> Purchase Needs & POs
+          <span class="nav-item-icon">🛒</span> Purchase Needs & Orders
         </div>
         <div class="nav-item" data-view="aging-view">
           <span class="nav-item-icon">📊</span> Fleet Aging & EOL
@@ -843,7 +843,7 @@
         <div class="sheet-toolbar" style="display: flex; justify-content: space-between; align-items: center; padding: 12px 18px; background: #1e293b; border-bottom: 1px solid var(--border-color); flex-wrap: wrap; gap: 10px;">
           <div style="display: flex; align-items: center; gap: 10px;">
             <span style="font-size: 18px;">🛒</span>
-            <h2 style="font-size: 15px; margin: 0; font-weight: 800; color: #f8fafc;">Purchase Needs & Purchase Orders</h2>
+            <h2 style="font-size: 15px; margin: 0; font-weight: 800; color: #f8fafc;">Purchase Needs & Orders</h2>
             <span class="brand-badge" id="procurement-selected-badge" style="background: rgba(37, 99, 235, 0.2); color: #93c5fd; border: 1px solid rgba(37, 99, 235, 0.4); font-size: 11px; font-weight: 700;">
               0 items
             </span>
@@ -861,22 +861,22 @@
             <button class="btn btn-secondary" id="btn-procurement-manage-vendors" style="display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 6px 12px;" onclick="window.procurementEngine.openManageVendorsModal()">
               <span>⚙️</span> Manage Vendors
             </button>
-            <button class="btn btn-secondary" onclick="window.procurementEngine.downloadPoCsv()" style="display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 6px 12px;" title="Download PO line items as CSV">
+            <button class="btn btn-secondary" onclick="window.procurementEngine.downloadPoCsv()" style="display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 6px 12px;" title="Download line items as CSV">
               <span>📥</span> Download CSV
             </button>
-            <button class="btn btn-primary" onclick="window.procurementEngine.sendPoEmail()" style="display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 6px 14px; background: linear-gradient(135deg, #10b981 0%, #059669 100%); border: none; box-shadow: 0 2px 6px rgba(16, 185, 129, 0.3);" title="Draft and transmit purchase order email to selected vendor">
-              <span>📧</span> Email PO
+            <button class="btn btn-primary" onclick="window.procurementEngine.sendPoEmail()" style="display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 6px 14px; background: linear-gradient(135deg, #10b981 0%, #059669 100%); border: none; box-shadow: 0 2px 6px rgba(16, 185, 129, 0.3);" title="Draft and transmit order email to selected vendor">
+              <span>📧</span> Email Order
             </button>
             <button class="btn btn-secondary" id="btn-procurement-gen-po" style="display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 6px 12px;">
               <span>📝</span> View Text
             </button>
-            <button class="btn btn-secondary" id="btn-procurement-mark-ordered" onclick="window.procurementEngine.openMarkOrderedModal()" style="display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 6px 12px; border-color: #10b981; color: #6ee7b7; background: rgba(16, 185, 129, 0.1);" title="Mark selected purchase needs as Ordered with PO #, vendor, date, and price">
+            <button class="btn btn-secondary" id="btn-procurement-mark-ordered" onclick="window.procurementEngine.openMarkOrderedModal()" style="display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 6px 12px; border-color: #10b981; color: #6ee7b7; background: rgba(16, 185, 129, 0.1);" title="Mark selected purchase needs as Ordered with Order #, vendor, date, and price">
               <span>📦</span> Mark Ordered
             </button>
             <button class="btn btn-secondary" id="btn-procurement-batch-deliver" onclick="window.procurementEngine.openBatchDeliveryModal()" style="display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 6px 12px; border-color: #3b82f6; color: #93c5fd; background: rgba(59, 130, 246, 0.1);" title="Receive delivered items into inventory in batches and assign new item numbers">
               <span>🚚</span> Mark Delivered
             </button>
-            <button class="btn btn-secondary" id="btn-procurement-add-past-order" onclick="window.procurementEngine.openAddPastOrderModal()" style="display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 6px 12px;" title="Manually record a past purchase order into the tracking log">
+            <button class="btn btn-secondary" id="btn-procurement-add-past-order" onclick="window.procurementEngine.openAddPastOrderModal()" style="display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 6px 12px;" title="Manually record a past order into the tracking log">
               <span>➕</span> Add Past Order
             </button>
           </div>
@@ -2059,7 +2059,7 @@
       <div class="modal-header" style="background: linear-gradient(135deg, #475569 0%, #334155 100%); color: white;">
         <div style="display: flex; align-items: center; gap: 8px;">
           <span style="font-size: 18px;">➕</span>
-          <span style="font-weight: 800; font-size: 15px;">Log Past / Manual Purchase Order</span>
+          <span style="font-weight: 800; font-size: 15px;">Log Past / Manual Order</span>
         </div>
         <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 12px; background: rgba(0,0,0,0.2); border: none; color: white; cursor: pointer;" onclick="window.procurementEngine.closeAddPastOrderModal()">✕</button>
       </div>
@@ -2075,13 +2075,13 @@
     </div>
   </div>
 
-  <!-- Edit Purchase Order Modal -->
+  <!-- Edit Order Modal -->
   <div id="edit-order-modal" class="modal-overlay" style="display: none;">
     <div class="modal-box" style="max-width: 680px; width: 95%; max-height: 90vh;">
       <div class="modal-header" style="background: linear-gradient(135deg, #1e3a8a 0%, #1e40af 100%); color: white;">
         <div style="display: flex; align-items: center; gap: 8px;">
           <span style="font-size: 18px;">✏️</span>
-          <span style="font-weight: 800; font-size: 15px;" id="edit-order-modal-title">Edit Purchase Order</span>
+          <span style="font-weight: 800; font-size: 15px;" id="edit-order-modal-title">Edit Order</span>
         </div>
         <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 12px; background: rgba(0,0,0,0.2); border: none; color: white; cursor: pointer;" onclick="window.procurementEngine.closeEditOrderModal()">✕</button>
       </div>

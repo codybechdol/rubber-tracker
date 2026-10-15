@@ -575,7 +575,7 @@ class RubberPpeTrackingEngine {
     const parseOrderNotes = (notesStr) => {
       if (!notesStr) return null;
       const str = String(notesStr);
-      const poMatch = str.match(/PO:\s*([^|;\n]+)/i);
+      const poMatch = str.match(/(?:Order(?:\s*#)?|Vendor Order(?:\s*#)?|PO(?:\s*#)?):\s*([^|;\n]+)/i);
       const dateMatch = str.match(/Date:\s*([^|;\n]+)/i);
       const vendorMatch = str.match(/Vendor:\s*([^|;\n]+)/i);
       const priceMatch = str.match(/Price:\s*\$?([0-9.,]+)/i);
@@ -1461,7 +1461,7 @@ class RubberPpeTrackingEngine {
       `;
     } else if (r.gloveOrdered) {
       const gOrd = r.gloveOrdered;
-      const poText = gOrd.orderNumber ? `PO: ${this.escapeHtml(gOrd.orderNumber)}` : 'Ordered';
+      const poText = gOrd.orderNumber ? `Order #: ${this.escapeHtml(gOrd.orderNumber)}` : 'Ordered';
       const vendorText = gOrd.vendor ? ` · ${this.escapeHtml(gOrd.vendor)}` : '';
       const dateText = gOrd.orderDate ? ` · ${this.escapeHtml(gOrd.orderDate)}` : '';
       glovesCell = `
@@ -1576,7 +1576,7 @@ class RubberPpeTrackingEngine {
       `;
     } else if (r.sleeveOrdered) {
       const sOrd = r.sleeveOrdered;
-      const poText = sOrd.orderNumber ? `PO: ${this.escapeHtml(sOrd.orderNumber)}` : 'Ordered';
+      const poText = sOrd.orderNumber ? `Order #: ${this.escapeHtml(sOrd.orderNumber)}` : 'Ordered';
       const vendorText = sOrd.vendor ? ` · ${this.escapeHtml(sOrd.vendor)}` : '';
       const dateText = sOrd.orderDate ? ` · ${this.escapeHtml(sOrd.orderDate)}` : '';
       sleevesCell = `
