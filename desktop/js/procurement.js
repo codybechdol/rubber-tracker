@@ -5129,9 +5129,11 @@ class ProcurementEngine {
         await this.db.addRow(catKey, newRow, 'New Purchase');
         addedItemsSummary.push(`${u.category} #${itemNum} (${isReadyForDelivery ? 'Packed for ' + assignedTo : (assignedTo || 'Shelf')})`);
 
-        if (typeof this.db.recordItemHistoryEvent === 'function') {
+        // If specifically packed for delivery or directly assigned to an employee, record that second stage event.
+        // For items placed on shelf, addRow above ALREADY recorded the initial 'On Shelf (New Purchase)' history event.
+        if (typeof this.db.recordItemHistoryEvent === 'function' && (isReadyForDelivery || (assignedTo && assignedTo.toLowerCase() !== 'on shelf' && !assignedTo.toLowerCase().includes('shelf')))) {
           const invSheetName = (catKey === 'gloves') ? 'Gloves' : ((catKey === 'sleeves') ? 'Sleeves' : ((catKey === 'blankets') ? 'Blankets' : ((catKey === 'macks') ? 'MACKs' : catKey)));
-          await this.db.recordItemHistoryEvent(invSheetName, newRow, isReadyForDelivery ? `Packed For Delivery (${assignedTo})` : (assignedTo ? `Assigned To (${assignedTo})` : 'Added to Shelf'));
+          await this.db.recordItemHistoryEvent(invSheetName, newRow, isReadyForDelivery ? `Packed For Delivery (${assignedTo})` : `Assigned To (${assignedTo})`);
         }
 
         if (assignedTo) {

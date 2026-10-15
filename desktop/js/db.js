@@ -2345,6 +2345,10 @@ class LocalDatabase {
       if (!/\bnew\b/i.test(notes)) {
         notes = 'New';
       }
+      // CRITICAL: A new purchase shelf origin is ALWAYS Helena (or non-truck warehouse), NEVER Cody's Truck!
+      if (!location || location.toLowerCase().includes('truck')) {
+        location = 'Helena';
+      }
     }
 
     let latest = null;
@@ -2626,12 +2630,19 @@ class LocalDatabase {
         const oAssigned = String(obj['Assigned To'] || obj['Employee Name'] || obj['Employee'] || '').trim();
         const oNotes = String(obj['Notes'] || obj['Note'] || '').trim();
 
+        const oLoc = String(obj['Location'] || '').trim();
+
         rowIdx = table.rows.findIndex(r => {
           const rDate = String(r['Date Assigned'] || r['Date'] || r['Action Date'] || '').trim();
           const rItem = String(r['Item #'] || r['Item'] || r['Serial #'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || '').replace(/^#/, '').trim();
           const rAssigned = String(r['Assigned To'] || r['Employee Name'] || r['Employee'] || '').trim();
           const rNotes = String(r['Notes'] || r['Note'] || '').trim();
-          return rDate === oDate && rItem.toLowerCase() === oItem.toLowerCase() && (oAssigned ? rAssigned.toLowerCase() === oAssigned.toLowerCase() : true) && (oNotes ? rNotes === oNotes : true);
+          const rLoc = String(r['Location'] || '').trim();
+          return rDate === oDate &&
+                 rItem.toLowerCase() === oItem.toLowerCase() &&
+                 (oAssigned ? rAssigned.toLowerCase() === oAssigned.toLowerCase() : true) &&
+                 (oNotes ? rNotes === oNotes : true) &&
+                 (oLoc ? rLoc.toLowerCase() === oLoc.toLowerCase() : true);
         });
       }
     }
@@ -2646,10 +2657,12 @@ class LocalDatabase {
       let itemColIdx = -1;
       let dateColIdx = -1;
       let assignedColIdx = -1;
+      let locColIdx = -1;
       if (table.headers) {
         itemColIdx = table.headers.findIndex(h => /^(item(\s*#)?|serial(\s*#)?|glove|sleeve|blanket|mack|hv\s*tester|phasing)/i.test(String(h).trim()));
         dateColIdx = table.headers.findIndex(h => /^(date(\s*assigned)?|action\s*date|date)/i.test(String(h).trim()));
         assignedColIdx = table.headers.findIndex(h => /^(assigned\s*to|employee(\s*name)?|employee|holder)/i.test(String(h).trim()));
+        locColIdx = table.headers.findIndex(h => /^location$/i.test(String(h).trim()));
       }
       if (itemColIdx === -1) itemColIdx = 1;
       if (dateColIdx === -1) dateColIdx = 0;
@@ -2657,6 +2670,7 @@ class LocalDatabase {
       const oDate = String(removedRow['Date Assigned'] || removedRow['Date'] || '').trim();
       const oItem = String(removedRow['Item #'] || removedRow['Item'] || removedRow['Serial #'] || '').replace(/^#/, '').trim();
       const oAssigned = String(removedRow['Assigned To'] || '').trim();
+      const oLoc = String(removedRow['Location'] || '').trim();
 
       let gridIdx = -1;
       if (removedRow._rowIdx && removedRow._rowIdx >= 2 && removedRow._rowIdx <= table.rawGrid.length) {
@@ -2676,7 +2690,11 @@ class LocalDatabase {
           const grDate = String(gr[dateColIdx] || gr[0] || '').trim();
           const grItem = String(gr[itemColIdx] || gr[1] || '').replace(/^#/, '').trim();
           const grAssigned = assignedColIdx !== -1 ? String(gr[assignedColIdx] || '').trim() : String(gr[5] || gr[4] || gr[3] || '').trim();
-          return (oDate ? grDate === oDate : true) && (oItem ? grItem.toLowerCase() === oItem.toLowerCase() : true) && (oAssigned ? grAssigned.toLowerCase() === oAssigned.toLowerCase() : true);
+          const grLoc = locColIdx !== -1 ? String(gr[locColIdx] || '').trim() : '';
+          return (oDate ? grDate === oDate : true) &&
+                 (oItem ? grItem.toLowerCase() === oItem.toLowerCase() : true) &&
+                 (oAssigned ? grAssigned.toLowerCase() === oAssigned.toLowerCase() : true) &&
+                 (oLoc && grLoc ? grLoc.toLowerCase() === oLoc.toLowerCase() : true);
         });
       }
 
@@ -2686,6 +2704,11 @@ class LocalDatabase {
       }
     }
 
+    // Re-index remaining rows' _rowIdx
+    table.rows.forEach((r, idx) => {
+      r._rowIdx = idx + 2;
+    });
+
     // Queue DELETE_ROW mutation
     await this.addMutation({
       action: 'DELETE_ROW',
@@ -2694,6 +2717,9 @@ class LocalDatabase {
       rowData: removedRow
     });
 
+    await this.saveTable(historyTableKey, table);
+    this._invalidateHistoryEngines(historyTableKey);
+    return true;
   }
 
   /**
@@ -3118,11 +3144,31 @@ class LocalDatabase {
           }
         }
 
-        // Merge Location (favor specific physical location over default 'Helena' or empty)
+        // Merge Location
         const masterLoc = String(masterRow[locColName] || masterRow['Location'] || '').trim();
         const dupLoc = String(row[locColName] || row['Location'] || '').trim();
-        if ((!masterLoc || masterLoc.toLowerCase() === 'helena') && dupLoc && dupLoc.toLowerCase() !== 'helena') {
-          masterRow[locColName] = dupLoc;
+        const isShelfOrNew = canonicalAssigned.includes('shelf') || canonicalAssigned.includes('storage') || canonicalAssigned.includes('new purchase');
+
+        if (isShelfOrNew) {
+          // For shelf items / new purchases, physical shop/warehouse (Helena) is ALWAYS correct, NEVER truck
+          if (masterLoc.toLowerCase().includes('truck') && dupLoc && !dupLoc.toLowerCase().includes('truck')) {
+            masterRow[locColName] = dupLoc;
+            if (masterRow['Location']) masterRow['Location'] = dupLoc;
+          } else if (masterLoc.toLowerCase().includes('truck')) {
+            masterRow[locColName] = 'Helena';
+            if (masterRow['Location']) masterRow['Location'] = 'Helena';
+          }
+        } else {
+          // For non-shelf, prefer specific physical city over default 'Helena' or empty, but NEVER prefer a truck over a physical city
+          const isDupTruck = dupLoc.toLowerCase().includes('truck');
+          const isMasterTruck = masterLoc.toLowerCase().includes('truck');
+          if (isMasterTruck && dupLoc && !isDupTruck) {
+            masterRow[locColName] = dupLoc;
+            if (masterRow['Location']) masterRow['Location'] = dupLoc;
+          } else if ((!masterLoc || masterLoc.toLowerCase() === 'helena') && dupLoc && dupLoc.toLowerCase() !== 'helena' && !isDupTruck) {
+            masterRow[locColName] = dupLoc;
+            if (masterRow['Location']) masterRow['Location'] = dupLoc;
+          }
         }
 
         // Merge other attributes if missing in master
@@ -3134,6 +3180,14 @@ class LocalDatabase {
           }
         }
       } else {
+        // Normalize location for shelf / new purchase records so truck is never recorded as a shelf location
+        if (canonicalAssigned.includes('shelf') || canonicalAssigned.includes('storage') || canonicalAssigned.includes('new purchase')) {
+          const curLoc = String(row[locColName] || row['Location'] || '').trim();
+          if (curLoc.toLowerCase().includes('truck')) {
+            row[locColName] = 'Helena';
+            if (row['Location']) row['Location'] = 'Helena';
+          }
+        }
         seenGroups.set(dedupKey, row);
         pass1Rows.push(row);
       }
@@ -3158,11 +3212,6 @@ class LocalDatabase {
     const cleanedRows = [...otherRows];
 
     itemRowGroups.forEach((groupRows) => {
-      if (groupRows.length <= 1) {
-        cleanedRows.push(...groupRows);
-        return;
-      }
-
       const statePrecedence = {
         'new_purchase': 1, 'new': 1,
         'on shelf': 2, 'shelf': 2, 'storage': 2, 'in stock': 2,
@@ -3187,6 +3236,48 @@ class LocalDatabase {
         return 4; // Field assignment to employee
       };
 
+      // Find active inventory item state if available
+      const activeTableKey = tableKey.replace('_history', '');
+      const activeTable = this.getTable ? this.getTable(activeTableKey) : null;
+      let activeItemRow = null;
+      if (activeTable && activeTable.rows) {
+        const sampleRow = groupRows[0] || {};
+        const itmKey = String(sampleRow[itemColName] || sampleRow['Item #'] || sampleRow['Serial #'] || Object.values(sampleRow)[1] || Object.values(sampleRow)[0] || '').trim();
+        const itmNorm = normalizeItemStr(itmKey);
+        activeItemRow = activeTable.rows.find(ar => {
+          const aNum = String(ar['Item #'] || ar['Model'] || ar['Serial #'] || ar['Glove'] || ar['Sleeve'] || ar['Blanket'] || ar['MACK'] || Object.values(ar)[1] || Object.values(ar)[0] || '').trim();
+          return normalizeItemStr(aNum) === itmNorm;
+        });
+      }
+      const isActiveShelf = activeItemRow && (
+        String(activeItemRow['Assigned To'] || '').toLowerCase().includes('shelf') ||
+        String(activeItemRow['Status'] || '').toLowerCase().includes('shelf')
+      );
+
+      if (groupRows.length <= 1) {
+        if (groupRows.length === 1) {
+          const singleRow = groupRows[0];
+          const aVal = String(singleRow[assignedColName] || singleRow['Assigned To'] || '').trim();
+          const isShelfOrNew = aVal.toLowerCase().includes('shelf') || aVal.toLowerCase().includes('storage') || aVal.toLowerCase().includes('new purchase');
+          if (isShelfOrNew) {
+            const loc = String(singleRow[locColName] || singleRow['Location'] || '').trim();
+            if (loc.toLowerCase().includes('truck')) {
+              singleRow[locColName] = 'Helena';
+              if (singleRow['Location']) singleRow['Location'] = 'Helena';
+            }
+          } else if (getRank(aVal) === 3 && isActiveShelf) {
+            singleRow[assignedColName] = 'On Shelf (New Purchase)';
+            if (singleRow['Assigned To']) singleRow['Assigned To'] = 'On Shelf (New Purchase)';
+            singleRow[locColName] = 'Helena';
+            if (singleRow['Location']) singleRow['Location'] = 'Helena';
+            singleRow[notesColName] = 'New';
+            if (singleRow['Notes']) singleRow['Notes'] = 'New';
+          }
+        }
+        cleanedRows.push(...groupRows);
+        return;
+      }
+
       // 1. Identify dates where active employee field assignments exist
       const empAssignmentDates = new Set();
       groupRows.forEach(r => {
@@ -3197,19 +3288,36 @@ class LocalDatabase {
         }
       });
 
-      // 2. Discard 0-day intermediate shelf records on dates where an employee assignment occurred
+      // 2. Discard 0-day intermediate shelf records on dates where an employee assignment occurred,
+      // and discard stray Packed For Delivery (rank 3) records if active item is On Shelf and item was never assigned to an employee
       const noIntermediateShelf = groupRows.filter((r, idx) => {
-        if (idx === 0) return true; // Never discard the item's initial origin record
         const aVal = r[assignedColName] || r['Assigned To'] || '';
-        if (getRank(aVal) === 2) {
-          const dStr = normalizeDateStr(r[dateColName] || r['Date Assigned'] || r['Date'] || Object.values(r)[0]);
-          if (dStr && empAssignmentDates.has(dStr)) {
-            removedCount++;
-            return false;
-          }
+        const rank = getRank(aVal);
+        const dStr = normalizeDateStr(r[dateColName] || r['Date Assigned'] || r['Date'] || Object.values(r)[0]);
+
+        if (idx > 0 && rank === 2 && dStr && empAssignmentDates.has(dStr)) {
+          removedCount++;
+          return false;
         }
+
+        if (rank === 3 && isActiveShelf && empAssignmentDates.size === 0) {
+          removedCount++;
+          return false;
+        }
+
         return true;
       });
+
+      // If the only remaining row is a stray Packed For Delivery and the active item is On Shelf, restore it to On Shelf (New Purchase)
+      if (noIntermediateShelf.length === 1 && isActiveShelf && getRank(noIntermediateShelf[0][assignedColName] || noIntermediateShelf[0]['Assigned To']) === 3) {
+        const singleRow = noIntermediateShelf[0];
+        singleRow[assignedColName] = 'On Shelf (New Purchase)';
+        if (singleRow['Assigned To']) singleRow['Assigned To'] = 'On Shelf (New Purchase)';
+        singleRow[locColName] = 'Helena';
+        if (singleRow['Location']) singleRow['Location'] = 'Helena';
+        singleRow[notesColName] = 'New';
+        if (singleRow['Notes']) singleRow['Notes'] = 'New';
+      }
 
       // 3. Sort chronologically ascending, tie-breaking by canonical lifecycle state rank
       noIntermediateShelf.sort((a, b) => {
@@ -3263,9 +3371,26 @@ class LocalDatabase {
 
             const pLoc = String(prev[locColName] || prev['Location'] || '').trim();
             const cLoc = String(cur[locColName] || cur['Location'] || '').trim();
-            if ((!pLoc || pLoc.toLowerCase() === 'helena') && cLoc && cLoc.toLowerCase() !== 'helena') {
-              prev[locColName] = cLoc;
-              if (prev['Location']) prev['Location'] = cLoc;
+            const isPrevShelf = prevAssigned.includes('shelf') || prevAssigned.includes('storage') || prevAssigned.includes('new purchase');
+
+            if (isPrevShelf) {
+              if (pLoc.toLowerCase().includes('truck') && cLoc && !cLoc.toLowerCase().includes('truck')) {
+                prev[locColName] = cLoc;
+                if (prev['Location']) prev['Location'] = cLoc;
+              } else if (pLoc.toLowerCase().includes('truck')) {
+                prev[locColName] = 'Helena';
+                if (prev['Location']) prev['Location'] = 'Helena';
+              }
+            } else {
+              const isCTruck = cLoc.toLowerCase().includes('truck');
+              const isPTruck = pLoc.toLowerCase().includes('truck');
+              if (isPTruck && cLoc && !isCTruck) {
+                prev[locColName] = cLoc;
+                if (prev['Location']) prev['Location'] = cLoc;
+              } else if ((!pLoc || pLoc.toLowerCase() === 'helena') && cLoc && cLoc.toLowerCase() !== 'helena' && !isCTruck) {
+                prev[locColName] = cLoc;
+                if (prev['Location']) prev['Location'] = cLoc;
+              }
             }
             continue; // Collapsed!
           }
@@ -3344,7 +3469,7 @@ class LocalDatabase {
 
     // Hard Guard: Disallow adding mutations in View Only mode
     const isViewOnly = (typeof window !== 'undefined' && window.currentRoleMode === 'view_only') ||
-                       (typeof document !== 'undefined' && document.body && (document.body.classList.contains('view-only-mode') || document.body.classList.contains('inspector-mode')));
+                       (typeof document !== 'undefined' && document.body && document.body.classList && typeof document.body.classList.contains === 'function' && (document.body.classList.contains('view-only-mode') || document.body.classList.contains('inspector-mode')));
     if (isViewOnly) {
       console.warn('⚠️ Manual edit blocked: Safety Assistant is currently in View Only mode.', mutation);
       return null;

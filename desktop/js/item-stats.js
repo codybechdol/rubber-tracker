@@ -2743,11 +2743,16 @@ class ItemStatsEngine {
       await this.db.deleteHistoryRow(histKey, r => {
         const d = String(r['Date Assigned'] || r['Date'] || Object.values(r)[0] || '').trim();
         const a = String(r['Assigned To'] || r['Employee Name'] || '').trim();
-        return d === m.startDateFormatted && a === m.assignedTo;
+        const loc = String(r['Location'] || '').trim();
+        const mLoc = String(m.location || '').trim();
+        return d === m.startDateFormatted && a === m.assignedTo && (!mLoc || loc.toLowerCase() === mLoc.toLowerCase());
       });
     }
 
     // Refresh UI
+    if (window.historyIssuesEngine) {
+      window.historyIssuesEngine.invalidateCache(cleanItemKey);
+    }
     this.openDossierModal(cleanItemKey, histKey);
     if (window.historyNavigator) {
       window.historyNavigator.renderCurrentHistory();
