@@ -5912,10 +5912,21 @@ class ProcurementEngine {
       // If this item was originated by an open PO in purchase_orders, check if PO needs to be updated/cancelled
       const poTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('purchase_orders') : null) || snap?.tables?.['purchase_orders'];
       if (poTable && poTable.rows && poNum) {
-        const poRow = poTable.rows.find(r => {
-          const num = String(r['PO Number'] || r['PO #'] || (Array.isArray(r) ? r[1] : '') || '').trim();
-          return num.toLowerCase() === poNum.toLowerCase();
-        });
+        const voNum = item.orderInfo?.vendorOrderNumber || '';
+        let poRow = null;
+        if (voNum) {
+          poRow = poTable.rows.find(r => {
+            const notes = String(r['Notes'] || '');
+            return notes.includes(voNum);
+          });
+        }
+        if (!poRow) {
+          poRow = poTable.rows.find(r => {
+            const num = String(r['PO Number'] || r['PO #'] || (Array.isArray(r) ? r[1] : '') || '').trim();
+            const stat = String(r['Status'] || (Array.isArray(r) ? r[6] : '') || '').toLowerCase();
+            return num.toLowerCase() === poNum.toLowerCase() && !stat.includes('received') && !stat.includes('fulfilled');
+          });
+        }
         if (poRow && (empIdx === null || (item.employees && item.employees.length <= 1))) {
           if (Array.isArray(poRow)) {
             poRow[6] = 'Cancelled';
