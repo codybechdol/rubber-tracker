@@ -13535,31 +13535,44 @@ function createBackupSnapshotFast(forceFullCopy, clientSnapshot) {
     var backupFile = null;
     var backupFolder = typeof getOrCreateBackupFolder === 'function' ? getOrCreateBackupFolder() : null;
 
+    if (!backupFolder && typeof getOrCreateBackupFolder === 'function') {
+      try { backupFolder = getOrCreateBackupFolder(); } catch (fErr) {}
+    }
+
     // 1. FAST JSON SNAPSHOT FIRST (<1 second):
     // Creates timestamped JSON database snapshot immediately in Google Drive!
     var jsonBackupFile = null;
     var jsonBackupName = backupName + '.json';
     try {
-      var snapData = clientSnapshot || null;
-      if (!snapData && typeof getFastSnapshotFromDriveOrExport === 'function') {
+      var jsonStr = null;
+      var needUpdateSyncSnapshot = false;
+
+      if (typeof clientSnapshot === 'string' && clientSnapshot.length > 50) {
+        jsonStr = clientSnapshot;
+        needUpdateSyncSnapshot = true;
+      } else if (clientSnapshot && typeof clientSnapshot === 'object') {
+        jsonStr = JSON.stringify(clientSnapshot);
+        needUpdateSyncSnapshot = true;
+      } else if (typeof getFastSnapshotFromDriveOrExport === 'function') {
         try {
-          var cachedStr = getFastSnapshotFromDriveOrExport();
-          if (cachedStr) snapData = JSON.parse(cachedStr);
+          jsonStr = getFastSnapshotFromDriveOrExport();
         } catch (eCache) {}
       }
-      if (!snapData && typeof exportFullDatabaseSnapshot === 'function') {
-        snapData = exportFullDatabaseSnapshot();
+
+      if (!jsonStr && typeof exportFullDatabaseSnapshot === 'function') {
+        var exported = exportFullDatabaseSnapshot();
+        jsonStr = JSON.stringify(exported);
+        needUpdateSyncSnapshot = true;
       }
 
-      if (snapData && backupFolder) {
-        var jsonStr = typeof snapData === 'string' ? snapData : JSON.stringify(snapData);
+      if (jsonStr && backupFolder) {
         jsonBackupFile = backupFolder.createFile(jsonBackupName, jsonStr, MimeType.PLAIN_TEXT);
         Logger.log('createBackupSnapshotFast: Created timestamped JSON backup: ' + jsonBackupName + ' (' + (jsonStr.length / 1024).toFixed(1) + ' KB)');
         logEvent('JSON Backup created: ' + jsonBackupName, 'INFO');
       }
 
-      if (snapData && typeof generateAndStoreSyncSnapshot === 'function') {
-        generateAndStoreSyncSnapshot(snapData);
+      if (needUpdateSyncSnapshot && jsonStr && typeof generateAndStoreSyncSnapshot === 'function') {
+        generateAndStoreSyncSnapshot(jsonStr);
       }
     } catch (syncSnapErr) {
       Logger.log('createBackupSnapshotFast: Error generating sync snapshot: ' + syncSnapErr);
@@ -13569,11 +13582,16 @@ function createBackupSnapshotFast(forceFullCopy, clientSnapshot) {
     if (forceFullCopy === true || !lastBackupTime || (nowTime - lastBackupTime) > backupThrottleMs) {
       try { ss.toast('Creating backup spreadsheet copy in Drive...', '💾 Backup in Progress', -1); } catch (tErr) {}
       if (backupFolder) {
-        backupFile = DriveApp.getFileById(ss.getId()).makeCopy(backupName, backupFolder);
+        try {
+          backupFile = DriveApp.getFileById(ss.getId()).makeCopy(backupName, backupFolder);
+          scriptProps.setProperty('LAST_FULL_DRIVE_BACKUP_TIME', String(nowTime));
+          logEvent('Full Drive Backup created: ' + backupName, 'INFO');
+          try { ss.toast('Backup created: ' + backupName, '✅ Backup Complete', 5); } catch (tErr) {}
+        } catch (copyErr) {
+          Logger.log('createBackupSnapshotFast: makeCopy error: ' + copyErr);
+          logEvent('Spreadsheet copy failed (JSON backup succeeded): ' + copyErr, 'WARNING');
+        }
       }
-      scriptProps.setProperty('LAST_FULL_DRIVE_BACKUP_TIME', String(nowTime));
-      logEvent('Full Drive Backup created: ' + backupName, 'INFO');
-      try { ss.toast('Backup created: ' + backupName, '✅ Backup Complete', 5); } catch (tErr) {}
     } else {
       Logger.log('createBackupSnapshotFast: Full Drive copy throttled (last created ' + ((nowTime - lastBackupTime) / 1000).toFixed(0) + 's ago).');
     }
