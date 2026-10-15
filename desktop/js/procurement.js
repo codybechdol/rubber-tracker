@@ -2512,6 +2512,137 @@ class ProcurementEngine {
     }
   }
 
+  async cancelOrderGroup(orderKey) {
+    const grp = this.orderGroupsMap ? this.orderGroupsMap.get(orderKey) : null;
+    if (!grp) return;
+
+    const targetOrderNum = String(grp.vendorOrderNumber || grp.orderNumber || grp.poNumber || '').trim();
+    const count = grp.totalUnits || grp.items.length || 0;
+    const confirmMsg = targetOrderNum
+      ? `Are you sure you want to cancel the entire Order #${targetOrderNum} (${count} items)?\n\nThis will revert all items in this order back to "Needs to Order" on Glove Swaps and remove this order from tracking.`
+      : `Are you sure you want to cancel this entire order (${count} items)?\n\nThis will revert all items back to "Needs to Order".`;
+
+    if (!confirm(confirmMsg)) return;
+
+    try {
+      const snap = (this.db && typeof this.db.getSnapshot === 'function')
+        ? this.db.getSnapshot()
+        : (window.localDB ? window.localDB.getSnapshot() : null);
+
+      // Collect target order identifiers
+      const targetNums = [targetOrderNum, grp.orderNumber, grp.poNumber, grp.vendorOrderNumber].filter(Boolean);
+
+      // Collect target employees & categories
+      const targetItems = grp.items || [];
+      const targetEmps = [];
+      targetItems.forEach(it => {
+        if (it.employees && it.employees.length) {
+          it.employees.forEach(e => {
+            if (e.name) targetEmps.push({ name: e.name, cat: (it.itemType || '').toLowerCase() });
+          });
+        }
+      });
+
+      const swapKeys = ['glove_swaps', 'sleeve_swaps', 'blanket_swaps', 'mack_swaps'];
+      for (const sk of swapKeys) {
+        const sTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable(sk) : null) || snap?.tables?.[sk];
+        if (sTable && sTable.rows) {
+          for (const sr of sTable.rows) {
+            const stat = String(sr['Status'] || '');
+            const notes = String(sr['Notes'] || '');
+            const empName = String(sr['Employee'] || sr['Employee Name'] || sr['Assigned To'] || Object.values(sr)[0] || '').trim();
+
+            const isNumMatch = targetNums.some(num => num && (stat.includes(num) || notes.includes(num)));
+            const isEmpMatch = targetEmps.some(te => this.isNameMatch(empName, te.name) && sk.includes(te.cat.slice(0, 4)));
+
+            if ((isNumMatch || isEmpMatch) && stat.toLowerCase().includes('order')) {
+              sr['Status'] = 'Need To Purchase';
+              if (sr['Notes']) {
+                sr['Notes'] = sr['Notes'].replace(/Ordered on [^;]+;?/gi, '').trim();
+              }
+              this.db.syncRowToRawGrid(sTable, sr);
+              const rIdx = sr._rowIdx || (sTable.rows.indexOf(sr) + 2);
+              await this.db.addMutation({
+                action: 'UPDATE_CELL',
+                sheetName: sTable.name,
+                tableKey: sk,
+                row: rIdx,
+                col: 8,
+                value: 'Need To Purchase'
+              });
+              await this.db.addMutation({
+                action: 'UPDATE_CELL',
+                sheetName: sTable.name,
+                tableKey: sk,
+                row: rIdx,
+                col: 12,
+                value: sr['Notes'] || ''
+              });
+            }
+          }
+        }
+      }
+
+      // Also revert matching rows in safety_equipment_needs
+      const needsTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('safety_equipment_needs') : null) || snap?.tables?.['safety_equipment_needs'];
+      if (needsTable && needsTable.rows) {
+        for (const nr of needsTable.rows) {
+          const empName = String(nr['Employee'] || '').trim();
+          const stat = String(nr['Status'] || '');
+          const isNumMatch = targetNums.some(num => num && (stat.includes(num) || String(nr['Notes'] || '').includes(num)));
+          const isEmpMatch = targetEmps.some(te => this.isNameMatch(empName, te.name));
+          if ((isNumMatch || isEmpMatch) && stat.toLowerCase().includes('order')) {
+            nr['Status'] = 'Pending';
+            if (nr['Notes']) {
+              nr['Notes'] = nr['Notes'].replace(/Ordered on [^;]+;?/gi, '').trim();
+            }
+            this.db.syncRowToRawGrid(needsTable, nr);
+            const nrIdx = nr._rowIdx || (needsTable.rows.indexOf(nr) + 2);
+            await this.db.addMutation({
+              action: 'UPDATE_ROW',
+              sheetName: needsTable.name || 'Safety Equipment Needs',
+              tableKey: 'safety_equipment_needs',
+              row: nrIdx,
+              rowData: nr
+            });
+          }
+        }
+      }
+
+      // Also delete matching row in purchase_orders if still present
+      const poTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('purchase_orders') : null) || snap?.tables?.['purchase_orders'];
+      if (poTable && poTable.rows && targetNums.length) {
+        const poIdx = poTable.rows.findIndex(r => {
+          const pNum = String(r['PO Number'] || r['PO #'] || '').trim().toLowerCase();
+          const pNotes = String(r['Notes'] || '').toLowerCase();
+          return targetNums.some(tn => pNum === tn.toLowerCase() || pNotes.includes(tn.toLowerCase()));
+        });
+        if (poIdx !== -1) {
+          const targetRowIdx = poTable.rows[poIdx]._rowIdx || (poIdx + 2);
+          poTable.rows.splice(poIdx, 1);
+          await this.db.addMutation({
+            action: 'DELETE_ROW',
+            sheetName: poTable.name || 'Purchase Orders',
+            tableKey: 'purchase_orders',
+            row: targetRowIdx
+          });
+        }
+      }
+
+      await this.loadData();
+      this.render();
+
+      if (window.ppeTrackingEngine && typeof window.ppeTrackingEngine.refresh === 'function') {
+        window.ppeTrackingEngine.refresh();
+      }
+
+      alert(`✅ Order #${targetOrderNum || ''} cancelled successfully. All items reverted back to "Needs to Order".`);
+    } catch (err) {
+      console.error('Error cancelling order group:', err);
+      alert('❌ Failed to cancel order: ' + (err.message || err));
+    }
+  }
+
   parseDateForSort(dVal) {
     if (!dVal) return 0;
     if (dVal instanceof Date) return isNaN(dVal.getTime()) ? 0 : dVal.getTime();
@@ -2942,6 +3073,9 @@ class ProcurementEngine {
                     </button>
                     <button type="button" class="btn btn-xs" onclick="window.procurementEngine.openEditOrderFromKey('${orderKey}')" style="background: rgba(148, 163, 184, 0.18); border: 1px solid rgba(148, 163, 184, 0.4); color: #e2e8f0; padding: 4px 8px; font-size: 11px; border-radius: 4px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;" title="Edit Order #, Vendor, Dates, or Details">
                       <span>✏️</span> Edit Order
+                    </button>
+                    <button type="button" class="btn btn-xs" onclick="window.procurementEngine.cancelOrderGroup('${orderKey}')" style="background: rgba(239, 68, 68, 0.18); border: 1px solid rgba(239, 68, 68, 0.45); color: #f87171; padding: 4px 8px; font-size: 11px; border-radius: 4px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;" title="Cancel this entire order and revert all items back to Needs to Order">
+                      <span>🗑️</span> Cancel Order
                     </button>
                   </div>
                 </div>
@@ -5363,7 +5497,14 @@ class ProcurementEngine {
       <div style="overflow-x: auto; border: 1px solid var(--border-color); border-radius: 6px;">
         <table class="procurement-orders-table" style="width: 100%; border-collapse: collapse; font-size: 12.5px;">
           <thead>
-            <tr style="user-select: none;">              <th style="width: 135px; cursor: pointer; color: ${this.historySortCol === 'po' ? '#38bdf8' : 'inherit'};" onclick="window.procurementEngine.toggleHistorySort('po')" title="Click to sort by Order Number">
+            <tr style="user-select: none;">
+              <th style="width: 105px; cursor: pointer; color: ${this.historySortCol === 'date' ? '#38bdf8' : 'inherit'};" onclick="window.procurementEngine.toggleHistorySort('date')" title="Click to sort by Date (${this.historySortCol === 'date' && this.historySortDir === 'desc' ? 'Currently Newest First' : 'Currently Oldest First'})">
+                <div style="display: flex; align-items: center; gap: 4px;">
+                  <span>Date</span>
+                  <span style="font-size: 11px; opacity: ${this.historySortCol === 'date' ? '1' : '0.4'};">${this.historySortCol === 'date' ? (this.historySortDir === 'asc' ? '▲' : '▼') : '↕'}</span>
+                </div>
+              </th>
+              <th style="width: 135px; cursor: pointer; color: ${this.historySortCol === 'po' ? '#38bdf8' : 'inherit'};" onclick="window.procurementEngine.toggleHistorySort('po')" title="Click to sort by Order Number">
                 <div style="display: flex; align-items: center; gap: 4px;">
                   <span>Order #</span>
                   <span style="font-size: 11px; opacity: ${this.historySortCol === 'po' ? '1' : '0.4'};">${this.historySortCol === 'po' ? (this.historySortDir === 'asc' ? '▲' : '▼') : '↕'}</span>
@@ -5766,7 +5907,7 @@ class ProcurementEngine {
   }
 
   async deleteOrder(rowIdx, poNum, poHistoryIdx = null) {
-    if (!confirm(`Are you sure you want to permanently delete Order #${poNum || 'Unknown'} from the tracking history?\n\nThis cannot be undone.`)) {
+    if (!confirm(`Are you sure you want to permanently delete Order #${poNum || 'Unknown'} from the tracking history?\n\nThis will also revert any pending items for this order back to "Needs to Order".`)) {
       return;
     }
 
@@ -5780,9 +5921,11 @@ class ProcurementEngine {
 
       const targetRowIdx = rowIdx;
 
+      let deletedOrderNotes = '';
       if (poTable.rows) {
         const idx = poTable.rows.findIndex((r, i) => (r._rowIdx || (i + 2)) === targetRowIdx);
         if (idx !== -1) {
+          deletedOrderNotes = String(poTable.rows[idx]['Notes'] || '');
           poTable.rows.splice(idx, 1);
         }
       }
@@ -5794,10 +5937,54 @@ class ProcurementEngine {
         row: targetRowIdx
       });
 
+      // Also revert any swap rows matching this order number or notes
+      const parsedNotes = this.parseOrderInfoFromNotes(deletedOrderNotes);
+      const targetNums = [poNum, parsedNotes?.orderNumber, parsedNotes?.vendorOrderNumber].filter(Boolean);
+
+      const swapKeys = ['glove_swaps', 'sleeve_swaps', 'blanket_swaps', 'mack_swaps'];
+      for (const sk of swapKeys) {
+        const sTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable(sk) : null) || snap?.tables?.[sk];
+        if (sTable && sTable.rows) {
+          for (const sr of sTable.rows) {
+            const stat = String(sr['Status'] || '');
+            const notes = String(sr['Notes'] || '');
+            const isMatch = targetNums.some(num => num && (stat.includes(num) || notes.includes(num)));
+            if (isMatch && stat.toLowerCase().includes('order')) {
+              sr['Status'] = 'Need To Purchase';
+              if (sr['Notes']) {
+                sr['Notes'] = sr['Notes'].replace(/Ordered on [^;]+;?/gi, '').trim();
+              }
+              this.db.syncRowToRawGrid(sTable, sr);
+              const rIdx = sr._rowIdx || (sTable.rows.indexOf(sr) + 2);
+              await this.db.addMutation({
+                action: 'UPDATE_CELL',
+                sheetName: sTable.name,
+                tableKey: sk,
+                row: rIdx,
+                col: 8,
+                value: 'Need To Purchase'
+              });
+              await this.db.addMutation({
+                action: 'UPDATE_CELL',
+                sheetName: sTable.name,
+                tableKey: sk,
+                row: rIdx,
+                col: 12,
+                value: sr['Notes'] || ''
+              });
+            }
+          }
+        }
+      }
+
       await this.loadData();
       this.render();
 
-      alert(`🗑️ Order #${poNum || ''} deleted.`);
+      if (window.ppeTrackingEngine && typeof window.ppeTrackingEngine.refresh === 'function') {
+        window.ppeTrackingEngine.refresh();
+      }
+
+      alert(`🗑️ Order #${poNum || ''} deleted and associated items reverted to "Needs to Order".`);
     } catch (err) {
       console.error('Error deleting order:', err);
       alert('❌ Failed to delete order: ' + (err.message || err));
@@ -5851,7 +6038,8 @@ class ProcurementEngine {
         if (swapTable && swapTable.rows && empName) {
           const sRow = swapTable.rows.find(sr => {
             const name = String(sr['Employee'] || sr['Employee Name'] || sr['Assigned To'] || Object.values(sr)[0] || '').trim();
-            return this.isNameMatch(name, empName) || (empName.toLowerCase().includes('shelf') && name.toLowerCase().includes('shelf'));
+            const stat = String(sr['Status'] || '').toLowerCase();
+            return (this.isNameMatch(name, empName) || (empName.toLowerCase().includes('shelf') && name.toLowerCase().includes('shelf'))) && stat.includes('order');
           });
           if (sRow) {
             sRow['Status'] = 'Need To Purchase';
