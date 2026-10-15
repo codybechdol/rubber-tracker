@@ -3125,6 +3125,15 @@ body.view-only-mode .card-drop-zone {
   border-bottom: 2px solid var(--border-color);
 }
 
+.procurement-orders-table th[onclick] {
+  transition: color 0.15s ease, background 0.15s ease;
+}
+
+.procurement-orders-table th[onclick]:hover {
+  background: rgba(51, 65, 85, 0.95);
+  color: #f8fafc;
+}
+
 .procurement-orders-table td {
   padding: 10px 12px;
   border-bottom: 1px solid var(--border-color);

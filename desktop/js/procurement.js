@@ -14,6 +14,8 @@ class ProcurementEngine {
     this.generatedPOTexts = { clean: '', detailed: '' };
     this.collapsedOrders = new Set();
     this.orderGroupsMap = new Map();
+    this.historySortCol = 'date';
+    this.historySortDir = 'desc';
     this.SECTIONS = {
       swaps_need: {
         key: 'swaps_need',
@@ -881,33 +883,63 @@ class ProcurementEngine {
     } : null;
   }
 
-  lookupOrderByPoNumber(poNumber) {
+  lookupOrderByPoNumber(poNumber, empName = null) {
     if (!poNumber) return null;
     const snap = (this.db && typeof this.db.getSnapshot === 'function')
       ? this.db.getSnapshot()
       : (window.localDB ? window.localDB.getSnapshot() : null);
 
     const poTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('purchase_orders') : null) || snap?.tables?.['purchase_orders'];
-    if (poTable && poTable.rows) {
-      for (const po of poTable.rows) {
-        const pNum = String(po['PO Number'] || po['PO #'] || '').trim();
-        if (pNum && pNum.toLowerCase() === String(poNumber).trim().toLowerCase()) {
-          const notes = String(po['Notes'] || '');
-          const parsedNotes = this.parseOrderInfoFromNotes(notes);
-          return {
-            orderNumber: pNum,
-            poNumber: pNum,
-            vendorOrderNumber: parsedNotes?.vendorOrderNumber || '',
-            vendor: String(po['Vendor'] || ''),
-            orderDate: String(po['Date'] || ''),
-            expectedDelivery: String(po['Expected Delivery'] || po['Delivery Date'] || ''),
-            price: parseFloat(po['Total Price'] || po['Price'] || 0) || 0,
-            rawRow: po
-          };
-        }
+    if (!poTable || !poTable.rows) return null;
+
+    const rows = poTable.rows || [];
+    const matching = [];
+
+    for (const po of rows) {
+      const pNum = String(po['PO Number'] || po['PO #'] || '').trim();
+      if (pNum && pNum.toLowerCase() === String(poNumber).trim().toLowerCase()) {
+        const stat = String(po['Status'] || po['status'] || '').toLowerCase();
+        const isClosed = stat.includes('received') || stat.includes('fulfilled') || stat.includes('cancel');
+        const notes = String(po['Notes'] || '');
+        const items = String(po['Items'] || '');
+        const parsedNotes = this.parseOrderInfoFromNotes(notes);
+        matching.push({
+          orderNumber: pNum,
+          poNumber: pNum,
+          vendorOrderNumber: parsedNotes?.vendorOrderNumber || '',
+          vendor: String(po['Vendor'] || ''),
+          orderDate: String(po['Date'] || ''),
+          expectedDelivery: String(po['Expected Delivery'] || po['Delivery Date'] || ''),
+          price: parseFloat(po['Total Price'] || po['Price'] || 0) || 0,
+          status: String(po['Status'] || ''),
+          isClosed,
+          notes,
+          items,
+          rawRow: po
+        });
       }
     }
-    return null;
+
+    if (!matching.length) return null;
+
+    // 1. If empName is given, prioritize an OPEN order that mentions this employee
+    if (empName) {
+      const empOpenMatch = matching.find(m => !m.isClosed && (this.isNameMatch(m.notes, empName) || this.isNameMatch(m.items, empName)));
+      if (empOpenMatch) return empOpenMatch;
+    }
+
+    // 2. Prioritize ANY open (awaiting delivery) order with this PO number (newest first)
+    const openOrders = matching.filter(m => !m.isClosed);
+    if (openOrders.length > 0) {
+      return openOrders[openOrders.length - 1];
+    }
+
+    // 3. Fallback: if all orders with this PO are closed, return matching by employee or newest closed
+    if (empName) {
+      const empClosedMatch = matching.find(m => this.isNameMatch(m.notes, empName) || this.isNameMatch(m.items, empName));
+      if (empClosedMatch) return empClosedMatch;
+    }
+    return matching[matching.length - 1];
   }
 
   lookupOrderForEmployee(empName, itemType) {
@@ -1555,13 +1587,13 @@ class ProcurementEngine {
         if (statLower.includes('ordered')) {
           if (this.isDepartedOrPreviousEmployee(emp)) return;
           const notesText = Array.isArray(row) ? String(row[11] || '') : String(row['Notes'] || '');
-          let orderInfo = this.parseOrderInfoFromNotes(status) ||
-                            this.parseOrderInfoFromNotes(notesText) ||
-                            this.lookupOrderForEmployee(emp, s.type) ||
-                            { orderNumber: '', vendor: '', orderDate: '', price: 0 };
+          let orderInfo = this.lookupOrderForEmployee(emp, s.type) ||
+                          this.parseOrderInfoFromNotes(notesText) ||
+                          this.parseOrderInfoFromNotes(status) ||
+                          { orderNumber: '', vendor: '', orderDate: '', price: 0 };
 
           if (orderInfo && orderInfo.orderNumber) {
-            const enriched = this.lookupOrderByPoNumber(orderInfo.orderNumber);
+            const enriched = this.lookupOrderByPoNumber(orderInfo.orderNumber, emp);
             if (enriched) {
               if (!orderInfo.vendor && enriched.vendor) orderInfo.vendor = enriched.vendor;
               if ((!orderInfo.price || orderInfo.price <= 0) && enriched.price > 0) orderInfo.price = enriched.price;
@@ -1732,12 +1764,12 @@ class ProcurementEngine {
 
         if (status.includes('ordered')) {
           if (this.isDepartedOrPreviousEmployee(emp)) return;
-          let orderInfo = this.parseOrderInfoFromNotes(row['Notes']) ||
-                            this.lookupOrderForEmployee(emp, itemType) ||
-                            { orderNumber: '', vendor: '', orderDate: '', price: 0 };
+          let orderInfo = this.lookupOrderForEmployee(emp, itemType) ||
+                          this.parseOrderInfoFromNotes(row['Notes']) ||
+                          { orderNumber: '', vendor: '', orderDate: '', price: 0 };
 
           if (orderInfo && orderInfo.orderNumber) {
-            const enriched = this.lookupOrderByPoNumber(orderInfo.orderNumber);
+            const enriched = this.lookupOrderByPoNumber(orderInfo.orderNumber, emp);
             if (enriched) {
               if (!orderInfo.vendor && enriched.vendor) orderInfo.vendor = enriched.vendor;
               if ((!orderInfo.price || orderInfo.price <= 0) && enriched.price > 0) orderInfo.price = enriched.price;
@@ -1832,8 +1864,11 @@ class ProcurementEngine {
           if (currentQty < pi.quantity) {
             const neededQty = pi.quantity - currentQty;
             const typeLabel = normCat === 'Gloves' ? '🧤 Gloves' : (normCat === 'Sleeves' ? '🦺 Sleeves' : (normCat === 'Blankets' ? '🧱 Blankets' : (normCat === 'MACKs' ? '🧱 MACKs' : `📦 ${normCat}`)));
+            const parsedNotes = this.parseOrderInfoFromNotes(notes);
             const orderInfo = {
               orderNumber: poNum,
+              poNumber: poNum,
+              vendorOrderNumber: parsedNotes?.vendorOrderNumber || '',
               vendor: vendor,
               orderDate: dateStr,
               expectedDelivery: expDeliv || '',
@@ -1854,6 +1889,9 @@ class ProcurementEngine {
 
             for (let q = 0; q < neededQty; q++) {
               const assignedName = empNamesList[q] || (empNamesList.length === 1 ? empNamesList[0] : '');
+              if (assignedName && isCovered(normCat, assignedName)) {
+                continue;
+              }
               const label = assignedName
                 ? `${assignedName} (📦 PO: ${poNum || 'Pending'})`
                 : (empNamesList.length > 0 && q >= empNamesList.length
@@ -2053,7 +2091,10 @@ class ProcurementEngine {
       const type = cleanItemType(item.itemType);
       const size = cleanSize(item.size, item.hasNoSize) || (item.hasNoSize ? '⚠️ Needs Size' : 'Standard');
       const classVal = cleanClass(item.classVal);
-      const key = `${item.section}|${type}|${size}|${classVal}`;
+      const orderKeyPart = (item.section === 'ordered_pending')
+        ? (item.orderInfo?.vendorOrderNumber || item.orderInfo?.orderNumber || item.orderInfo?.poNumber || 'PENDING')
+        : '';
+      const key = `${item.section}|${type}|${size}|${classVal}|${orderKeyPart}`;
 
       if (normalizedAggregated[key]) {
         const existing = normalizedAggregated[key];
@@ -2067,7 +2108,18 @@ class ProcurementEngine {
           });
         }
         if (item.price > existing.price) existing.price = item.price;
-        if (item.orderInfo && !existing.orderInfo) existing.orderInfo = item.orderInfo;
+        if (item.orderInfo) {
+          if (!existing.orderInfo) {
+            existing.orderInfo = item.orderInfo;
+          } else {
+            if (!existing.orderInfo.vendorOrderNumber && item.orderInfo.vendorOrderNumber) {
+              existing.orderInfo.vendorOrderNumber = item.orderInfo.vendorOrderNumber;
+            }
+            if (!existing.orderInfo.orderNumber && item.orderInfo.orderNumber) {
+              existing.orderInfo.orderNumber = item.orderInfo.orderNumber;
+            }
+          }
+        }
       } else {
         normalizedAggregated[key] = {
           ...item,
@@ -2386,43 +2438,102 @@ class ProcurementEngine {
     const grp = this.orderGroupsMap ? this.orderGroupsMap.get(orderKey) : null;
     if (!grp) return;
 
-    // Look for matching PO in purchase_orders table if possible
-    const poRows = this.db.getTable('purchase_orders') || [];
+    const snap = (this.db && typeof this.db.getSnapshot === 'function')
+      ? this.db.getSnapshot()
+      : (window.localDB ? window.localDB.getSnapshot() : null);
+
+    const poTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('purchase_orders') : null) || snap?.tables?.['purchase_orders'];
+    const poRows = poTable ? (poTable.rows || []) : [];
     let matchedPo = null;
 
-    if (grp.poNumber) {
-      matchedPo = poRows.find(r => String(r.po_number || r.poNumber || '').trim().toLowerCase() === grp.poNumber.trim().toLowerCase());
+    if (grp.vendorOrderNumber) {
+      matchedPo = poRows.find(r => {
+        const notes = String(r['Notes'] || '');
+        const parsed = this.parseOrderInfoFromNotes(notes);
+        return (parsed?.vendorOrderNumber && parsed.vendorOrderNumber.toLowerCase() === grp.vendorOrderNumber.toLowerCase()) ||
+               notes.includes(grp.vendorOrderNumber);
+      });
     }
-    if (!matchedPo && grp.vendorOrderNumber) {
-      matchedPo = poRows.find(r => String(r.vendor_order_number || r.notes || '').includes(grp.vendorOrderNumber));
+
+    if (!matchedPo && grp.poNumber) {
+      // Prioritize open/ordered status
+      matchedPo = poRows.find(r => {
+        const pNum = String(r['PO Number'] || r['PO #'] || '').trim().toLowerCase();
+        const stat = String(r['Status'] || '').toLowerCase();
+        return pNum === grp.poNumber.trim().toLowerCase() && !stat.includes('received') && !stat.includes('fulfilled');
+      });
+      if (!matchedPo) {
+        matchedPo = poRows.find(r => {
+          const pNum = String(r['PO Number'] || r['PO #'] || '').trim().toLowerCase();
+          return pNum === grp.poNumber.trim().toLowerCase();
+        });
+      }
     }
 
     if (matchedPo) {
+      const notes = String(matchedPo['Notes'] || '');
       this.openEditOrderModal({
         rowIdx: matchedPo._rowIdx || (poRows.indexOf(matchedPo) + 2),
-        poNumber: matchedPo.po_number || matchedPo.poNumber || grp.poNumber || '',
-        vendor: matchedPo.vendor || grp.vendor || '',
-        orderDate: matchedPo.order_date || matchedPo.orderDate || grp.orderDate || '',
-        deliveryDate: matchedPo.delivery_date || matchedPo.deliveryDate || grp.expectedDelivery || '',
-        status: matchedPo.status || 'Ordered',
-        totalCost: matchedPo.total_cost || matchedPo.totalCost || grp.totalCost || 0,
-        items: matchedPo.items || '',
-        notes: matchedPo.notes || ''
+        poNum: String(matchedPo['PO Number'] || matchedPo['PO #'] || grp.poNumber || ''),
+        vendor: String(matchedPo['Vendor'] || grp.vendor || ''),
+        date: String(matchedPo['Date'] || grp.orderDate || ''),
+        expDeliv: String(matchedPo['Expected Delivery'] || grp.expectedDelivery || ''),
+        status: String(matchedPo['Status'] || 'Ordered'),
+        price: parseFloat(matchedPo['Total Price'] || matchedPo['Price'] || grp.totalCost || 0) || 0,
+        items: String(matchedPo['Items'] || ''),
+        notes: notes
       });
     } else {
       // Create a virtual PO object to edit
       this.openEditOrderModal({
         rowIdx: null,
-        poNumber: grp.poNumber || '',
+        poNum: grp.poNumber || '',
         vendor: grp.vendor || '',
-        orderDate: grp.orderDate || '',
-        deliveryDate: (grp.expectedDelivery && grp.expectedDelivery !== 'Pending') ? grp.expectedDelivery : '',
+        date: grp.orderDate || '',
+        expDeliv: (grp.expectedDelivery && grp.expectedDelivery !== 'Pending') ? grp.expectedDelivery : '',
         status: 'Ordered',
-        totalCost: grp.totalCost || 0,
+        price: grp.totalCost || 0,
         items: grp.items.map(it => `${it.quantity}x ${it.itemType} Size ${it.size} Class ${it.classVal}`).join(', '),
         notes: grp.vendorOrderNumber ? `Vendor Order #: ${grp.vendorOrderNumber}` : ''
       });
     }
+  }
+
+  parseDateForSort(dVal) {
+    if (!dVal) return 0;
+    if (dVal instanceof Date) return isNaN(dVal.getTime()) ? 0 : dVal.getTime();
+    if (typeof dVal === 'number') return isNaN(dVal) ? 0 : dVal;
+    const dStr = String(dVal).trim();
+    if (!dStr || dStr.toLowerCase() === 'pending' || dStr === '—' || dStr === '-') return 0;
+
+    // Handle MM/DD/YYYY or M/D/YYYY or M/D/YY
+    if (dStr.includes('/')) {
+      const parts = dStr.split('/');
+      if (parts.length === 3) {
+        const m = parseInt(parts[0], 10);
+        const d = parseInt(parts[1], 10);
+        let y = parseInt(parts[2], 10);
+        if (y < 100) y += 2000;
+        const dt = new Date(y, m - 1, d, 12, 0, 0);
+        if (!isNaN(dt.getTime())) return dt.getTime();
+      }
+    }
+
+    // Handle YYYY-MM-DD
+    if (dStr.includes('-')) {
+      const cleanStr = dStr.split('T')[0];
+      const parts = cleanStr.split('-');
+      if (parts.length === 3) {
+        const y = parseInt(parts[0], 10);
+        const m = parseInt(parts[1], 10);
+        const d = parseInt(parts[2], 10);
+        const dt = new Date(y, m - 1, d, 12, 0, 0);
+        if (!isNaN(dt.getTime())) return dt.getTime();
+      }
+    }
+
+    const t = Date.parse(dStr);
+    return isNaN(t) ? 0 : t;
   }
 
   render() {
@@ -2774,8 +2885,14 @@ class ProcurementEngine {
 
         this.orderGroupsMap = orderGroupsMap;
 
-        // Render each Order as a primary collapsible line
-        orderGroupsMap.forEach((grp, orderKey) => {
+        // Render each Order as a primary collapsible line (sorted by order date descending)
+        const sortedOrderGroups = Array.from(orderGroupsMap.entries()).sort((a, b) => {
+          const dateA = this.parseDateForSort(a[1].orderDate);
+          const dateB = this.parseDateForSort(b[1].orderDate);
+          return dateB - dateA;
+        });
+
+        sortedOrderGroups.forEach(([orderKey, grp]) => {
           const isOrderCollapsed = this.collapsedOrders && this.collapsedOrders.has(orderKey);
           const allGroupChecked = grp.items.every(it => it.selected);
 
@@ -4310,8 +4427,8 @@ class ProcurementEngine {
 
     let unitRowsHtml = units.map((u, idx) => {
       const isAssigned = !!u.empName && !u.empName.toLowerCase().includes('shelf') && !u.empName.toLowerCase().includes('stock');
-      const defaultStatus = isAssigned ? 'Assigned' : 'On Shelf';
-      const defaultLoc = 'Helena';
+      const defaultStatus = isAssigned ? 'Ready For Delivery' : 'On Shelf';
+      const defaultLoc = isAssigned ? "Cody's Truck" : 'Helena';
 
       return `
         <tr class="batch-delivery-unit-row" data-unit-idx="${idx}" style="border-bottom: 1px solid var(--border-color);">
@@ -4338,9 +4455,10 @@ class ProcurementEngine {
           <td style="padding: 10px; width: 120px;">
             <input type="text" class="batch-delivery-input batch-location" value="${defaultLoc}" placeholder="Helena">
           </td>
-          <td style="padding: 10px; width: 110px;">
+          <td style="padding: 10px; width: 145px;">
             <select class="batch-delivery-input batch-status">
-              <option value="Assigned" ${defaultStatus === 'Assigned' ? 'selected' : ''}>Assigned</option>
+              <option value="Ready For Delivery" ${defaultStatus === 'Ready For Delivery' ? 'selected' : ''}>Ready For Delivery 🚚</option>
+              <option value="Assigned" ${defaultStatus === 'Assigned' ? 'selected' : ''}>Assigned (Direct Hand-off)</option>
               <option value="On Shelf" ${defaultStatus === 'On Shelf' ? 'selected' : ''}>On Shelf</option>
             </select>
           </td>
@@ -4413,7 +4531,9 @@ class ProcurementEngine {
         return dStr;
       };
 
-      const todayStr = formatToMdY(new Date().toISOString().split('T')[0]);
+      const now = new Date();
+      const todayIso = now.toISOString().split('T')[0];
+      const todayStr = formatToMdY(todayIso);
 
       for (let i = 0; i < rows.length; i++) {
         const r = rows[i];
@@ -4437,7 +4557,13 @@ class ProcurementEngine {
         const locInput = r.querySelector('.batch-location');
         const location = locInput ? locInput.value.trim() : 'Helena';
         const statSelect = r.querySelector('.batch-status');
-        const status = statSelect ? statSelect.value : (assignedTo ? 'Assigned' : 'On Shelf');
+        const status = statSelect ? statSelect.value : (assignedTo ? 'Ready For Delivery' : 'On Shelf');
+
+        const isReadyForDelivery = (status === 'Ready For Delivery' || status === 'Ready For Delivery 🚚');
+        const invStatus = isReadyForDelivery ? 'Ready For Delivery' : status;
+        const invAssignedTo = isReadyForDelivery ? 'Packed For Delivery' : assignedTo;
+        const invPickedFor = (isReadyForDelivery && assignedTo) ? `${assignedTo} Picked On ${todayIso}` : '';
+        const invLocation = isReadyForDelivery ? (location === 'Helena' ? "Cody's Truck" : location) : location;
 
         const cat = u.category.toLowerCase();
         let catKey = 'gloves';
@@ -4453,10 +4579,10 @@ class ProcurementEngine {
 
         let changeOutDate = '';
         if (window.inventoryManager && typeof window.inventoryManager.calculateChangeOutDate === 'function') {
-          changeOutDate = window.inventoryManager.calculateChangeOutDate(todayStr, location, assignedTo, catKey, { testDate: testDate });
+          changeOutDate = window.inventoryManager.calculateChangeOutDate(todayStr, invLocation, invAssignedTo, catKey, { testDate: testDate });
         } else {
           const d = new Date();
-          d.setMonth(d.getMonth() + 6);
+          d.setMonth(d.getMonth() + (isReadyForDelivery ? 3 : 6));
           changeOutDate = `${String(d.getMonth() + 1).padStart(2, '0')}/${String(d.getDate()).padStart(2, '0')}/${d.getFullYear()}`;
         }
 
@@ -4471,11 +4597,11 @@ class ProcurementEngine {
             'Class': (u.classVal || 'Class 2').replace(/[^0-9]/g, '') || '2',
             'Test Date': testDate,
             'Date Assigned': assignedTo ? todayStr : '',
-            'Location': location,
-            'Status': status,
-            'Assigned To': assignedTo,
+            'Location': invLocation,
+            'Status': invStatus,
+            'Assigned To': invAssignedTo,
             'Change Out Date': changeOutDate,
-            'Picked For': '',
+            'Picked For': invPickedFor,
             'Notes': 'New'
           };
         } else if (catKey === 'blankets') {
@@ -4486,11 +4612,11 @@ class ProcurementEngine {
             'Class': (u.classVal || 'Class 4').replace(/[^0-9]/g, '') || '4',
             'Test Date': testDate,
             'Date Assigned': assignedTo ? todayStr : testDate,
-            'Location': location,
-            'Status': status,
-            'Assigned To': assignedTo,
+            'Location': invLocation,
+            'Status': invStatus,
+            'Assigned To': invAssignedTo,
             'Change Out Date': changeOutDate,
-            'Picked For': '',
+            'Picked For': invPickedFor,
             'Notes': 'New'
           };
         } else if (catKey === 'macks') {
@@ -4503,28 +4629,34 @@ class ProcurementEngine {
             'Length': '8 ft',
             'Test Date': testDate,
             'Date Assigned': assignedTo ? todayStr : testDate,
-            'Location': location,
-            'Status': status,
-            'Assigned To': assignedTo,
+            'Location': invLocation,
+            'Status': invStatus,
+            'Assigned To': invAssignedTo,
             'Change Out Date': changeOutDate,
-            'Picked For': '',
+            'Picked For': invPickedFor,
             'Notes': 'New'
           };
         } else {
           newRow = {
             'Item #': itemNum,
-            'Location': location,
-            'Status': status,
-            'Assigned To': assignedTo,
+            'Location': invLocation,
+            'Status': invStatus,
+            'Assigned To': invAssignedTo,
             'Test Date': testDate,
             'Date Assigned': assignedTo ? todayStr : '',
             'Change Out Date': changeOutDate,
+            'Picked For': invPickedFor,
             'Notes': 'New'
           };
         }
 
         await this.db.addRow(catKey, newRow, 'New Purchase');
-        addedItemsSummary.push(`${u.category} #${itemNum} (${assignedTo || 'Shelf'})`);
+        addedItemsSummary.push(`${u.category} #${itemNum} (${isReadyForDelivery ? 'Packed for ' + assignedTo : (assignedTo || 'Shelf')})`);
+
+        if (typeof this.db.recordItemHistoryEvent === 'function') {
+          const invSheetName = (catKey === 'gloves') ? 'Gloves' : ((catKey === 'sleeves') ? 'Sleeves' : ((catKey === 'blankets') ? 'Blankets' : ((catKey === 'macks') ? 'MACKs' : catKey)));
+          await this.db.recordItemHistoryEvent(invSheetName, newRow, isReadyForDelivery ? `Packed For Delivery (${assignedTo})` : (assignedTo ? `Assigned To (${assignedTo})` : 'Added to Shelf'));
+        }
 
         if (assignedTo) {
           let swapKey = '';
@@ -4540,27 +4672,77 @@ class ProcurementEngine {
               return this.isNameMatch(name, assignedTo);
             });
             if (sRow) {
-              sRow['Status'] = 'Complete';
-              sRow['Pick List Item #'] = itemNum;
-              sRow['Picked For'] = itemNum;
-              this.db.syncRowToRawGrid(swapTable, sRow);
-              const rIdx = sRow._rowIdx || (swapTable.rows.indexOf(sRow) + 2);
-              await this.db.addMutation({
-                action: 'UPDATE_CELL',
-                sheetName: swapTable.name,
-                tableKey: swapKey,
-                row: rIdx,
-                col: 7,
-                value: itemNum
-              });
-              await this.db.addMutation({
-                action: 'UPDATE_CELL',
-                sheetName: swapTable.name,
-                tableKey: swapKey,
-                row: rIdx,
-                col: 8,
-                value: 'Complete'
-              });
+              const oldItemNum = String(sRow['Current Item #'] || sRow['Current Item'] || sRow['Glove'] || sRow['Sleeve'] || sRow['Blanket'] || sRow['MACK'] || '').trim();
+              const pickCol = (catKey === 'macks') ? 9 : 7;
+              const statCol = (catKey === 'macks') ? 10 : 8;
+              const pickedCol = (catKey === 'macks') ? 11 : 9;
+
+              if (isReadyForDelivery) {
+                sRow['Status'] = 'Ready For Delivery 🚚';
+                sRow['Pick List Item #'] = itemNum;
+                sRow['Picked For'] = itemNum;
+                sRow['Picked'] = true;
+                this.db.syncRowToRawGrid(swapTable, sRow);
+                const rIdx = sRow._rowIdx || (swapTable.rows.indexOf(sRow) + 2);
+                await this.db.addMutation({
+                  action: 'UPDATE_CELL',
+                  sheetName: swapTable.name,
+                  tableKey: swapKey,
+                  row: rIdx,
+                  col: pickCol,
+                  value: itemNum
+                });
+                await this.db.addMutation({
+                  action: 'UPDATE_CELL',
+                  sheetName: swapTable.name,
+                  tableKey: swapKey,
+                  row: rIdx,
+                  col: statCol,
+                  value: 'Ready For Delivery 🚚'
+                });
+                await this.db.addMutation({
+                  action: 'UPDATE_CELL',
+                  sheetName: swapTable.name,
+                  tableKey: swapKey,
+                  row: rIdx,
+                  col: pickedCol,
+                  value: true
+                });
+                if (typeof this.db.saveManualPick === 'function') {
+                  this.db.saveManualPick(swapKey, assignedTo, oldItemNum, itemNum, 'Ready For Delivery 🚚', true);
+                }
+              } else {
+                sRow['Status'] = 'Complete';
+                sRow['Pick List Item #'] = itemNum;
+                sRow['Picked For'] = itemNum;
+                sRow['Picked'] = true;
+                this.db.syncRowToRawGrid(swapTable, sRow);
+                const rIdx = sRow._rowIdx || (swapTable.rows.indexOf(sRow) + 2);
+                await this.db.addMutation({
+                  action: 'UPDATE_CELL',
+                  sheetName: swapTable.name,
+                  tableKey: swapKey,
+                  row: rIdx,
+                  col: pickCol,
+                  value: itemNum
+                });
+                await this.db.addMutation({
+                  action: 'UPDATE_CELL',
+                  sheetName: swapTable.name,
+                  tableKey: swapKey,
+                  row: rIdx,
+                  col: statCol,
+                  value: 'Complete'
+                });
+                await this.db.addMutation({
+                  action: 'UPDATE_CELL',
+                  sheetName: swapTable.name,
+                  tableKey: swapKey,
+                  row: rIdx,
+                  col: pickedCol,
+                  value: true
+                });
+              }
             }
           }
 
@@ -4572,8 +4754,8 @@ class ProcurementEngine {
               return this.isNameMatch(name, assignedTo) && type.includes(catKey.slice(0, 4));
             });
             if (nRow) {
-              nRow['Status'] = 'Fulfilled';
-              nRow['Notes'] = `Delivered & added as #${itemNum} on ${todayStr}`;
+              nRow['Status'] = isReadyForDelivery ? 'Ready For Delivery' : 'Fulfilled';
+              nRow['Notes'] = isReadyForDelivery ? `Packed as #${itemNum} for delivery on ${todayStr}` : `Delivered & added as #${itemNum} on ${todayStr}`;
               this.db.syncRowToRawGrid(needsTable, nRow);
               const nrIdx = nRow._rowIdx || (needsTable.rows.indexOf(nRow) + 2);
               await this.db.addMutation({
@@ -5044,7 +5226,49 @@ class ProcurementEngine {
       poList.push({ rowIdx, date, poNum, vendorOrderNum, vendor, items, price, expDeliv, status, notes, raw: r });
     });
 
-    poList.reverse();
+    // Default sort order is Date descending (newest first)
+    if (!this.historySortCol) this.historySortCol = 'date';
+    if (!this.historySortDir) this.historySortDir = 'desc';
+
+    poList.sort((a, b) => {
+      if (this.historySortCol === 'date') {
+        const timeA = this.parseDateForSort(a.date);
+        const timeB = this.parseDateForSort(b.date);
+        if (timeA !== timeB) {
+          return this.historySortDir === 'asc' ? timeA - timeB : timeB - timeA;
+        }
+        return this.historySortDir === 'asc' ? a.rowIdx - b.rowIdx : b.rowIdx - a.rowIdx;
+      }
+      if (this.historySortCol === 'po') {
+        const valA = String(a.poNum || '').toLowerCase();
+        const valB = String(b.poNum || '').toLowerCase();
+        const cmp = valA.localeCompare(valB, undefined, { numeric: true });
+        if (cmp !== 0) return this.historySortDir === 'asc' ? cmp : -cmp;
+        return a.rowIdx - b.rowIdx;
+      }
+      if (this.historySortCol === 'vendor') {
+        const valA = String(a.vendor || '').toLowerCase();
+        const valB = String(b.vendor || '').toLowerCase();
+        const cmp = valA.localeCompare(valB);
+        if (cmp !== 0) return this.historySortDir === 'asc' ? cmp : -cmp;
+        return a.rowIdx - b.rowIdx;
+      }
+      if (this.historySortCol === 'price') {
+        const pA = a.price || 0;
+        const pB = b.price || 0;
+        if (pA !== pB) return this.historySortDir === 'asc' ? pA - pB : pB - pA;
+        return a.rowIdx - b.rowIdx;
+      }
+      if (this.historySortCol === 'status') {
+        const valA = String(a.status || '').toLowerCase();
+        const valB = String(b.status || '').toLowerCase();
+        const cmp = valA.localeCompare(valB);
+        if (cmp !== 0) return this.historySortDir === 'asc' ? cmp : -cmp;
+        return a.rowIdx - b.rowIdx;
+      }
+      return 0;
+    });
+
     this.poHistoryList = poList;
 
     let tableRows = '';
@@ -5156,13 +5380,38 @@ class ProcurementEngine {
       <div style="overflow-x: auto; border: 1px solid var(--border-color); border-radius: 6px;">
         <table class="procurement-orders-table" style="width: 100%; border-collapse: collapse; font-size: 12.5px;">
           <thead>
-            <tr>
-              <th style="width: 95px;">Date</th>
-              <th style="width: 125px;">PO # / Order #</th>
-              <th style="width: 150px;">Vendor</th>
+            <tr style="user-select: none;">
+              <th style="width: 105px; cursor: pointer; color: ${this.historySortCol === 'date' ? '#38bdf8' : 'inherit'};" onclick="window.procurementEngine.toggleHistorySort('date')" title="Click to sort by Date (${this.historySortCol === 'date' && this.historySortDir === 'desc' ? 'Currently Newest First' : 'Currently Oldest First'})">
+                <div style="display: flex; align-items: center; gap: 4px;">
+                  <span>Date</span>
+                  <span style="font-size: 11px; opacity: ${this.historySortCol === 'date' ? '1' : '0.4'};">${this.historySortCol === 'date' ? (this.historySortDir === 'asc' ? '▲' : '▼') : '↕'}</span>
+                </div>
+              </th>
+              <th style="width: 135px; cursor: pointer; color: ${this.historySortCol === 'po' ? '#38bdf8' : 'inherit'};" onclick="window.procurementEngine.toggleHistorySort('po')" title="Click to sort by PO Number">
+                <div style="display: flex; align-items: center; gap: 4px;">
+                  <span>PO # / Order #</span>
+                  <span style="font-size: 11px; opacity: ${this.historySortCol === 'po' ? '1' : '0.4'};">${this.historySortCol === 'po' ? (this.historySortDir === 'asc' ? '▲' : '▼') : '↕'}</span>
+                </div>
+              </th>
+              <th style="width: 150px; cursor: pointer; color: ${this.historySortCol === 'vendor' ? '#38bdf8' : 'inherit'};" onclick="window.procurementEngine.toggleHistorySort('vendor')" title="Click to sort by Vendor">
+                <div style="display: flex; align-items: center; gap: 4px;">
+                  <span>Vendor</span>
+                  <span style="font-size: 11px; opacity: ${this.historySortCol === 'vendor' ? '1' : '0.4'};">${this.historySortCol === 'vendor' ? (this.historySortDir === 'asc' ? '▲' : '▼') : '↕'}</span>
+                </div>
+              </th>
               <th>Items & Order Details</th>
-              <th style="text-align: right; width: 110px;">Total Price</th>
-              <th style="text-align: center; width: 120px;">Status</th>
+              <th style="text-align: right; width: 115px; cursor: pointer; color: ${this.historySortCol === 'price' ? '#38bdf8' : 'inherit'};" onclick="window.procurementEngine.toggleHistorySort('price')" title="Click to sort by Total Price">
+                <div style="display: flex; align-items: center; justify-content: flex-end; gap: 4px;">
+                  <span>Total Price</span>
+                  <span style="font-size: 11px; opacity: ${this.historySortCol === 'price' ? '1' : '0.4'};">${this.historySortCol === 'price' ? (this.historySortDir === 'asc' ? '▲' : '▼') : '↕'}</span>
+                </div>
+              </th>
+              <th style="text-align: center; width: 120px; cursor: pointer; color: ${this.historySortCol === 'status' ? '#38bdf8' : 'inherit'};" onclick="window.procurementEngine.toggleHistorySort('status')" title="Click to sort by Status">
+                <div style="display: flex; align-items: center; justify-content: center; gap: 4px;">
+                  <span>Status</span>
+                  <span style="font-size: 11px; opacity: ${this.historySortCol === 'status' ? '1' : '0.4'};">${this.historySortCol === 'status' ? (this.historySortDir === 'asc' ? '▲' : '▼') : '↕'}</span>
+                </div>
+              </th>
               <th style="text-align: center; width: 200px;">Actions</th>
             </tr>
           </thead>
@@ -5172,6 +5421,19 @@ class ProcurementEngine {
         </table>
       </div>
     `;
+  }
+
+  toggleHistorySort(col) {
+    if (this.historySortCol === col) {
+      this.historySortDir = this.historySortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      this.historySortCol = col;
+      this.historySortDir = (col === 'date' || col === 'price') ? 'desc' : 'asc';
+    }
+    const container = document.getElementById('procurement-items-table');
+    if (container) {
+      this.renderOrdersHistory(container);
+    }
   }
 
   async quickMarkOrderReceived(rowIdx, poNum) {
@@ -5230,17 +5492,19 @@ class ProcurementEngine {
   }
 
   openEditOrderModal(poIndex) {
-    const po = this.poHistoryList ? this.poHistoryList[poIndex] : null;
+    const po = (typeof poIndex === 'object' && poIndex !== null)
+      ? poIndex
+      : (this.poHistoryList ? this.poHistoryList[poIndex] : null);
     if (!po) return;
 
-    this.editingOrder = { ...po, _historyIdx: poIndex };
+    this.editingOrder = { ...po, _historyIdx: typeof poIndex === 'number' ? poIndex : null };
     const modal = document.getElementById('edit-order-modal');
     const body = document.getElementById('edit-order-modal-body');
     const title = document.getElementById('edit-order-modal-title');
     if (!modal || !body) return;
 
     if (title) {
-      title.textContent = `Edit Purchase Order #${po.poNum || ''}`;
+      title.textContent = `Edit Purchase Order #${po.poNum || po.poNumber || ''}`;
     }
 
     const toYmd = (dStr) => {
