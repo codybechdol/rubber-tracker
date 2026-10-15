@@ -3266,13 +3266,6 @@ class LocalDatabase {
               singleRow[locColName] = 'Helena';
               if (singleRow['Location']) singleRow['Location'] = 'Helena';
             }
-          } else if (getRank(aVal) === 3 && isActiveShelf) {
-            singleRow[assignedColName] = 'On Shelf (New Purchase)';
-            if (singleRow['Assigned To']) singleRow['Assigned To'] = 'On Shelf (New Purchase)';
-            singleRow[locColName] = 'Helena';
-            if (singleRow['Location']) singleRow['Location'] = 'Helena';
-            singleRow[notesColName] = 'New';
-            if (singleRow['Notes']) singleRow['Notes'] = 'New';
           }
         }
         cleanedRows.push(...groupRows);
@@ -3289,8 +3282,8 @@ class LocalDatabase {
         }
       });
 
-      // 2. Discard 0-day intermediate shelf records on dates where an employee assignment occurred,
-      // and discard stray Packed For Delivery (rank 3) records if active item is On Shelf and item was never assigned to an employee
+      // 2. Discard 0-day intermediate shelf records on dates where an employee assignment occurred.
+      // Note: On Shelf to Packed For Delivery is an acceptable progression and is NEVER discarded.
       const noIntermediateShelf = groupRows.filter((r, idx) => {
         const aVal = r[assignedColName] || r['Assigned To'] || '';
         const rank = getRank(aVal);
@@ -3301,24 +3294,8 @@ class LocalDatabase {
           return false;
         }
 
-        if (rank === 3 && isActiveShelf && empAssignmentDates.size === 0) {
-          removedCount++;
-          return false;
-        }
-
         return true;
       });
-
-      // If the only remaining row is a stray Packed For Delivery and the active item is On Shelf, restore it to On Shelf (New Purchase)
-      if (noIntermediateShelf.length === 1 && isActiveShelf && getRank(noIntermediateShelf[0][assignedColName] || noIntermediateShelf[0]['Assigned To']) === 3) {
-        const singleRow = noIntermediateShelf[0];
-        singleRow[assignedColName] = 'On Shelf (New Purchase)';
-        if (singleRow['Assigned To']) singleRow['Assigned To'] = 'On Shelf (New Purchase)';
-        singleRow[locColName] = 'Helena';
-        if (singleRow['Location']) singleRow['Location'] = 'Helena';
-        singleRow[notesColName] = 'New';
-        if (singleRow['Notes']) singleRow['Notes'] = 'New';
-      }
 
       // 3. Sort chronologically ascending, tie-breaking by canonical lifecycle state rank
       noIntermediateShelf.sort((a, b) => {
