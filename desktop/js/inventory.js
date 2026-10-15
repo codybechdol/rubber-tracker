@@ -1558,18 +1558,21 @@ class InventoryManager {
             const tB = dtB ? dtB.getTime() : 0;
             if (tA !== tB) return tA - tB;
 
-            // Same-day tie-breaker: Active Lineman assignment takes precedence over shelf/storage entry
-            const assignA = String(a['Assigned To'] || a['Employee Name'] || '').toLowerCase().trim();
-            const assignB = String(b['Assigned To'] || b['Employee Name'] || '').toLowerCase().trim();
-            const noteA = String(a['Notes'] || a['Note'] || '').toLowerCase().trim();
-            const noteB = String(b['Notes'] || b['Note'] || '').toLowerCase().trim();
-            const hasEmpNoteA = noteA.includes('assigned to') && !noteA.includes('on shelf');
-            const hasEmpNoteB = noteB.includes('assigned to') && !noteB.includes('on shelf');
-            const isSpecialA = ['on shelf', 'shelf', 'in stock', 'storage', 'unassigned', ''].includes(assignA) && !hasEmpNoteA;
-            const isSpecialB = ['on shelf', 'shelf', 'in stock', 'storage', 'unassigned', ''].includes(assignB) && !hasEmpNoteB;
-            if (!isSpecialA && isSpecialB) return 1;
-            if (isSpecialA && !isSpecialB) return -1;
-            return 0;
+            // Same-day lifecycle progression tie-breaker:
+            // Shelf / New Purchase (2) -> Packed for Delivery (3) -> Lineman Assignment (4) -> Packed for Test (5) -> Testing (6) -> Lost (7) -> Failed/Destroyed (8)
+            const getRank = (row) => {
+              const a = String(row['Assigned To'] || row['Employee Name'] || row['Employee'] || '').toLowerCase().trim();
+              const n = String(row['Notes'] || row['Note'] || '').toLowerCase().trim();
+              if (a.includes('fail') || a.includes('destroy')) return 8;
+              if (a.includes('lost')) return 7;
+              if (a.includes('test') && !a.includes('packed')) return 6;
+              if (a.includes('packed') && a.includes('test')) return 5;
+              if (a.includes('packed') && a.includes('deliv')) return 3;
+              if (a.includes('shelf') || a.includes('stock') || a.includes('stor') || a.includes('new purchase') || a.includes('brand new') || a === 'new' || (!a && n.includes('new'))) return 2;
+              return 4; // Field assignment to employee
+            };
+
+            return getRank(a) - getRank(b);
           });
 
           // Guard: ignore rows with dates far in the future (> 30 days ahead of today) when determining the latest historical state
@@ -1645,11 +1648,16 @@ class InventoryManager {
           const curAssignedLower = curAssignedTo.toLowerCase();
 
           // Check if history shows an active lineman assignment vs a special status (shelf, testing, lost, etc.)
-          const isSpecialHistAssign = ['on shelf', 'shelf', 'in stock', 'storage', 'in testing', 'arnett', 'jm test', 'arnett / jm test', 'packed for testing', 'packed for delivery', 'ready for delivery', 'ready for test', 'lost', 'failed rubber', 'failed', 'destroyed', 'not repairable', 'unassigned', 'n/a', 'none', 'unknown', '—', '-', ''].includes(histAssignedLower);
+          const isSpecialHistAssign = ['on shelf', 'shelf', 'in stock', 'storage', 'in testing', 'arnett', 'jm test', 'arnett / jm test', 'packed for testing', 'packed for delivery', 'ready for delivery', 'ready for test', 'lost', 'failed rubber', 'failed', 'destroyed', 'not repairable', 'unassigned', 'n/a', 'none', 'unknown', '—', '-', ''].includes(histAssignedLower) ||
+            histAssignedLower.includes('shelf') ||
+            histAssignedLower.includes('new purchase') ||
+            histAssignedLower.includes('brand new');
           const isHistLineman = Boolean(latestHist.assignedTo) && !isSpecialHistAssign;
 
-          const isHistTesting = !isHistLineman && (histAssignedLower.includes('test') || histLocLower.includes('test') || histLocLower.includes('arnett') || histLocLower.includes('jm test'));
-          const isHistShelf = !isHistLineman && (histAssignedLower.includes('shelf') || histAssignedLower === 'in stock' || histAssignedLower === 'storage' || histAssignedLower === 'unassigned' || !histAssignedLower);
+          const isHistPackedDelivery = !isHistLineman && (histAssignedLower.includes('packed') && histAssignedLower.includes('deliv'));
+          const isHistPackedTesting = !isHistLineman && (histAssignedLower.includes('packed') && histAssignedLower.includes('test'));
+          const isHistTesting = !isHistLineman && !isHistPackedTesting && (histAssignedLower.includes('test') || histLocLower.includes('test') || histLocLower.includes('arnett') || histLocLower.includes('jm test'));
+          const isHistShelf = !isHistLineman && !isHistPackedDelivery && (histAssignedLower.includes('shelf') || histAssignedLower.includes('new purchase') || histAssignedLower.includes('brand new') || histAssignedLower === 'in stock' || histAssignedLower === 'storage' || histAssignedLower === 'unassigned' || !histAssignedLower);
           const isHistLost = !isHistLineman && (histAssignedLower.includes('lost') || histLocLower.includes('lost'));
           const isHistFailed = !isHistLineman && (histAssignedLower.includes('fail') || histAssignedLower === 'not repairable');
           const isHistRetired = !isHistLineman && (histAssignedLower.includes('retir') || histAssignedLower.includes('destroy') || histLocLower.includes('destroyed'));
@@ -1666,9 +1674,10 @@ class InventoryManager {
 
           // Needs reconciliation if:
           // A. History shows an active Lineman assignment that differs from active sheet (e.g. active sheet was left On Shelf)
-          // B. Active sheet has item assigned to an employee, but history shows it was returned / sent to testing / on shelf
-          // C. Latest history date is newer than active sheet date assigned
-          // D. Different employee is assigned in history than on active sheet
+          // B. History shows item is Packed For Delivery / Packed For Testing
+          // C. Active sheet has item assigned to an employee, but history shows it was returned / sent to testing / on shelf
+          // D. Latest history date is newer than active sheet date assigned
+          // E. Different employee is assigned in history than on active sheet
           let needsFix = false;
           let newStatus = curStatus;
           let newAssignedTo = curAssignedTo;
@@ -1677,6 +1686,18 @@ class InventoryManager {
 
           if (isHistLineman && !isHistPreviousEmp) {
             if (curAssignedLower !== histAssignedLower || curStatus.toLowerCase() !== 'assigned') {
+              needsFix = true;
+            }
+          } else if (isHistPackedDelivery) {
+            if (curAssignedLower !== 'packed for delivery' || curStatus.toLowerCase() !== 'ready for delivery') {
+              needsFix = true;
+            }
+          } else if (isHistPackedTesting) {
+            if (curAssignedLower !== 'packed for testing' || curStatus.toLowerCase() !== 'ready for test') {
+              needsFix = true;
+            }
+          } else if (isHistShelf) {
+            if (curAssignedLower !== 'on shelf' || curStatus.toLowerCase() !== 'on shelf') {
               needsFix = true;
             }
           } else if (isCurActiveEmployee && isHistReturned) {
@@ -1694,30 +1715,52 @@ class InventoryManager {
           }
 
           if (needsFix) {
+            let newPickedFor = '';
             if (isHistLineman) {
               newStatus = 'Assigned';
               newAssignedTo = latestHist.assignedTo;
               newLocation = latestHist.location || curLocation || 'Helena';
+              newPickedFor = '';
+            } else if (isHistPackedDelivery) {
+              newStatus = 'Ready For Delivery';
+              newAssignedTo = 'Packed For Delivery';
+              newLocation = latestHist.location || "Cody's Truck";
+              const m = (latestHist.notes || '').match(/Packed For Delivery \(([^)]+)\)/i);
+              if (m && m[1]) {
+                newPickedFor = `${m[1].trim()} Picked On ${newDateAssigned}`;
+              } else {
+                newPickedFor = curPickedFor;
+              }
+            } else if (isHistPackedTesting) {
+              newStatus = 'Ready For Test';
+              newAssignedTo = 'Packed For Testing';
+              newLocation = latestHist.location || "Cody's Truck";
+              newPickedFor = '';
             } else if (isHistTesting) {
               newStatus = 'In Testing';
               newAssignedTo = 'In Testing';
               newLocation = latestHist.location || 'Arnett / JM Test';
+              newPickedFor = '';
             } else if (isHistShelf) {
               newStatus = 'On Shelf';
               newAssignedTo = 'On Shelf';
               newLocation = latestHist.location || 'Helena';
+              newPickedFor = '';
             } else if (isHistLost) {
               newStatus = 'Lost';
               newAssignedTo = 'Lost';
               newLocation = latestHist.location || 'Unknown';
+              newPickedFor = '';
             } else if (isHistFailed) {
               newStatus = 'Failed Rubber';
               newAssignedTo = 'Failed Rubber';
               newLocation = latestHist.location || 'Helena';
+              newPickedFor = '';
             } else if (isHistRetired) {
               newStatus = 'Destroyed';
               newAssignedTo = 'Destroyed';
               newLocation = latestHist.location || 'Helena';
+              newPickedFor = '';
             }
 
             newDateAssigned = latestHist.dateFormatted || curDateAssigned;
@@ -1743,7 +1786,7 @@ class InventoryManager {
             row['Location'] = newLocation;
             row['Date Assigned'] = newDateAssigned;
             row['Change Out Date'] = newChangeOut;
-            row['Picked For'] = '';
+            row['Picked For'] = newPickedFor;
 
             // Sync to rawGrid if table uses rawGrid array
             if (activeTable.rawGrid && activeTable.rawGrid[rIdx + 1]) {
@@ -1780,8 +1823,8 @@ class InventoryManager {
             if (curChangeOut !== newChangeOut) {
               await queueColUpdate('Change Out Date', curChangeOut, newChangeOut);
             }
-            if (curPickedFor) {
-              await queueColUpdate('Picked For', curPickedFor, '');
+            if (curPickedFor !== newPickedFor) {
+              await queueColUpdate('Picked For', curPickedFor, newPickedFor);
             }
 
             if (row['Notes'] === 'Not New' || row['Notes'] === 'New Purchase') {
