@@ -1700,9 +1700,10 @@ class LocalDatabase {
 
     const rows = [];
     grid.forEach((gr, idx) => {
-      if (idx === 0 || !Array.isArray(gr)) return;
+      if (!Array.isArray(gr)) return;
       const c0 = String(gr[0] || '').trim();
       if (!c0) return;
+      if (idx === 0 && (c0.toLowerCase() === 'employee' || String(gr[1] || '').toLowerCase().includes('current'))) return;
 
       // Location banners
       if (c0.startsWith('🔍') || c0.startsWith('📍')) {

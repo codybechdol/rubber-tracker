@@ -1703,7 +1703,9 @@ class SheetNavigator {
 
     // Find the primary subheader row to identify visible columns and labels (Col A-J max 10 columns)
     let visibleColIndices = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
-    let colLabels = ['Employee', 'Current Item #', 'Size', 'Date Assigned', 'Change Out Date', 'Days Left', 'Pick List Item #', 'Status', 'Picked', 'Date Changed'];
+    let colLabels = (tableData.headers && tableData.headers.length >= 10)
+      ? tableData.headers.slice(0, 10)
+      : ['Employee', 'Current Item #', 'Size', 'Date Assigned', 'Change Out Date', 'Days Left', 'Pick List Item #', 'Status', 'Picked', 'Date Changed'];
 
     for (let r = 0; r < Math.min(grid.length, 10); r++) {
       const row = grid[r];
@@ -1770,11 +1772,12 @@ class SheetNavigator {
       );
 
       // Level 1: Main Section Headers
-      const isClassHeader = firstCell.includes('Class ') && (firstCell.includes('Swaps') || firstCell.includes('Sleeves') || firstCell.includes('Blankets') || firstCell.includes('MACKs'));
-      const isPrevEmpHeader = firstCell.includes('Previous Employee');
-      const isClassReclaimHeader = firstCell.includes('Class Reclaims');
-      const isLostHeader = (firstCell.includes('Lost ') && firstCell.includes('Locate')) || firstCell.includes('Lost Glove') || firstCell.includes('Lost Sleeve') || firstCell.includes('Lost Blanket') || firstCell.includes('Lost MACK');
-      const isRetestHeader = firstCell.includes('Needs Retest') || (firstCell.includes('On Shelf') && (firstCell.includes('Retest') || firstCell.includes('Swaps')));
+      const fLower = firstCell.toLowerCase();
+      const isClassHeader = /class\s*\d/i.test(firstCell) && (fLower.includes('swaps') || fLower.includes('sleeves') || fLower.includes('blankets') || fLower.includes('macks') || fLower.includes('gloves'));
+      const isPrevEmpHeader = fLower.includes('previous employee');
+      const isClassReclaimHeader = fLower.includes('class reclaims') || fLower.includes('class reclaim');
+      const isLostHeader = (fLower.includes('lost') && fLower.includes('locate')) || fLower.includes('lost glove') || fLower.includes('lost sleeve') || fLower.includes('lost blanket') || fLower.includes('lost mack');
+      const isRetestHeader = fLower.includes('needs retest') || (fLower.includes('on shelf') && (fLower.includes('retest') || fLower.includes('swaps')));
 
       if (isClassHeader) currentSection = 'class';
       else if (isPrevEmpHeader) currentSection = 'prev_emp';
@@ -1854,6 +1857,7 @@ class SheetNavigator {
 
       // 4. Subheader (Table column names)
       if (isSubHeader) {
+        if (rowIdx <= 1) return; // Prevent duplicate header row directly beneath thead
         visibleColIndices.forEach((c) => {
           let val = rowArr[c] !== undefined ? String(rowArr[c]).trim() : '';
           html += `<td style="font-weight: 700; color: #93c5fd; background-color: #1e293b; font-size: 12px; text-align: center; border-bottom: 1px solid var(--border-color);">${this.escapeHtml(val)}</td>`;
@@ -2028,7 +2032,10 @@ class SheetNavigator {
 
     html += `</tbody></table>`;
     container.innerHTML = html;
-    if (countBadge) countBadge.textContent = `${visibleRowCount} rows`;
+    if (countBadge) {
+      const rowCount = (tableData.rows && tableData.rows.length > 0) ? tableData.rows.length : visibleRowCount;
+      countBadge.textContent = `${rowCount} rows`;
+    }
 
     // Attach inline edit handlers for swap reports
     container.querySelectorAll('td.editable').forEach(td => {
