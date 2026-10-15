@@ -4030,26 +4030,172 @@ function getIncidentEmailAttachments(emailId, subject, options) {
       return { success: false, error: 'Email message not found in Gmail' };
     }
 
-    var attachments = message.getAttachments();
-    var pdfAttachment = null;
-    var photoAttachments = [];
+    // Collect all related messages/revisions across the thread and matching subjects
+    var allCandidateMsgs = [];
+    var seenMsgIds = {};
 
-    for (var i = 0; i < attachments.length; i++) {
-      var att = attachments[i];
-      var name = att.getName().toLowerCase();
-      var cType = (att.getContentType() || '').toLowerCase();
-      if (cType === 'application/pdf' || name.endsWith('.pdf')) {
-        if (!pdfAttachment) pdfAttachment = att;
-      } else if (cType.indexOf('image/') !== -1 || name.endsWith('.jpg') || name.endsWith('.jpeg') || name.endsWith('.png')) {
-        photoAttachments.push(att);
+    function addCandidateMsg(m) {
+      if (!m) return;
+      var mid = m.getId();
+      if (!seenMsgIds[mid]) {
+        seenMsgIds[mid] = true;
+        allCandidateMsgs.push(m);
       }
     }
+
+    addCandidateMsg(message);
+
+    // 1. Check thread messages
+    try {
+      var th = message.getThread();
+      if (th) {
+        var tmsgs = th.getMessages();
+        for (var tm = 0; tm < tmsgs.length; tm++) {
+          addCandidateMsg(tmsgs[tm]);
+        }
+      }
+    } catch (eThread) {}
+
+    // 2. Search Gmail for related messages if subject has base employee or if thread only had 1 message
+    var currentSubj = message.getSubject() || subject || '';
+    var baseSubj = currentSubj.replace(/\s*\((?:Modified|Rev|Revision)[^)]*\)/gi, '').trim();
+    var empSubjectMatch = baseSubj.match(/Incident Report\s+([^(\-]+?)(?:\s*\(|\s*-|$)/i);
+    var empToken = empSubjectMatch ? empSubjectMatch[1].trim() : '';
+
+    if (baseSubj && baseSubj.length > 5) {
+      try {
+        var relatedQueries = [
+          'from:mptablets@mountainpower.com subject:"' + baseSubj + '"',
+          'from:mptablets@mountainpower.com subject:"' + baseSubj.replace(/"/g, '') + '"'
+        ];
+        if (empToken && empToken.length > 3) {
+          var primaryEmp = empToken.split(/[.,&/]/)[0].trim();
+          if (primaryEmp.length > 3) {
+            relatedQueries.push('from:mptablets@mountainpower.com subject:"Incident Report" "' + primaryEmp + '"');
+          }
+        }
+
+        for (var rq = 0; rq < relatedQueries.length; rq++) {
+          var relThreads = GmailApp.search(relatedQueries[rq], 0, 8);
+          if (relThreads && relThreads.length > 0) {
+            for (var rt = 0; rt < relThreads.length; rt++) {
+              var rtMsgs = relThreads[rt].getMessages();
+              for (var rm = 0; rm < rtMsgs.length; rm++) {
+                var rMsg = rtMsgs[rm];
+                var rSubj = rMsg.getSubject() || '';
+                if (rSubj.toLowerCase().indexOf('incident report') !== -1 || rSubj.toLowerCase().indexOf('incident') !== -1) {
+                  var rBase = rSubj.replace(/\s*\((?:Modified|Rev|Revision)[^)]*\)/gi, '').trim().toLowerCase();
+                  if (rBase === baseSubj.toLowerCase() || (primaryEmp && rSubj.toLowerCase().indexOf(primaryEmp.toLowerCase()) !== -1)) {
+                    addCandidateMsg(rMsg);
+                  }
+                }
+              }
+            }
+          }
+          if (allCandidateMsgs.length > 1) break;
+        }
+      } catch (eSearch) {
+        Logger.log('getIncidentEmailAttachments search related error: ' + eSearch);
+      }
+    }
+
+    // Inspect each candidate for PDF and photo attachments
+    var revisionEntries = [];
+    for (var mi = 0; mi < allCandidateMsgs.length; mi++) {
+      var candidate = allCandidateMsgs[mi];
+      var cAtts = candidate.getAttachments();
+      var cPdf = null;
+      var cPhotos = [];
+      for (var ca = 0; ca < cAtts.length; ca++) {
+        var attItem = cAtts[ca];
+        var attName = attItem.getName().toLowerCase();
+        var attType = (attItem.getContentType() || '').toLowerCase();
+        if (attType === 'application/pdf' || attName.endsWith('.pdf')) {
+          if (!cPdf) cPdf = attItem;
+        } else if (attType.indexOf('image/') !== -1 || attName.endsWith('.jpg') || attName.endsWith('.jpeg') || attName.endsWith('.png')) {
+          cPhotos.push(attItem);
+        }
+      }
+      if (cPdf) {
+        revisionEntries.push({
+          msg: candidate,
+          pdf: cPdf,
+          photoAttachments: cPhotos,
+          photoCount: cPhotos.length,
+          dateReceived: candidate.getDate()
+        });
+      }
+    }
+
+    // Sort chronologically (oldest = Original, latest = Modified-N)
+    revisionEntries.sort(function(a, b) {
+      return a.dateReceived.getTime() - b.dateReceived.getTime();
+    });
+
+    var revisions = [];
+    for (var rIdx = 0; rIdx < revisionEntries.length; rIdx++) {
+      var entry = revisionEntries[rIdx];
+      var eSubj = entry.msg.getSubject() || '';
+      var modTagMatch = eSubj.match(/\((Modified(?:-\d+)?)\)/i);
+      var rLabel = modTagMatch ? modTagMatch[1] : (eSubj.toLowerCase().indexOf('modified') !== -1 ? 'Modified' : '');
+      if (!rLabel) {
+        rLabel = (rIdx === 0 && revisionEntries.length > 1) ? 'Original' : ((rIdx === 0) ? 'Original' : ('Modified-' + rIdx));
+      }
+
+      revisions.push({
+        revision: rIdx,
+        label: rLabel,
+        emailId: entry.msg.getId(),
+        subject: eSubj,
+        dateReceived: entry.dateReceived.toISOString(),
+        pdfFilename: entry.pdf.getName(),
+        sizeBytes: entry.pdf.getSize(),
+        photoCount: entry.photoCount,
+        isLatest: (rIdx === revisionEntries.length - 1)
+      });
+    }
+
+    // Select the active revision:
+    // 1. By options.revisionEmailId
+    // 2. By options.revision index
+    // 3. By matching message.getId()
+    // 4. Fallback to latest revision
+    var activeEntry = null;
+    if (options.revisionEmailId) {
+      for (var revI = 0; revI < revisionEntries.length; revI++) {
+        if (revisionEntries[revI].msg.getId() === options.revisionEmailId) {
+          activeEntry = revisionEntries[revI];
+          break;
+        }
+      }
+    } else if (options.revision !== undefined && options.revision !== null) {
+      var revIdxNum = parseInt(options.revision, 10);
+      if (revIdxNum >= 0 && revIdxNum < revisionEntries.length) {
+        activeEntry = revisionEntries[revIdxNum];
+      }
+    }
+
+    if (!activeEntry) {
+      for (var defI = 0; defI < revisionEntries.length; defI++) {
+        if (revisionEntries[defI].msg.getId() === message.getId()) {
+          activeEntry = revisionEntries[defI];
+          break;
+        }
+      }
+      if (!activeEntry && revisionEntries.length > 0) {
+        activeEntry = revisionEntries[revisionEntries.length - 1];
+      }
+    }
+
+    var targetMsg = activeEntry ? activeEntry.msg : message;
+    var targetPdf = activeEntry ? activeEntry.pdf : null;
+    var targetPhotos = activeEntry ? activeEntry.photoAttachments : [];
 
     // Specific photo requested by index
     if (options.photoIndex !== undefined && options.photoIndex !== null) {
       var pIdx = parseInt(options.photoIndex, 10);
-      if (pIdx >= 0 && pIdx < photoAttachments.length) {
-        var targetPhoto = photoAttachments[pIdx];
+      if (pIdx >= 0 && pIdx < targetPhotos.length) {
+        var targetPhoto = targetPhotos[pIdx];
         var photoBytes = targetPhoto.getBytes();
         return {
           success: true,
@@ -4068,31 +4214,34 @@ function getIncidentEmailAttachments(emailId, subject, options) {
 
     var result = {
       success: true,
-      emailId: message.getId(),
-      subject: message.getSubject(),
-      dateReceived: message.getDate().toISOString(),
-      photoCount: photoAttachments.length,
-      photos: []
+      emailId: targetMsg.getId(),
+      subject: targetMsg.getSubject(),
+      dateReceived: targetMsg.getDate().toISOString(),
+      photoCount: targetPhotos.length,
+      photos: [],
+      revisions: revisions,
+      hasModifications: revisions.length > 1,
+      activeRevisionEmailId: targetMsg.getId()
     };
 
-    if (pdfAttachment && options.includePdf !== false) {
-      var pdfBytes = pdfAttachment.getBytes();
+    if (targetPdf && options.includePdf !== false) {
+      var pdfBytes = targetPdf.getBytes();
       result.pdf = {
-        filename: pdfAttachment.getName(),
+        filename: targetPdf.getName(),
         sizeBytes: pdfBytes.length,
         contentType: 'application/pdf',
         base64: Utilities.base64Encode(pdfBytes)
       };
-    } else if (pdfAttachment) {
+    } else if (targetPdf) {
       result.pdf = {
-        filename: pdfAttachment.getName(),
-        sizeBytes: pdfAttachment.getSize(),
+        filename: targetPdf.getName(),
+        sizeBytes: targetPdf.getSize(),
         contentType: 'application/pdf'
       };
     }
 
-    for (var p = 0; p < photoAttachments.length; p++) {
-      var ph = photoAttachments[p];
+    for (var p = 0; p < targetPhotos.length; p++) {
+      var ph = targetPhotos[p];
       var phInfo = {
         index: p,
         filename: ph.getName(),
@@ -4132,8 +4281,9 @@ function scanIncidentReportEmails(options) {
     var sheet = ss.getSheetByName(sheetName);
     if (!sheet) return { success: false, error: 'Incident Reports sheet could not be created' };
 
-    // Build set of existing Email IDs to prevent duplicates
+    // Build set of existing Email IDs and matching map of existing incidents
     var existingIds = {};
+    var existingReportsByMatch = {};
     var lastRow = sheet.getLastRow();
     if (options.rescan === true && lastRow > 1) {
       sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn()).clearContent();
@@ -4141,11 +4291,37 @@ function scanIncidentReportEmails(options) {
     }
 
     if (lastRow > 1) {
-      var emailIdCol = (typeof COLS !== 'undefined' && COLS.INCIDENT_REPORTS) ? COLS.INCIDENT_REPORTS.EMAIL_ID : 15;
-      var existingVals = sheet.getRange(2, emailIdCol, lastRow - 1, 1).getValues();
-      for (var e = 0; e < existingVals.length; e++) {
-        var eid = String(existingVals[e][0] || '').trim();
+      var allExistingVals = sheet.getRange(2, 1, lastRow - 1, sheet.getLastColumn()).getValues();
+      for (var e = 0; e < allExistingVals.length; e++) {
+        var erRow = allExistingVals[e];
+        var eid = String(erRow[14] || '').trim(); // col 15 (0-indexed 14)
         if (eid) existingIds[eid] = true;
+
+        var erJob = String(erRow[4] || '').trim().replace(/^job\s*#?\s*/i, '').replace(/^0+/, '');
+        var erEmp = String(erRow[6] || '')
+          .toLowerCase()
+          .replace(/incident type\s*:.*$/i, '')
+          .replace(/[^a-z0-9]/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+        var erRowIdx = e + 2;
+
+        if (erJob && erEmp) {
+          var empToks = erEmp.split(' ').filter(function(t) { return t.length > 2; }).slice(0, 3).sort().join('_');
+          var mKey = erJob + '__' + empToks;
+          existingReportsByMatch[mKey] = {
+            rowIndex: erRowIdx,
+            emailId: eid,
+            pdfFilename: String(erRow[15] || '').trim(),
+            dateReceived: String(erRow[0] || '').trim(),
+            explanation: String(erRow[11] || '').trim(),
+            avoidable: String(erRow[12] || '').trim(),
+            unit: String(erRow[9] || '').trim(),
+            ticket: String(erRow[10] || '').trim(),
+            addressLocation: String(erRow[8] || '').trim(),
+            notes: String(erRow[17] || '').trim()
+          };
+        }
       }
     }
 
@@ -4456,11 +4632,113 @@ function scanIncidentReportEmails(options) {
         }
 
         // Calculate Quarter: Q1 (Jan-Mar), Q2 (Apr-Jun), Q3 (Jul-Sep), Q4 (Oct-Dec)
+        // Clean involvedEmployees if leaked
+        if (parsed.involvedEmployees) {
+          parsed.involvedEmployees = parsed.involvedEmployees.replace(/Incident Type\s*:\s*[^\n\r]+/gi, '').trim();
+        }
+
+        // Check if message is a revision / modification
+        var modTagMatch = subject.match(/\((Modified(?:-\d+)?)\)/i) || subject.match(/(Modified-\d+|Modified)/i);
+        var modTag = modTagMatch ? modTagMatch[1] : '';
+
+        // Build match key for incoming report
+        var cleanJobKey = String(parsed.jobNumber || '').trim().replace(/^job\s*#?\s*/i, '').replace(/^0+/, '');
+        var cleanEmpKey = String(parsed.involvedEmployees || '')
+          .toLowerCase()
+          .replace(/[^a-z0-9]/g, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+        var empToksIn = cleanEmpKey.split(' ').filter(function(t) { return t.length > 2; }).slice(0, 3).sort().join('_');
+        var incomingMatchKey = cleanJobKey && empToksIn ? (cleanJobKey + '__' + empToksIn) : '';
+
+        var matchedExisting = incomingMatchKey ? existingReportsByMatch[incomingMatchKey] : null;
+
+        if (matchedExisting && (modTag || (new Date(receivedDate).getTime() > new Date(matchedExisting.dateReceived).getTime()))) {
+          // UPDATE existing row with the richer/modified data from the modified PDF
+          var updateRowIdx = matchedExisting.rowIndex;
+
+          if (parsed.unitNumber && (!matchedExisting.unit || matchedExisting.unit.toLowerCase().indexOf('employee') !== -1)) {
+            sheet.getRange(updateRowIdx, 10).setValue(parsed.unitNumber);
+            matchedExisting.unit = parsed.unitNumber;
+          }
+          if (parsed.ticketNumber && !matchedExisting.ticket) {
+            sheet.getRange(updateRowIdx, 11).setValue(parsed.ticketNumber);
+            matchedExisting.ticket = parsed.ticketNumber;
+          }
+          if (parsed.explanation && (parsed.explanation.length > (matchedExisting.explanation || '').length || !matchedExisting.explanation)) {
+            sheet.getRange(updateRowIdx, 12).setValue(parsed.explanation);
+            matchedExisting.explanation = parsed.explanation;
+          }
+          if (parsed.avoidableActions && (parsed.avoidableActions.length > (matchedExisting.avoidable || '').length || !matchedExisting.avoidable)) {
+            sheet.getRange(updateRowIdx, 13).setValue(parsed.avoidableActions);
+            matchedExisting.avoidable = parsed.avoidableActions;
+          }
+          if (parsed.addressLocation && (parsed.addressLocation.length > (matchedExisting.addressLocation || '').length || !matchedExisting.addressLocation)) {
+            sheet.getRange(updateRowIdx, 9).setValue(parsed.addressLocation);
+            matchedExisting.addressLocation = parsed.addressLocation;
+          }
+
+          // Build or update REVISIONS metadata in Notes (column 18)
+          var currentNotes = String(matchedExisting.notes || '');
+          var revList = [];
+          var revMatch = currentNotes.match(/REVISIONS:(\[.*?\])/);
+          if (revMatch) {
+            try { revList = JSON.parse(revMatch[1]); } catch (eRev) {}
+          }
+          if (revList.length === 0) {
+            revList.push({
+              label: 'Original',
+              revision: 0,
+              emailId: matchedExisting.emailId,
+              pdfFilename: matchedExisting.pdfFilename,
+              dateReceived: matchedExisting.dateReceived
+            });
+          }
+          var alreadyInRevList = false;
+          for (var rl = 0; rl < revList.length; rl++) {
+            if (revList[rl].emailId === msgId) {
+              alreadyInRevList = true;
+              break;
+            }
+          }
+          if (!alreadyInRevList) {
+            revList.push({
+              label: modTag || ('Modified-' + revList.length),
+              revision: revList.length,
+              emailId: msgId,
+              pdfFilename: parsed.pdfFilename || '',
+              dateReceived: Utilities.formatDate(receivedDate, 'GMT-0600', 'yyyy-MM-dd HH:mm:ss'),
+              isLatest: true
+            });
+          }
+
+          var cleanedNotes = currentNotes.replace(/REVISIONS:\[.*?\]/g, '').trim();
+          var updatedNotes = (cleanedNotes ? (cleanedNotes + ' ') : '') + 'REVISIONS:' + JSON.stringify(revList);
+          sheet.getRange(updateRowIdx, 18).setValue(updatedNotes);
+          matchedExisting.notes = updatedNotes;
+
+          existingIds[msgId] = true;
+          Logger.log('scanIncidentReportEmails: Linked modification ' + (modTag || 'Modified') + ' (msgId: ' + msgId + ') to existing row ' + updateRowIdx);
+          continue;
+        }
+
         var incDate = new Date(parsed.dateOfIncident);
         if (isNaN(incDate.getTime())) incDate = receivedDate;
         var yyyy = incDate.getFullYear();
         var qNum = Math.floor(incDate.getMonth() / 3) + 1;
         var quarterKey = yyyy + '-Q' + qNum;
+
+        var initialNotes = '';
+        if (modTag) {
+          initialNotes = 'REVISIONS:' + JSON.stringify([{
+            label: modTag,
+            revision: 0,
+            emailId: msgId,
+            pdfFilename: parsed.pdfFilename || '',
+            dateReceived: Utilities.formatDate(receivedDate, 'GMT-0600', 'yyyy-MM-dd HH:mm:ss'),
+            isLatest: true
+          }]);
+        }
 
         var rowVals = [
           Utilities.formatDate(receivedDate, 'GMT-0600', 'yyyy-MM-dd HH:mm:ss'),
@@ -4480,7 +4758,7 @@ function scanIncidentReportEmails(options) {
           msgId,
           parsed.pdfFilename,
           'Under Review',
-          ''
+          initialNotes
         ];
 
         newRows.push(rowVals);

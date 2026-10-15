@@ -178,7 +178,7 @@ class IncidentReportsEngine {
       }
     });
 
-    return rows.map((row, idx) => {
+    const parsedRows = rows.map((row, idx) => {
       const rawDate = row['Date of Incident'] || row['Date'] || row['Date Received'] || '';
       const dObj = this.parseDate(rawDate) || new Date();
       const year = dObj.getFullYear().toString();
@@ -201,25 +201,18 @@ class IncidentReportsEngine {
       let unitNum = String(row['Unit #'] || '').trim();
       let ticketNum = String(row['Ticket #'] || '').trim();
 
-      // Clean up legacy parsing artifact where Unit # was stored as "Ticket"
-      if (unitNum.toLowerCase() === 'ticket') {
+      // Clean up legacy parsing artifact where Unit # was stored as "Ticket" or "Employee Name: ..."
+      if (unitNum.toLowerCase() === 'ticket' || unitNum.toLowerCase().startsWith('employee name:')) {
         unitNum = '';
       }
 
       // If unitNum is empty and ticketNum has content (from the legacy sheet scan)
       if (!unitNum && ticketNum) {
-        // Check if ticketNum contains two tokens: Unit # followed by Ticket #
-        // e.g. "5008 510 B394955 E" -> unit: "5008", ticket: "510 B394955 E"
-        // e.g. "22G1598 26313614" -> unit: "22G1598", ticket: "26313614"
-        // e.g. "02726 26123824" -> unit: "02726", ticket: "26123824"
-        // e.g. "R593224 26114052" -> unit: "R593224", ticket: "26114052"
-        // e.g. "237828 26101420" -> unit: "237828", ticket: "26101420"
         const twoParts = ticketNum.match(/^([A-Za-z0-9\-_]+(?:\s+[A-Za-z]+)?)\s+([A-Za-z0-9\-_]+(?:\s+[A-Za-z0-9\-_]+)*)$/);
         if (twoParts && !ticketNum.startsWith('547 LT')) {
           unitNum = twoParts[1].trim();
           ticketNum = twoParts[2].trim();
         } else if (!/^26\d{6,7}$/.test(ticketNum)) {
-          // If not a Montana 811 Dig Ticket (26XXXXXX), it was written in the Unit # column (e.g. R237174, 550, 547 LT, 676, 2087)
           unitNum = ticketNum;
           ticketNum = '';
         }
@@ -239,6 +232,22 @@ class IncidentReportsEngine {
         .replace(/Involved Employee\(s\)\s*Name\s*:\s*[^\n\r"']+/gi, '')
         .replace(/\s+/g, ' ')
         .trim();
+
+      // Clean up leaked form field labels from involved employees
+      let involvedEmployees = String(row['Involved Employee(s)'] || row['Involved Employees'] || '').trim();
+      involvedEmployees = involvedEmployees.replace(/Incident Type\s*:\s*[^\n\r]+/gi, '').trim();
+
+      // Parse revision metadata from notes if present
+      const notes = String(row['Notes'] || '').trim();
+      let embeddedRevisions = [];
+      const revMatch = notes.match(/REVISIONS:(\[.*?\])/);
+      if (revMatch) {
+        try { embeddedRevisions = JSON.parse(revMatch[1]); } catch (e) {}
+      }
+
+      const modTagMatch = (notes + ' ' + (row['PDF Filename'] || '')).match(/\((Modified(?:-\d+)?)\)/i) ||
+                          (notes + ' ' + (row['PDF Filename'] || '')).match(/(Modified-\d+|Modified)/i);
+      const rowModTag = modTagMatch ? modTagMatch[1] : '';
 
       const displayTime = this.formatDisplayTime(row['Time']);
       const displayDate = this.formatDisplayDate(rawDate);
@@ -260,7 +269,7 @@ class IncidentReportsEngine {
         jobLocation: jtMatch.location || String(row['Address / Location'] || '').trim(),
         jobName: jtMatch.jobName || '',
         foreman: foreman || 'Supervisor',
-        involvedEmployees: String(row['Involved Employee(s)'] || row['Involved Employees'] || '').trim(),
+        involvedEmployees: involvedEmployees,
         incidentType: rawType,
         tags: tags,
         addressLocation: String(row['Address / Location'] || row['Location'] || '').trim(),
@@ -271,9 +280,98 @@ class IncidentReportsEngine {
         photoCount: parseInt(row['Photo Count'] || 0, 10),
         pdfFilename: String(row['PDF Filename'] || 'Incident_Report.pdf').trim(),
         status: String(row['Status'] || 'Under Review').trim(),
-        notes: String(row['Notes'] || '').trim()
+        notes: notes,
+        rowModTag: rowModTag,
+        embeddedRevisions: embeddedRevisions
       };
     });
+
+    // Group rows that represent the same incident (e.g. original and modified revisions)
+    const groupedMap = new Map();
+
+    parsedRows.forEach(inc => {
+      const cleanJob = String(inc.jobNumber || '').trim().replace(/^0+/, '');
+      const cleanDate = inc.displayDate || (inc.dateOfIncident ? String(inc.dateOfIncident).split('T')[0] : '');
+      const cleanEmp = String(inc.involvedEmployees || '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      const empToks = cleanEmp.split(' ').filter(t => t.length > 2).slice(0, 3).sort().join('_');
+      const matchKey = cleanJob && empToks ? `${cleanJob}__${cleanDate}__${empToks}` : (inc.id || inc.emailId);
+
+      if (!groupedMap.has(matchKey)) {
+        groupedMap.set(matchKey, []);
+      }
+      groupedMap.get(matchKey).push(inc);
+    });
+
+    const mergedIncidents = [];
+
+    groupedMap.forEach((group) => {
+      if (group.length === 1) {
+        const item = group[0];
+        if (item.embeddedRevisions && item.embeddedRevisions.length > 0) {
+          item.revisions = item.embeddedRevisions;
+          item.isModified = item.revisions.length > 1 || !!item.rowModTag;
+          item.latestRevisionLabel = item.revisions[item.revisions.length - 1].label || item.rowModTag || 'Modified';
+        } else {
+          item.isModified = !!item.rowModTag;
+          item.latestRevisionLabel = item.rowModTag || '';
+          item.revisions = [{
+            label: item.rowModTag || 'Original',
+            revision: 0,
+            emailId: item.emailId,
+            pdfFilename: item.pdfFilename,
+            dateReceived: item.dateReceived,
+            isLatest: true
+          }];
+        }
+        mergedIncidents.push(item);
+      } else {
+        // Multiple entries for same incident - sort chronologically
+        group.sort((a, b) => (a.dateObj?.getTime() || 0) - (b.dateObj?.getTime() || 0));
+
+        const base = group[0];
+        const latest = group[group.length - 1];
+
+        // Pick richest details from latest or best populated row
+        const bestUnit = group.slice().reverse().find(g => g.unitNumber && !g.unitNumber.toLowerCase().includes('employee'))?.unitNumber || base.unitNumber;
+        const bestTicket = group.slice().reverse().find(g => g.ticketNumber)?.ticketNumber || base.ticketNumber;
+        const bestExp = group.slice().sort((a, b) => (b.explanation?.length || 0) - (a.explanation?.length || 0))[0]?.explanation || base.explanation;
+        const bestAvoidable = group.slice().reverse().find(g => g.avoidableActions)?.avoidableActions || base.avoidableActions;
+        const bestAddress = group.slice().reverse().find(g => g.addressLocation)?.addressLocation || base.addressLocation;
+
+        const revisions = group.map((g, idx) => ({
+          revision: idx,
+          label: g.rowModTag || (idx === 0 ? 'Original' : `Modified-${idx}`),
+          emailId: g.emailId,
+          pdfFilename: g.pdfFilename,
+          dateReceived: g.dateReceived,
+          unitNumber: g.unitNumber,
+          ticketNumber: g.ticketNumber,
+          isLatest: idx === group.length - 1
+        }));
+
+        const merged = {
+          ...base,
+          id: base.id,
+          emailId: latest.emailId || base.emailId,
+          pdfFilename: latest.pdfFilename || base.pdfFilename,
+          unitNumber: bestUnit,
+          ticketNumber: bestTicket,
+          explanation: bestExp,
+          avoidableActions: bestAvoidable,
+          addressLocation: bestAddress,
+          isModified: true,
+          latestRevisionLabel: latest.rowModTag || `Modified-${group.length - 1}`,
+          revisions: revisions
+        };
+        mergedIncidents.push(merged);
+      }
+    });
+
+    return mergedIncidents;
   }
 
   /**
@@ -569,6 +667,13 @@ class IncidentReportsEngine {
                 <span>👤</span> ${this.escapeHtml(inc.involvedEmployees)}
               </span>
             ` : ''}
+
+            <!-- Modified / Revision Badge -->
+            ${inc.isModified ? `
+              <span style="background: rgba(245, 158, 11, 0.18); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.5); font-size: 12px; font-weight: 800; padding: 3px 10px; border-radius: 6px; display: inline-flex; align-items: center; gap: 5px; box-shadow: 0 0 10px rgba(245, 158, 11, 0.2);" title="Incident report has been revised/modified">
+                <span>✏️</span> <strong>${this.escapeHtml(inc.latestRevisionLabel || 'Modified')}</strong>
+              </span>
+            ` : ''}
           </div>
 
           <!-- Incident Type Tag Pills (Split Tags) -->
@@ -632,10 +737,21 @@ class IncidentReportsEngine {
               <span>📷</span> View Attached Photos ${inc.photoCount > 0 ? `<span class="badge" style="background: rgba(96, 165, 247, 0.2); color: #93c5fd; padding: 1px 6px; border-radius: 4px; font-size: 10.5px; margin-left: 4px;">${inc.photoCount}</span>` : ''}
             </button>
 
-            <!-- PDF Viewer Button -->
-            <button class="btn btn-primary" onclick="window.incidentReportsEngine.openPdfViewer('${this.escapeJs(inc.emailId)}', '${this.escapeJs(inc.pdfFilename)}')" style="font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border-radius: 6px; background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); color: #fff; border: none; box-shadow: 0 2px 6px rgba(37, 99, 235, 0.3);">
-              <span>📄</span> View Incident PDF
-            </button>
+            <!-- PDF Viewer Buttons (Single or Multi-Revision) -->
+            ${(inc.revisions && inc.revisions.length > 1) ? `
+              <div style="display: inline-flex; align-items: center; gap: 6px;">
+                <button class="btn btn-secondary" onclick="window.incidentReportsEngine.openPdfViewer('${this.escapeJs(inc.revisions[0].emailId)}', '${this.escapeJs(inc.revisions[0].pdfFilename || inc.pdfFilename)}', '${this.escapeJs(inc.id)}', 0)" style="font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; gap: 5px; padding: 6px 12px; border-radius: 6px; background: rgba(30, 41, 59, 0.8); color: #cbd5e1; border: 1px solid var(--border-color);" title="View Original PDF received ${this.escapeHtml(this.formatDisplayDate(inc.revisions[0].dateReceived))}">
+                  <span>📄</span> Original PDF
+                </button>
+                <button class="btn btn-primary" onclick="window.incidentReportsEngine.openPdfViewer('${this.escapeJs(inc.revisions[inc.revisions.length - 1].emailId)}', '${this.escapeJs(inc.revisions[inc.revisions.length - 1].pdfFilename || inc.pdfFilename)}', '${this.escapeJs(inc.id)}', ${inc.revisions.length - 1})" style="font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; gap: 5px; padding: 6px 14px; border-radius: 6px; background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); color: #fff; border: none; box-shadow: 0 2px 6px rgba(245, 158, 11, 0.35);" title="View Modified PDF (${this.escapeHtml(inc.latestRevisionLabel || 'Modified')})">
+                  <span>✏️</span> View Modified PDF (${this.escapeHtml(inc.latestRevisionLabel || 'Modified-1')})
+                </button>
+              </div>
+            ` : `
+              <button class="btn btn-primary" onclick="window.incidentReportsEngine.openPdfViewer('${this.escapeJs(inc.emailId)}', '${this.escapeJs(inc.pdfFilename)}', '${this.escapeJs(inc.id)}', 0)" style="font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border-radius: 6px; background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); color: #fff; border: none; box-shadow: 0 2px 6px rgba(37, 99, 235, 0.3);">
+                <span>📄</span> View Incident PDF
+              </button>
+            `}
           </div>
 
           <div style="display: flex; align-items: center; gap: 10px;">
@@ -809,8 +925,9 @@ class IncidentReportsEngine {
 
   /**
    * Opens the attached PDF form in the Safety PDF modal
+   * Supports toggling between Original and Modified PDF versions
    */
-  async openPdfViewer(emailId, pdfFilename) {
+  async openPdfViewer(emailId, pdfFilename, incidentId = null, revisionIndex = null) {
     if (!emailId) {
       alert('Email ID missing for this incident report.');
       return;
@@ -820,9 +937,6 @@ class IncidentReportsEngine {
     const titleEl = document.getElementById('safety-pdf-modal-title') || document.getElementById('safety-pdf-title');
     const subtitleEl = document.getElementById('safety-pdf-modal-subtitle') || document.getElementById('safety-pdf-subtitle');
     const body = document.getElementById('safety-pdf-modal-body') || document.getElementById('safety-pdf-body');
-    const downloadBtn = document.getElementById('safety-pdf-btn-download') || document.getElementById('safety-pdf-download');
-    const popoutBtn = document.getElementById('safety-pdf-btn-newtab') || document.getElementById('safety-pdf-popout');
-    const gmailBtn = document.getElementById('safety-pdf-btn-gmail') || document.getElementById('safety-pdf-gmail');
 
     if (!modal || !body) return;
 
@@ -830,10 +944,122 @@ class IncidentReportsEngine {
     modal.style.display = 'flex';
     if (titleEl) titleEl.textContent = `Incident Report Form`;
     if (subtitleEl) subtitleEl.textContent = pdfFilename || 'Incident_Report.pdf';
+
+    // Find the incident in memory
+    const allIncidents = this.loadIncidents();
+    let currentInc = allIncidents.find(i => (incidentId && i.id === incidentId) || i.emailId === emailId || (i.revisions && i.revisions.some(r => r.emailId === emailId)));
+
+    let revisions = currentInc?.revisions ? [...currentInc.revisions] : [];
+    if (revisions.length === 0) {
+      revisions = [{
+        label: 'Original',
+        revision: 0,
+        emailId: emailId,
+        pdfFilename: pdfFilename,
+        isLatest: true
+      }];
+    }
+
+    let activeIdx = 0;
+    if (revisionIndex !== null && revisionIndex !== undefined && revisions[revisionIndex]) {
+      activeIdx = parseInt(revisionIndex, 10);
+    } else {
+      const matchIdx = revisions.findIndex(r => r.emailId === emailId);
+      activeIdx = matchIdx !== -1 ? matchIdx : (revisions.length - 1);
+    }
+
+    this.currentPdfState = {
+      incident: currentInc,
+      revisions: revisions,
+      activeIndex: activeIdx
+    };
+
+    // Render initial version switcher
+    this.renderPdfVersionSelector(activeIdx);
+
+    // Display active revision PDF
+    await this.displayRevisionPdf(activeIdx);
+  }
+
+  /**
+   * Renders the PDF version selector tabs in the modal header
+   */
+  renderPdfVersionSelector(activeIdx) {
+    const container = document.getElementById('safety-pdf-version-selector');
+    if (!container) return;
+
+    const revisions = this.currentPdfState?.revisions || [];
+    if (revisions.length <= 1) {
+      container.style.display = 'none';
+      container.innerHTML = '';
+      return;
+    }
+
+    container.style.display = 'inline-flex';
+    container.innerHTML = `
+      <div style="display: flex; align-items: center; gap: 4px; background: rgba(15, 23, 42, 0.7); padding: 3px 6px; border-radius: 8px; border: 1px solid rgba(148, 163, 184, 0.25);">
+        <span style="font-size: 11px; font-weight: 700; color: #94a3b8; margin-right: 4px; text-transform: uppercase;">Versions:</span>
+        ${revisions.map((rev, idx) => {
+          const isActive = idx === activeIdx;
+          const isMod = rev.label.toLowerCase().includes('mod') || idx > 0;
+          return `
+            <button onclick="window.incidentReportsEngine.switchPdfVersion(${idx})" style="
+              font-size: 11.5px; font-weight: 700; padding: 4px 10px; border-radius: 6px; cursor: pointer; transition: all 0.15s ease; display: inline-flex; align-items: center; gap: 4px; border: 1px solid transparent;
+              ${isActive
+                ? (isMod
+                    ? 'background: rgba(245, 158, 11, 0.25); color: #fcd34d; border-color: #f59e0b; box-shadow: 0 0 10px rgba(245, 158, 11, 0.35);'
+                    : 'background: rgba(59, 130, 246, 0.25); color: #93c5fd; border-color: #3b82f6; box-shadow: 0 0 10px rgba(59, 130, 246, 0.35);')
+                : 'background: rgba(255, 255, 255, 0.06); color: #94a3b8; border-color: rgba(255, 255, 255, 0.12);'
+              }
+            " title="${rev.dateReceived ? `Received ${this.formatDisplayDate(rev.dateReceived)}` : ''}">
+              <span>${isMod ? '✏️' : '📄'}</span> ${this.escapeHtml(rev.label)} ${rev.isLatest && revisions.length > 1 ? '<span style="font-size: 9.5px; opacity: 0.85; margin-left: 2px;">(Latest)</span>' : ''}
+            </button>
+          `;
+        }).join('')}
+      </div>
+    `;
+  }
+
+  /**
+   * Switches the active PDF version in the Safety PDF modal
+   */
+  async switchPdfVersion(idx) {
+    if (!this.currentPdfState || !this.currentPdfState.revisions || !this.currentPdfState.revisions[idx]) return;
+    await this.displayRevisionPdf(idx);
+  }
+
+  /**
+   * Loads and displays the specific PDF revision
+   */
+  async displayRevisionPdf(idx) {
+    if (!this.currentPdfState || !this.currentPdfState.revisions) return;
+    const rev = this.currentPdfState.revisions[idx] || this.currentPdfState.revisions[0];
+    if (!rev) return;
+
+    const emailId = rev.emailId;
+    const pdfFilename = rev.pdfFilename || 'Incident_Report.pdf';
+    this.currentPdfState.activeIndex = idx;
+
+    const subtitleEl = document.getElementById('safety-pdf-modal-subtitle') || document.getElementById('safety-pdf-subtitle');
+    const body = document.getElementById('safety-pdf-modal-body') || document.getElementById('safety-pdf-body');
+    const downloadBtn = document.getElementById('safety-pdf-btn-download') || document.getElementById('safety-pdf-download');
+    const popoutBtn = document.getElementById('safety-pdf-btn-newtab') || document.getElementById('safety-pdf-popout');
+    const gmailBtn = document.getElementById('safety-pdf-btn-gmail') || document.getElementById('safety-pdf-gmail');
+
+    const revLabel = rev.label || (idx === 0 ? 'Original' : `Modified-${idx}`);
+    if (subtitleEl) {
+      const recDate = rev.dateReceived ? this.formatDisplayDate(rev.dateReceived) : '';
+      subtitleEl.textContent = `${pdfFilename} • ${revLabel}${recDate ? ` (Received ${recDate})` : ''}`;
+    }
+
+    // Update version selector active pill
+    this.renderPdfVersionSelector(idx);
+
     body.innerHTML = `
       <div style="padding: 40px; text-align: center; color: var(--text-secondary);">
         <div style="font-size: 32px; margin-bottom: 8px;">⏳</div>
-        <div>Loading original Incident Report PDF from Gmail...</div>
+        <div style="font-size: 14px; font-weight: 700; color: #f1f5f9;">Loading ${this.escapeHtml(revLabel)} PDF from Gmail...</div>
+        <div style="font-size: 11px; color: #94a3b8; margin-top: 4px;">Contacting Google Apps Script backend</div>
       </div>
     `;
 
@@ -841,13 +1067,13 @@ class IncidentReportsEngine {
       const syncUrl = window.syncEngine ? window.syncEngine.getSyncUrl() : '';
       let pdfData = null;
 
-      // Check cache
       if (this.attachmentsCache.has(emailId) && this.attachmentsCache.get(emailId).pdf) {
         pdfData = this.attachmentsCache.get(emailId).pdf;
       } else {
         const payload = {
           action: 'getIncidentEmailAttachments',
-          emailId: emailId
+          emailId: emailId,
+          revisionEmailId: emailId
         };
 
         let resJson = null;
@@ -867,6 +1093,17 @@ class IncidentReportsEngine {
           if (resJson.photos) {
             this.attachmentsCache.get(emailId).photos = resJson.photos;
           }
+
+          // If backend discovered more revisions across threads/messages, update revisions list!
+          if (resJson.revisions && Array.isArray(resJson.revisions) && resJson.revisions.length > this.currentPdfState.revisions.length) {
+            this.currentPdfState.revisions = resJson.revisions;
+            if (this.currentPdfState.incident) {
+              this.currentPdfState.incident.revisions = resJson.revisions;
+              this.currentPdfState.incident.isModified = true;
+              this.currentPdfState.incident.latestRevisionLabel = resJson.revisions[resJson.revisions.length - 1].label;
+            }
+            this.renderPdfVersionSelector(idx);
+          }
         } else {
           throw new Error((resJson && resJson.error) || 'Failed to extract PDF attachment.');
         }
@@ -884,11 +1121,11 @@ class IncidentReportsEngine {
 
       if (downloadBtn) {
         downloadBtn.href = blobUrl;
-        downloadBtn.download = pdfData.filename || 'Incident_Report.pdf';
+        downloadBtn.download = pdfData.filename || pdfFilename;
         downloadBtn.onclick = async (e) => {
           if (window.desktopAPI && typeof window.desktopAPI.savePdfToFile === 'function') {
             e.preventDefault();
-            await window.desktopAPI.savePdfToFile(pdfData.base64, pdfData.filename || 'Incident_Report.pdf');
+            await window.desktopAPI.savePdfToFile(pdfData.base64, pdfData.filename || pdfFilename);
           }
         };
       }
@@ -898,7 +1135,7 @@ class IncidentReportsEngine {
         popoutBtn.onclick = async (e) => {
           if (window.desktopAPI && typeof window.desktopAPI.openPdfExternally === 'function') {
             e.preventDefault();
-            await window.desktopAPI.openPdfExternally(pdfData.base64, pdfData.filename || 'Incident_Report.pdf');
+            await window.desktopAPI.openPdfExternally(pdfData.base64, pdfData.filename || pdfFilename);
           }
         };
       }
@@ -929,7 +1166,7 @@ class IncidentReportsEngine {
       body.innerHTML = `
         <div style="padding: 30px; text-align: center; max-width: 500px; color: #f87171;">
           <div style="font-size: 32px; margin-bottom: 12px;">⚠️</div>
-          <div style="font-size: 14px; font-weight: 700; margin-bottom: 6px;">Could not load Incident Report PDF</div>
+          <div style="font-size: 14px; font-weight: 700; margin-bottom: 6px;">Could not load ${this.escapeHtml(revLabel)} PDF</div>
           <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 20px; line-height: 1.5;">${this.escapeHtml(err.message || 'Unknown error')}</div>
           <button onclick="window.incidentReportsEngine.openEmailInGmail('${this.escapeJs(emailId)}')" class="btn btn-primary" style="font-weight: 700; background: #10b981; border: none; display: inline-flex; align-items: center; gap: 6px; padding: 8px 18px; cursor: pointer; color: white; border-radius: 6px;">
             <span>✉️</span> Open Email in Gmail
@@ -948,6 +1185,12 @@ class IncidentReportsEngine {
       modal.style.display = 'none';
       modal.classList.add('hidden');
     }
+    const verSelector = document.getElementById('safety-pdf-version-selector');
+    if (verSelector) {
+      verSelector.style.display = 'none';
+      verSelector.innerHTML = '';
+    }
+    this.currentPdfState = null;
   }
 
   /**
