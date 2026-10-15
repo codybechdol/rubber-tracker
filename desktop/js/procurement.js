@@ -1172,7 +1172,8 @@ class ProcurementEngine {
       'retired', 'in testing', 'packed for testing', 'not repairable', 'reclaimed'
     ]);
 
-    const cleanSize = (val) => {
+    const cleanSize = (val, hasNoSize) => {
+      if (hasNoSize) return '⚠️ Needs Size';
       if (val === null || val === undefined) return '';
       let s = String(val).trim();
       const lower = s.toLowerCase();
@@ -1357,14 +1358,30 @@ class ProcurementEngine {
       return 'Class 2';
     };
 
-    const addItem = (section, itemType, typeLabel, size, hasNoSize, classVal, empLabel, minDaysLeft, isImmediate, orderInfo = null) => {
+    const cleanItemType = (typeVal) => {
+      if (!typeVal) return 'Equipment';
+      let t = String(typeVal).replace(/^[^\w]+/g, '').trim();
+      return t || 'Equipment';
+    };
+
+    const cleanClass = (classVal) => {
+      if (!classVal) return 'Class 2';
+      let c = String(classVal).trim();
+      return /^class\b/i.test(c) ? c : `Class ${c}`;
+    };
+
+    const addItem = (section, rawItemType, typeLabel, rawSize, hasNoSize, rawClassVal, empLabel, minDaysLeft, isImmediate, orderInfo = null) => {
+      const itemType = cleanItemType(rawItemType);
+      const size = cleanSize(rawSize, hasNoSize) || (hasNoSize ? '⚠️ Needs Size' : 'Standard');
+      const classVal = cleanClass(rawClassVal);
       const aggKey = `${section}|${itemType}|${size}|${classVal}`;
+
       if (!aggregated[aggKey]) {
         aggregated[aggKey] = {
           section: section,
           sectionTitle: this.SECTIONS[section] ? this.SECTIONS[section].title : section,
           itemType: itemType,
-          typeLabel: typeLabel,
+          typeLabel: typeLabel || (itemType === 'Gloves' ? '🧤 Gloves' : (itemType === 'Sleeves' ? '🦺 Sleeves' : (itemType === 'Blankets' ? '🧱 Blankets' : (itemType === 'MACKs' ? '🧱 MACKs' : `📦 ${itemType}`)))),
           size: size,
           hasNoSize: !!hasNoSize,
           classVal: classVal,
@@ -1407,7 +1424,8 @@ class ProcurementEngine {
           empName = empLabel.trim();
         }
 
-        const existing = aggregated[aggKey].employees.find(e => this.isNameMatch(e.name, empName));
+        const isStock = empName.toLowerCase().includes('stock') || empName.toLowerCase().includes('shelf');
+        const existing = isStock ? null : aggregated[aggKey].employees.find(e => this.isNameMatch(e.name, empName));
         if (!existing) {
           aggregated[aggKey].employees.push({
             name: empName,
@@ -1417,6 +1435,10 @@ class ProcurementEngine {
             orderInfo: orderInfo || null
           });
           aggregated[aggKey].quantity += 1;
+        } else {
+          if (orderInfo && !existing.orderInfo) {
+            existing.orderInfo = orderInfo;
+          }
         }
       } else {
         aggregated[aggKey].quantity += 1;
@@ -1799,12 +1821,14 @@ class ProcurementEngine {
 
         const parsedItems = this.parsePoItemsString(itemsStr);
         parsedItems.forEach(pi => {
+          const normCat = cleanItemType(pi.category);
           const normSize = cleanSize(pi.size) || 'Standard';
-          const aggKey = `ordered_pending|${pi.category}|${normSize}|${pi.classVal}`;
+          const normClass = cleanClass(pi.classVal);
+          const aggKey = `ordered_pending|${normCat}|${normSize}|${normClass}`;
           const currentQty = aggregated[aggKey] ? aggregated[aggKey].quantity : 0;
           if (currentQty < pi.quantity) {
             const neededQty = pi.quantity - currentQty;
-            const typeLabel = pi.category === 'Gloves' ? '🧤 Gloves' : (pi.category === 'Sleeves' ? '🦺 Sleeves' : (pi.category === 'Blankets' ? '🧱 Blankets' : (pi.category === 'MACKs' ? '🧱 MACKs' : `📦 ${pi.category}`)));
+            const typeLabel = normCat === 'Gloves' ? '🧤 Gloves' : (normCat === 'Sleeves' ? '🦺 Sleeves' : (normCat === 'Blankets' ? '🧱 Blankets' : (normCat === 'MACKs' ? '🧱 MACKs' : `📦 ${normCat}`)));
             const orderInfo = {
               orderNumber: poNum,
               vendor: vendor,
@@ -1821,9 +1845,19 @@ class ProcurementEngine {
               }
             }
 
+            const empNamesList = empForPo
+              ? empForPo.split(',').map(n => n.trim()).filter(Boolean)
+              : [];
+
             for (let q = 0; q < neededQty; q++) {
-              const label = empForPo ? `${empForPo} (📦 PO: ${poNum || 'Pending'})` : `Stock Order (PO: ${poNum || 'Pending'} · ${vendor || 'Vendor'})`;
-              addItem('ordered_pending', pi.category, typeLabel, normSize, false, pi.classVal, label, 15, false, orderInfo);
+              const assignedName = empNamesList[q] || (empNamesList.length === 1 ? empNamesList[0] : '');
+              const label = assignedName
+                ? `${assignedName} (📦 PO: ${poNum || 'Pending'})`
+                : (empNamesList.length > 0 && q >= empNamesList.length
+                    ? `Stock Order (PO: ${poNum || 'Pending'} · ${vendor || 'Vendor'})`
+                    : (empForPo ? `${empForPo} (📦 PO: ${poNum || 'Pending'})` : `Stock Order (PO: ${poNum || 'Pending'} · ${vendor || 'Vendor'})`));
+
+              addItem('ordered_pending', normCat, typeLabel, normSize, false, normClass, label, 15, false, orderInfo);
             }
           }
         });
@@ -2010,7 +2044,38 @@ class ProcurementEngine {
     // =========================================================================
     // COMPILE & PRIORITIZE ITEMS
     // =========================================================================
-    this.items = Object.values(aggregated).map(item => {
+    // Strictly consolidate items by like size and class across every section (especially ordered_pending)
+    const normalizedAggregated = {};
+    Object.values(aggregated).forEach(item => {
+      const type = cleanItemType(item.itemType);
+      const size = cleanSize(item.size, item.hasNoSize) || (item.hasNoSize ? '⚠️ Needs Size' : 'Standard');
+      const classVal = cleanClass(item.classVal);
+      const key = `${item.section}|${type}|${size}|${classVal}`;
+
+      if (normalizedAggregated[key]) {
+        const existing = normalizedAggregated[key];
+        existing.quantity += item.quantity;
+        if (item.employees && item.employees.length > 0) {
+          item.employees.forEach(emp => {
+            const isStock = emp.name.toLowerCase().includes('stock') || emp.name.toLowerCase().includes('shelf');
+            if (isStock || !existing.employees.some(e => this.isNameMatch(e.name, emp.name))) {
+              existing.employees.push(emp);
+            }
+          });
+        }
+        if (item.price > existing.price) existing.price = item.price;
+        if (item.orderInfo && !existing.orderInfo) existing.orderInfo = item.orderInfo;
+      } else {
+        normalizedAggregated[key] = {
+          ...item,
+          itemType: type,
+          size: size,
+          classVal: classVal
+        };
+      }
+    });
+
+    this.items = Object.values(normalizedAggregated).map(item => {
       let priority = 'LOW';
       let priorityEmoji = '🟢';
       let timeframe = 'Consider / Future';
@@ -2377,6 +2442,15 @@ class ProcurementEngine {
                                 : `👤 Ordered for: <strong style="color: #60a5fa;">${emp.name}</strong>`))
                         : `👤 ${emp.name}`}
                     </span>
+                    ${item.section === 'ordered_pending' && emp.orderInfo?.orderNumber ? `
+                      <span class="badge" style="font-size: 10px; padding: 1px 5px; background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 3px;" title="PO / Job Number">
+                        PO: ${this.escapeHtml(emp.orderInfo.orderNumber)}${emp.orderInfo.vendor ? ' · ' + this.escapeHtml(emp.orderInfo.vendor) : ''}
+                      </span>
+                    ` : (item.section === 'ordered_pending' && emp.label && emp.label.includes('PO:') ? `
+                      <span class="badge" style="font-size: 10px; padding: 1px 5px; background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 3px;">
+                        ${this.escapeHtml(emp.label.match(/\(([^)]+)\)/)?.[1] || '')}
+                      </span>
+                    ` : '')}
                     ${emp.detail ? `
                       <span style="font-size: 11px; padding: 2px 7px; border-radius: 4px; background: rgba(255, 255, 255, 0.06); color: var(--text-secondary); border: 1px solid rgba(255, 255, 255, 0.08); font-weight: 500;">
                         ${emp.detail}
@@ -2414,7 +2488,7 @@ class ProcurementEngine {
                     </div>
                   ` : `
                     <button type="button" class="btn btn-xs" onclick="window.procurementEngine.openMarkOrderedModal([{ ...window.procurementEngine.items[${item._globalIdx}], quantity: 1, employees: [{ name: '${this.escapeJs(emp.name)}', label: '${this.escapeJs(emp.label)}', checked: true }] }])" style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.35); color: #6ee7b7; padding: 2px 6px; font-size: 10.5px; border-radius: 3px; cursor: pointer;">
-                      <span>📦</span> Order
+                        <span>📦</span> Order
                     </button>
                   `}
                 </td>
@@ -2440,21 +2514,48 @@ class ProcurementEngine {
                   </span>
                 ` : ''}
               </div>
-              ${item.section === 'ordered_pending' && item.orderInfo ? `
-                <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 4px; font-size: 11px;">
-                  <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); font-weight: 700; padding: 2px 6px; border-radius: 4px;" title="Internal PO / Job Number">
-                    PO (Job #): ${this.escapeHtml(item.orderInfo.poNumber || item.orderInfo.orderNumber || 'Pending')}
-                  </span>
-                  ${item.orderInfo.vendorOrderNumber ? `
-                    <span class="badge" style="background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4); font-weight: 700; padding: 2px 6px; border-radius: 4px;" title="Vendor Order / Invoice Number">
-                      Order #: ${this.escapeHtml(item.orderInfo.vendorOrderNumber)}
+              ${item.section === 'ordered_pending' ? (() => {
+                const poSet = new Set();
+                const vendorSet = new Set();
+                const orderDatesSet = new Set();
+                const delivDatesSet = new Set();
+                if (item.orderInfo) {
+                  if (item.orderInfo.poNumber) poSet.add(item.orderInfo.poNumber);
+                  if (item.orderInfo.orderNumber) poSet.add(item.orderInfo.orderNumber);
+                  if (item.orderInfo.vendor) vendorSet.add(item.orderInfo.vendor);
+                  if (item.orderInfo.orderDate) orderDatesSet.add(item.orderInfo.orderDate);
+                  if (item.orderInfo.expectedDelivery && item.orderInfo.expectedDelivery !== 'Pending') delivDatesSet.add(item.orderInfo.expectedDelivery);
+                }
+                (item.employees || []).forEach(e => {
+                  if (e.orderInfo?.orderNumber) poSet.add(e.orderInfo.orderNumber);
+                  if (e.orderInfo?.poNumber) poSet.add(e.orderInfo.poNumber);
+                  if (e.orderInfo?.vendor) vendorSet.add(e.orderInfo.vendor);
+                  if (e.orderInfo?.orderDate) orderDatesSet.add(e.orderInfo.orderDate);
+                  if (e.orderInfo?.expectedDelivery && e.orderInfo.expectedDelivery !== 'Pending') delivDatesSet.add(e.orderInfo.expectedDelivery);
+                  const poM = (e.label || '').match(/PO:\s*([^·)\s]+)/i);
+                  if (poM) poSet.add(poM[1]);
+                });
+                const poList = Array.from(poSet).filter(Boolean);
+                const vendorList = Array.from(vendorSet).filter(Boolean);
+                const orderDateList = Array.from(orderDatesSet).filter(Boolean);
+                const delivList = Array.from(delivDatesSet).filter(Boolean);
+
+                return `
+                  <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 4px; font-size: 11px;">
+                    <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); font-weight: 700; padding: 2px 6px; border-radius: 4px;" title="Internal PO / Job Number">
+                      ${poList.length > 1 ? 'POs: ' + this.escapeHtml(poList.join(', ')) : 'PO: ' + this.escapeHtml(poList[0] || 'Pending')}
                     </span>
-                  ` : ''}
-                  ${item.orderInfo.vendor ? `<span style="color: #cbd5e1; font-weight: 600;">🏢 ${this.escapeHtml(item.orderInfo.vendor)}</span>` : ''}
-                  ${item.orderInfo.orderDate ? `<span style="color: #94a3b8;">📅 Ordered: <strong>${this.escapeHtml(item.orderInfo.orderDate)}</strong></span>` : ''}
-                  ${item.orderInfo.expectedDelivery && item.orderInfo.expectedDelivery !== 'Pending' ? `<span style="color: #38bdf8;">🚚 Est. Delivery: <strong>${this.escapeHtml(item.orderInfo.expectedDelivery)}</strong></span>` : ''}
-                </div>
-              ` : (item.partNumber ? `<div style="font-size: 11px; color: #3b82f6; margin-top: 1px;">PN: ${item.partNumber}</div>` : (item.orderInfo?.orderNumber ? `<div style="font-size: 11px; color: #34d399; margin-top: 1px; font-weight: 600;">PO: ${this.escapeHtml(item.orderInfo.orderNumber)}${item.orderInfo.vendor ? ' · ' + this.escapeHtml(item.orderInfo.vendor) : ''}</div>` : ''))}
+                    ${item.orderInfo?.vendorOrderNumber ? `
+                      <span class="badge" style="background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4); font-weight: 700; padding: 2px 6px; border-radius: 4px;" title="Vendor Order / Invoice Number">
+                        Order #: ${this.escapeHtml(item.orderInfo.vendorOrderNumber)}
+                      </span>
+                    ` : ''}
+                    ${vendorList.length > 0 ? `<span style="color: #cbd5e1; font-weight: 600;">🏢 ${this.escapeHtml(vendorList.join(' · '))}</span>` : ''}
+                    ${orderDateList.length > 0 ? `<span style="color: #94a3b8;">📅 Ordered: <strong>${this.escapeHtml(orderDateList[0])}</strong></span>` : ''}
+                    ${delivList.length > 0 ? `<span style="color: #38bdf8;">🚚 Est. Delivery: <strong>${this.escapeHtml(delivList[0])}</strong></span>` : ''}
+                  </div>
+                `;
+              })() : (item.partNumber ? `<div style="font-size: 11px; color: #3b82f6; margin-top: 1px;">PN: ${item.partNumber}</div>` : (item.orderInfo?.orderNumber ? `<div style="font-size: 11px; color: #34d399; margin-top: 1px; font-weight: 600;">PO: ${this.escapeHtml(item.orderInfo.orderNumber)}${item.orderInfo.vendor ? ' · ' + this.escapeHtml(item.orderInfo.vendor) : ''}</div>` : ''))}
             </td>
             <td style="padding: 8px; text-align: center;">
               ${item.hasNoSize ? `
