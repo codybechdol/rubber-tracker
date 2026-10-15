@@ -4576,10 +4576,16 @@ class ProcurementEngine {
         </div>
       </div>
 
-      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px;">
+      <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; margin-bottom: 14px;">
         <div>
-          <label style="display: block; font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 5px;">PO / Order Number *</label>
-          <input type="text" id="past-order-po-num" class="batch-delivery-input" placeholder="e.g. 002-26 or PO-9811" style="font-weight: 700; color: #38bdf8;">
+          <label style="display: block; font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 5px;">PO # (Job Number) *</label>
+          <input type="text" id="past-order-po-num" class="batch-delivery-input" placeholder="e.g. 002-26" style="font-weight: 700; color: #38bdf8;">
+          <div style="font-size: 11px; color: #64748b; margin-top: 2px;">Internal job / PO number</div>
+        </div>
+        <div>
+          <label style="display: block; font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 5px;">Order Number</label>
+          <input type="text" id="past-order-vendor-order-num" class="batch-delivery-input" placeholder="e.g. PO-9811 or invoice #" style="font-weight: 600; color: #f1f5f9;">
+          <div style="font-size: 11px; color: #64748b; margin-top: 2px;">Vendor order / invoice #</div>
         </div>
         <div>
           <label style="display: block; font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 5px;">Vendor *</label>
@@ -4649,11 +4655,19 @@ class ProcurementEngine {
 
   async confirmAddPastOrder() {
     const poNumInput = document.getElementById('past-order-po-num');
-    const poNum = poNumInput ? poNumInput.value.trim() : '';
-    if (!poNum) {
-      alert('⚠️ Please enter a PO / Order Number.');
+    let poNum = poNumInput ? poNumInput.value.trim() : '';
+
+    const vendorOrderNumInput = document.getElementById('past-order-vendor-order-num');
+    const vendorOrderNum = vendorOrderNumInput ? vendorOrderNumInput.value.trim() : '';
+
+    if (!poNum && !vendorOrderNum) {
+      alert('⚠️ Please enter a PO # or Order Number.');
       if (poNumInput) poNumInput.focus();
       return;
+    }
+
+    if (!poNum && vendorOrderNum) {
+      poNum = vendorOrderNum;
     }
 
     const vSelect = document.getElementById('past-order-vendor-select');
@@ -4685,6 +4699,15 @@ class ProcurementEngine {
     const notesInput = document.getElementById('past-order-notes');
     const notes = notesInput ? notesInput.value.trim() : '';
 
+    let finalNotes = notes;
+    if (vendorOrderNum) {
+      if (finalNotes.toLowerCase().includes('vendor order #:')) {
+        finalNotes = finalNotes.replace(/vendor order #:\s*[^;,]+/i, `Vendor Order #: ${vendorOrderNum}`);
+      } else {
+        finalNotes = finalNotes ? `${finalNotes}; Vendor Order #: ${vendorOrderNum}` : `Vendor Order #: ${vendorOrderNum}`;
+      }
+    }
+
     const formatToMdY = (dStr) => {
       if (!dStr) return '';
       if (dStr.includes('/')) return dStr;
@@ -4703,9 +4726,9 @@ class ProcurementEngine {
         'Vendor': vendorName,
         'Items': itemsStr,
         'Total Price': totalPrice > 0 ? totalPrice : 0,
-        'Expected Delivery': formatToMdY(delivDate) || 'Delivered',
+        'Expected Delivery': formatToMdY(delivDate) || (status === 'Received' ? 'Delivered' : 'Pending'),
         'Status': status,
-        'Notes': notes || 'Manually logged past order'
+        'Notes': finalNotes || 'Manually logged past order'
       };
 
       const parsedItems = this.parsePoItemsString(itemsStr);
@@ -4719,8 +4742,9 @@ class ProcurementEngine {
 
       this.closeAddPastOrderModal();
       await this.loadData();
+      this.render();
 
-      alert(`✅ Past Purchase Order #${poNum} logged successfully!`);
+      alert(`✅ Past Purchase Order #${poNum}${vendorOrderNum ? ' (Order #' + vendorOrderNum + ')' : ''} logged successfully!`);
     } catch (err) {
       console.error('Error logging past order:', err);
       alert('❌ Failed to save past order: ' + (err.message || err));
@@ -4797,7 +4821,9 @@ class ProcurementEngine {
       }
 
       const rowIdx = (r && r._rowIdx) ? r._rowIdx : (idx + 2);
-      poList.push({ rowIdx, date, poNum, vendor, items, price, expDeliv, status, notes, raw: r });
+      const parsedNotes = this.parseOrderInfoFromNotes(notes);
+      const vendorOrderNum = parsedNotes?.vendorOrderNumber || '';
+      poList.push({ rowIdx, date, poNum, vendorOrderNum, vendor, items, price, expDeliv, status, notes, raw: r });
     });
 
     poList.reverse();
@@ -4836,8 +4862,9 @@ class ProcurementEngine {
             <td style="padding: 10px 12px; font-family: monospace; font-size: 12px; color: #94a3b8;">
               ${this.escapeHtml(po.date)}
             </td>
-            <td style="padding: 10px 12px; font-weight: 700; color: #38bdf8; font-size: 13px;">
-              ${this.escapeHtml(po.poNum || '—')}
+            <td style="padding: 10px 12px; font-size: 13px;">
+              <div style="font-weight: 700; color: #38bdf8;">${this.escapeHtml(po.poNum || '—')}</div>
+              ${po.vendorOrderNum ? `<div style="font-size: 11px; color: #93c5fd; font-weight: 600; margin-top: 2px;" title="Vendor Order / Invoice Number">Order #: ${this.escapeHtml(po.vendorOrderNum)}</div>` : ''}
             </td>
             <td style="padding: 10px 12px; font-weight: 600; color: #f1f5f9;">
               ${this.escapeHtml(po.vendor || '—')}
@@ -4910,7 +4937,7 @@ class ProcurementEngine {
           <thead>
             <tr>
               <th style="width: 95px;">Date</th>
-              <th style="width: 110px;">PO #</th>
+              <th style="width: 125px;">PO # / Order #</th>
               <th style="width: 150px;">Vendor</th>
               <th>Items & Order Details</th>
               <th style="text-align: right; width: 110px;">Total Price</th>
