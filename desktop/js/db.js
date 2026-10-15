@@ -4172,30 +4172,41 @@ class LocalDatabase {
       if (table) {
         if (mut.rowData) {
           const mDate = String(mut.rowData['Date Assigned'] || mut.rowData['Date'] || Object.values(mut.rowData)[0] || '').trim();
-          const mAssigned = String(mut.rowData['Assigned To'] || '').trim().toLowerCase();
-          const mItem = String(mut.rowData['Item #'] || mut.rowData['Serial #'] || Object.values(mut.rowData)[1] || '').trim().toLowerCase();
+          const mAssigned = String(mut.rowData['Assigned To'] || mut.rowData['Vendor'] || '').trim().toLowerCase();
+          const mItem = String(mut.rowData['Item #'] || mut.rowData['Serial #'] || mut.rowData['PO Number'] || mut.rowData['PO #'] || Object.values(mut.rowData)[1] || '').trim().toLowerCase();
           const mNotes = String(mut.rowData['Notes'] || mut.rowData['Note'] || '').trim();
 
           if (table.rows) {
-            const rowIdx = table.rows.findIndex(r => {
-              const rDate = String(r['Date Assigned'] || r['Date'] || Object.values(r)[0] || '').trim();
-              const rAssigned = String(r['Assigned To'] || '').trim().toLowerCase();
-              const rItem = String(r['Item #'] || r['Serial #'] || Object.values(r)[1] || '').trim().toLowerCase();
-              const rNotes = String(r['Notes'] || r['Note'] || '').trim();
-              return (!mItem || rItem === mItem) && (!mDate || rDate === mDate) && (!mAssigned || rAssigned === mAssigned) && (!mNotes || rNotes === mNotes);
-            });
+            let rowIdx = -1;
+            if (mut.row && mut.row >= 2) {
+              rowIdx = table.rows.findIndex((r, i) => (r._rowIdx || (i + 2)) === mut.row);
+            }
+            if (rowIdx === -1) {
+              rowIdx = table.rows.findIndex(r => {
+                const rDate = String(r['Date Assigned'] || r['Date'] || Object.values(r)[0] || '').trim();
+                const rAssigned = String(r['Assigned To'] || r['Vendor'] || '').trim().toLowerCase();
+                const rItem = String(r['Item #'] || r['Serial #'] || r['PO Number'] || r['PO #'] || Object.values(r)[1] || '').trim().toLowerCase();
+                const rNotes = String(r['Notes'] || r['Note'] || '').trim();
+                return (!mItem || rItem === mItem) && (!mDate || rDate === mDate) && (!mAssigned || rAssigned === mAssigned) && (!mNotes || rNotes === mNotes);
+              });
+            }
             if (rowIdx !== -1) {
               table.rows.splice(rowIdx, 1);
               table.rowCount = table.rows.length;
             }
           }
           if (table.rawGrid) {
-            const gIdx = table.rawGrid.findIndex((gr, idx) => {
-              if (idx === 0) return false;
-              const grStr = gr.map(c => String(c || '').trim().toLowerCase());
-              return (!mItem || grStr.includes(mItem)) && (!mDate || grStr.includes(mDate.toLowerCase())) && (!mAssigned || grStr.includes(mAssigned));
-            });
-            if (gIdx > 0) {
+            let gIdx = -1;
+            if (mut.row && mut.row >= 2 && mut.row <= table.rawGrid.length) {
+              gIdx = mut.row - 1;
+            } else {
+              gIdx = table.rawGrid.findIndex((gr, idx) => {
+                if (idx === 0) return false;
+                const grStr = gr.map(c => String(c || '').trim().toLowerCase());
+                return (!mItem || grStr.includes(mItem)) && (!mDate || grStr.includes(mDate.toLowerCase())) && (!mAssigned || grStr.includes(mAssigned));
+              });
+            }
+            if (gIdx > 0 && gIdx < table.rawGrid.length) {
               table.rawGrid.splice(gIdx, 1);
               table.maxRows = table.rawGrid.length;
             }

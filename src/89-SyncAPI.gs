@@ -2334,8 +2334,8 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
             if (data.length > 1) {
               var idStr = String(mut.itemIdentifier || '').trim().toLowerCase();
               var rDate = mut.rowData ? String(mut.rowData['Date Assigned'] || mut.rowData['Date'] || '').trim().toLowerCase() : '';
-              var rItem = mut.rowData ? String(mut.rowData['Item #'] || mut.rowData['Item'] || mut.rowData['Serial #'] || '').trim().toLowerCase() : '';
-              var rAssigned = mut.rowData ? String(mut.rowData['Assigned To'] || '').trim().toLowerCase() : '';
+              var rItem = mut.rowData ? String(mut.rowData['Item #'] || mut.rowData['Item'] || mut.rowData['Serial #'] || mut.rowData['PO Number'] || mut.rowData['PO #'] || '').trim().toLowerCase() : '';
+              var rAssigned = mut.rowData ? String(mut.rowData['Assigned To'] || mut.rowData['Vendor'] || '').trim().toLowerCase() : '';
               var rNotes = mut.rowData ? String(mut.rowData['Notes'] || mut.rowData['Note'] || '').trim().toLowerCase() : '';
 
               var formatCellVal = function(c) {
@@ -2349,22 +2349,35 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
               };
 
               var matchRowIdx = -1;
-              for (var r = 1; r < data.length; r++) {
-                var rowVals = data[r].map(formatCellVal);
-                var isMatch = false;
-                if (idStr) {
-                  isMatch = (rowVals.indexOf(idStr) !== -1);
-                } else if (mut.rowData) {
-                  var matchDate = rDate ? (rowVals[0] === rDate || rowVals.indexOf(rDate) !== -1) : true;
-                  var matchItem = rItem ? (rowVals[1] === rItem || rowVals.indexOf(rItem) !== -1) : true;
-                  var matchAssigned = rAssigned ? (rowVals.indexOf(rAssigned) !== -1) : true;
-                  var matchNotes = rNotes ? (rowVals.indexOf(rNotes) !== -1) : true;
-                  isMatch = (matchDate && matchItem && matchAssigned && matchNotes);
+              if (mut.row && mut.row >= 2 && mut.row <= data.length) {
+                var candVals = data[mut.row - 1].map(formatCellVal);
+                var candMatch = true;
+                if (idStr && candVals.indexOf(idStr) === -1) candMatch = false;
+                if (rDate && candVals[0] !== rDate && candVals.indexOf(rDate) === -1) candMatch = false;
+                if (rItem && candVals.indexOf(rItem) === -1) candMatch = false;
+                if (candMatch) {
+                  matchRowIdx = mut.row;
                 }
+              }
 
-                if (isMatch) {
-                  matchRowIdx = r + 1;
-                  break;
+              if (matchRowIdx === -1) {
+                for (var r = 1; r < data.length; r++) {
+                  var rowVals = data[r].map(formatCellVal);
+                  var isMatch = false;
+                  if (idStr) {
+                    isMatch = (rowVals.indexOf(idStr) !== -1);
+                  } else if (mut.rowData) {
+                    var matchDate = rDate ? (rowVals[0] === rDate || rowVals.indexOf(rDate) !== -1) : true;
+                    var matchItem = rItem ? (rowVals[1] === rItem || rowVals.indexOf(rItem) !== -1) : true;
+                    var matchAssigned = rAssigned ? (rowVals.indexOf(rAssigned) !== -1) : true;
+                    var matchNotes = rNotes ? (rowVals.indexOf(rNotes) !== -1) : true;
+                    isMatch = (matchDate && matchItem && matchAssigned && matchNotes);
+                  }
+
+                  if (isMatch) {
+                    matchRowIdx = r + 1;
+                    break;
+                  }
                 }
               }
 
