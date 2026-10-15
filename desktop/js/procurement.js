@@ -793,8 +793,9 @@ class ProcurementEngine {
 
   isNeedToOrderStat(stat) {
     if (!stat) return false;
-    const lower = String(stat).toLowerCase();
-    return lower.includes('need to purchase') || lower.includes('purchase') || lower.includes('size up') || lower.includes('unassigned');
+    const s = String(stat).toLowerCase().trim();
+    if (s.includes('ordered')) return false;
+    return s.includes('purchase') || s.includes('need to order') || s.includes('need to purchase') || s.includes('size up') || s === 'unassigned';
   }
 
   getActiveEmployeeNames() {
@@ -853,7 +854,7 @@ class ProcurementEngine {
     if (vMatch) vendor = vMatch[1].trim();
 
     // Extract Date (e.g. 10/12/2026 or 2026-10-12)
-    const dMatch = s.match(/(?:date|ordered(?:\s*on)?)\s*[:=]?\s*(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}|\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2})/i);
+    const dMatch = s.match(/(?:date|ordered(?:\s*on)?)\s*[:=]?\s*(\d{1,2}[-/]\d{1,2}[-/]\d{2,4}|\d{4}[-/]\d{1,2}[-/]\d{1,2})/i);
     if (dMatch) orderDate = dMatch[1].trim();
 
     // Extract Price
@@ -865,7 +866,7 @@ class ProcurementEngine {
 
     // Extract Expected Delivery
     let expectedDelivery = '';
-    const delivMatch = s.match(/(?:expected(?:\s*delivery)?|deliv(?:ery)?(?:\s*date)?|eta)\s*[:=]?\s*(\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}|\d{4}[\/\-]\d{1,2}[\/\-]\d{1,2})/i);
+    const delivMatch = s.match(/(?:expected(?:\s*delivery)?|deliv(?:ery)?(?:\s*date)?|eta)\s*[:=]?\s*(\d{1,2}[-/]\d{1,2}[-/]\d{2,4}|\d{4}[-/]\d{1,2}[-/]\d{1,2})/i);
     if (delivMatch) expectedDelivery = delivMatch[1].trim();
 
     const orderNumber = poNumber || vendorOrderNumber;
@@ -3226,23 +3227,6 @@ class ProcurementEngine {
 
     const mailtoUrl = `mailto:${encodeURIComponent(vendorEmail)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(bodyText)}`;
     window.open(mailtoUrl, '_blank');
-  }
-
-  cleanSize(val) {
-    if (val === null || val === undefined) return '';
-    const s = String(val).trim();
-    const lower = s.toLowerCase();
-    if (!s || s === '—' || s === '-' || lower === 'n/a' || lower === 'none' || lower === 'unknown' || lower === 'null') {
-      return '';
-    }
-    return s;
-  }
-
-  isNeedToOrderStat(stat) {
-    if (!stat) return false;
-    const s = String(stat).toLowerCase().trim();
-    if (s.includes('ordered')) return false;
-    return s.includes('purchase') || s.includes('need to order') || s.includes('need to purchase') || s === 'unassigned';
   }
 
   /**
