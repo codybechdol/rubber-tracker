@@ -330,6 +330,9 @@ class LocalDatabase {
         }
         snapshot = this.snapshot;
       } else if (this.snapshot && this.snapshot.tables && snapshot.tables) {
+        if (this.snapshot.configs) {
+          snapshot.configs = Object.assign({}, this.snapshot.configs, snapshot.configs || {});
+        }
         // Full snapshot download: Protect local history from being truncated or wiped out!
         const historyTableKeys = [
           'gloves_history', 'sleeves_history', 'blankets_history', 'macks_history',
@@ -405,6 +408,12 @@ class LocalDatabase {
         try {
           localStorage.setItem('sa_holidays', JSON.stringify(snapshot.configs.holidays));
         } catch { /* ignore */ }
+      }
+      if (Array.isArray(snapshot.configs.CREW_IMPORT_ORDER)) {
+        try {
+          localStorage.setItem('CREW_IMPORT_ORDER', JSON.stringify(snapshot.configs.CREW_IMPORT_ORDER));
+        } catch { /* ignore */ }
+        window._crewImportOrder = snapshot.configs.CREW_IMPORT_ORDER;
       }
     }
 
@@ -4416,3 +4425,4 @@ class LocalDatabase {
 }
 
 window.localDB = new LocalDatabase();
+window.db = window.localDB;

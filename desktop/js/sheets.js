@@ -2386,7 +2386,7 @@ class SheetNavigator {
     // Build crew card view models
     const crewCards = [];
     crewGroups.forEach((members, baseJob) => {
-      if (!baseJob || baseJob.toLowerCase() === 'job number' || baseJob.toLowerCase() === 'job #' || baseJob === '002-26') return;
+      if (!baseJob || baseJob.toLowerCase() === 'job number' || baseJob.toLowerCase() === 'job #' || baseJob.startsWith('002')) return;
 
       // Find matching job_tracking row
       const jt = jtRows.find(j => {
@@ -2536,31 +2536,36 @@ class SheetNavigator {
     if (!savedImportOrder && window.crewImportEngine && window.crewImportEngine.parsedCrews && window.crewImportEngine.parsedCrews.length > 0) {
       savedImportOrder = window.crewImportEngine.parsedCrews.map(c => String(c.jobNumber || '').replace(/\.\d+.*$/, '').trim()).filter(Boolean);
     }
-    if (!savedImportOrder && window.db?.snapshot?.configs?.['CREW_IMPORT_ORDER']) {
-      savedImportOrder = window.db.snapshot.configs['CREW_IMPORT_ORDER'];
+    if (!savedImportOrder) {
+      savedImportOrder = this.db?.snapshot?.configs?.['CREW_IMPORT_ORDER'] ||
+                         window.localDB?.snapshot?.configs?.['CREW_IMPORT_ORDER'] ||
+                         window.db?.snapshot?.configs?.['CREW_IMPORT_ORDER'];
     }
 
     const getImportOrderIndex = (baseJob) => {
-      if (!baseJob || baseJob === 'Unassigned') return 9999;
+      if (!baseJob || baseJob === 'Unassigned') return 99999;
       const clean = String(baseJob).replace(/\.\d+.*$/, '').trim().toLowerCase();
-      if (clean === 'job number' || clean === 'job #') return 9999;
+      if (clean === 'job number' || clean === 'job #') return 99999;
 
-      // 1. Check saved import order list
+      // 1. Check saved import order list (exact Excel import sequence)
       if (Array.isArray(savedImportOrder) && savedImportOrder.length > 0) {
         const idx = savedImportOrder.findIndex(j => String(j).replace(/\.\d+.*$/, '').trim().toLowerCase() === clean);
         if (idx !== -1) return idx;
       }
 
-      // 2. Check Job Tracking rows order (which mirrors Excel import sequence)
+      // 2. Check Job Tracking rows order as fallback (or for secondary/unlisted crews)
       if (jtRows && jtRows.length > 0) {
         const jtIdx = jtRows.findIndex(j => {
           const jn = String(j['Job Number'] || j['Job #'] || '').replace(/\.\d+.*$/, '').trim().toLowerCase();
           return jn && jn !== 'job number' && jn !== 'job #' && jn === clean;
         });
-        if (jtIdx !== -1) return jtIdx;
+        if (jtIdx !== -1) {
+          // If savedImportOrder exists, offset non-import jobs so they appear after the imported Excel crews rather than colliding
+          return (Array.isArray(savedImportOrder) && savedImportOrder.length > 0) ? (1000 + jtIdx) : jtIdx;
+        }
       }
 
-      return 999;
+      return 9999;
     };
 
     // Sort crew cards: match the exact order from the imported Excel sheet

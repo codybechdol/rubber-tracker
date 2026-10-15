@@ -923,7 +923,8 @@ class CrewImportEngine {
       localStorage.setItem('CREW_IMPORT_ORDER', JSON.stringify(orderList));
     } catch (e) {}
     window._crewImportOrder = orderList;
-    if (this.db?.snapshot?.configs) {
+    if (this.db?.snapshot) {
+      if (!this.db.snapshot.configs) this.db.snapshot.configs = {};
       this.db.snapshot.configs['CREW_IMPORT_ORDER'] = orderList;
     }
 
@@ -3779,7 +3780,8 @@ class CrewImportEngine {
       localStorage.setItem('CREW_IMPORT_ORDER', JSON.stringify(orderList));
     } catch (e) {}
     window._crewImportOrder = orderList;
-    if (this.db?.snapshot?.configs) {
+    if (this.db?.snapshot) {
+      if (!this.db.snapshot.configs) this.db.snapshot.configs = {};
       this.db.snapshot.configs['CREW_IMPORT_ORDER'] = orderList;
     }
 
