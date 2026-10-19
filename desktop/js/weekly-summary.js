@@ -813,7 +813,25 @@ class WeeklySummaryEngine {
             if (this.selectedLocation !== 'all' && !trLoc.includes(this.selectedLocation.toLowerCase())) {
               return;
             }
-            const isDone = !!(entry.completed || entry.isCompleted || (entry.training && (entry.training.isCompleted || entry.training.completed)));
+            let isDone = !!(entry.completed || entry.isCompleted || (entry.training && (entry.training.isCompleted || entry.training.completed)));
+            if (trainTable && trainTable.rows) {
+              const trItem = entry.training;
+              const targetRow = trainTable.rows.find(r => {
+                if (trItem.rowIdx && (r._rowIdx === trItem.rowIdx || trainTable.rows.indexOf(r) + 2 === trItem.rowIdx)) return true;
+                const cRaw = String(r['Crew #'] || r['Crew'] || r['Job Number'] || r['Job #'] || '').trim();
+                const cSig = window.tripPlanner ? window.tripPlanner.getSignificantJobNumber(cRaw).toLowerCase() : cRaw.toLowerCase();
+                const tSig = window.tripPlanner ? window.tripPlanner.getSignificantJobNumber(trItem.crewId || '').toLowerCase() : (trItem.crewId || '').toLowerCase();
+                const crewMatches = (tSig && cSig === tSig) || (cRaw.toLowerCase() === String(trItem.crewId || '').trim().toLowerCase());
+                const rTopic = String(r['Topic'] || r['Training Topic'] || r['Training'] || '').trim().toLowerCase();
+                const topicTarget = String(trItem.topic || '').trim().toLowerCase();
+                const topicMatches = rTopic && topicTarget && (rTopic === topicTarget || rTopic.includes(topicTarget) || topicTarget.includes(rTopic));
+                return crewMatches && topicMatches;
+              });
+              if (targetRow) {
+                const s = String(targetRow['Status'] || targetRow['Training Status'] || '').trim().toLowerCase();
+                isDone = (s === 'completed' || s === 'complete' || s === 'done');
+              }
+            }
             dayTrainings.push({
               _trKey: trKey,
               topic: entry.training.topic || 'Crew Safety Training',
