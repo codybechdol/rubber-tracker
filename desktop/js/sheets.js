@@ -2464,13 +2464,14 @@ class SheetNavigator {
         isPending
       };
 
-      if (locLower.includes('(vacation)') || locLower === 'vacation') {
+      const statLower = String(status || '').toLowerCase().trim();
+      if (statLower === 'vacation' || locLower.includes('(vacation)') || locLower === 'vacation') {
         vacationList.push(empObj);
-      } else if (locLower.includes('(leave)') || locLower === 'leave' || locLower.includes('fmla') || locLower.includes('military')) {
+      } else if (statLower === 'leave' || locLower.includes('(leave)') || locLower === 'leave' || locLower.includes('fmla') || locLower.includes('military')) {
         leaveList.push(empObj);
-      } else if (locLower.includes('(light duty)') || locLower === 'light duty' || locLower.includes('(weeds)') || locLower === 'weeds') {
+      } else if (statLower === 'light duty' || locLower.includes('(light duty)') || locLower === 'light duty' || locLower.includes('(weeds)') || locLower === 'weeds') {
         lightDutyList.push(empObj);
-      } else if (locLower.includes('(medical)') || locLower === 'medical' || locLower.includes("worker's comp") || locLower.includes('(injury)')) {
+      } else if (statLower === 'medical' || locLower.includes('(medical)') || locLower === 'medical' || locLower.includes("worker's comp") || locLower.includes('(injury)')) {
         medicalList.push(empObj);
       } else {
         fieldCrewMembers.push(empObj);
@@ -3587,33 +3588,35 @@ class SheetNavigator {
 
     // Clean physical city
     let city = String(sourceLoc || emp['Location'] || '').replace(/\s*\([^)]*\)/g, '').trim();
-    if (!city || city.toLowerCase() === 'unassigned') city = 'Helena';
+    if (!city || city.toLowerCase() === 'unassigned' || city.toLowerCase() === 'previous employee') city = 'Helena';
 
-    const newLocationValue = `${city} (${statusType})`;
-
-    if (confirm(`Move ${empName} to ${statusType}?\n\nLocation will be set to: "${newLocationValue}"`)) {
-      emp['Location'] = newLocationValue;
+    if (confirm(`Move ${empName} to ${statusType}?\n\nLocation: "${city}"\nStatus: "${statusType}"`)) {
+      emp['Location'] = city;
+      emp['Status'] = statusType;
       const locColIdx = (empTable.headers || []).findIndex(h => /^location$/i.test(h)) + 1;
+      const statusColIdx = (empTable.headers || []).findIndex(h => /^status$/i.test(h)) + 1;
       const rIdx = emp._rowIdx || (empTable.rows.indexOf(emp) + 2);
-      if (empTable.rawGrid && empTable.rawGrid[rIdx - 1] && locColIdx > 0) {
-        empTable.rawGrid[rIdx - 1][locColIdx - 1] = newLocationValue;
+      if (empTable.rawGrid && empTable.rawGrid[rIdx - 1]) {
+        if (locColIdx > 0) empTable.rawGrid[rIdx - 1][locColIdx - 1] = city;
+        if (statusColIdx > 0) empTable.rawGrid[rIdx - 1][statusColIdx - 1] = statusType;
       }
 
       await this.db.addMutation({
-        action: 'UPDATE_CELL',
+        action: 'UPDATE_ROW',
         sheetName: empTable.name || 'Employees',
         tableKey: 'employees',
         row: rIdx,
-        col: locColIdx > 0 ? locColIdx : 3,
-        header: 'Location',
         itemIdentifier: empName,
-        value: newLocationValue
+        updatedFields: {
+          'Location': city,
+          'Status': statusType
+        }
       });
 
       await this.db.persistSnapshot(this.db.snapshot);
       this.renderCurrentSheet();
       if (typeof window.showToast === 'function') {
-        window.showToast(`🏖️ Assigned ${empName} to ${statusType} (${newLocationValue}).`);
+        window.showToast(`🏖️ Assigned ${empName} to ${statusType} (${city}).`);
       }
     }
   }
@@ -3799,14 +3802,17 @@ class SheetNavigator {
         emp['Job Number'] = newSlot;
         if (emp['Job #']) emp['Job #'] = newSlot;
         emp['Location'] = destLoc;
+        emp['Status'] = 'Active';
 
         const jobColIdx = (empTable.headers || []).findIndex(h => /^(job\s*#|job\s*number)$/i.test(h)) + 1;
         const locColIdx = (empTable.headers || []).findIndex(h => /^location$/i.test(h)) + 1;
+        const statusColIdx = (empTable.headers || []).findIndex(h => /^status$/i.test(h)) + 1;
         const eRowIdx = emp._rowIdx || (empTable.rows.indexOf(emp) + 2);
 
         if (empTable.rawGrid && empTable.rawGrid[eRowIdx - 1]) {
           if (jobColIdx > 0) empTable.rawGrid[eRowIdx - 1][jobColIdx - 1] = newSlot;
           if (locColIdx > 0) empTable.rawGrid[eRowIdx - 1][locColIdx - 1] = destLoc;
+          if (statusColIdx > 0) empTable.rawGrid[eRowIdx - 1][statusColIdx - 1] = 'Active';
         }
 
         await this.db.addMutation({
@@ -3817,7 +3823,8 @@ class SheetNavigator {
           row: eRowIdx,
           updatedFields: {
             'Job Number': newSlot,
-            'Location': destLoc
+            'Location': destLoc,
+            'Status': 'Active'
           }
         });
       }

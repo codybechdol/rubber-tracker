@@ -140,6 +140,7 @@ class TaskManagerApp {
           empLookup[name] = {
             displayName: String(r['Employee Name'] || r['Name'] || r['Employee'] || '').trim(),
             location: String(r['Location'] || '').trim(),
+            status: String(r['Status'] || 'Active').trim(),
             crewId: String(r['Job Number'] || r['Job #'] || '').trim(),
             foreman: String(r['Foreman'] || r['Crew Lead'] || r['Lead'] || '').trim(),
             phone: String(r['Phone Number'] || r['Phone'] || '').trim(),

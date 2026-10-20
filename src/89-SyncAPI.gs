@@ -24,6 +24,7 @@ var COLS_SAFE = (typeof COLS !== 'undefined' && COLS) ? COLS : {
   AED: { ITEM_NUM: 1, MODEL: 2, UNUSED_C: 3, PAD_EXPIRATION: 4, DATE_ASSIGNED: 5, LOCATION: 6, STATUS: 7, ASSIGNED_TO: 8, UNUSED_I: 9, PICKED_FOR: 10, NOTES: 11 },
   GROUNDS: { SERIAL_NUM: 1, TYPE: 2, SIZE: 3, KV: 4, LENGTH: 5, TEST_DATE: 6, DATE_ASSIGNED: 7, LOCATION: 8, STATUS: 9, ASSIGNED_TO: 10, CHANGE_OUT_DATE: 11, PICKED_FOR: 12, NOTES: 13 },
   HOT_STICKS: { ITEM_NUM: 1, TYPE: 2, LENGTH: 3, TEST_DATE: 4, DATE_ASSIGNED: 5, LOCATION: 6, STATUS: 7, ASSIGNED_TO: 8, CHANGE_OUT_DATE: 9, PICKED_FOR: 10, NOTES: 11 },
+  EMPLOYEES: { NAME: 1, CLASS: 2, LOCATION: 3, JOB_NUMBER: 4, PHONE: 5, NOTIFICATION_EMAILS: 6, MP_EMAIL: 7, EMAIL: 8, GLOVE_SIZE: 9, SLEEVE_SIZE: 10, HIRE_DATE: 11, LAST_DAY: 12, LAST_DAY_REASON: 13, JOB_CLASSIFICATION: 14, SECONDARY_JOB_NUMBER: 15, CREW_LEAD: 16, ALTERNATE_NAMES: 17, STATUS: 18 },
   RETIRED_EQUIPMENT: { ITEM_NUM: 1, ESL_ID_SERIAL: 2, CATEGORY: 3, CLASS_KV: 4, SIZE_LENGTH: 5, DATE_RETIRED: 6, REASON: 7, LAST_ASSIGNED_TO: 8, LAST_LOCATION: 9, LAB_TICKET: 10, NOTES: 11 },
   TRIP_SCHEDULE: { TRIP_ID: 1, DATE: 2, WEEK_MONDAY: 3, DESTINATION: 4, JOB_NUMBER: 5, CREW_LEAD: 6, TASK_TYPE: 7, SWAPS_COUNT: 8, STATUS: 9, COMPLETED_DATE: 10, NOTES: 11 },
   TEST_BATCHES: { BATCH_ID: 1, LAB_VENDOR: 2, CATEGORY: 3, DATE_SHIPPED: 4, TRACKING_NUM: 5, EXPECTED_RETURN: 6, DATE_RECEIVED: 7, TOTAL_SENT: 8, PASSED_COUNT: 9, FAILED_COUNT: 10, STATUS: 11, NOTES: 12 },
@@ -134,6 +135,99 @@ function ensureRecommendedCompanionSheetsExist(ss) {
 }
 
 /**
+ * Ensures the Employees sheet has the dedicated Column 18 (R) "Status" header.
+ * If missing, adds the header and backfills existing rows by parsing compound locations
+ * like "City (Vacation)" -> Location: "City", Status: "Vacation", or "Previous Employee" -> Status: "Previous Employee".
+ *
+ * @param {SpreadsheetApp.Spreadsheet} [ss] - Optional spreadsheet reference
+ */
+function ensureEmployeeStatusColumn(ss) {
+  if (!ss) ss = typeof getActiveSpreadsheetSafe === 'function' ? getActiveSpreadsheetSafe() : SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) return;
+  var sheetName = typeof SHEET_EMPLOYEES !== 'undefined' ? SHEET_EMPLOYEES : 'Employees';
+  var sheet = ss.getSheetByName(sheetName);
+  if (!sheet) return;
+
+  var lastCol = sheet.getLastColumn();
+  var lastRow = sheet.getLastRow();
+  if (lastCol < 1 || lastRow < 1) return;
+
+  var checkCols = Math.max(lastCol, 18);
+  var headerRange = sheet.getRange(1, 1, 1, checkCols);
+  var headers = headerRange.getValues()[0];
+  var statusColIdx = -1;
+  var locColIdx = 3; // Default Col C
+
+  for (var h = 0; h < headers.length; h++) {
+    var hName = String(headers[h] || '').trim().toLowerCase();
+    if (hName === 'status') {
+      statusColIdx = h + 1;
+    } else if (hName === 'location' || hName === 'city') {
+      locColIdx = h + 1;
+    }
+  }
+
+  // If column 18 does not have 'Status' header, initialize it
+  if (statusColIdx === -1) {
+    statusColIdx = 18;
+    sheet.getRange(1, 18).setValue('Status')
+      .setFontWeight('bold')
+      .setHorizontalAlignment('center');
+  }
+
+  // If we have data rows, backfill any empty Status cells and clean compound locations
+  if (lastRow > 1) {
+    var locRange = sheet.getRange(2, locColIdx, lastRow - 1, 1);
+    var locVals = locRange.getValues();
+    var statusRange = sheet.getRange(2, statusColIdx, lastRow - 1, 1);
+    var statusVals = statusRange.getValues();
+    var locUpdated = false;
+    var statusUpdated = false;
+
+    for (var r = 0; r < locVals.length; r++) {
+      var rawLoc = String(locVals[r][0] || '').trim();
+      var currentStatus = String(statusVals[r][0] || '').trim();
+      
+      var parenMatch = rawLoc.match(/^(.*?)\s*\((.*?)\)$/);
+      if (parenMatch) {
+        var cleanCity = parenMatch[1].trim();
+        var statusInside = parenMatch[2].trim();
+        if (!currentStatus || currentStatus === 'Active') {
+          statusVals[r][0] = statusInside;
+          statusUpdated = true;
+        }
+        locVals[r][0] = cleanCity || 'Helena';
+        locUpdated = true;
+      } else if (rawLoc.toLowerCase() === 'previous employee') {
+        if (!currentStatus) {
+          statusVals[r][0] = 'Previous Employee';
+          statusUpdated = true;
+        }
+        locVals[r][0] = 'Helena';
+        locUpdated = true;
+      } else if (/^(vacation|light duty|leave|medical|weeds)$/i.test(rawLoc)) {
+        if (!currentStatus) {
+          statusVals[r][0] = rawLoc;
+          statusUpdated = true;
+        }
+        locVals[r][0] = 'Helena';
+        locUpdated = true;
+      } else if (!currentStatus) {
+        statusVals[r][0] = 'Active';
+        statusUpdated = true;
+      }
+    }
+
+    if (statusUpdated) {
+      statusRange.setValues(statusVals);
+    }
+    if (locUpdated) {
+      locRange.setValues(locVals);
+    }
+  }
+}
+
+/**
  * Exports a complete, structured snapshot of all database sheets and configurations.
  * Optimized for local SQLite / IndexedDB consumption in the desktop app.
  * Uses a single-pass getValues() read per sheet with fast in-memory formatting
@@ -173,9 +267,10 @@ function exportFullDatabaseSnapshot(tableKeysFilter) {
     return hrs + ':' + strMins + ' ' + ampm;
   }
 
-  // Auto-provision recommended companion sheets if missing
+  // Auto-provision recommended companion sheets if missing and ensure schema
   try {
     ensureRecommendedCompanionSheetsExist(ss);
+    ensureEmployeeStatusColumn(ss);
   } catch (eEnsure) {
     Logger.log('ensureRecommendedCompanionSheetsExist error: ' + eEnsure);
   }
@@ -752,6 +847,11 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
 
   // Google Sheets acts as a passive cloud data store. Individual cells are written directly
   // with safeSetCellWithValidationFallback handling any legacy validation rule overrides.
+  try {
+    ensureEmployeeStatusColumn(ss);
+  } catch (eStat) {
+    Logger.log('ensureEmployeeStatusColumn error: ' + eStat);
+  }
 
   // 1. Conflict Detection Pre-Pass
   var tz = ss ? (ss.getSpreadsheetTimeZone() || 'America/Denver') : 'America/Denver';

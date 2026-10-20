@@ -1427,6 +1427,42 @@ class EmployeeProfileEngine {
                 <span class="brand-badge" style="background: rgba(139, 92, 246, 0.2); color: #c4b5fd; border: 1px solid rgba(139, 92, 246, 0.4); font-size: 11px; font-weight: 700;">
                   📍 ${this.escapeHtml(data.location)}
                 </span>
+                ${data.status ? (() => {
+                  const sLower = data.status.toLowerCase();
+                  let bg = 'rgba(16, 185, 129, 0.2)';
+                  let color = '#6ee7b7';
+                  let icon = '🟢';
+                  if (sLower.includes('vacat')) {
+                    bg = 'rgba(245, 158, 11, 0.2)';
+                    color = '#fcd34d';
+                    icon = '🏖️';
+                  } else if (sLower.includes('light') || sLower.includes('weeds')) {
+                    bg = 'rgba(168, 85, 247, 0.2)';
+                    color = '#d8b4fe';
+                    icon = '🩺';
+                  } else if (sLower.includes('leave') || sLower.includes('fmla')) {
+                    bg = 'rgba(59, 130, 246, 0.2)';
+                    color = '#93c5fd';
+                    icon = '🌴';
+                  } else if (sLower.includes('medical') || sLower.includes('injury')) {
+                    bg = 'rgba(244, 114, 182, 0.2)';
+                    color = '#fbcfe8';
+                    icon = '🏥';
+                  } else if (sLower.includes('prev') || sLower.includes('term') || sLower.includes('quit')) {
+                    bg = 'rgba(107, 114, 128, 0.2)';
+                    color = '#9ca3af';
+                    icon = '🚪';
+                  } else if (sLower.includes('pend')) {
+                    bg = 'rgba(245, 158, 11, 0.2)';
+                    color = '#fde68a';
+                    icon = '⏳';
+                  }
+                  return `
+                    <span class="brand-badge" style="background: ${bg}; color: ${color}; border: 1px solid currentColor; font-size: 11px; font-weight: 700;">
+                      ${icon} ${this.escapeHtml(data.status)}
+                    </span>
+                  `;
+                })() : ''}
                 <span class="brand-badge" style="background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4); font-size: 11px; font-weight: 700; font-family: monospace;">
                   🔢 Crew ${this.escapeHtml(data.jobNumber)}
                 </span>

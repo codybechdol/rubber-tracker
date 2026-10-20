@@ -343,8 +343,11 @@ var COLS = {
     SLEEVE_SIZE: 10,      // J
     HIRE_DATE: 11,        // K
     LAST_DAY: 12,         // L
-    LAST_DAY_REASON: 13,  // M
-    JOB_CLASSIFICATION: 14 // N - e.g., "Foreman", "Lead", "Journeyman", "Apprentice"
+    JOB_CLASSIFICATION: 14, // N - e.g., "Foreman", "Lead", "Journeyman", "Apprentice"
+    SECONDARY_JOB_NUMBER: 15, // O
+    CREW_LEAD: 16,        // P
+    ALTERNATE_NAMES: 17,  // Q
+    STATUS: 18            // R - e.g., "Active", "Vacation", "Light Duty", "Leave", "Previous Employee"
   },
 
   // Employee History Sheet
