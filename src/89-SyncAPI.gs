@@ -5154,4 +5154,178 @@ function deduplicateAllInventorySheets() {
   };
 }
 
+/**
+ * Scans Gmail for cert renewal photos and documents sent/received with subjects like:
+ * "Emery Dewitt DL", "Josh Miller MEC", "1st Aid CPR", "Crane Evaluation", etc.
+ *
+ * @param {Object} [options] - { daysBack: number, maxThreads: number, folder: 'ALL'|'SENT'|'INBOX', query: string }
+ * @return {Object} { success: boolean, count: number, certs: Array }
+ */
+function scanCertRenewalEmails(options) {
+  try {
+    options = options || {};
+    var ss = typeof getActiveSpreadsheetSafe === 'function' ? getActiveSpreadsheetSafe() : SpreadsheetApp.getActiveSpreadsheet();
+    if (!ss) return { success: false, error: 'Active spreadsheet not accessible' };
+
+    var daysBack = parseInt(options.daysBack || '60', 10);
+    var maxThreads = parseInt(options.maxThreads || '50', 10);
+    var scope = options.folder || 'ALL';
+
+    // Build list of known employee names from Employees sheet
+    var empSheet = ss.getSheetByName(typeof SHEET_EMPLOYEES !== 'undefined' ? SHEET_EMPLOYEES : 'Employees');
+    var knownEmployees = [];
+    if (empSheet && empSheet.getLastRow() > 1) {
+      var empData = empSheet.getDataRange().getValues();
+      var nameColIdx = (typeof COLS !== 'undefined' && COLS.EMPLOYEES && COLS.EMPLOYEES.NAME) ? (COLS.EMPLOYEES.NAME - 1) : 0;
+      for (var e = 1; e < empData.length; e++) {
+        var n = String(empData[e][nameColIdx] || '').trim();
+        if (n && n !== '—' && n !== '-') {
+          knownEmployees.push(n);
+        }
+      }
+    }
+    // Sort employees by name length descending so longer full names match first
+    knownEmployees.sort(function(a, b) { return b.length - a.length; });
+
+    // Gmail search query
+    var baseQuery = 'has:attachment (DL OR MEC OR "Med Card" OR "Medical Card" OR "1st Aid" OR CPR OR "First Aid" OR Crane OR Forklift OR OSHA OR MSHA OR BNSF OR "Pole Top" OR "Dig Safe")';
+    if (daysBack > 0) {
+      baseQuery += ' newer_than:' + daysBack + 'd';
+    }
+    if (scope === 'SENT') {
+      baseQuery = 'from:me ' + baseQuery;
+    } else if (scope === 'INBOX') {
+      baseQuery = 'to:me ' + baseQuery;
+    }
+    if (options.query && String(options.query).trim()) {
+      baseQuery = String(options.query).trim() + ' ' + baseQuery;
+    }
+
+    var threads = [];
+    try {
+      threads = GmailApp.search(baseQuery, 0, maxThreads);
+    } catch (sErr) {
+      Logger.log('scanCertRenewalEmails search error: ' + sErr);
+      return { success: false, error: 'Gmail search failed: ' + (sErr.message || sErr) };
+    }
+
+    var results = [];
+    var seenAttachmentHashes = {};
+    var startTime = new Date().getTime();
+
+    // Map keywords to standard Cert Types
+    function detectCertType(text) {
+      var lower = text.toLowerCase();
+      if (/\b(dl|driver'?s?\s*license)\b/i.test(lower)) return 'DL';
+      if (/\b(mec|medical\s*card|med\s*card|dot\s*card)\b/i.test(lower)) return 'MEC Expiration';
+      if (/\b(1st\s*aid|first\s*aid)\b/i.test(lower) && /\bcpr\b/i.test(lower)) return '1st Aid & CPR';
+      if (/\b(1st\s*aid|first\s*aid|fa)\b/i.test(lower)) return '1st Aid';
+      if (/\bcpr\b/i.test(lower)) return 'CPR';
+      if (/\b(crane\s*eval(uation)?)\b/i.test(lower)) return 'Crane Evaluation';
+      if (/\bcrane\b/i.test(lower)) return 'Crane Cert';
+      if (/\b(rigging|signal(person)?|spotter)\b/i.test(lower)) return 'Rigging & Signaling/Signalperson & Spotter Cert';
+      if (/\bforklift\b/i.test(lower)) return 'Forklift';
+      if (/\b(pole\s*top|ptr)\b/i.test(lower)) return 'Pole Top Rescue';
+      if (/\btrench\b/i.test(lower)) return 'OSHA Trench Comp Person';
+      if (/\bosha\b/i.test(lower)) return 'OSHA 1910';
+      if (/\bmsha\b/i.test(lower)) return 'MSHA';
+      if (/\bbnsf\b/i.test(lower)) return 'BNSF';
+      if (/\bdig\s*safe\b/i.test(lower)) return 'Dig Safe';
+      return 'Other Cert';
+    }
+
+    // Match employee name from subject or body
+    function detectEmployeeName(subject) {
+      var clean = subject
+        .replace(/^(fwd|re|fw):\s*/ig, '')
+        .replace(/^(fwd|re|fw):\s*/ig, '')
+        .trim();
+
+      for (var i = 0; i < knownEmployees.length; i++) {
+        var emp = knownEmployees[i];
+        var re = new RegExp('\\b' + emp.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&') + '\\b', 'i');
+        if (re.test(clean)) {
+          return emp;
+        }
+      }
+      return '';
+    }
+
+    for (var t = 0; t < threads.length; t++) {
+      // 22-second circuit breaker
+      if (new Date().getTime() - startTime > 22000) break;
+
+      var thread = threads[t];
+      var msgs = thread.getMessages();
+
+      for (var m = 0; m < msgs.length; m++) {
+        var msg = msgs[m];
+        var subject = msg.getSubject() || '';
+        var attachments = msg.getAttachments();
+        if (!attachments || attachments.length === 0) continue;
+
+        var detectedEmp = detectEmployeeName(subject);
+        var detectedCert = detectCertType(subject);
+
+        for (var a = 0; a < attachments.length; a++) {
+          var att = attachments[a];
+          var cType = String(att.getContentType() || '').toLowerCase();
+          var isImg = cType.indexOf('image/') !== -1;
+          var isPdf = cType.indexOf('application/pdf') !== -1;
+
+          if (!isImg && !isPdf) continue;
+
+          var bytes = att.getBytes();
+          if (!bytes || bytes.length === 0) continue;
+
+          // Deduplicate by size and name if already seen in same scan
+          var hashKey = att.getName() + '_' + bytes.length;
+          if (seenAttachmentHashes[hashKey]) continue;
+          seenAttachmentHashes[hashKey] = true;
+
+          var b64 = Utilities.base64Encode(bytes);
+          var dataUri = 'data:' + cType + ';base64,' + b64;
+
+          var msgDate = msg.getDate();
+          var dateStr = '';
+          if (msgDate instanceof Date && !isNaN(msgDate.getTime())) {
+            var mo = msgDate.getMonth() + 1;
+            var dy = msgDate.getDate();
+            var yr = msgDate.getFullYear();
+            dateStr = (mo < 10 ? '0' + mo : mo) + '/' + (dy < 10 ? '0' + dy : dy) + '/' + yr;
+          }
+
+          results.push({
+            id: msg.getId() + '_' + a,
+            date: dateStr,
+            from: msg.getFrom(),
+            to: msg.getTo(),
+            subject: subject,
+            employeeName: detectedEmp,
+            certType: detectedCert,
+            fileName: att.getName() || ('cert_attachment_' + Date.now() + (isPdf ? '.pdf' : '.jpg')),
+            contentType: cType,
+            base64Data: dataUri,
+            fileSize: bytes.length
+          });
+
+          if (results.length >= 25) break;
+        }
+        if (results.length >= 25) break;
+      }
+      if (results.length >= 25) break;
+    }
+
+    return {
+      success: true,
+      count: results.length,
+      certs: results
+    };
+  } catch (err) {
+    Logger.log('scanCertRenewalEmails fatal error: ' + err);
+    return { success: false, error: err.toString() };
+  }
+}
+
+
 

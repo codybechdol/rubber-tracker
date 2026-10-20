@@ -1140,6 +1140,10 @@ class SheetNavigator {
     modal.style.display = 'flex';
     modal.classList.add('active');
 
+    if (window.windowManager && typeof window.windowManager.bringToFront === 'function') {
+      window.windowManager.bringToFront(modal);
+    }
+
     // Attach clipboard paste handler
     if (this._certPasteHandler) {
       window.removeEventListener('paste', this._certPasteHandler);
@@ -1156,6 +1160,9 @@ class SheetNavigator {
     if (modal) {
       modal.style.display = 'none';
       modal.classList.remove('active');
+      if (window.windowManager && typeof window.windowManager.unregisterModal === 'function') {
+        window.windowManager.unregisterModal(modal);
+      }
     }
     if (this._certPasteHandler) {
       window.removeEventListener('paste', this._certPasteHandler);
@@ -1570,6 +1577,776 @@ class SheetNavigator {
 
     if (typeof window.showToast === 'function') {
       window.showToast('📧 Opening email client... Photo highlighted in folder to drag and attach!', 'info');
+    }
+  }
+
+  // ==========================================
+  // GMAIL CERT RENEWAL SCANNER & CROPPER
+  // ==========================================
+
+  /**
+   * Opens the Gmail Cert Renewal Scanner modal.
+   */
+  openCertEmailScannerModal() {
+    const modal = document.getElementById('cert-email-scanner-modal');
+    if (!modal) return;
+    modal.style.display = 'flex';
+    modal.classList.add('active');
+
+    if (window.windowManager && typeof window.windowManager.bringToFront === 'function') {
+      window.windowManager.bringToFront(modal);
+    }
+
+    if (!this.scannedCertItems || this.scannedCertItems.length === 0) {
+      this.renderCertScannerInitialState();
+    } else {
+      this.renderScannedCertItems();
+    }
+  }
+
+  /**
+   * Closes the Gmail Cert Renewal Scanner modal.
+   */
+  closeCertEmailScannerModal() {
+    const modal = document.getElementById('cert-email-scanner-modal');
+    if (modal) {
+      modal.style.display = 'none';
+      modal.classList.remove('active');
+      if (window.windowManager && typeof window.windowManager.unregisterModal === 'function') {
+        window.windowManager.unregisterModal(modal);
+      }
+    }
+  }
+
+  /**
+   * Renders initial state prompting user to start scanning.
+   */
+  renderCertScannerInitialState() {
+    const body = document.getElementById('cert-email-scanner-body');
+    const batchActions = document.getElementById('cert-scan-batch-actions');
+    if (batchActions) batchActions.style.display = 'none';
+    if (!body) return;
+
+    body.innerHTML = `
+      <div style="text-align: center; padding: 48px 20px; color: #94a3b8;">
+        <div style="font-size: 52px; margin-bottom: 16px;">📧</div>
+        <h3 style="color: #f8fafc; font-size: 19px; font-weight: 800; margin-bottom: 8px;">Scan Gmail for Cert Renewal Photos</h3>
+        <p style="max-width: 620px; margin: 0 auto 24px; font-size: 13.5px; line-height: 1.6; color: #cbd5e1;">
+          Automatically detects renewal proof attachments from sent or received emails titled like 
+          <strong style="color: #38bdf8;">"Emery Dewitt DL"</strong>, <strong style="color: #38bdf8;">"Josh Miller MEC"</strong>, 
+          <strong style="color: #38bdf8;">"1st Aid CPR"</strong>, or <strong style="color: #38bdf8;">"Crane Evaluation"</strong>.
+        </p>
+        <button class="btn btn-primary" style="font-size: 14px; font-weight: 700; padding: 9px 24px; background: linear-gradient(135deg, #06b6d4 0%, #0284c7 100%); border: none; box-shadow: 0 4px 14px rgba(6, 182, 212, 0.4); cursor: pointer; border-radius: 8px;" onclick="window.sheetNavigator.runCertEmailScan()">
+          <span>🔍</span> Scan Gmail Now
+        </button>
+      </div>
+    `;
+  }
+
+  /**
+   * Scans Gmail for cert renewals via Apps Script backend.
+   */
+  async runCertEmailScan() {
+    const daysSelect = document.getElementById('cert-scan-days-back');
+    const folderSelect = document.getElementById('cert-scan-folder');
+    const daysBack = daysSelect ? parseInt(daysSelect.value, 10) : 60;
+    const folder = folderSelect ? folderSelect.value : 'ALL';
+
+    const spinner = document.getElementById('cert-scan-spinner');
+    const icon = document.getElementById('cert-scan-icon');
+    const label = document.getElementById('cert-scan-label');
+    const triggerBtn = document.getElementById('btn-cert-scan-trigger');
+
+    if (spinner) spinner.style.display = 'inline';
+    if (icon) icon.style.display = 'none';
+    if (label) label.textContent = 'Scanning Gmail...';
+    if (triggerBtn) triggerBtn.disabled = true;
+
+    const body = document.getElementById('cert-email-scanner-body');
+    if (body) {
+      body.innerHTML = `
+        <div style="text-align: center; padding: 60px 20px; color: #94a3b8;">
+          <div style="font-size: 44px; margin-bottom: 14px; animation: pulse 1.5s infinite;">⏳</div>
+          <h4 style="color: #f8fafc; font-size: 16px; font-weight: 700; margin-bottom: 6px;">Scanning Gmail Inbox &amp; Sent Mail...</h4>
+          <p style="font-size: 12.5px; color: #94a3b8;">Searching for attachments with DL, MEC, CPR, 1st Aid, Crane, and other cert titles...</p>
+        </div>
+      `;
+    }
+
+    try {
+      const syncUrl = window.syncEngine ? window.syncEngine.getSyncUrl() : '';
+      if (!syncUrl) {
+        throw new Error('Sync URL is not configured. Please check connection settings.');
+      }
+
+      const payload = {
+        action: 'scanCertEmails',
+        daysBack: daysBack,
+        folder: folder
+      };
+
+      let result = null;
+      if (window.syncEngine && typeof window.syncEngine.executeNetworkRequest === 'function') {
+        result = await window.syncEngine.executeNetworkRequest(syncUrl, 'POST', payload, 60000);
+      } else {
+        const resp = await fetch(syncUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        result = await resp.json();
+      }
+
+      if (result && result.success) {
+        this.scannedCertItems = result.certs || [];
+        if (this.scannedCertItems.length === 0) {
+          if (body) {
+            body.innerHTML = `
+              <div style="text-align: center; padding: 50px 20px; color: #94a3b8;">
+                <div style="font-size: 44px; margin-bottom: 12px;">📭</div>
+                <h4 style="color: #f8fafc; font-size: 16px; font-weight: 700; margin-bottom: 6px;">No Cert Renewal Attachments Found</h4>
+                <p style="font-size: 13px; color: #94a3b8; max-width: 500px; margin: 0 auto 16px;">
+                  No emails with matching certification keywords and image/PDF attachments were found in the last ${daysBack} days.
+                </p>
+                <div style="font-size: 12px; color: #64748b;">
+                  Tip: Try changing the timeframe to "Last 6 Months" or "Last 1 Year" and scan again.
+                </div>
+              </div>
+            `;
+          }
+          const batchActions = document.getElementById('cert-scan-batch-actions');
+          if (batchActions) batchActions.style.display = 'none';
+        } else {
+          this.renderScannedCertItems();
+          if (typeof window.showToast === 'function') {
+            window.showToast(`Found ${this.scannedCertItems.length} cert renewal attachments in Gmail!`, 'success');
+          }
+        }
+      } else {
+        throw new Error((result && result.error) || 'Failed to scan Gmail');
+      }
+    } catch (err) {
+      console.error('Cert email scan error:', err);
+      if (body) {
+        body.innerHTML = `
+          <div style="text-align: center; padding: 40px 20px; color: #ef4444;">
+            <div style="font-size: 40px; margin-bottom: 10px;">⚠️</div>
+            <h4 style="font-size: 15px; font-weight: 700; margin-bottom: 6px;">Gmail Scan Error</h4>
+            <p style="font-size: 12.5px; color: #f87171; max-width: 520px; margin: 0 auto 14px;">${err.message || err}</p>
+            <button class="btn btn-secondary" onclick="window.sheetNavigator.runCertEmailScan()">Try Again</button>
+          </div>
+        `;
+      }
+    } finally {
+      if (spinner) spinner.style.display = 'none';
+      if (icon) icon.style.display = 'inline';
+      if (label) label.textContent = 'Scan Gmail';
+      if (triggerBtn) triggerBtn.disabled = false;
+    }
+  }
+
+  /**
+   * Renders cards for all scanned cert items for user review, cropping, and import.
+   */
+  renderScannedCertItems() {
+    const body = document.getElementById('cert-email-scanner-body');
+    const batchActions = document.getElementById('cert-scan-batch-actions');
+    const countBadge = document.getElementById('cert-scan-count-badge');
+    if (!body) return;
+
+    if (!this.scannedCertItems || this.scannedCertItems.length === 0) {
+      this.renderCertScannerInitialState();
+      return;
+    }
+
+    if (batchActions) batchActions.style.display = 'flex';
+    if (countBadge) countBadge.textContent = `${this.scannedCertItems.length} cert ${this.scannedCertItems.length === 1 ? 'photo' : 'photos'} found`;
+
+    // Fetch employee names for dropdown
+    const empTable = this.db.getTable('employees');
+    const employeeOptions = (empTable && empTable.rows ? empTable.rows : [])
+      .map(e => String(e['Employee Name'] || e['Name'] || '').trim())
+      .filter(n => n && n !== '—' && !n.toLowerCase().includes('vacant') && !n.toLowerCase().includes('open'))
+      .sort((a, b) => a.localeCompare(b));
+
+    const certTypes = [
+      'DL',
+      'MEC Expiration',
+      '1st Aid & CPR',
+      '1st Aid',
+      'CPR',
+      'Crane Evaluation',
+      'Crane Cert',
+      'Rigging & Signaling/Signalperson & Spotter Cert',
+      'Forklift',
+      'Pole Top Rescue',
+      'OSHA 1910',
+      'MSHA',
+      'BNSF',
+      'OSHA Trench Comp Person',
+      'Dig Safe',
+      'Other Cert'
+    ];
+
+    let html = `
+      <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px;">
+    `;
+
+    this.scannedCertItems.forEach((item, idx) => {
+      const isPdf = (item.contentType && item.contentType.includes('pdf')) || (item.fileName && item.fileName.toLowerCase().endsWith('.pdf'));
+
+      html += `
+        <div class="scanned-cert-card" id="scanned-cert-card-${idx}" style="background: rgba(15, 23, 42, 0.85); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; transition: transform 0.15s, border-color 0.15s; box-shadow: 0 4px 12px rgba(0,0,0,0.3);">
+          
+          <!-- Image / PDF Preview Container -->
+          <div style="height: 180px; background: #090d16; display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden; border-bottom: 1px solid rgba(255,255,255,0.06);">
+            ${isPdf ? `
+              <div style="text-align: center; color: #f87171;">
+                <div style="font-size: 48px;">📄</div>
+                <div style="font-size: 11px; font-weight: 700; color: #fca5a5; margin-top: 4px;">PDF Document</div>
+              </div>
+            ` : `
+              <img id="scanned-card-preview-${idx}" src="${item.base64Data}" alt="Cert Preview" style="max-height: 100%; max-width: 100%; object-fit: contain; cursor: pointer;" onclick="window.sheetNavigator.openPhotoCropperModal(${idx})" title="Click to open Crop &amp; Rotate tool">
+            `}
+            
+            <div style="position: absolute; top: 8px; right: 8px; display: flex; gap: 6px;">
+              ${!isPdf ? `
+                <button class="btn btn-secondary" style="font-size: 11px; padding: 3px 8px; background: rgba(15, 23, 42, 0.85); border: 1px solid rgba(56, 189, 248, 0.5); color: #38bdf8; border-radius: 6px; cursor: pointer;" onclick="window.sheetNavigator.openPhotoCropperModal(${idx})" title="Crop and rotate this photo">
+                  <span>✂️</span> Crop
+                </button>
+              ` : ''}
+              <button class="btn btn-secondary" style="font-size: 11px; padding: 3px 7px; background: rgba(15, 23, 42, 0.85); border: 1px solid rgba(239, 68, 68, 0.4); color: #f87171; border-radius: 6px; cursor: pointer;" onclick="window.sheetNavigator.dismissScannedCert(${idx})" title="Dismiss this item">
+                ✕
+              </button>
+            </div>
+
+            <div style="position: absolute; bottom: 6px; left: 8px; background: rgba(0,0,0,0.65); padding: 2px 7px; border-radius: 4px; font-size: 10px; color: #94a3b8;">
+              ${item.date || 'Recent'}
+            </div>
+          </div>
+
+          <!-- Card Controls -->
+          <div style="padding: 14px; flex: 1; display: flex; flex-direction: column; gap: 10px;">
+            <div style="font-size: 11.5px; color: #cbd5e1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${item.subject}">
+              📧 <strong style="color: #e2e8f0;">${item.subject || 'Cert Attachment'}</strong>
+            </div>
+
+            <div>
+              <label style="display: block; font-size: 11px; color: #94a3b8; font-weight: 600; margin-bottom: 3px;">Assigned Employee</label>
+              <select id="scanned-emp-select-${idx}" style="width: 100%; background: #0f172a; color: #f8fafc; border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 5px 8px; font-size: 12px; font-weight: 600;">
+                <option value="">-- Select Employee --</option>
+                ${employeeOptions.map(name => `
+                  <option value="${name}" ${item.employeeName && item.employeeName.toLowerCase() === name.toLowerCase() ? 'selected' : ''}>
+                    ${name}
+                  </option>
+                `).join('')}
+              </select>
+            </div>
+
+            <div>
+              <label style="display: block; font-size: 11px; color: #94a3b8; font-weight: 600; margin-bottom: 3px;">Certification Type</label>
+              <select id="scanned-cert-select-${idx}" style="width: 100%; background: #0f172a; color: #f8fafc; border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 5px 8px; font-size: 12px; font-weight: 600;">
+                ${certTypes.map(ct => `
+                  <option value="${ct}" ${item.certType === ct ? 'selected' : ''}>${ct}</option>
+                `).join('')}
+              </select>
+            </div>
+
+            <div style="margin-top: auto; padding-top: 8px; display: flex; gap: 8px;">
+              <button class="btn btn-primary" style="flex: 1; font-size: 12px; font-weight: 700; background: linear-gradient(135deg, #059669 0%, #10b981 100%); border: none; padding: 6px 10px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px;" onclick="window.sheetNavigator.importSingleScannedCert(${idx})">
+                <span>📥</span> Save to Vault
+              </button>
+            </div>
+          </div>
+
+        </div>
+      `;
+    });
+
+    html += `</div>`;
+    body.innerHTML = html;
+  }
+
+  /**
+   * Dismisses a single scanned cert item from the review grid.
+   */
+  dismissScannedCert(idx) {
+    if (!this.scannedCertItems || !this.scannedCertItems[idx]) return;
+    this.scannedCertItems.splice(idx, 1);
+    this.renderScannedCertItems();
+  }
+
+  /**
+   * Imports a single reviewed cert item into the Cert Photo Vault.
+   */
+  async importSingleScannedCert(idx) {
+    if (!this.scannedCertItems || !this.scannedCertItems[idx]) return;
+    const item = this.scannedCertItems[idx];
+
+    const empSelect = document.getElementById(`scanned-emp-select-${idx}`);
+    const certSelect = document.getElementById(`scanned-cert-select-${idx}`);
+    const empName = empSelect ? empSelect.value.trim() : item.employeeName;
+    const certType = certSelect ? certSelect.value.trim() : item.certType;
+
+    if (!empName) {
+      alert('Please select an employee to assign this certification proof to.');
+      if (empSelect) empSelect.focus();
+      return;
+    }
+
+    if (!certType) {
+      alert('Please select a certification type.');
+      if (certSelect) certSelect.focus();
+      return;
+    }
+
+    if (!window.desktopAPI || !window.desktopAPI.saveCertPhoto) {
+      alert('Desktop file saving API is not available.');
+      return;
+    }
+
+    try {
+      const saveRes = await window.desktopAPI.saveCertPhoto({
+        employeeName: empName,
+        certType: certType,
+        base64Data: item.base64Data,
+        fileName: item.fileName
+      });
+
+      if (saveRes && saveRes.success) {
+        const todayStr = new Date().toLocaleDateString('en-US');
+        await this.db.saveCertPhotoRecord(empName, certType, {
+          fileName: saveRes.fileName,
+          fullPath: saveRes.fullPath,
+          dateAdded: todayStr
+        });
+
+        // Remove item from review list
+        this.scannedCertItems.splice(idx, 1);
+        this.renderScannedCertItems();
+
+        if (typeof window.showToast === 'function') {
+          window.showToast(`✅ Saved renewal proof for ${empName} (${certType}) into Vault!`, 'success');
+        }
+        this.renderCurrentSheet();
+      } else {
+        alert(`Failed to save cert photo: ${(saveRes && saveRes.error) || 'Unknown error'}`);
+      }
+    } catch (err) {
+      console.error('importSingleScannedCert error:', err);
+      alert(`Error saving cert photo: ${err.message || err}`);
+    }
+  }
+
+  /**
+   * Imports all currently reviewed cert cards in one click.
+   */
+  async importAllReviewedCertCards() {
+    if (!this.scannedCertItems || this.scannedCertItems.length === 0) return;
+
+    if (!window.desktopAPI || !window.desktopAPI.saveCertPhoto) {
+      alert('Desktop file saving API is not available.');
+      return;
+    }
+
+    let successCount = 0;
+    const unassignedItems = [];
+
+    for (let i = 0; i < this.scannedCertItems.length; i++) {
+      const item = this.scannedCertItems[i];
+      const empSelect = document.getElementById(`scanned-emp-select-${i}`);
+      const certSelect = document.getElementById(`scanned-cert-select-${i}`);
+      const empName = empSelect ? empSelect.value.trim() : item.employeeName;
+      const certType = certSelect ? certSelect.value.trim() : item.certType;
+
+      if (!empName) {
+        unassignedItems.push(item);
+        continue;
+      }
+
+      try {
+        const saveRes = await window.desktopAPI.saveCertPhoto({
+          employeeName: empName,
+          certType: certType || 'Other Cert',
+          base64Data: item.base64Data,
+          fileName: item.fileName
+        });
+
+        if (saveRes && saveRes.success) {
+          const todayStr = new Date().toLocaleDateString('en-US');
+          await this.db.saveCertPhotoRecord(empName, certType || 'Other Cert', {
+            fileName: saveRes.fileName,
+            fullPath: saveRes.fullPath,
+            dateAdded: todayStr
+          });
+          successCount++;
+        }
+      } catch (err) {
+        console.error('Error importing cert item:', err);
+      }
+    }
+
+    this.scannedCertItems = unassignedItems;
+    this.renderScannedCertItems();
+    this.renderCurrentSheet();
+
+    if (successCount > 0) {
+      if (typeof window.showToast === 'function') {
+        window.showToast(`🎉 Successfully imported ${successCount} cert renewal photos into Vault!`, 'success');
+      }
+      if (this.scannedCertItems.length === 0) {
+        this.closeCertEmailScannerModal();
+      }
+    } else if (unassignedItems.length > 0) {
+      alert('Please assign an employee to each card before importing.');
+    }
+  }
+
+  // ==========================================
+  // INTERACTIVE PHOTO CROPPER & ROTATOR
+  // ==========================================
+
+  /**
+   * Opens the photo crop & rotate modal for a specific scanned cert card.
+   */
+  openPhotoCropperModal(idx) {
+    if (!this.scannedCertItems || !this.scannedCertItems[idx]) return;
+    const item = this.scannedCertItems[idx];
+
+    if (item.contentType && item.contentType.includes('pdf')) {
+      alert('PDF documents cannot be edited with the photo crop tool.');
+      return;
+    }
+
+    this.cropperCurrentIndex = idx;
+    this.cropperAngle = 0;
+
+    const modal = document.getElementById('cert-photo-cropper-modal');
+    if (!modal) return;
+    modal.style.display = 'flex';
+    modal.classList.add('active');
+
+    if (window.windowManager && typeof window.windowManager.bringToFront === 'function') {
+      window.windowManager.bringToFront(modal);
+    }
+
+    this._initCropperCanvas(item.base64Data);
+  }
+
+  /**
+   * Closes the photo cropper modal.
+   */
+  closePhotoCropperModal() {
+    const modal = document.getElementById('cert-photo-cropper-modal');
+    if (modal) {
+      modal.style.display = 'none';
+      modal.classList.remove('active');
+      if (window.windowManager && typeof window.windowManager.unregisterModal === 'function') {
+        window.windowManager.unregisterModal(modal);
+      }
+    }
+    this.cropperImg = null;
+  }
+
+  /**
+   * Rotates the cropper image by 90 degrees clockwise or counter-clockwise.
+   */
+  cropperRotate(deg) {
+    this.cropperAngle = (this.cropperAngle + deg + 360) % 360;
+    this._drawCropper(true);
+  }
+
+  /**
+   * Resets the crop box to frame 90% of the image.
+   */
+  cropperReset() {
+    this.cropperBox = null;
+    this._drawCropper(true);
+  }
+
+  /**
+   * Initializes the cropper canvas with the image source.
+   */
+  _initCropperCanvas(imageSrc) {
+    const container = document.getElementById('cropper-canvas-container');
+    if (!container) return;
+    container.innerHTML = '';
+
+    const canvas = document.createElement('canvas');
+    canvas.id = 'cert-cropper-canvas';
+    canvas.style.cursor = 'crosshair';
+    canvas.style.boxShadow = '0 8px 30px rgba(0,0,0,0.8)';
+    canvas.style.borderRadius = '4px';
+    container.appendChild(canvas);
+
+    this.cropperCanvas = canvas;
+    this.cropperCtx = canvas.getContext('2d');
+    this.cropperBox = null;
+
+    const img = new Image();
+    img.onload = () => {
+      this.cropperImg = img;
+      this._setupCropperEvents();
+      this._drawCropper(true);
+    };
+    img.src = imageSrc;
+  }
+
+  /**
+   * Renders the rotated image and draggable crop box overlay.
+   */
+  _drawCropper(resetBox) {
+    if (!this.cropperCanvas || !this.cropperImg) return;
+    const canvas = this.cropperCanvas;
+    const ctx = this.cropperCtx;
+    const img = this.cropperImg;
+
+    const isRotated90or270 = this.cropperAngle === 90 || this.cropperAngle === 270;
+    const naturalWidth = isRotated90or270 ? img.naturalHeight : img.naturalWidth;
+    const naturalHeight = isRotated90or270 ? img.naturalWidth : img.naturalHeight;
+
+    // Scale canvas to fit viewport container comfortably
+    const maxW = 760;
+    const maxH = 460;
+    let scale = Math.min(maxW / naturalWidth, maxH / naturalHeight, 1);
+    if (scale <= 0) scale = 0.5;
+
+    const displayW = Math.round(naturalWidth * scale);
+    const displayH = Math.round(naturalHeight * scale);
+
+    canvas.width = displayW;
+    canvas.height = displayH;
+    this.cropperDisplayScale = scale;
+
+    ctx.save();
+    ctx.translate(displayW / 2, displayH / 2);
+    ctx.rotate((this.cropperAngle * Math.PI) / 180);
+
+    const drawW = (this.cropperAngle % 180 === 0) ? displayW : displayH;
+    const drawH = (this.cropperAngle % 180 === 0) ? displayH : displayW;
+    ctx.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
+    ctx.restore();
+
+    // Initialize crop box if needed
+    if (!this.cropperBox || resetBox) {
+      const marginX = Math.round(displayW * 0.06);
+      const marginY = Math.round(displayH * 0.06);
+      this.cropperBox = {
+        x: marginX,
+        y: marginY,
+        width: displayW - (marginX * 2),
+        height: displayH - (marginY * 2)
+      };
+    }
+
+    const box = this.cropperBox;
+
+    // Dark tint outside crop box
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.55)';
+    ctx.fillRect(0, 0, displayW, box.y); // Top
+    ctx.fillRect(0, box.y + box.height, displayW, displayH - (box.y + box.height)); // Bottom
+    ctx.fillRect(0, box.y, box.x, box.height); // Left
+    ctx.fillRect(box.x + box.width, box.y, displayW - (box.x + box.width), box.height); // Right
+
+    // Crop box border
+    ctx.strokeStyle = '#38bdf8';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(box.x, box.y, box.width, box.height);
+
+    // Grid rule-of-thirds lines inside crop box
+    ctx.strokeStyle = 'rgba(56, 189, 248, 0.25)';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(box.x + box.width / 3, box.y);
+    ctx.lineTo(box.x + box.width / 3, box.y + box.height);
+    ctx.moveTo(box.x + (box.width * 2) / 3, box.y);
+    ctx.lineTo(box.x + (box.width * 2) / 3, box.y + box.height);
+    ctx.moveTo(box.x, box.y + box.height / 3);
+    ctx.lineTo(box.x + box.width, box.y + box.height / 3);
+    ctx.moveTo(box.x, box.y + (box.height * 2) / 3);
+    ctx.lineTo(box.x + box.width, box.y + (box.height * 2) / 3);
+    ctx.stroke();
+
+    // Corner handles
+    const handleSize = 12;
+    ctx.fillStyle = '#0284c7';
+    ctx.strokeStyle = '#ffffff';
+    ctx.lineWidth = 2;
+
+    const corners = [
+      { x: box.x, y: box.y }, // nw
+      { x: box.x + box.width, y: box.y }, // ne
+      { x: box.x + box.width, y: box.y + box.height }, // se
+      { x: box.x, y: box.y + box.height } // sw
+    ];
+
+    corners.forEach(c => {
+      ctx.beginPath();
+      ctx.arc(c.x, c.y, handleSize / 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+    });
+  }
+
+  /**
+   * Sets up mouse and drag handlers for adjusting the crop box.
+   */
+  _setupCropperEvents() {
+    const canvas = this.cropperCanvas;
+    if (!canvas) return;
+
+    let isDragging = false;
+    let dragMode = null; // 'nw', 'ne', 'se', 'sw', 'move'
+    let startX = 0;
+    let startY = 0;
+    let initialBox = null;
+
+    const getPos = (e) => {
+      const rect = canvas.getBoundingClientRect();
+      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+      const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+      return {
+        x: clientX - rect.left,
+        y: clientY - rect.top
+      };
+    };
+
+    const hitTest = (pos) => {
+      if (!this.cropperBox) return null;
+      const b = this.cropperBox;
+      const handleRadius = 16;
+
+      if (Math.hypot(pos.x - b.x, pos.y - b.y) <= handleRadius) return 'nw';
+      if (Math.hypot(pos.x - (b.x + b.width), pos.y - b.y) <= handleRadius) return 'ne';
+      if (Math.hypot(pos.x - (b.x + b.width), pos.y - (b.y + b.height)) <= handleRadius) return 'se';
+      if (Math.hypot(pos.x - b.x, pos.y - (b.y + b.height)) <= handleRadius) return 'sw';
+
+      if (pos.x >= b.x && pos.x <= b.x + b.width && pos.y >= b.y && pos.y <= b.y + b.height) {
+        return 'move';
+      }
+      return null;
+    };
+
+    canvas.onmousedown = (e) => {
+      const pos = getPos(e);
+      dragMode = hitTest(pos);
+      if (dragMode) {
+        isDragging = true;
+        startX = pos.x;
+        startY = pos.y;
+        initialBox = { ...this.cropperBox };
+      }
+    };
+
+    canvas.onmousemove = (e) => {
+      const pos = getPos(e);
+      if (!isDragging) {
+        const mode = hitTest(pos);
+        if (mode === 'nw' || mode === 'se') canvas.style.cursor = 'nwse-resize';
+        else if (mode === 'ne' || mode === 'sw') canvas.style.cursor = 'nesw-resize';
+        else if (mode === 'move') canvas.style.cursor = 'move';
+        else canvas.style.cursor = 'default';
+        return;
+      }
+
+      const dx = pos.x - startX;
+      const dy = pos.y - startY;
+      const b = { ...initialBox };
+      const minSize = 40;
+
+      if (dragMode === 'move') {
+        b.x = Math.max(0, Math.min(canvas.width - b.width, b.x + dx));
+        b.y = Math.max(0, Math.min(canvas.height - b.height, b.y + dy));
+      } else if (dragMode === 'se') {
+        b.width = Math.max(minSize, Math.min(canvas.width - b.x, b.width + dx));
+        b.height = Math.max(minSize, Math.min(canvas.height - b.y, b.height + dy));
+      } else if (dragMode === 'sw') {
+        const newX = Math.max(0, Math.min(initialBox.x + initialBox.width - minSize, b.x + dx));
+        b.width = initialBox.x + initialBox.width - newX;
+        b.x = newX;
+        b.height = Math.max(minSize, Math.min(canvas.height - b.y, b.height + dy));
+      } else if (dragMode === 'ne') {
+        const newY = Math.max(0, Math.min(initialBox.y + initialBox.height - minSize, b.y + dy));
+        b.height = initialBox.y + initialBox.height - newY;
+        b.y = newY;
+        b.width = Math.max(minSize, Math.min(canvas.width - b.x, b.width + dx));
+      } else if (dragMode === 'nw') {
+        const newX = Math.max(0, Math.min(initialBox.x + initialBox.width - minSize, b.x + dx));
+        const newY = Math.max(0, Math.min(initialBox.y + initialBox.height - minSize, b.y + dy));
+        b.width = initialBox.x + initialBox.width - newX;
+        b.height = initialBox.y + initialBox.height - newY;
+        b.x = newX;
+        b.y = newY;
+      }
+
+      this.cropperBox = b;
+      this._drawCropper(false);
+    };
+
+    window.addEventListener('mouseup', () => {
+      isDragging = false;
+      dragMode = null;
+    });
+  }
+
+  /**
+   * Applies the crop & rotate to the active card's photo and updates the review thumbnail.
+   */
+  applyPhotoCropper() {
+    if (!this.cropperImg || !this.cropperBox || !this.scannedCertItems || this.cropperCurrentIndex == null) return;
+    const img = this.cropperImg;
+    const box = this.cropperBox;
+    const scale = this.cropperDisplayScale || 1;
+
+    // Calculate crop coordinates on original unscaled image
+    const cropX = Math.round(box.x / scale);
+    const cropY = Math.round(box.y / scale);
+    const cropW = Math.round(box.width / scale);
+    const cropH = Math.round(box.height / scale);
+
+    const isRotated90or270 = this.cropperAngle === 90 || this.cropperAngle === 270;
+    const naturalW = isRotated90or270 ? img.naturalHeight : img.naturalWidth;
+    const naturalH = isRotated90or270 ? img.naturalWidth : img.naturalHeight;
+
+    // 1. Render full rotated image on an offscreen high-res canvas
+    const rotatedCanvas = document.createElement('canvas');
+    rotatedCanvas.width = naturalW;
+    rotatedCanvas.height = naturalH;
+    const rotCtx = rotatedCanvas.getContext('2d');
+
+    rotCtx.translate(naturalW / 2, naturalH / 2);
+    rotCtx.rotate((this.cropperAngle * Math.PI) / 180);
+    const drawW = (this.cropperAngle % 180 === 0) ? naturalW : naturalH;
+    const drawH = (this.cropperAngle % 180 === 0) ? naturalH : naturalW;
+    rotCtx.drawImage(img, -drawW / 2, -drawH / 2, drawW, drawH);
+
+    // 2. Extract cropped area onto destination canvas
+    const destCanvas = document.createElement('canvas');
+    destCanvas.width = Math.max(1, cropW);
+    destCanvas.height = Math.max(1, cropH);
+    const destCtx = destCanvas.getContext('2d');
+
+    destCtx.drawImage(
+      rotatedCanvas,
+      cropX, cropY, cropW, cropH,
+      0, 0, cropW, cropH
+    );
+
+    const croppedDataUrl = destCanvas.toDataURL('image/jpeg', 0.92);
+
+    // Update the item in memory
+    const item = this.scannedCertItems[this.cropperCurrentIndex];
+    if (item) {
+      item.base64Data = croppedDataUrl;
+      const previewImg = document.getElementById(`scanned-card-preview-${this.cropperCurrentIndex}`);
+      if (previewImg) {
+        previewImg.src = croppedDataUrl;
+      }
+    }
+
+    this.closePhotoCropperModal();
+    if (typeof window.showToast === 'function') {
+      window.showToast('✂️ Photo cropped and rotated successfully!', 'success');
     }
   }
 
@@ -6471,7 +7248,10 @@ class SheetNavigator {
                 <div style="font-size: 12px; font-weight: 800; color: #cbd5e1;">${missAll}</div>
               </div>
             </div>
-            <div style="margin-left: auto; display: flex; gap: 6px;">
+            <div style="margin-left: auto; display: flex; gap: 6px; align-items: center;">
+              <button class="btn btn-primary" style="font-size: 11px; padding: 4px 10px; background: linear-gradient(135deg, #06b6d4 0%, #0284c7 100%); border: none; font-weight: 700; box-shadow: 0 2px 8px rgba(6,182,212,0.3); display: flex; align-items: center; gap: 5px; cursor: pointer; border-radius: 4px;" onclick="window.sheetNavigator.openCertEmailScannerModal()" title="Scan Gmail inbox and sent mail for cert renewal photos sent from employees">
+                <span>📧</span> Scan Gmail for Certs
+              </button>
               <button class="btn btn-secondary" style="font-size: 11px; padding: 3px 8px;" onclick="if(window.certsConfigEngine){window.certsConfigEngine.showConfigModal();}">⚙️ Requirements Matrix</button>
             </div>
           </div>
