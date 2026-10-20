@@ -7366,12 +7366,12 @@ class TripPlannerApp {
 
           swapsHtml = `
             <div class="day-section-collapsible swaps-day-section" style="margin-bottom: 8px;">
-              <div style="font-size: 10.5px; font-weight: 800; color: #34d399; display: flex; align-items: center; justify-content: space-between; padding: 4px 7px; background: rgba(16, 185, 129, 0.12); border-radius: 4px; border-left: 3px solid #10b981; cursor: pointer; user-select: none;" onclick="window.tripPlanner.toggleSectionCollapse('${dateKey}', 'swaps')" title="Click to collapse / expand Swaps">
+              <div style="font-size: 10.5px; font-weight: 800; color: #93c5fd; display: flex; align-items: center; justify-content: space-between; padding: 4px 7px; background: rgba(59, 130, 246, 0.12); border-radius: 4px; border-left: 3px solid #3b82f6; cursor: pointer; user-select: none;" onclick="window.tripPlanner.toggleSectionCollapse('${dateKey}', 'swaps')" title="Click to collapse / expand Swaps">
                 <span style="display: flex; align-items: center; gap: 5px;">
                   <span id="section-chevron-${dateKey}-swaps" style="font-size: 8px; width: 10px; display: inline-block;">${isSwapsCollapsed ? '▶' : '▼'}</span>
                   <span>🚚 ${completedSwapsCount > 0 ? `Picked Swaps (${pendingSwapsCount}/${totalSwapsCount})` : `Picked Swaps Ready (${totalSwapsCount})`}</span>
                 </span>
-                <span style="font-size: 9px; color: #6ee7b7; opacity: 0.9;">${completedSwapsCount > 0 && pendingSwapsCount === 0 ? '✓ All Completed' : (completedSwapsCount > 0 ? `${completedSwapsCount} Done · PPE Swaps` : 'PPE Swaps')}</span>
+                <span style="font-size: 9px; color: #bfdbfe; opacity: 0.9;">${completedSwapsCount > 0 && pendingSwapsCount === 0 ? '✓ All Completed' : (completedSwapsCount > 0 ? `${completedSwapsCount} Done · PPE Swaps` : 'PPE Swaps')}</span>
               </div>
               <div id="section-body-${dateKey}-swaps" style="display: ${isSwapsCollapsed ? 'none' : 'flex'}; flex-direction: column; gap: 5px; margin-top: 5px;">
                 ${dayScheduledSwaps.map(s => {
@@ -7380,10 +7380,10 @@ class TripPlannerApp {
                   const loc = s.location || '';
                   const isDone = !!s.isCompleted;
                   return `
-                    <div class="scheduled-swap-card ${isDone ? 'completed-swap-card' : ''}" draggable="${!isDone}" data-skey="${this.escapeHtml(s._sKey)}" style="background: var(--bg-primary); border: 1px solid ${isDone ? 'rgba(16, 185, 129, 0.25)' : (isReclaim ? 'rgba(245, 158, 11, 0.35)' : 'rgba(16, 185, 129, 0.35)')}; border-left: 4px solid ${isReclaim ? '#f59e0b' : '#10b981'}; border-radius: 6px; padding: 7px 9px; box-shadow: 0 1px 4px rgba(0,0,0,0.25); cursor: ${isDone ? 'default' : 'grab'}; opacity: ${isDone ? '0.72' : '1'}; transition: all 0.15s ease;" onmouseover="this.style.borderColor='${isReclaim ? '#fbbf24' : '#34d399'}'" onmouseout="this.style.borderColor='${isDone ? 'rgba(16, 185, 129, 0.25)' : (isReclaim ? 'rgba(245, 158, 11, 0.35)' : 'rgba(16, 185, 129, 0.35)')}'">
+                    <div class="scheduled-swap-card ${isDone ? 'completed-swap-card' : ''}" draggable="${!isDone}" data-skey="${this.escapeHtml(s._sKey)}" style="background: var(--bg-primary); border: 1px solid ${isDone ? 'rgba(16, 185, 129, 0.25)' : (isReclaim ? 'rgba(245, 158, 11, 0.35)' : 'rgba(59, 130, 246, 0.35)')}; border-left: 4px solid ${isDone ? '#10b981' : (isReclaim ? '#f59e0b' : '#3b82f6')}; border-radius: 6px; padding: 7px 9px; box-shadow: 0 1px 4px rgba(0,0,0,0.25); cursor: ${isDone ? 'default' : 'grab'}; opacity: ${isDone ? '0.72' : '1'}; transition: all 0.15s ease;" onmouseover="this.style.borderColor='${isDone ? '#34d399' : (isReclaim ? '#fbbf24' : '#60a5fa')}';" onmouseout="this.style.borderColor='${isDone ? 'rgba(16, 185, 129, 0.25)' : (isReclaim ? 'rgba(245, 158, 11, 0.35)' : 'rgba(59, 130, 246, 0.35)')}';">
                       <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 6px;">
                         <div style="display: flex; align-items: flex-start; gap: 7px; flex: 1; min-width: 0;">
-                          <input type="checkbox" ${isDone ? 'checked' : ''} style="cursor: pointer; margin-top: 3px; accent-color: ${isReclaim ? '#f59e0b' : '#10b981'}; width: 14px; height: 14px;" title="${isDone ? 'Completed (click to view / revert)' : 'Click to view / complete'}" onclick="event.stopPropagation(); window.tripPlanner.openSwapDetailsModal(${JSON.stringify(s).replace(/"/g, '&quot;')}, '${this.escapeJs(s.crewId || '')}', '${this.escapeJs(loc)}')">
+                          <input type="checkbox" ${isDone ? 'checked' : ''} style="cursor: pointer; margin-top: 3px; accent-color: ${isDone ? '#10b981' : (isReclaim ? '#f59e0b' : '#3b82f6')}; width: 14px; height: 14px;" title="${isDone ? 'Completed (click to view / revert)' : 'Click to view / complete'}" onclick="event.stopPropagation(); window.tripPlanner.openSwapDetailsModal(${JSON.stringify(s).replace(/"/g, '&quot;')}, '${this.escapeJs(s.crewId || '')}', '${this.escapeJs(loc)}')">
                           <div style="flex: 1; min-width: 0;">
                             <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 3px;">
                               <span style="font-weight: 700; font-size: 12px; color: ${isDone ? '#94a3b8' : '#f8fafc'}; text-decoration: ${isDone ? 'line-through' : 'none'}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
@@ -7437,7 +7437,7 @@ class TripPlannerApp {
                         </div>
                         <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 6px; margin-left: 4px;">
                           ${!isDone ? `
-                            <button class="btn btn-primary" style="padding: 2px 7px; font-size: 9px; background: ${isReclaim ? '#f59e0b; color: #000;' : '#10b981;'}; border: none; font-weight: 700; cursor: pointer; border-radius: 3px; white-space: nowrap;" onclick="event.stopPropagation(); window.tripPlanner.openSwapDetailsModal(${JSON.stringify(s).replace(/"/g, '&quot;')}, '${this.escapeJs(s.crewId || '')}', '${this.escapeJs(loc)}')">
+                            <button class="btn btn-primary" style="padding: 2px 7px; font-size: 9px; background: ${isReclaim ? '#f59e0b; color: #000;' : '#2563eb;'}; color: #fff; border: none; font-weight: 700; cursor: pointer; border-radius: 3px; white-space: nowrap;" onclick="event.stopPropagation(); window.tripPlanner.openSwapDetailsModal(${JSON.stringify(s).replace(/"/g, '&quot;')}, '${this.escapeJs(s.crewId || '')}', '${this.escapeJs(loc)}')">
                               ${isReclaim ? '📦 Reclaim' : '🔍 Swap'}
                             </button>
                           ` : `
@@ -7661,8 +7661,8 @@ class TripPlannerApp {
                                   </div>
 
                                   ${crewPickedSwaps.length > 0 ? `
-                                    <div style="margin-top: 5px; padding: 4px 6px; background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 4px;">
-                                      <div style="font-size: 9.5px; font-weight: 800; color: #34d399; display: flex; align-items: center; justify-content: space-between; margin-bottom: 2px;">
+                                    <div style="margin-top: 5px; padding: 4px 6px; background: rgba(59, 130, 246, 0.12); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 4px;">
+                                      <div style="font-size: 9.5px; font-weight: 800; color: #93c5fd; display: flex; align-items: center; justify-content: space-between; margin-bottom: 2px;">
                                         <span>🚚 Picked Swaps Ready (${crewPickedSwaps.length})</span>
                                       </div>
                                       ${crewPickedSwaps.map(ps => {
@@ -7673,7 +7673,7 @@ class TripPlannerApp {
                                             <strong>${this.escapeHtml(ps.employeeName)}</strong>: ${isReclaim ? '📦 Reclaim ' : ''}${ps.type === 'Glove' ? '🧤 Glove' : '🧤 Sleeve'} ${isReclaim ? `<span style="color: #fca5a5;">#${this.escapeHtml(ps.currentItem || '—')}</span> ➔ <strong style="color: #fbbf24;">Helena</strong>` : `<span style="color: #fca5a5;">${this.escapeHtml(ps.currentItem || '—')}</span> ➔ <strong style="color: #4ade80;">${this.escapeHtml(ps.pickItem || '—')}</strong>`}
                                             ${ps.size ? `<span style="color: #94a3b8; font-size: 9px;"> (${this.escapeHtml(ps.size)})</span>` : ''}
                                           </span>
-                                          <button class="btn btn-primary" style="padding: 1px 6px; font-size: 8.5px; background: ${isReclaim ? '#f59e0b; color: #000;' : '#10b981;'}; border: none; font-weight: 700; cursor: pointer; border-radius: 3px; white-space: nowrap;" onclick="event.stopPropagation(); window.tripPlanner.openSwapDetailsModal(${JSON.stringify(ps).replace(/"/g, '&quot;')}, '${this.escapeJs(c.crewId)}', '${this.escapeJs(trip.location)}')" title="${isReclaim ? 'View reclaim details' : 'View swap details & complete swap'}">
+                                          <button class="btn btn-primary" style="padding: 1px 6px; font-size: 8.5px; background: ${isReclaim ? '#f59e0b; color: #000;' : '#2563eb;'}; color: #fff; border: none; font-weight: 700; cursor: pointer; border-radius: 3px; white-space: nowrap;" onclick="event.stopPropagation(); window.tripPlanner.openSwapDetailsModal(${JSON.stringify(ps).replace(/"/g, '&quot;')}, '${this.escapeJs(c.crewId)}', '${this.escapeJs(trip.location)}')" title="${isReclaim ? 'View reclaim details' : 'View swap details & complete swap'}">
                                             ${isReclaim ? '📦 Reclaim' : '🔍 Swap'}
                                           </button>
                                         </div>
@@ -7758,7 +7758,7 @@ class TripPlannerApp {
                 </span>
               ` : ''}
               ${dayPickedCount > 0 ? `
-                <span class="badge" style="background: rgba(16, 185, 129, 0.25); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 9px; padding: 1px 4px; border-radius: 3px;" title="${dayPickedCount} Swap(s) Scheduled / Completed (${dayScheduledSwaps.filter(s => s.isCompleted).length} Completed)">
+                <span class="badge" style="background: rgba(59, 130, 246, 0.25); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4); font-size: 9px; padding: 1px 4px; border-radius: 3px;" title="${dayPickedCount} Swap(s) Scheduled / Completed (${dayScheduledSwaps.filter(s => s.isCompleted).length} Completed)">
                   🚚 ${dayScheduledSwaps.filter(s => !s.isCompleted).length > 0 ? `${dayScheduledSwaps.filter(s => !s.isCompleted).length} Picked` : `✓ ${dayPickedCount}`}
                 </span>
               ` : ''}
