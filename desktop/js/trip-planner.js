@@ -3812,9 +3812,6 @@ class TripPlannerApp {
         training: { ...tr, lead: liveLead, location: targetLoc, attendees: liveAttendees }
       };
       this.saveScheduledTrainingNeeds();
-      if (targetLoc && targetLoc.toLowerCase() !== 'helena') {
-        this.addTrip(dateKey, targetLoc);
-      }
       this.renderPlanner();
       this.renderTrainingNeedsList();
       this.showToast(`🎓 Scheduled Training "${tr.topic}" for Crew ${tr.crewId} on ${dateKey}`);
@@ -3835,9 +3832,6 @@ class TripPlannerApp {
         };
       });
       this.saveScheduledTrainingNeeds();
-      if (targetLoc && targetLoc.toLowerCase() !== 'helena') {
-        this.addTrip(dateKey, targetLoc);
-      }
       this.renderPlanner();
       this.renderTrainingNeedsList();
       this.showToast(`🎓 Scheduled ${payload.trainings.length} training topic(s) for Crew ${payload.crewId} on ${dateKey}`);
