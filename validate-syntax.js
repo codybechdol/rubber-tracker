@@ -133,39 +133,6 @@ function checkSyntaxV8(file, content) {
 }
 
 /**
- * Check for ES6+ syntax that Google Apps Script doesn't support
- */
-function checkES6Syntax(file, lines) {
-    const es6Patterns = [
-        { pattern: /^\s*const\s+/, msg: 'const (use var instead)' },
-        { pattern: /^\s*let\s+/, msg: 'let (use var instead)' },
-        { pattern: /=>\s*{/, msg: 'arrow function (use function() instead)' },
-        { pattern: /=>\s*[^{]/, msg: 'arrow function (use function() instead)' },
-        { pattern: /`[^`]*\$\{/, msg: 'template literal (use string concatenation instead)' },
-        { pattern: /\.\.\.[\w[]+/, msg: 'spread operator (not supported)' },
-        { pattern: /class\s+\w+\s*{/, msg: 'class declaration (use function constructor instead)' },
-    ];
-
-    for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-
-        // Skip comments
-        if (line.trim().startsWith('//') || line.trim().startsWith('*')) continue;
-
-        for (const { pattern, msg } of es6Patterns) {
-            if (pattern.test(line)) {
-                console.log(`⚠️  WARNING: ${file}:${i + 1}`);
-                console.log(`   ES6+ syntax detected: ${msg}`);
-                console.log(`   Line: ${line.trim().substring(0, 60)}...`);
-                console.log('');
-                warningCount++;
-                break; // Only report first match per line
-            }
-        }
-    }
-}
-
-/**
  * Check for duplicate .js and .gs files with same name
  */
 function checkDuplicateFiles(file) {
