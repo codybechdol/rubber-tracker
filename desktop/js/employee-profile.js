@@ -1685,6 +1685,9 @@ class EmployeeProfileEngine {
       isoHireDate = `${yyyy}-${mm}-${dd}`;
     }
 
+    const curStatus = String(data.status || (data.isPending ? 'Pending' : 'Active')).trim();
+    const statusOptions = ['Active', 'Vacation', 'Light Duty', 'Leave', 'Medical', 'Pending'];
+
     return `
       <div style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 8px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.2);">
         <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 12px; margin-bottom: 18px; flex-wrap: wrap; gap: 10px;">
@@ -1752,10 +1755,18 @@ class EmployeeProfileEngine {
             </div>
           </div>
 
-          <!-- Section 3: Classification & Crew Assignment -->
+          <!-- Section 3: Classification & Roles -->
           <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px; padding: 14px;">
             <div style="font-size: 12.5px; font-weight: 800; color: #4ade80; margin-bottom: 12px; display: flex; align-items: center; gap: 6px;">
               <span>⚡</span> Classification & Roles
+            </div>
+
+            <div style="margin-bottom: 12px;">
+              <label style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 4px;">Employee Status</label>
+              <select id="edit-emp-status" class="form-control" style="width: 100%; font-size: 12px; padding: 6px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary);">
+                ${statusOptions.map(st => `<option value="${st}" ${st.toLowerCase() === curStatus.toLowerCase() ? 'selected' : ''}>${st}</option>`).join('')}
+                ${curStatus && !statusOptions.some(st => st.toLowerCase() === curStatus.toLowerCase()) ? `<option value="${this.escapeHtml(curStatus)}" selected>${this.escapeHtml(curStatus)}</option>` : ''}
+              </select>
             </div>
 
             <div style="margin-bottom: 12px;">
@@ -1828,9 +1839,10 @@ class EmployeeProfileEngine {
     const newSecJob = getVal('edit-emp-sec-job');
     const newAltNames = getVal('edit-emp-alt-names');
     const newHireRaw = getVal('edit-emp-hire-date');
+    const newStatusChoice = getVal('edit-emp-status');
 
     let formattedHireDate = '';
-    let newStatus = '';
+    let newStatus = newStatusChoice || '';
     if (newHireRaw) {
       const parsed = this.parseDate(newHireRaw);
       if (parsed) {
@@ -1839,7 +1851,11 @@ class EmployeeProfileEngine {
         today.setHours(0, 0, 0, 0);
         const checkDate = new Date(parsed.getTime());
         checkDate.setHours(0, 0, 0, 0);
-        newStatus = checkDate <= today ? 'Active' : 'Pending';
+        if (checkDate > today) {
+          newStatus = 'Pending';
+        } else if (newStatusChoice === 'Pending') {
+          newStatus = 'Active';
+        }
       }
     }
 
@@ -1870,11 +1886,12 @@ class EmployeeProfileEngine {
       [altKey]: newAltNames
     };
 
+    if (newStatus && statusKey) {
+      updatedFields[statusKey] = newStatus;
+    }
+
     if (formattedHireDate) {
       updatedFields[hireKey] = formattedHireDate;
-      if (newStatus) {
-        updatedFields[statusKey] = newStatus;
-      }
     }
 
     Object.assign(row, updatedFields);

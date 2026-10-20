@@ -2528,8 +2528,8 @@ class CrewImportEngine {
         continue;
       }
 
-      // Exclude employees on special non-crew status locations (Light Duty, Weeds, Leave, Medical, etc.)
-      if (['light duty', 'weeds', 'leave', 'medical', "worker's comp"].some(s => locLower.includes(s))) {
+      // Exclude employees on special non-crew status (Vacation, Light Duty, Weeds, Leave, Medical, etc.)
+      if (['vacation', 'light duty', 'weeds', 'leave', 'medical', "worker's comp"].some(s => locLower.includes(s) || stat.includes(s))) {
         continue;
       }
 
@@ -2654,7 +2654,8 @@ class CrewImportEngine {
       const j = String(this.getEmpRowJobNumber(r) || '').trim();
       if (!j.startsWith(cleanBase + '.')) continue;
       const loc = String(this.getEmpRowLocation(r) || '').toLowerCase();
-      const isStatus = ['vacation', 'light duty', 'leave', 'medical', "worker's comp", 'previous'].some(s => loc.includes(s));
+      const stat = String(r['Status'] || r['Employee Status'] || '').toLowerCase();
+      const isStatus = ['vacation', 'light duty', 'leave', 'medical', "worker's comp", 'previous'].some(s => loc.includes(s) || stat.includes(s));
       if (isStatus) continue;
 
       const match = j.match(new RegExp(`^${cleanBase.replace('-', '\\-')}\\.(\\d+)`));
@@ -2964,6 +2965,13 @@ class CrewImportEngine {
           if (change.scheduleNote && notesKey) {
             row[notesKey] = change.scheduleNote;
             updatedFields[notesKey] = change.scheduleNote;
+          }
+          if (statusKey) {
+            const currentStat = String(row[statusKey] || '').toLowerCase().trim();
+            if (currentStat === 'vacation' || currentStat === 'leave' || currentStat === 'light duty' || currentStat === 'medical') {
+              row[statusKey] = 'Active';
+              updatedFields[statusKey] = 'Active';
+            }
           }
 
           this.syncRowToRawGrid(empTable, row);
@@ -3408,7 +3416,15 @@ class CrewImportEngine {
             }
 
             const updatedFields = {};
-            if (locKey) { row[locKey] = absenceLoc; updatedFields[locKey] = absenceLoc; }
+            if (statusKey) {
+              row[statusKey] = statusSuffix;
+              updatedFields[statusKey] = statusSuffix;
+            }
+            if (locKey) {
+              const finalLoc = statusKey ? (rawCity || 'Helena') : absenceLoc;
+              row[locKey] = finalLoc;
+              updatedFields[locKey] = finalLoc;
+            }
             if (jobKey && assignedJob) { row[jobKey] = assignedJob; updatedFields[jobKey] = assignedJob; }
             if (notesKey) {
               row[notesKey] = to.note || (`${statusSuffix} ` + (this.rosterDateFormatted || todayFormatted));
