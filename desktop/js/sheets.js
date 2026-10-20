@@ -6280,7 +6280,12 @@ class SheetNavigator {
         // Job Tracking Conditional Formatting
         if (isJobTracking) {
           if (hLower === 'status' || hLower === 'job status') {
-            const statusStr = String(val).trim();
+            let statusStr = String(val || '').trim();
+            if (statusStr.includes('Active')) statusStr = 'Active';
+            else if (statusStr.includes('Completed')) statusStr = 'Completed';
+            else if (statusStr.includes('Pending Start')) statusStr = 'Pending Start';
+            else if (statusStr.includes('On Hold')) statusStr = 'On Hold';
+
             const jobNum = String(row['Job Number'] || row['Job #'] || row['Crew'] || '').trim();
             let badgeBg = '#15803d';
             let icon = '🟢';
@@ -6291,8 +6296,9 @@ class SheetNavigator {
 
             customCellHtml = `
               <div style="display: inline-flex; align-items: center; gap: 6px;">
-                <span class="badge" style="background-color: ${badgeBg}; color: #fff; padding: 2px 8px; border-radius: 4px; font-weight: 700;">${icon} ${this.escapeHtml(statusStr)}</span>
+                <span class="badge" style="background-color: ${badgeBg}; color: #fff; padding: 2px 8px; border-radius: 4px; font-weight: 700; cursor: pointer;" title="Click to manage job status / schedule" onclick="window.sheetNavigator.showJobLifecycleModal('${this.escapeHtml(jobNum)}')">${icon} ${this.escapeHtml(statusStr)}</span>
                 <button class="btn btn-secondary" style="padding: 1px 5px; font-size: 10px; border-radius: 3px; cursor: pointer;" title="Manage Job Lifecycle / Schedule" onclick="window.sheetNavigator.showJobLifecycleModal('${this.escapeHtml(jobNum)}')">⚙️</button>
+                <button class="btn btn-secondary admin-only-control" style="padding: 1px 5px; font-size: 10px; border-radius: 3px; cursor: pointer; color: #f87171; border-color: rgba(239, 68, 68, 0.35); background: rgba(239, 68, 68, 0.08);" title="Delete this Job from Job Tracking" onclick="window.sheetNavigator.deleteJobTrackingRow('${this.escapeHtml(jobNum)}')">🗑️</button>
               </div>
             `;
           } else if (hLower.startsWith('skip ') && hLower !== 'skip days') {
@@ -6670,7 +6676,8 @@ class SheetNavigator {
         const isCrewTypeCol = ['crew type', 'crew discipline', 'discipline'].includes(hLower);
         const isBlankPrimary = isPrimaryItemCol && (!val || String(val).trim() === '' || String(val).trim() === '—' || String(val).trim() === '-');
         const isTrainingStatusCol = this.currentSheetKey === 'training_tracking' && (hLower === 'status' || hLower === 'training status');
-        const isEditable = (!isPrimaryItemCol || isBlankPrimary) && !isEmployeeNameCol && !isLocationNameCol && !isSmsCol && !isCrewTypeCol && !hLower.includes('change out') && !hLower.startsWith('skip ') && window.currentRoleMode !== 'view_only';
+        const isJobTrackingStatusCol = isJobTracking && (hLower === 'status' || hLower === 'job status');
+        const isEditable = (!isPrimaryItemCol || isBlankPrimary) && !isEmployeeNameCol && !isLocationNameCol && !isSmsCol && !isCrewTypeCol && !isJobTrackingStatusCol && !hLower.includes('change out') && !hLower.startsWith('skip ') && window.currentRoleMode !== 'view_only';
         let itemIdentifier = '';
         if (this.currentSheetKey === 'expiring_certs') {
           itemIdentifier = `${row['Employee Name'] || row['Name'] || ''} | ${row['Item Type'] || row['Cert Type'] || ''}`;
@@ -6681,7 +6688,7 @@ class SheetNavigator {
         }
 
         html += `<td class="${isEditable ? 'editable' : ''}" 
-                     contenteditable="${isEditable && !isTrainingStatusCol}" 
+                     contenteditable="${isEditable && !isTrainingStatusCol && !isJobTrackingStatusCol}" 
                      data-row="${sheetRowIdx}" 
                      data-col="${colIdx + 1}" 
                      data-header="${this.escapeHtml(h)}"
@@ -9359,9 +9366,12 @@ class SheetNavigator {
           </div>
 
           <!-- Bottom Actions -->
-          <div style="display: flex; justify-content: flex-end; gap: 10px;">
-            <button class="btn btn-secondary" onclick="document.getElementById('job-lifecycle-sheet-modal').remove()">Cancel</button>
-            <button class="btn btn-primary" onclick="window.sheetNavigator.saveJobLifecycleModal('${this.escapeHtml(jobNum)}')">💾 Save Changes</button>
+          <div style="display: flex; justify-content: space-between; align-items: center; gap: 10px;">
+            <button class="btn btn-secondary admin-only-control" style="color: #f87171; border-color: rgba(239, 68, 68, 0.4); background: rgba(239, 68, 68, 0.1); cursor: pointer;" onclick="window.sheetNavigator.deleteJobTrackingRow('${this.escapeHtml(jobNum)}')">🗑️ Delete Job</button>
+            <div style="display: flex; gap: 10px;">
+              <button class="btn btn-secondary" onclick="document.getElementById('job-lifecycle-sheet-modal').remove()">Cancel</button>
+              <button class="btn btn-primary" onclick="window.sheetNavigator.saveJobLifecycleModal('${this.escapeHtml(jobNum)}')">💾 Save Changes</button>
+            </div>
           </div>
 
         </div>
@@ -9416,14 +9426,21 @@ class SheetNavigator {
     if (targetStatus === 'On Hold') {
       row['Put On Hold Date'] = document.getElementById('input-hold-date').value || todayFormatted;
       row['Estimated Return'] = document.getElementById('input-return-date').value || '';
+      row['Actual End Date'] = '';
     } else if (targetStatus === 'Pending Start') {
       row['Start Date'] = document.getElementById('input-start-date').value || '';
+      row['Put On Hold Date'] = '';
+      row['Estimated Return'] = '';
+      row['Actual End Date'] = '';
     } else if (targetStatus === 'Completed') {
       row['Actual End Date'] = document.getElementById('input-end-date').value || todayFormatted;
+      row['Put On Hold Date'] = '';
+      row['Estimated Return'] = '';
     } else if (targetStatus === 'Active') {
       if (!row['Start Date']) row['Start Date'] = todayFormatted;
       row['Put On Hold Date'] = '';
       row['Estimated Return'] = '';
+      row['Actual End Date'] = '';
     }
 
     // Sync raw grid
@@ -9471,6 +9488,34 @@ class SheetNavigator {
     if (modal) modal.remove();
 
     this.renderCurrentSheet();
+  }
+
+  async deleteJobTrackingRow(jobNum) {
+    if (!jobNum) return;
+    const cleanJobNum = String(jobNum).trim();
+
+    const confirmed = confirm(`Are you sure you want to delete Job #${cleanJobNum} from Job Tracking?\n\nThis will remove the job from the active roster and queue the deletion to Google Sheets.`);
+    if (!confirmed) return;
+
+    const modal = document.getElementById('job-lifecycle-sheet-modal');
+    if (modal) modal.remove();
+
+    if (!this.db || typeof this.db.deleteRow !== 'function') {
+      alert('Database deleteRow function is not available.');
+      return;
+    }
+
+    const success = await this.db.deleteRow('job_tracking', cleanJobNum);
+    if (success) {
+      if (typeof window.showToast === 'function') {
+        window.showToast(`🗑️ Job #${cleanJobNum} deleted successfully.`, 'success');
+      } else if (window.inventoryManager && typeof window.inventoryManager.showToast === 'function') {
+        window.inventoryManager.showToast(`🗑️ Job #${cleanJobNum} deleted successfully.`);
+      }
+      this.renderCurrentSheet();
+    } else {
+      alert(`Could not find Job #${cleanJobNum} in Job Tracking.`);
+    }
   }
 
   escapeHtml(str) {

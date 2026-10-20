@@ -2707,7 +2707,7 @@ class LocalDatabase {
     const cleanId = String(itemIdentifier).trim().toLowerCase();
     const rowIdx = table.rows.findIndex(r => {
       const firstKey = Object.keys(r)[0] || 'Item #';
-      const num = String(r['Item #'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['Serial #'] || r['ESL ID'] || r[firstKey] || '').trim().toLowerCase();
+      const num = String(r['Item #'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['Serial #'] || r['ESL ID'] || r['Job Number'] || r['Job #'] || r[firstKey] || '').trim().toLowerCase();
       const esl = String(r['ESL ID'] || '').trim().toLowerCase();
       return num === cleanId || esl === cleanId;
     });
@@ -2789,6 +2789,11 @@ class LocalDatabase {
     }
 
     this._invalidateHistoryEngines(tableKey);
+    if (typeof this.saveLocalSnapshot === 'function') {
+      await this.saveLocalSnapshot();
+    } else if (window.desktopAPI && typeof window.desktopAPI.saveLocalSnapshot === 'function' && this.snapshot) {
+      await window.desktopAPI.saveLocalSnapshot(this.snapshot);
+    }
     return true;
   }
 
