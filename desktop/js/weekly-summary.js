@@ -1704,7 +1704,7 @@ class WeeklySummaryEngine {
               ${day.tasks.map(t => {
                 const isDone = (t.status === 'Complete');
                 const isHighPrio = (t.priority === 'High' || t.priority === 'Urgent');
-                let cardBorder = isDone ? 'border-left: 3px solid #10b981; opacity: 0.65;' : (isHighPrio ? 'border-left: 3px solid #ef4444;' : 'border-left: 3px solid #3b82f6;');
+                let cardBorder = isDone ? 'border-left: 3px solid #10b981; opacity: 0.65;' : (isHighPrio ? 'border-left: 3px solid #ef4444;' : 'border-left: 3px solid #f97316;');
 
                 return `
                   <div style="background: var(--bg-card); border: 1px solid var(--border-color); ${cardBorder} border-radius: 6px; padding: 6px 8px; display: flex; flex-direction: column; gap: 3px;">
@@ -1715,11 +1715,11 @@ class WeeklySummaryEngine {
                           ${this.escapeHtml(t.title || 'Task')}
                         </div>
                       </div>
-                      <button onclick="window.weeklySummaryEngine.openEditTaskModal('${this.escapeJs(t.id)}')" style="background: none; border: none; color: #64748b; font-size: 10px; cursor: pointer; padding: 0 2px; line-height: 1;" onmouseover="this.style.color='#93c5fd'" onmouseout="this.style.color='#64748b'" title="Edit Task">✏️</button>
+                      <button onclick="window.weeklySummaryEngine.openEditTaskModal('${this.escapeJs(t.id)}')" style="background: none; border: none; color: #64748b; font-size: 10px; cursor: pointer; padding: 0 2px; line-height: 1;" onmouseover="this.style.color='#fb923c'" onmouseout="this.style.color='#64748b'" title="Edit Task">✏️</button>
                     </div>
 
                     <div style="display: flex; align-items: center; gap: 5px; flex-wrap: wrap; font-size: 9.5px; margin-top: 1px;">
-                      ${t.time ? `<span style="color: #60a5fa; font-weight: 700;">🕒 ${this.escapeHtml(t.time)}</span>` : ''}
+                      ${t.time ? `<span style="color: #fb923c; font-weight: 700;">🕒 ${this.escapeHtml(t.time)}</span>` : ''}
                       ${t.location ? `<span style="color: #94a3b8;">📍 ${this.escapeHtml(t.location)}</span>` : ''}
                       ${t.crewId ? `<span style="color: #cbd5e1; font-weight: 600;">🚚 Crew ${this.escapeHtml(t.crewId)}</span>` : ''}
                       ${isHighPrio ? `<span style="background: rgba(239, 68, 68, 0.2); color: #f87171; padding: 1px 3px; border-radius: 2px; font-weight: 700;">${this.escapeHtml(t.priority)}</span>` : ''}

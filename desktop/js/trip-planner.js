@@ -2420,9 +2420,9 @@ class TripPlannerApp {
       if (personalFields) personalFields.style.display = 'flex';
 
       if (tabPersonal) {
-        tabPersonal.style.border = '1px solid #3b82f6';
-        tabPersonal.style.background = 'rgba(59, 130, 246, 0.2)';
-        tabPersonal.style.color = '#93c5fd';
+        tabPersonal.style.border = '1px solid #f97316';
+        tabPersonal.style.background = 'rgba(249, 115, 22, 0.2)';
+        tabPersonal.style.color = '#fdba74';
       }
       if (tabCert) {
         tabCert.style.border = '1px solid rgba(255, 255, 255, 0.1)';
@@ -2431,8 +2431,8 @@ class TripPlannerApp {
       }
       if (modalIcon) modalIcon.textContent = '💼';
       if (saveBtn) {
-        saveBtn.style.background = '#3b82f6';
-        saveBtn.style.boxShadow = '0 2px 8px rgba(59, 130, 246, 0.4)';
+        saveBtn.style.background = '#f97316';
+        saveBtn.style.boxShadow = '0 2px 8px rgba(249, 115, 22, 0.4)';
       }
       if (saveBtnText) saveBtnText.textContent = isEditing ? 'Update Task' : 'Save Task';
 
@@ -7240,25 +7240,25 @@ class TripPlannerApp {
           const pendingCount = personalTasks.filter(m => m.status !== 'Complete').length;
           officeHtml = `
             <div class="day-section-collapsible office-tasks-day-section" style="margin-bottom: 8px;">
-              <div style="font-size: 10.5px; font-weight: 800; color: #93c5fd; display: flex; align-items: center; justify-content: space-between; padding: 4px 7px; background: rgba(59, 130, 246, 0.12); border-radius: 4px; border-left: 3px solid #3b82f6; cursor: pointer; user-select: none;" onclick="window.tripPlanner.toggleSectionCollapse('${dateKey}', 'office')" title="Click to collapse / expand Office Tasks">
+              <div style="font-size: 10.5px; font-weight: 800; color: #fdba74; display: flex; align-items: center; justify-content: space-between; padding: 4px 7px; background: rgba(249, 115, 22, 0.12); border-radius: 4px; border-left: 3px solid #f97316; cursor: pointer; user-select: none;" onclick="window.tripPlanner.toggleSectionCollapse('${dateKey}', 'office')" title="Click to collapse / expand Office Tasks">
                 <span style="display: flex; align-items: center; gap: 5px;">
                   <span id="section-chevron-${dateKey}-office" style="font-size: 8px; width: 10px; display: inline-block;">${isCollapsed ? '▶' : '▼'}</span>
                   <span>💼 Office Tasks (${pendingCount}/${personalTasks.length})</span>
                 </span>
-                <button class="btn btn-secondary admin-only-control" style="padding: 1px 6px; font-size: 9.5px; color: #93c5fd; border-color: rgba(59, 130, 246, 0.35); background: rgba(59, 130, 246, 0.08); cursor: pointer;" onclick="event.stopPropagation(); window.tripPlanner.openAddManualTaskModal('${dateKey}', '${this.escapeJs(day.dayName)}, ${this.escapeJs(day.formattedDate)}', 'personal_task')" title="Add Office Task">+ Task</button>
+                <button class="btn btn-secondary admin-only-control" style="padding: 1px 6px; font-size: 9.5px; color: #fdba74; border-color: rgba(249, 115, 22, 0.35); background: rgba(249, 115, 22, 0.08); cursor: pointer;" onclick="event.stopPropagation(); window.tripPlanner.openAddManualTaskModal('${dateKey}', '${this.escapeJs(day.dayName)}, ${this.escapeJs(day.formattedDate)}', 'personal_task')" title="Add Office Task">+ Task</button>
               </div>
               <div id="section-body-${dateKey}-office" style="display: ${isCollapsed ? 'none' : 'flex'}; flex-direction: column; gap: 5px; margin-top: 5px; max-height: 480px; overflow-y: auto; padding-right: 3px;">
                 ${personalTasks.map((mt, taskIdx) => {
                   const isDone = mt.status === 'Complete';
                   const assignee = mt.assignedTo || 'Myself';
                   return `
-                    <div class="manual-task-card personal-task-card" style="background: var(--bg-primary); border: 1px solid ${isDone ? 'rgba(16, 185, 129, 0.3)' : 'rgba(59, 130, 246, 0.3)'}; border-left: 4px solid ${isDone ? '#10b981' : (mt.priority === 'High' ? '#ef4444' : '#3b82f6')}; border-radius: 6px; padding: 7px 9px; box-shadow: 0 1px 4px rgba(0,0,0,0.25); opacity: ${isDone ? '0.65' : '1'}; transition: all 0.15s ease; cursor: pointer;" onclick="window.tripPlanner.openEditManualTaskModal('${this.escapeHtml(mt.id)}')" onmouseover="this.style.borderColor='rgba(96, 165, 250, 0.7)'; this.style.transform='translateY(-1px)';" onmouseout="this.style.borderColor='${isDone ? 'rgba(16, 185, 129, 0.3)' : 'rgba(59, 130, 246, 0.3)'}'; this.style.transform='translateY(0)';" title="Click to view / edit task details">
+                    <div class="manual-task-card personal-task-card" style="background: var(--bg-primary); border: 1px solid ${isDone ? 'rgba(16, 185, 129, 0.3)' : 'rgba(249, 115, 22, 0.3)'}; border-left: 4px solid ${isDone ? '#10b981' : (mt.priority === 'High' ? '#ef4444' : '#f97316')}; border-radius: 6px; padding: 7px 9px; box-shadow: 0 1px 4px rgba(0,0,0,0.25); opacity: ${isDone ? '0.65' : '1'}; transition: all 0.15s ease; cursor: pointer;" onclick="window.tripPlanner.openEditManualTaskModal('${this.escapeHtml(mt.id)}')" onmouseover="this.style.borderColor='rgba(251, 146, 60, 0.7)'; this.style.transform='translateY(-1px)';" onmouseout="this.style.borderColor='${isDone ? 'rgba(16, 185, 129, 0.3)' : 'rgba(249, 115, 22, 0.3)'}'; this.style.transform='translateY(0)';" title="Click to view / edit task details">
                       <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 6px;">
                         <div style="display: flex; align-items: flex-start; gap: 7px; flex: 1; min-width: 0;">
                           <input type="checkbox" ${isDone ? 'checked' : ''} onclick="event.stopPropagation()" onchange="window.tripPlanner.toggleManualTask('${this.escapeHtml(mt.id)}')" style="cursor: pointer; margin-top: 2px; accent-color: #10b981; width: 14px; height: 14px;" title="${isDone ? 'Mark Pending' : 'Mark Complete'}">
                           <div style="flex: 1; min-width: 0;">
                             <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 3px; flex-wrap: wrap;">
-                              <span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.3); font-size: 9px; font-weight: 800; padding: 1px 5px; border-radius: 3px;">
+                              <span class="badge" style="background: rgba(249, 115, 22, 0.15); color: #fdba74; border: 1px solid rgba(249, 115, 22, 0.3); font-size: 9px; font-weight: 800; padding: 1px 5px; border-radius: 3px;">
                                 💼 Personal / Office
                               </span>
                               ${mt.priority === 'High' ? `
@@ -7280,11 +7280,11 @@ class TripPlannerApp {
                             </div>
                             <div style="font-size: 10px; color: #94a3b8; margin-top: 4px; display: flex; align-items: center; gap: 4px; flex-wrap: wrap;">
                               ${mt.location ? `<span class="badge" style="background: rgba(255,255,255,0.06); color: #cbd5e1; font-size: 9px; padding: 1px 4px;">📍 ${this.escapeHtml(mt.location)}</span>` : ''}
-                              ${mt.time ? `<span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; font-size: 9px; padding: 1px 4px;">⏰ ${this.escapeHtml(mt.time)}</span>` : ''}
+                              ${mt.time ? `<span class="badge" style="background: rgba(249, 115, 22, 0.15); color: #fdba74; font-size: 9px; padding: 1px 4px;">⏰ ${this.escapeHtml(mt.time)}</span>` : ''}
                               ${mt.notes ? `
                                 <div style="color: #94a3b8; font-size: 9.5px; margin-top: 3px; width: 100%; word-break: break-word; line-height: 1.35; white-space: pre-line; background: rgba(0,0,0,0.2); padding: 3px 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.05);">
                                   📝 ${this.escapeHtml(mt.notes.length > 90 ? mt.notes.substring(0, 85) + '...' : mt.notes)}
-                                  ${mt.notes.length > 90 ? `<span style="color: #60a5fa; font-weight: 700; font-size: 9px; margin-left: 4px;">(Click to view details)</span>` : ''}
+                                  ${mt.notes.length > 90 ? `<span style="color: #fb923c; font-weight: 700; font-size: 9px; margin-left: 4px;">(Click to view details)</span>` : ''}
                                 </div>
                               ` : ''}
                             </div>
@@ -7292,14 +7292,14 @@ class TripPlannerApp {
                         </div>
                         <div style="display: flex; align-items: center; gap: 3px;">
                           ${personalTasks.length > 1 ? `
-                            <button style="background: none; border: none; color: ${taskIdx > 0 ? '#94a3b8' : '#334155'}; cursor: ${taskIdx > 0 ? 'pointer' : 'default'}; padding: 1px 2px; font-size: 10px; line-height: 1; border-radius: 3px;" ${taskIdx > 0 ? `onclick="event.stopPropagation(); window.tripPlanner.moveManualTask('${this.escapeHtml(mt.id)}', -1)" onmouseover="this.style.color='#60a5fa'" onmouseout="this.style.color='#94a3b8'"` : 'disabled'} title="${taskIdx > 0 ? 'Move Task Up' : ''}">
+                            <button style="background: none; border: none; color: ${taskIdx > 0 ? '#94a3b8' : '#334155'}; cursor: ${taskIdx > 0 ? 'pointer' : 'default'}; padding: 1px 2px; font-size: 10px; line-height: 1; border-radius: 3px;" ${taskIdx > 0 ? `onclick="event.stopPropagation(); window.tripPlanner.moveManualTask('${this.escapeHtml(mt.id)}', -1)" onmouseover="this.style.color='#fb923c'"` : 'disabled'} title="${taskIdx > 0 ? 'Move Task Up' : ''}">
                               ▲
                             </button>
-                            <button style="background: none; border: none; color: ${taskIdx < personalTasks.length - 1 ? '#94a3b8' : '#334155'}; cursor: ${taskIdx < personalTasks.length - 1 ? 'pointer' : 'default'}; padding: 1px 2px; font-size: 10px; line-height: 1; border-radius: 3px;" ${taskIdx < personalTasks.length - 1 ? `onclick="event.stopPropagation(); window.tripPlanner.moveManualTask('${this.escapeHtml(mt.id)}', 1)" onmouseover="this.style.color='#60a5fa'" onmouseout="this.style.color='#94a3b8'"` : 'disabled'} title="${taskIdx < personalTasks.length - 1 ? 'Move Task Down' : ''}">
+                            <button style="background: none; border: none; color: ${taskIdx < personalTasks.length - 1 ? '#94a3b8' : '#334155'}; cursor: ${taskIdx < personalTasks.length - 1 ? 'pointer' : 'default'}; padding: 1px 2px; font-size: 10px; line-height: 1; border-radius: 3px;" ${taskIdx < personalTasks.length - 1 ? `onclick="event.stopPropagation(); window.tripPlanner.moveManualTask('${this.escapeHtml(mt.id)}', 1)" onmouseover="this.style.color='#fb923c'"` : 'disabled'} title="${taskIdx < personalTasks.length - 1 ? 'Move Task Down' : ''}">
                               ▼
                             </button>
                           ` : ''}
-                          <button class="admin-only-control" style="background: none; border: none; color: #64748b; cursor: pointer; padding: 1px 3px; font-size: 11px; line-height: 1; border-radius: 3px;" onmouseover="this.style.color='#60a5fa'" onmouseout="this.style.color='#64748b'" onclick="event.stopPropagation(); window.tripPlanner.openEditManualTaskModal('${this.escapeHtml(mt.id)}')" title="Edit Task">
+                          <button class="admin-only-control" style="background: none; border: none; color: #64748b; cursor: pointer; padding: 1px 3px; font-size: 11px; line-height: 1; border-radius: 3px;" onmouseover="this.style.color='#fb923c'" onmouseout="this.style.color='#64748b'" onclick="event.stopPropagation(); window.tripPlanner.openEditManualTaskModal('${this.escapeHtml(mt.id)}')" title="Edit Task">
                             ✏️
                           </button>
                           <button class="admin-only-control" style="background: none; border: none; color: #64748b; cursor: pointer; padding: 1px 4px; font-size: 12px; line-height: 1; border-radius: 3px;" onmouseover="this.style.color='#f87171'" onmouseout="this.style.color='#64748b'" onclick="event.stopPropagation(); window.tripPlanner.deleteManualTask('${this.escapeHtml(mt.id)}')" title="Delete Task">
@@ -7753,7 +7753,7 @@ class TripPlannerApp {
                 </span>
               ` : ''}
               ${personalTasks.length > 0 ? `
-                <span class="badge" style="background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.35); font-size: 9px; padding: 1px 4px; border-radius: 3px;" title="${personalTasks.length} Office Task(s)">
+                <span class="badge" style="background: rgba(249, 115, 22, 0.2); color: #fdba74; border: 1px solid rgba(249, 115, 22, 0.35); font-size: 9px; padding: 1px 4px; border-radius: 3px;" title="${personalTasks.length} Office Task(s)">
                   💼 ${personalTasks.filter(t => t.status !== 'Complete').length}
                 </span>
               ` : ''}
@@ -7777,7 +7777,7 @@ class TripPlannerApp {
               <button class="btn btn-secondary admin-only-control" style="padding: 1px 5px; font-size: 9px; line-height: 1.2; background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 3px; cursor: pointer;" onclick="window.tripPlanner.openAddManualTaskModal('${dateKey}', '${this.escapeJs(day.dayName)}, ${this.escapeJs(day.formattedDate)}', 'cert_class')" title="Schedule Training Class on ${day.dayName}">
                 🎓 + Class
               </button>
-              <button class="btn btn-secondary admin-only-control" style="padding: 1px 5px; font-size: 9px; line-height: 1.2; background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 3px; cursor: pointer;" onclick="window.tripPlanner.openAddManualTaskModal('${dateKey}', '${this.escapeJs(day.dayName)}, ${this.escapeJs(day.formattedDate)}', 'personal_task')" title="Add Personal / Office Task on ${day.dayName}">
+              <button class="btn btn-secondary admin-only-control" style="padding: 1px 5px; font-size: 9px; line-height: 1.2; background: rgba(249, 115, 22, 0.15); color: #fdba74; border: 1px solid rgba(249, 115, 22, 0.3); border-radius: 3px; cursor: pointer;" onclick="window.tripPlanner.openAddManualTaskModal('${dateKey}', '${this.escapeJs(day.dayName)}, ${this.escapeJs(day.formattedDate)}', 'personal_task')" title="Add Personal / Office Task on ${day.dayName}">
                 💼 + Task
               </button>
               <span class="badge" style="background: ${isHoliday ? '#ca8a04' : (day.isWorkDay ? '#0284c7' : '#475569')}; color: #fff; font-size: 9.5px; padding: 2px 5px; border-radius: 4px;">
