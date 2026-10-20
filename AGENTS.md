@@ -23,16 +23,16 @@ Google Apps Script loads files **alphabetically**. Numbered prefixes control loa
 00-Constants.gs  → loads FIRST (defines COLS, SHEET_* constants, STATUS_LOCATIONS, incl. Blankets/MACKs/HV Testers/Phasing Sets/AED/Grounds/Hot Sticks) (~380 lines)
 01-Utilities.gs  → utility functions (logEvent, normalizeApprovalValue, isStatusLocation, isEmployeePending, parseDateNoon, getPhysicalLocation, getSignificantJobNumber, setChunkedScriptProperty, getChunkedScriptProperty, findTrainingTrackingHeaderRow, getTrainingTrackingColIndices, safeWriteRowToTable, safeSetNumberFormat, getEmployeeNameColumnIndex) (~510 lines)
 10-Menu.gs       → archived (menu now in Code.gs) (~19 lines)
-11-Triggers.gs   → edit/change triggers, auto change-out dates (Gloves, Sleeves, Blankets, HV Testers, Phasing Sets, AED) (~2.4k lines)
-20-InventoryHandlers.gs → inventory status/assignment handlers (~215 lines)
+11-Triggers.gs   → passive repository protection (onEdit(e) blocks direct edits) & admin utilities (~240 lines)
+20-InventoryHandlers.gs → stub (inventory handlers consolidated in Desktop App & Code.gs) (~10 lines)
 21-ChangeOutDate.gs → change-out date calculation logic (~220 lines)
 22-EmployeeValidation.gs → Job Tracking functions, Employee validation, training sync (~3.3k lines)
 22-LocationSync.gs → Inventory location sync with Employees (Gloves, Sleeves, Blankets, HV Testers, Phasing Sets, AED) (~242 lines)
-30-SwapGeneration.gs → Swap report generation stubs (~378 lines — most logic in Code.gs)
+30-SwapGeneration.gs → Swap report generation (normalizeSleeveSize, upgradePickListItems) (~380 lines)
 31-SwapHandlers.gs → Swap stage handling (Stage 1/2/3 workflows) (~515 lines)
-32-SwapPreservation.gs → stub (~21 lines — logic in Code.gs)
+32-SwapPreservation.gs → stub (consolidated in Code.gs & Desktop App) (~10 lines)
 40-Reclaims.gs   → stub (~8 lines — logic in Code.gs)
-50-History.gs    → Item history (Gloves/Sleeves History), DEPRECATED by saveHistoryFast() in Code.gs (~265 lines)
+50-History.gs    → stub (history tracking consolidated in saveHistoryFast() in Code.gs) (~10 lines)
 51-EmployeeHistory.gs → Employee lifecycle, restore deleted employees (~1.5k lines)
 60-PurchaseNeeds.gs → stub (~10 lines — logic in Code.gs)
 61-InventoryReports.gs → Inventory Reports with charts (~901 lines)
@@ -173,15 +173,11 @@ Keys are stored as `TASKS_DATA_chunks` (count) + `TASKS_DATA_chunk_0`, `TASKS_DA
 | `88-SafetyReports.gs` | Gmail processing, Safety Compliance tracking (~19.2k lines) |
 | `99-MenuFix.gs` | Canonical menu builder — `onOpen()` delegates to `_buildGloveManagerMenu()` here; run `forceCreateMenu()` if menu missing (~462 lines) |
 | `TestRunner.gs` | Integration tests - run `runAllTests()` in Apps Script editor (~365 lines) |
-| `ToDoSchedule.html` | Task List dialog (~6.7k lines) |
-| `TripPlanner.html` | Trip Planner / Scheduler (primary scheduling interface, ~5.3k lines) |
-| `CrewImport.html` | Excel crew import with SheetJS (~9.2k lines) |
 | `QuickActions.html` | Monday workflow sidebar (~375 lines) |
 | `ProcessSafetyEmailsDialog.html` | Safety email processing dialog (~1.8k lines) |
 | `GenerateAllReportsDialog.html` | 3-part progress dialog for Generate All Reports — calls `generateAllReportsPart1/2/3()` sequentially to avoid 6-min timeout (~166 lines) |
 | `DashboardSMSDialog.html` | SMS notification dialog for cert expiration — calls `markCertNotifiedAndReload(employeeName, certType)` on send (~71 lines) |
 | `ToDoConfig.html` | Schedule configuration dialog (~1.4k lines) |
-| `PurchaseOrderDialog.html` | Purchase order creation dialog (~943 lines) |
 | `VendorConfig.html` | Vendor management with unified catalog (~450 lines) |
 | `ComplianceConfig.html` | Safety Compliance configuration (~200 lines) |
 | `AssignCrewLeads.html` | Crew lead assignment dialog (~540 lines) |
