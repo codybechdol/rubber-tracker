@@ -13,10 +13,27 @@ class TaskManagerApp {
 
   init() {
     this.setupSearchListeners();
+    if (this.db && typeof this.db.subscribe === 'function') {
+      this.db.subscribe(() => {
+        this.invalidateTasksCache();
+        const tasksView = document.getElementById('tasks-view');
+        if (tasksView && tasksView.classList.contains('active')) {
+          this.renderTasks();
+        }
+      });
+    }
     const tasksView = document.getElementById('tasks-view');
     if (tasksView && tasksView.classList.contains('active')) {
       this.renderTasks();
     }
+  }
+
+  invalidateTasksCache() {
+    this._cachedTasks = null;
+    this._taskMap = null;
+    this._cachedTasksSnapshot = null;
+    this._cachedTasksOutboxLen = -1;
+    this._departedNamesCache = null;
   }
 
   setupSearchListeners() {
@@ -122,7 +139,11 @@ class TaskManagerApp {
   /**
    * Collects, enriches, and normalizes all tasks across Task Metadata, Swap Sheets, Training, and Expiring Certs
    */
-  collectAllTasks(targetDate = new Date()) {
+  collectAllTasks(targetDate = new Date(), forceRefresh = false) {
+    if (!forceRefresh && this._cachedTasks && this._cachedTasksSnapshot === (this.db ? this.db.snapshot : null) && this._cachedTasksOutboxLen === (this.db && this.db.outbox ? this.db.outbox.length : 0)) {
+      return this._cachedTasks;
+    }
+
     const allTasks = [];
     const seenTaskKeys = new Set();
 
@@ -818,13 +839,23 @@ class TaskManagerApp {
       });
     }
 
+    this._cachedTasks = allTasks;
+    this._cachedTasksSnapshot = this.db ? this.db.snapshot : null;
+    this._cachedTasksOutboxLen = this.db && this.db.outbox ? this.db.outbox.length : 0;
+    this._taskMap = new Map();
+    allTasks.forEach(t => {
+      if (t && t.id) this._taskMap.set(String(t.id).toLowerCase(), t);
+    });
+
     return allTasks;
   }
 
   getTaskById(taskId) {
     if (!taskId) return null;
-    const allTasks = this.collectAllTasks();
-    return allTasks.find(t => String(t.id).toLowerCase() === String(taskId).toLowerCase()) || null;
+    if (!this._cachedTasks || !this._taskMap) {
+      this.collectAllTasks();
+    }
+    return (this._taskMap && this._taskMap.get(String(taskId).toLowerCase())) || null;
   }
 
   isEquipmentSwapCompleted(sourceSheet, itemNum, employeeName) {

@@ -448,6 +448,7 @@ function exportFullDatabaseSnapshot(tableKeysFilter) {
   var workSchedule = 'Mon-Thu';
   var driveTimeMap = {};
   var plannedTrips = {};
+  var scheduledSwaps = {};
   var manualTasks = [];
 
   if (!filterSet) {
@@ -486,6 +487,15 @@ function exportFullDatabaseSnapshot(tableKeysFilter) {
     } catch (e) {
       Logger.log('exportFullDatabaseSnapshot: Error reading manualTasks: ' + e);
     }
+
+    try {
+      var rawSwaps = (typeof getChunkedScriptProperty === 'function') ? getChunkedScriptProperty('SCHEDULED_SWAPS') : PropertiesService.getScriptProperties().getProperty('SCHEDULED_SWAPS');
+      if (rawSwaps) {
+        scheduledSwaps = typeof rawSwaps === 'string' ? JSON.parse(rawSwaps) : rawSwaps;
+      }
+    } catch (e) {
+      Logger.log('exportFullDatabaseSnapshot: Error reading scheduledSwaps: ' + e);
+    }
   }
 
   return {
@@ -500,6 +510,7 @@ function exportFullDatabaseSnapshot(tableKeysFilter) {
       workSchedule: workSchedule,
       driveTimeMap: driveTimeMap,
       plannedTrips: plannedTrips,
+      scheduled_swaps: scheduledSwaps,
       manual_tasks: manualTasks
     },
     tables: tables
@@ -698,13 +709,17 @@ function patchSyncSnapshotInDrive(sheetsModified, configsModified) {
         if (rawTasks) snap.configs.manual_tasks = typeof rawTasks === 'string' ? JSON.parse(rawTasks) : rawTasks;
       } catch (eTk) {}
       try {
+        var rawSwaps = (typeof getChunkedScriptProperty === 'function') ? getChunkedScriptProperty('SCHEDULED_SWAPS') : PropertiesService.getScriptProperties().getProperty('SCHEDULED_SWAPS');
+        if (rawSwaps) snap.configs.scheduled_swaps = typeof rawSwaps === 'string' ? JSON.parse(rawSwaps) : rawSwaps;
+      } catch (eSw) {}
+      try {
         if (typeof getHolidays === 'function') snap.configs.holidays = getHolidays();
       } catch (eH) {}
       try {
         if (typeof getWorkSchedule === 'function') snap.configs.workSchedule = getWorkSchedule();
       } catch (eW) {}
       patchedAny = true;
-      Logger.log('patchSyncSnapshotInDrive: Patched plannedTrips & manual_tasks in Drive snapshot cache');
+      Logger.log('patchSyncSnapshotInDrive: Patched plannedTrips, scheduled_swaps & manual_tasks in Drive snapshot cache');
     }
 
     if (patchedAny) {
