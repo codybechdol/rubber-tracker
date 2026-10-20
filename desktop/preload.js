@@ -11,5 +11,11 @@ contextBridge.exposeInMainWorld('desktopAPI', {
   openPdfExternally: (base64Data, filename) => ipcRenderer.invoke('open-pdf-externally', { base64Data, filename }),
   savePdfToFile: (base64Data, defaultFilename) => ipcRenderer.invoke('save-pdf-to-file', { base64Data, defaultFilename }),
   saveHtmlToPdf: (htmlContent, defaultFilename) => ipcRenderer.invoke('save-html-to-pdf', { htmlContent, defaultFilename }),
-  forceFocusWindow: () => ipcRenderer.invoke('force-focus-window')
+  forceFocusWindow: () => ipcRenderer.invoke('force-focus-window'),
+  selectCertPhotoFile: () => ipcRenderer.invoke('select-cert-photo-file'),
+  saveCertPhoto: (data) => ipcRenderer.invoke('save-cert-photo', data),
+  getCertPhoto: (params) => ipcRenderer.invoke('get-cert-photo', params),
+  openCertPhotoExternally: (params) => ipcRenderer.invoke('open-cert-photo-externally', params),
+  showCertPhotoInFolder: (params) => ipcRenderer.invoke('show-cert-photo-in-folder', params),
+  deleteCertPhoto: (params) => ipcRenderer.invoke('delete-cert-photo', params)
 });

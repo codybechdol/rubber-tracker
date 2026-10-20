@@ -584,6 +584,71 @@ class LocalDatabase {
   }
 
   /**
+   * Helper to get a normalized key for an employee and certification type.
+   */
+  getCertPhotoKey(employeeName, certType) {
+    const cleanEmp = String(employeeName || '').toLowerCase().trim().replace(/\s+/g, ' ');
+    const cleanCert = String(certType || '').toLowerCase().trim().replace(/\s+/g, ' ');
+    return `${cleanEmp}|${cleanCert}`;
+  }
+
+  /**
+   * Retrieves cert photo metadata for an employee and cert type.
+   */
+  getCertPhotoRecord(employeeName, certType) {
+    if (!this.snapshot || !this.snapshot.configs || !this.snapshot.configs.cert_photos) {
+      return null;
+    }
+    const key = this.getCertPhotoKey(employeeName, certType);
+    return this.snapshot.configs.cert_photos[key] || null;
+  }
+
+  /**
+   * Saves cert photo metadata for an employee and cert type.
+   */
+  async saveCertPhotoRecord(employeeName, certType, record) {
+    if (!this.snapshot) this.snapshot = { configs: {}, tables: {} };
+    if (!this.snapshot.configs) this.snapshot.configs = {};
+    if (!this.snapshot.configs.cert_photos) this.snapshot.configs.cert_photos = {};
+
+    const key = this.getCertPhotoKey(employeeName, certType);
+    this.snapshot.configs.cert_photos[key] = {
+      ...record,
+      employeeName,
+      certType,
+      updatedAt: new Date().toISOString()
+    };
+
+    if (typeof this.saveLocalSnapshot === 'function') {
+      await this.saveLocalSnapshot();
+    } else if (window.desktopAPI && typeof window.desktopAPI.saveLocalSnapshot === 'function') {
+      await window.desktopAPI.saveLocalSnapshot(this.snapshot);
+    }
+    return this.snapshot.configs.cert_photos[key];
+  }
+
+  /**
+   * Deletes cert photo metadata for an employee and cert type.
+   */
+  async deleteCertPhotoRecord(employeeName, certType) {
+    if (!this.snapshot || !this.snapshot.configs || !this.snapshot.configs.cert_photos) {
+      return false;
+    }
+    const key = this.getCertPhotoKey(employeeName, certType);
+    const existing = this.snapshot.configs.cert_photos[key];
+    if (existing) {
+      delete this.snapshot.configs.cert_photos[key];
+      if (typeof this.saveLocalSnapshot === 'function') {
+        await this.saveLocalSnapshot();
+      } else if (window.desktopAPI && typeof window.desktopAPI.saveLocalSnapshot === 'function') {
+        await window.desktopAPI.saveLocalSnapshot(this.snapshot);
+      }
+      return true;
+    }
+    return false;
+  }
+
+  /**
    * Synchronizes trip schedule and manual task calendar into the 'Trip Schedule' table.
    */
   syncTripScheduleTable() {

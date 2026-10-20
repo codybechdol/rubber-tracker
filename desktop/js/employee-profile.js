@@ -3903,6 +3903,28 @@ class EmployeeProfileEngine {
           </label>
           <input type="text" id="cert-edit-notes" value="${this.escapeHtml(currentNotes || '')}" placeholder="e.g. Card #, Evaluation notes, Instructor..." style="width: 100%; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 8px 10px; font-size: 12.5px; outline: none;">
         </div>
+
+        <!-- Proof Photo Section -->
+        <div style="background: rgba(14, 165, 233, 0.05); border: 1px dashed rgba(14, 165, 233, 0.35); border-radius: 8px; padding: 12px 14px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span style="font-size: 20px;">📷</span>
+            <div>
+              <div style="font-size: 12px; font-weight: 700; color: #f8fafc;">Renewal Proof Photo</div>
+              <div style="font-size: 11px; color: #94a3b8; margin-top: 2px;">
+                ${(() => {
+                  const pRec = this.db && typeof this.db.getCertPhotoRecord === 'function' ? this.db.getCertPhotoRecord(empName, certType) : null;
+                  return (pRec && pRec.fileName) ? `<span style="color: #34d399; font-weight: 700;">✅ Proof on file (${this.escapeHtml(pRec.fileName)})</span>` : 'Attach physical picture texted by employee';
+                })()}
+              </div>
+            </div>
+          </div>
+          <button type="button" class="btn btn-secondary" style="font-size: 11.5px; padding: 4px 12px; color: #38bdf8; border-color: rgba(56, 189, 248, 0.4); display: inline-flex; align-items: center; gap: 5px; cursor: pointer;" onclick="window.sheetNavigator && window.sheetNavigator.openCertPhotoModal('${this.escapeJs(empName)}', '${this.escapeJs(certType)}')">
+            <span>${(() => {
+              const pRec = this.db && typeof this.db.getCertPhotoRecord === 'function' ? this.db.getCertPhotoRecord(empName, certType) : null;
+              return (pRec && pRec.fileName) ? '🖼️ View / Email to HR' : '📷 Attach Photo';
+            })()}</span>
+          </button>
+        </div>
       </div>
     `;
 

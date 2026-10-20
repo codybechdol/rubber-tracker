@@ -1111,6 +1111,468 @@ class SheetNavigator {
     }
   }
 
+  // ==========================================
+  // Cert Photo Vault & Document Proof Methods
+  // ==========================================
+
+  /**
+   * Opens the Cert Photo Vault modal for a given employee and cert type.
+   */
+  async openCertPhotoModal(empName, certType, sheetRowIdx = null) {
+    if (!empName || !certType) return;
+    const modal = document.getElementById('cert-photo-modal');
+    const titleEl = document.getElementById('cert-photo-modal-title');
+    const subTitleEl = document.getElementById('cert-photo-modal-subtitle');
+    if (!modal) return;
+
+    this.activeCertPhotoContext = {
+      empName: String(empName).trim(),
+      certType: String(certType).trim(),
+      sheetRowIdx
+    };
+    this.stagedCertPhoto = null;
+    this.isReplacingCertPhoto = false;
+
+    if (titleEl) titleEl.textContent = `Certification Proof: ${empName}`;
+    if (subTitleEl) subTitleEl.textContent = `${certType} — Renewal Proof Vault & HR Email Dispatch`;
+
+    await this.renderCertPhotoModalContent();
+    modal.style.display = 'flex';
+    modal.classList.add('active');
+
+    // Attach clipboard paste handler
+    if (this._certPasteHandler) {
+      window.removeEventListener('paste', this._certPasteHandler);
+    }
+    this._certPasteHandler = (e) => this.handleCertPhotoClipboardPaste(e);
+    window.addEventListener('paste', this._certPasteHandler);
+  }
+
+  /**
+   * Closes the Cert Photo Vault modal.
+   */
+  closeCertPhotoModal() {
+    const modal = document.getElementById('cert-photo-modal');
+    if (modal) {
+      modal.style.display = 'none';
+      modal.classList.remove('active');
+    }
+    if (this._certPasteHandler) {
+      window.removeEventListener('paste', this._certPasteHandler);
+      this._certPasteHandler = null;
+    }
+    this.activeCertPhotoContext = null;
+    this.stagedCertPhoto = null;
+    this.isReplacingCertPhoto = false;
+  }
+
+  /**
+   * Renders the dynamic content of the Cert Photo Vault modal.
+   */
+  async renderCertPhotoModalContent() {
+    const body = document.getElementById('cert-photo-modal-body');
+    if (!body || !this.activeCertPhotoContext) return;
+
+    const { empName, certType } = this.activeCertPhotoContext;
+
+    // Look up dates from expiring_certs
+    let acqDate = '';
+    let expDate = '';
+    const tableData = this.db ? this.db.getTable('expiring_certs') : null;
+    if (tableData && tableData.rows) {
+      const row = tableData.rows.find(r => {
+        const rEmp = String(r['Employee Name'] || r['Name'] || '').trim().toLowerCase();
+        const rCert = String(r['Item Type'] || r['Cert Type'] || '').trim().toLowerCase();
+        return rEmp === empName.toLowerCase() && rCert === certType.toLowerCase();
+      });
+      if (row) {
+        acqDate = String(row['Date Acquired'] || row['Acquired Date'] || '').trim();
+        expDate = String(row['Expiration Date'] || row['Expiration'] || '').trim();
+      }
+    }
+
+    const photoRecord = this.db && typeof this.db.getCertPhotoRecord === 'function' ? this.db.getCertPhotoRecord(empName, certType) : null;
+    const hasSavedPhoto = !!(photoRecord && photoRecord.fileName && !this.isReplacingCertPhoto);
+    const savedHrEmail = (this.db && this.db.snapshot && this.db.snapshot.configs && this.db.snapshot.configs.hr_email) || '';
+
+    // If we have a staged photo (pasted or dragged), show staged preview
+    if (this.stagedCertPhoto) {
+      const isPdf = this.stagedCertPhoto.base64Data && this.stagedCertPhoto.base64Data.startsWith('data:application/pdf');
+      body.innerHTML = `
+        <div style="background: rgba(14, 165, 233, 0.08); border: 1px solid rgba(14, 165, 233, 0.3); border-radius: 10px; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between;">
+          <div>
+            <div style="font-weight: 800; font-size: 14px; color: #f8fafc;">✨ Staged Photo Ready to Attach</div>
+            <div style="font-size: 11.5px; color: #94a3b8; margin-top: 2px;">
+              ${this.escapeHtml(this.stagedCertPhoto.fileName || 'Pasted Image')} · Review preview below and click Save.
+            </div>
+          </div>
+          <span class="badge" style="background: #0284c7; color: white; padding: 4px 10px; border-radius: 4px; font-weight: 700; font-size: 11px;">Staged</span>
+        </div>
+
+        <div style="text-align: center; background: #0f172a; border-radius: 10px; border: 1px solid rgba(255,255,255,0.1); padding: 16px; max-height: 400px; display: flex; align-items: center; justify-content: center; overflow: hidden;">
+          ${isPdf ? `
+            <div style="padding: 30px;">
+              <span style="font-size: 48px;">📄</span>
+              <div style="font-size: 14px; font-weight: 700; color: #f8fafc; margin-top: 10px;">${this.escapeHtml(this.stagedCertPhoto.fileName || 'PDF Document')}</div>
+            </div>
+          ` : `
+            <img src="${this.stagedCertPhoto.base64Data}" style="max-width: 100%; max-height: 360px; object-fit: contain; border-radius: 6px; box-shadow: 0 4px 20px rgba(0,0,0,0.5);">
+          `}
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; gap: 10px; padding-top: 8px;">
+          <button class="btn btn-secondary" onclick="window.sheetNavigator.cancelStagedCertPhoto()">✕ Cancel</button>
+          <button class="btn btn-primary" onclick="window.sheetNavigator.saveStagedCertPhoto()" style="font-weight: 700; display: inline-flex; align-items: center; gap: 6px; background: linear-gradient(135deg, #059669 0%, #10b981 100%); border: none;">
+            <span>💾</span> Save & Attach Photo
+          </button>
+        </div>
+      `;
+      return;
+    }
+
+    // If photo exists on disk and saved in database
+    if (hasSavedPhoto) {
+      let photoDataUrl = '';
+      let fileExists = true;
+      if (window.desktopAPI && typeof window.desktopAPI.getCertPhoto === 'function') {
+        const res = await window.desktopAPI.getCertPhoto({ fileName: photoRecord.fileName, fullPath: photoRecord.fullPath });
+        if (res && res.exists) {
+          photoDataUrl = res.base64Data;
+        } else {
+          fileExists = false;
+        }
+      }
+
+      const isPdf = photoRecord.fileName.toLowerCase().endsWith('.pdf');
+
+      body.innerHTML = `
+        <!-- Meta Details Card -->
+        <div style="background: rgba(30, 41, 59, 0.7); border: 1px solid rgba(255,255,255,0.1); border-radius: 10px; padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+          <div>
+            <div style="font-size: 15px; font-weight: 800; color: #f8fafc;">
+              👤 ${this.escapeHtml(empName)} · <span style="color: #38bdf8;">${this.escapeHtml(certType)}</span>
+            </div>
+            <div style="font-size: 11.5px; color: #94a3b8; margin-top: 4px; display: flex; gap: 14px; flex-wrap: wrap;">
+              <span>📅 Acquired: <strong style="color: #e2e8f0;">${this.escapeHtml(acqDate || '—')}</strong></span>
+              <span>⏳ Expires: <strong style="color: #e2e8f0;">${this.escapeHtml(expDate || '—')}</strong></span>
+              <span>📁 File: <strong style="color: #a78bfa;">${this.escapeHtml(photoRecord.fileName)}</strong></span>
+            </div>
+          </div>
+          <div>
+            <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); padding: 4px 10px; border-radius: 20px; font-size: 11.5px; font-weight: 700;">
+              ✅ Proof Attached
+            </span>
+          </div>
+        </div>
+
+        <!-- Main Photo Box -->
+        <div style="background: #0f172a; border-radius: 10px; border: 1px solid rgba(255,255,255,0.1); padding: 14px; text-align: center; position: relative;">
+          ${fileExists ? (
+            isPdf ? `
+              <div style="padding: 40px 20px;">
+                <span style="font-size: 50px;">📄</span>
+                <div style="font-size: 14.5px; font-weight: 800; color: #f8fafc; margin-top: 8px;">${this.escapeHtml(photoRecord.fileName)}</div>
+                <button class="btn btn-secondary" style="margin-top: 14px; color: #38bdf8; border-color: rgba(56, 189, 248, 0.4);" onclick="window.sheetNavigator.openCertPhotoExternally('${this.escapeJs(photoRecord.fileName)}')">
+                  📄 Open PDF in Default Viewer
+                </button>
+              </div>
+            ` : `
+              <img src="${photoDataUrl}" style="max-width: 100%; max-height: 380px; object-fit: contain; border-radius: 6px; cursor: pointer; transition: transform 0.2s;" onclick="window.sheetNavigator.openCertPhotoExternally('${this.escapeJs(photoRecord.fileName)}')" title="Click to view full image in Windows Photos">
+              <div style="font-size: 11px; color: #64748b; margin-top: 6px;">💡 Click photo to view high-resolution image in Windows Photos</div>
+            `
+          ) : `
+            <div style="padding: 30px; color: #f87171;">
+              ⚠️ Photo file was not found in the local cert_photos folder (${this.escapeHtml(photoRecord.fileName)}).
+            </div>
+          `}
+        </div>
+
+        <!-- HR Email & Dispatch Section -->
+        <div style="background: rgba(14, 165, 233, 0.06); border: 1px solid rgba(14, 165, 233, 0.25); border-radius: 10px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+            <div style="font-size: 12.5px; font-weight: 800; color: #38bdf8; display: flex; align-items: center; gap: 6px;">
+              <span>📧</span> 1-Click HR Email Dispatch
+            </div>
+            <div style="font-size: 11px; color: var(--text-muted);">Pre-fills email subject, body, and highlights file to drag into email</div>
+          </div>
+
+          <div style="display: flex; gap: 10px; align-items: center;">
+            <input type="email" id="cert-photo-hr-email" value="${this.escapeHtml(savedHrEmail)}" placeholder="HR Email (e.g. hr@company.com)" style="flex: 1; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 7px 10px; font-size: 12px; outline: none;">
+            <button class="btn btn-primary" style="font-size: 12px; font-weight: 700; padding: 7px 14px; background: linear-gradient(135deg, #0284c7 0%, #2563eb 100%); border: none; display: inline-flex; align-items: center; gap: 6px; box-shadow: 0 2px 10px rgba(14, 165, 233, 0.35); cursor: pointer;" onclick="window.sheetNavigator.emailCertPhotoToHR('${this.escapeJs(empName)}', '${this.escapeJs(certType)}')">
+              <span>📧</span> Email to HR
+            </button>
+          </div>
+        </div>
+
+        <!-- Action Tools Bar -->
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; padding-top: 6px; border-top: 1px solid rgba(255,255,255,0.08);">
+          <div style="display: flex; gap: 8px;">
+            <button class="btn btn-secondary" style="font-size: 11.5px; padding: 5px 10px;" onclick="window.sheetNavigator.openCertPhotoExternally('${this.escapeJs(photoRecord.fileName)}')">
+              📂 Windows Photos
+            </button>
+            <button class="btn btn-secondary" style="font-size: 11.5px; padding: 5px 10px;" onclick="window.sheetNavigator.showCertPhotoInFolder('${this.escapeJs(photoRecord.fileName)}')">
+              📁 Show in Folder
+            </button>
+          </div>
+          <div style="display: flex; gap: 8px;">
+            <button class="btn btn-secondary" style="font-size: 11.5px; padding: 5px 10px; color: #38bdf8; border-color: rgba(56, 189, 248, 0.4);" onclick="window.sheetNavigator.startReplaceCertPhoto()">
+              🔄 Replace Photo
+            </button>
+            <button class="btn btn-secondary" style="font-size: 11.5px; padding: 5px 10px; color: #f87171; border-color: rgba(239, 68, 68, 0.4); background: rgba(239, 68, 68, 0.08);" onclick="window.sheetNavigator.handleCertPhotoDelete('${this.escapeJs(empName)}', '${this.escapeJs(certType)}')">
+              🗑️ Remove
+            </button>
+          </div>
+        </div>
+      `;
+      return;
+    }
+
+    // Default: Upload / Dropzone state
+    body.innerHTML = `
+      <!-- Meta Card -->
+      <div style="background: rgba(30, 41, 59, 0.7); border: 1px solid rgba(255,255,255,0.1); border-radius: 10px; padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+        <div>
+          <div style="font-size: 15px; font-weight: 800; color: #f8fafc;">
+            👤 ${this.escapeHtml(empName)} · <span style="color: #38bdf8;">${this.escapeHtml(certType)}</span>
+          </div>
+          <div style="font-size: 11.5px; color: #94a3b8; margin-top: 4px; display: flex; gap: 14px; flex-wrap: wrap;">
+            <span>📅 Acquired: <strong style="color: #e2e8f0;">${this.escapeHtml(acqDate || '—')}</strong></span>
+            <span>⏳ Expires: <strong style="color: #e2e8f0;">${this.escapeHtml(expDate || '—')}</strong></span>
+          </div>
+        </div>
+        <div>
+          <span class="badge" style="background: rgba(148, 163, 184, 0.15); color: #94a3b8; border: 1px solid rgba(148, 163, 184, 0.3); padding: 4px 10px; border-radius: 20px; font-size: 11.5px; font-weight: 600;">
+            No Proof Attached
+          </span>
+        </div>
+      </div>
+
+      <!-- Drag & Drop Zone -->
+      <div id="cert-photo-dropzone" 
+           ondragover="event.preventDefault(); this.style.borderColor='#38bdf8'; this.style.background='rgba(56,189,248,0.1)';" 
+           ondragleave="this.style.borderColor='#0284c7'; this.style.background='rgba(14,165,233,0.05)';" 
+           ondrop="window.sheetNavigator.handleCertPhotoDrop(event)"
+           onclick="window.sheetNavigator.handleCertPhotoFileBrowse()"
+           style="border: 2px dashed #0284c7; background: rgba(14, 165, 233, 0.05); padding: 42px 20px; text-align: center; border-radius: 12px; cursor: pointer; transition: all 0.2s ease;">
+        <div style="font-size: 42px; margin-bottom: 10px;">📥</div>
+        <div style="font-size: 15px; font-weight: 800; color: #f8fafc;">
+          Drag &amp; Drop cert renewal photo here
+        </div>
+        <div style="font-size: 12.5px; color: #38bdf8; margin-top: 6px; font-weight: 600;">
+          or click to browse image / PDF from your computer
+        </div>
+        <div style="margin-top: 16px; display: inline-flex; align-items: center; gap: 8px; background: rgba(250, 204, 21, 0.1); border: 1px solid rgba(250, 204, 21, 0.3); padding: 6px 14px; border-radius: 20px;">
+          <span style="font-size: 13px;">💡</span>
+          <span style="font-size: 11.5px; color: #fde047; font-weight: 700;">
+            Or press <code style="background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; color: white;">Ctrl + V</code> anywhere to paste directly from your clipboard!
+          </span>
+        </div>
+        <div style="font-size: 11px; color: #64748b; margin-top: 10px;">
+          Supports JPG, PNG, WEBP, HEIC, and PDF documents. Texted photos can be copied and pasted in one click.
+        </div>
+      </div>
+
+      <div style="display: flex; justify-content: flex-end; padding-top: 8px;">
+        <button class="btn btn-secondary" onclick="window.sheetNavigator.closeCertPhotoModal()">Close</button>
+      </div>
+    `;
+  }
+
+  startReplaceCertPhoto() {
+    this.isReplacingCertPhoto = true;
+    this.stagedCertPhoto = null;
+    this.renderCertPhotoModalContent();
+  }
+
+  cancelStagedCertPhoto() {
+    this.stagedCertPhoto = null;
+    this.isReplacingCertPhoto = false;
+    this.renderCertPhotoModalContent();
+  }
+
+  handleCertPhotoClipboardPaste(e) {
+    if (!this.activeCertPhotoContext) return;
+    const items = e.clipboardData && e.clipboardData.items;
+    if (!items || !items.length) return;
+
+    for (const item of items) {
+      if (item.type.indexOf('image') !== -1) {
+        e.preventDefault();
+        const blob = item.getAsFile();
+        const reader = new FileReader();
+        reader.onload = (event) => {
+          this.stagedCertPhoto = {
+            base64Data: event.target.result,
+            fileName: `Pasted_Photo_${Date.now()}.png`
+          };
+          this.renderCertPhotoModalContent();
+          if (typeof window.showToast === 'function') {
+            window.showToast('📋 Image pasted from clipboard! Click "Save & Attach Photo" to store.', 'info');
+          }
+        };
+        reader.readAsDataURL(blob);
+        break;
+      }
+    }
+  }
+
+  handleCertPhotoDrop(event) {
+    event.preventDefault();
+    const dropzone = document.getElementById('cert-photo-dropzone');
+    if (dropzone) {
+      dropzone.style.borderColor = '#0284c7';
+      dropzone.style.background = 'rgba(14, 165, 233, 0.05)';
+    }
+
+    if (!this.activeCertPhotoContext) return;
+    const files = event.dataTransfer && event.dataTransfer.files;
+    if (!files || !files.length) return;
+    const file = files[0];
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      this.stagedCertPhoto = {
+        base64Data: e.target.result,
+        originalPath: file.path || null,
+        fileName: file.name
+      };
+      this.renderCertPhotoModalContent();
+    };
+    reader.readAsDataURL(file);
+  }
+
+  async handleCertPhotoFileBrowse() {
+    if (!window.desktopAPI || !window.desktopAPI.selectCertPhotoFile) return;
+    const res = await window.desktopAPI.selectCertPhotoFile();
+    if (res && res.success) {
+      this.stagedCertPhoto = {
+        base64Data: res.base64Data,
+        originalPath: res.originalPath,
+        fileName: res.fileName
+      };
+      await this.renderCertPhotoModalContent();
+    }
+  }
+
+  async saveStagedCertPhoto() {
+    if (!this.activeCertPhotoContext || !this.stagedCertPhoto) return;
+    const { empName, certType } = this.activeCertPhotoContext;
+
+    if (!window.desktopAPI || !window.desktopAPI.saveCertPhoto) {
+      alert('Desktop file saving API is not available.');
+      return;
+    }
+
+    const saveRes = await window.desktopAPI.saveCertPhoto({
+      employeeName: empName,
+      certType: certType,
+      base64Data: this.stagedCertPhoto.base64Data,
+      originalPath: this.stagedCertPhoto.originalPath
+    });
+
+    if (saveRes && saveRes.success) {
+      const todayStr = new Date().toLocaleDateString('en-US');
+      await this.db.saveCertPhotoRecord(empName, certType, {
+        fileName: saveRes.fileName,
+        fullPath: saveRes.fullPath,
+        dateAdded: todayStr
+      });
+
+      this.stagedCertPhoto = null;
+      this.isReplacingCertPhoto = false;
+      if (typeof window.showToast === 'function') {
+        window.showToast(`✅ Renewal proof for ${empName} saved successfully!`, 'success');
+      }
+      await this.renderCertPhotoModalContent();
+      this.renderCurrentSheet();
+    } else {
+      alert(`Failed to save photo: ${(saveRes && saveRes.error) || 'Unknown error'}`);
+    }
+  }
+
+  async handleCertPhotoDelete(empName, certType) {
+    if (!empName || !certType) return;
+    if (!confirm(`Are you sure you want to remove the renewal proof photo for ${empName} (${certType})?`)) {
+      return;
+    }
+
+    const photoRecord = this.db.getCertPhotoRecord(empName, certType);
+    if (photoRecord && photoRecord.fileName && window.desktopAPI && window.desktopAPI.deleteCertPhoto) {
+      await window.desktopAPI.deleteCertPhoto({ fileName: photoRecord.fileName, fullPath: photoRecord.fullPath });
+    }
+
+    await this.db.deleteCertPhotoRecord(empName, certType);
+    this.stagedCertPhoto = null;
+    this.isReplacingCertPhoto = false;
+
+    if (typeof window.showToast === 'function') {
+      window.showToast(`🗑️ Proof photo removed for ${empName}.`, 'info');
+    }
+    await this.renderCertPhotoModalContent();
+    this.renderCurrentSheet();
+  }
+
+  async openCertPhotoExternally(fileName) {
+    if (!fileName || !window.desktopAPI || !window.desktopAPI.openCertPhotoExternally) return;
+    await window.desktopAPI.openCertPhotoExternally({ fileName });
+  }
+
+  async showCertPhotoInFolder(fileName) {
+    if (!fileName || !window.desktopAPI || !window.desktopAPI.showCertPhotoInFolder) return;
+    await window.desktopAPI.showCertPhotoInFolder({ fileName });
+  }
+
+  async emailCertPhotoToHR(empName, certType) {
+    if (!empName || !certType) return;
+    const photoRecord = this.db.getCertPhotoRecord(empName, certType);
+
+    let acqDate = '';
+    let expDate = '';
+    const tableData = this.db.getTable('expiring_certs');
+    if (tableData && tableData.rows) {
+      const row = tableData.rows.find(r => {
+        const rEmp = String(r['Employee Name'] || r['Name'] || '').trim().toLowerCase();
+        const rCert = String(r['Item Type'] || r['Cert Type'] || '').trim().toLowerCase();
+        return rEmp === empName.toLowerCase() && rCert === certType.toLowerCase();
+      });
+      if (row) {
+        acqDate = String(row['Date Acquired'] || row['Acquired Date'] || '').trim();
+        expDate = String(row['Expiration Date'] || row['Expiration'] || '').trim();
+      }
+    }
+
+    const hrEmailInput = document.getElementById('cert-photo-hr-email');
+    let hrEmail = hrEmailInput ? hrEmailInput.value.trim() : '';
+    if (!hrEmail && this.db.snapshot && this.db.snapshot.configs && this.db.snapshot.configs.hr_email) {
+      hrEmail = this.db.snapshot.configs.hr_email;
+    }
+    if (hrEmail) {
+      if (!this.db.snapshot.configs) this.db.snapshot.configs = {};
+      this.db.snapshot.configs.hr_email = hrEmail;
+      if (typeof this.db.saveLocalSnapshot === 'function') {
+        await this.db.saveLocalSnapshot();
+      }
+    }
+
+    const subject = `Certification Renewal Proof: ${empName} - ${certType}`;
+    const body = `Hello HR,\n\nAttached is the renewed certification proof card for ${empName}.\n\n• Employee: ${empName}\n• Certification: ${certType}\n• Date Acquired: ${acqDate || 'On file'}\n• Expiration Date: ${expDate || 'Current'}\n\nPlease update company HR records accordingly.\n\nThank you,\nSafety Department`;
+
+    const mailtoUrl = `mailto:${encodeURIComponent(hrEmail)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+
+    if (window.desktopAPI && typeof window.desktopAPI.openExternal === 'function') {
+      await window.desktopAPI.openExternal(mailtoUrl);
+    } else {
+      window.open(mailtoUrl, '_blank');
+    }
+
+    if (photoRecord && photoRecord.fileName && window.desktopAPI && typeof window.desktopAPI.showCertPhotoInFolder === 'function') {
+      await window.desktopAPI.showCertPhotoInFolder({ fileName: photoRecord.fileName, fullPath: photoRecord.fullPath });
+    }
+
+    if (typeof window.showToast === 'function') {
+      window.showToast('📧 Opening email client... Photo highlighted in folder to drag and attach!', 'info');
+    }
+  }
+
   /**
    * Returns a Set of lowercase normalized names of all departed / previous employees.
    */
@@ -6152,7 +6614,7 @@ class SheetNavigator {
       </th>`;
     });
     if (this.currentSheetKey === 'expiring_certs') {
-      html += `<th style="width: 48px; text-align: center;">Action</th>`;
+      html += `<th style="width: 140px; text-align: center;">Actions</th>`;
     }
     html += `</tr></thead><tbody>`;
 
@@ -6697,7 +7159,17 @@ class SheetNavigator {
                      data-sheet="${this.escapeHtml(tableData.name)}">${customCellHtml !== null ? customCellHtml : this.escapeHtml(val)}</td>`;
       });
       if (this.currentSheetKey === 'expiring_certs') {
-        html += `<td class="admin-only-control" style="text-align: center; width: 74px; white-space: nowrap;">
+        const empName = String(row['Employee Name'] || row['Name'] || Object.values(row)[0] || '').trim();
+        const certType = String(row['Item Type'] || row['Cert Type'] || row['Certification'] || '').trim();
+        const photoRecord = this.db && typeof this.db.getCertPhotoRecord === 'function' ? this.db.getCertPhotoRecord(empName, certType) : null;
+        const hasPhoto = !!(photoRecord && photoRecord.fileName);
+
+        const proofBtnHtml = hasPhoto
+          ? `<button class="btn btn-secondary" style="padding: 2px 7px; font-size: 11px; color: #34d399; border-color: rgba(52, 211, 153, 0.45); background: rgba(52, 211, 153, 0.12); cursor: pointer; margin-right: 4px; font-weight: 700;" onclick="window.sheetNavigator.openCertPhotoModal('${this.escapeJs(empName)}', '${this.escapeJs(certType)}', ${sheetRowIdx})" title="View attached renewal proof / 1-Click Email to HR">🖼️ Proof</button>`
+          : `<button class="btn btn-secondary" style="padding: 2px 7px; font-size: 11px; color: #94a3b8; border-color: rgba(148, 163, 184, 0.3); background: rgba(148, 163, 184, 0.05); cursor: pointer; margin-right: 4px;" onclick="window.sheetNavigator.openCertPhotoModal('${this.escapeJs(empName)}', '${this.escapeJs(certType)}', ${sheetRowIdx})" title="Attach cert renewal proof photo (texted from employee)">📷 Attach</button>`;
+
+        html += `<td class="admin-only-control" style="text-align: center; width: 140px; white-space: nowrap;">
+          ${proofBtnHtml}
           <button class="btn btn-secondary" style="padding: 2px 7px; font-size: 11px; color: #60a5fa; border-color: rgba(96, 165, 250, 0.35); background: rgba(96, 165, 250, 0.08); cursor: pointer; margin-right: 4px;" onclick="window.sheetNavigator.openCertEditModal(${sheetRowIdx})" title="Edit certification dates, provider & notes">✏️</button>
           <button class="btn btn-secondary" style="padding: 2px 7px; font-size: 11px; color: #f87171; border-color: rgba(239, 68, 68, 0.35); background: rgba(239, 68, 68, 0.08); cursor: pointer;" onclick="window.sheetNavigator.deleteCertRow(${sheetRowIdx})" title="Delete this certification record">🗑️</button>
         </td>`;

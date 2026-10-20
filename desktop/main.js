@@ -359,4 +359,143 @@ ipcMain.handle('save-html-to-pdf', async (event, { htmlContent, defaultFilename 
   }
 });
 
+// ==========================================
+// Cert Photo Vault & Document Proof IPC Handlers
+// ==========================================
+const CERT_PHOTOS_DIR = path.join(USER_DATA_DIR, 'cert_photos');
+if (!fs.existsSync(CERT_PHOTOS_DIR)) {
+  fs.mkdirSync(CERT_PHOTOS_DIR, { recursive: true });
+}
+
+ipcMain.handle('select-cert-photo-file', async () => {
+  try {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Select Certification Photo or Document',
+      properties: ['openFile'],
+      filters: [
+        { name: 'Images & PDFs', extensions: ['jpg', 'jpeg', 'png', 'webp', 'pdf', 'heic', 'bmp'] }
+      ]
+    });
+    if (!result.canceled && result.filePaths && result.filePaths.length > 0) {
+      const srcPath = result.filePaths[0];
+      const buffer = await fs.promises.readFile(srcPath);
+      const ext = path.extname(srcPath).toLowerCase() || '.jpg';
+      let mime = 'image/jpeg';
+      if (ext === '.png') mime = 'image/png';
+      else if (ext === '.webp') mime = 'image/webp';
+      else if (ext === '.pdf') mime = 'application/pdf';
+      return {
+        success: true,
+        originalPath: srcPath,
+        fileName: path.basename(srcPath),
+        base64Data: `data:${mime};base64,${buffer.toString('base64')}`
+      };
+    }
+    return { success: false, canceled: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('save-cert-photo', async (event, { employeeName, certType, base64Data, originalPath }) => {
+  try {
+    const safeEmp = String(employeeName || 'Employee').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const safeCert = String(certType || 'Cert').replace(/[^a-zA-Z0-9_-]/g, '_');
+    const timestamp = Date.now();
+    let ext = '.jpg';
+
+    if (originalPath) {
+      ext = path.extname(originalPath).toLowerCase() || '.jpg';
+    } else if (base64Data) {
+      if (base64Data.startsWith('data:image/png')) ext = '.png';
+      else if (base64Data.startsWith('data:image/webp')) ext = '.webp';
+      else if (base64Data.startsWith('data:application/pdf')) ext = '.pdf';
+    }
+
+    const fileName = `${safeEmp}_${safeCert}_${timestamp}${ext}`;
+    const targetPath = path.join(CERT_PHOTOS_DIR, fileName);
+
+    if (originalPath && fs.existsSync(originalPath)) {
+      await fs.promises.copyFile(originalPath, targetPath);
+    } else if (base64Data) {
+      const rawBase64 = base64Data.includes('base64,') ? base64Data.split('base64,')[1] : base64Data;
+      const buffer = Buffer.from(rawBase64, 'base64');
+      await fs.promises.writeFile(targetPath, buffer);
+    } else {
+      return { success: false, error: 'No image data provided' };
+    }
+
+    return {
+      success: true,
+      fileName,
+      fullPath: targetPath
+    };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('get-cert-photo', async (event, { fileName, fullPath }) => {
+  try {
+    const targetPath = fullPath || (fileName ? path.join(CERT_PHOTOS_DIR, fileName) : null);
+    if (!targetPath || !fs.existsSync(targetPath)) {
+      return { exists: false };
+    }
+    const buffer = await fs.promises.readFile(targetPath);
+    const ext = path.extname(targetPath).toLowerCase();
+    let mime = 'image/jpeg';
+    if (ext === '.png') mime = 'image/png';
+    else if (ext === '.webp') mime = 'image/webp';
+    else if (ext === '.pdf') mime = 'application/pdf';
+
+    return {
+      exists: true,
+      fullPath: targetPath,
+      fileName: path.basename(targetPath),
+      base64Data: `data:${mime};base64,${buffer.toString('base64')}`
+    };
+  } catch (err) {
+    return { exists: false, error: err.message };
+  }
+});
+
+ipcMain.handle('open-cert-photo-externally', async (event, { fileName, fullPath }) => {
+  try {
+    const targetPath = fullPath || (fileName ? path.join(CERT_PHOTOS_DIR, fileName) : null);
+    if (targetPath && fs.existsSync(targetPath)) {
+      await shell.openPath(targetPath);
+      return { success: true };
+    }
+    return { success: false, error: 'File does not exist' };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('show-cert-photo-in-folder', async (event, { fileName, fullPath }) => {
+  try {
+    const targetPath = fullPath || (fileName ? path.join(CERT_PHOTOS_DIR, fileName) : null);
+    if (targetPath && fs.existsSync(targetPath)) {
+      shell.showItemInFolder(targetPath);
+      return { success: true };
+    }
+    return { success: false, error: 'File does not exist' };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('delete-cert-photo', async (event, { fileName, fullPath }) => {
+  try {
+    const targetPath = fullPath || (fileName ? path.join(CERT_PHOTOS_DIR, fileName) : null);
+    if (targetPath && fs.existsSync(targetPath)) {
+      await fs.promises.unlink(targetPath);
+      return { success: true };
+    }
+    return { success: false, error: 'File does not exist' };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
 
