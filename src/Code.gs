@@ -33943,6 +33943,16 @@ function doGet(e) {
         : { success: false, error: 'scanIncidentReportEmails function not found in backend' };
       return ContentService.createTextOutput(JSON.stringify(scanRes))
         .setMimeType(ContentService.MimeType.JSON);
+    } else if (action === 'scanCertEmails') {
+      var scanCertRes = (typeof scanCertRenewalEmails === 'function')
+        ? scanCertRenewalEmails({
+            daysBack: parseInt(e.parameter.daysBack || '30', 10),
+            query: e.parameter.query || '',
+            folder: e.parameter.folder || 'ALL'
+          })
+        : { success: false, error: 'scanCertRenewalEmails function not found in backend' };
+      return ContentService.createTextOutput(JSON.stringify(scanCertRes))
+        .setMimeType(ContentService.MimeType.JSON);
     } else if (action === 'getSafetyEmailsStatus') {
       var statusRes = (typeof getSafetyEmailsStatus === 'function')
         ? getSafetyEmailsStatus()
@@ -34119,6 +34129,14 @@ function doPost(e) {
         ? scanIncidentReportEmails(payload)
         : { success: false, error: 'scanIncidentReportEmails function not found in backend' };
       return ContentService.createTextOutput(JSON.stringify(scanIncResult))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    if (action === 'scanCertEmails') {
+      var scanCertRes = (typeof scanCertRenewalEmails === 'function')
+        ? scanCertRenewalEmails(payload)
+        : { success: false, error: 'scanCertRenewalEmails function not found in backend' };
+      return ContentService.createTextOutput(JSON.stringify(scanCertRes))
         .setMimeType(ContentService.MimeType.JSON);
     }
 
