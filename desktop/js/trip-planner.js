@@ -181,9 +181,10 @@ class TripPlannerApp {
   /**
    * Checks whether a picked swap is scheduled for a date in Trip Planner.
    * Checks both explicit swap scheduling (this.scheduledSwaps) and planned location/crew trips (this.plannedTrips).
+   * When explicitOnly is true, only returns explicit swap assignments and ignores planned location trips.
    * Returns { dateKey, location, source } or null if not scheduled.
    */
-  getSwapScheduleInfo(item, targetTodayKey = null) {
+  getSwapScheduleInfo(item, targetTodayKey = null, explicitOnly = false) {
     if (!item) return null;
     const sKey = this.getSwapKey(item);
 
@@ -196,6 +197,8 @@ class TripPlannerApp {
         return { dateKey, location, source: 'explicit' };
       }
     }
+
+    if (explicitOnly) return null;
 
     // 2. Check planned trips across dates
     if (this.plannedTrips) {
@@ -3755,24 +3758,6 @@ class TripPlannerApp {
       }
       this.showToast(`🚚 Scheduled ${payload.swaps.length} swap(s) for ${payload.employeeName || 'employee'} on ${dateKey}`);
     } else if (payload.type === 'location') {
-      const pickedData = this.getPickedSwapsData();
-      const locSwaps = (pickedData.items || []).filter(item => 
-        (item.location || '').toLowerCase() === (location || '').toLowerCase()
-      );
-      locSwaps.forEach(s => {
-        const sKey = this.getSwapKey(s);
-        if (sKey) {
-          this.scheduledSwaps[sKey] = {
-            dateKey,
-            location: location,
-            employeeName: s.employeeName || '',
-            crewId: s.crewId || s.jobNum || '',
-            type: s.type || 'Glove',
-            swap: s
-          };
-        }
-      });
-      this.saveScheduledSwaps();
       if (location) {
         this.addTrip(dateKey, location);
       }
@@ -6237,6 +6222,43 @@ class TripPlannerApp {
   }
 
   /**
+   * Identifies whether a task is a PPE swap, Tool/Equipment, or Training task.
+   * Used to ensure Cities sidebar only displays non-swap, non-equipment, non-training tasks
+   * (such as Certifications, Safety Reports, Drug Testing).
+   */
+  isSwapOrEquipmentOrTrainingTask(t) {
+    if (!t) return false;
+    const cat = String(t.category || '').toLowerCase();
+    const type = String(t.type || '').toLowerCase();
+    const source = String(t.sourceSheet || '').toLowerCase();
+    const itemType = String(t.itemType || '').toLowerCase();
+
+    // 1. Swaps (PPE)
+    if (cat === 'ppe' || cat === 'reclaim') return true;
+    if (type.includes('glove') || type.includes('sleeve') || type.includes('blanket') || type.includes('swap')) return true;
+    if (source.includes('swap')) return true;
+    if (itemType.includes('glove') || itemType.includes('sleeve') || itemType.includes('blanket')) return true;
+
+    // 2. Equipment
+    if (cat === 'equipment') return true;
+    if (type.includes('equipment') || type.includes('mack') || type.includes('tester') || type.includes('phasing') || type.includes('aed') || type.includes('ground') || type.includes('stick') || type.includes('jumper') || type.includes('cone') || type.includes('extinguisher') || type.includes('first aid') || type.includes('firstaid')) return true;
+    if (source.includes('equipment') || source.includes('tester') || source.includes('phasing') || source.includes('ground') || source.includes('stick') || source.includes('mack')) return true;
+    if (itemType.includes('mack') || itemType.includes('tester') || itemType.includes('phasing') || itemType.includes('aed') || itemType.includes('ground') || itemType.includes('stick') || itemType.includes('extinguisher')) return true;
+
+    // 3. Certifications are NOT training or equipment or swaps
+    if (cat === 'certs' || type.includes('cert') || type.includes('cpr') || type.includes('crane') || type.includes('rescue')) {
+      return false;
+    }
+
+    // 4. Training (Classroom / Training Tracking)
+    if (cat === 'training' || source === 'training tracking' || type.includes('training') || itemType.includes('training')) {
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
    * Calculates concise task count breakdown for a crew
    */
   getCrewTaskSummary(crewTasks) {
@@ -7616,7 +7638,7 @@ class TripPlannerApp {
                               });
 
                               return `
-                                <div class="crew-task-box" onclick="window.tripPlanner.openCrewTasksModal('${this.escapeHtml(c.crewId)}', '${this.escapeHtml(trip.location)}', 'All', '${dateKey}')" title="Click to view all tasks for Crew ${this.escapeHtml(c.crewId)}">
+                                <div class="crew-task-box" onclick="window.tripPlanner.openCrewTasksModal('${this.escapeHtml(c.crewId)}', '${this.escapeHtml(trip.location)}', 'All', '${dateKey}', false)" title="Click to view all tasks for Crew ${this.escapeHtml(c.crewId)}">
                                   <div style="font-size: 11px; color: #cbd5e1; display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
                                     <span><strong style="color: #60a5fa;">Crew ${this.escapeHtml(c.crewId)}</strong> (${this.escapeHtml(c.foreman)})</span>
                                     <div style="display: flex; align-items: center; gap: 4px;">
@@ -7890,7 +7912,8 @@ class TripPlannerApp {
       card.style.background = 'var(--bg-primary)';
 
       const totalWorkers = loc.activeCrews.reduce((sum, c) => sum + (c.crewSize || 0), 0);
-      const locTasks = window.taskManager ? window.taskManager.getTasksByLocation(loc.name) : [];
+      const rawLocTasks = window.taskManager ? window.taskManager.getTasksByLocation(loc.name) : [];
+      const locTasks = rawLocTasks.filter(t => !this.isSwapOrEquipmentOrTrainingTask(t));
       const overdueTasks = locTasks.filter(t => t.isOverdue).length;
 
       card.innerHTML = `
@@ -7911,20 +7934,18 @@ class TripPlannerApp {
               
               <div style="display: flex; flex-direction: column; gap: 4px; margin-top: 5px;">
                 ${loc.activeCrews.map(c => {
-                  const crewTasks = window.taskManager ? window.taskManager.getTasksByCrew(c.crewId) : [];
+                  const rawCrewTasks = window.taskManager ? window.taskManager.getTasksByCrew(c.crewId) : [];
+                  const crewTasks = rawCrewTasks.filter(t => !this.isSwapOrEquipmentOrTrainingTask(t));
                   const summary = this.getCrewTaskSummary(crewTasks);
 
                   return `
-                    <div class="crew-task-box" style="margin-bottom: 0; padding: 4px 6px;" onclick="window.tripPlanner.openCrewTasksModal('${this.escapeHtml(c.crewId)}', '${this.escapeHtml(loc.name)}')" title="Click to view tasks for Crew ${this.escapeHtml(c.crewId)}">
+                    <div class="crew-task-box" style="margin-bottom: 0; padding: 4px 6px;" onclick="window.tripPlanner.openCrewTasksModal('${this.escapeHtml(c.crewId)}', '${this.escapeHtml(loc.name)}', 'All', null, true)" title="Click to view tasks for Crew ${this.escapeHtml(c.crewId)}">
                       <div style="display: flex; justify-content: space-between; align-items: center;">
                         <span style="font-size: 10.5px; color: #cbd5e1;"><strong style="color: #60a5fa;">${this.escapeHtml(c.crewId)}</strong> (${this.escapeHtml(c.foreman)})</span>
                         <span style="font-size: 9.5px; color: ${summary.total > 0 ? '#93c5fd' : '#4ade80'};">${summary.total} tasks</span>
                       </div>
                       <div style="display: flex; flex-wrap: wrap; gap: 2px; margin-top: 2px;">
-                        ${summary.gloves > 0 ? `<span style="font-size: 9px; color: #93c5fd;">🧤${summary.gloves}</span>` : ''}
-                        ${summary.sleeves > 0 ? `<span style="font-size: 9px; color: #d8b4fe;">🧤${summary.sleeves}</span>` : ''}
                         ${summary.certs > 0 ? `<span style="font-size: 9px; color: #fca5a5;">📜${summary.certs}</span>` : ''}
-                        ${summary.equipment > 0 || summary.macks > 0 ? `<span style="font-size: 9px; color: #5eead4;">⚡${summary.equipment + summary.macks}</span>` : ''}
                         ${summary.reports > 0 ? `<span style="font-size: 9px; color: #fdba74;">📋${summary.reports}</span>` : ''}
                         ${summary.drugTests > 0 ? `<span style="font-size: 9px; color: #c084fc;">🧪${summary.drugTests}</span>` : ''}
                       </div>
@@ -8344,14 +8365,14 @@ class TripPlannerApp {
 
     let items = data.items;
 
-    // Filter out swaps that are scheduled for today or an upcoming day (scheduledDate >= todayKey)
-    // Both explicit swap assignments (this.scheduledSwaps) and planned location/crew trips (this.plannedTrips) are checked.
+    // Filter out swaps that are explicitly scheduled for today or an upcoming day (scheduledDate >= todayKey)
+    // Only explicit swap assignments (this.scheduledSwaps) hide items from the sidebar, so general planned location trips do not hide unassigned picked swaps.
     // If the scheduled day has passed (scheduledDate < todayKey) and swap is not completed, it is kept in the list (added back as missed)!
     const today = new Date();
     const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
     items = items.filter(i => {
-      const sched = this.getSwapScheduleInfo(i, todayKey);
+      const sched = this.getSwapScheduleInfo(i, todayKey, true);
       if (!sched) return true;
       const schedDate = sched.dateKey;
       if (!schedDate) return true;
@@ -8512,7 +8533,7 @@ class TripPlannerApp {
         crewHeader.style.cssText = 'display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; cursor: pointer;';
         crewHeader.title = `Click to view crew tasks`;
         crewHeader.onclick = () => {
-          this.openCrewTasksModal(crewGroup.crewId, locName, 'PPE');
+          this.openCrewTasksModal(crewGroup.crewId, locName, 'PPE', null, false);
         };
         crewHeader.innerHTML = `
           <div style="font-size: 11px; font-weight: 700; color: #cbd5e1; display: flex; align-items: center; gap: 4px;">
@@ -9823,10 +9844,15 @@ class TripPlannerApp {
   /**
    * Opens the full task checklist modal for a specific crew
    */
-  openCrewTasksModal(crewId, location = '', filterCat = 'All', targetDateKey = null) {
+  openCrewTasksModal(crewId, location = '', filterCat = 'All', targetDateKey = null, fromCitiesSidebar = null) {
     this.activeModalCrewId = crewId;
+    this.activeModalLocation = location;
     this.activeModalCat = filterCat;
     this.activeModalDateKey = targetDateKey;
+    if (fromCitiesSidebar !== null && fromCitiesSidebar !== undefined) {
+      this.activeModalFromCitiesSidebar = !!fromCitiesSidebar;
+    }
+    const isFromCities = !!this.activeModalFromCitiesSidebar;
 
     const modal = document.getElementById('crew-tasks-modal');
     const title = document.getElementById('crew-tasks-modal-title');
@@ -9836,10 +9862,14 @@ class TripPlannerApp {
 
     const targetDate = targetDateKey ? this.parseDate(targetDateKey) : this.currentDate;
     if (filterCat === 'Training') filterCat = 'All';
+    if (isFromCities && (filterCat === 'PPE' || filterCat === 'Equipment')) filterCat = 'All';
 
     // Get active (non-completed) operational tasks for this crew (monthly classroom trainings are managed under the day column 🎓 Training section)
     const rawCrewTasks = window.taskManager ? window.taskManager.getTasksByCrew(crewId, targetDate, false) : [];
-    const allCrewTasks = rawCrewTasks.filter(t => t.category !== 'Training' && t.sourceSheet !== 'Training Tracking' && !(t.type || '').toLowerCase().includes('training') && !(t.itemType || '').toLowerCase().includes('training'));
+    let allCrewTasks = rawCrewTasks.filter(t => t.category !== 'Training' && t.sourceSheet !== 'Training Tracking' && !(t.type || '').toLowerCase().includes('training') && !(t.itemType || '').toLowerCase().includes('training'));
+    if (isFromCities) {
+      allCrewTasks = rawCrewTasks.filter(t => !this.isSwapOrEquipmentOrTrainingTask(t));
+    }
     const summary = this.getCrewTaskSummary(allCrewTasks);
 
     // Get crew details from Job Tracking
@@ -9908,25 +9938,27 @@ class TripPlannerApp {
 
       <!-- Category Filter Pills -->
       <div style="display: flex; gap: 6px; margin-bottom: 14px; flex-wrap: wrap;">
-        <button class="btn btn-secondary ${filterCat === 'All' ? 'active' : ''}" style="padding: 3px 10px; font-size: 11.5px; font-weight: 700;" onclick="window.tripPlanner.openCrewTasksModal('${this.escapeHtml(crewId)}', '${this.escapeHtml(loc)}', 'All', '${safeDateKey}')">
+        <button class="btn btn-secondary ${filterCat === 'All' ? 'active' : ''}" style="padding: 3px 10px; font-size: 11.5px; font-weight: 700;" onclick="window.tripPlanner.openCrewTasksModal('${this.escapeHtml(crewId)}', '${this.escapeHtml(loc)}', 'All', '${safeDateKey}', ${isFromCities ? 'true' : 'false'})">
           All Active (${allCrewTasks.length})
         </button>
-        <button class="btn btn-secondary ${filterCat === 'PPE' ? 'active' : ''}" style="padding: 3px 10px; font-size: 11.5px;" onclick="window.tripPlanner.openCrewTasksModal('${this.escapeHtml(crewId)}', '${this.escapeHtml(loc)}', 'PPE', '${safeDateKey}')">
-          🧤 PPE Swaps (${summary.gloves + summary.sleeves + summary.blankets})
-        </button>
-        <button class="btn btn-secondary ${filterCat === 'Equipment' ? 'active' : ''}" style="padding: 3px 10px; font-size: 11.5px;" onclick="window.tripPlanner.openCrewTasksModal('${this.escapeHtml(crewId)}', '${this.escapeHtml(loc)}', 'Equipment', '${safeDateKey}')">
-          ⚡ Tool & Equipment (${summary.macks + summary.equipment})
-        </button>
-        <button class="btn btn-secondary ${filterCat === 'Certs' ? 'active' : ''}" style="padding: 3px 10px; font-size: 11.5px;" onclick="window.tripPlanner.openCrewTasksModal('${this.escapeHtml(crewId)}', '${this.escapeHtml(loc)}', 'Certs', '${safeDateKey}')">
+        ${!isFromCities ? `
+          <button class="btn btn-secondary ${filterCat === 'PPE' ? 'active' : ''}" style="padding: 3px 10px; font-size: 11.5px;" onclick="window.tripPlanner.openCrewTasksModal('${this.escapeHtml(crewId)}', '${this.escapeHtml(loc)}', 'PPE', '${safeDateKey}', false)">
+            🧤 PPE Swaps (${summary.gloves + summary.sleeves + summary.blankets})
+          </button>
+          <button class="btn btn-secondary ${filterCat === 'Equipment' ? 'active' : ''}" style="padding: 3px 10px; font-size: 11.5px;" onclick="window.tripPlanner.openCrewTasksModal('${this.escapeHtml(crewId)}', '${this.escapeHtml(loc)}', 'Equipment', '${safeDateKey}', false)">
+            ⚡ Tool & Equipment (${summary.macks + summary.equipment})
+          </button>
+        ` : ''}
+        <button class="btn btn-secondary ${filterCat === 'Certs' ? 'active' : ''}" style="padding: 3px 10px; font-size: 11.5px;" onclick="window.tripPlanner.openCrewTasksModal('${this.escapeHtml(crewId)}', '${this.escapeHtml(loc)}', 'Certs', '${safeDateKey}', ${isFromCities ? 'true' : 'false'})">
           📜 Certifications (${summary.certs})
         </button>
         ${summary.reports > 0 ? `
-          <button class="btn btn-secondary ${filterCat === 'Reports' ? 'active' : ''}" style="padding: 3px 10px; font-size: 11.5px;" onclick="window.tripPlanner.openCrewTasksModal('${this.escapeHtml(crewId)}', '${this.escapeHtml(loc)}', 'Reports', '${safeDateKey}')">
+          <button class="btn btn-secondary ${filterCat === 'Reports' ? 'active' : ''}" style="padding: 3px 10px; font-size: 11.5px;" onclick="window.tripPlanner.openCrewTasksModal('${this.escapeHtml(crewId)}', '${this.escapeHtml(loc)}', 'Reports', '${safeDateKey}', ${isFromCities ? 'true' : 'false'})">
             📋 Safety Reports (${summary.reports})
           </button>
         ` : ''}
         ${summary.drugTests > 0 ? `
-          <button class="btn btn-secondary ${filterCat === 'DrugTests' ? 'active' : ''}" style="padding: 3px 10px; font-size: 11.5px;" onclick="window.tripPlanner.openCrewTasksModal('${this.escapeHtml(crewId)}', '${this.escapeHtml(loc)}', 'DrugTests', '${safeDateKey}')">
+          <button class="btn btn-secondary ${filterCat === 'DrugTests' ? 'active' : ''}" style="padding: 3px 10px; font-size: 11.5px;" onclick="window.tripPlanner.openCrewTasksModal('${this.escapeHtml(crewId)}', '${this.escapeHtml(loc)}', 'DrugTests', '${safeDateKey}', ${isFromCities ? 'true' : 'false'})">
             🧪 Drug Tests (${summary.drugTests})
           </button>
         ` : ''}
