@@ -810,10 +810,19 @@ function markItemsAsOrdered(items, expectedDelivery) {
  * Menu item: Glove Manager → 🛒 Purchase Orders → 📝 Create Purchase Order
  */
 function showPurchaseOrderDialog() {
-  var html = HtmlService.createHtmlOutputFromFile('PurchaseOrderDialog')
-    .setWidth(1400)
-    .setHeight(900);
-  SpreadsheetApp.getUi().showModalDialog(html, '🛒 Create Purchase Order');
+  var html = HtmlService.createHtmlOutput(
+    '<div style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; padding: 24px 28px; text-align: center; color: #1e293b; background: #ffffff;">' +
+    '<div style="font-size: 44px; margin-bottom: 12px;">🛒</div>' +
+    '<h3 style="margin: 0 0 8px 0; color: #0f172a; font-size: 18px; font-weight: 700;">Purchase Order Management</h3>' +
+    '<p style="font-size: 13px; color: #64748b; line-height: 1.6; margin: 0 0 20px 0;">' +
+    'Purchase orders and vendor catalog management are now handled directly in the dedicated <strong>Safety Assistant Desktop App</strong>.' +
+    '</p>' +
+    '<div style="display: flex; justify-content: center; gap: 10px;">' +
+    '<button style="background: #2563eb; color: #ffffff; border: none; border-radius: 6px; padding: 8px 18px; font-size: 13px; font-weight: 600; cursor: pointer;" onclick="google.script.host.close()">Got it</button>' +
+    '</div>' +
+    '</div>'
+  ).setWidth(480).setHeight(280);
+  SpreadsheetApp.getUi().showModalDialog(html, '🛒 Purchase Orders');
 }
 
 /**

@@ -16,10 +16,25 @@
  * Dialog size: 1920x1080 (maximum for full screen on most monitors)
  */
 function showCrewImportDialog() {
-  var html = HtmlService.createHtmlOutputFromFile('CrewImport')
-    .setWidth(1900)
-    .setHeight(1000);
-  SpreadsheetApp.getUi().showModalDialog(html, 'Import Crew Makeup');
+  var html = HtmlService.createHtmlOutput(
+    '<div style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, Roboto, sans-serif; padding: 24px 28px; text-align: center; color: #1e293b; background: #ffffff;">' +
+    '<div style="font-size: 44px; margin-bottom: 12px;">👥</div>' +
+    '<h3 style="margin: 0 0 8px 0; color: #0f172a; font-size: 18px; font-weight: 700;">Import Crew Makeup</h3>' +
+    '<p style="font-size: 13px; color: #64748b; line-height: 1.6; margin: 0 0 20px 0;">' +
+    'Crew makeup imports and roster synchronization are now processed directly in the dedicated <strong>Safety Assistant Desktop App</strong>.' +
+    '</p>' +
+    '<div style="background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 8px; padding: 16px; text-align: left; font-size: 12px; color: #475569; line-height: 1.7; margin-bottom: 20px;">' +
+    '⚡ <strong>Desktop App Import Features:</strong><br>' +
+    '• <strong>Direct Excel Parsing:</strong> Drop your crew roster spreadsheet directly into the app.<br>' +
+    '• <strong>Visual Preview & Validation:</strong> Review new hires, transfers, and foremen before committing.<br>' +
+    '• <strong>Cloud Database Sync:</strong> Automatically queues and syncs roster mutations.' +
+    '</div>' +
+    '<div style="display: flex; justify-content: center; gap: 10px;">' +
+    '<button style="background: #2563eb; color: #ffffff; border: none; border-radius: 6px; padding: 8px 18px; font-size: 13px; font-weight: 600; cursor: pointer;" onclick="google.script.host.close()">Got it</button>' +
+    '</div>' +
+    '</div>'
+  ).setWidth(520).setHeight(360);
+  SpreadsheetApp.getUi().showModalDialog(html, '👥 Import Crew Makeup');
 }
 
 /**

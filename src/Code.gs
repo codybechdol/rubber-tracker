@@ -207,57 +207,36 @@ function showToDoConfig() {
  * @param {string} initialTab - Optional tab to open: 'schedule', 'trip', or 'config'
  */
 function showScheduleDialog(initialTab) {
-  var html = HtmlService.createHtmlOutputFromFile('Schedule')
-    .setWidth(1400)
-    .setHeight(900);
-  SpreadsheetApp.getUi().showModalDialog(html, '📅 Schedule');
+  showTripPlannerDialog();
 }
 
 /**
  * Returns the HTML content of a specified file for embedding in Schedule dialog.
- * Used by Schedule.html to load ToDoSchedule, TripPlanner, and ToDoConfig as embedded content.
- *
- * NOTE: When HTML is loaded via iframe with document.write(), the google.script.run
- * context is lost. This function now returns content wrapped with the Apps Script
- * client library to restore functionality.
- *
  * @param {string} fileName - The HTML file name (without .html extension)
- * @return {string} The HTML content as a string with google.script.run support
+ * @return {string} The HTML content as a string
  */
 function getEmbeddedHtmlContent(fileName) {
   try {
-    // Use createHtmlOutputFromFile which includes the Apps Script client library
     var htmlOutput = HtmlService.createHtmlOutputFromFile(fileName);
-
-    // Get the content - this includes the necessary script tags for google.script.run
-    var content = htmlOutput.getContent();
-
-    return content;
+    return htmlOutput.getContent();
   } catch (e) {
     Logger.log('Error loading embedded HTML ' + fileName + ': ' + e.toString());
-    throw new Error('Could not load ' + fileName + ': ' + e.message);
+    return '';
   }
 }
 
 /**
  * Shows a specific embedded dialog by name.
- * This opens the dialog directly (not as iframe content), preserving google.script.run functionality.
- * Used as a workaround for iframe embedding limitations.
  * @param {string} dialogName - The dialog to show: 'ToDoSchedule', 'TripPlanner', or 'ToDoConfig'
  */
 function showEmbeddedDialog(dialogName) {
-  var ui = SpreadsheetApp.getUi();
-  var titles = {
-    'ToDoSchedule': 'Tasks',
-    'TripPlanner': 'Trip Planner',
-    'ToDoConfig': 'Configuration'
-  };
-
-  var html = HtmlService.createHtmlOutputFromFile(dialogName)
-    .setWidth(1100)
-    .setHeight(700);
-
-  ui.showModalDialog(html, titles[dialogName] || dialogName);
+  if (dialogName === 'TripPlanner') {
+    showTripPlannerDialog();
+  } else if (dialogName === 'ToDoSchedule') {
+    showToDoSchedule();
+  } else {
+    showToDoConfig();
+  }
 }
 
 // ============================================================================
