@@ -14,15 +14,11 @@
 
 const fs = require('fs');
 const path = require('path');
+const vm = require('vm');
 
 const SRC_DIR = path.join(__dirname, 'src');
 let errorCount = 0;
 let warningCount = 0;
-
-// Only warn when the open/close count differs by more than this amount.
-// Keeps false positives from regex literals silent while still catching
-// genuinely unclosed blocks (which would have a much larger delta).
-const MISMATCH_THRESHOLD = 5;
 
 console.log('========================================');
 console.log('   PRE-PUSH SYNTAX VALIDATOR');
@@ -38,10 +34,10 @@ files.forEach(file => {
 
     // Check for common issues
     checkDuplicateCommentClosers(file, lines);
-    checkUnmatchedBraces(file, content);
+    if (file.endsWith('.gs')) {
+        checkSyntaxV8(file, content);
+    }
     checkDuplicateFiles(file);
-
-    // checkES6Syntax(file, lines); // Skipped: Project supports V8/ES6+ syntax on this branch
 });
 
 // Validate desktop files if desktop folder exists
@@ -121,54 +117,18 @@ function checkDuplicateCommentClosers(file, lines) {
 }
 
 /**
- * Check for unmatched braces/brackets.
- * Uses simple regex stripping (block comments, line comments, quoted strings).
- * Small imbalances (≤ MISMATCH_THRESHOLD) are ignored as likely false positives
- * from JS regex literals containing quantifiers like {3} or {1,2}.
+ * Validate JavaScript syntax using Node's V8 compiler (same engine as Google Apps Script V8).
+ * Accurately catches real syntax errors (unmatched braces/parens, illegal tokens, unclosed strings)
+ * without false positives from regex literals or multiline templates.
  */
-function checkUnmatchedBraces(file, content) {
-    // Remove strings and comments to avoid false positives
-    let stripped = content
-        .replace(/\/\*[\s\S]*?\*\//g, '') // Remove block comments
-        .replace(/\/\/.*/g, '')           // Remove line comments
-        .replace(/'[^']*'/g, '')          // Remove single-quoted strings
-        .replace(/"[^"]*"/g, '');         // Remove double-quoted strings
-
-    const counts = {
-        '{': 0, '}': 0,
-        '[': 0, ']': 0,
-        '(': 0, ')': 0
-    };
-
-    for (const char of stripped) {
-        if (Object.prototype.hasOwnProperty.call(counts, char)) {
-            counts[char]++;
-        }
-    }
-
-    const braceDelta   = Math.abs(counts['{'] - counts['}']);
-    const bracketDelta = Math.abs(counts['['] - counts[']']);
-    const parenDelta   = Math.abs(counts['('] - counts[')']);
-
-    if (braceDelta > MISMATCH_THRESHOLD) {
-        console.log(`⚠️  WARNING: ${file}`);
-        console.log(`   Unmatched braces: ${counts['{']} opening, ${counts['}']} closing (delta ${braceDelta})`);
+function checkSyntaxV8(file, content) {
+    try {
+        new vm.Script(content, { filename: file });
+    } catch (err) {
+        console.log(`❌ ERROR: ${file}`);
+        console.log(`   ${err.name}: ${err.message}`);
         console.log('');
-        warningCount++;
-    }
-
-    if (bracketDelta > MISMATCH_THRESHOLD) {
-        console.log(`⚠️  WARNING: ${file}`);
-        console.log(`   Unmatched brackets: ${counts['[']} opening, ${counts[']']} closing (delta ${bracketDelta})`);
-        console.log('');
-        warningCount++;
-    }
-
-    if (parenDelta > MISMATCH_THRESHOLD) {
-        console.log(`⚠️  WARNING: ${file}`);
-        console.log(`   Unmatched parentheses: ${counts['(']} opening, ${counts[')']} closing (delta ${parenDelta})`);
-        console.log('');
-        warningCount++;
+        errorCount++;
     }
 }
 
