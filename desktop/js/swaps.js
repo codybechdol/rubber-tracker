@@ -268,24 +268,49 @@ class SwapGenerationEngine {
    */
   isLocationApprovedForClass(location, itemClassNum, locationApprovals = {}) {
     if (itemClassNum === 0 || itemClassNum === '0') return true;
-    const locClean = String(location || '').trim();
+    const locClean = String(location || '').replace(/\s*\([^)]*\)/g, '').trim();
     let approval = locationApprovals[locClean];
     if (approval === undefined || approval === null) {
-      // Default location approvals fallback
+      const lower = locClean.toLowerCase();
+      for (const [k, v] of Object.entries(locationApprovals)) {
+        if (k.toLowerCase() === lower) {
+          approval = v;
+          break;
+        }
+      }
+    }
+    if (approval === undefined || approval === null) {
+      // Default location approvals fallback matching 00-Constants.gs
       const defaults = {
-        'Helena': 'CL2 & CL3',
+        'Big Sky': 'CL3',
         'Belgrade': 'CL2 & CL3',
         'Belgrade Dock': 'CL2 & CL3',
-        'Bozeman': 'CL2 & CL3',
+        'Dillon': 'CL2 & CL3',
         'Great Falls': 'CL2 & CL3',
-        'Billings': 'CL2 & CL3',
-        'Missoula': 'CL2 & CL3',
-        'Butte': 'CL2 & CL3',
-        'Kalispell': 'CL2 & CL3',
-        'Havre': 'CL2 & CL3',
+        'Hamilton': 'CL2 & CL3',
+        'Livingston': 'CL2 & CL3',
+        'Melville': 'CL2 & CL3',
+        'Billings': 'CL2',
+        'Bozeman': 'CL2',
+        'Butte': 'CL2',
+        'Elliston': 'CL2',
+        'Ennis': 'CL2',
+        'Helena': 'CL2',
+        'Kalispell': 'CL2',
+        'Missoula': 'CL2',
+        'Three Forks': 'CL2',
         'Office/Management': 'None'
       };
       approval = defaults[locClean];
+      if (approval === undefined || approval === null) {
+        const lower = locClean.toLowerCase();
+        for (const [k, v] of Object.entries(defaults)) {
+          if (k.toLowerCase() === lower) {
+            approval = v;
+            break;
+          }
+        }
+      }
     }
     if (approval === undefined || approval === null) return true;
     if (!approval || approval === 'None') return false;
@@ -457,6 +482,7 @@ class SwapGenerationEngine {
 
     // Build employee maps (Skip pending new hires and previous employees)
     const empMap = {};
+    const allDirectoryEmployees = new Set();
     const empLocationMap = {};
     const empJobNumMap = {};
     const empClassificationMap = {};
@@ -494,17 +520,22 @@ class SwapGenerationEngine {
         return; // Skip from active empMap
       }
 
+      // This employee is in the company directory (Active or Pending New Hire)
+      // They must NEVER be in previousEmployeeNames or treated as a former employee reclaim
+      allDirectoryEmployees.add(nameLower);
+      altList.forEach(alt => allDirectoryEmployees.add(alt));
+      previousEmployeeNames.delete(nameLower);
+      altList.forEach(alt => previousEmployeeNames.delete(alt));
+
       const hireDateStr = row['Hire Date'];
       const hireDate = this.parseDate(hireDateStr);
-      if (hireDate && hireDate > today) return; // Skip pending new hire
+      if (hireDate && hireDate > today) return; // Skip pending new hire from active swap needs (they haven't started yet)
 
       empMap[nameLower] = row;
       empLocationMap[nameLower] = String(row['Location'] || 'Helena').trim();
       empJobNumMap[nameLower] = String(row['Job Number'] || row['Job #'] || '').trim();
       empClassificationMap[nameLower] = String(row['Job Classification'] || row['Classification'] || '').trim();
       empSizeMap[nameLower] = String(isGloves ? (row['Glove Size'] || row['Size'] || '10') : (row['Sleeve Size'] || row['Size'] || '20')).trim();
-      // Active employee must never be in previousEmployeeNames
-      previousEmployeeNames.delete(nameLower);
 
       // Register all alternate names / aliases pointing to this employee
       altList.forEach(alt => {
@@ -514,13 +545,12 @@ class SwapGenerationEngine {
           empJobNumMap[alt] = empJobNumMap[nameLower];
           empClassificationMap[alt] = empClassificationMap[nameLower];
           empSizeMap[alt] = empSizeMap[nameLower];
-          previousEmployeeNames.delete(alt);
         }
       });
     });
 
-    // Explicitly purge all active employees and their aliases from previousEmployeeNames
-    Object.keys(empMap).forEach(activeName => {
+    // Explicitly purge all directory employees (active and pending) from previousEmployeeNames
+    allDirectoryEmployees.forEach(activeName => {
       previousEmployeeNames.delete(activeName);
     });
 
@@ -602,7 +632,7 @@ class SwapGenerationEngine {
       let isAlreadyPicked = false;
       let employeeName = '';
 
-      const isAssignedActiveEmp = Boolean(empMap[assignedToLower]);
+      const isAssignedActiveEmp = Boolean(empMap[assignedToLower] || allDirectoryEmployees.has(assignedToLower));
 
       if (!isAssignedActiveEmp && (locationLower === 'previous employee' || previousEmployeeNames.has(assignedToLower))) {
         if (assignedTo && !ignoreNames.includes(assignedToLower)) {
@@ -1115,7 +1145,9 @@ class SwapGenerationEngine {
           pickListStatus = pickListSizeUp ? 'In Stock (Size Up) ⚠️' : 'In Stock ✅';
           pickedCount++;
         } else if (pickListStatusRaw === 'ready for delivery') {
-          pickListStatus = pickListSizeUp ? 'Ready For Delivery (Size Up) ⚠️' : 'Ready For Delivery 🚚';
+          pickListStatus = isAlreadyPicked
+            ? (pickListSizeUp ? 'Ready For Delivery (Size Up) ⚠️' : 'Ready For Delivery 🚚')
+            : (pickListSizeUp ? 'In Stock (Size Up) ⚠️' : 'In Stock ✅');
           pickedCount++;
         } else if (pickListStatusRaw === 'in testing') {
           pickListStatus = pickListSizeUp ? 'In Testing (Size Up) ⚠️' : 'In Testing 🔬';

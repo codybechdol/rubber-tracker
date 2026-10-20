@@ -676,6 +676,11 @@ class EmployeeProfileEngine {
     const mpEmail = primaryRow ? (primaryRow['MP Email'] || '') : '';
     const notifEmail = primaryRow ? (primaryRow['Notification Emails'] || '') : '';
     const hireDate = primaryRow ? (primaryRow['Hire Date'] || primaryRow['Hire'] || '') : '';
+    const status = primaryRow ? (primaryRow['Status'] || '') : '';
+    const parsedHire = this.parseDate(hireDate);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const isPending = status.toLowerCase().includes('pending') || Boolean(parsedHire && parsedHire > today);
 
     // 2. Scan ALL equipment sheets for items currently assigned to this employee
     const equipmentSheets = [
@@ -1341,6 +1346,8 @@ class EmployeeProfileEngine {
       mpEmail,
       notifEmail,
       hireDate,
+      status,
+      isPending,
       gloveSize: primaryRow ? (primaryRow['Glove Size'] || primaryRow['Glove'] || '') : '',
       sleeveSize: primaryRow ? (primaryRow['Sleeve Size'] || primaryRow['Sleeve'] || '') : '',
       alternateNames: primaryRow ? (primaryRow['Alternate Names'] || primaryRow['Aliases'] || '') : '',
@@ -1633,6 +1640,15 @@ class EmployeeProfileEngine {
     const curSleeve = String(data.sleeveSize || '').trim();
     const curRole = String(data.role || '').trim();
 
+    let isoHireDate = '';
+    const parsedHire = this.parseDate(data.hireDate);
+    if (parsedHire) {
+      const yyyy = parsedHire.getFullYear();
+      const mm = String(parsedHire.getMonth() + 1).padStart(2, '0');
+      const dd = String(parsedHire.getDate()).padStart(2, '0');
+      isoHireDate = `${yyyy}-${mm}-${dd}`;
+    }
+
     return `
       <div style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 8px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.2);">
         <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-color); padding-bottom: 12px; margin-bottom: 18px; flex-wrap: wrap; gap: 10px;">
@@ -1719,6 +1735,18 @@ class EmployeeProfileEngine {
               <input type="text" id="edit-emp-sec-job" class="form-control" style="width: 100%; font-size: 12px; padding: 6px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary);" value="${this.escapeHtml(data.secondaryJob)}" placeholder="e.g. 040-26.1">
             </div>
 
+            <div style="margin-bottom: 12px;">
+              <label style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 4px;">Hire Date / Start Date</label>
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <input type="date" id="edit-emp-hire-date" class="form-control" style="flex: 1; font-size: 12px; padding: 6px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary);" value="${this.escapeHtml(isoHireDate)}">
+                ${data.isPending ? `
+                  <button type="button" class="btn btn-xs" style="background: rgba(16, 185, 129, 0.2); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.4); font-weight: 700; padding: 6px 10px; border-radius: 4px; cursor: pointer; white-space: nowrap;" title="Activate employee today" onclick="const inp=document.getElementById('edit-emp-hire-date'); if(inp){const today=new Date(); const yyyy=today.getFullYear(); const mm=String(today.getMonth()+1).padStart(2,'0'); const dd=String(today.getDate()).padStart(2,'0'); inp.value=\`\${yyyy}-\${mm}-\${dd}\`; window.employeeProfileEngine.saveEmployeeDetails('${this.escapeJs(data.displayName)}');}">
+                    🚀 Activate Today
+                  </button>
+                ` : ''}
+              </div>
+            </div>
+
             <div>
               <label style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 4px;">Alternate Names / Aliases</label>
               <input type="text" id="edit-emp-alt-names" class="form-control" style="width: 100%; font-size: 12px; padding: 6px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary);" value="${this.escapeHtml(data.alternateNames || '')}" placeholder="e.g. Mike Smith, Johnny Smith">
@@ -1763,6 +1791,21 @@ class EmployeeProfileEngine {
     const newClass = getVal('edit-emp-classification');
     const newSecJob = getVal('edit-emp-sec-job');
     const newAltNames = getVal('edit-emp-alt-names');
+    const newHireRaw = getVal('edit-emp-hire-date');
+
+    let formattedHireDate = '';
+    let newStatus = '';
+    if (newHireRaw) {
+      const parsed = this.parseDate(newHireRaw);
+      if (parsed) {
+        formattedHireDate = this.formatDateDisplay(parsed);
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const checkDate = new Date(parsed.getTime());
+        checkDate.setHours(0, 0, 0, 0);
+        newStatus = checkDate <= today ? 'Active' : 'Pending';
+      }
+    }
 
     const headers = empTable.headers || [];
     const getFieldKey = (target) => headers.find(h => h.toLowerCase().trim() === target.toLowerCase().trim()) || target;
@@ -1776,6 +1819,8 @@ class EmployeeProfileEngine {
     const classKey = getFieldKey('Job Classification');
     const secJobKey = getFieldKey('Secondary Job Number');
     const altKey = getFieldKey('Alternate Names');
+    const hireKey = getFieldKey('Hire Date');
+    const statusKey = getFieldKey('Status');
 
     const updatedFields = {
       [phoneKey]: newPhone,
@@ -1789,12 +1834,26 @@ class EmployeeProfileEngine {
       [altKey]: newAltNames
     };
 
-    Object.assign(row, updatedFields);
-    if (window.sheetNavigator && typeof window.sheetNavigator.syncRowToRawGrid === 'function') {
-      window.sheetNavigator.syncRowToRawGrid(empTable, row);
+    if (formattedHireDate) {
+      updatedFields[hireKey] = formattedHireDate;
+      if (newStatus) {
+        updatedFields[statusKey] = newStatus;
+      }
     }
 
+    Object.assign(row, updatedFields);
     const empRowIdx = row._rowIdx || (empTable.rows.indexOf(row) + 2);
+
+    if (window.sheetNavigator && typeof window.sheetNavigator.syncRowToRawGrid === 'function') {
+      window.sheetNavigator.syncRowToRawGrid(empTable, row);
+    } else if (empTable.rawGrid && empTable.rawGrid[empRowIdx - 1]) {
+      headers.forEach((h, hIdx) => {
+        if (updatedFields[h] !== undefined) {
+          empTable.rawGrid[empRowIdx - 1][hIdx] = updatedFields[h];
+        }
+      });
+    }
+
     await this.db.addMutation({
       action: 'UPDATE_ROW',
       sheetName: empTable.name,
@@ -1804,6 +1863,29 @@ class EmployeeProfileEngine {
       itemIdentifier: displayName,
       updatedFields: updatedFields
     });
+
+    // If activated, remove any rogue PREV EMP reclaim row for this employee from glove_swaps
+    if (newStatus === 'Active') {
+      const gSwaps = this.db.getTable('glove_swaps');
+      if (gSwaps && Array.isArray(gSwaps.rows)) {
+        const rogueIdx = gSwaps.rows.findIndex(r => {
+          const empField = String(r['Employee'] || r['Assigned To'] || '').trim().toLowerCase();
+          const daysLeft = String(r['Days Left'] || '').trim().toUpperCase();
+          return empField === displayName.toLowerCase() && daysLeft.includes('PREV EMP');
+        });
+        if (rogueIdx !== -1) {
+          const removedRow = gSwaps.rows.splice(rogueIdx, 1)[0];
+          if (gSwaps.rawGrid && removedRow && removedRow._rowIdx) {
+            const gridIdx = gSwaps.rawGrid.findIndex((r, idx) => idx + 1 === removedRow._rowIdx);
+            if (gridIdx !== -1) {
+              gSwaps.rawGrid.splice(gridIdx, 1);
+            }
+          }
+        }
+      }
+    }
+
+    await this.db.persistSnapshot(this.db.snapshot);
 
     // Refresh profile modal
     this.openProfileModal(displayName, 'details');
@@ -1819,6 +1901,76 @@ class EmployeeProfileEngine {
   getItemIdentifier(item) {
     if (!item) return '—';
     return String(item['Glove'] || item['Sleeve'] || item['Item #'] || item['Item'] || item['ESL ID'] || Object.values(item)[0] || '—').trim();
+  }
+
+  /**
+   * Resolves rubber class approval for a given location (e.g. 'CL2', 'CL3', 'CL2 & CL3', 'None')
+   */
+  getLocationRubberClassApproval(location) {
+    if (window.ppeTrackingEngine && typeof window.ppeTrackingEngine.getLocationRubberClassApproval === 'function') {
+      return window.ppeTrackingEngine.getLocationRubberClassApproval(location);
+    }
+    if (!location) return 'CL2';
+    const locClean = String(location).replace(/\s*\([^)]*\)/g, '').trim().toLowerCase();
+
+    const snap = (this.db && typeof this.db.getSnapshot === 'function')
+      ? this.db.getSnapshot()
+      : (window.localDB ? window.localDB.getSnapshot() : null);
+    const locTable = snap?.tables?.['locations'];
+    if (locTable && locTable.rows) {
+      const match = locTable.rows.find(r => {
+        const lName = String(r['Location'] || Object.values(r)[0] || '').replace(/\s*\([^)]*\)/g, '').trim().toLowerCase();
+        return lName === locClean;
+      });
+      if (match) {
+        const app = String(match['Rubber Class Approval'] || match['Approval'] || Object.values(match)[6] || '').trim().toUpperCase();
+        if (app) return app;
+      }
+    }
+
+    const defaults = {
+      'big sky': 'CL3',
+      'belgrade': 'CL2 & CL3',
+      'belgrade dock': 'CL2 & CL3',
+      'dillon': 'CL2 & CL3',
+      'great falls': 'CL2 & CL3',
+      'hamilton': 'CL2 & CL3',
+      'livingston': 'CL2 & CL3',
+      'melville': 'CL2 & CL3',
+      'billings': 'CL2',
+      'bozeman': 'CL2',
+      'butte': 'CL2',
+      'elliston': 'CL2',
+      'ennis': 'CL2',
+      'helena': 'CL2',
+      'kalispell': 'CL2',
+      'missoula': 'CL2',
+      'three forks': 'CL2',
+      'office/management': 'None'
+    };
+    return defaults[locClean] || 'CL2';
+  }
+
+  /**
+   * Checks if an item class (e.g. 0, 2, 3) is approved for a given location approval
+   */
+  isItemClassApprovedForLocation(itemClass, locationApproval) {
+    if (window.ppeTrackingEngine && typeof window.ppeTrackingEngine.isItemClassApprovedForLocation === 'function') {
+      return window.ppeTrackingEngine.isItemClassApprovedForLocation(itemClass, locationApproval);
+    }
+    const app = String(locationApproval || 'CL2').trim().toUpperCase();
+    if (app === 'NONE') return false;
+
+    let c = null;
+    if (itemClass !== null && itemClass !== undefined && itemClass !== '' && itemClass !== '—' && itemClass !== '-') {
+      const m = String(itemClass).match(/\b([0-4])\b/);
+      if (m) c = parseInt(m[1], 10);
+    }
+
+    if (c === 0) return true;
+    if (c === 2) return app === 'CL2' || app === 'CL2 & CL3' || app === 'BOTH';
+    if (c === 3) return app === 'CL3' || app === 'CL2 & CL3' || app === 'BOTH';
+    return true;
   }
 
   /**
@@ -2084,6 +2236,14 @@ class EmployeeProfileEngine {
     const icon = isGlove ? '🧤' : '🦾';
     const curSize = String(isGlove ? (data.gloveSize || '') : (data.sleeveSize || '')).trim();
     let curClass = this.getPreferredPpeClass(data.displayName, itemType);
+    const empLoc = data.location || 'Helena';
+    const locApproval = this.getLocationRubberClassApproval(empLoc);
+
+    // If current class preference is not approved for employee's location, default to Class 2
+    if (!this.isItemClassApprovedForLocation(curClass, locApproval)) {
+      curClass = 'Class 2';
+    }
+
     const invKey = isGlove ? 'gloves' : 'sleeves';
     const swapKey = isGlove ? 'glove_swaps' : 'sleeve_swaps';
     const themeColor = isGlove ? '#38bdf8' : '#c084fc';
@@ -2127,7 +2287,11 @@ class EmployeeProfileEngine {
             <div style="display: flex; align-items: center; gap: 6px;">
               <label for="profile-assign-${itemType}-class-select" style="font-size: 12px; font-weight: 700; color: #94a3b8;">Class:</label>
               <select id="profile-assign-${itemType}-class-select" class="form-control" style="font-size: 13px; font-weight: 700; padding: 6px 12px; background: var(--bg-primary); border: 1px solid ${themeBorder}; border-radius: 6px; color: #fff; min-width: 150px;">
-                ${classOptions.map(c => `<option value="${c}" ${c === curClass ? 'selected' : ''}>${c}${c === 'Class 2' ? ' (17kV Standard)' : c === 'Class 0' ? ' (1kV)' : ' (26.5kV)'}</option>`).join('')}
+                ${classOptions.map(c => {
+                  const isApproved = this.isItemClassApprovedForLocation(c, locApproval);
+                  const disNote = !isApproved ? ` (Disallowed for ${this.escapeHtml(empLoc)})` : '';
+                  return `<option value="${c}" ${c === curClass ? 'selected' : ''}>${c}${c === 'Class 2' ? ' (17kV Standard)' : c === 'Class 0' ? ' (1kV)' : ' (26.5kV)'}${disNote}</option>`;
+                }).join('')}
               </select>
             </div>
             <button type="button" class="btn btn-primary" style="padding: 7px 18px; font-size: 12.5px; font-weight: 700; display: inline-flex; align-items: center; gap: 6px; background: #2563eb; border: none; box-shadow: 0 2px 6px rgba(37, 99, 235, 0.3);"
@@ -2151,13 +2315,22 @@ class EmployeeProfileEngine {
       return NON_ASSIGNED_STATUSES.has(status) || NON_ASSIGNED_STATUSES.has(assignedTo);
     });
 
-    // Items with matching size
-    const matchingShelfItems = onShelfItems.filter(r => {
+    // Separate matching size items into approved vs disallowed for employee's location
+    const matchingShelfItems = [];
+    const disallowedShelfItems = [];
+    for (const r of onShelfItems) {
       const s = String(r['Size'] || '').trim().toLowerCase();
-      return s === curSize.toLowerCase();
-    });
+      if (s === curSize.toLowerCase()) {
+        const itemClass = r['Class'];
+        if (this.isItemClassApprovedForLocation(itemClass, locApproval)) {
+          matchingShelfItems.push(r);
+        } else {
+          disallowedShelfItems.push(r);
+        }
+      }
+    }
 
-    // LAYER 2: Matching item(s) found on shelf -> Display Quick Assign
+    // LAYER 2: Matching approved item(s) found on shelf -> Display Quick Assign
     if (matchingShelfItems.length > 0) {
       return `
         <div style="background: ${themeBg}; border: 1px solid ${themeBorder}; border-radius: 8px; padding: 16px;">
@@ -2166,7 +2339,7 @@ class EmployeeProfileEngine {
               <span>${icon}</span>
               <span>${label} Ready for Assignment</span>
               <span class="badge" style="background: ${themePillBg}; color: ${themeBadgeColor}; border: 1px solid ${themeBorder}; font-size: 11px; padding: 2px 8px; border-radius: 4px;">
-                Size ${this.escapeHtml(curSize)} · ${this.escapeHtml(curClass)}
+                Size ${this.escapeHtml(curSize)} · ${this.escapeHtml(curClass)} · ${this.escapeHtml(locApproval)}
               </span>
             </div>
             <div style="display: flex; align-items: center; gap: 8px;">
@@ -2180,8 +2353,14 @@ class EmployeeProfileEngine {
           </div>
 
           <div style="font-size: 12.5px; color: #cbd5e1; margin-bottom: 12px;">
-            Size <strong>${this.escapeHtml(curSize)}</strong> is logged in <strong>Contact & Details</strong>. Found <strong>${matchingShelfItems.length}</strong> matching item(s) currently <strong>On Shelf</strong> ready for 1-click assignment:
+            Size <strong>${this.escapeHtml(curSize)}</strong> is logged in <strong>Contact & Details</strong>. Found <strong>${matchingShelfItems.length}</strong> matching item(s) currently <strong>On Shelf</strong> approved for <strong>${this.escapeHtml(empLoc)}</strong> (${this.escapeHtml(locApproval)}):
           </div>
+
+          ${disallowedShelfItems.length > 0 ? `
+            <div style="font-size: 11.5px; color: #fbbf24; background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 6px; padding: 6px 10px; margin-bottom: 10px;">
+              ⚠️ Note: <strong>${disallowedShelfItems.length}</strong> additional size ${this.escapeHtml(curSize)} item(s) on shelf are excluded because their class is not approved for ${this.escapeHtml(empLoc)} (${this.escapeHtml(locApproval)} approval).
+            </div>
+          ` : ''}
 
           <div style="overflow-x: auto; max-height: 240px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 6px;">
             <table class="data-table" style="width: 100%; font-size: 12px; border-collapse: collapse;">
@@ -2265,6 +2444,12 @@ class EmployeeProfileEngine {
           </div>
         </div>
 
+        ${disallowedShelfItems.length > 0 ? `
+          <div style="font-size: 12px; color: #fbbf24; background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 6px; padding: 8px 12px; margin-bottom: 12px; line-height: 1.4;">
+            ℹ️ Note: <strong>${disallowedShelfItems.length}</strong> on-shelf item(s) exist in size <strong>${this.escapeHtml(curSize)}</strong>, but all are a voltage class disallowed for <strong>${this.escapeHtml(empLoc)}</strong> (${this.escapeHtml(locApproval)} approval only).
+          </div>
+        ` : ''}
+
         <!-- Class Selector & Urgency Banner -->
         <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; padding: 8px 12px; background: rgba(0,0,0,0.22); border-radius: 6px; border: 1px solid rgba(255,255,255,0.06); flex-wrap: wrap;">
           <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
@@ -2272,10 +2457,12 @@ class EmployeeProfileEngine {
             <div style="display: inline-flex; gap: 5px;">
               ${classOptions.map(cOpt => {
                 const isSel = (cOpt.toLowerCase() === curClass.toLowerCase());
+                const isApproved = this.isItemClassApprovedForLocation(cOpt, locApproval);
                 return `
                   <button type="button" class="btn" style="padding: 3px 10px; font-size: 11.5px; font-weight: 700; border-radius: 4px; cursor: pointer; transition: all 0.15s ease; ${isSel ? 'background: #0284c7; color: #fff; border: 1px solid #38bdf8; box-shadow: 0 0 6px rgba(56, 189, 248, 0.4);' : 'background: rgba(255,255,255,0.05); color: #94a3b8; border: 1px solid rgba(255,255,255,0.1);'}"
+                          title="${!isApproved ? `Warning: ${cOpt} is not approved for ${empLoc} (${locApproval})` : ''}"
                           onclick="window.employeeProfileEngine.setPurchaseNeedClass('${this.escapeJs(data.displayName)}', '${itemType}', '${cOpt}')">
-                    ${cOpt === 'Class 2' ? '⭐ Class 2 (17kV Standard)' : cOpt === 'Class 0' ? 'Class 0 (1kV)' : 'Class 3 (26.5kV)'}
+                    ${cOpt === 'Class 2' ? '⭐ Class 2 (17kV Standard)' : cOpt === 'Class 0' ? 'Class 0 (1kV)' : 'Class 3 (26.5kV)'}${!isApproved ? ' ⚠️' : ''}
                   </button>
                 `;
               }).join('')}
@@ -2471,6 +2658,20 @@ class EmployeeProfileEngine {
     if (!targetRow) {
       alert(`⚠️ Item #${itemIdentifier} could not be located in ${invKey} table.`);
       return;
+    }
+
+    // Safety check against location rubber class approval
+    const locApproval = this.getLocationRubberClassApproval(chosenLoc);
+    const itemClass = targetRow['Class'];
+    if (!this.isItemClassApprovedForLocation(itemClass, locApproval)) {
+      const confirmMsg = `⚠️ LOCATION COMPLIANCE WARNING:\n\n` +
+        `Location "${chosenLoc}" is approved for ${locApproval} rubber PPE.\n` +
+        `Item #${itemIdentifier} is Class ${itemClass}.\n\n` +
+        `Assigning this item violates location rubber PPE approval standards.\n\n` +
+        `Do you want to override and assign anyway?`;
+      if (!confirm(confirmMsg)) {
+        return;
+      }
     }
 
     const headers = table.headers || Object.keys(targetRow);

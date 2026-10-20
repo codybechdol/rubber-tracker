@@ -1642,6 +1642,8 @@ class InventoryManager {
           const curLocation = String(row['Location'] || '').trim();
           const curDateAssigned = String(row['Date Assigned'] || row['Date'] || '').trim();
           const curDateObj = this.parseDate(curDateAssigned);
+          const curChangeOut = String(row['Change Out Date'] || row['Pad Expiration'] || '').trim();
+          const curPickedFor = String(row['Picked For'] || '').trim();
 
           const histAssignedLower = latestHist.assignedTo.toLowerCase();
           const histLocLower = latestHist.location.toLowerCase();
@@ -1773,9 +1775,7 @@ class InventoryManager {
               batteryExpiration: row['Battery Expiration']
             });
 
-            // Capture current values before modifying row object
-            const curChangeOut = String(row['Change Out Date'] || row['Pad Expiration'] || '').trim();
-            const curPickedFor = String(row['Picked For'] || '').trim();
+            // Note: curChangeOut and curPickedFor are captured at the start of the loop before row modification
 
             // Apply changes to local row object
             const oldAssignedSummary = `${curAssignedTo} (${curStatus})`;
@@ -1872,7 +1872,9 @@ class InventoryManager {
       return reconciledItems;
     } catch (err) {
       console.error('❌ Error during reconcileInventoryWithHistory:', err);
-      alert('Error during reconciliation: ' + (err.message || err));
+      if (!silent) {
+        alert('Error during reconciliation: ' + (err.message || err));
+      }
       this.showToast('⚠️ Reconciliation error: ' + (err.message || err));
       return [];
     }

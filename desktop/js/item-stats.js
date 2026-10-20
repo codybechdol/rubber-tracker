@@ -582,7 +582,9 @@ class ItemStatsEngine {
         }
       }
 
-      const isUpcomingFutureAssignment = startDate.getTime() > now.getTime();
+      const startNum = startDate.getFullYear() * 10000 + (startDate.getMonth() + 1) * 100 + startDate.getDate();
+      const todayNum = now.getFullYear() * 10000 + (now.getMonth() + 1) * 100 + now.getDate();
+      const isUpcomingFutureAssignment = startNum > todayNum;
 
       // Calculate days spent in this transition
       let diffMs = endDate.getTime() - startDate.getTime();
@@ -1088,7 +1090,7 @@ class ItemStatsEngine {
 
     const netReplacementBalance = newPurchasesCount - failedActive.length;
 
-    return {
+    const result = {
       sheetKey: cleanKey,
       sheetLabel: isGloves ? 'Gloves' : 'Sleeves',
       singularLabel: isGloves ? 'Glove' : 'Sleeve',

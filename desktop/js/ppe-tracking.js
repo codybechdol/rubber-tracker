@@ -19,6 +19,7 @@ class RubberPpeTrackingEngine {
     this.currentAuditData = null;
     this.activeAssignTarget = null; // { employeeName, itemType: 'gloves' | 'sleeves', preferredSize, location }
     this.excludedEmployeeMap = this.loadExcludedEmployeeMap();
+    this.showUnapprovedClasses = false;
   }
 
   init() {
@@ -1436,6 +1437,11 @@ class RubberPpeTrackingEngine {
               <span style="font-size: 11px; color: #94a3b8;">
                 Sz ${this.escapeHtml(g.size)} · Cl ${this.escapeHtml(g.classVal)}
               </span>
+              ${!this.isItemClassApprovedForLocation(g.classVal, this.getLocationRubberClassApproval(r.location)) ? `
+                <span class="badge" style="background: rgba(239, 68, 68, 0.2); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.4); font-size: 9.5px; font-weight: 700; padding: 1px 5px; border-radius: 3px;" title="Location ${this.escapeHtml(r.location)} is approved for ${this.escapeHtml(this.getLocationRubberClassApproval(r.location))} only, but this glove is Class ${this.escapeHtml(g.classVal)}!">
+                  ⚠️ Unapproved Class
+                </span>
+              ` : ''}
               ${g.changeOutDate && g.changeOutDate !== '—' ? `
                 <span class="badge" style="background: rgba(255,255,255,0.06); color: #cbd5e1; font-size: 10px; padding: 1px 4px; border-radius: 3px;" title="Change-out due date">
                   📅 ${this.escapeHtml(g.changeOutDate)}
@@ -1536,6 +1542,11 @@ class RubberPpeTrackingEngine {
               <span style="font-size: 11px; color: #94a3b8;">
                 Sz ${this.escapeHtml(s.size)} · Cl ${this.escapeHtml(s.classVal)}
               </span>
+              ${!this.isItemClassApprovedForLocation(s.classVal, this.getLocationRubberClassApproval(r.location)) ? `
+                <span class="badge" style="background: rgba(239, 68, 68, 0.2); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.4); font-size: 9.5px; font-weight: 700; padding: 1px 5px; border-radius: 3px;" title="Location ${this.escapeHtml(r.location)} is approved for ${this.escapeHtml(this.getLocationRubberClassApproval(r.location))} only, but this sleeve is Class ${this.escapeHtml(s.classVal)}!">
+                  ⚠️ Unapproved Class
+                </span>
+              ` : ''}
               ${s.changeOutDate && s.changeOutDate !== '—' ? `
                 <span class="badge" style="background: rgba(255,255,255,0.06); color: #cbd5e1; font-size: 10px; padding: 1px 4px; border-radius: 3px;" title="Change-out due date">
                   📅 ${this.escapeHtml(s.changeOutDate)}
@@ -2259,6 +2270,100 @@ class RubberPpeTrackingEngine {
   }
 
   /**
+   * Resolves rubber class approval for a given location (e.g. 'CL2', 'CL3', 'CL2 & CL3', 'None')
+   */
+  getLocationRubberClassApproval(location) {
+    if (!location) return 'CL2';
+    const locClean = String(location).replace(/\s*\([^)]*\)/g, '').trim().toLowerCase();
+
+    const snap = (this.db && typeof this.db.getSnapshot === 'function')
+      ? this.db.getSnapshot()
+      : (window.localDB ? window.localDB.getSnapshot() : null);
+    const locTable = snap?.tables?.['locations'];
+    if (locTable && locTable.rows) {
+      const match = locTable.rows.find(r => {
+        const lName = String(r['Location'] || Object.values(r)[0] || '').replace(/\s*\([^)]*\)/g, '').trim().toLowerCase();
+        return lName === locClean;
+      });
+      if (match) {
+        const app = String(match['Rubber Class Approval'] || match['Approval'] || Object.values(match)[6] || '').trim().toUpperCase();
+        if (app) return app;
+      }
+    }
+
+    const defaults = {
+      'big sky': 'CL3',
+      'belgrade': 'CL2 & CL3',
+      'belgrade dock': 'CL2 & CL3',
+      'dillon': 'CL2 & CL3',
+      'great falls': 'CL2 & CL3',
+      'hamilton': 'CL2 & CL3',
+      'livingston': 'CL2 & CL3',
+      'melville': 'CL2 & CL3',
+      'billings': 'CL2',
+      'bozeman': 'CL2',
+      'butte': 'CL2',
+      'elliston': 'CL2',
+      'ennis': 'CL2',
+      'helena': 'CL2',
+      'kalispell': 'CL2',
+      'missoula': 'CL2',
+      'three forks': 'CL2',
+      'office/management': 'None'
+    };
+    return defaults[locClean] || 'CL2';
+  }
+
+  /**
+   * Checks if an item class (e.g. 0, 2, 3) is approved for a given location approval
+   */
+  isItemClassApprovedForLocation(itemClass, locationApproval) {
+    const app = String(locationApproval || 'CL2').trim().toUpperCase();
+    if (app === 'NONE') return false;
+
+    // Normalize class: extract numeric class if present
+    let c = null;
+    if (itemClass !== null && itemClass !== undefined && itemClass !== '' && itemClass !== '—' && itemClass !== '-') {
+      const m = String(itemClass).match(/\b([0-4])\b/);
+      if (m) c = parseInt(m[1], 10);
+    }
+
+    // Class 0 is low-voltage / meter work (not voltage-restricted by 25kV rule)
+    if (c === 0) return true;
+
+    if (c === 2) {
+      return app === 'CL2' || app === 'CL2 & CL3' || app === 'BOTH';
+    }
+    if (c === 3) {
+      return app === 'CL3' || app === 'CL2 & CL3' || app === 'BOTH';
+    }
+
+    return true; // Default allow if class not specified
+  }
+
+  getApprovalBadgeHtml(approval) {
+    const app = String(approval || 'CL2').trim().toUpperCase();
+    if (app === 'CL3') {
+      return `<span class="badge" style="background-color: #7c3aed; color: #fff; padding: 2px 7px; border-radius: 4px; font-weight: 700; font-size: 10.5px;" title="Location is approved for Class 3 rubber PPE only">⚡ Class 3</span>`;
+    }
+    if (app === 'CL2 & CL3' || app === 'BOTH') {
+      return `<span class="badge" style="background-color: #059669; color: #fff; padding: 2px 7px; border-radius: 4px; font-weight: 700; font-size: 10.5px;" title="Location is approved for both Class 2 and Class 3 rubber PPE">🏷️ Class 2 & 3</span>`;
+    }
+    if (app === 'NONE') {
+      return `<span class="badge" style="background-color: #ef4444; color: #fff; padding: 2px 7px; border-radius: 4px; font-weight: 700; font-size: 10.5px;" title="Location is not approved for rubber PPE">🚫 None</span>`;
+    }
+    return `<span class="badge" style="background-color: #2563eb; color: #fff; padding: 2px 7px; border-radius: 4px; font-weight: 700; font-size: 10.5px;" title="Location is approved for Class 2 rubber PPE only">🏷️ Class 2</span>`;
+  }
+
+  toggleShowUnapprovedClasses(checked) {
+    this.showUnapprovedClasses = Boolean(checked);
+    const body = document.getElementById('ppe-quick-assign-modal-body');
+    if (body) {
+      this.renderQuickAssignContent(body);
+    }
+  }
+
+  /**
    * Prompts quick assignment modal for gloves or sleeves
    */
   promptQuickAssign(empName, itemType, preferredSize, location) {
@@ -2268,6 +2373,7 @@ class RubberPpeTrackingEngine {
       preferredSize: preferredSize && preferredSize !== '—' ? preferredSize : '',
       location: location || 'Helena'
     };
+    this.showUnapprovedClasses = false; // Reset toggle on each modal open
 
     const modal = document.getElementById('ppe-quick-assign-modal');
     const body = document.getElementById('ppe-quick-assign-modal-body');
@@ -2287,6 +2393,7 @@ class RubberPpeTrackingEngine {
     const modal = document.getElementById('ppe-quick-assign-modal');
     if (modal) modal.classList.remove('active');
     this.activeAssignTarget = null;
+    this.showUnapprovedClasses = false;
   }
 
   /**
@@ -2300,15 +2407,30 @@ class RubberPpeTrackingEngine {
     const table = snap?.tables?.[sheetKey];
     const rows = table?.rows || [];
 
+    const locApproval = this.getLocationRubberClassApproval(location);
+    const showAll = Boolean(this.showUnapprovedClasses);
+
     // Filter items that are currently On Shelf
-    const onShelfItems = rows.filter(r => {
+    const allOnShelfItems = rows.filter(r => {
       const status = String(r['Status'] || '').trim().toLowerCase();
       const assignedTo = String(r['Assigned To'] || r['Holder'] || '').trim().toLowerCase();
       return status === 'on shelf' || assignedTo === 'on shelf' || assignedTo === '';
     });
 
-    // Sort by matching size first
+    const approvedShelfItems = allOnShelfItems.filter(r => {
+      return this.isItemClassApprovedForLocation(r['Class'], locApproval);
+    });
+
+    const unapprovedCount = allOnShelfItems.length - approvedShelfItems.length;
+    const onShelfItems = showAll ? allOnShelfItems : approvedShelfItems;
+
+    // Sort by matching size first, then approved items before unapproved items, then item #
     onShelfItems.sort((a, b) => {
+      const isApprovedA = this.isItemClassApprovedForLocation(a['Class'], locApproval);
+      const isApprovedB = this.isItemClassApprovedForLocation(b['Class'], locApproval);
+      if (isApprovedA && !isApprovedB) return -1;
+      if (!isApprovedA && isApprovedB) return 1;
+
       const sizeA = String(a['Size'] || '').trim().toLowerCase();
       const sizeB = String(b['Size'] || '').trim().toLowerCase();
       const pref = String(preferredSize || '').trim().toLowerCase();
@@ -2317,21 +2439,31 @@ class RubberPpeTrackingEngine {
       const matchB = pref && sizeB === pref;
       if (matchA && !matchB) return -1;
       if (!matchA && matchB) return 1;
-      return String(a['Glove'] || a['Sleeve'] || a['Item #'] || '').localeCompare(String(b['Glove'] || b['Sleeve'] || b['Item #'] || ''));
+      return String(a['Glove'] || a['Sleeve'] || a['Item #'] || '').localeCompare(String(b['Glove'] || b['Sleeve'] || b['Item #'] || ''), undefined, { numeric: true });
     });
 
     container.innerHTML = `
       <div style="display: flex; flex-direction: column; gap: 14px;">
         <div style="background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.25); border-radius: 6px; padding: 10px 14px; font-size: 12.5px; color: #cbd5e1; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
-          <div>
-            Assigning to: <strong style="color: #60a5fa;">${this.escapeHtml(empName)}</strong>
-            <span style="margin: 0 6px; color: #475569;">•</span>
-            Location: <strong style="color: #f1f5f9;">${this.escapeHtml(location)}</strong>
-            <span style="margin: 0 6px; color: #475569;">•</span>
-            Preferred Size: <strong style="color: #fbbf24;">${this.escapeHtml(preferredSize || 'Not specified')}</strong>
+          <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+            <span>Assigning to: <strong style="color: #60a5fa;">${this.escapeHtml(empName)}</strong></span>
+            <span style="color: #475569;">•</span>
+            <span>Location: <strong style="color: #f1f5f9;">${this.escapeHtml(location)}</strong></span>
+            <span style="color: #475569;">•</span>
+            <span>Approval: ${this.getApprovalBadgeHtml(locApproval)}</span>
+            <span style="color: #475569;">•</span>
+            <span>Preferred Size: <strong style="color: #fbbf24;">${this.escapeHtml(preferredSize || 'Not specified')}</strong></span>
           </div>
-          <div style="font-size: 11.5px; color: #94a3b8;">
-            Available On Shelf: <strong style="color: #34d399;">${onShelfItems.length}</strong>
+          <div style="font-size: 11.5px; color: #94a3b8; display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+            <div>
+              Approved On Shelf: <strong style="color: #34d399;">${approvedShelfItems.length}</strong>
+            </div>
+            ${unapprovedCount > 0 ? `
+              <label style="display: inline-flex; align-items: center; gap: 4px; font-size: 11px; cursor: pointer; color: ${showAll ? '#fbbf24' : '#94a3b8'}; background: rgba(0,0,0,0.25); padding: 3px 8px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.08); user-select: none;" title="Toggle to display items on shelf with classes not approved for ${this.escapeHtml(location)}">
+                <input type="checkbox" id="chk-show-unapproved-ppe" ${showAll ? 'checked' : ''} onchange="window.ppeTrackingEngine.toggleShowUnapprovedClasses(this.checked)" style="cursor: pointer;">
+                <span>Show ${unapprovedCount} unapproved</span>
+              </label>
+            ` : ''}
           </div>
         </div>
 
@@ -2339,8 +2471,11 @@ class RubberPpeTrackingEngine {
           ${onShelfItems.length === 0 ? `
             <div style="padding: 30px; text-align: center; color: var(--text-muted);">
               <div style="font-size: 28px; margin-bottom: 8px;">📦</div>
-              <div style="font-size: 14px; font-weight: 700; color: #f8fafc; margin-bottom: 4px;">No On-Shelf Items Available</div>
-              <div style="font-size: 12px; color: #94a3b8;">There are currently no items with status "On Shelf" in the ${itemType} inventory.</div>
+              <div style="font-size: 14px; font-weight: 700; color: #f8fafc; margin-bottom: 4px;">No Approved On-Shelf Items Available</div>
+              <div style="font-size: 12px; color: #94a3b8; max-width: 480px; margin: 0 auto; line-height: 1.5;">
+                There are currently no items with status "On Shelf" matching <strong>${this.escapeHtml(locApproval)}</strong> rubber approval for <strong>${this.escapeHtml(location)}</strong>.
+                ${unapprovedCount > 0 ? `<br><span style="color: #fbbf24;">(${unapprovedCount} items of other classes are on shelf but disallowed for this location)</span>` : ''}
+              </div>
             </div>
           ` : `
             <table class="data-table" style="width: 100%; border-collapse: collapse; font-size: 12px;">
@@ -2360,12 +2495,16 @@ class RubberPpeTrackingEngine {
                   const itNum = this.getItemIdentifier(item);
                   const eslId = String(item['ESL ID'] || '—').trim();
                   const size = String(item['Size'] || '—').trim();
-                  const classVal = String(item['Class'] || '—').trim();
+                  const classRaw = item['Class'];
+                  const classVal = (classRaw !== null && classRaw !== undefined && String(classRaw).trim() !== '') ? String(classRaw).trim() : '—';
                   const testDate = String(item['Test Date'] || '—').trim();
                   const loc = String(item['Location'] || 'Helena').trim();
+                  const isApproved = this.isItemClassApprovedForLocation(classRaw, locApproval);
 
                   const isPreferredMatch = preferredSize && size.toLowerCase() === preferredSize.toLowerCase();
-                  const rowBg = isPreferredMatch ? 'rgba(59, 130, 246, 0.08)' : (idx % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.02)');
+                  const rowBg = !isApproved
+                    ? 'rgba(239, 68, 68, 0.05)'
+                    : (isPreferredMatch ? 'rgba(59, 130, 246, 0.08)' : (idx % 2 === 0 ? 'transparent' : 'rgba(255,255,255,0.02)'));
 
                   return `
                     <tr style="background: ${rowBg}; border-bottom: 1px solid rgba(255,255,255,0.04);">
@@ -2386,7 +2525,14 @@ class RubberPpeTrackingEngine {
                         ` : ''}
                       </td>
                       <td style="padding: 8px 10px; color: #cbd5e1;">
-                        Cl ${this.escapeHtml(classVal)}
+                        <span style="display: inline-flex; align-items: center; gap: 4px;">
+                          <span>Cl ${this.escapeHtml(classVal)}</span>
+                          ${!isApproved ? `
+                            <span class="badge" style="background: rgba(239, 68, 68, 0.2); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.4); font-size: 8.5px; padding: 1px 4px; border-radius: 3px;" title="Class ${classVal} is not approved for ${this.escapeHtml(location)} (${locApproval})">
+                              ⚠️ Disallowed (${locApproval} only)
+                            </span>
+                          ` : ''}
+                        </span>
                       </td>
                       <td style="padding: 8px 10px; color: #cbd5e1;">
                         ${this.escapeHtml(testDate)}
@@ -2395,11 +2541,20 @@ class RubberPpeTrackingEngine {
                         ${this.escapeHtml(loc)}
                       </td>
                       <td style="padding: 8px 10px; text-align: right;">
-                        <button class="btn btn-xs btn-primary"
-                                onclick="window.ppeTrackingEngine.executeQuickAssign('${this.escapeJs(itNum)}', '${this.escapeJs(sheetKey)}')"
-                                style="font-size: 11px; padding: 3px 10px; font-weight: 700;">
-                          Assign to ${this.escapeHtml(empName.split(' ')[0])}
-                        </button>
+                        ${isApproved ? `
+                          <button class="btn btn-xs btn-primary"
+                                  onclick="window.ppeTrackingEngine.executeQuickAssign('${this.escapeJs(itNum)}', '${this.escapeJs(sheetKey)}')"
+                                  style="font-size: 11px; padding: 3px 10px; font-weight: 700;">
+                            Assign to ${this.escapeHtml(empName.split(' ')[0])}
+                          </button>
+                        ` : `
+                          <button class="btn btn-xs"
+                                  onclick="window.ppeTrackingEngine.executeQuickAssign('${this.escapeJs(itNum)}', '${this.escapeJs(sheetKey)}')"
+                                  style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); color: #fca5a5; font-size: 10px; padding: 3px 8px; font-weight: 700; cursor: pointer;"
+                                  title="Warning: Class ${classVal} is not approved for ${this.escapeHtml(location)}">
+                            ⚠️ Override & Assign
+                          </button>
+                        `}
                       </td>
                     </tr>
                   `;
@@ -2419,6 +2574,17 @@ class RubberPpeTrackingEngine {
     if (!this.activeAssignTarget) return;
     const { empName, location } = this.activeAssignTarget;
 
+    const snap = this.db.getSnapshot();
+    const table = snap?.tables?.[sheetKey];
+    if (!table || !table.rows) return;
+
+    // Locate the row in table
+    const targetRow = table.rows.find(r => this.getItemIdentifier(r) === itemIdentifier);
+    if (!targetRow) {
+      alert(`⚠️ Item #${itemIdentifier} could not be located in ${sheetKey} table.`);
+      return;
+    }
+
     let assignDetails = null;
     if (window.sheetNavigator && typeof window.sheetNavigator.promptAssignItemDetails === 'function') {
       assignDetails = await window.sheetNavigator.promptAssignItemDetails(itemIdentifier, empName, location);
@@ -2433,15 +2599,18 @@ class RubberPpeTrackingEngine {
     const chosenDate = assignDetails.dateAssigned;
     const chosenLoc = assignDetails.location || location || 'Helena';
 
-    const snap = this.db.getSnapshot();
-    const table = snap?.tables?.[sheetKey];
-    if (!table || !table.rows) return;
-
-    // Locate the row in table
-    const targetRow = table.rows.find(r => this.getItemIdentifier(r) === itemIdentifier);
-    if (!targetRow) {
-      alert(`⚠️ Item #${itemIdentifier} could not be located in ${sheetKey} table.`);
-      return;
+    // Safety check against location rubber class approval
+    const locApproval = this.getLocationRubberClassApproval(chosenLoc);
+    const itemClass = targetRow['Class'];
+    if (!this.isItemClassApprovedForLocation(itemClass, locApproval)) {
+      const confirmMsg = `⚠️ LOCATION COMPLIANCE WARNING:\n\n` +
+        `Location "${chosenLoc}" is approved for ${locApproval} rubber PPE.\n` +
+        `Item #${itemIdentifier} is Class ${itemClass}.\n\n` +
+        `Assigning this item violates location rubber PPE approval standards.\n\n` +
+        `Do you want to override and assign anyway?`;
+      if (!confirm(confirmMsg)) {
+        return;
+      }
     }
 
     // Determine column names

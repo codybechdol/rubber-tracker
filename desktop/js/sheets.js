@@ -137,16 +137,18 @@ class SheetNavigator {
     const empTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('employees') : null);
     if (!empTable || !empTable.rows) return map;
 
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+    const now = new Date();
+    const todayNum = now.getFullYear() * 10000 + (now.getMonth() + 1) * 100 + now.getDate();
 
     empTable.rows.forEach(r => {
       const name = String(r['Employee Name'] || r['Name'] || Object.values(r)[0] || '').trim();
       if (!name) return;
       const status = String(r['Status'] || '').trim().toLowerCase();
+      // Exclude previous, terminated, or inactive records
+      if (status === 'previous' || status === 'terminated' || status === 'inactive') return;
+
       const hireDateStr = String(r['Hire Date'] || r['HireDate'] || '').trim();
-      let isFutureHire = false;
-      let hireDateObj = null;
+      let hireNum = null;
 
       if (hireDateStr) {
         const parts = hireDateStr.split(/[-/]/);
@@ -154,26 +156,42 @@ class SheetNavigator {
           let y, m, d;
           if (parts[0].length === 4) {
             y = parseInt(parts[0], 10);
-            m = parseInt(parts[1], 10) - 1;
+            m = parseInt(parts[1], 10);
             d = parseInt(parts[2], 10);
           } else {
-            m = parseInt(parts[0], 10) - 1;
+            m = parseInt(parts[0], 10);
             d = parseInt(parts[1], 10);
             y = parseInt(parts[2], 10);
           }
-          hireDateObj = new Date(y, m, d, 12, 0, 0);
-          if (hireDateObj > today) isFutureHire = true;
+          if (!isNaN(y) && !isNaN(m) && !isNaN(d)) {
+            hireNum = y * 10000 + m * 100 + d;
+          }
         }
       }
 
-      if (status === 'pending' || isFutureHire) {
+      // Pre-assigned applies ONLY to pending new hire employees that have a future hire date (strictly tomorrow or later)
+      const isFutureHire = hireNum !== null && hireNum > todayNum;
+      const isPending = (status === 'pending' && (hireNum === null || hireNum > todayNum));
+
+      if (isFutureHire || isPending) {
         const clean = name.replace(/\s*\([^)]*\)/g, '').toLowerCase().trim();
-        map.set(clean, {
+        const info = {
           name,
           status,
           hireDate: hireDateStr,
-          hireDateObj
-        });
+          hireNum
+        };
+        map.set(clean, info);
+
+        // Also register alternate names / aliases
+        const altKey = Object.keys(r).find(k => /^(alt(ernat(e|ive))?(\s*names?)?|also\s*known\s*as|aka|aliases?)$/i.test(k.trim()));
+        const altVal = String((altKey ? r[altKey] : r['Alternate Names']) || '').trim();
+        if (altVal) {
+          altVal.split(/[,;\n]/).forEach(alias => {
+            const cleanAlias = alias.replace(/\s*\([^)]*\)/g, '').toLowerCase().trim();
+            if (cleanAlias) map.set(cleanAlias, info);
+          });
+        }
       }
     });
 
@@ -186,8 +204,8 @@ class SheetNavigator {
       const empTable = this.db.getTable('employees');
       if (!empTable || !empTable.rows) return;
 
-      const today = new Date();
-      today.setHours(0, 0, 0, 0);
+      const now = new Date();
+      const todayNum = now.getFullYear() * 10000 + (now.getMonth() + 1) * 100 + now.getDate();
 
       const headers = empTable.headers || [];
       let statusColIdx = headers.findIndex(h => String(h).trim().toLowerCase() === 'status') + 1;
@@ -209,15 +227,18 @@ class SheetNavigator {
         let y, m, d;
         if (parts[0].length === 4) {
           y = parseInt(parts[0], 10);
-          m = parseInt(parts[1], 10) - 1;
+          m = parseInt(parts[1], 10);
           d = parseInt(parts[2], 10);
         } else {
-          m = parseInt(parts[0], 10) - 1;
+          m = parseInt(parts[0], 10);
           d = parseInt(parts[1], 10);
           y = parseInt(parts[2], 10);
         }
-        const hDate = new Date(y, m, d, 12, 0, 0);
-        if (today >= hDate) {
+        if (isNaN(y) || isNaN(m) || isNaN(d)) continue;
+        const hireNum = y * 10000 + m * 100 + d;
+
+        // Auto-activate when today reaches or exceeds hire date (todayNum >= hireNum)
+        if (todayNum >= hireNum) {
           const empName = String(r['Employee Name'] || r['Name'] || Object.values(r)[0] || '').trim();
           r['Status'] = 'Active';
           const rIdx = r._rowIdx || (i + 2);
@@ -2750,7 +2771,7 @@ class SheetNavigator {
           }
         }
         const badgeLabel = shortDate ? `⏳ Starts ${shortDate}` : `⏳ Pending`;
-        pendingBadge = `<span class="badge" style="background: rgba(245, 158, 11, 0.18); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); font-size: 9.5px; font-weight: 700; padding: 1px 5px; border-radius: 3px;" title="Pending New Hire — Starts ${this.escapeHtml(e.hireDate || 'future')}">${badgeLabel}</span>`;
+        pendingBadge = `<span class="badge" style="background: rgba(245, 158, 11, 0.18); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); font-size: 9.5px; font-weight: 700; padding: 1px 5px; border-radius: 3px; cursor: pointer; transition: all 0.15s ease;" onclick="event.stopPropagation(); window.sheetNavigator.promptChangeHireDate('${this.escapeJs(e.name)}', '${this.escapeJs(e.hireDate || '')}')" onmouseover="this.style.borderColor='#f59e0b'; this.style.color='#fef3c7';" onmouseout="this.style.borderColor='rgba(245, 158, 11, 0.4)'; this.style.color='#fbbf24';" title="Pending New Hire — Click to change start date or activate today">${badgeLabel}</span>`;
       }
 
       return `
@@ -2866,7 +2887,7 @@ class SheetNavigator {
                   ${e.isPending ? (() => {
                     const sp = String(e.hireDate || '').split(/[-/]/);
                     const dt = sp.length === 3 ? (sp[0].length === 4 ? `${sp[1]}/${sp[2]}` : `${sp[0]}/${sp[1]}`) : '';
-                    return `<span class="badge" style="background: rgba(245, 158, 11, 0.18); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); font-size: 9.5px; font-weight: 700; padding: 1px 5px; border-radius: 3px;" title="Pending New Hire — Starts ${this.escapeHtml(e.hireDate || 'future')}">⏳ Starts ${dt || 'Soon'}</span>`;
+                    return `<span class="badge" style="background: rgba(245, 158, 11, 0.18); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); font-size: 9.5px; font-weight: 700; padding: 1px 5px; border-radius: 3px; cursor: pointer; transition: all 0.15s ease;" onclick="event.stopPropagation(); window.sheetNavigator.promptChangeHireDate('${this.escapeJs(e.name)}', '${this.escapeJs(e.hireDate || '')}')" onmouseover="this.style.borderColor='#f59e0b'; this.style.color='#fef3c7';" onmouseout="this.style.borderColor='rgba(245, 158, 11, 0.4)'; this.style.color='#fbbf24';" title="Pending New Hire — Click to change start date or activate today">⏳ Starts ${dt || 'Soon'}</span>`;
                   })() : ''}
                   ${window.ppeTrackingEngine ? window.ppeTrackingEngine.getMemberRowBadge(e.name, e.classification) : ''}
                   <span class="badge" style="background: rgba(255,255,255,0.05); color: var(--text-muted); font-size: 10px; padding: 1px 5px; border-radius: 4px;">
@@ -4709,6 +4730,226 @@ class SheetNavigator {
     }
   }
 
+  promptChangeHireDate(empName, currentHireDate) {
+    const modalId = 'change-hire-date-modal';
+    const oldModal = document.getElementById(modalId);
+    if (oldModal) oldModal.remove();
+
+    let defaultIso = '';
+    const parsed = this.parseDate(currentHireDate);
+    if (parsed) {
+      const yyyy = parsed.getFullYear();
+      const mm = String(parsed.getMonth() + 1).padStart(2, '0');
+      const dd = String(parsed.getDate()).padStart(2, '0');
+      defaultIso = `${yyyy}-${mm}-${dd}`;
+    } else {
+      const today = new Date();
+      const yyyy = today.getFullYear();
+      const mm = String(today.getMonth() + 1).padStart(2, '0');
+      const dd = String(today.getDate()).padStart(2, '0');
+      defaultIso = `${yyyy}-${mm}-${dd}`;
+    }
+
+    const todayIso = (() => {
+      const today = new Date();
+      const yyyy = today.getFullYear();
+      const mm = String(today.getMonth() + 1).padStart(2, '0');
+      const dd = String(today.getDate()).padStart(2, '0');
+      return `${yyyy}-${mm}-${dd}`;
+    })();
+
+    const modal = document.createElement('div');
+    modal.id = modalId;
+    modal.className = 'modal active';
+    modal.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.7); display: flex; align-items: center; justify-content: center; z-index: 1050; padding: 20px;';
+    modal.innerHTML = `
+      <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; max-width: 440px; width: 100%; box-shadow: 0 10px 30px rgba(0,0,0,0.5); overflow: hidden;">
+        <div style="display: flex; justify-content: space-between; align-items: center; padding: 14px 18px; border-bottom: 1px solid var(--border-color);">
+          <div style="font-weight: 800; font-size: 15px; color: var(--text-primary); display: flex; align-items: center; gap: 8px;">
+            <span>📅</span> Hire Date / Start Date: <span style="color: #60a5fa;">${this.escapeHtml(empName)}</span>
+          </div>
+          <button class="btn btn-xs btn-secondary" onclick="document.getElementById('${modalId}').remove()" style="cursor: pointer;">✖</button>
+        </div>
+        <div style="padding: 16px 18px; display: flex; flex-direction: column; gap: 14px;">
+          <div>
+            <label style="font-size: 12px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 6px;">New Hire / Start Date:</label>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <input type="date" id="modal-hire-date-input" class="form-control" value="${defaultIso}" style="flex: 1; padding: 8px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); font-size: 13px;">
+              <button type="button" id="btn-set-today" class="btn btn-xs" style="background: rgba(16, 185, 129, 0.2); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.4); font-weight: 700; padding: 8px 10px; border-radius: 6px; cursor: pointer; white-space: nowrap;" title="Set date to today">
+                ⚡ Today
+              </button>
+            </div>
+          </div>
+          <div style="font-size: 11.5px; color: var(--text-secondary); background: rgba(0,0,0,0.18); border-radius: 6px; padding: 10px 12px; border-left: 3px solid #3b82f6; line-height: 1.4;">
+            💡 <strong>Automatic Status Update:</strong><br>
+            • If the date is <strong>today or in the past</strong>, status is automatically set to <span style="color: #10b981; font-weight: 700;">🟢 Active</span>.<br>
+            • If the date is in the <strong>future</strong>, status is set to <span style="color: #fbbf24; font-weight: 700;">⏳ Pending New Hire</span>.
+          </div>
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 12px 18px; border-top: 1px solid var(--border-color); background: var(--bg-primary);">
+          <button type="button" id="btn-quick-activate" class="btn btn-sm" style="background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.35); font-weight: 700; padding: 6px 12px; border-radius: 4px; cursor: pointer;">
+            🚀 Activate Today
+          </button>
+          <div style="display: flex; gap: 8px;">
+            <button type="button" class="btn btn-secondary" onclick="document.getElementById('${modalId}').remove()">Cancel</button>
+            <button type="button" class="btn btn-primary" id="btn-save-hire-date" style="background: #2563eb; border-color: #2563eb; font-weight: 700;">
+              💾 Save Date
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(modal);
+
+    document.getElementById('btn-set-today')?.addEventListener('click', () => {
+      const inp = document.getElementById('modal-hire-date-input');
+      if (inp) inp.value = todayIso;
+    });
+
+    document.getElementById('btn-quick-activate')?.addEventListener('click', async () => {
+      modal.remove();
+      await this.setEmployeeHireDate(empName, todayIso, true);
+    });
+
+    document.getElementById('btn-save-hire-date')?.addEventListener('click', async () => {
+      const selected = document.getElementById('modal-hire-date-input')?.value.trim() || '';
+      modal.remove();
+      if (selected) {
+        await this.setEmployeeHireDate(empName, selected);
+      }
+    });
+  }
+
+  async setEmployeeHireDate(empName, rawDateStr, forceActive = false) {
+    const empTable = this.db.getTable('employees');
+    if (!empTable || !empTable.rows) return;
+    const emp = empTable.rows.find(e => String(e['Employee Name'] || e['Name'] || '').trim().toLowerCase() === empName.toLowerCase());
+    if (!emp) {
+      alert(`Could not find employee record for ${empName}`);
+      return;
+    }
+
+    const parsedDate = this.parseDate(rawDateStr);
+    if (!parsedDate) {
+      alert('Invalid date format provided.');
+      return;
+    }
+
+    const formattedHireDate = this.formatDate(parsedDate);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const checkDate = new Date(parsedDate.getTime());
+    checkDate.setHours(0, 0, 0, 0);
+
+    let newStatus = 'Active';
+    if (!forceActive && checkDate > today) {
+      newStatus = 'Pending';
+    }
+
+    const oldHireDate = emp['Hire Date'] || '';
+    const oldStatus = emp['Status'] || '';
+
+    emp['Hire Date'] = formattedHireDate;
+    emp['Status'] = newStatus;
+
+    // Headers & column positions in Employees table
+    const headers = empTable.headers || [];
+    const hireColIdx = headers.findIndex(h => /^(hire\s*date|hire)$/i.test(h)) + 1;
+    const statusColIdx = headers.findIndex(h => /^status$/i.test(h)) + 1;
+    const rIdx = emp._rowIdx || (empTable.rows.indexOf(emp) + 2);
+
+    if (empTable.rawGrid && empTable.rawGrid[rIdx - 1]) {
+      if (hireColIdx > 0) empTable.rawGrid[rIdx - 1][hireColIdx - 1] = formattedHireDate;
+      if (statusColIdx > 0) empTable.rawGrid[rIdx - 1][statusColIdx - 1] = newStatus;
+    }
+
+    // Queue mutations for Hire Date and Status
+    if (hireColIdx > 0) {
+      await this.db.addMutation({
+        action: 'UPDATE_CELL',
+        sheetName: empTable.name || 'Employees',
+        tableKey: 'employees',
+        row: rIdx,
+        col: hireColIdx,
+        header: 'Hire Date',
+        itemIdentifier: empName,
+        oldValue: oldHireDate,
+        value: formattedHireDate
+      });
+    }
+
+    if (statusColIdx > 0) {
+      await this.db.addMutation({
+        action: 'UPDATE_CELL',
+        sheetName: empTable.name || 'Employees',
+        tableKey: 'employees',
+        row: rIdx,
+        col: statusColIdx,
+        header: 'Status',
+        itemIdentifier: empName,
+        oldValue: oldStatus,
+        value: newStatus
+      });
+    }
+
+    // Also record event in employee_history if table exists
+    const histTable = this.db.getTable('employee_history');
+    if (histTable && Array.isArray(histTable.rows)) {
+      const todayFormatted = this.formatDate(new Date());
+      const eventNote = newStatus === 'Active'
+        ? `Activated as Active employee with hire date ${formattedHireDate}`
+        : `Start date updated to ${formattedHireDate} (Pending New Hire)`;
+      const newHistRow = {
+        'Date': todayFormatted,
+        'Employee Name': empName,
+        'Event Type': newStatus === 'Active' ? 'Activated' : 'Date Changed',
+        'Location': emp['Location'] || '',
+        'Job Number': emp['Job Number'] || emp['Job #'] || '',
+        'Notes': eventNote
+      };
+      histTable.rows.unshift(newHistRow);
+      await this.db.addMutation({
+        action: 'ADD_ROW',
+        sheetName: histTable.name || 'Employee History',
+        tableKey: 'employee_history',
+        employeeName: empName,
+        itemIdentifier: empName,
+        rowValues: newHistRow
+      });
+    }
+
+    // If active, also check if glove_swaps has a PREV EMP reclaim row for this employee and clean it up
+    const gSwaps = this.db.getTable('glove_swaps');
+    if (gSwaps && Array.isArray(gSwaps.rows)) {
+      const rogueIdx = gSwaps.rows.findIndex(r => {
+        const empField = String(r['Employee'] || r['Assigned To'] || '').trim().toLowerCase();
+        const daysLeft = String(r['Days Left'] || '').trim().toUpperCase();
+        return empField === empName.toLowerCase() && daysLeft.includes('PREV EMP');
+      });
+      if (rogueIdx !== -1) {
+        const removedRow = gSwaps.rows.splice(rogueIdx, 1)[0];
+        if (gSwaps.rawGrid && removedRow && removedRow._rowIdx) {
+          const gridIdx = gSwaps.rawGrid.findIndex((r, idx) => idx + 1 === removedRow._rowIdx);
+          if (gridIdx !== -1) {
+            gSwaps.rawGrid.splice(gridIdx, 1);
+          }
+        }
+      }
+    }
+
+    await this.db.persistSnapshot(this.db.snapshot);
+    this.renderCurrentSheet();
+
+    if (window.employeeProfileEngine && window.employeeProfileEngine.currentEmployeeData?.displayName?.toLowerCase() === empName.toLowerCase()) {
+      window.employeeProfileEngine.openProfileModal(empName, window.employeeProfileEngine.currentActiveTab || 'details');
+    }
+
+    if (typeof window.showToast === 'function') {
+      window.showToast(`✅ Updated start date for ${empName}: ${formattedHireDate} (${newStatus})`);
+    }
+  }
+
   openMemberRowActions(event, empName, baseJob, isLead, isSecondary) {
     event.stopPropagation();
     const existing = document.getElementById('crew-member-actions-menu');
@@ -4745,6 +4986,21 @@ class SheetNavigator {
       return btn;
     };
 
+    const empTable = this.db.getTable('employees');
+    const emp = (empTable?.rows || []).find(e => String(e['Employee Name'] || e['Name'] || '').trim().toLowerCase() === empName.toLowerCase());
+    const isPending = emp && (String(emp['Status'] || '').toLowerCase().includes('pending') || (emp['Hire Date'] && new Date(emp['Hire Date']) > new Date()));
+
+    if (isPending) {
+      menu.appendChild(makeItem('🚀', 'Activate Employee Today', () => {
+        const todayIso = new Date().toISOString().split('T')[0];
+        this.setEmployeeHireDate(empName, todayIso, true);
+      }));
+    }
+
+    menu.appendChild(makeItem('📅', isPending ? 'Change Start Date' : 'Edit Hire Date', () => {
+      this.promptChangeHireDate(empName, emp?.['Hire Date'] || '');
+    }));
+
     if (!isLead) {
       menu.appendChild(makeItem('👑', `Make Foreman for ${baseJob}`, () => {
         this.setCrewForeman(baseJob, empName);
@@ -4752,8 +5008,6 @@ class SheetNavigator {
     }
 
     menu.appendChild(makeItem('✏️', 'Edit Slot Number', () => {
-      const empTable = this.db.getTable('employees');
-      const emp = (empTable?.rows || []).find(e => String(e['Employee Name'] || e['Name'] || '').trim().toLowerCase() === empName.toLowerCase());
       this.promptChangeMemberSlot(empName, emp?.['Job Number'] || '', baseJob);
     }));
 
@@ -6326,36 +6580,14 @@ class SheetNavigator {
           const sVal = String(val || '').trim();
           const sLower = sVal.toLowerCase();
 
-          // Check if date assigned is in the future
-          const dateAssignedStr = String(row['Date Assigned'] || row['Assigned Date'] || '').trim();
-          let isFutureAssignedDate = false;
-          if (dateAssignedStr) {
-            const parts = dateAssignedStr.split(/[-/]/);
-            if (parts.length === 3) {
-              let y, m, d;
-              if (parts[0].length === 4) {
-                y = parseInt(parts[0], 10);
-                m = parseInt(parts[1], 10) - 1;
-                d = parseInt(parts[2], 10);
-              } else {
-                m = parseInt(parts[0], 10) - 1;
-                d = parseInt(parts[1], 10);
-                y = parseInt(parts[2], 10);
-              }
-              const aDate = new Date(y, m, d, 12, 0, 0);
-              const today = new Date();
-              today.setHours(0, 0, 0, 0);
-              if (aDate > today) isFutureAssignedDate = true;
-            }
-          }
-
           const holderRaw = String(row['Assigned To'] || row['Holder'] || '').trim();
           const cleanHolder = holderRaw.replace(/\s*\([^)]*\)/g, '').toLowerCase().trim();
           const isPendingHolder = Boolean(pendingEmps && pendingEmps.has(cleanHolder));
 
-          if (sLower === 'assigned' && (isFutureAssignedDate || isPendingHolder)) {
-            const pendingInfo = isPendingHolder ? pendingEmps.get(cleanHolder) : null;
-            const startDateStr = dateAssignedStr || pendingInfo?.hireDate || '';
+          // Pre-Assigned applies ONLY to items assigned to pending new hire employees that have a future hire date
+          if (sLower === 'assigned' && isPendingHolder) {
+            const pendingInfo = pendingEmps.get(cleanHolder);
+            const startDateStr = pendingInfo?.hireDate || '';
             let shortDate = '';
             if (startDateStr) {
               const sp = startDateStr.split(/[-/]/);
@@ -6982,6 +7214,7 @@ class SheetNavigator {
             const dateAssignedColName = (tableData.headers || []).find(h => /date\s*assigned/i.test(h));
             const chgOutColName = (tableData.headers || []).find(h => /change\s*out/i.test(h));
             const testDateColName = (tableData.headers || []).find(h => /test\s*date|calibration/i.test(h));
+            const classColName = (tableData.headers || []).find(h => /^class$/i.test(h)) || 'Class';
 
             const curAssigned = isAssignedCol ? newVal : String(tableRow[assignedColName] || '').trim();
             const curAssignedLower = curAssigned.toLowerCase();
@@ -7223,6 +7456,29 @@ class SheetNavigator {
 
               const chosenDate = assignDetails.dateAssigned || todayFormatted;
               const chosenLoc = assignDetails.location || empLoc;
+
+              // Safety check against location rubber class approval for gloves or sleeves
+              if (this.currentSheetKey === 'gloves' || this.currentSheetKey === 'sleeves') {
+                const itemClass = tableRow[classColName || 'Class'];
+                const locApproval = window.ppeTrackingEngine
+                  ? window.ppeTrackingEngine.getLocationRubberClassApproval(chosenLoc)
+                  : (window.employeeProfileEngine ? window.employeeProfileEngine.getLocationRubberClassApproval(chosenLoc) : 'CL2');
+                const isApproved = window.ppeTrackingEngine
+                  ? window.ppeTrackingEngine.isItemClassApprovedForLocation(itemClass, locApproval)
+                  : (window.employeeProfileEngine ? window.employeeProfileEngine.isItemClassApprovedForLocation(itemClass, locApproval) : true);
+
+                if (!isApproved) {
+                  const confirmMsg = `⚠️ LOCATION COMPLIANCE WARNING:\n\n` +
+                    `Location "${chosenLoc}" is approved for ${locApproval} rubber PPE.\n` +
+                    `Item #${itemIdentifier} is Class ${itemClass}.\n\n` +
+                    `Assigning this item violates location rubber PPE approval standards.\n\n` +
+                    `Do you want to override and assign anyway?`;
+                  if (!confirm(confirmMsg)) {
+                    targetCell.textContent = initialVal || '';
+                    return;
+                  }
+                }
+              }
 
               // Apply in-memory row updates
               if (pickedColName) tableRow[pickedColName] = '';
