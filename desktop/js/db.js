@@ -243,6 +243,8 @@ class LocalDatabase {
     this.snapshot = null;
     this.outbox = [];
     this.listeners = [];
+    this._rowIndices = new Map();
+    this._empAliasMap = null;
   }
 
   _invalidateHistoryEngines(tableKey = null) {
@@ -311,6 +313,7 @@ class LocalDatabase {
       this.normalizeSnapshot(this.snapshot);
     }
 
+    this._invalidateIndices();
     this.notify();
     return this.snapshot;
   }
@@ -418,6 +421,7 @@ class LocalDatabase {
     }
 
     await this.persistSnapshot(snapshot);
+    this._invalidateIndices();
     this.notify();
   }
 
@@ -1016,6 +1020,173 @@ class LocalDatabase {
     }
     table = table || { headers: [], rows: [] };
     return this.normalizeTableData(table, tableKey);
+  }
+
+  /**
+   * Invalidates cached in-memory indices for a specific table or across all tables.
+   */
+  _invalidateIndices(tableKey = null) {
+    if (!tableKey) {
+      this._rowIndices.clear();
+      this._empAliasMap = null;
+    } else {
+      const cleanKey = String(tableKey).toLowerCase();
+      for (const k of this._rowIndices.keys()) {
+        if (k.startsWith(`${cleanKey}:`)) {
+          this._rowIndices.delete(k);
+        }
+      }
+      if (cleanKey === 'employees') {
+        this._empAliasMap = null;
+      }
+    }
+  }
+
+  /**
+   * Retrieves or builds an in-memory Map index for O(1) row lookups by a given field.
+   * Key comparisons are case-insensitive and whitespace-trimmed.
+   */
+  getIndex(tableKey, keyField) {
+    if (!tableKey || !keyField) return new Map();
+    const cleanTable = String(tableKey).toLowerCase();
+    const cleanField = String(keyField).trim().toLowerCase();
+    const indexKey = `${cleanTable}:${cleanField}`;
+
+    if (this._rowIndices.has(indexKey)) {
+      return this._rowIndices.get(indexKey);
+    }
+
+    const table = this.getTable(cleanTable);
+    const index = new Map();
+    if (table && Array.isArray(table.rows)) {
+      for (let i = 0; i < table.rows.length; i++) {
+        const row = table.rows[i];
+        if (!row) continue;
+        let rawVal = row[keyField];
+        if (rawVal === undefined || rawVal === null) {
+          for (const k of Object.keys(row)) {
+            if (k.trim().toLowerCase() === cleanField) {
+              rawVal = row[k];
+              break;
+            }
+          }
+        }
+        if (rawVal !== undefined && rawVal !== null) {
+          const normVal = String(rawVal).trim().toLowerCase();
+          if (normVal && !index.has(normVal)) {
+            index.set(normVal, row);
+          }
+        }
+      }
+    }
+
+    this._rowIndices.set(indexKey, index);
+    return index;
+  }
+
+  /**
+   * Performs an O(1) in-memory indexed lookup for a single row in a table.
+   */
+  findRow(tableKey, keyField, value) {
+    if (value === undefined || value === null) return null;
+    const normVal = String(value).trim().toLowerCase();
+    if (!normVal) return null;
+    const index = this.getIndex(tableKey, keyField);
+    return index.get(normVal) || null;
+  }
+
+  /**
+   * Retrieves all rows matching a specific field value using an in-memory multi-index.
+   */
+  findRows(tableKey, keyField, value) {
+    if (value === undefined || value === null) return [];
+    const normVal = String(value).trim().toLowerCase();
+    if (!normVal) return [];
+
+    const cleanTable = String(tableKey).toLowerCase();
+    const cleanField = String(keyField).trim().toLowerCase();
+    const multiIndexKey = `${cleanTable}:${cleanField}:multi`;
+
+    let multiIndex = this._rowIndices.get(multiIndexKey);
+    if (!multiIndex) {
+      multiIndex = new Map();
+      const table = this.getTable(cleanTable);
+      if (table && Array.isArray(table.rows)) {
+        for (let i = 0; i < table.rows.length; i++) {
+          const row = table.rows[i];
+          if (!row) continue;
+          let rawVal = row[keyField];
+          if (rawVal === undefined || rawVal === null) {
+            for (const k of Object.keys(row)) {
+              if (k.trim().toLowerCase() === cleanField) {
+                rawVal = row[k];
+                break;
+              }
+            }
+          }
+          if (rawVal !== undefined && rawVal !== null) {
+            const v = String(rawVal).trim().toLowerCase();
+            if (v) {
+              let list = multiIndex.get(v);
+              if (!list) {
+                list = [];
+                multiIndex.set(v, list);
+              }
+              list.push(row);
+            }
+          }
+        }
+      }
+      this._rowIndices.set(multiIndexKey, multiIndex);
+    }
+
+    return multiIndex.get(normVal) || [];
+  }
+
+  /**
+   * O(1) indexed lookup for an employee by canonical name or alias.
+   */
+  getEmployee(name) {
+    if (!name) return null;
+    const canonical = this.getCanonicalEmployeeName(name);
+    const table = this.getTable('employees');
+    if (!table || !Array.isArray(table.rows)) return null;
+
+    const nameKey = (table.headers || []).find(h => /^(employee\s*name|name)$/i.test(h.trim())) || 'Name';
+    let emp = this.findRow('employees', nameKey, canonical);
+    if (!emp && canonical !== name) {
+      emp = this.findRow('employees', nameKey, name);
+    }
+    return emp;
+  }
+
+  /**
+   * O(1) indexed lookup for an inventory item by item number, serial number, or ESL ID.
+   */
+  getInventoryItem(categoryKey, itemIdentifier) {
+    if (!categoryKey || !itemIdentifier) return null;
+    const table = this.getTable(categoryKey);
+    if (!table || !Array.isArray(table.rows)) return null;
+
+    const cleanId = String(itemIdentifier).trim().toLowerCase();
+    const candidateFields = ['Item #', 'Serial #', 'ESL ID', 'Glove', 'Sleeve', 'Blanket', 'MACK'];
+    for (const field of candidateFields) {
+      if ((table.headers || []).includes(field)) {
+        const item = this.findRow(categoryKey, field, cleanId);
+        if (item) return item;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * O(1) indexed lookup for a job by job number.
+   */
+  getJob(jobNumber) {
+    if (!jobNumber) return null;
+    const cleanJob = String(jobNumber).trim().toLowerCase();
+    return this.findRow('job_tracking', 'Job Number', cleanJob) ||
+           this.findRow('job_tracking', 'Job #', cleanJob);
   }
 
   normalizeSnapshot(snapshot) {
@@ -4360,6 +4531,13 @@ class LocalDatabase {
           _normalized: true
         };
       }
+    }
+
+    const affectedKey = mut.tableKey || (mut.sheetName ? this.getTableKeyForSheet(mut.sheetName) : null);
+    if (affectedKey) {
+      this._invalidateIndices(affectedKey);
+    } else {
+      this._invalidateIndices();
     }
   }
 
