@@ -1812,6 +1812,7 @@ class SheetNavigator {
         maxThreads = 350;
       }
 
+      const prevEmps = Array.from(this.getPreviousEmployeeNamesSet());
       const payload = {
         action: 'scanCertEmails',
         daysBack: daysBack,
@@ -1819,7 +1820,8 @@ class SheetNavigator {
         query: query,
         maxThreads: maxThreads,
         maxResults: 150,
-        activeEmployees: activeEmps
+        activeEmployees: activeEmps,
+        previousEmployees: prevEmps
       };
 
       let result = null;
@@ -1835,7 +1837,31 @@ class SheetNavigator {
       }
 
       if (result && result.success) {
-        this.scannedCertItems = result.certs || [];
+        const prevSet = this.getPreviousEmployeeNamesSet();
+        const rawCerts = result.certs || [];
+        this.scannedCertItems = rawCerts.filter(item => {
+          const emp = String(item.employeeName || '').toLowerCase().trim();
+          if (emp && prevSet.has(emp)) return false;
+          const subjEmp = this.matchEmployeeFromText(item.subject, activeEmps);
+          if (!subjEmp) {
+            // Check if subject is for a previous employee
+            for (const prevName of prevSet) {
+              const re = new RegExp('\\b' + prevName.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&') + '\\b', 'i');
+              if (re.test(item.subject)) return false;
+            }
+          }
+          return true;
+        });
+
+        // Pre-match active employee names from subject or filename if missing
+        this.scannedCertItems.forEach(item => {
+          if (!item.employeeName || !activeEmps.some(n => n.toLowerCase() === item.employeeName.toLowerCase())) {
+            const matched = this.matchEmployeeFromText(item.subject, activeEmps) || this.matchEmployeeFromText(item.fileName, activeEmps);
+            if (matched) {
+              item.employeeName = matched;
+            }
+          }
+        });
 
         if (this.scannedCertItems.length === 0) {
           if (body) {
@@ -2143,9 +2169,13 @@ class SheetNavigator {
       if (item.alreadyInVault) vaultedCount++;
     });
 
-    const displayItems = hideVaulted
+    const prevNamesSet = this.getPreviousEmployeeNamesSet();
+    const displayItems = (hideVaulted
       ? this.scannedCertItems.filter(item => !item.alreadyInVault)
-      : this.scannedCertItems;
+      : this.scannedCertItems).filter(item => {
+        const emp = String(item.employeeName || '').toLowerCase().trim();
+        return !prevNamesSet.has(emp);
+      });
 
     if (batchActions) batchActions.style.display = displayItems.length > 0 ? 'flex' : 'none';
     if (countBadge) {
@@ -2208,6 +2238,14 @@ class SheetNavigator {
     `;
 
     displayItems.forEach(item => {
+      // Auto-preselect employee if missing or not in active employees list
+      if (!item.employeeName || !employeeOptions.some(n => n.toLowerCase() === item.employeeName.toLowerCase())) {
+        const matched = this.matchEmployeeFromText(item.subject, employeeOptions) || this.matchEmployeeFromText(item.fileName, employeeOptions);
+        if (matched) {
+          item.employeeName = matched;
+        }
+      }
+
       const isPdf = (item.contentType && item.contentType.includes('pdf')) || (item.fileName && item.fileName.toLowerCase().endsWith('.pdf'));
       const subLower = String(item.subject || '').toLowerCase();
       const isMultiOrGroup = subLower.includes('new hire') || subLower.includes('ape') || subLower.includes('group') || subLower.includes('butte') || subLower.includes('helena') || (item.attIdx && item.attIdx > 0);
@@ -2267,6 +2305,9 @@ class SheetNavigator {
                   <span>👁️</span> View
                 </button>
               ` : `
+                <button type="button" class="btn btn-secondary" id="btn-scan-ocr-${item.id}" style="font-size: 11px; padding: 3px 8px; background: rgba(15, 23, 42, 0.88); border: 1px solid rgba(14, 165, 233, 0.55); color: #38bdf8; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 3px;" onclick="window.sheetNavigator.extractCertInfoFromImage('${this.escapeJs(item.id)}', true)" title="Scan document photo with OCR to pull name, expiration date, and cert type directly off the picture">
+                  <span>✨</span> Scan Photo
+                </button>
                 <button type="button" class="btn btn-secondary" style="font-size: 11px; padding: 3px 8px; background: rgba(15, 23, 42, 0.88); border: 1px solid rgba(56, 189, 248, 0.55); color: #38bdf8; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 3px;" onclick="window.sheetNavigator.openPhotoCropperModal('${this.escapeJs(item.id)}')" title="Crop and rotate this photo">
                   <span>✂️</span> Crop
                 </button>
@@ -2283,6 +2324,9 @@ class SheetNavigator {
               </div>
               <span id="scanned-vault-badge-${item.id}" style="${item.alreadyInVault ? 'display: inline-block;' : 'display: none;'} background: rgba(16, 185, 129, 0.25); border: 1px solid rgba(16, 185, 129, 0.55); color: #34d399; padding: 1px 6px; border-radius: 4px; font-size: 9.5px; font-weight: 700;" title="Already attached in Cert Photo Vault">
                 ✓ In Vault
+              </span>
+              <span id="scanned-ocr-badge-${item.id}" style="display: none; background: rgba(56, 189, 248, 0.22); border: 1px solid rgba(56, 189, 248, 0.5); color: #38bdf8; padding: 1px 6px; border-radius: 4px; font-size: 9.5px; font-weight: 700;" title="Extracted from photo text">
+                ✨ Auto-detected
               </span>
               ${isMultiOrGroup ? `
                 <div style="background: rgba(245, 158, 11, 0.22); border: 1px solid rgba(245, 158, 11, 0.4); padding: 1px 6px; border-radius: 4px; font-size: 9.5px; color: #fbbf24; font-weight: 600;" title="${this.escapeHtml(item.fileName || 'Multi-attachment email')}">
@@ -2529,6 +2573,11 @@ class SheetNavigator {
           if (imgEl) {
             imgEl.src = b64;
             imgEl.style.display = 'block';
+          }
+
+          // If employee name or expiration date is not yet known, auto-pull it off the picture!
+          if (!item.isPdf && (!item.employeeName || !item.expDate)) {
+            this.extractCertInfoFromImage(item, false);
           }
         }
         return b64;
@@ -3361,6 +3410,272 @@ class SheetNavigator {
       });
     }
     return names.sort((a, b) => a.localeCompare(b));
+  }
+
+  /**
+   * Matches an active employee from arbitrary text (email subject, attachment filename, or OCR text).
+   * Supports full names, alternate names (e.g. John-Michael Baker -> John Baker), and compound parts.
+   */
+  matchEmployeeFromText(text, employeeList = null) {
+    if (!text) return '';
+    const clean = String(text)
+      .replace(/^(fwd|re|fw):\s*/ig, '')
+      .replace(/^(fwd|re|fw):\s*/ig, '')
+      .trim();
+    if (!clean) return '';
+
+    const activeList = employeeList || this.getActiveEmployeeNamesList();
+    const prevSet = this.getPreviousEmployeeNamesSet();
+
+    // 1. Check exact active employee full names first (longer names first)
+    const sorted = [...activeList].sort((a, b) => b.length - a.length);
+    for (const emp of sorted) {
+      if (prevSet && prevSet.has(emp.toLowerCase())) continue;
+      const re = new RegExp('\\b' + emp.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&') + '\\b', 'i');
+      if (re.test(clean)) {
+        return emp;
+      }
+    }
+
+    // 2. Check Alternate Names from employees table
+    const empTable = this.db ? this.db.getTable('employees') : null;
+    if (empTable && empTable.rows) {
+      for (const row of empTable.rows) {
+        if (!this.isEmployeeActive(row, prevSet)) continue;
+        const canonicalName = String(row['Employee Name'] || row['Name'] || '').trim();
+        if (!canonicalName || (prevSet && prevSet.has(canonicalName.toLowerCase()))) continue;
+
+        const altNames = String(row['Alternate Names'] || '').trim();
+        if (altNames) {
+          const parts = altNames.split(/[,;\/|]+/);
+          for (const p of parts) {
+            const altTrim = p.trim();
+            if (altTrim.length >= 3) {
+              const re = new RegExp('\\b' + altTrim.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&') + '\\b', 'i');
+              if (re.test(clean)) {
+                return canonicalName;
+              }
+              // If alternate name has hyphens like "John-Michael Baker", check "John Baker" or "Michael Baker"
+              if (altTrim.includes('-')) {
+                const hyphenRe = new RegExp('\\b' + altTrim.replace(/-/g, '[-\\s]') + '\\b', 'i');
+                if (hyphenRe.test(clean)) {
+                  return canonicalName;
+                }
+              }
+            }
+          }
+        }
+
+        // Also check if canonical name has hyphen like "John-Michael"
+        if (canonicalName.includes('-')) {
+          const firstAndLast = canonicalName.split(' ');
+          if (firstAndLast.length === 2 && firstAndLast[0].includes('-')) {
+            const firstParts = firstAndLast[0].split('-');
+            for (const fp of firstParts) {
+              if (fp.length >= 3) {
+                const candidate = `${fp} ${firstAndLast[1]}`;
+                const candRe = new RegExp('\\b' + candidate.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&') + '\\b', 'i');
+                if (candRe.test(clean)) {
+                  return canonicalName;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    return '';
+  }
+
+  /**
+   * Normalizes arbitrary date formats (e.g. 6-23-2030, 8/4/2026, 2026-08-04) to MM/DD/YYYY.
+   */
+  normalizeScannedDateStr(raw) {
+    if (!raw) return '';
+    const clean = String(raw).trim().replace(/[^\d\/\-\.]/g, '');
+    const parts = clean.split(/[\/\-\.]/);
+    if (parts.length === 3) {
+      let [m, d, y] = parts;
+      if (m.length === 4) {
+        // YYYY-MM-DD
+        [y, m, d] = [m, d, y];
+      }
+      if (y.length === 2) {
+        const yNum = parseInt(y, 10);
+        y = yNum > 50 ? '19' + y : '20' + y;
+      }
+      m = String(m).padStart(2, '0');
+      d = String(d).padStart(2, '0');
+      return `${m}/${d}/${y}`;
+    }
+    return raw;
+  }
+
+  /**
+   * Parses cert data (employee name, expiration date, date acquired, and cert type) from recognized OCR text.
+   */
+  parseCertInfoFromText(text, employeeList = null) {
+    const result = {
+      employeeName: '',
+      certType: '',
+      expDate: '',
+      acqDate: ''
+    };
+    if (!text || typeof text !== 'string') return result;
+
+    const activeList = employeeList || this.getActiveEmployeeNamesList();
+
+    // 1. Employee Name extraction
+    // Look for explicit form headers first: Operator Name, Employee Name, Candidate, Trainee, Name
+    const nameFieldRegex = /(?:operator(?:\s*name)?|employee(?:\s*name)?|trainee(?:\s*name)?|student|candidate|name)\s*[:\-]\s*([A-Za-z\s'\.-]+)/i;
+    const nameMatch = text.match(nameFieldRegex);
+    if (nameMatch) {
+      const rawCandidate = nameMatch[1].trim().split('\n')[0].trim();
+      const matchedFromCandidate = this.matchEmployeeFromText(rawCandidate, activeList);
+      if (matchedFromCandidate) {
+        result.employeeName = matchedFromCandidate;
+      }
+    }
+
+    // Fallback: search whole text for active employees (excluding evaluator/trainer if present)
+    if (!result.employeeName) {
+      for (const emp of activeList) {
+        const empRe = new RegExp('\\b' + emp.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&') + '\\b', 'i');
+        if (empRe.test(text)) {
+          const evalRe = new RegExp('(?:evaluator|instructor|trainer|supervisor)\\s*[:\\-]?\\s*' + emp.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&'), 'i');
+          if (!evalRe.test(text)) {
+            result.employeeName = emp;
+            break;
+          }
+        }
+      }
+    }
+
+    // 2. Expiration Date extraction
+    // Looks for patterns like "Crane Cert Exp Date: 6-23-2030", "Expiration Date: 10/12/2028", "Expires: 2028-10-15"
+    const expRegex = /(?:(?:crane\s*cert\s*)?exp(?:iration)?\s*(?:date)?|expires?|valid\s*(?:through|thru|until)|end\s*date)\s*[:\-]?\s*([0-1]?\d[\/\-\.][0-3]?\d[\/\-\.]\d{2,4})/i;
+    const expMatch = text.match(expRegex);
+    if (expMatch) {
+      result.expDate = this.normalizeScannedDateStr(expMatch[1]);
+    }
+
+    // 3. Date Acquired / Test Date / Issue Date
+    // Looks for patterns like "Date: 8/4/2026", "Issue Date: 05/10/2025", "Date Acquired: 06/01/2026"
+    const acqRegex = /(?:(?:issue|eval(?:uation)?|training|course)\s*date|date\s*acquired|date\s*completed|\bdate)\s*[:\-]?\s*([0-1]?\d[\/\-\.][0-3]?\d[\/\-\.]\d{2,4})/i;
+    const acqMatch = text.match(acqRegex);
+    if (acqMatch) {
+      const dStr = this.normalizeScannedDateStr(acqMatch[1]);
+      if (dStr !== result.expDate) {
+        result.acqDate = dStr;
+      }
+    }
+
+    // 4. Certification Type
+    const lower = text.toLowerCase();
+    if (lower.includes('crane operator evaluation') || lower.includes('crane eval')) {
+      result.certType = 'Crane Cert';
+    } else if (lower.includes('medical examiner') || lower.includes('dot card') || lower.includes('mec')) {
+      result.certType = 'MEC Expiration';
+    } else if (lower.includes('cpr') && (lower.includes('first aid') || lower.includes('1st aid'))) {
+      result.certType = '1st Aid & CPR';
+    } else if (lower.includes('driver license') || lower.includes('cdl')) {
+      result.certType = 'DL';
+    } else if (lower.includes('forklift')) {
+      result.certType = 'Forklift';
+    } else if (lower.includes('pole top') || lower.includes('ptr')) {
+      result.certType = 'Pole Top Rescue';
+    } else if (lower.includes('trench')) {
+      result.certType = 'OSHA Trench Comp Person';
+    }
+
+    return result;
+  }
+
+  /**
+   * Performs client-side OCR on an image attachment to pull employee name, expiration date,
+   * date acquired, and certification type directly off the document/photo.
+   */
+  async extractCertInfoFromImage(item, userInitiated = false) {
+    if (!item) return;
+    if (typeof item === 'string') {
+      item = this.scannedCertItems ? this.scannedCertItems.find(x => x.id === item) : null;
+      if (!item) return;
+    }
+
+    if (!item.base64Data) {
+      const b64 = await this.loadScannedCertAttachment(item.id);
+      if (!b64) {
+        if (userInitiated && typeof window.showToast === 'function') {
+          window.showToast('Could not load image for text scanning', 'error');
+        }
+        return;
+      }
+    }
+
+    if (!window.desktopAPI || typeof window.desktopAPI.extractTextFromPhoto !== 'function') {
+      if (userInitiated) alert('OCR text recognition is not available in this environment.');
+      return;
+    }
+
+    const badge = document.getElementById(`scanned-ocr-badge-${item.id}`);
+    const scanBtn = document.getElementById(`btn-scan-ocr-${item.id}`);
+    if (scanBtn) scanBtn.innerHTML = `<span>⏳</span> Scanning...`;
+
+    try {
+      const res = await window.desktopAPI.extractTextFromPhoto({ base64Data: item.base64Data });
+      if (res && res.success && res.text) {
+        const parsed = this.parseCertInfoFromText(res.text);
+        let updatedCount = 0;
+
+        if (parsed.employeeName && (!item.employeeName || item.employeeName === '')) {
+          item.employeeName = parsed.employeeName;
+          const empSelect = document.getElementById(`scanned-emp-select-${item.id}`);
+          if (empSelect) empSelect.value = parsed.employeeName;
+          updatedCount++;
+        }
+
+        if (parsed.expDate && (!item.expDate || item.expDate === '')) {
+          item.expDate = parsed.expDate;
+          const expInput = document.getElementById(`scanned-exp-date-${item.id}`);
+          if (expInput) expInput.value = parsed.expDate;
+          updatedCount++;
+        }
+
+        if (parsed.acqDate && (!item.acqDate || item.acqDate === '')) {
+          item.acqDate = parsed.acqDate;
+          const acqInput = document.getElementById(`scanned-acq-date-${item.id}`);
+          if (acqInput) acqInput.value = parsed.acqDate;
+          updatedCount++;
+        }
+
+        if (parsed.certType && (!item.certType || item.certType === 'Other Cert')) {
+          item.certType = parsed.certType;
+          const certSelect = document.getElementById(`scanned-cert-select-${item.id}`);
+          if (certSelect) certSelect.value = parsed.certType;
+          updatedCount++;
+        }
+
+        if (badge) {
+          badge.style.display = 'inline-block';
+          badge.textContent = `✨ Auto-detected`;
+        }
+
+        if (userInitiated && typeof window.showToast === 'function') {
+          if (updatedCount > 0) {
+            window.showToast(`✨ Extracted from photo: ${item.employeeName || ''} ${item.expDate ? `(Exp: ${item.expDate})` : ''}`, 'success');
+          } else {
+            window.showToast('Photo scanned, but no new fields were detected', 'info');
+          }
+        }
+      } else if (userInitiated && typeof window.showToast === 'function') {
+        window.showToast('Could not detect readable text in photo', 'info');
+      }
+    } catch (ocrErr) {
+      console.warn('OCR error on cert card:', ocrErr);
+    } finally {
+      if (scanBtn) scanBtn.innerHTML = `<span>✨</span> Scan Photo`;
+    }
   }
 
   /**

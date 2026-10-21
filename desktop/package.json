@@ -24,7 +24,8 @@
   "dependencies": {
     "dexie": "^4.0.10",
     "heic2any": "^0.0.4",
-    "leaflet": "^1.9.4"
+    "leaflet": "^1.9.4",
+    "tesseract.js": "^7.0.0"
   },
   "build": {
     "appId": "com.safetyassistant.desktop",

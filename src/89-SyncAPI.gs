@@ -5184,6 +5184,15 @@ function scanCertRenewalEmails(options) {
     // 1. Build list of CURRENTLY EMPLOYED workers (excluding previous/terminated employees)
     var knownEmployees = [];
     var previousEmployeesSet = {};
+    var altNameToCanonical = {};
+
+    // Ingest previousEmployees from options if provided
+    if (Array.isArray(options.previousEmployees)) {
+      for (var pi = 0; pi < options.previousEmployees.length; pi++) {
+        var pn = String(options.previousEmployees[pi] || '').toLowerCase().trim();
+        if (pn) previousEmployeesSet[pn] = true;
+      }
+    }
 
     // Check Previous Employees sheet if present
     try {
@@ -5199,6 +5208,63 @@ function scanCertRenewalEmails(options) {
       Logger.log('Previous Employees sheet check note: ' + prevErr);
     }
 
+    // Read Employees sheet for alternate names and previous status
+    try {
+      var empSheetRef = ss.getSheetByName(typeof SHEET_EMPLOYEES !== 'undefined' ? SHEET_EMPLOYEES : 'Employees');
+      if (empSheetRef && empSheetRef.getLastRow() > 1) {
+        var empGrid = empSheetRef.getDataRange().getValues();
+        var nameColIdx = (typeof COLS !== 'undefined' && COLS.EMPLOYEES && COLS.EMPLOYEES.NAME) ? (COLS.EMPLOYEES.NAME - 1) : 0;
+        var locColIdx = (typeof COLS !== 'undefined' && COLS.EMPLOYEES && COLS.EMPLOYEES.LOCATION) ? (COLS.EMPLOYEES.LOCATION - 1) : 2;
+        var jobColIdx = (typeof COLS !== 'undefined' && COLS.EMPLOYEES && COLS.EMPLOYEES.JOB_NUMBER) ? (COLS.EMPLOYEES.JOB_NUMBER - 1) : 3;
+        var lastDayColIdx = (typeof COLS !== 'undefined' && COLS.EMPLOYEES && COLS.EMPLOYEES.LAST_DAY) ? (COLS.EMPLOYEES.LAST_DAY - 1) : 11;
+        var statColIdx = (typeof COLS !== 'undefined' && COLS.EMPLOYEES && COLS.EMPLOYEES.STATUS) ? (COLS.EMPLOYEES.STATUS - 1) : 17;
+        var altColIdx = (typeof COLS !== 'undefined' && COLS.EMPLOYEES && COLS.EMPLOYEES.ALTERNATE_NAMES) ? (COLS.EMPLOYEES.ALTERNATE_NAMES - 1) : 16;
+
+        var nowTime = new Date().getTime();
+        for (var er = 1; er < empGrid.length; er++) {
+          var eName = String(empGrid[er][nameColIdx] || '').trim();
+          if (!eName || eName === '—' || eName.toLowerCase().indexOf('former') !== -1 || eName.toLowerCase().indexOf('vacant') !== -1) {
+            continue;
+          }
+          var eLoc = String(empGrid[er][locColIdx] || '').toLowerCase().trim();
+          var eStat = String(empGrid[er][statColIdx] || '').toLowerCase().trim();
+          var eJob = String(empGrid[er][jobColIdx] || '').toLowerCase().trim();
+          var eLastDay = empGrid[er][lastDayColIdx];
+
+          var isPrev = (
+            eLoc === 'previous employee' || eLoc.indexOf('previous') !== -1 ||
+            eStat === 'previous employee' || eStat.indexOf('inactive') !== -1 || eStat.indexOf('terminated') !== -1 ||
+            eJob.indexOf('previous') !== -1 || eJob.indexOf('002-') === 0 ||
+            previousEmployeesSet[eName.toLowerCase()]
+          );
+
+          if (eLastDay) {
+            var lDate = new Date(eLastDay);
+            if (!isNaN(lDate.getTime()) && lDate.getTime() <= nowTime) {
+              isPrev = true;
+            }
+          }
+
+          if (isPrev) {
+            previousEmployeesSet[eName.toLowerCase()] = true;
+          } else {
+            var eAlt = String(empGrid[er][altColIdx] || '').trim();
+            if (eAlt) {
+              var altParts = eAlt.split(/[,;\/|]+/);
+              for (var ap = 0; ap < altParts.length; ap++) {
+                var apTrim = altParts[ap].trim();
+                if (apTrim.length >= 3) {
+                  altNameToCanonical[apTrim.toLowerCase()] = eName;
+                }
+              }
+            }
+          }
+        }
+      }
+    } catch (empErr) {
+      Logger.log('Employees sheet scan note: ' + empErr);
+    }
+
     if (Array.isArray(options.activeEmployees) && options.activeEmployees.length > 0) {
       // Use active employees provided by client
       for (var aIdx = 0; aIdx < options.activeEmployees.length; aIdx++) {
@@ -5212,39 +5278,9 @@ function scanCertRenewalEmails(options) {
       var empSheet = ss.getSheetByName(typeof SHEET_EMPLOYEES !== 'undefined' ? SHEET_EMPLOYEES : 'Employees');
       if (empSheet && empSheet.getLastRow() > 1) {
         var empData = empSheet.getDataRange().getValues();
-        var nameColIdx = (typeof COLS !== 'undefined' && COLS.EMPLOYEES && COLS.EMPLOYEES.NAME) ? (COLS.EMPLOYEES.NAME - 1) : 0;
-        var locColIdx = (typeof COLS !== 'undefined' && COLS.EMPLOYEES && COLS.EMPLOYEES.LOCATION) ? (COLS.EMPLOYEES.LOCATION - 1) : 2;
-        var jobColIdx = (typeof COLS !== 'undefined' && COLS.EMPLOYEES && COLS.EMPLOYEES.JOB_NUMBER) ? (COLS.EMPLOYEES.JOB_NUMBER - 1) : 3;
-        var lastDayColIdx = (typeof COLS !== 'undefined' && COLS.EMPLOYEES && COLS.EMPLOYEES.LAST_DAY) ? (COLS.EMPLOYEES.LAST_DAY - 1) : 11;
-        var statColIdx = (typeof COLS !== 'undefined' && COLS.EMPLOYEES && COLS.EMPLOYEES.STATUS) ? (COLS.EMPLOYEES.STATUS - 1) : 17;
-
-        var now = new Date();
         for (var e = 1; e < empData.length; e++) {
-          var n = String(empData[e][nameColIdx] || '').trim();
-          if (!n || n === '—' || n === '-' || n.toLowerCase().indexOf('former') !== -1 || n.toLowerCase().indexOf('vacant') !== -1) {
-            continue;
-          }
-
-          var loc = String(empData[e][locColIdx] || '').toLowerCase().trim();
-          var stat = String(empData[e][statColIdx] || '').toLowerCase().trim();
-          var job = String(empData[e][jobColIdx] || '').toLowerCase().trim();
-          var lastDayVal = empData[e][lastDayColIdx];
-
-          var isPrevious = (
-            loc === 'previous employee' || loc.indexOf('previous') !== -1 ||
-            stat === 'previous employee' || stat.indexOf('inactive') !== -1 || stat.indexOf('terminated') !== -1 ||
-            job.indexOf('previous') !== -1 || job.indexOf('002-') === 0 ||
-            previousEmployeesSet[n.toLowerCase()]
-          );
-
-          if (lastDayVal) {
-            var lastDate = new Date(lastDayVal);
-            if (!isNaN(lastDate.getTime()) && lastDate <= now) {
-              isPrevious = true;
-            }
-          }
-
-          if (!isPrevious) {
+          var n = String(empData[e][0] || '').trim();
+          if (n && n !== '—' && !previousEmployeesSet[n.toLowerCase()]) {
             knownEmployees.push(n);
           }
         }
@@ -5324,16 +5360,28 @@ function scanCertRenewalEmails(options) {
         .replace(/^(fwd|re|fw):\s*/ig, '')
         .trim();
 
-      // 1. Try known employees list first
+      // 1. Direct match on known active employees
       for (var i = 0; i < knownEmployees.length; i++) {
         var emp = knownEmployees[i];
+        if (previousEmployeesSet[emp.toLowerCase()]) continue;
         var re = new RegExp('\\b' + emp.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&') + '\\b', 'i');
         if (re.test(clean)) {
           return emp;
         }
       }
 
-      // 2. Fallback heuristic: extract name from subject if subject matches "<First> <Last> <CertType>"
+      // 2. Check Alternate Names map
+      for (var altKey in altNameToCanonical) {
+        var altRe = new RegExp('\\b' + altKey.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&') + '\\b', 'i');
+        if (altRe.test(clean)) {
+          var canon = altNameToCanonical[altKey];
+          if (!previousEmployeesSet[canon.toLowerCase()]) {
+            return canon;
+          }
+        }
+      }
+
+      // 3. Fallback heuristic: extract name from subject if subject matches "<First> <Last> <CertType>"
       var stripped = clean
         .replace(/\b(1st\s*aid|first\s*aid|fa|cpr|dl|cdl|driver'?s?\s*license|mec|medical\s*card|med\s*card|dot\s*card|crane|forklift|osha|msha|bnsf|pole\s*top|dig\s*safe|trench|rigging|signalperson|spotter|evaluation|eval|cards?|certs?|certification|new|renewal|update|proof|photo|image|picture|scanned|scan|temp|updated)\b/ig, '')
         .replace(/[-–—:_()[\]{}#@!?,.]/g, ' ')
@@ -5348,7 +5396,7 @@ function scanCertRenewalEmails(options) {
           return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
         }).join(' ');
         if (/^[a-zA-Z\s'-]+$/.test(candidate) && words[0].length >= 2 && words[1].length >= 2) {
-          if (!isNonPersonTerm(candidate)) {
+          if (!isNonPersonTerm(candidate) && !previousEmployeesSet[candidate.toLowerCase()]) {
             return candidate;
           }
         }
@@ -5494,6 +5542,9 @@ function scanCertRenewalEmails(options) {
 
         // 3. Employee detection: check subject, sender (from), body snippet, and fallback extraction
         var subjectEmp = detectEmployeeName(subject);
+        if (subjectEmp && previousEmployeesSet[subjectEmp.toLowerCase()]) {
+          continue; // Discard emails for departed employees
+        }
         var detectedEmp = subjectEmp;
         if (!detectedEmp) {
           var sender = String(msg.getFrom() || '');
@@ -5513,6 +5564,11 @@ function scanCertRenewalEmails(options) {
           // Check if attachment filename itself names the employee
           var attEmp = detectEmployeeName(vItem.name);
           var finalEmp = attEmp || detectedEmp;
+
+          // Never return items for previous employees
+          if (finalEmp && previousEmployeesSet[finalEmp.toLowerCase()]) {
+            continue;
+          }
 
           // If there are many attachments (e.g. > 2) and neither the subject nor the filename named a specific employee,
           // don't blindly assign the first body-snip employee to every attachment

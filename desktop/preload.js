@@ -17,5 +17,6 @@ contextBridge.exposeInMainWorld('desktopAPI', {
   getCertPhoto: (params) => ipcRenderer.invoke('get-cert-photo', params),
   openCertPhotoExternally: (params) => ipcRenderer.invoke('open-cert-photo-externally', params),
   showCertPhotoInFolder: (params) => ipcRenderer.invoke('show-cert-photo-in-folder', params),
-  deleteCertPhoto: (params) => ipcRenderer.invoke('delete-cert-photo', params)
+  deleteCertPhoto: (params) => ipcRenderer.invoke('delete-cert-photo', params),
+  extractTextFromPhoto: (params) => ipcRenderer.invoke('extract-text-from-photo', params)
 });

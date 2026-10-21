@@ -505,4 +505,41 @@ ipcMain.handle('delete-cert-photo', async (event, { fileName, fullPath }) => {
   }
 });
 
+// Optical Character Recognition (OCR) via Tesseract.js
+let ocrWorker = null;
+async function getOcrWorkerInstance() {
+  if (!ocrWorker) {
+    const { createWorker } = require('tesseract.js');
+    ocrWorker = await createWorker('eng');
+  }
+  return ocrWorker;
+}
+
+ipcMain.handle('extract-text-from-photo', async (event, { base64Data }) => {
+  try {
+    if (!base64Data || typeof base64Data !== 'string') {
+      return { success: false, error: 'No image data provided' };
+    }
+
+    // If PDF, Tesseract.js can't read raw PDF bytes directly without rendering to image
+    if (base64Data.startsWith('data:application/pdf')) {
+      return { success: false, isPdf: true, error: 'PDF format requires canvas rendering' };
+    }
+
+    const rawB64 = base64Data.includes('base64,') ? base64Data.split('base64,')[1] : base64Data;
+    const buffer = Buffer.from(rawB64, 'base64');
+    const worker = await getOcrWorkerInstance();
+    const ret = await worker.recognize(buffer);
+
+    return {
+      success: true,
+      text: ret.data ? (ret.data.text || '') : ''
+    };
+  } catch (err) {
+    console.warn('[OCR Error]', err);
+    return { success: false, error: err.message };
+  }
+});
+
+
 
