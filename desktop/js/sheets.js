@@ -2684,7 +2684,7 @@ class SheetNavigator {
 
           // If employee name or expiration date is not yet known, auto-pull it off the picture!
           if (!item.isPdf && (!item.employeeName || !item.expDate)) {
-            this.extractCertInfoFromImage(item, false);
+            await this.extractCertInfoFromImage(item, false);
           }
         }
         return b64;
@@ -3519,6 +3519,32 @@ class SheetNavigator {
   }
 
   /**
+   * Calculates Levenshtein distance between two strings.
+   */
+  calcLevenshtein(a, b) {
+    if (a === b) return 0;
+    if (!a || !a.length) return (b && b.length) || 0;
+    if (!b || !b.length) return a.length;
+    const matrix = [];
+    for (let i = 0; i <= b.length; i++) matrix[i] = [i];
+    for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
+    for (let i = 1; i <= b.length; i++) {
+      for (let j = 1; j <= a.length; j++) {
+        if (b.charAt(i - 1) === a.charAt(j - 1)) {
+          matrix[i][j] = matrix[i - 1][j - 1];
+        } else {
+          matrix[i][j] = Math.min(
+            matrix[i - 1][j - 1] + 1,
+            matrix[i][j - 1] + 1,
+            matrix[i - 1][j] + 1
+          );
+        }
+      }
+    }
+    return matrix[b.length][a.length];
+  }
+
+  /**
    * Matches an active employee from arbitrary text (email subject, attachment filename, or OCR text).
    * Supports full names, alternate names (e.g. John-Michael Baker -> John Baker), and compound parts.
    */
@@ -3850,12 +3876,90 @@ class SheetNavigator {
       }
     }
 
+    // D2. Token-Based Unique Surname + Fuzzy First Name (handles OCR typos, noise chars like "|\RODRIGUEZ" / "AARDN ANTHONY")
+    if (!result.employeeName) {
+      const cleanTokens = text
+        .replace(/[^a-zA-Z0-9\s'-]/g, ' ')
+        .split(/\s+/)
+        .filter(t => t.length >= 2);
+
+      const lastNameMap = {};
+      for (const emp of filteredActiveList) {
+        const parts = emp.replace(/\s+(jr|sr|ii|iii|iv)\.?$/i, '').split(/\s+/);
+        if (parts.length >= 2) {
+          const ln = parts[parts.length - 1].toLowerCase();
+          if (!lastNameMap[ln]) lastNameMap[ln] = [];
+          lastNameMap[ln].push(emp);
+        }
+      }
+
+      for (const token of cleanTokens) {
+        const tLow = token.toLowerCase();
+        const empsWithLn = lastNameMap[tLow];
+        if (empsWithLn && empsWithLn.length === 1) {
+          const candidateEmp = empsWithLn[0];
+          const cParts = candidateEmp.replace(/\s+(jr|sr|ii|iii|iv)\.?$/i, '').split(/\s+/);
+          const cFn = cParts[0].toLowerCase();
+          for (const otherToken of cleanTokens) {
+            if (otherToken.toLowerCase() === tLow) continue;
+            const oLow = otherToken.toLowerCase();
+            if (
+              this.calcLevenshtein(oLow, cFn) <= 1 ||
+              (oLow.length >= 3 && cFn.startsWith(oLow)) ||
+              (cFn.length >= 3 && oLow.startsWith(cFn))
+            ) {
+              result.employeeName = candidateEmp;
+              break;
+            }
+          }
+          if (result.employeeName) break;
+        } else if (empsWithLn && empsWithLn.length > 1) {
+          for (const candidateEmp of empsWithLn) {
+            const cParts = candidateEmp.replace(/\s+(jr|sr|ii|iii|iv)\.?$/i, '').split(/\s+/);
+            const cFn = cParts[0].toLowerCase();
+            for (const otherToken of cleanTokens) {
+              if (otherToken.toLowerCase() === tLow) continue;
+              const oLow = otherToken.toLowerCase();
+              if (
+                this.calcLevenshtein(oLow, cFn) <= 1 ||
+                (oLow.length >= 3 && cFn.startsWith(oLow))
+              ) {
+                result.employeeName = candidateEmp;
+                break;
+              }
+            }
+            if (result.employeeName) break;
+          }
+          if (result.employeeName) break;
+        }
+      }
+    }
+
     // 2. Expiration Date extraction
     // Look for patterns like "Crane Cert Exp Date: 6-23-2030", "Expiration Date: 10/12/2028", "Expires: 2028-10-15", "4b Expires: 05/13/2027", "4b: 05/13/2027"
     const expRegex = /(?:(?:crane\s*cert\s*)?exp(?:iration)?\s*(?:date)?|expires?|valid\s*(?:through|thru|until)|end\s*date|\b4b\b(?:\s*expires?)?)\s*[:\-]?\s*([0-1]?\d[\/\-\.][0-3]?\d[\/\-\.]\d{2,4})/i;
     const expMatch = text.match(expRegex);
     if (expMatch) {
       result.expDate = this.normalizeScannedDateStr(expMatch[1]);
+    }
+
+    // Fallback: If no explicit expiration label was matched, look for future dates on the document (e.g. DL expiry in future year)
+    if (!result.expDate) {
+      const allDateMatches = text.match(/\b([0-1]?\d[\/\-\.][0-3]?\d[\/\-\.]\d{2,4})\b/g);
+      if (allDateMatches && allDateMatches.length > 0) {
+        const currentYear = new Date().getFullYear();
+        for (const rawDate of allDateMatches) {
+          const norm = this.normalizeScannedDateStr(rawDate);
+          const parts = norm.split('/');
+          if (parts.length === 3) {
+            const y = parseInt(parts[2], 10);
+            if (y >= currentYear) {
+              result.expDate = norm;
+              break;
+            }
+          }
+        }
+      }
     }
 
     // 3. Date Acquired / Test Date / Issue Date
@@ -3937,6 +4041,47 @@ class SheetNavigator {
           const empSelect = document.getElementById(`scanned-emp-select-${item.id}`);
           if (empSelect) empSelect.value = parsed.employeeName;
           updatedCount++;
+
+          // Propagate employee name to sibling cards from the same email message (e.g. DL Back)
+          if (item.messageId && this.scannedCertItems) {
+            const hideVaultedCheckbox = document.getElementById('cert-scan-hide-vaulted');
+            const hideVaulted = hideVaultedCheckbox ? hideVaultedCheckbox.checked : true;
+            this.scannedCertItems.forEach(sib => {
+              if (sib.id !== item.id && sib.messageId === item.messageId && (!sib.employeeName || sib.employeeName === '')) {
+                sib.employeeName = parsed.employeeName;
+                const sibSelect = document.getElementById(`scanned-emp-select-${sib.id}`);
+                if (sibSelect) sibSelect.value = parsed.employeeName;
+
+                // If item is DL Front and sib is DL Back, specialize cert types
+                const sibFile = String(sib.fileName || '').toLowerCase();
+                const isSibBack = sibFile.includes('back') || (sib.attIdx !== undefined && item.attIdx !== undefined && sib.attIdx > item.attIdx);
+                if (isSibBack && (sib.certType === 'DL' || !sib.certType || sib.certType === 'Other Cert')) {
+                  sib.certType = 'DL (Back)';
+                  const sibCertSelect = document.getElementById(`scanned-cert-select-${sib.id}`);
+                  if (sibCertSelect) sibCertSelect.value = 'DL (Back)';
+                  if (item.certType === 'DL') {
+                    item.certType = 'DL (Front)';
+                    const itemCertSelect = document.getElementById(`scanned-cert-select-${item.id}`);
+                    if (itemCertSelect) itemCertSelect.value = 'DL (Front)';
+                  }
+                }
+
+                sib.alreadyInVault = this.isScannedCertAlreadyAdded(sib);
+                const sibVaultBadge = document.getElementById(`scanned-vault-badge-${sib.id}`);
+                if (sibVaultBadge) sibVaultBadge.style.display = sib.alreadyInVault ? 'inline-block' : 'none';
+
+                if (sib.alreadyInVault && hideVaulted) {
+                  const sibCard = document.getElementById(`scanned-cert-card-${sib.id}`);
+                  if (sibCard) {
+                    sibCard.style.transition = 'all 0.3s ease';
+                    sibCard.style.opacity = '0';
+                    sibCard.style.transform = 'scale(0.92)';
+                    setTimeout(() => { if (sibCard && sibCard.parentNode) sibCard.remove(); }, 300);
+                  }
+                }
+              }
+            });
+          }
         }
 
         if (parsed.expDate && (!item.expDate || item.expDate === '')) {
