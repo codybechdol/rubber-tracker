@@ -1436,11 +1436,17 @@ class SheetNavigator {
     if (!files || !files.length) return;
     const file = files[0];
     const reader = new FileReader();
-    reader.onload = (e) => {
+    reader.onload = async (e) => {
+      let b64 = e.target.result;
+      let fName = file.name;
+      if (fName.toLowerCase().endsWith('.heic') || fName.toLowerCase().endsWith('.heif') || b64.startsWith('data:image/heic') || b64.startsWith('data:image/heif')) {
+        b64 = await this.convertHeicDataUrlToJpeg(b64);
+        fName = fName.replace(/\.heic$/i, '.jpg').replace(/\.heif$/i, '.jpg');
+      }
       this.stagedCertPhoto = {
-        base64Data: e.target.result,
+        base64Data: b64,
         originalPath: file.path || null,
-        fileName: file.name
+        fileName: fName
       };
       this.renderCertPhotoModalContent();
     };
@@ -1451,10 +1457,16 @@ class SheetNavigator {
     if (!window.desktopAPI || !window.desktopAPI.selectCertPhotoFile) return;
     const res = await window.desktopAPI.selectCertPhotoFile();
     if (res && res.success) {
+      let b64 = res.base64Data;
+      let fName = res.fileName;
+      if (fName.toLowerCase().endsWith('.heic') || fName.toLowerCase().endsWith('.heif') || b64.startsWith('data:image/heic') || b64.startsWith('data:image/heif')) {
+        b64 = await this.convertHeicDataUrlToJpeg(b64);
+        fName = fName.replace(/\.heic$/i, '.jpg').replace(/\.heif$/i, '.jpg');
+      }
       this.stagedCertPhoto = {
-        base64Data: res.base64Data,
+        base64Data: b64,
         originalPath: res.originalPath,
-        fileName: res.fileName
+        fileName: fName
       };
       await this.renderCertPhotoModalContent();
     }
@@ -1679,10 +1691,12 @@ class SheetNavigator {
         throw new Error('Sync URL is not configured. Please check connection settings.');
       }
 
+      const activeEmps = this.getActiveEmployeeNamesList();
       const payload = {
         action: 'scanCertEmails',
         daysBack: daysBack,
-        folder: folder
+        folder: folder,
+        activeEmployees: activeEmps
       };
 
       let result = null;
@@ -1698,7 +1712,22 @@ class SheetNavigator {
       }
 
       if (result && result.success) {
-        this.scannedCertItems = result.certs || [];
+        let certs = result.certs || [];
+        // Convert any Apple HEIC photos into standard JPEG Data URLs automatically
+        for (let i = 0; i < certs.length; i++) {
+          const item = certs[i];
+          if (item.isHeic || (item.contentType && item.contentType.includes('heic')) || (item.fileName && item.fileName.toLowerCase().endsWith('.heic'))) {
+            try {
+              item.base64Data = await this.convertHeicDataUrlToJpeg(item.base64Data);
+              item.contentType = 'image/jpeg';
+              item.fileName = item.fileName.replace(/\.heic$/i, '.jpg').replace(/\.heif$/i, '.jpg');
+            } catch (convErr) {
+              console.warn('HEIC item conversion warning:', convErr);
+            }
+          }
+        }
+        this.scannedCertItems = certs;
+
         if (this.scannedCertItems.length === 0) {
           if (body) {
             body.innerHTML = `
@@ -1762,15 +1791,13 @@ class SheetNavigator {
     if (batchActions) batchActions.style.display = 'flex';
     if (countBadge) countBadge.textContent = `${this.scannedCertItems.length} cert ${this.scannedCertItems.length === 1 ? 'photo' : 'photos'} found`;
 
-    // Fetch employee names for dropdown
-    const empTable = this.db.getTable('employees');
-    const employeeOptions = (empTable && empTable.rows ? empTable.rows : [])
-      .map(e => String(e['Employee Name'] || e['Name'] || '').trim())
-      .filter(n => n && n !== '—' && !n.toLowerCase().includes('vacant') && !n.toLowerCase().includes('open'))
-      .sort((a, b) => a.localeCompare(b));
+    // Fetch employee names for dropdown (strictly currently employed workers)
+    const employeeOptions = this.getActiveEmployeeNamesList();
 
     const certTypes = [
       'DL',
+      'DL (Front)',
+      'DL (Back)',
       'MEC Expiration',
       '1st Aid & CPR',
       '1st Aid',
@@ -2410,6 +2437,66 @@ class SheetNavigator {
     if (!r) return false;
     if (!prevEmpNames) prevEmpNames = this.getPreviousEmployeeNamesSet();
     return !this.isRowPreviousEmployee(r, prevEmpNames);
+  }
+
+  /**
+   * Returns a sorted list of names of currently employed workers (excluding previous/terminated).
+   */
+  getActiveEmployeeNamesList() {
+    const prevNames = this.getPreviousEmployeeNamesSet();
+    const empTable = this.db ? this.db.getTable('employees') : null;
+    const names = [];
+    if (empTable && empTable.rows) {
+      empTable.rows.forEach(r => {
+        if (this.isEmployeeActive(r, prevNames)) {
+          const n = String(r['Employee Name'] || r['Name'] || Object.values(r)[0] || '').trim();
+          if (n && n !== '—' && !names.includes(n) && !n.toLowerCase().includes('vacant') && !n.toLowerCase().includes('open')) {
+            names.push(n);
+          }
+        }
+      });
+    }
+    return names.sort((a, b) => a.localeCompare(b));
+  }
+
+  /**
+   * Automatically converts an Apple HEIC/HEIF base64 data URL into a standard JPEG Data URL via heic2any.
+   */
+  async convertHeicDataUrlToJpeg(base64Data) {
+    if (!base64Data || typeof base64Data !== 'string') return base64Data;
+    const isHeic = base64Data.startsWith('data:image/heic') || base64Data.startsWith('data:image/heif') || base64Data.startsWith('data:application/octet-stream');
+    if (!isHeic) return base64Data;
+
+    if (typeof window.heic2any !== 'function') {
+      console.warn('heic2any library is not loaded, keeping original data');
+      return base64Data;
+    }
+
+    try {
+      const parts = base64Data.split('base64,');
+      const rawB64 = parts.length > 1 ? parts[1] : parts[0];
+      const byteCharacters = atob(rawB64);
+      const byteNumbers = new Uint8Array(byteCharacters.length);
+      for (let i = 0; i < byteCharacters.length; i++) {
+        byteNumbers[i] = byteCharacters.charCodeAt(i);
+      }
+      const heicBlob = new Blob([byteNumbers], { type: 'image/heic' });
+      const convertedBlobOrBlobs = await window.heic2any({
+        blob: heicBlob,
+        toType: 'image/jpeg',
+        quality: 0.92
+      });
+      const convertedBlob = Array.isArray(convertedBlobOrBlobs) ? convertedBlobOrBlobs[0] : convertedBlobOrBlobs;
+      return new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(reader.result);
+        reader.onerror = () => resolve(base64Data);
+        reader.readAsDataURL(convertedBlob);
+      });
+    } catch (err) {
+      console.warn('HEIC to JPEG conversion note:', err);
+      return base64Data;
+    }
   }
 
   /**

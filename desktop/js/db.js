@@ -594,13 +594,54 @@ class LocalDatabase {
 
   /**
    * Retrieves cert photo metadata for an employee and cert type.
+   * Supports companion aliases (e.g. DL matches DL (Front) / DL (Back); 1st Aid & CPR matches 1st Aid / CPR).
    */
   getCertPhotoRecord(employeeName, certType) {
     if (!this.snapshot || !this.snapshot.configs || !this.snapshot.configs.cert_photos) {
       return null;
     }
     const key = this.getCertPhotoKey(employeeName, certType);
-    return this.snapshot.configs.cert_photos[key] || null;
+    if (this.snapshot.configs.cert_photos[key]) {
+      return this.snapshot.configs.cert_photos[key];
+    }
+
+    const norm = String(certType || '').toLowerCase().trim();
+    if (norm === 'dl' || norm === "driver's license" || norm === 'drivers license') {
+      const front = this.snapshot.configs.cert_photos[this.getCertPhotoKey(employeeName, 'DL (Front)')];
+      if (front) return front;
+      const back = this.snapshot.configs.cert_photos[this.getCertPhotoKey(employeeName, 'DL (Back)')];
+      if (back) return back;
+    } else if (norm === '1st aid & cpr' || norm === 'first aid & cpr' || norm === '1st aid/cpr') {
+      const fa = this.snapshot.configs.cert_photos[this.getCertPhotoKey(employeeName, '1st Aid')];
+      if (fa) return fa;
+      const cpr = this.snapshot.configs.cert_photos[this.getCertPhotoKey(employeeName, 'CPR')];
+      if (cpr) return cpr;
+    } else if (norm === '1st aid' || norm === 'first aid') {
+      const combo = this.snapshot.configs.cert_photos[this.getCertPhotoKey(employeeName, '1st Aid & CPR')];
+      if (combo) return combo;
+    } else if (norm === 'cpr') {
+      const combo = this.snapshot.configs.cert_photos[this.getCertPhotoKey(employeeName, '1st Aid & CPR')];
+      if (combo) return combo;
+    }
+
+    return null;
+  }
+
+  /**
+   * Returns all cert photos stored for a specific employee.
+   */
+  getAllCertPhotoRecords(employeeName) {
+    if (!this.snapshot || !this.snapshot.configs || !this.snapshot.configs.cert_photos) {
+      return [];
+    }
+    const safeEmp = String(employeeName || '').toLowerCase().trim();
+    const photos = [];
+    Object.values(this.snapshot.configs.cert_photos).forEach(rec => {
+      if (rec && String(rec.employeeName || '').toLowerCase().trim() === safeEmp) {
+        photos.push(rec);
+      }
+    });
+    return photos;
   }
 
   /**

@@ -373,7 +373,7 @@ ipcMain.handle('select-cert-photo-file', async () => {
       title: 'Select Certification Photo or Document',
       properties: ['openFile'],
       filters: [
-        { name: 'Images & PDFs', extensions: ['jpg', 'jpeg', 'png', 'webp', 'pdf', 'heic', 'bmp'] }
+        { name: 'Images & PDFs', extensions: ['jpg', 'jpeg', 'png', 'webp', 'pdf', 'heic', 'heif', 'bmp'] }
       ]
     });
     if (!result.canceled && result.filePaths && result.filePaths.length > 0) {
@@ -384,6 +384,7 @@ ipcMain.handle('select-cert-photo-file', async () => {
       if (ext === '.png') mime = 'image/png';
       else if (ext === '.webp') mime = 'image/webp';
       else if (ext === '.pdf') mime = 'application/pdf';
+      else if (ext === '.heic' || ext === '.heif') mime = 'image/heic';
       return {
         success: true,
         originalPath: srcPath,
@@ -410,6 +411,7 @@ ipcMain.handle('save-cert-photo', async (event, { employeeName, certType, base64
       if (base64Data.startsWith('data:image/png')) ext = '.png';
       else if (base64Data.startsWith('data:image/webp')) ext = '.webp';
       else if (base64Data.startsWith('data:application/pdf')) ext = '.pdf';
+      else if (base64Data.startsWith('data:image/heic') || base64Data.startsWith('data:image/heif')) ext = '.heic';
     }
 
     const fileName = `${safeEmp}_${safeCert}_${timestamp}${ext}`;
@@ -447,6 +449,7 @@ ipcMain.handle('get-cert-photo', async (event, { fileName, fullPath }) => {
     if (ext === '.png') mime = 'image/png';
     else if (ext === '.webp') mime = 'image/webp';
     else if (ext === '.pdf') mime = 'application/pdf';
+    else if (ext === '.heic' || ext === '.heif') mime = 'image/heic';
 
     return {
       exists: true,
