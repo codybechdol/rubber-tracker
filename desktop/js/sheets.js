@@ -1871,7 +1871,118 @@ class SheetNavigator {
   }
 
   /**
+   * Updates or inserts a certification record's expiration date & date acquired in expiring_certs table.
+   */
+  async updateCertDatesInTable(empName, certType, expDate, acqDate = '') {
+    if (!empName || !certType || !expDate) return false;
+    const tableData = this.db ? this.db.getTable('expiring_certs') : null;
+    if (!tableData || !tableData.rows) return false;
+
+    const headers = tableData.headers || ['Employee Name', 'Item Type', 'Date Acquired', 'Expiration Date', 'Status', 'Days Until Expiration'];
+    const normEmp = empName.toLowerCase().trim();
+    const normCert = certType.toLowerCase().trim();
+
+    // Find matching row in expiring_certs
+    let row = tableData.rows.find(r => {
+      const rEmp = String(r['Employee Name'] || r['Name'] || '').toLowerCase().trim();
+      const rCert = String(r['Item Type'] || r['Cert Type'] || '').toLowerCase().trim();
+      return rEmp === normEmp && (rCert === normCert || (normCert.startsWith('dl') && rCert.startsWith('dl')));
+    });
+
+    // Calculate days left and status
+    let daysLeft = null;
+    let status = 'Valid';
+    try {
+      const parts = expDate.split('/');
+      if (parts.length === 3) {
+        const exp = new Date(parseInt(parts[2], 10), parseInt(parts[0], 10) - 1, parseInt(parts[1], 10));
+        const now = new Date();
+        now.setHours(0, 0, 0, 0);
+        const diffMs = exp.getTime() - now.getTime();
+        daysLeft = Math.round(diffMs / (1000 * 60 * 60 * 24));
+        if (daysLeft < 0) status = 'Expired';
+        else if (daysLeft <= 30) status = 'Expiring Soon';
+        else status = 'Valid';
+      }
+    } catch (e) {}
+
+    if (row) {
+      const rowIdx = row._rowIdx;
+      const colExp = headers.findIndex(h => /expir/i.test(h)) + 1;
+      const colAcq = headers.findIndex(h => /acquir/i.test(h)) + 1;
+
+      const oldExp = row['Expiration Date'] || row['Expiration'] || '';
+      row['Expiration Date'] = expDate;
+      if (acqDate) row['Date Acquired'] = acqDate;
+      row['Status'] = status;
+      if (daysLeft !== null) row['Days Until Expiration'] = String(daysLeft);
+
+      if (rowIdx && this.db && typeof this.db.addMutation === 'function') {
+        if (colExp > 0) {
+          await this.db.addMutation({
+            action: 'UPDATE_CELL',
+            sheetName: 'Expiring Certs',
+            tableKey: 'expiring_certs',
+            row: rowIdx,
+            col: colExp,
+            header: headers[colExp - 1],
+            oldValue: oldExp,
+            value: expDate
+          });
+        }
+        if (acqDate && colAcq > 0) {
+          await this.db.addMutation({
+            action: 'UPDATE_CELL',
+            sheetName: 'Expiring Certs',
+            tableKey: 'expiring_certs',
+            row: rowIdx,
+            col: colAcq,
+            header: headers[colAcq - 1],
+            oldValue: row['Date Acquired'] || '',
+            value: acqDate
+          });
+        }
+      }
+    } else {
+      // Create new record in expiring_certs
+      const newRow = {
+        'Employee Name': empName,
+        'Name': empName,
+        'Item Type': certType,
+        'Cert Type': certType,
+        'Date Acquired': acqDate || '',
+        'Expiration Date': expDate,
+        'Status': status,
+        'Days Until Expiration': daysLeft !== null ? String(daysLeft) : ''
+      };
+      newRow._rowIdx = tableData.rows.length + 2;
+      tableData.rows.push(newRow);
+      tableData.rowCount = tableData.rows.length;
+      if (tableData.rawGrid) {
+        tableData.rawGrid.push(headers.map(h => newRow[h] !== undefined ? newRow[h] : ''));
+        tableData.maxRows = tableData.rawGrid.length;
+      }
+      if (this.db && typeof this.db.addMutation === 'function') {
+        await this.db.addMutation({
+          action: 'ADD_ROW',
+          sheetName: 'Expiring Certs',
+          tableKey: 'expiring_certs',
+          rowData: newRow
+        });
+      }
+    }
+
+    if (typeof this.db.setSnapshot === 'function') {
+      await this.db.setSnapshot(this.db.snapshot);
+    } else if (window.desktopAPI && typeof window.desktopAPI.saveLocalSnapshot === 'function') {
+      await window.desktopAPI.saveLocalSnapshot(this.db.snapshot);
+    }
+    return true;
+  }
+
+  /**
    * Renders cards for all scanned cert items for user review, cropping, and import.
+   * Bound by unique item.id to prevent index-shift and reloading bugs.
    */
   renderScannedCertItems() {
     const body = document.getElementById('cert-email-scanner-body');
@@ -1912,14 +2023,16 @@ class SheetNavigator {
     ];
 
     let html = `
-      <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px;">
+      <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 16px;">
     `;
 
-    this.scannedCertItems.forEach((item, idx) => {
+    this.scannedCertItems.forEach(item => {
       const isPdf = (item.contentType && item.contentType.includes('pdf')) || (item.fileName && item.fileName.toLowerCase().endsWith('.pdf'));
+      const subLower = String(item.subject || '').toLowerCase();
+      const isMultiOrGroup = subLower.includes('new hire') || subLower.includes('ape') || subLower.includes('group') || subLower.includes('butte') || subLower.includes('helena') || (item.attIdx && item.attIdx > 0);
 
       html += `
-        <div class="scanned-cert-card" id="scanned-cert-card-${idx}" style="background: rgba(15, 23, 42, 0.85); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; transition: transform 0.15s, border-color 0.15s; box-shadow: 0 4px 12px rgba(0,0,0,0.3);">
+        <div class="scanned-cert-card" id="scanned-cert-card-${item.id}" style="background: rgba(15, 23, 42, 0.85); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; transition: transform 0.15s, border-color 0.15s; box-shadow: 0 4px 12px rgba(0,0,0,0.3);">
           
           <!-- Image / PDF Preview Container -->
           <div style="height: 180px; background: #090d16; display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden; border-bottom: 1px solid rgba(255,255,255,0.06);">
@@ -1929,40 +2042,55 @@ class SheetNavigator {
                 <div style="font-size: 11px; font-weight: 700; color: #fca5a5; margin-top: 4px;">PDF Document</div>
               </div>
             ` : (item.base64Data ? `
-              <img id="scanned-card-preview-${idx}" src="${item.base64Data}" alt="Cert Preview" style="max-height: 100%; max-width: 100%; object-fit: contain; cursor: pointer;" onclick="window.sheetNavigator.openPhotoCropperModal(${idx})" title="Click to open Crop &amp; Rotate tool">
+              <img id="scanned-card-preview-${item.id}" src="${item.base64Data}" alt="Cert Preview" style="max-height: 100%; max-width: 100%; object-fit: contain; cursor: pointer;" onclick="window.sheetNavigator.openPhotoCropperModal('${this.escapeJs(item.id)}')" title="Click to open Crop &amp; Rotate tool">
             ` : `
-              <div id="scanned-card-loading-${idx}" style="display: flex; flex-direction: column; align-items: center; justify-content: center; color: #94a3b8; font-size: 12px; gap: 8px;">
+              <div id="scanned-card-loading-${item.id}" style="display: flex; flex-direction: column; align-items: center; justify-content: center; color: #94a3b8; font-size: 12px; gap: 8px;">
                 <div class="cert-scan-card-spinner" style="width: 24px; height: 24px; border: 2.5px solid rgba(56, 189, 248, 0.2); border-top-color: #38bdf8; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
                 <span style="font-size: 11px; color: #cbd5e1;">Loading photo...</span>
               </div>
-              <img id="scanned-card-preview-${idx}" src="" alt="Cert Preview" style="display: none; max-height: 100%; max-width: 100%; object-fit: contain; cursor: pointer;" onclick="window.sheetNavigator.openPhotoCropperModal(${idx})" title="Click to open Crop &amp; Rotate tool">
+              <img id="scanned-card-preview-${item.id}" src="" alt="Cert Preview" style="display: none; max-height: 100%; max-width: 100%; object-fit: contain; cursor: pointer;" onclick="window.sheetNavigator.openPhotoCropperModal('${this.escapeJs(item.id)}')" title="Click to open Crop &amp; Rotate tool">
             `)}
             
+            <!-- Top Action Controls -->
             <div style="position: absolute; top: 8px; right: 8px; display: flex; gap: 6px;">
+              <button type="button" class="btn btn-secondary" style="font-size: 11px; padding: 3px 8px; background: rgba(15, 23, 42, 0.88); border: 1px solid rgba(168, 85, 247, 0.55); color: #c084fc; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 3px;" onclick="window.sheetNavigator.duplicateScannedCertCard('${this.escapeJs(item.id)}')" title="Split / Duplicate card (useful for 1st Aid &amp; CPR in one photo or Front &amp; Back of DL)">
+                <span>📋</span> Split
+              </button>
               ${!isPdf ? `
-                <button class="btn btn-secondary" style="font-size: 11px; padding: 3px 8px; background: rgba(15, 23, 42, 0.85); border: 1px solid rgba(56, 189, 248, 0.5); color: #38bdf8; border-radius: 6px; cursor: pointer;" onclick="window.sheetNavigator.openPhotoCropperModal(${idx})" title="Crop and rotate this photo">
+                <button type="button" class="btn btn-secondary" style="font-size: 11px; padding: 3px 8px; background: rgba(15, 23, 42, 0.88); border: 1px solid rgba(56, 189, 248, 0.55); color: #38bdf8; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 3px;" onclick="window.sheetNavigator.openPhotoCropperModal('${this.escapeJs(item.id)}')" title="Crop and rotate this photo">
                   <span>✂️</span> Crop
                 </button>
               ` : ''}
-              <button class="btn btn-secondary" style="font-size: 11px; padding: 3px 7px; background: rgba(15, 23, 42, 0.85); border: 1px solid rgba(239, 68, 68, 0.4); color: #f87171; border-radius: 6px; cursor: pointer;" onclick="window.sheetNavigator.dismissScannedCert(${idx})" title="Dismiss this item">
+              <button type="button" class="btn btn-secondary" style="font-size: 11px; padding: 3px 7px; background: rgba(15, 23, 42, 0.88); border: 1px solid rgba(239, 68, 68, 0.45); color: #f87171; border-radius: 6px; cursor: pointer;" onclick="window.sheetNavigator.dismissScannedCert('${this.escapeJs(item.id)}')" title="Dismiss this item">
                 ✕
               </button>
             </div>
 
-            <div style="position: absolute; bottom: 6px; left: 8px; background: rgba(0,0,0,0.65); padding: 2px 7px; border-radius: 4px; font-size: 10px; color: #94a3b8;">
-              ${item.date || 'Recent'}
+            <!-- Bottom Left Metadata Badges -->
+            <div style="position: absolute; bottom: 6px; left: 8px; display: flex; gap: 6px; align-items: center;">
+              <div style="background: rgba(0,0,0,0.72); padding: 2px 7px; border-radius: 4px; font-size: 10px; color: #94a3b8;">
+                ${item.date || 'Recent'}
+              </div>
+              ${isMultiOrGroup ? `
+                <div style="background: rgba(245, 158, 11, 0.22); border: 1px solid rgba(245, 158, 11, 0.4); padding: 1px 6px; border-radius: 4px; font-size: 9.5px; color: #fbbf24; font-weight: 600;" title="${this.escapeHtml(item.fileName || 'Multi-attachment email')}">
+                  📎 ${this.escapeHtml(item.fileName || 'Multi-file')}
+                </div>
+              ` : ''}
             </div>
           </div>
 
           <!-- Card Controls -->
-          <div style="padding: 14px; flex: 1; display: flex; flex-direction: column; gap: 10px;">
+          <div style="padding: 13px; flex: 1; display: flex; flex-direction: column; gap: 9px;">
             <div style="font-size: 11.5px; color: #cbd5e1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${item.subject}">
               📧 <strong style="color: #e2e8f0;">${item.subject || 'Cert Attachment'}</strong>
             </div>
 
             <div>
-              <label style="display: block; font-size: 11px; color: #94a3b8; font-weight: 600; margin-bottom: 3px;">Assigned Employee</label>
-              <select id="scanned-emp-select-${idx}" style="width: 100%; background: #0f172a; color: #f8fafc; border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 5px 8px; font-size: 12px; font-weight: 600;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px;">
+                <label style="font-size: 11px; color: #94a3b8; font-weight: 600;">Assigned Employee</label>
+                ${isMultiOrGroup ? `<span style="font-size: 10px; color: #f59e0b; font-weight: 600;">⚠️ Check Name</span>` : ''}
+              </div>
+              <select id="scanned-emp-select-${item.id}" style="width: 100%; background: #0f172a; color: #f8fafc; border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 5px 8px; font-size: 12px; font-weight: 600;">
                 <option value="">-- Select Employee --</option>
                 ${employeeOptions.map(name => `
                   <option value="${name}" ${item.employeeName && item.employeeName.toLowerCase() === name.toLowerCase() ? 'selected' : ''}>
@@ -1974,15 +2102,27 @@ class SheetNavigator {
 
             <div>
               <label style="display: block; font-size: 11px; color: #94a3b8; font-weight: 600; margin-bottom: 3px;">Certification Type</label>
-              <select id="scanned-cert-select-${idx}" style="width: 100%; background: #0f172a; color: #f8fafc; border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 5px 8px; font-size: 12px; font-weight: 600;">
+              <select id="scanned-cert-select-${item.id}" style="width: 100%; background: #0f172a; color: #f8fafc; border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 5px 8px; font-size: 12px; font-weight: 600;">
                 ${certTypes.map(ct => `
                   <option value="${ct}" ${item.certType === ct ? 'selected' : ''}>${ct}</option>
                 `).join('')}
               </select>
             </div>
 
-            <div style="margin-top: auto; padding-top: 8px; display: flex; gap: 8px;">
-              <button class="btn btn-primary" style="flex: 1; font-size: 12px; font-weight: 700; background: linear-gradient(135deg, #059669 0%, #10b981 100%); border: none; padding: 6px 10px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px;" onclick="window.sheetNavigator.importSingleScannedCert(${idx})">
+            <!-- Expiration Date & Acquired Date Inputs -->
+            <div style="display: flex; gap: 8px;">
+              <div style="flex: 1;">
+                <label style="display: block; font-size: 11px; color: #38bdf8; font-weight: 700; margin-bottom: 3px;">⏳ Expiration Date</label>
+                <input type="text" id="scanned-exp-date-${item.id}" placeholder="MM/DD/YYYY" value="${this.escapeHtml(item.expDate || '')}" style="width: 100%; background: #090d16; color: #f8fafc; border: 1px solid rgba(56, 189, 248, 0.4); border-radius: 6px; padding: 5px 8px; font-size: 11.5px; font-weight: 600;">
+              </div>
+              <div style="flex: 1;">
+                <label style="display: block; font-size: 11px; color: #94a3b8; font-weight: 600; margin-bottom: 3px;">📅 Date Acquired</label>
+                <input type="text" id="scanned-acq-date-${item.id}" placeholder="MM/DD/YYYY" value="${this.escapeHtml(item.acqDate || '')}" style="width: 100%; background: #0f172a; color: #cbd5e1; border: 1px solid rgba(255,255,255,0.12); border-radius: 6px; padding: 5px 8px; font-size: 11.5px;">
+              </div>
+            </div>
+
+            <div style="margin-top: auto; padding-top: 6px; display: flex; gap: 8px;">
+              <button type="button" class="btn btn-primary" style="flex: 1; font-size: 12px; font-weight: 700; background: linear-gradient(135deg, #059669 0%, #10b981 100%); border: none; padding: 7px 10px; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 5px; box-shadow: 0 2px 8px rgba(16, 185, 129, 0.35);" onclick="window.sheetNavigator.importSingleScannedCert('${this.escapeJs(item.id)}')">
                 <span>📥</span> Save to Vault
               </button>
             </div>
@@ -1997,23 +2137,114 @@ class SheetNavigator {
   }
 
   /**
-   * Dismisses a single scanned cert item from the review grid.
+   * Duplicates a scanned cert card so combo photos (e.g. 1st Aid & CPR or Front & Back) can be split.
    */
-  dismissScannedCert(idx) {
-    if (!this.scannedCertItems || !this.scannedCertItems[idx]) return;
-    this.scannedCertItems.splice(idx, 1);
+  duplicateScannedCertCard(itemId) {
+    if (!this.scannedCertItems) return;
+    const itemIndex = this.scannedCertItems.findIndex(x => x.id === itemId);
+    if (itemIndex === -1) return;
+    const original = this.scannedCertItems[itemIndex];
+
+    const currentEmpSelect = document.getElementById(`scanned-emp-select-${itemId}`);
+    const currentCertSelect = document.getElementById(`scanned-cert-select-${itemId}`);
+    const currentExpInput = document.getElementById(`scanned-exp-date-${itemId}`);
+    const currentAcqInput = document.getElementById(`scanned-acq-date-${itemId}`);
+
+    const activeEmp = currentEmpSelect ? currentEmpSelect.value : original.employeeName;
+    const activeCert = currentCertSelect ? currentCertSelect.value : original.certType;
+    const activeExp = currentExpInput ? currentExpInput.value : (original.expDate || '');
+    const activeAcq = currentAcqInput ? currentAcqInput.value : (original.acqDate || '');
+
+    original.employeeName = activeEmp;
+    original.expDate = activeExp;
+    original.acqDate = activeAcq;
+
+    // Determine default types when splitting
+    let origType = activeCert;
+    let cloneType = activeCert;
+    const certNorm = activeCert.toLowerCase();
+    if (certNorm.includes('1st aid') && certNorm.includes('cpr')) {
+      origType = '1st Aid';
+      cloneType = 'CPR';
+    } else if (certNorm === 'dl' || certNorm === "driver's license") {
+      origType = 'DL (Front)';
+      cloneType = 'DL (Back)';
+    }
+
+    original.certType = origType;
+
+    const clone = {
+      ...original,
+      id: `${original.messageId}_split_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+      certType: cloneType,
+      fileName: original.fileName ? original.fileName.replace(/(\.[^.]+)$/, '_split$1') : `cert_split_${Date.now()}.jpg`,
+      expDate: '',
+      acqDate: original.acqDate || ''
+    };
+
+    // Insert clone right after original in memory
+    this.scannedCertItems.splice(itemIndex + 1, 0, clone);
     this.renderScannedCertItems();
+
+    if (typeof window.showToast === 'function') {
+      window.showToast(`📋 Split into "${origType}" and "${cloneType}"! Crop each slip and set expiration dates.`, 'info');
+    }
   }
 
   /**
-   * Imports a single reviewed cert item into the Cert Photo Vault.
+   * Retries fetching an attachment that previously failed or timed out.
    */
+  async retryLoadScannedCert(itemId) {
+    const item = this.scannedCertItems.find(x => x.id === itemId);
+    if (!item) return;
+
+    const loadingEl = document.getElementById(`scanned-card-loading-${itemId}`);
+    if (loadingEl) {
+      loadingEl.innerHTML = `
+        <div class="cert-scan-card-spinner" style="width: 24px; height: 24px; border: 2.5px solid rgba(56, 189, 248, 0.2); border-top-color: #38bdf8; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
+        <span style="font-size: 11px; color: #cbd5e1;">Retrying photo...</span>
+      `;
+    }
+    item.isLoading = false;
+    await this.loadScannedCertAttachment(itemId);
+  }
+
   /**
-   * Asynchronously fetches the full image or document bytes for a single scanned card.
+   * Dismisses a single scanned cert item from the review grid without re-rendering the whole page.
    */
-  async loadScannedCertAttachment(idx) {
-    if (!this.scannedCertItems || !this.scannedCertItems[idx]) return null;
-    const item = this.scannedCertItems[idx];
+  dismissScannedCert(itemId) {
+    if (!this.scannedCertItems) return;
+    const remIdx = this.scannedCertItems.findIndex(x => x.id === itemId);
+    if (remIdx !== -1) {
+      this.scannedCertItems.splice(remIdx, 1);
+    }
+
+    const cardEl = document.getElementById(`scanned-cert-card-${itemId}`);
+    if (cardEl) {
+      cardEl.style.transition = 'all 0.2s ease';
+      cardEl.style.opacity = '0';
+      cardEl.style.transform = 'scale(0.92)';
+      setTimeout(() => {
+        if (cardEl && cardEl.parentNode) cardEl.remove();
+        if (!this.scannedCertItems || this.scannedCertItems.length === 0) {
+          this.renderScannedCertItems();
+        }
+      }, 200);
+    }
+
+    const countBadge = document.getElementById('cert-scan-count-badge');
+    if (countBadge) {
+      countBadge.textContent = `${this.scannedCertItems.length} cert ${this.scannedCertItems.length === 1 ? 'photo' : 'photos'} found`;
+    }
+  }
+
+  /**
+   * Asynchronously fetches the full image or document bytes for a single scanned card by unique ID.
+   */
+  async loadScannedCertAttachment(itemId) {
+    if (!this.scannedCertItems) return null;
+    const item = this.scannedCertItems.find(x => x.id === itemId);
+    if (!item) return null;
     if (item.base64Data) return item.base64Data;
     if (item.isLoading) return null;
 
@@ -2054,20 +2285,27 @@ class SheetNavigator {
         item.base64Data = b64;
 
         // Update DOM elements if present
-        const loadingEl = document.getElementById(`scanned-card-loading-${idx}`);
-        const imgEl = document.getElementById(`scanned-card-preview-${idx}`);
+        const loadingEl = document.getElementById(`scanned-card-loading-${item.id}`);
+        const imgEl = document.getElementById(`scanned-card-preview-${item.id}`);
         if (loadingEl) loadingEl.style.display = 'none';
         if (imgEl) {
           imgEl.src = b64;
           imgEl.style.display = 'block';
         }
         return b64;
+      } else {
+        throw new Error((res && res.error) || 'Failed to download attachment');
       }
     } catch (err) {
-      console.warn(`Failed to load attachment for card ${idx}:`, err);
-      const loadingEl = document.getElementById(`scanned-card-loading-${idx}`);
+      console.warn(`Failed to load attachment for card ${item.id}:`, err);
+      const loadingEl = document.getElementById(`scanned-card-loading-${item.id}`);
       if (loadingEl) {
-        loadingEl.innerHTML = `<span style="font-size: 10px; color: #f87171;">⚠️ Failed to load</span>`;
+        loadingEl.innerHTML = `
+          <div style="display: flex; flex-direction: column; align-items: center; gap: 4px;">
+            <span style="font-size: 10px; color: #f87171;">⚠️ Failed to load</span>
+            <button type="button" class="btn btn-secondary" style="font-size: 10px; padding: 2px 8px; border-color: rgba(56, 189, 248, 0.45); color: #38bdf8; background: rgba(56, 189, 248, 0.1); border-radius: 4px; cursor: pointer;" onclick="window.sheetNavigator.retryLoadScannedCert('${this.escapeJs(item.id)}')">🔄 Retry</button>
+          </div>
+        `;
       }
     } finally {
       item.isLoading = false;
@@ -2076,20 +2314,21 @@ class SheetNavigator {
   }
 
   /**
-   * Automatically queues background fetching of all card images in small batches.
+   * Queues background fetching of card images smoothly without flooding Google Apps Script.
    */
   async loadScannedCertImagesQueue() {
     if (!this.scannedCertItems || this.scannedCertItems.length === 0) return;
     const items = this.scannedCertItems;
-    const concurrency = 3;
+    const concurrency = 2;
     let nextIdx = 0;
 
     const worker = async () => {
       while (nextIdx < items.length) {
-        const currentIdx = nextIdx++;
-        const item = items[currentIdx];
-        if (!item || item.base64Data || item.isPdf) continue;
-        await this.loadScannedCertAttachment(currentIdx);
+        const item = items[nextIdx++];
+        if (!item || item.base64Data || item.isPdf || item.isLoading) continue;
+        await this.loadScannedCertAttachment(item.id);
+        // Small delay between requests to avoid GAS rate limiting
+        await new Promise(r => setTimeout(r, 150));
       }
     };
 
@@ -2101,16 +2340,22 @@ class SheetNavigator {
   }
 
   /**
-   * Imports a single reviewed cert item into the Cert Photo Vault.
+   * Imports a single reviewed cert item into the Cert Photo Vault and updates dates.
    */
-  async importSingleScannedCert(idx) {
-    if (!this.scannedCertItems || !this.scannedCertItems[idx]) return;
-    const item = this.scannedCertItems[idx];
+  async importSingleScannedCert(itemId) {
+    if (!this.scannedCertItems) return;
+    const item = this.scannedCertItems.find(x => x.id === itemId);
+    if (!item) return;
 
-    const empSelect = document.getElementById(`scanned-emp-select-${idx}`);
-    const certSelect = document.getElementById(`scanned-cert-select-${idx}`);
+    const empSelect = document.getElementById(`scanned-emp-select-${itemId}`);
+    const certSelect = document.getElementById(`scanned-cert-select-${itemId}`);
+    const expInput = document.getElementById(`scanned-exp-date-${itemId}`);
+    const acqInput = document.getElementById(`scanned-acq-date-${itemId}`);
+
     const empName = empSelect ? empSelect.value.trim() : item.employeeName;
     const certType = certSelect ? certSelect.value.trim() : item.certType;
+    const expDate = expInput ? expInput.value.trim() : (item.expDate || '');
+    const acqDate = acqInput ? acqInput.value.trim() : (item.acqDate || '');
 
     if (!empName) {
       alert('Please select an employee to assign this certification proof to.');
@@ -2131,9 +2376,9 @@ class SheetNavigator {
 
     // Ensure image payload is loaded before saving
     if (!item.base64Data && !item.isPdf) {
-      const b64 = await this.loadScannedCertAttachment(idx);
+      const b64 = await this.loadScannedCertAttachment(itemId);
       if (!b64) {
-        alert('Could not download certificate photo from Gmail. Please check your connection and try again.');
+        alert('Could not download certificate photo from Gmail. Please click Retry on the card or check your connection.');
         return;
       }
     }
@@ -2154,12 +2399,38 @@ class SheetNavigator {
           dateAdded: todayStr
         });
 
-        // Remove item from review list
-        this.scannedCertItems.splice(idx, 1);
-        this.renderScannedCertItems();
+        // If expiration date was entered, update the expiring_certs table
+        if (expDate) {
+          await this.updateCertDatesInTable(empName, certType, expDate, acqDate);
+        }
+
+        // Remove item from in-memory list
+        const remIdx = this.scannedCertItems.findIndex(x => x.id === itemId);
+        if (remIdx !== -1) {
+          this.scannedCertItems.splice(remIdx, 1);
+        }
+
+        // Smoothly animate and remove card from DOM without re-rendering everything
+        const cardEl = document.getElementById(`scanned-cert-card-${itemId}`);
+        if (cardEl) {
+          cardEl.style.transition = 'all 0.25s ease';
+          cardEl.style.opacity = '0';
+          cardEl.style.transform = 'scale(0.92)';
+          setTimeout(() => {
+            if (cardEl && cardEl.parentNode) cardEl.remove();
+            if (!this.scannedCertItems || this.scannedCertItems.length === 0) {
+              this.renderScannedCertItems();
+            }
+          }, 250);
+        }
+
+        const countBadge = document.getElementById('cert-scan-count-badge');
+        if (countBadge) {
+          countBadge.textContent = `${this.scannedCertItems.length} cert ${this.scannedCertItems.length === 1 ? 'photo' : 'photos'} found`;
+        }
 
         if (typeof window.showToast === 'function') {
-          window.showToast(`✅ Saved renewal proof for ${empName} (${certType}) into Vault!`, 'success');
+          window.showToast(`✅ Saved proof ${expDate ? `& updated exp date (${expDate}) ` : ''}for ${empName} (${certType})!`, 'success');
         }
         this.renderCurrentSheet();
       } else {
@@ -2187,10 +2458,15 @@ class SheetNavigator {
 
     for (let i = 0; i < this.scannedCertItems.length; i++) {
       const item = this.scannedCertItems[i];
-      const empSelect = document.getElementById(`scanned-emp-select-${i}`);
-      const certSelect = document.getElementById(`scanned-cert-select-${i}`);
+      const empSelect = document.getElementById(`scanned-emp-select-${item.id}`);
+      const certSelect = document.getElementById(`scanned-cert-select-${item.id}`);
+      const expInput = document.getElementById(`scanned-exp-date-${item.id}`);
+      const acqInput = document.getElementById(`scanned-acq-date-${item.id}`);
+
       const empName = empSelect ? empSelect.value.trim() : item.employeeName;
       const certType = certSelect ? certSelect.value.trim() : item.certType;
+      const expDate = expInput ? expInput.value.trim() : (item.expDate || '');
+      const acqDate = acqInput ? acqInput.value.trim() : (item.acqDate || '');
 
       if (!empName) {
         unassignedItems.push(item);
@@ -2198,7 +2474,7 @@ class SheetNavigator {
       }
 
       if (!item.base64Data && !item.isPdf) {
-        await this.loadScannedCertAttachment(i);
+        await this.loadScannedCertAttachment(item.id);
       }
 
       try {
@@ -2216,6 +2492,10 @@ class SheetNavigator {
             fullPath: saveRes.fullPath,
             dateAdded: todayStr
           });
+
+          if (expDate) {
+            await this.updateCertDatesInTable(empName, certType || 'Other Cert', expDate, acqDate);
+          }
           successCount++;
         }
       } catch (err) {
@@ -2246,9 +2526,12 @@ class SheetNavigator {
   /**
    * Opens the photo crop & rotate modal for a specific scanned cert card.
    */
-  async openPhotoCropperModal(idx) {
-    if (!this.scannedCertItems || !this.scannedCertItems[idx]) return;
-    const item = this.scannedCertItems[idx];
+  async openPhotoCropperModal(itemIdOrIdx) {
+    if (!this.scannedCertItems) return;
+    const item = typeof itemIdOrIdx === 'string'
+      ? this.scannedCertItems.find(x => x.id === itemIdOrIdx)
+      : this.scannedCertItems[itemIdOrIdx];
+    if (!item) return;
 
     if (item.contentType && item.contentType.includes('pdf')) {
       alert('PDF documents cannot be edited with the photo crop tool.');
@@ -2256,14 +2539,14 @@ class SheetNavigator {
     }
 
     if (!item.base64Data) {
-      const b64 = await this.loadScannedCertAttachment(idx);
+      const b64 = await this.loadScannedCertAttachment(item.id);
       if (!b64) {
         alert('Image is still loading. Please wait a moment.');
         return;
       }
     }
 
-    this.cropperCurrentIndex = idx;
+    this.cropperCurrentItemId = item.id;
     this.cropperAngle = 0;
 
     const modal = document.getElementById('cert-photo-cropper-modal');
@@ -2580,12 +2863,15 @@ class SheetNavigator {
     const croppedDataUrl = destCanvas.toDataURL('image/jpeg', 0.92);
 
     // Update the item in memory
-    const item = this.scannedCertItems[this.cropperCurrentIndex];
+    const item = this.cropperCurrentItemId
+      ? this.scannedCertItems.find(x => x.id === this.cropperCurrentItemId)
+      : (this.cropperCurrentIndex != null ? this.scannedCertItems[this.cropperCurrentIndex] : null);
     if (item) {
       item.base64Data = croppedDataUrl;
-      const previewImg = document.getElementById(`scanned-card-preview-${this.cropperCurrentIndex}`);
+      const previewImg = document.getElementById(`scanned-card-preview-${item.id}`) || (this.cropperCurrentIndex != null ? document.getElementById(`scanned-card-preview-${this.cropperCurrentIndex}`) : null);
       if (previewImg) {
         previewImg.src = croppedDataUrl;
+        previewImg.style.display = 'block';
       }
     }
 

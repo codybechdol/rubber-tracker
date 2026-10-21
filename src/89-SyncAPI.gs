@@ -5493,7 +5493,8 @@ function scanCertRenewalEmails(options) {
         if (validAttachments.length === 0) continue;
 
         // 3. Employee detection: check subject, sender (from), body snippet, and fallback extraction
-        var detectedEmp = detectEmployeeName(subject);
+        var subjectEmp = detectEmployeeName(subject);
+        var detectedEmp = subjectEmp;
         if (!detectedEmp) {
           var sender = String(msg.getFrom() || '');
           detectedEmp = detectEmployeeName(sender);
@@ -5509,15 +5510,25 @@ function scanCertRenewalEmails(options) {
           var vItem = validAttachments[a];
           var detectedCert = detectAttachmentCert(subject, vItem.name, a, validAttachments.length);
 
+          // Check if attachment filename itself names the employee
+          var attEmp = detectEmployeeName(vItem.name);
+          var finalEmp = attEmp || detectedEmp;
+
+          // If there are many attachments (e.g. > 2) and neither the subject nor the filename named a specific employee,
+          // don't blindly assign the first body-snip employee to every attachment
+          if (!attEmp && !subjectEmp && validAttachments.length > 2) {
+            finalEmp = ''; // Let reviewer choose the employee from dropdown
+          }
+
           // CRITICAL: Reject if NEITHER an employee nor a known certification was identified.
-          if (!detectedEmp && detectedCert === 'Other Cert') {
+          if (!finalEmp && detectedCert === 'Other Cert') {
             continue;
           }
-          // If detectedCert is 'Other Cert', detectedEmp MUST be a verified employee in knownEmployees
-          if (detectedCert === 'Other Cert' && knownEmployees.length > 0 && knownEmployeesLower.indexOf(detectedEmp.toLowerCase()) === -1) {
+          // If detectedCert is 'Other Cert', finalEmp MUST be a verified employee in knownEmployees
+          if (detectedCert === 'Other Cert' && knownEmployees.length > 0 && finalEmp && knownEmployeesLower.indexOf(finalEmp.toLowerCase()) === -1) {
             continue;
           }
-          if (isNonPersonTerm(detectedEmp)) {
+          if (finalEmp && isNonPersonTerm(finalEmp)) {
             continue;
           }
 
@@ -5543,7 +5554,7 @@ function scanCertRenewalEmails(options) {
             from: msg.getFrom(),
             to: msg.getTo(),
             subject: subject,
-            employeeName: detectedEmp,
+            employeeName: finalEmp,
             certType: detectedCert,
             fileName: vItem.name || ('cert_attachment_' + Date.now() + (vItem.isPdf ? '.pdf' : (vItem.isHeic ? '.heic' : '.jpg'))),
             contentType: vItem.contentType,
