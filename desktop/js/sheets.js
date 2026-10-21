@@ -1755,8 +1755,10 @@ class SheetNavigator {
   async runCertEmailScan() {
     const daysSelect = document.getElementById('cert-scan-days-back');
     const folderSelect = document.getElementById('cert-scan-folder');
-    const daysBack = daysSelect ? parseInt(daysSelect.value, 10) : 60;
+    const queryInput = document.getElementById('cert-scan-query');
+    const daysBack = daysSelect ? parseInt(daysSelect.value, 10) : 365;
     const folder = folderSelect ? folderSelect.value : 'ALL';
+    const query = queryInput ? queryInput.value.trim() : '';
 
     const spinner = document.getElementById('cert-scan-spinner');
     const icon = document.getElementById('cert-scan-icon');
@@ -1786,10 +1788,20 @@ class SheetNavigator {
       }
 
       const activeEmps = this.getActiveEmployeeNamesList();
+      let maxThreads = 200;
+      if (daysBack >= 365 || daysBack === 0) {
+        maxThreads = 500;
+      } else if (daysBack >= 180) {
+        maxThreads = 350;
+      }
+
       const payload = {
         action: 'scanCertEmails',
         daysBack: daysBack,
         folder: folder,
+        query: query,
+        maxThreads: maxThreads,
+        maxResults: 50,
         activeEmployees: activeEmps
       };
 
@@ -1824,15 +1836,16 @@ class SheetNavigator {
 
         if (this.scannedCertItems.length === 0) {
           if (body) {
+            const timeDesc = daysBack === 0 ? 'all time' : (daysBack >= 365 ? `the last ${Math.round(daysBack / 365)} year(s)` : `the last ${daysBack} days`);
             body.innerHTML = `
               <div style="text-align: center; padding: 50px 20px; color: #94a3b8;">
                 <div style="font-size: 44px; margin-bottom: 12px;">📭</div>
                 <h4 style="color: #f8fafc; font-size: 16px; font-weight: 700; margin-bottom: 6px;">No Cert Renewal Attachments Found</h4>
                 <p style="font-size: 13px; color: #94a3b8; max-width: 500px; margin: 0 auto 16px;">
-                  No emails with matching certification keywords and image/PDF attachments were found in the last ${daysBack} days.
+                  No emails with matching certification keywords and image/PDF attachments were found in ${timeDesc}${query ? ` matching "${query}"` : ''}.
                 </p>
                 <div style="font-size: 12px; color: #64748b;">
-                  Tip: Try changing the timeframe to "Last 6 Months" or "Last 1 Year" and scan again.
+                  Tip: Try searching by employee name or changing the timeframe.
                 </div>
               </div>
             `;
