@@ -1125,10 +1125,26 @@ class SheetNavigator {
     const subTitleEl = document.getElementById('cert-photo-modal-subtitle');
     if (!modal) return;
 
+    const slots = this.db && typeof this.db.getCertPhotoSlots === 'function' 
+      ? this.db.getCertPhotoSlots(certType) 
+      : [{ id: 'card', certKey: certType, label: certType, icon: '📄' }];
+    const records = this.db && typeof this.db.getCertPhotoRecordsForSlots === 'function' 
+      ? this.db.getCertPhotoRecordsForSlots(empName, certType) 
+      : [];
+
+    // Prioritize showing an already attached slot, or default to first slot
+    let defaultSlot = slots[0];
+    const existingSlot = records.find(r => !!(r.record && r.record.fileName));
+    if (existingSlot) {
+      defaultSlot = existingSlot;
+    }
+
     this.activeCertPhotoContext = {
       empName: String(empName).trim(),
       certType: String(certType).trim(),
-      sheetRowIdx
+      sheetRowIdx,
+      activeSlotId: defaultSlot.id,
+      activeCertKey: defaultSlot.certKey
     };
     this.stagedCertPhoto = null;
     this.isReplacingCertPhoto = false;
@@ -1150,6 +1166,22 @@ class SheetNavigator {
     }
     this._certPasteHandler = (e) => this.handleCertPhotoClipboardPaste(e);
     window.addEventListener('paste', this._certPasteHandler);
+  }
+
+  /**
+   * Switches the active photo sub-tab slot (e.g. Front vs Back of DL, 1st Aid vs CPR).
+   */
+  switchCertPhotoSlot(slotId) {
+    if (!this.activeCertPhotoContext) return;
+    const slots = this.db ? this.db.getCertPhotoSlots(this.activeCertPhotoContext.certType) : [];
+    const target = slots.find(s => s.id === slotId);
+    if (target) {
+      this.activeCertPhotoContext.activeSlotId = target.id;
+      this.activeCertPhotoContext.activeCertKey = target.certKey;
+      this.stagedCertPhoto = null;
+      this.isReplacingCertPhoto = false;
+      this.renderCertPhotoModalContent();
+    }
   }
 
   /**
@@ -1180,7 +1212,7 @@ class SheetNavigator {
     const body = document.getElementById('cert-photo-modal-body');
     if (!body || !this.activeCertPhotoContext) return;
 
-    const { empName, certType } = this.activeCertPhotoContext;
+    const { empName, certType, activeSlotId } = this.activeCertPhotoContext;
 
     // Look up dates from expiring_certs
     let acqDate = '';
@@ -1198,17 +1230,104 @@ class SheetNavigator {
       }
     }
 
-    const photoRecord = this.db && typeof this.db.getCertPhotoRecord === 'function' ? this.db.getCertPhotoRecord(empName, certType) : null;
+    const summary = this.db && typeof this.db.getCertPhotoStatusSummary === 'function'
+      ? this.db.getCertPhotoStatusSummary(empName, certType)
+      : { total: 1, count: 0, hasAll: false, hasAny: false, isMultiSlot: false, slots: [] };
+
+    const currentSlot = (summary.slots && summary.slots.find(s => s.id === activeSlotId)) || (summary.slots && summary.slots[0]) || {
+      id: 'card', label: certType, certKey: certType, record: null
+    };
+
+    // Ensure activeCertKey is in sync with currentSlot
+    this.activeCertPhotoContext.activeCertKey = currentSlot.certKey;
+    this.activeCertPhotoContext.activeSlotId = currentSlot.id;
+
+    const photoRecord = currentSlot.record;
     const hasSavedPhoto = !!(photoRecord && photoRecord.fileName && !this.isReplacingCertPhoto);
     const savedHrEmail = (this.db && this.db.snapshot && this.db.snapshot.configs && this.db.snapshot.configs.hr_email) || '';
 
-    // If we have a staged photo (pasted or dragged), show staged preview
+    // Multi-slot tab selector HTML
+    let tabsHtml = '';
+    if (summary.isMultiSlot) {
+      tabsHtml = `
+        <div style="display: flex; gap: 8px; margin-bottom: 12px; background: rgba(15, 23, 42, 0.6); padding: 5px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.08);">
+          ${summary.slots.map(s => {
+            const isActive = s.id === currentSlot.id;
+            const hasSlotPhoto = !!(s.record && s.record.fileName);
+            return `
+              <button type="button" 
+                onclick="window.sheetNavigator.switchCertPhotoSlot('${s.id}')"
+                style="flex: 1; padding: 8px 12px; border-radius: 6px; border: ${isActive ? '1px solid #38bdf8' : '1px solid transparent'}; background: ${isActive ? 'rgba(56, 189, 248, 0.18)' : 'transparent'}; color: ${isActive ? '#f8fafc' : '#94a3b8'}; font-weight: ${isActive ? '700' : '500'}; font-size: 12.5px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 8px; transition: all 0.15s ease;">
+                <span>${s.icon || '📄'}</span>
+                <span>${this.escapeHtml(s.label)}</span>
+                <span class="badge" style="font-size: 10px; padding: 2px 6px; border-radius: 12px; font-weight: 700; ${hasSlotPhoto ? 'background: rgba(16, 185, 129, 0.25); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4);' : 'background: rgba(148, 163, 184, 0.15); color: #94a3b8; border: 1px solid rgba(148, 163, 184, 0.25);'}">
+                  ${hasSlotPhoto ? '✅ Attached' : '📷 Missing'}
+                </span>
+              </button>
+            `;
+          }).join('')}
+        </div>
+      `;
+    }
+
+    // Top Meta Details Card
+    const metaCardHtml = `
+      <div style="background: rgba(30, 41, 59, 0.7); border: 1px solid rgba(255,255,255,0.1); border-radius: 10px; padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 12px;">
+        <div>
+          <div style="font-size: 15px; font-weight: 800; color: #f8fafc;">
+            👤 ${this.escapeHtml(empName)} · <span style="color: #38bdf8;">${this.escapeHtml(certType)}</span>
+          </div>
+          <div style="font-size: 11.5px; color: #94a3b8; margin-top: 4px; display: flex; gap: 14px; flex-wrap: wrap;">
+            <span>📅 Acquired: <strong style="color: #e2e8f0;">${this.escapeHtml(acqDate || '—')}</strong></span>
+            <span>⏳ Expires: <strong style="color: #e2e8f0;">${this.escapeHtml(expDate || '—')}</strong></span>
+            ${summary.isMultiSlot ? `<span>📑 Attached: <strong style="color: ${summary.hasAll ? '#34d399' : (summary.hasAny ? '#fbbf24' : '#94a3b8')}">${summary.count} of ${summary.total} photos</strong></span>` : ''}
+          </div>
+        </div>
+        <div>
+          <span class="badge" style="padding: 4px 10px; border-radius: 20px; font-size: 11.5px; font-weight: 700; ${summary.hasAll ? 'background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4);' : (summary.hasAny ? 'background: rgba(251, 191, 36, 0.2); color: #fbbf24; border: 1px solid rgba(251, 191, 36, 0.4);' : 'background: rgba(148, 163, 184, 0.15); color: #94a3b8; border: 1px solid rgba(148, 163, 184, 0.3);')}">
+            ${summary.hasAll ? '✅ All Proofs Attached' : (summary.hasAny ? `⚠️ Partially Attached (${summary.count}/${summary.total})` : 'No Proof Attached')}
+          </span>
+        </div>
+      </div>
+    `;
+
+    // Attached files summary for HR dispatch
+    const attachedFileListHtml = summary.attachedSlots && summary.attachedSlots.length > 0
+      ? summary.attachedSlots.map(s => `<span style="display: inline-flex; align-items: center; gap: 4px; background: rgba(0,0,0,0.3); padding: 2px 8px; border-radius: 4px; color: #e2e8f0; font-size: 11px;">${s.icon || '📄'} <strong>${this.escapeHtml(s.label)}:</strong> ${this.escapeHtml(s.record.fileName)}</span>`).join(' ')
+      : '<span style="color: #64748b; font-size: 11px;">No photos attached yet</span>';
+
+    const hrDispatchSectionHtml = `
+      <div style="margin-top: 14px; background: rgba(14, 165, 233, 0.06); border: 1px solid rgba(14, 165, 233, 0.25); border-radius: 10px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+          <div style="font-size: 12.5px; font-weight: 800; color: #38bdf8; display: flex; align-items: center; gap: 6px;">
+            <span>📧</span> 1-Click HR Email Dispatch
+          </div>
+          <div style="font-size: 11px; color: var(--text-muted);">Pre-fills email subject, body, and highlights all photos in folder to drag and attach</div>
+        </div>
+
+        <div style="font-size: 11px; color: #94a3b8; display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+          <span>📎 Files to attach:</span>
+          ${attachedFileListHtml}
+        </div>
+
+        <div style="display: flex; gap: 10px; align-items: center;">
+          <input type="email" id="cert-photo-hr-email" value="${this.escapeHtml(savedHrEmail)}" placeholder="HR Email (e.g. hr@company.com)" style="flex: 1; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 7px 10px; font-size: 12px; outline: none;">
+          <button class="btn btn-primary" style="font-size: 12px; font-weight: 700; padding: 7px 14px; background: linear-gradient(135deg, #0284c7 0%, #2563eb 100%); border: none; display: inline-flex; align-items: center; gap: 6px; box-shadow: 0 2px 10px rgba(14, 165, 233, 0.35); cursor: pointer;" onclick="window.sheetNavigator.emailCertPhotoToHR('${this.escapeJs(empName)}', '${this.escapeJs(certType)}')">
+            <span>📧</span> Email to HR
+          </button>
+        </div>
+      </div>
+    `;
+
+    // 1. If we have a staged photo for the active slot
     if (this.stagedCertPhoto) {
       const isPdf = this.stagedCertPhoto.base64Data && this.stagedCertPhoto.base64Data.startsWith('data:application/pdf');
       body.innerHTML = `
-        <div style="background: rgba(14, 165, 233, 0.08); border: 1px solid rgba(14, 165, 233, 0.3); border-radius: 10px; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between;">
+        ${metaCardHtml}
+        ${tabsHtml}
+        <div style="background: rgba(14, 165, 233, 0.08); border: 1px solid rgba(14, 165, 233, 0.3); border-radius: 10px; padding: 12px 16px; display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px;">
           <div>
-            <div style="font-weight: 800; font-size: 14px; color: #f8fafc;">✨ Staged Photo Ready to Attach</div>
+            <div style="font-weight: 800; font-size: 14px; color: #f8fafc;">✨ Staged Photo Ready for ${this.escapeHtml(currentSlot.label)}</div>
             <div style="font-size: 11.5px; color: #94a3b8; margin-top: 2px;">
               ${this.escapeHtml(this.stagedCertPhoto.fileName || 'Pasted Image')} · Review preview below and click Save.
             </div>
@@ -1227,17 +1346,17 @@ class SheetNavigator {
           `}
         </div>
 
-        <div style="display: flex; justify-content: flex-end; gap: 10px; padding-top: 8px;">
+        <div style="display: flex; justify-content: flex-end; gap: 10px; padding-top: 12px;">
           <button class="btn btn-secondary" onclick="window.sheetNavigator.cancelStagedCertPhoto()">✕ Cancel</button>
           <button class="btn btn-primary" onclick="window.sheetNavigator.saveStagedCertPhoto()" style="font-weight: 700; display: inline-flex; align-items: center; gap: 6px; background: linear-gradient(135deg, #059669 0%, #10b981 100%); border: none;">
-            <span>💾</span> Save & Attach Photo
+            <span>💾</span> Save & Attach for ${this.escapeHtml(currentSlot.label)}
           </button>
         </div>
       `;
       return;
     }
 
-    // If photo exists on disk and saved in database
+    // 2. If photo exists on disk for active slot
     if (hasSavedPhoto) {
       let photoDataUrl = '';
       let fileExists = true;
@@ -1253,26 +1372,9 @@ class SheetNavigator {
       const isPdf = photoRecord.fileName.toLowerCase().endsWith('.pdf');
 
       body.innerHTML = `
-        <!-- Meta Details Card -->
-        <div style="background: rgba(30, 41, 59, 0.7); border: 1px solid rgba(255,255,255,0.1); border-radius: 10px; padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
-          <div>
-            <div style="font-size: 15px; font-weight: 800; color: #f8fafc;">
-              👤 ${this.escapeHtml(empName)} · <span style="color: #38bdf8;">${this.escapeHtml(certType)}</span>
-            </div>
-            <div style="font-size: 11.5px; color: #94a3b8; margin-top: 4px; display: flex; gap: 14px; flex-wrap: wrap;">
-              <span>📅 Acquired: <strong style="color: #e2e8f0;">${this.escapeHtml(acqDate || '—')}</strong></span>
-              <span>⏳ Expires: <strong style="color: #e2e8f0;">${this.escapeHtml(expDate || '—')}</strong></span>
-              <span>📁 File: <strong style="color: #a78bfa;">${this.escapeHtml(photoRecord.fileName)}</strong></span>
-            </div>
-          </div>
-          <div>
-            <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); padding: 4px 10px; border-radius: 20px; font-size: 11.5px; font-weight: 700;">
-              ✅ Proof Attached
-            </span>
-          </div>
-        </div>
+        ${metaCardHtml}
+        ${tabsHtml}
 
-        <!-- Main Photo Box -->
         <div style="background: #0f172a; border-radius: 10px; border: 1px solid rgba(255,255,255,0.1); padding: 14px; text-align: center; position: relative;">
           ${fileExists ? (
             isPdf ? `
@@ -1294,25 +1396,9 @@ class SheetNavigator {
           `}
         </div>
 
-        <!-- HR Email & Dispatch Section -->
-        <div style="background: rgba(14, 165, 233, 0.06); border: 1px solid rgba(14, 165, 233, 0.25); border-radius: 10px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px;">
-          <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
-            <div style="font-size: 12.5px; font-weight: 800; color: #38bdf8; display: flex; align-items: center; gap: 6px;">
-              <span>📧</span> 1-Click HR Email Dispatch
-            </div>
-            <div style="font-size: 11px; color: var(--text-muted);">Pre-fills email subject, body, and highlights file to drag into email</div>
-          </div>
+        ${hrDispatchSectionHtml}
 
-          <div style="display: flex; gap: 10px; align-items: center;">
-            <input type="email" id="cert-photo-hr-email" value="${this.escapeHtml(savedHrEmail)}" placeholder="HR Email (e.g. hr@company.com)" style="flex: 1; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 7px 10px; font-size: 12px; outline: none;">
-            <button class="btn btn-primary" style="font-size: 12px; font-weight: 700; padding: 7px 14px; background: linear-gradient(135deg, #0284c7 0%, #2563eb 100%); border: none; display: inline-flex; align-items: center; gap: 6px; box-shadow: 0 2px 10px rgba(14, 165, 233, 0.35); cursor: pointer;" onclick="window.sheetNavigator.emailCertPhotoToHR('${this.escapeJs(empName)}', '${this.escapeJs(certType)}')">
-              <span>📧</span> Email to HR
-            </button>
-          </div>
-        </div>
-
-        <!-- Action Tools Bar -->
-        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; padding-top: 6px; border-top: 1px solid rgba(255,255,255,0.08);">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; padding-top: 12px; border-top: 1px solid rgba(255,255,255,0.08); margin-top: 12px;">
           <div style="display: flex; gap: 8px;">
             <button class="btn btn-secondary" style="font-size: 11.5px; padding: 5px 10px;" onclick="window.sheetNavigator.openCertPhotoExternally('${this.escapeJs(photoRecord.fileName)}')">
               📂 Windows Photos
@@ -1323,10 +1409,10 @@ class SheetNavigator {
           </div>
           <div style="display: flex; gap: 8px;">
             <button class="btn btn-secondary" style="font-size: 11.5px; padding: 5px 10px; color: #38bdf8; border-color: rgba(56, 189, 248, 0.4);" onclick="window.sheetNavigator.startReplaceCertPhoto()">
-              🔄 Replace Photo
+              🔄 Replace ${this.escapeHtml(currentSlot.label)}
             </button>
-            <button class="btn btn-secondary" style="font-size: 11.5px; padding: 5px 10px; color: #f87171; border-color: rgba(239, 68, 68, 0.4); background: rgba(239, 68, 68, 0.08);" onclick="window.sheetNavigator.handleCertPhotoDelete('${this.escapeJs(empName)}', '${this.escapeJs(certType)}')">
-              🗑️ Remove
+            <button class="btn btn-secondary" style="font-size: 11.5px; padding: 5px 10px; color: #f87171; border-color: rgba(239, 68, 68, 0.4); background: rgba(239, 68, 68, 0.08);" onclick="window.sheetNavigator.handleCertPhotoDelete('${this.escapeJs(empName)}', '${this.escapeJs(currentSlot.certKey)}')">
+              🗑️ Remove ${this.escapeHtml(currentSlot.label)}
             </button>
           </div>
         </div>
@@ -1334,25 +1420,10 @@ class SheetNavigator {
       return;
     }
 
-    // Default: Upload / Dropzone state
+    // 3. Default: Dropzone / Upload state for the active slot
     body.innerHTML = `
-      <!-- Meta Card -->
-      <div style="background: rgba(30, 41, 59, 0.7); border: 1px solid rgba(255,255,255,0.1); border-radius: 10px; padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
-        <div>
-          <div style="font-size: 15px; font-weight: 800; color: #f8fafc;">
-            👤 ${this.escapeHtml(empName)} · <span style="color: #38bdf8;">${this.escapeHtml(certType)}</span>
-          </div>
-          <div style="font-size: 11.5px; color: #94a3b8; margin-top: 4px; display: flex; gap: 14px; flex-wrap: wrap;">
-            <span>📅 Acquired: <strong style="color: #e2e8f0;">${this.escapeHtml(acqDate || '—')}</strong></span>
-            <span>⏳ Expires: <strong style="color: #e2e8f0;">${this.escapeHtml(expDate || '—')}</strong></span>
-          </div>
-        </div>
-        <div>
-          <span class="badge" style="background: rgba(148, 163, 184, 0.15); color: #94a3b8; border: 1px solid rgba(148, 163, 184, 0.3); padding: 4px 10px; border-radius: 20px; font-size: 11.5px; font-weight: 600;">
-            No Proof Attached
-          </span>
-        </div>
-      </div>
+      ${metaCardHtml}
+      ${tabsHtml}
 
       <!-- Drag & Drop Zone -->
       <div id="cert-photo-dropzone" 
@@ -1363,7 +1434,7 @@ class SheetNavigator {
            style="border: 2px dashed #0284c7; background: rgba(14, 165, 233, 0.05); padding: 42px 20px; text-align: center; border-radius: 12px; cursor: pointer; transition: all 0.2s ease;">
         <div style="font-size: 42px; margin-bottom: 10px;">📥</div>
         <div style="font-size: 15px; font-weight: 800; color: #f8fafc;">
-          Drag &amp; Drop cert renewal photo here
+          Drag &amp; Drop photo for <span style="color: #38bdf8;">${this.escapeHtml(currentSlot.label)}</span> here
         </div>
         <div style="font-size: 12.5px; color: #38bdf8; margin-top: 6px; font-weight: 600;">
           or click to browse image / PDF from your computer
@@ -1375,11 +1446,13 @@ class SheetNavigator {
           </span>
         </div>
         <div style="font-size: 11px; color: #64748b; margin-top: 10px;">
-          Supports JPG, PNG, WEBP, HEIC, and PDF documents. Texted photos can be copied and pasted in one click.
+          Supports JPG, PNG, WEBP, Apple HEIC, and PDF documents. Texted photos can be copied and pasted in one click.
         </div>
       </div>
 
-      <div style="display: flex; justify-content: flex-end; padding-top: 8px;">
+      ${hrDispatchSectionHtml}
+
+      <div style="display: flex; justify-content: flex-end; padding-top: 12px;">
         <button class="btn btn-secondary" onclick="window.sheetNavigator.closeCertPhotoModal()">Close</button>
       </div>
     `;
@@ -1475,6 +1548,7 @@ class SheetNavigator {
   async saveStagedCertPhoto() {
     if (!this.activeCertPhotoContext || !this.stagedCertPhoto) return;
     const { empName, certType } = this.activeCertPhotoContext;
+    const certKey = this.activeCertPhotoContext.activeCertKey || certType;
 
     if (!window.desktopAPI || !window.desktopAPI.saveCertPhoto) {
       alert('Desktop file saving API is not available.');
@@ -1483,14 +1557,14 @@ class SheetNavigator {
 
     const saveRes = await window.desktopAPI.saveCertPhoto({
       employeeName: empName,
-      certType: certType,
+      certType: certKey,
       base64Data: this.stagedCertPhoto.base64Data,
       originalPath: this.stagedCertPhoto.originalPath
     });
 
     if (saveRes && saveRes.success) {
       const todayStr = new Date().toLocaleDateString('en-US');
-      await this.db.saveCertPhotoRecord(empName, certType, {
+      await this.db.saveCertPhotoRecord(empName, certKey, {
         fileName: saveRes.fileName,
         fullPath: saveRes.fullPath,
         dateAdded: todayStr
@@ -1508,23 +1582,23 @@ class SheetNavigator {
     }
   }
 
-  async handleCertPhotoDelete(empName, certType) {
-    if (!empName || !certType) return;
-    if (!confirm(`Are you sure you want to remove the renewal proof photo for ${empName} (${certType})?`)) {
+  async handleCertPhotoDelete(empName, certKey) {
+    if (!empName || !certKey) return;
+    if (!confirm(`Are you sure you want to remove the renewal proof photo for ${empName} (${certKey})?`)) {
       return;
     }
 
-    const photoRecord = this.db.getCertPhotoRecord(empName, certType);
+    const photoRecord = this.db.getCertPhotoRecord(empName, certKey);
     if (photoRecord && photoRecord.fileName && window.desktopAPI && window.desktopAPI.deleteCertPhoto) {
       await window.desktopAPI.deleteCertPhoto({ fileName: photoRecord.fileName, fullPath: photoRecord.fullPath });
     }
 
-    await this.db.deleteCertPhotoRecord(empName, certType);
+    await this.db.deleteCertPhotoRecord(empName, certKey);
     this.stagedCertPhoto = null;
     this.isReplacingCertPhoto = false;
 
     if (typeof window.showToast === 'function') {
-      window.showToast(`🗑️ Proof photo removed for ${empName}.`, 'info');
+      window.showToast(`🗑️ Proof photo removed for ${empName} (${certKey}).`, 'info');
     }
     await this.renderCertPhotoModalContent();
     this.renderCurrentSheet();
@@ -1542,7 +1616,11 @@ class SheetNavigator {
 
   async emailCertPhotoToHR(empName, certType) {
     if (!empName || !certType) return;
-    const photoRecord = this.db.getCertPhotoRecord(empName, certType);
+    const summary = this.db && typeof this.db.getCertPhotoStatusSummary === 'function'
+      ? this.db.getCertPhotoStatusSummary(empName, certType)
+      : { attachedSlots: [], isMultiSlot: false, hasAll: false, hasAny: false, count: 0, total: 1 };
+
+    const attachedSlots = summary.attachedSlots || [];
 
     let acqDate = '';
     let expDate = '';
@@ -1572,8 +1650,19 @@ class SheetNavigator {
       }
     }
 
-    const subject = `Certification Renewal Proof: ${empName} - ${certType}`;
-    const body = `Hello HR,\n\nAttached is the renewed certification proof card for ${empName}.\n\n• Employee: ${empName}\n• Certification: ${certType}\n• Date Acquired: ${acqDate || 'On file'}\n• Expiration Date: ${expDate || 'Current'}\n\nPlease update company HR records accordingly.\n\nThank you,\nSafety Department`;
+    let subSuffix = '';
+    if (summary.isMultiSlot && summary.hasAll) {
+      subSuffix = ' (Front & Back Attached)';
+    } else if (summary.isMultiSlot && summary.hasAny) {
+      subSuffix = ` (${attachedSlots.map(s => s.label).join(' & ')} Attached)`;
+    }
+
+    const subject = `Certification Renewal Proof: ${empName} - ${certType}${subSuffix}`;
+    let body = `Hello HR,\n\nAttached is the renewed certification proof for ${empName}.\n\n• Employee: ${empName}\n• Certification: ${certType}\n• Date Acquired: ${acqDate || 'On file'}\n• Expiration Date: ${expDate || 'Current'}`;
+    if (attachedSlots.length > 0) {
+      body += `\n\nAttached Proof Cards:\n` + attachedSlots.map(s => `  • ${s.label}: ${s.record.fileName}`).join('\n');
+    }
+    body += `\n\nPlease update company HR records accordingly.\n\nThank you,\nSafety Department`;
 
     const mailtoUrl = `mailto:${encodeURIComponent(hrEmail)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
 
@@ -1583,12 +1672,17 @@ class SheetNavigator {
       window.open(mailtoUrl, '_blank');
     }
 
-    if (photoRecord && photoRecord.fileName && window.desktopAPI && typeof window.desktopAPI.showCertPhotoInFolder === 'function') {
-      await window.desktopAPI.showCertPhotoInFolder({ fileName: photoRecord.fileName, fullPath: photoRecord.fullPath });
+    // Highlight / show file(s) in folder
+    if (attachedSlots.length > 0 && window.desktopAPI && typeof window.desktopAPI.showCertPhotoInFolder === 'function') {
+      for (const s of attachedSlots) {
+        if (s.record && s.record.fileName) {
+          await window.desktopAPI.showCertPhotoInFolder({ fileName: s.record.fileName, fullPath: s.record.fullPath });
+        }
+      }
     }
 
     if (typeof window.showToast === 'function') {
-      window.showToast('📧 Opening email client... Photo highlighted in folder to drag and attach!', 'info');
+      window.showToast('📧 Opening email client... Proof files highlighted in folder to drag and attach!', 'info');
     }
   }
 
@@ -8028,12 +8122,18 @@ class SheetNavigator {
       if (this.currentSheetKey === 'expiring_certs') {
         const empName = String(row['Employee Name'] || row['Name'] || Object.values(row)[0] || '').trim();
         const certType = String(row['Item Type'] || row['Cert Type'] || row['Certification'] || '').trim();
-        const photoRecord = this.db && typeof this.db.getCertPhotoRecord === 'function' ? this.db.getCertPhotoRecord(empName, certType) : null;
-        const hasPhoto = !!(photoRecord && photoRecord.fileName);
+        const photoSummary = this.db && typeof this.db.getCertPhotoStatusSummary === 'function'
+          ? this.db.getCertPhotoStatusSummary(empName, certType)
+          : { hasAll: false, hasAny: false, isMultiSlot: false, count: 0, total: 1 };
 
-        const proofBtnHtml = hasPhoto
-          ? `<button class="btn btn-secondary" style="padding: 2px 7px; font-size: 11px; color: #34d399; border-color: rgba(52, 211, 153, 0.45); background: rgba(52, 211, 153, 0.12); cursor: pointer; margin-right: 4px; font-weight: 700;" onclick="window.sheetNavigator.openCertPhotoModal('${this.escapeJs(empName)}', '${this.escapeJs(certType)}', ${sheetRowIdx})" title="View attached renewal proof / 1-Click Email to HR">🖼️ Proof</button>`
-          : `<button class="btn btn-secondary" style="padding: 2px 7px; font-size: 11px; color: #94a3b8; border-color: rgba(148, 163, 184, 0.3); background: rgba(148, 163, 184, 0.05); cursor: pointer; margin-right: 4px;" onclick="window.sheetNavigator.openCertPhotoModal('${this.escapeJs(empName)}', '${this.escapeJs(certType)}', ${sheetRowIdx})" title="Attach cert renewal proof photo (texted from employee)">📷 Attach</button>`;
+        let proofBtnHtml = '';
+        if (photoSummary.hasAll) {
+          proofBtnHtml = `<button class="btn btn-secondary" style="padding: 2px 7px; font-size: 11px; color: #34d399; border-color: rgba(52, 211, 153, 0.45); background: rgba(52, 211, 153, 0.12); cursor: pointer; margin-right: 4px; font-weight: 700;" onclick="window.sheetNavigator.openCertPhotoModal('${this.escapeJs(empName)}', '${this.escapeJs(certType)}', ${sheetRowIdx})" title="View attached renewal proof / 1-Click Email to HR">🖼️ Proof${photoSummary.isMultiSlot ? ` (${photoSummary.count}/${photoSummary.total})` : ''}</button>`;
+        } else if (photoSummary.hasAny) {
+          proofBtnHtml = `<button class="btn btn-secondary" style="padding: 2px 7px; font-size: 11px; color: #fbbf24; border-color: rgba(251, 191, 36, 0.45); background: rgba(251, 191, 36, 0.12); cursor: pointer; margin-right: 4px; font-weight: 700;" onclick="window.sheetNavigator.openCertPhotoModal('${this.escapeJs(empName)}', '${this.escapeJs(certType)}', ${sheetRowIdx})" title="Partial renewal proof (${photoSummary.count}/${photoSummary.total}) - click to complete">📷 ${photoSummary.count}/${photoSummary.total}</button>`;
+        } else {
+          proofBtnHtml = `<button class="btn btn-secondary" style="padding: 2px 7px; font-size: 11px; color: #94a3b8; border-color: rgba(148, 163, 184, 0.3); background: rgba(148, 163, 184, 0.05); cursor: pointer; margin-right: 4px;" onclick="window.sheetNavigator.openCertPhotoModal('${this.escapeJs(empName)}', '${this.escapeJs(certType)}', ${sheetRowIdx})" title="Attach cert renewal proof photo (texted from employee)">📷 Attach</button>`;
+        }
 
         html += `<td class="admin-only-control" style="text-align: center; width: 140px; white-space: nowrap;">
           ${proofBtnHtml}

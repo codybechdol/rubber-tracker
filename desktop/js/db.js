@@ -593,6 +593,76 @@ class LocalDatabase {
   }
 
   /**
+   * Returns the sub-photo slots for a given certification type.
+   * e.g. DL -> [Front, Back], 1st Aid & CPR -> [1st Aid, CPR], others -> single slot.
+   */
+  getCertPhotoSlots(certType) {
+    const norm = String(certType || '').toLowerCase().trim();
+    if (norm === 'dl' || norm === "driver's license" || norm === 'drivers license' || norm.startsWith('dl ') || norm.includes('driver')) {
+      return [
+        { id: 'front', label: 'Front of License', icon: '🪪', certKey: 'DL (Front)', fallbackKeys: ['DL'] },
+        { id: 'back', label: 'Back of License', icon: '🔄', certKey: 'DL (Back)', fallbackKeys: [] }
+      ];
+    }
+    if (norm === '1st aid & cpr' || norm === 'first aid & cpr' || norm === '1st aid/cpr' || norm === '1st aid' || norm === 'cpr') {
+      return [
+        { id: '1st_aid', label: '1st Aid Cert', icon: '🩹', certKey: '1st Aid', fallbackKeys: ['1st Aid & CPR'] },
+        { id: 'cpr', label: 'CPR Cert', icon: '❤️', certKey: 'CPR', fallbackKeys: ['1st Aid & CPR'] }
+      ];
+    }
+    return [
+      { id: 'card', label: certType || 'Cert Card', icon: '📄', certKey: certType, fallbackKeys: [] }
+    ];
+  }
+
+  /**
+   * Returns the photo records mapped to each slot for an employee and cert type.
+   */
+  getCertPhotoRecordsForSlots(employeeName, certType) {
+    const slots = this.getCertPhotoSlots(certType);
+    if (!this.snapshot || !this.snapshot.configs || !this.snapshot.configs.cert_photos) {
+      return slots.map(s => ({ ...s, record: null }));
+    }
+
+    return slots.map(slot => {
+      let record = this.snapshot.configs.cert_photos[this.getCertPhotoKey(employeeName, slot.certKey)];
+      if (!record && slot.fallbackKeys) {
+        for (const fb of slot.fallbackKeys) {
+          const fbRec = this.snapshot.configs.cert_photos[this.getCertPhotoKey(employeeName, fb)];
+          if (fbRec) {
+            record = fbRec;
+            break;
+          }
+        }
+      }
+      return {
+        ...slot,
+        record: record || null
+      };
+    });
+  }
+
+  /**
+   * Returns a status summary for the cert photos of an employee (total slots, attached count, attached slots).
+   */
+  getCertPhotoStatusSummary(employeeName, certType) {
+    const slots = this.getCertPhotoRecordsForSlots(employeeName, certType);
+    const total = slots.length;
+    const attachedSlots = slots.filter(s => s.record && s.record.fileName);
+    const count = attachedSlots.length;
+    return {
+      total,
+      count,
+      hasAll: count === total && total > 0,
+      hasAny: count > 0,
+      isMultiSlot: total > 1,
+      slots,
+      attachedSlots,
+      fileNames: attachedSlots.map(s => s.record.fileName)
+    };
+  }
+
+  /**
    * Retrieves cert photo metadata for an employee and cert type.
    * Supports companion aliases (e.g. DL matches DL (Front) / DL (Back); 1st Aid & CPR matches 1st Aid / CPR).
    */
