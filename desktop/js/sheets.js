@@ -1378,13 +1378,30 @@ class SheetNavigator {
         <div style="background: #0f172a; border-radius: 10px; border: 1px solid rgba(255,255,255,0.1); padding: 14px; text-align: center; position: relative;">
           ${fileExists ? (
             isPdf ? `
-              <div style="padding: 40px 20px;">
-                <span style="font-size: 50px;">📄</span>
-                <div style="font-size: 14.5px; font-weight: 800; color: #f8fafc; margin-top: 8px;">${this.escapeHtml(photoRecord.fileName)}</div>
-                <button class="btn btn-secondary" style="margin-top: 14px; color: #38bdf8; border-color: rgba(56, 189, 248, 0.4);" onclick="window.sheetNavigator.openCertPhotoExternally('${this.escapeJs(photoRecord.fileName)}')">
-                  📄 Open PDF in Default Viewer
-                </button>
+              <div style="width: 100%; height: 420px; position: relative;">
+                ${photoDataUrl ? `
+                  <object data="${photoDataUrl}#toolbar=1&navpanes=0&view=FitH" type="application/pdf" style="width: 100%; height: 100%; border: none; border-radius: 6px; background: #1e293b;">
+                    <iframe src="${photoDataUrl}" style="width: 100%; height: 100%; border: none; background: #1e293b;">
+                      <div style="padding: 40px 20px; text-align: center;">
+                        <span style="font-size: 50px;">📄</span>
+                        <div style="font-size: 14.5px; font-weight: 800; color: #f8fafc; margin-top: 8px;">${this.escapeHtml(photoRecord.fileName)}</div>
+                        <button class="btn btn-secondary" style="margin-top: 14px; color: #38bdf8; border-color: rgba(56, 189, 248, 0.4);" onclick="window.sheetNavigator.openCertPhotoExternally('${this.escapeJs(photoRecord.fileName)}')">
+                          📄 Open PDF in Default Viewer
+                        </button>
+                      </div>
+                    </iframe>
+                  </object>
+                ` : `
+                  <div style="padding: 40px 20px;">
+                    <span style="font-size: 50px;">📄</span>
+                    <div style="font-size: 14.5px; font-weight: 800; color: #f8fafc; margin-top: 8px;">${this.escapeHtml(photoRecord.fileName)}</div>
+                    <button class="btn btn-secondary" style="margin-top: 14px; color: #38bdf8; border-color: rgba(56, 189, 248, 0.4);" onclick="window.sheetNavigator.openCertPhotoExternally('${this.escapeJs(photoRecord.fileName)}')">
+                      📄 Open PDF in Default Viewer
+                    </button>
+                  </div>
+                `}
               </div>
+              <div style="font-size: 11px; color: #64748b; margin-top: 6px;">💡 Embedded PDF Document · Click below to open in Acrobat or Edge</div>
             ` : `
               <img src="${photoDataUrl}" style="max-width: 100%; max-height: 380px; object-fit: contain; border-radius: 6px; cursor: pointer; transition: transform 0.2s;" onclick="window.sheetNavigator.openCertPhotoExternally('${this.escapeJs(photoRecord.fileName)}')" title="Click to view full image in Windows Photos">
               <div style="font-size: 11px; color: #64748b; margin-top: 6px;">💡 Click photo to view high-resolution image in Windows Photos</div>
@@ -1981,6 +1998,127 @@ class SheetNavigator {
   }
 
   /**
+   * Helper to parse dates in MM/DD/YYYY, YYYY-MM-DD, or ISO format into timestamps.
+   */
+  parseDateToTime(str) {
+    if (!str) return null;
+    if (typeof str === 'number') return str;
+    if (str instanceof Date) return str.getTime();
+    const s = String(str).trim();
+    if (!s) return null;
+    const mdy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+    if (mdy) {
+      return new Date(parseInt(mdy[3], 10), parseInt(mdy[1], 10) - 1, parseInt(mdy[2], 10), 12, 0, 0).getTime();
+    }
+    const ymd = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (ymd) {
+      return new Date(parseInt(ymd[1], 10), parseInt(ymd[2], 10) - 1, parseInt(ymd[3], 10), 12, 0, 0).getTime();
+    }
+    const parsed = Date.parse(s);
+    return isNaN(parsed) ? null : parsed;
+  }
+
+  /**
+   * Determines if a scanned cert item is already attached to the employee in the Cert Photo Vault.
+   * If a newer renewal email exists (email date > existing email date / recorded date), returns false.
+   */
+  isScannedCertAlreadyAdded(item) {
+    if (!item || !item.employeeName || !item.certType) return false;
+    if (!this.db || !this.db.snapshot) return false;
+
+    const empName = String(item.employeeName).trim();
+    const certType = String(item.certType).trim();
+    if (!empName || !certType) return false;
+
+    // Check cert_photos vault
+    const existing = this.db.getCertPhotoRecord ? this.db.getCertPhotoRecord(empName, certType) : null;
+    if (!existing || !existing.fileName) {
+      return false;
+    }
+
+    // Exact email message ID match -> definitely the same email attachment already saved
+    if (existing.emailMessageId && item.messageId && String(existing.emailMessageId).trim() === String(item.messageId).trim()) {
+      return true;
+    }
+
+    // Check email dates
+    const itemTime = this.parseDateToTime(item.date);
+    const existingEmailTime = existing.emailDate ? this.parseDateToTime(existing.emailDate) : null;
+
+    if (itemTime && existingEmailTime) {
+      // If scanned item is on or before the email of the vaulted cert, it's already added or older
+      if (itemTime <= existingEmailTime) {
+        return true;
+      }
+      // If itemTime > existingEmailTime, this is a newer email with an updated renewal proof!
+      return false;
+    }
+
+    // Cross-reference expiring_certs table
+    const tableData = this.db.getTable('expiring_certs');
+    if (tableData && tableData.rows && itemTime) {
+      const normEmp = empName.toLowerCase();
+      const normCert = certType.toLowerCase();
+      const row = tableData.rows.find(r => {
+        const rEmp = String(r['Employee Name'] || r['Name'] || '').toLowerCase().trim();
+        const rCert = String(r['Item Type'] || r['Cert Type'] || '').toLowerCase().trim();
+        return rEmp === normEmp && (rCert === normCert || (normCert.startsWith('dl') && rCert.startsWith('dl')));
+      });
+
+      if (row) {
+        const acqTime = row['Date Acquired'] ? this.parseDateToTime(row['Date Acquired']) : null;
+        if (acqTime && itemTime <= acqTime) {
+          return true;
+        }
+      }
+    }
+
+    // If existing photo exists and was added after or around the item's email date
+    const addedTime = existing.dateAdded ? this.parseDateToTime(existing.dateAdded) : null;
+    if (itemTime && addedTime && itemTime <= addedTime) {
+      return true;
+    }
+
+    // Default: photo exists in vault for this employee and cert type
+    return true;
+  }
+
+  /**
+   * Toggles hiding/showing certs that are already attached in the vault.
+   */
+  toggleHideVaultedCerts() {
+    this.renderScannedCertItems();
+  }
+
+  /**
+   * Dynamically handles employee dropdown change on a scanned card.
+   */
+  handleScannedCardEmployeeChange(itemId, empName) {
+    const item = this.scannedCertItems ? this.scannedCertItems.find(x => x.id === itemId) : null;
+    if (!item) return;
+    item.employeeName = (empName || '').trim();
+    item.alreadyInVault = this.isScannedCertAlreadyAdded(item);
+    const badge = document.getElementById(`scanned-vault-badge-${itemId}`);
+    if (badge) {
+      badge.style.display = item.alreadyInVault ? 'inline-block' : 'none';
+    }
+  }
+
+  /**
+   * Dynamically handles cert type dropdown change on a scanned card.
+   */
+  handleScannedCardCertTypeChange(itemId, certType) {
+    const item = this.scannedCertItems ? this.scannedCertItems.find(x => x.id === itemId) : null;
+    if (!item) return;
+    item.certType = (certType || '').trim();
+    item.alreadyInVault = this.isScannedCertAlreadyAdded(item);
+    const badge = document.getElementById(`scanned-vault-badge-${itemId}`);
+    if (badge) {
+      badge.style.display = item.alreadyInVault ? 'inline-block' : 'none';
+    }
+  }
+
+  /**
    * Renders cards for all scanned cert items for user review, cropping, and import.
    * Bound by unique item.id to prevent index-shift and reloading bugs.
    */
@@ -1995,8 +2133,51 @@ class SheetNavigator {
       return;
     }
 
-    if (batchActions) batchActions.style.display = 'flex';
-    if (countBadge) countBadge.textContent = `${this.scannedCertItems.length} cert ${this.scannedCertItems.length === 1 ? 'photo' : 'photos'} found`;
+    const hideVaultedCheckbox = document.getElementById('cert-scan-hide-vaulted');
+    const hideVaulted = hideVaultedCheckbox ? hideVaultedCheckbox.checked : true;
+
+    // Evaluate vault status for each item
+    let vaultedCount = 0;
+    this.scannedCertItems.forEach(item => {
+      item.alreadyInVault = this.isScannedCertAlreadyAdded(item);
+      if (item.alreadyInVault) vaultedCount++;
+    });
+
+    const displayItems = hideVaulted
+      ? this.scannedCertItems.filter(item => !item.alreadyInVault)
+      : this.scannedCertItems;
+
+    if (batchActions) batchActions.style.display = displayItems.length > 0 ? 'flex' : 'none';
+    if (countBadge) {
+      if (vaultedCount > 0) {
+        countBadge.textContent = hideVaulted
+          ? `${displayItems.length} new cert ${displayItems.length === 1 ? 'photo' : 'photos'} (${vaultedCount} in vault hidden)`
+          : `${displayItems.length} cert photos (${vaultedCount} already in vault)`;
+      } else {
+        countBadge.textContent = `${displayItems.length} cert ${displayItems.length === 1 ? 'photo' : 'photos'} found`;
+      }
+    }
+
+    if (displayItems.length === 0) {
+      if (vaultedCount > 0) {
+        body.innerHTML = `
+          <div style="text-align: center; padding: 50px 20px; color: #94a3b8;">
+            <div style="font-size: 50px; margin-bottom: 14px;">🎉</div>
+            <h3 style="color: #f8fafc; font-size: 18px; font-weight: 800; margin-bottom: 8px;">All Scanned Certs Are Already in Vault!</h3>
+            <p style="max-width: 520px; margin: 0 auto 20px; font-size: 13px; line-height: 1.6; color: #cbd5e1;">
+              Found ${vaultedCount} cert photos in Gmail, and all ${vaultedCount} have already been reviewed and attached to employee profiles. No new renewal updates were found.
+            </p>
+            <button class="btn btn-secondary" onclick="document.getElementById('cert-scan-hide-vaulted').checked = false; window.sheetNavigator.renderScannedCertItems();" style="font-size: 12.5px; font-weight: 600; padding: 7px 18px; border-color: rgba(56, 189, 248, 0.5); color: #38bdf8; border-radius: 8px; cursor: pointer; background: rgba(56, 189, 248, 0.08);">
+              👁️ Show All ${vaultedCount} Vaulted Photos
+            </button>
+          </div>
+        `;
+        return;
+      } else {
+        this.renderCertScannerInitialState();
+        return;
+      }
+    }
 
     // Fetch employee names for dropdown (strictly currently employed workers)
     const employeeOptions = this.getActiveEmployeeNamesList();
@@ -2026,10 +2207,26 @@ class SheetNavigator {
       <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 16px;">
     `;
 
-    this.scannedCertItems.forEach(item => {
+    displayItems.forEach(item => {
       const isPdf = (item.contentType && item.contentType.includes('pdf')) || (item.fileName && item.fileName.toLowerCase().endsWith('.pdf'));
       const subLower = String(item.subject || '').toLowerCase();
       const isMultiOrGroup = subLower.includes('new hire') || subLower.includes('ape') || subLower.includes('group') || subLower.includes('butte') || subLower.includes('helena') || (item.attIdx && item.attIdx > 0);
+
+      // Create blobUrl for PDF if base64Data is already loaded
+      if (isPdf && item.base64Data && !item.blobUrl) {
+        try {
+          const rawB64 = item.base64Data.includes('base64,') ? item.base64Data.split('base64,')[1] : item.base64Data;
+          const byteChars = atob(rawB64);
+          const byteNumbers = new Uint8Array(byteChars.length);
+          for (let i = 0; i < byteChars.length; i++) {
+            byteNumbers[i] = byteChars.charCodeAt(i);
+          }
+          const blob = new Blob([byteNumbers], { type: 'application/pdf' });
+          item.blobUrl = URL.createObjectURL(blob);
+        } catch (bErr) {
+          console.warn('PDF blob creation error:', bErr);
+        }
+      }
 
       html += `
         <div class="scanned-cert-card" id="scanned-cert-card-${item.id}" style="background: rgba(15, 23, 42, 0.85); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; transition: transform 0.15s, border-color 0.15s; box-shadow: 0 4px 12px rgba(0,0,0,0.3);">
@@ -2037,9 +2234,18 @@ class SheetNavigator {
           <!-- Image / PDF Preview Container -->
           <div style="height: 180px; background: #090d16; display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden; border-bottom: 1px solid rgba(255,255,255,0.06);">
             ${isPdf ? `
-              <div style="text-align: center; color: #f87171;">
-                <div style="font-size: 48px;">📄</div>
-                <div style="font-size: 11px; font-weight: 700; color: #fca5a5; margin-top: 4px;">PDF Document</div>
+              <div id="scanned-card-preview-container-${item.id}" style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; position: relative;">
+                ${(item.blobUrl || item.base64Data) ? `
+                  <div style="width: 100%; height: 100%; position: relative; cursor: pointer;" onclick="window.sheetNavigator.openPdfViewerModal('${this.escapeJs(item.id)}')" title="Click to view full PDF">
+                    <object data="${item.blobUrl || item.base64Data}#toolbar=0&navpanes=0&scrollbar=0&view=FitH" type="application/pdf" style="width: 100%; height: 100%; pointer-events: none; border: none; background: #090d16;"></object>
+                    <div style="position: absolute; inset: 0; background: rgba(0,0,0,0.02); pointer-events: none;"></div>
+                  </div>
+                ` : `
+                  <div id="scanned-card-loading-${item.id}" style="display: flex; flex-direction: column; align-items: center; justify-content: center; color: #94a3b8; font-size: 12px; gap: 8px;">
+                    <div class="cert-scan-card-spinner" style="width: 24px; height: 24px; border: 2.5px solid rgba(248, 113, 113, 0.2); border-top-color: #f87171; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
+                    <span style="font-size: 11px; color: #cbd5e1;">Loading PDF...</span>
+                  </div>
+                `}
               </div>
             ` : (item.base64Data ? `
               <img id="scanned-card-preview-${item.id}" src="${item.base64Data}" alt="Cert Preview" style="max-height: 100%; max-width: 100%; object-fit: contain; cursor: pointer;" onclick="window.sheetNavigator.openPhotoCropperModal('${this.escapeJs(item.id)}')" title="Click to open Crop &amp; Rotate tool">
@@ -2052,25 +2258,32 @@ class SheetNavigator {
             `)}
             
             <!-- Top Action Controls -->
-            <div style="position: absolute; top: 8px; right: 8px; display: flex; gap: 6px;">
+            <div style="position: absolute; top: 8px; right: 8px; display: flex; gap: 6px; z-index: 2;">
               <button type="button" class="btn btn-secondary" style="font-size: 11px; padding: 3px 8px; background: rgba(15, 23, 42, 0.88); border: 1px solid rgba(168, 85, 247, 0.55); color: #c084fc; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 3px;" onclick="window.sheetNavigator.duplicateScannedCertCard('${this.escapeJs(item.id)}')" title="Split / Duplicate card (useful for 1st Aid &amp; CPR in one photo or Front &amp; Back of DL)">
                 <span>📋</span> Split
               </button>
-              ${!isPdf ? `
+              ${isPdf ? `
+                <button type="button" class="btn btn-secondary" style="font-size: 11px; padding: 3px 8px; background: rgba(15, 23, 42, 0.88); border: 1px solid rgba(248, 113, 113, 0.6); color: #fca5a5; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 3px;" onclick="window.sheetNavigator.openPdfViewerModal('${this.escapeJs(item.id)}')" title="View full PDF document">
+                  <span>👁️</span> View
+                </button>
+              ` : `
                 <button type="button" class="btn btn-secondary" style="font-size: 11px; padding: 3px 8px; background: rgba(15, 23, 42, 0.88); border: 1px solid rgba(56, 189, 248, 0.55); color: #38bdf8; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 3px;" onclick="window.sheetNavigator.openPhotoCropperModal('${this.escapeJs(item.id)}')" title="Crop and rotate this photo">
                   <span>✂️</span> Crop
                 </button>
-              ` : ''}
+              `}
               <button type="button" class="btn btn-secondary" style="font-size: 11px; padding: 3px 7px; background: rgba(15, 23, 42, 0.88); border: 1px solid rgba(239, 68, 68, 0.45); color: #f87171; border-radius: 6px; cursor: pointer;" onclick="window.sheetNavigator.dismissScannedCert('${this.escapeJs(item.id)}')" title="Dismiss this item">
                 ✕
               </button>
             </div>
 
             <!-- Bottom Left Metadata Badges -->
-            <div style="position: absolute; bottom: 6px; left: 8px; display: flex; gap: 6px; align-items: center;">
+            <div style="position: absolute; bottom: 6px; left: 8px; display: flex; gap: 6px; align-items: center; z-index: 2;">
               <div style="background: rgba(0,0,0,0.72); padding: 2px 7px; border-radius: 4px; font-size: 10px; color: #94a3b8;">
                 ${item.date || 'Recent'}
               </div>
+              <span id="scanned-vault-badge-${item.id}" style="${item.alreadyInVault ? 'display: inline-block;' : 'display: none;'} background: rgba(16, 185, 129, 0.25); border: 1px solid rgba(16, 185, 129, 0.55); color: #34d399; padding: 1px 6px; border-radius: 4px; font-size: 9.5px; font-weight: 700;" title="Already attached in Cert Photo Vault">
+                ✓ In Vault
+              </span>
               ${isMultiOrGroup ? `
                 <div style="background: rgba(245, 158, 11, 0.22); border: 1px solid rgba(245, 158, 11, 0.4); padding: 1px 6px; border-radius: 4px; font-size: 9.5px; color: #fbbf24; font-weight: 600;" title="${this.escapeHtml(item.fileName || 'Multi-attachment email')}">
                   📎 ${this.escapeHtml(item.fileName || 'Multi-file')}
@@ -2090,7 +2303,7 @@ class SheetNavigator {
                 <label style="font-size: 11px; color: #94a3b8; font-weight: 600;">Assigned Employee</label>
                 ${isMultiOrGroup ? `<span style="font-size: 10px; color: #f59e0b; font-weight: 600;">⚠️ Check Name</span>` : ''}
               </div>
-              <select id="scanned-emp-select-${item.id}" style="width: 100%; background: #0f172a; color: #f8fafc; border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 5px 8px; font-size: 12px; font-weight: 600;">
+              <select id="scanned-emp-select-${item.id}" onchange="window.sheetNavigator.handleScannedCardEmployeeChange('${this.escapeJs(item.id)}', this.value)" style="width: 100%; background: #0f172a; color: #f8fafc; border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 5px 8px; font-size: 12px; font-weight: 600;">
                 <option value="">-- Select Employee --</option>
                 ${employeeOptions.map(name => `
                   <option value="${name}" ${item.employeeName && item.employeeName.toLowerCase() === name.toLowerCase() ? 'selected' : ''}>
@@ -2102,7 +2315,7 @@ class SheetNavigator {
 
             <div>
               <label style="display: block; font-size: 11px; color: #94a3b8; font-weight: 600; margin-bottom: 3px;">Certification Type</label>
-              <select id="scanned-cert-select-${item.id}" style="width: 100%; background: #0f172a; color: #f8fafc; border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 5px 8px; font-size: 12px; font-weight: 600;">
+              <select id="scanned-cert-select-${item.id}" onchange="window.sheetNavigator.handleScannedCardCertTypeChange('${this.escapeJs(item.id)}', this.value)" style="width: 100%; background: #0f172a; color: #f8fafc; border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 5px 8px; font-size: 12px; font-weight: 600;">
                 ${certTypes.map(ct => `
                   <option value="${ct}" ${item.certType === ct ? 'selected' : ''}>${ct}</option>
                 `).join('')}
@@ -2284,13 +2497,39 @@ class SheetNavigator {
         }
         item.base64Data = b64;
 
-        // Update DOM elements if present
-        const loadingEl = document.getElementById(`scanned-card-loading-${item.id}`);
-        const imgEl = document.getElementById(`scanned-card-preview-${item.id}`);
-        if (loadingEl) loadingEl.style.display = 'none';
-        if (imgEl) {
-          imgEl.src = b64;
-          imgEl.style.display = 'block';
+        if (item.isPdf) {
+          try {
+            const rawB64 = b64.includes('base64,') ? b64.split('base64,')[1] : b64;
+            const byteChars = atob(rawB64);
+            const byteNumbers = new Uint8Array(byteChars.length);
+            for (let i = 0; i < byteChars.length; i++) {
+              byteNumbers[i] = byteChars.charCodeAt(i);
+            }
+            const blob = new Blob([byteNumbers], { type: 'application/pdf' });
+            item.blobUrl = URL.createObjectURL(blob);
+          } catch (bErr) {
+            console.warn('PDF blob creation error:', bErr);
+          }
+
+          const containerEl = document.getElementById(`scanned-card-preview-container-${item.id}`);
+          if (containerEl) {
+            containerEl.style.cursor = 'pointer';
+            containerEl.onclick = () => this.openPdfViewerModal(item.id);
+            containerEl.title = 'Click to view full PDF';
+            containerEl.innerHTML = `
+              <object data="${item.blobUrl || b64}#toolbar=0&navpanes=0&scrollbar=0&view=FitH" type="application/pdf" style="width: 100%; height: 100%; pointer-events: none; border: none; background: #090d16;"></object>
+              <div style="position: absolute; inset: 0; background: rgba(0,0,0,0.02); pointer-events: none;"></div>
+            `;
+          }
+        } else {
+          // Update DOM elements if present
+          const loadingEl = document.getElementById(`scanned-card-loading-${item.id}`);
+          const imgEl = document.getElementById(`scanned-card-preview-${item.id}`);
+          if (loadingEl) loadingEl.style.display = 'none';
+          if (imgEl) {
+            imgEl.src = b64;
+            imgEl.style.display = 'block';
+          }
         }
         return b64;
       } else {
@@ -2314,7 +2553,7 @@ class SheetNavigator {
   }
 
   /**
-   * Queues background fetching of card images smoothly without flooding Google Apps Script.
+   * Queues background fetching of card images & PDFs smoothly without flooding Google Apps Script.
    */
   async loadScannedCertImagesQueue() {
     if (!this.scannedCertItems || this.scannedCertItems.length === 0) return;
@@ -2325,7 +2564,7 @@ class SheetNavigator {
     const worker = async () => {
       while (nextIdx < items.length) {
         const item = items[nextIdx++];
-        if (!item || item.base64Data || item.isPdf || item.isLoading) continue;
+        if (!item || item.base64Data || item.isLoading) continue;
         await this.loadScannedCertAttachment(item.id);
         // Small delay between requests to avoid GAS rate limiting
         await new Promise(r => setTimeout(r, 150));
@@ -2374,11 +2613,11 @@ class SheetNavigator {
       return;
     }
 
-    // Ensure image payload is loaded before saving
-    if (!item.base64Data && !item.isPdf) {
+    // Ensure document payload is loaded before saving
+    if (!item.base64Data) {
       const b64 = await this.loadScannedCertAttachment(itemId);
       if (!b64) {
-        alert('Could not download certificate photo from Gmail. Please click Retry on the card or check your connection.');
+        alert('Could not download certificate proof from Gmail. Please click Retry on the card or check your connection.');
         return;
       }
     }
@@ -2396,8 +2635,15 @@ class SheetNavigator {
         await this.db.saveCertPhotoRecord(empName, certType, {
           fileName: saveRes.fileName,
           fullPath: saveRes.fullPath,
-          dateAdded: todayStr
+          dateAdded: todayStr,
+          emailMessageId: item.messageId || '',
+          emailDate: item.date || todayStr,
+          subject: item.subject || '',
+          source: 'gmail_scan',
+          expDate: expDate || '',
+          acqDate: acqDate || ''
         });
+        item.alreadyInVault = true;
 
         // If expiration date was entered, update the expiring_certs table
         if (expDate) {
@@ -2473,7 +2719,7 @@ class SheetNavigator {
         continue;
       }
 
-      if (!item.base64Data && !item.isPdf) {
+      if (!item.base64Data) {
         await this.loadScannedCertAttachment(item.id);
       }
 
@@ -2490,8 +2736,15 @@ class SheetNavigator {
           await this.db.saveCertPhotoRecord(empName, certType || 'Other Cert', {
             fileName: saveRes.fileName,
             fullPath: saveRes.fullPath,
-            dateAdded: todayStr
+            dateAdded: todayStr,
+            emailMessageId: item.messageId || '',
+            emailDate: item.date || todayStr,
+            subject: item.subject || '',
+            source: 'gmail_scan',
+            expDate: expDate || '',
+            acqDate: acqDate || ''
           });
+          item.alreadyInVault = true;
 
           if (expDate) {
             await this.updateCertDatesInTable(empName, certType || 'Other Cert', expDate, acqDate);
@@ -2516,6 +2769,139 @@ class SheetNavigator {
       }
     } else if (unassignedItems.length > 0) {
       alert('Please assign an employee to each card before importing.');
+    }
+  }
+
+  /**
+   * Opens the full PDF viewer modal for a scanned cert item.
+   */
+  async openPdfViewerModal(itemId) {
+    const modal = document.getElementById('cert-pdf-viewer-modal');
+    const body = document.getElementById('cert-pdf-modal-body');
+    const titleEl = document.getElementById('cert-pdf-modal-title');
+    const subtitleEl = document.getElementById('cert-pdf-modal-subtitle');
+    const infoEl = document.getElementById('cert-pdf-modal-info');
+    if (!modal || !body) return;
+
+    modal.style.display = 'flex';
+    modal.classList.add('active');
+
+    let item = this.scannedCertItems ? this.scannedCertItems.find(x => x.id === itemId) : null;
+    if (!item) {
+      alert('Certificate document not found.');
+      this.closePdfViewerModal();
+      return;
+    }
+
+    this.activePdfItem = item;
+
+    if (titleEl) titleEl.textContent = `${item.certType || 'Certificate'} · ${item.employeeName || 'Unassigned'}`;
+    if (subtitleEl) subtitleEl.textContent = `${item.fileName || 'Document.pdf'} | Date: ${item.date || 'Recent'} | Subject: ${item.subject || ''}`;
+    if (infoEl) infoEl.textContent = `Attachment: ${item.fileName || 'PDF'} (${item.fileSize ? Math.round(item.fileSize / 1024) + ' KB' : 'PDF'})`;
+
+    // If base64Data is not loaded yet, fetch it
+    if (!item.base64Data) {
+      body.innerHTML = `
+        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; color: #94a3b8; gap: 12px; padding: 40px;">
+          <div class="cert-scan-card-spinner" style="width: 36px; height: 36px; border: 3px solid rgba(56, 189, 248, 0.2); border-top-color: #38bdf8; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
+          <div style="font-size: 13px; color: #f8fafc; font-weight: 600;">Downloading PDF from Gmail...</div>
+        </div>
+      `;
+      const b64 = await this.loadScannedCertAttachment(itemId);
+      if (!b64) {
+        body.innerHTML = `
+          <div style="padding: 30px; text-align: center; color: #f87171;">
+            <div style="font-size: 36px; margin-bottom: 8px;">⚠️</div>
+            <div style="font-size: 14px; font-weight: 700;">Failed to download PDF attachment</div>
+            <button class="btn btn-secondary" style="margin-top: 12px;" onclick="window.sheetNavigator.openPdfViewerModal('${this.escapeJs(itemId)}')">Retry</button>
+          </div>
+        `;
+        return;
+      }
+    }
+
+    // Prepare Blob URL
+    if (!item.blobUrl && item.base64Data) {
+      try {
+        const rawB64 = item.base64Data.includes('base64,') ? item.base64Data.split('base64,')[1] : item.base64Data;
+        const byteChars = atob(rawB64);
+        const byteNumbers = new Uint8Array(byteChars.length);
+        for (let i = 0; i < byteChars.length; i++) {
+          byteNumbers[i] = byteChars.charCodeAt(i);
+        }
+        const blob = new Blob([byteNumbers], { type: 'application/pdf' });
+        item.blobUrl = URL.createObjectURL(blob);
+      } catch (e) {
+        console.warn('PDF blob creation error:', e);
+      }
+    }
+
+    const pdfSrc = item.blobUrl || item.base64Data;
+    body.innerHTML = `
+      <object data="${pdfSrc}#toolbar=1&navpanes=0&view=FitH" type="application/pdf" style="width: 100%; height: 100%; border: none; background: #1e293b;">
+        <iframe src="${pdfSrc}#view=FitH" style="width: 100%; height: 100%; border: none; background: #1e293b;">
+          <div style="padding: 40px; text-align: center; color: #cbd5e1;">
+            <p style="font-size: 14px; margin-bottom: 12px;">Preview cannot be rendered inline in this view.</p>
+            <button class="btn btn-primary" onclick="window.sheetNavigator.openCurrentPdfExternally()">
+              ↗️ Open in System PDF Viewer (Acrobat / Edge)
+            </button>
+          </div>
+        </iframe>
+      </object>
+    `;
+  }
+
+  /**
+   * Closes the PDF viewer modal.
+   */
+  closePdfViewerModal() {
+    const modal = document.getElementById('cert-pdf-viewer-modal');
+    if (modal) {
+      modal.style.display = 'none';
+      modal.classList.remove('active');
+    }
+  }
+
+  /**
+   * Opens the active PDF in the system default viewer (Adobe Acrobat, Edge, etc.).
+   */
+  async openCurrentPdfExternally() {
+    if (!this.activePdfItem || !this.activePdfItem.base64Data) {
+      alert('PDF data is not available.');
+      return;
+    }
+    if (window.desktopAPI && typeof window.desktopAPI.openPdfExternally === 'function') {
+      const res = await window.desktopAPI.openPdfExternally(
+        this.activePdfItem.base64Data,
+        this.activePdfItem.fileName || 'Certificate.pdf'
+      );
+      if (res && !res.success) {
+        alert('Could not open PDF in system viewer: ' + (res.error || 'Unknown error'));
+      }
+    }
+  }
+
+  /**
+   * Saves the active PDF to a local disk file via Save File dialog.
+   */
+  async downloadCurrentPdf() {
+    if (!this.activePdfItem || !this.activePdfItem.base64Data) {
+      alert('PDF data is not available.');
+      return;
+    }
+    if (window.desktopAPI && typeof window.desktopAPI.savePdfToFile === 'function') {
+      const rawB64 = this.activePdfItem.base64Data.includes('base64,')
+        ? this.activePdfItem.base64Data.split('base64,')[1]
+        : this.activePdfItem.base64Data;
+      const res = await window.desktopAPI.savePdfToFile(
+        rawB64,
+        this.activePdfItem.fileName || 'Certificate.pdf'
+      );
+      if (res && res.success) {
+        if (typeof window.showToast === 'function') {
+          window.showToast('Saved PDF successfully!', 'success');
+        }
+      }
     }
   }
 

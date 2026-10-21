@@ -307,7 +307,8 @@ ipcMain.handle('open-pdf-externally', async (event, { base64Data, filename }) =>
     if (!fs.existsSync(tempDir)) fs.mkdirSync(tempDir, { recursive: true });
     const safeName = (filename || 'document.pdf').replace(/[^a-zA-Z0-9._-]/g, '_');
     const filePath = path.join(tempDir, safeName);
-    const buffer = Buffer.from(base64Data, 'base64');
+    const rawB64 = (base64Data || '').includes('base64,') ? base64Data.split('base64,')[1] : base64Data;
+    const buffer = Buffer.from(rawB64, 'base64');
     fs.writeFileSync(filePath, buffer);
     await shell.openPath(filePath);
     return { success: true, filePath };
@@ -324,7 +325,8 @@ ipcMain.handle('save-pdf-to-file', async (event, { base64Data, defaultFilename }
       filters: [{ name: 'PDF Document', extensions: ['pdf'] }]
     });
     if (canceled || !filePath) return { success: false, canceled: true };
-    const buffer = Buffer.from(base64Data, 'base64');
+    const rawB64 = (base64Data || '').includes('base64,') ? base64Data.split('base64,')[1] : base64Data;
+    const buffer = Buffer.from(rawB64, 'base64');
     fs.writeFileSync(filePath, buffer);
     return { success: true, filePath };
   } catch (err) {
@@ -398,7 +400,7 @@ ipcMain.handle('select-cert-photo-file', async () => {
   }
 });
 
-ipcMain.handle('save-cert-photo', async (event, { employeeName, certType, base64Data, originalPath }) => {
+ipcMain.handle('save-cert-photo', async (event, { employeeName, certType, base64Data, originalPath, fileName: origFileName }) => {
   try {
     const safeEmp = String(employeeName || 'Employee').replace(/[^a-zA-Z0-9_-]/g, '_');
     const safeCert = String(certType || 'Cert').replace(/[^a-zA-Z0-9_-]/g, '_');
@@ -407,10 +409,12 @@ ipcMain.handle('save-cert-photo', async (event, { employeeName, certType, base64
 
     if (originalPath) {
       ext = path.extname(originalPath).toLowerCase() || '.jpg';
+    } else if (origFileName) {
+      ext = path.extname(origFileName).toLowerCase() || '.jpg';
     } else if (base64Data) {
       if (base64Data.startsWith('data:image/png')) ext = '.png';
       else if (base64Data.startsWith('data:image/webp')) ext = '.webp';
-      else if (base64Data.startsWith('data:application/pdf')) ext = '.pdf';
+      else if (base64Data.startsWith('data:application/pdf') || base64Data.includes('application/pdf')) ext = '.pdf';
       else if (base64Data.startsWith('data:image/heic') || base64Data.startsWith('data:image/heif')) ext = '.heic';
     }
 
