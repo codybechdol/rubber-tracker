@@ -2587,15 +2587,26 @@ class SheetNavigator {
       };
 
       let res = null;
-      if (window.syncEngine && typeof window.syncEngine.executeNetworkRequest === 'function') {
-        res = await window.syncEngine.executeNetworkRequest(syncUrl, 'POST', payload, 35000);
-      } else {
-        const resp = await fetch(syncUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload)
-        });
-        res = await resp.json();
+      let lastErr = null;
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          if (window.syncEngine && typeof window.syncEngine.executeNetworkRequest === 'function') {
+            res = await window.syncEngine.executeNetworkRequest(syncUrl, 'POST', payload, 35000);
+          } else {
+            const resp = await fetch(syncUrl, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload)
+            });
+            res = await resp.json();
+          }
+          if (res && res.success && res.base64Data) break;
+          if (res && res.error) lastErr = new Error(res.error);
+        } catch (fetchErr) {
+          lastErr = fetchErr;
+          if (attempt === 2) break;
+          await new Promise(r => setTimeout(r, 700));
+        }
       }
 
       if (res && res.success && res.base64Data) {
@@ -2652,7 +2663,7 @@ class SheetNavigator {
         }
         return b64;
       } else {
-        throw new Error((res && res.error) || 'Failed to download attachment');
+        throw (lastErr || new Error((res && res.error) || 'Failed to download attachment'));
       }
     } catch (err) {
       console.warn(`Failed to load attachment for card ${item.id}:`, err);
@@ -2676,25 +2687,21 @@ class SheetNavigator {
    */
   async loadScannedCertImagesQueue() {
     if (!this.scannedCertItems || this.scannedCertItems.length === 0) return;
-    const items = this.scannedCertItems;
-    const concurrency = 2;
-    let nextIdx = 0;
+    const hideVaultedCheckbox = document.getElementById('cert-scan-hide-vaulted');
+    const hideVaulted = hideVaultedCheckbox ? hideVaultedCheckbox.checked : true;
 
-    const worker = async () => {
-      while (nextIdx < items.length) {
-        const item = items[nextIdx++];
-        if (!item || item.base64Data || item.isLoading) continue;
-        await this.loadScannedCertAttachment(item.id);
-        // Small delay between requests to avoid GAS rate limiting
-        await new Promise(r => setTimeout(r, 150));
-      }
-    };
+    // Only load attachments for cards that are NOT already in the vault when hideVaulted is active
+    const targetItems = hideVaulted
+      ? this.scannedCertItems.filter(item => !item.alreadyInVault)
+      : this.scannedCertItems;
 
-    const workers = [];
-    for (let c = 0; c < concurrency; c++) {
-      workers.push(worker());
+    for (let i = 0; i < targetItems.length; i++) {
+      const item = targetItems[i];
+      if (!item || item.base64Data || item.isLoading) continue;
+      await this.loadScannedCertAttachment(item.id);
+      // Clean delay between requests to keep Google Apps Script happy
+      await new Promise(r => setTimeout(r, 250));
     }
-    await Promise.all(workers);
   }
 
   /**
@@ -3392,11 +3399,14 @@ class SheetNavigator {
       if (loadingEl) {
         loadingEl.style.display = 'none';
       }
+
+      // Automatically re-run OCR on the newly cropped & oriented photo!
+      this.extractCertInfoFromImage(item, false);
     }
 
     this.closePhotoCropperModal();
     if (typeof window.showToast === 'function') {
-      window.showToast('✂️ Photo cropped and rotated successfully!', 'success');
+      window.showToast('✂️ Photo cropped and scanned successfully!', 'success');
     }
   }
 

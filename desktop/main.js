@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, dialog, shell, session } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, session, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const dns = require('dns');
@@ -515,6 +515,53 @@ async function getOcrWorkerInstance() {
   return ocrWorker;
 }
 
+/**
+ * Preprocesses an image buffer using nativeImage to enhance contrast, upscale,
+ * and binarize security backgrounds so faint text on state driver's licenses is crystal clear.
+ */
+function preprocessImageBuffer(buffer) {
+  try {
+    let nImg = nativeImage.createFromBuffer(buffer);
+    if (!nImg || nImg.isEmpty()) return buffer;
+
+    const size = nImg.getSize();
+    if (!size.width || !size.height) return buffer;
+
+    // Scale up 1.35x for clearer font stroke recognition
+    const targetW = Math.round(size.width * 1.35);
+    const targetH = Math.round(size.height * 1.35);
+    nImg = nImg.resize({ width: targetW, height: targetH, quality: 'best' });
+
+    const rawBitmap = nImg.toBitmap();
+    const processed = Buffer.from(rawBitmap);
+
+    // Calculate average luminance
+    let totalLum = 0;
+    const totalPixels = targetW * targetH;
+    for (let i = 0; i < processed.length; i += 4) {
+      const lum = 0.299 * processed[i] + 0.587 * processed[i + 1] + 0.114 * processed[i + 2];
+      totalLum += lum;
+    }
+    const avgLum = totalLum / totalPixels;
+    // Threshold to drop background patterns (mountains, watermarks, colored backgrounds)
+    const threshold = avgLum * 0.75;
+
+    for (let i = 0; i < processed.length; i += 4) {
+      const lum = 0.299 * processed[i] + 0.587 * processed[i + 1] + 0.114 * processed[i + 2];
+      const val = lum < threshold ? 0 : 255;
+      processed[i] = val;
+      processed[i + 1] = val;
+      processed[i + 2] = val;
+    }
+
+    const enhancedImg = nativeImage.createFromBitmap(processed, { width: targetW, height: targetH });
+    return enhancedImg.toJPEG(95);
+  } catch (err) {
+    console.warn('[Preprocessing Warning]', err);
+    return buffer;
+  }
+}
+
 ipcMain.handle('extract-text-from-photo', async (event, { base64Data }) => {
   try {
     if (!base64Data || typeof base64Data !== 'string') {
@@ -527,13 +574,25 @@ ipcMain.handle('extract-text-from-photo', async (event, { base64Data }) => {
     }
 
     const rawB64 = base64Data.includes('base64,') ? base64Data.split('base64,')[1] : base64Data;
-    const buffer = Buffer.from(rawB64, 'base64');
+    const originalBuffer = Buffer.from(rawB64, 'base64');
     const worker = await getOcrWorkerInstance();
-    const ret = await worker.recognize(buffer);
+
+    // Pass 1: Enhanced / Binarized image (strips background patterns on driver's licenses)
+    const enhancedBuffer = preprocessImageBuffer(originalBuffer);
+    const retEnhanced = await worker.recognize(enhancedBuffer);
+    const textEnhanced = retEnhanced.data ? (retEnhanced.data.text || '') : '';
+
+    // Pass 2: Also recognize original buffer to combine any details missed by thresholding
+    let combinedText = textEnhanced;
+    if (!/exp|date|driver|cpr|crane|license|name/i.test(textEnhanced) || textEnhanced.length < 30) {
+      const retOriginal = await worker.recognize(originalBuffer);
+      const textOriginal = retOriginal.data ? (retOriginal.data.text || '') : '';
+      combinedText = `${textEnhanced}\n${textOriginal}`;
+    }
 
     return {
       success: true,
-      text: ret.data ? (ret.data.text || '') : ''
+      text: combinedText
     };
   } catch (err) {
     console.warn('[OCR Error]', err);
