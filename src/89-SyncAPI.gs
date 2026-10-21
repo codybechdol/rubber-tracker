@@ -5253,18 +5253,19 @@ function scanCertRenewalEmails(options) {
 
     // Sort employees by name length descending so longer full names match first
     knownEmployees.sort(function(a, b) { return b.length - a.length; });
+    var knownEmployeesLower = knownEmployees.map(function(e) { return e.toLowerCase(); });
 
-    // Gmail search query:
-    // Base attachments filter: must be image (jpg, jpeg, png, heic, heif) or PDF document
-    var attFilter = 'has:attachment (filename:heic OR filename:heif OR filename:jpg OR filename:jpeg OR filename:png OR filename:pdf)';
-    var certKeywords = '(DL OR CDL OR Driver OR Drivers OR License OR MEC OR "Med Card" OR "Medical Card" OR "DOT Card" OR "1st Aid" OR CPR OR "First Aid" OR Crane OR Forklift OR OSHA OR MSHA OR BNSF OR "Pole Top" OR "Dig Safe" OR Trench OR Rigging OR Signalperson OR Spotter OR Cert OR Certs OR Certification)';
+    // Exclusion filter for automated reports, newsletters, invoices, webinars, etc.
+    var exclusionFilter = '-subject:("Job Hazard" OR "Safety Meeting" OR "Weekly Repairs" OR "Weekly Report" OR "Incident Report" OR "Training Opportunities" OR "Newsletter" OR "Invoice" OR "Statement" OR "Receipt" OR "Payroll")';
 
-    var baseQuery = '';
+    var baseQuery = 'has:attachment';
     if (options.query && String(options.query).trim()) {
       var customQ = String(options.query).trim();
-      baseQuery = attFilter + ' ' + customQ;
+      baseQuery += ' (' + customQ + ') ' + exclusionFilter;
     } else {
-      baseQuery = attFilter + ' ' + certKeywords;
+      // Default targeted subject query: matches cert renewal subject patterns
+      var certKeywords = 'subject:(DL OR CDL OR MEC OR "Med Card" OR "Medical Card" OR "DOT Card" OR "1st Aid" OR CPR OR "First Aid" OR Crane OR Forklift OR "Pole Top" OR "Dig Safe" OR Rigging OR "new hire cert" OR "cert card" OR "cert cards" OR "cert photo" OR "cert proof")';
+      baseQuery += ' ' + certKeywords + ' ' + exclusionFilter;
     }
 
     if (daysBack > 0) {
@@ -5297,7 +5298,25 @@ function scanCertRenewalEmails(options) {
     var seenAttachmentHashes = {};
     var startTime = new Date().getTime();
 
-    // Match employee name (strictly against current employees)
+    // Blacklist non-person entities from ever being treated as an employee name
+    var nonPersonTerms = [
+      'montana', 'outreach', 'state fund', 'safety wallet', 'referrals',
+      'harassment', 'training', 'app errors', 'incident', 'report',
+      'meeting', 'checklist', 'opportunity', 'opportunities', 'webinar',
+      'newsletter', 'invoice', 'statement', 'receipt', 'payroll',
+      'inspection', 'audit', 'renewal', 'update', 'safety assistant',
+      'american red cross', 'red cross', 'osha in the news', 'safety tips'
+    ];
+
+    function isNonPersonTerm(str) {
+      var lower = String(str || '').toLowerCase();
+      for (var k = 0; k < nonPersonTerms.length; k++) {
+        if (lower.indexOf(nonPersonTerms[k]) !== -1) return true;
+      }
+      return false;
+    }
+
+    // Match employee name
     function detectEmployeeName(text) {
       if (!text) return '';
       var clean = String(text)
@@ -5305,6 +5324,7 @@ function scanCertRenewalEmails(options) {
         .replace(/^(fwd|re|fw):\s*/ig, '')
         .trim();
 
+      // 1. Try known employees list first
       for (var i = 0; i < knownEmployees.length; i++) {
         var emp = knownEmployees[i];
         var re = new RegExp('\\b' + emp.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&') + '\\b', 'i');
@@ -5312,6 +5332,28 @@ function scanCertRenewalEmails(options) {
           return emp;
         }
       }
+
+      // 2. Fallback heuristic: extract name from subject if subject matches "<First> <Last> <CertType>"
+      var stripped = clean
+        .replace(/\b(1st\s*aid|first\s*aid|fa|cpr|dl|cdl|driver'?s?\s*license|mec|medical\s*card|med\s*card|dot\s*card|crane|forklift|osha|msha|bnsf|pole\s*top|dig\s*safe|trench|rigging|signalperson|spotter|evaluation|eval|cards?|certs?|certification|new|renewal|update|proof|photo|image|picture|scanned|scan|temp|updated)\b/ig, '')
+        .replace(/[-–—:_()[\]{}#@!?,.]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      if (isNonPersonTerm(stripped)) return '';
+
+      var words = stripped.split(' ');
+      if (words.length >= 2 && words.length <= 3) {
+        var candidate = words.map(function(w) {
+          return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+        }).join(' ');
+        if (/^[a-zA-Z\s'-]+$/.test(candidate) && words[0].length >= 2 && words[1].length >= 2) {
+          if (!isNonPersonTerm(candidate)) {
+            return candidate;
+          }
+        }
+      }
+
       return '';
     }
 
@@ -5343,7 +5385,6 @@ function scanCertRenewalEmails(options) {
 
       // 1st Aid vs CPR handling
       if (subHasCpr && subHas1stAid) {
-        // Both mentioned in email
         if (fileHasCpr && !fileHas1stAid) return 'CPR';
         if (fileHas1stAid && !fileHasCpr) return '1st Aid';
         if (totalCount === 2) {
@@ -5352,7 +5393,6 @@ function scanCertRenewalEmails(options) {
         return '1st Aid & CPR';
       }
 
-      // Separate emails or single cert mentions
       if (fileHasCpr || (subHasCpr && !subHas1stAid)) return 'CPR';
       if (fileHas1stAid || (subHas1stAid && !subHasCpr)) return '1st Aid';
 
@@ -5373,25 +5413,33 @@ function scanCertRenewalEmails(options) {
     }
 
     for (var t = 0; t < threads.length; t++) {
-      // 22-second circuit breaker to prevent Web App gateway timeout
-      if (new Date().getTime() - startTime > 22000) {
-        Logger.log('scanCertRenewalEmails: Web App timeout limit approached (22s). Halting loop and returning ' + results.length + ' certs.');
+      // 25-second circuit breaker to prevent Web App gateway timeout
+      if (new Date().getTime() - startTime > 25000) {
+        Logger.log('scanCertRenewalEmails: Web App timeout limit approached (25s). Halting loop and returning ' + results.length + ' certs.');
         break;
       }
 
       var thread = threads[t];
       var msgs = thread.getMessages();
+      var threadHasCert = false;
 
       for (var m = 0; m < msgs.length; m++) {
+        // If the thread already produced cert attachments from an earlier message, skip reply messages
+        if (threadHasCert) break;
+
         var msg = msgs[m];
         var subject = String(msg.getSubject() || '').trim();
         var subLower = subject.toLowerCase();
 
-        // 1. Fast blacklist check: exclude newsletters, training opportunities, automated reports, invoices, etc.
+        // 1. Fast blacklist check: exclude newsletters, automated reports, invoices, etc.
         if (
+          isNonPersonTerm(subLower) ||
           subLower.indexOf('job hazard report') !== -1 ||
           subLower.indexOf('safety meeting report') !== -1 ||
           subLower.indexOf('weekly safety repairs') !== -1 ||
+          subLower.indexOf('safety assistant weekly report') !== -1 ||
+          subLower.indexOf('weekly report') !== -1 ||
+          subLower.indexOf('incident report') !== -1 ||
           subLower.indexOf('montana state fund') !== -1 ||
           subLower.indexOf('training opportunities') !== -1 ||
           subLower.indexOf('training opportunity') !== -1 ||
@@ -5412,7 +5460,7 @@ function scanCertRenewalEmails(options) {
         var rawAttachments = msg.getAttachments();
         if (!rawAttachments || rawAttachments.length === 0) continue;
 
-        // 2. Filter valid image & PDF attachments and ignore tiny signature logos/QR codes (< 12KB)
+        // 2. Filter valid image & PDF attachments and ignore tiny signature logos/QR codes/Outlook icons
         var validAttachments = [];
         for (var vi = 0; vi < rawAttachments.length; vi++) {
           var rAtt = rawAttachments[vi];
@@ -5424,24 +5472,27 @@ function scanCertRenewalEmails(options) {
 
           if (isImg || isPdf) {
             var attSize = rAtt.getSize();
-            // Ignore small signature logos, social icons, tracking pixels, and tiny QR codes (< 12KB)
-            if (attSize > 0 && attSize < 12000 && isImg) {
-              continue;
+            if (isImg) {
+              // Ignore small signature logos, social icons, tracking pixels, and Outlook inline icons
+              if (attSize > 0 && attSize < 25000) continue;
+              if (/^image00\d\.(png|jpg|jpeg)$/i.test(rName) && attSize < 60000) continue;
+              if (/(logo|icon|banner|signature|social|avatar|linkedin|facebook|twitter)/i.test(rName)) continue;
             }
             validAttachments.push({
               att: rAtt,
               name: rAtt.getName() || '',
-              contentType: isHeic ? 'image/heic' : rType,
+              contentType: isHeic ? 'image/heic' : (isPdf ? 'application/pdf' : rType),
               isHeic: isHeic,
               isPdf: isPdf,
-              size: attSize
+              size: attSize,
+              attIdx: vi
             });
           }
         }
 
         if (validAttachments.length === 0) continue;
 
-        // 3. Employee detection: check subject, sender (from), and body snippet
+        // 3. Employee detection: check subject, sender (from), body snippet, and fallback extraction
         var detectedEmp = detectEmployeeName(subject);
         if (!detectedEmp) {
           var sender = String(msg.getFrom() || '');
@@ -5449,7 +5500,7 @@ function scanCertRenewalEmails(options) {
         }
         if (!detectedEmp) {
           try {
-            var bodySnip = String(msg.getPlainBody() || '').substring(0, 350);
+            var bodySnip = String(msg.getPlainBody() || '').substring(0, 300);
             detectedEmp = detectEmployeeName(bodySnip);
           } catch (bErr) {}
         }
@@ -5459,22 +5510,21 @@ function scanCertRenewalEmails(options) {
           var detectedCert = detectAttachmentCert(subject, vItem.name, a, validAttachments.length);
 
           // CRITICAL: Reject if NEITHER an employee nor a known certification was identified.
-          // This prevents general newsletter images, flyers, QR codes, or unassociated PDFs from polluting results.
           if (!detectedEmp && detectedCert === 'Other Cert') {
             continue;
           }
+          // If detectedCert is 'Other Cert', detectedEmp MUST be a verified employee in knownEmployees
+          if (detectedCert === 'Other Cert' && knownEmployees.length > 0 && knownEmployeesLower.indexOf(detectedEmp.toLowerCase()) === -1) {
+            continue;
+          }
+          if (isNonPersonTerm(detectedEmp)) {
+            continue;
+          }
 
-          var att = vItem.att;
-          var bytes = att.getBytes();
-          if (!bytes || bytes.length < 10000) continue; // Final safeguard against empty or tiny signature files
-
-          // Deduplicate by size and name if already seen in same scan
-          var hashKey = vItem.name + '_' + bytes.length;
+          // Deduplicate by name and size if already seen in same scan
+          var hashKey = vItem.name + '_' + vItem.size;
           if (seenAttachmentHashes[hashKey]) continue;
           seenAttachmentHashes[hashKey] = true;
-
-          var b64 = Utilities.base64Encode(bytes);
-          var dataUri = 'data:' + vItem.contentType + ';base64,' + b64;
 
           var msgDate = msg.getDate();
           var dateStr = '';
@@ -5486,7 +5536,9 @@ function scanCertRenewalEmails(options) {
           }
 
           results.push({
-            id: msg.getId() + '_' + a,
+            id: msg.getId() + '_' + vItem.attIdx,
+            messageId: msg.getId(),
+            attIdx: vItem.attIdx,
             date: dateStr,
             from: msg.getFrom(),
             to: msg.getTo(),
@@ -5496,24 +5548,70 @@ function scanCertRenewalEmails(options) {
             fileName: vItem.name || ('cert_attachment_' + Date.now() + (vItem.isPdf ? '.pdf' : (vItem.isHeic ? '.heic' : '.jpg'))),
             contentType: vItem.contentType,
             isHeic: vItem.isHeic,
-            base64Data: dataUri,
-            fileSize: bytes.length
+            isPdf: vItem.isPdf,
+            fileSize: vItem.size,
+            base64Data: '' // Ultra-fast metadata return; full image loaded asynchronously on demand!
           });
 
+          threadHasCert = true;
           if (results.length >= maxResults) break;
         }
+
         if (results.length >= maxResults) break;
       }
+
       if (results.length >= maxResults) break;
     }
 
+    Logger.log('scanCertRenewalEmails finished in ' + ((new Date().getTime() - startTime)/1000).toFixed(1) + 's with ' + results.length + ' certs found.');
     return {
       success: true,
       count: results.length,
+      daysBack: daysBack,
+      scope: scope,
       certs: results
     };
   } catch (err) {
     Logger.log('scanCertRenewalEmails fatal error: ' + err);
+    return { success: false, error: err.toString() };
+  }
+}
+
+/**
+ * Retrieves the full base64 image or PDF data for a single cert email attachment on demand.
+ * This guarantees lightning-fast scans without hitting Google Web App execution timeouts.
+ *
+ * @param {string} messageId - The Gmail message ID
+ * @param {number|string} attIdx - The attachment index on the message
+ * @return {Object} { success: boolean, base64Data: string, contentType: string, fileName: string }
+ */
+function getCertEmailAttachment(messageId, attIdx) {
+  try {
+    if (!messageId) return { success: false, error: 'Missing messageId' };
+    var msg = GmailApp.getMessageById(messageId);
+    if (!msg) return { success: false, error: 'Message not found: ' + messageId };
+    var atts = msg.getAttachments();
+    var idx = parseInt(attIdx || '0', 10);
+    if (!atts || idx >= atts.length) return { success: false, error: 'Attachment index out of bounds' };
+    var att = atts[idx];
+    var bytes = att.getBytes();
+    var rType = String(att.getContentType() || '').toLowerCase();
+    var rName = String(att.getName() || '').toLowerCase();
+    var isHeic = rType.indexOf('heic') !== -1 || rType.indexOf('heif') !== -1 || rName.endsWith('.heic') || rName.endsWith('.heif');
+    var isPdf = rType.indexOf('application/pdf') !== -1 || rName.endsWith('.pdf');
+    var contentType = isHeic ? 'image/heic' : (isPdf ? 'application/pdf' : rType);
+    var b64 = Utilities.base64Encode(bytes);
+    return {
+      success: true,
+      contentType: contentType,
+      isHeic: isHeic,
+      isPdf: isPdf,
+      fileName: att.getName(),
+      base64Data: 'data:' + contentType + ';base64,' + b64,
+      fileSize: bytes.length
+    };
+  } catch (err) {
+    Logger.log('getCertEmailAttachment error: ' + err);
     return { success: false, error: err.toString() };
   }
 }

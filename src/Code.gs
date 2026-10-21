@@ -33953,6 +33953,12 @@ function doGet(e) {
         : { success: false, error: 'scanCertRenewalEmails function not found in backend' };
       return ContentService.createTextOutput(JSON.stringify(scanCertRes))
         .setMimeType(ContentService.MimeType.JSON);
+    } else if (action === 'getCertEmailAttachment') {
+      var certAttRes = (typeof getCertEmailAttachment === 'function')
+        ? getCertEmailAttachment(e.parameter.messageId, e.parameter.attIdx)
+        : { success: false, error: 'getCertEmailAttachment function not found in backend' };
+      return ContentService.createTextOutput(JSON.stringify(certAttRes))
+        .setMimeType(ContentService.MimeType.JSON);
     } else if (action === 'getSafetyEmailsStatus') {
       var statusRes = (typeof getSafetyEmailsStatus === 'function')
         ? getSafetyEmailsStatus()
@@ -34137,6 +34143,14 @@ function doPost(e) {
         ? scanCertRenewalEmails(payload)
         : { success: false, error: 'scanCertRenewalEmails function not found in backend' };
       return ContentService.createTextOutput(JSON.stringify(scanCertRes))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    if (action === 'getCertEmailAttachment') {
+      var certAttRes = (typeof getCertEmailAttachment === 'function')
+        ? getCertEmailAttachment(payload.messageId, payload.attIdx)
+        : { success: false, error: 'getCertEmailAttachment function not found in backend' };
+      return ContentService.createTextOutput(JSON.stringify(certAttRes))
         .setMimeType(ContentService.MimeType.JSON);
     }
 
@@ -35876,6 +35890,405 @@ function dedupeInventorySheetsMenu() {
     }
   } catch (err) {
     ui.alert('❌ Error', 'Failed to deduplicate inventory: ' + err.message, ui.ButtonSet.OK);
+  }
+}
+
+/**
+ * Scans Gmail for cert renewal photos and documents sent to or from the user.
+ * Ultra-fast two-phase architecture: returns lightweight metadata for cards in 2-3 seconds,
+ * while attachments are loaded on demand asynchronously.
+ */
+function scanCertRenewalEmails(options) {
+  options = options || {};
+  try {
+    var ss = typeof getActiveSpreadsheetSafe === 'function' ? getActiveSpreadsheetSafe() : SpreadsheetApp.getActiveSpreadsheet();
+    var daysBack = parseInt(options.daysBack !== undefined ? options.daysBack : '365', 10);
+    var maxThreads = parseInt(options.maxThreads || '0', 10);
+    if (isNaN(maxThreads) || maxThreads <= 0) {
+      if (daysBack >= 365 || daysBack === 0) {
+        maxThreads = 500;
+      } else if (daysBack >= 180) {
+        maxThreads = 350;
+      } else {
+        maxThreads = 200;
+      }
+    }
+    var maxResults = parseInt(options.maxResults || '150', 10);
+    var scope = options.folder || 'ALL';
+
+    var knownEmployees = [];
+    var previousEmployeesSet = {};
+
+    try {
+      if (ss) {
+        var prevSheet = ss.getSheetByName('Previous Employees');
+        if (prevSheet && prevSheet.getLastRow() > 1) {
+          var prevData = prevSheet.getDataRange().getValues();
+          for (var p = 1; p < prevData.length; p++) {
+            var pName = String(prevData[p][0] || '').toLowerCase().trim();
+            if (pName) previousEmployeesSet[pName] = true;
+          }
+        }
+      }
+    } catch (prevErr) {}
+
+    if (Array.isArray(options.activeEmployees) && options.activeEmployees.length > 0) {
+      for (var aIdx = 0; aIdx < options.activeEmployees.length; aIdx++) {
+        var actN = String(options.activeEmployees[aIdx] || '').trim();
+        if (actN && !previousEmployeesSet[actN.toLowerCase()]) {
+          knownEmployees.push(actN);
+        }
+      }
+    } else if (ss) {
+      var empSheet = ss.getSheetByName(typeof SHEET_EMPLOYEES !== 'undefined' ? SHEET_EMPLOYEES : 'Employees');
+      if (empSheet && empSheet.getLastRow() > 1) {
+        var empData = empSheet.getDataRange().getValues();
+        for (var e = 1; e < empData.length; e++) {
+          var n = String(empData[e][0] || '').trim();
+          if (n && n !== '—' && !previousEmployeesSet[n.toLowerCase()]) {
+            knownEmployees.push(n);
+          }
+        }
+      }
+    }
+
+    knownEmployees.sort(function(a, b) { return b.length - a.length; });
+    var knownEmployeesLower = knownEmployees.map(function(e) { return e.toLowerCase(); });
+
+    var exclusionFilter = '-subject:("Job Hazard" OR "Safety Meeting" OR "Weekly Repairs" OR "Weekly Report" OR "Incident Report" OR "Training Opportunities" OR "Newsletter" OR "Invoice" OR "Statement" OR "Receipt" OR "Payroll")';
+
+    var baseQuery = 'has:attachment';
+    if (options.query && String(options.query).trim()) {
+      var customQ = String(options.query).trim();
+      baseQuery += ' (' + customQ + ') ' + exclusionFilter;
+    } else {
+      var certKeywords = 'subject:(DL OR CDL OR MEC OR "Med Card" OR "Medical Card" OR "DOT Card" OR "1st Aid" OR CPR OR "First Aid" OR Crane OR Forklift OR "Pole Top" OR "Dig Safe" OR Rigging OR "new hire cert" OR "cert card" OR "cert cards" OR "cert photo" OR "cert proof")';
+      baseQuery += ' ' + certKeywords + ' ' + exclusionFilter;
+    }
+
+    if (daysBack > 0) {
+      baseQuery += ' newer_than:' + daysBack + 'd';
+    }
+    if (scope === 'SENT') {
+      baseQuery = 'from:me ' + baseQuery;
+    } else if (scope === 'INBOX') {
+      baseQuery = 'to:me ' + baseQuery;
+    }
+
+    var threads = [];
+    try {
+      var pageSize = 100;
+      var startIdx = 0;
+      while (threads.length < maxThreads) {
+        var toFetch = Math.min(pageSize, maxThreads - threads.length);
+        var page = GmailApp.search(baseQuery, startIdx, toFetch);
+        if (!page || page.length === 0) break;
+        threads = threads.concat(page);
+        if (page.length < toFetch) break;
+        startIdx += page.length;
+      }
+    } catch (sErr) {
+      Logger.log('scanCertRenewalEmails search error: ' + sErr);
+      return { success: false, error: 'Gmail search failed: ' + (sErr.message || sErr) };
+    }
+
+    var results = [];
+    var seenAttachmentHashes = {};
+    var startTime = new Date().getTime();
+
+    var nonPersonTerms = [
+      'montana', 'outreach', 'state fund', 'safety wallet', 'referrals',
+      'harassment', 'training', 'app errors', 'incident', 'report',
+      'meeting', 'checklist', 'opportunity', 'opportunities', 'webinar',
+      'newsletter', 'invoice', 'statement', 'receipt', 'payroll',
+      'inspection', 'audit', 'renewal', 'update', 'safety assistant',
+      'american red cross', 'red cross', 'osha in the news', 'safety tips'
+    ];
+
+    function isNonPersonTerm(str) {
+      var lower = String(str || '').toLowerCase();
+      for (var k = 0; k < nonPersonTerms.length; k++) {
+        if (lower.indexOf(nonPersonTerms[k]) !== -1) return true;
+      }
+      return false;
+    }
+
+    function detectEmployeeName(text) {
+      if (!text) return '';
+      var clean = String(text)
+        .replace(/^(fwd|re|fw):\s*/ig, '')
+        .replace(/^(fwd|re|fw):\s*/ig, '')
+        .trim();
+
+      for (var i = 0; i < knownEmployees.length; i++) {
+        var emp = knownEmployees[i];
+        var re = new RegExp('\\b' + emp.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&') + '\\b', 'i');
+        if (re.test(clean)) {
+          return emp;
+        }
+      }
+
+      var stripped = clean
+        .replace(/\b(1st\s*aid|first\s*aid|fa|cpr|dl|cdl|driver'?s?\s*license|mec|medical\s*card|med\s*card|dot\s*card|crane|forklift|osha|msha|bnsf|pole\s*top|dig\s*safe|trench|rigging|signalperson|spotter|evaluation|eval|cards?|certs?|certification|new|renewal|update|proof|photo|image|picture|scanned|scan|temp|updated)\b/ig, '')
+        .replace(/[-–—:_()[\]{}#@!?,.]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      if (isNonPersonTerm(stripped)) return '';
+
+      var words = stripped.split(' ');
+      if (words.length >= 2 && words.length <= 3) {
+        var candidate = words.map(function(w) {
+          return w.charAt(0).toUpperCase() + w.slice(1).toLowerCase();
+        }).join(' ');
+        if (/^[a-zA-Z\s'-]+$/.test(candidate) && words[0].length >= 2 && words[1].length >= 2) {
+          if (!isNonPersonTerm(candidate)) {
+            return candidate;
+          }
+        }
+      }
+
+      return '';
+    }
+
+    function detectAttachmentCert(subject, attFileName, attIdx, totalCount) {
+      var s = String(subject || '').toLowerCase();
+      var f = String(attFileName || '').toLowerCase();
+      var combined = s + ' ' + f;
+
+      var subHasCpr = /\bcpr\b/i.test(s);
+      var subHas1stAid = /\b(1st\s*aid|first\s*aid|fa)\b/i.test(s);
+      var fileHasCpr = /\bcpr\b/i.test(f);
+      var fileHas1stAid = /\b(1st\s*aid|first\s*aid|fa)\b/i.test(f);
+
+      var subHasDl = /\b(dl|cdl|driver'?s?\s*license)\b/i.test(s);
+      var fileHasDl = /\b(dl|cdl|driver'?s?\s*license)\b/i.test(f);
+      var isFront = /\b(front|face)\b/i.test(f) || /\bfront\b/i.test(s);
+      var isBack = /\b(back|rear|reverse)\b/i.test(f) || /\bback\b/i.test(s);
+
+      if (subHasDl || fileHasDl) {
+        if (isBack) return 'DL (Back)';
+        if (isFront) return 'DL (Front)';
+        if (totalCount === 2) {
+          return attIdx === 0 ? 'DL (Front)' : 'DL (Back)';
+        }
+        return 'DL';
+      }
+
+      if (subHasCpr && subHas1stAid) {
+        if (fileHasCpr && !fileHas1stAid) return 'CPR';
+        if (fileHas1stAid && !fileHasCpr) return '1st Aid';
+        if (totalCount === 2) {
+          return attIdx === 0 ? '1st Aid' : 'CPR';
+        }
+        return '1st Aid & CPR';
+      }
+
+      if (fileHasCpr || (subHasCpr && !subHas1stAid)) return 'CPR';
+      if (fileHas1stAid || (subHas1stAid && !subHasCpr)) return '1st Aid';
+
+      if (/\b(mec|medical\s*card|med\s*card|dot\s*card)\b/i.test(combined)) return 'MEC Expiration';
+      if (/\b(crane\s*eval(uation)?)\b/i.test(combined)) return 'Crane Evaluation';
+      if (/\bcrane\b/i.test(combined)) return 'Crane Cert';
+      if (/\b(rigging|signal(person)?|spotter)\b/i.test(combined)) return 'Rigging & Signaling/Signalperson & Spotter Cert';
+      if (/\bforklift\b/i.test(combined)) return 'Forklift';
+      if (/\b(pole\s*top|ptr)\b/i.test(combined)) return 'Pole Top Rescue';
+      if (/\btrench\b/i.test(combined)) return 'OSHA Trench Comp Person';
+      if (/\bosha\b/i.test(combined)) return 'OSHA 1910';
+      if (/\bmsha\b/i.test(combined)) return 'MSHA';
+      if (/\bbnsf\b/i.test(combined)) return 'BNSF';
+      if (/\bdig\s*safe\b/i.test(combined)) return 'Dig Safe';
+
+      return 'Other Cert';
+    }
+
+    for (var t = 0; t < threads.length; t++) {
+      if (new Date().getTime() - startTime > 25000) {
+        Logger.log('scanCertRenewalEmails: Web App timeout limit approached (25s). Halting loop and returning ' + results.length + ' certs.');
+        break;
+      }
+
+      var thread = threads[t];
+      var msgs = thread.getMessages();
+      var threadHasCert = false;
+
+      for (var m = 0; m < msgs.length; m++) {
+        if (threadHasCert) break;
+
+        var msg = msgs[m];
+        var subject = String(msg.getSubject() || '').trim();
+        var subLower = subject.toLowerCase();
+
+        if (
+          isNonPersonTerm(subLower) ||
+          subLower.indexOf('job hazard report') !== -1 ||
+          subLower.indexOf('safety meeting report') !== -1 ||
+          subLower.indexOf('weekly safety repairs') !== -1 ||
+          subLower.indexOf('safety assistant weekly report') !== -1 ||
+          subLower.indexOf('weekly report') !== -1 ||
+          subLower.indexOf('incident report') !== -1 ||
+          subLower.indexOf('montana state fund') !== -1 ||
+          subLower.indexOf('training opportunities') !== -1 ||
+          subLower.indexOf('training opportunity') !== -1 ||
+          subLower.indexOf('newsletter') !== -1 ||
+          subLower.indexOf('webinar') !== -1 ||
+          subLower.indexOf('invoice') !== -1 ||
+          subLower.indexOf('statement') !== -1 ||
+          subLower.indexOf('receipt') !== -1 ||
+          subLower.indexOf('billing') !== -1 ||
+          subLower.indexOf('payroll') !== -1 ||
+          subLower.indexOf('timecard') !== -1 ||
+          subLower.indexOf('time card') !== -1 ||
+          subLower.indexOf('expense report') !== -1
+        ) {
+          continue;
+        }
+
+        var rawAttachments = msg.getAttachments();
+        if (!rawAttachments || rawAttachments.length === 0) continue;
+
+        var validAttachments = [];
+        for (var vi = 0; vi < rawAttachments.length; vi++) {
+          var rAtt = rawAttachments[vi];
+          var rType = String(rAtt.getContentType() || '').toLowerCase();
+          var rName = String(rAtt.getName() || '').toLowerCase();
+          var isHeic = rType.indexOf('heic') !== -1 || rType.indexOf('heif') !== -1 || rName.endsWith('.heic') || rName.endsWith('.heif');
+          var isImg = rType.indexOf('image/') !== -1 || isHeic;
+          var isPdf = rType.indexOf('application/pdf') !== -1 || rName.endsWith('.pdf');
+
+          if (isImg || isPdf) {
+            var attSize = rAtt.getSize();
+            if (isImg) {
+              if (attSize > 0 && attSize < 25000) continue;
+              if (/^image00\d\.(png|jpg|jpeg)$/i.test(rName) && attSize < 60000) continue;
+              if (/(logo|icon|banner|signature|social|avatar|linkedin|facebook|twitter)/i.test(rName)) continue;
+            }
+            validAttachments.push({
+              att: rAtt,
+              name: rAtt.getName() || '',
+              contentType: isHeic ? 'image/heic' : (isPdf ? 'application/pdf' : rType),
+              isHeic: isHeic,
+              isPdf: isPdf,
+              size: attSize,
+              attIdx: vi
+            });
+          }
+        }
+
+        if (validAttachments.length === 0) continue;
+
+        var detectedEmp = detectEmployeeName(subject);
+        if (!detectedEmp) {
+          var sender = String(msg.getFrom() || '');
+          detectedEmp = detectEmployeeName(sender);
+        }
+        if (!detectedEmp) {
+          try {
+            var bodySnip = String(msg.getPlainBody() || '').substring(0, 300);
+            detectedEmp = detectEmployeeName(bodySnip);
+          } catch (bErr) {}
+        }
+
+        for (var a = 0; a < validAttachments.length; a++) {
+          var vItem = validAttachments[a];
+          var detectedCert = detectAttachmentCert(subject, vItem.name, a, validAttachments.length);
+
+          if (!detectedEmp && detectedCert === 'Other Cert') {
+            continue;
+          }
+          if (detectedCert === 'Other Cert' && knownEmployees.length > 0 && knownEmployeesLower.indexOf(detectedEmp.toLowerCase()) === -1) {
+            continue;
+          }
+          if (isNonPersonTerm(detectedEmp)) {
+            continue;
+          }
+
+          var hashKey = vItem.name + '_' + vItem.size;
+          if (seenAttachmentHashes[hashKey]) continue;
+          seenAttachmentHashes[hashKey] = true;
+
+          var msgDate = msg.getDate();
+          var dateStr = '';
+          if (msgDate instanceof Date && !isNaN(msgDate.getTime())) {
+            var mo = msgDate.getMonth() + 1;
+            var dy = msgDate.getDate();
+            var yr = msgDate.getFullYear();
+            dateStr = (mo < 10 ? '0' + mo : mo) + '/' + (dy < 10 ? '0' + dy : dy) + '/' + yr;
+          }
+
+          results.push({
+            id: msg.getId() + '_' + vItem.attIdx,
+            messageId: msg.getId(),
+            attIdx: vItem.attIdx,
+            date: dateStr,
+            from: msg.getFrom(),
+            to: msg.getTo(),
+            subject: subject,
+            employeeName: detectedEmp,
+            certType: detectedCert,
+            fileName: vItem.name || ('cert_attachment_' + Date.now() + (vItem.isPdf ? '.pdf' : (vItem.isHeic ? '.heic' : '.jpg'))),
+            contentType: vItem.contentType,
+            isHeic: vItem.isHeic,
+            isPdf: vItem.isPdf,
+            fileSize: vItem.size,
+            base64Data: ''
+          });
+
+          threadHasCert = true;
+          if (results.length >= maxResults) break;
+        }
+
+        if (results.length >= maxResults) break;
+      }
+
+      if (results.length >= maxResults) break;
+    }
+
+    Logger.log('scanCertRenewalEmails finished in ' + ((new Date().getTime() - startTime)/1000).toFixed(1) + 's with ' + results.length + ' certs found.');
+    return {
+      success: true,
+      count: results.length,
+      daysBack: daysBack,
+      scope: scope,
+      certs: results
+    };
+  } catch (err) {
+    Logger.log('scanCertRenewalEmails fatal error: ' + err);
+    return { success: false, error: err.toString() };
+  }
+}
+
+/**
+ * Retrieves the full base64 image or PDF data for a single cert email attachment on demand.
+ */
+function getCertEmailAttachment(messageId, attIdx) {
+  try {
+    if (!messageId) return { success: false, error: 'Missing messageId' };
+    var msg = GmailApp.getMessageById(messageId);
+    if (!msg) return { success: false, error: 'Message not found: ' + messageId };
+    var atts = msg.getAttachments();
+    var idx = parseInt(attIdx || '0', 10);
+    if (!atts || idx >= atts.length) return { success: false, error: 'Attachment index out of bounds' };
+    var att = atts[idx];
+    var bytes = att.getBytes();
+    var rType = String(att.getContentType() || '').toLowerCase();
+    var rName = String(att.getName() || '').toLowerCase();
+    var isHeic = rType.indexOf('heic') !== -1 || rType.indexOf('heif') !== -1 || rName.endsWith('.heic') || rName.endsWith('.heif');
+    var isPdf = rType.indexOf('application/pdf') !== -1 || rName.endsWith('.pdf');
+    var contentType = isHeic ? 'image/heic' : (isPdf ? 'application/pdf' : rType);
+    var b64 = Utilities.base64Encode(bytes);
+    return {
+      success: true,
+      contentType: contentType,
+      isHeic: isHeic,
+      isPdf: isPdf,
+      fileName: att.getName(),
+      base64Data: 'data:' + contentType + ';base64,' + b64,
+      fileSize: bytes.length
+    };
+  } catch (err) {
+    Logger.log('getCertEmailAttachment error: ' + err);
+    return { success: false, error: err.toString() };
   }
 }
 

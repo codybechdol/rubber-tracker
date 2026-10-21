@@ -1801,7 +1801,7 @@ class SheetNavigator {
         folder: folder,
         query: query,
         maxThreads: maxThreads,
-        maxResults: 50,
+        maxResults: 150,
         activeEmployees: activeEmps
       };
 
@@ -1818,21 +1818,7 @@ class SheetNavigator {
       }
 
       if (result && result.success) {
-        let certs = result.certs || [];
-        // Convert any Apple HEIC photos into standard JPEG Data URLs automatically
-        for (let i = 0; i < certs.length; i++) {
-          const item = certs[i];
-          if (item.isHeic || (item.contentType && item.contentType.includes('heic')) || (item.fileName && item.fileName.toLowerCase().endsWith('.heic'))) {
-            try {
-              item.base64Data = await this.convertHeicDataUrlToJpeg(item.base64Data);
-              item.contentType = 'image/jpeg';
-              item.fileName = item.fileName.replace(/\.heic$/i, '.jpg').replace(/\.heif$/i, '.jpg');
-            } catch (convErr) {
-              console.warn('HEIC item conversion warning:', convErr);
-            }
-          }
-        }
-        this.scannedCertItems = certs;
+        this.scannedCertItems = result.certs || [];
 
         if (this.scannedCertItems.length === 0) {
           if (body) {
@@ -1854,6 +1840,9 @@ class SheetNavigator {
           if (batchActions) batchActions.style.display = 'none';
         } else {
           this.renderScannedCertItems();
+          // Kick off background image loading for the cards
+          this.loadScannedCertImagesQueue();
+
           if (typeof window.showToast === 'function') {
             window.showToast(`Found ${this.scannedCertItems.length} cert renewal attachments in Gmail!`, 'success');
           }
@@ -1939,9 +1928,15 @@ class SheetNavigator {
                 <div style="font-size: 48px;">📄</div>
                 <div style="font-size: 11px; font-weight: 700; color: #fca5a5; margin-top: 4px;">PDF Document</div>
               </div>
-            ` : `
+            ` : (item.base64Data ? `
               <img id="scanned-card-preview-${idx}" src="${item.base64Data}" alt="Cert Preview" style="max-height: 100%; max-width: 100%; object-fit: contain; cursor: pointer;" onclick="window.sheetNavigator.openPhotoCropperModal(${idx})" title="Click to open Crop &amp; Rotate tool">
-            `}
+            ` : `
+              <div id="scanned-card-loading-${idx}" style="display: flex; flex-direction: column; align-items: center; justify-content: center; color: #94a3b8; font-size: 12px; gap: 8px;">
+                <div class="cert-scan-card-spinner" style="width: 24px; height: 24px; border: 2.5px solid rgba(56, 189, 248, 0.2); border-top-color: #38bdf8; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
+                <span style="font-size: 11px; color: #cbd5e1;">Loading photo...</span>
+              </div>
+              <img id="scanned-card-preview-${idx}" src="" alt="Cert Preview" style="display: none; max-height: 100%; max-width: 100%; object-fit: contain; cursor: pointer;" onclick="window.sheetNavigator.openPhotoCropperModal(${idx})" title="Click to open Crop &amp; Rotate tool">
+            `)}
             
             <div style="position: absolute; top: 8px; right: 8px; display: flex; gap: 6px;">
               ${!isPdf ? `
@@ -2013,6 +2008,101 @@ class SheetNavigator {
   /**
    * Imports a single reviewed cert item into the Cert Photo Vault.
    */
+  /**
+   * Asynchronously fetches the full image or document bytes for a single scanned card.
+   */
+  async loadScannedCertAttachment(idx) {
+    if (!this.scannedCertItems || !this.scannedCertItems[idx]) return null;
+    const item = this.scannedCertItems[idx];
+    if (item.base64Data) return item.base64Data;
+    if (item.isLoading) return null;
+
+    item.isLoading = true;
+    try {
+      const syncUrl = window.syncEngine ? window.syncEngine.getSyncUrl() : '';
+      if (!syncUrl) return null;
+
+      const payload = {
+        action: 'getCertEmailAttachment',
+        messageId: item.messageId,
+        attIdx: item.attIdx
+      };
+
+      let res = null;
+      if (window.syncEngine && typeof window.syncEngine.executeNetworkRequest === 'function') {
+        res = await window.syncEngine.executeNetworkRequest(syncUrl, 'POST', payload, 35000);
+      } else {
+        const resp = await fetch(syncUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+        res = await resp.json();
+      }
+
+      if (res && res.success && res.base64Data) {
+        let b64 = res.base64Data;
+        if (item.isHeic || res.isHeic || (item.fileName && item.fileName.toLowerCase().endsWith('.heic'))) {
+          try {
+            b64 = await this.convertHeicDataUrlToJpeg(b64);
+            item.contentType = 'image/jpeg';
+            item.fileName = item.fileName.replace(/\.heic$/i, '.jpg').replace(/\.heif$/i, '.jpg');
+          } catch (cErr) {
+            console.warn('HEIC preview conversion error:', cErr);
+          }
+        }
+        item.base64Data = b64;
+
+        // Update DOM elements if present
+        const loadingEl = document.getElementById(`scanned-card-loading-${idx}`);
+        const imgEl = document.getElementById(`scanned-card-preview-${idx}`);
+        if (loadingEl) loadingEl.style.display = 'none';
+        if (imgEl) {
+          imgEl.src = b64;
+          imgEl.style.display = 'block';
+        }
+        return b64;
+      }
+    } catch (err) {
+      console.warn(`Failed to load attachment for card ${idx}:`, err);
+      const loadingEl = document.getElementById(`scanned-card-loading-${idx}`);
+      if (loadingEl) {
+        loadingEl.innerHTML = `<span style="font-size: 10px; color: #f87171;">⚠️ Failed to load</span>`;
+      }
+    } finally {
+      item.isLoading = false;
+    }
+    return null;
+  }
+
+  /**
+   * Automatically queues background fetching of all card images in small batches.
+   */
+  async loadScannedCertImagesQueue() {
+    if (!this.scannedCertItems || this.scannedCertItems.length === 0) return;
+    const items = this.scannedCertItems;
+    const concurrency = 3;
+    let nextIdx = 0;
+
+    const worker = async () => {
+      while (nextIdx < items.length) {
+        const currentIdx = nextIdx++;
+        const item = items[currentIdx];
+        if (!item || item.base64Data || item.isPdf) continue;
+        await this.loadScannedCertAttachment(currentIdx);
+      }
+    };
+
+    const workers = [];
+    for (let c = 0; c < concurrency; c++) {
+      workers.push(worker());
+    }
+    await Promise.all(workers);
+  }
+
+  /**
+   * Imports a single reviewed cert item into the Cert Photo Vault.
+   */
   async importSingleScannedCert(idx) {
     if (!this.scannedCertItems || !this.scannedCertItems[idx]) return;
     const item = this.scannedCertItems[idx];
@@ -2037,6 +2127,15 @@ class SheetNavigator {
     if (!window.desktopAPI || !window.desktopAPI.saveCertPhoto) {
       alert('Desktop file saving API is not available.');
       return;
+    }
+
+    // Ensure image payload is loaded before saving
+    if (!item.base64Data && !item.isPdf) {
+      const b64 = await this.loadScannedCertAttachment(idx);
+      if (!b64) {
+        alert('Could not download certificate photo from Gmail. Please check your connection and try again.');
+        return;
+      }
     }
 
     try {
@@ -2098,6 +2197,10 @@ class SheetNavigator {
         continue;
       }
 
+      if (!item.base64Data && !item.isPdf) {
+        await this.loadScannedCertAttachment(i);
+      }
+
       try {
         const saveRes = await window.desktopAPI.saveCertPhoto({
           employeeName: empName,
@@ -2143,13 +2246,21 @@ class SheetNavigator {
   /**
    * Opens the photo crop & rotate modal for a specific scanned cert card.
    */
-  openPhotoCropperModal(idx) {
+  async openPhotoCropperModal(idx) {
     if (!this.scannedCertItems || !this.scannedCertItems[idx]) return;
     const item = this.scannedCertItems[idx];
 
     if (item.contentType && item.contentType.includes('pdf')) {
       alert('PDF documents cannot be edited with the photo crop tool.');
       return;
+    }
+
+    if (!item.base64Data) {
+      const b64 = await this.loadScannedCertAttachment(idx);
+      if (!b64) {
+        alert('Image is still loading. Please wait a moment.');
+        return;
+      }
     }
 
     this.cropperCurrentIndex = idx;
