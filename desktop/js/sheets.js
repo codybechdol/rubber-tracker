@@ -2547,6 +2547,7 @@ class SheetNavigator {
     }
 
     this.cropperCurrentItemId = item.id;
+    this.cropperCurrentIndex = this.scannedCertItems.findIndex(x => x.id === item.id);
     this.cropperAngle = 0;
 
     const modal = document.getElementById('cert-photo-cropper-modal');
@@ -2821,7 +2822,16 @@ class SheetNavigator {
    * Applies the crop & rotate to the active card's photo and updates the review thumbnail.
    */
   applyPhotoCropper() {
-    if (!this.cropperImg || !this.cropperBox || !this.scannedCertItems || this.cropperCurrentIndex == null) return;
+    if (!this.cropperImg || !this.cropperBox || !this.scannedCertItems || (!this.cropperCurrentItemId && this.cropperCurrentIndex == null)) {
+      console.warn('applyPhotoCropper aborted: missing cropper state', {
+        hasImg: !!this.cropperImg,
+        hasBox: !!this.cropperBox,
+        hasItems: !!this.scannedCertItems,
+        itemId: this.cropperCurrentItemId,
+        index: this.cropperCurrentIndex
+      });
+      return;
+    }
     const img = this.cropperImg;
     const box = this.cropperBox;
     const scale = this.cropperDisplayScale || 1;
@@ -2872,6 +2882,10 @@ class SheetNavigator {
       if (previewImg) {
         previewImg.src = croppedDataUrl;
         previewImg.style.display = 'block';
+      }
+      const loadingEl = document.getElementById(`scanned-card-loading-${item.id}`) || (this.cropperCurrentIndex != null ? document.getElementById(`scanned-card-loading-${this.cropperCurrentIndex}`) : null);
+      if (loadingEl) {
+        loadingEl.style.display = 'none';
       }
     }
 
