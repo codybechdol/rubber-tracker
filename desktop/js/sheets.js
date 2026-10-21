@@ -2067,6 +2067,32 @@ class SheetNavigator {
       return true;
     }
 
+    // If expiration date matches existing vault record or expiring_certs row, it's definitely the same cert!
+    if (item.expDate) {
+      const itemExpTime = this.parseDateToTime(item.expDate);
+      if (itemExpTime) {
+        if (existing.expDate && this.parseDateToTime(existing.expDate) === itemExpTime) {
+          return true;
+        }
+        const tableData = this.db.getTable('expiring_certs');
+        if (tableData && tableData.rows) {
+          const normEmp = empName.toLowerCase();
+          const normCert = certType.toLowerCase();
+          const row = tableData.rows.find(r => {
+            const rEmp = String(r['Employee Name'] || r['Name'] || '').toLowerCase().trim();
+            const rCert = String(r['Item Type'] || r['Cert Type'] || '').toLowerCase().trim();
+            return rEmp === normEmp && (rCert === normCert || (normCert.startsWith('dl') && rCert.startsWith('dl')));
+          });
+          if (row && row['Expiration Date']) {
+            const rowExpTime = this.parseDateToTime(row['Expiration Date']);
+            if (rowExpTime === itemExpTime) {
+              return true;
+            }
+          }
+        }
+      }
+    }
+
     // Check email dates
     const itemTime = this.parseDateToTime(item.date);
     const existingEmailTime = existing.emailDate ? this.parseDateToTime(existing.emailDate) : null;
@@ -2128,6 +2154,7 @@ class SheetNavigator {
     if (badge) {
       badge.style.display = item.alreadyInVault ? 'inline-block' : 'none';
     }
+    this.updateScannedVaultCountBadges();
   }
 
   /**
@@ -2142,6 +2169,7 @@ class SheetNavigator {
     if (badge) {
       badge.style.display = item.alreadyInVault ? 'inline-block' : 'none';
     }
+    this.updateScannedVaultCountBadges();
   }
 
   /**
@@ -2391,6 +2419,48 @@ class SheetNavigator {
 
     html += `</div>`;
     body.innerHTML = html;
+  }
+
+  /**
+   * Updates count badges and batch action visibility based on current scanned items and hideVaulted toggle.
+   */
+  updateScannedVaultCountBadges() {
+    const body = document.getElementById('cert-email-scanner-body');
+    const batchActions = document.getElementById('cert-scan-batch-actions');
+    const countBadge = document.getElementById('cert-scan-count-badge');
+    const hideVaultedCheckbox = document.getElementById('cert-scan-hide-vaulted');
+    const hideVaulted = hideVaultedCheckbox ? hideVaultedCheckbox.checked : true;
+
+    if (!this.scannedCertItems || this.scannedCertItems.length === 0) return;
+
+    let vaultedCount = 0;
+    this.scannedCertItems.forEach(item => {
+      item.alreadyInVault = this.isScannedCertAlreadyAdded(item);
+      if (item.alreadyInVault) vaultedCount++;
+    });
+
+    const prevNamesSet = this.getPreviousEmployeeNamesSet();
+    const displayItems = (hideVaulted
+      ? this.scannedCertItems.filter(item => !item.alreadyInVault)
+      : this.scannedCertItems).filter(item => {
+        const emp = String(item.employeeName || '').toLowerCase().trim();
+        return !prevNamesSet.has(emp);
+      });
+
+    if (batchActions) batchActions.style.display = displayItems.length > 0 ? 'flex' : 'none';
+    if (countBadge) {
+      if (vaultedCount > 0) {
+        countBadge.textContent = hideVaulted
+          ? `${displayItems.length} new cert ${displayItems.length === 1 ? 'photo' : 'photos'} (${vaultedCount} in vault hidden)`
+          : `${displayItems.length} cert photos (${vaultedCount} already in vault)`;
+      } else {
+        countBadge.textContent = `${displayItems.length} cert ${displayItems.length === 1 ? 'photo' : 'photos'} found`;
+      }
+    }
+
+    if (displayItems.length === 0 && vaultedCount > 0 && body) {
+      this.renderScannedCertItems();
+    }
   }
 
   /**
@@ -3525,44 +3595,125 @@ class SheetNavigator {
     if (!text || typeof text !== 'string') return result;
 
     const activeList = employeeList || this.getActiveEmployeeNamesList();
+    const prevSet = this.getPreviousEmployeeNamesSet();
+    const filteredActiveList = activeList.filter(emp => !prevSet || !prevSet.has(emp.toLowerCase().trim()));
 
     // 1. Employee Name extraction
-    // Look for explicit form headers first: Operator Name, Employee Name, Candidate, Trainee, Name
-    const nameFieldRegex = /(?:operator(?:\s*name)?|employee(?:\s*name)?|trainee(?:\s*name)?|student|candidate|name)\s*[:\-]\s*([A-Za-z\s'\.-]+)/i;
+    // A. Explicit form headers (Operator Name, Employee Name, Candidate, Trainee, Cardholder, Name of Employee, etc.)
+    const nameFieldRegex = /(?:operator(?:\s*name)?|employee(?:\s*name)?|trainee(?:\s*name)?|student(?:\s*name)?|candidate(?:\s*name)?|cardholder(?:\s*name)?|name\s+of\s+employee|name)\s*[:\-]\s*([A-Za-z\s'\.-]+)/i;
     const nameMatch = text.match(nameFieldRegex);
     if (nameMatch) {
       const rawCandidate = nameMatch[1].trim().split('\n')[0].trim();
-      const matchedFromCandidate = this.matchEmployeeFromText(rawCandidate, activeList);
+      const matchedFromCandidate = this.matchEmployeeFromText(rawCandidate, filteredActiveList);
       if (matchedFromCandidate) {
         result.employeeName = matchedFromCandidate;
       }
     }
 
-    // Fallback: search whole text for active employees (excluding evaluator/trainer if present)
+    // B. Driver's License Standards (AAMVA Line 1 = Surname, Line 2 = First/Given Name)
+    // Common on US/Montana/Idaho/Washington DLs:
+    // "1 ORESMAN \n 2 XANDERKIELENE" or "1. ORESMAN \n 2. XANDER" or "LN: ORESMAN \n FN: XANDER"
     if (!result.employeeName) {
-      for (const emp of activeList) {
-        const empRe = new RegExp('\\b' + emp.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&') + '\\b', 'i');
-        if (empRe.test(text)) {
-          const evalRe = new RegExp('(?:evaluator|instructor|trainer|supervisor)\\s*[:\\-]?\\s*' + emp.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&'), 'i');
-          if (!evalRe.test(text)) {
-            result.employeeName = emp;
-            break;
+      const dlLastMatch = text.match(/(?:^|\n)\s*(?:1[.\-]?\s+|LN:?\s*|Last(?:\s*Name)?[:\-]\s*)([A-Za-z'-]+)/i);
+      const dlFirstMatch = text.match(/(?:^|\n)\s*(?:2[.\-]?\s+|FN:?\s*|First(?:\s*Name)?[:\-]\s*)([A-Za-z'-]+)/i);
+      if (dlLastMatch && dlFirstMatch) {
+        const ln = dlLastMatch[1].trim().toLowerCase();
+        const fnToken = dlFirstMatch[1].trim().toLowerCase();
+        for (const emp of filteredActiveList) {
+          const parts = emp.trim().replace(/\s+(jr|sr|ii|iii|iv)\.?$/i, '').split(/\s+/);
+          if (parts.length >= 2) {
+            const empFn = parts[0].toLowerCase();
+            const empLn = parts[parts.length - 1].toLowerCase();
+            if (empLn === ln && (fnToken.startsWith(empFn) || empFn.startsWith(fnToken))) {
+              result.employeeName = emp;
+              break;
+            }
           }
         }
       }
     }
 
+    // C. Contiguous Full Name: "First Last", "First Middle Last", or "Last, First"
+    if (!result.employeeName) {
+      for (const emp of filteredActiveList) {
+        const parts = emp.trim().replace(/\s+(jr|sr|ii|iii|iv)\.?$/i, '').split(/\s+/);
+        if (parts.length >= 2) {
+          const fn = parts[0].replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&');
+          const ln = parts[parts.length - 1].replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&');
+          const firstLastRe = new RegExp(`\\b${fn}(?:\\s+[A-Za-z'\\.-]+)?\\s+${ln}\\b`, 'i');
+          const lastCommaFirstRe = new RegExp(`\\b${ln}\\s*,\\s*${fn}\\b`, 'i');
+          if (firstLastRe.test(text) || lastCommaFirstRe.test(text)) {
+            const evalRe = new RegExp(`(?:evaluator|instructor|trainer|supervisor|proctor)\\s*[:\\-]?[^\\n]*\\b(?:${fn}|${ln})\\b`, 'i');
+            if (!evalRe.test(text)) {
+              result.employeeName = emp;
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    // D. Split Co-occurrence: First Name + Last Name anywhere in the document (handles DL lines, middle names, etc.)
+    if (!result.employeeName) {
+      const candidates = [];
+      for (const emp of filteredActiveList) {
+        const parts = emp.trim().replace(/\s+(jr|sr|ii|iii|iv)\.?$/i, '').split(/\s+/);
+        if (parts.length >= 2) {
+          const fn = parts[0].toLowerCase();
+          const ln = parts[parts.length - 1].toLowerCase();
+          if (fn.length < 3 || ln.length < 3) continue;
+
+          const fnEsc = fn.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&');
+          const lnEsc = ln.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&');
+
+          // Check if last name appears as whole word
+          const lnRe = new RegExp(`\\b${lnEsc}\\b`, 'i');
+          if (!lnRe.test(text)) continue;
+
+          // Check if first name appears as whole word OR word prefix (handles XANDERKIELENE)
+          const fnRe = new RegExp(`\\b${fnEsc}`, 'i');
+          if (!fnRe.test(text)) continue;
+
+          // Ensure not an evaluator/instructor
+          const evalRe = new RegExp(`(?:evaluator|instructor|trainer|supervisor|proctor)\\s*[:\\-]?[^\\n]*\\b${lnEsc}\\b`, 'i');
+          if (evalRe.test(text)) continue;
+
+          candidates.push(emp);
+        }
+      }
+
+      if (candidates.length === 1) {
+        result.employeeName = candidates[0];
+      } else if (candidates.length > 1) {
+        let bestEmp = candidates[0];
+        let shortestDist = Infinity;
+        for (const emp of candidates) {
+          const parts = emp.trim().split(/\s+/);
+          const fnPos = text.toLowerCase().indexOf(parts[0].toLowerCase());
+          const lnPos = text.toLowerCase().indexOf(parts[parts.length - 1].toLowerCase());
+          if (fnPos !== -1 && lnPos !== -1) {
+            const dist = Math.abs(fnPos - lnPos);
+            if (dist < shortestDist) {
+              shortestDist = dist;
+              bestEmp = emp;
+            }
+          }
+        }
+        result.employeeName = bestEmp;
+      }
+    }
+
     // 2. Expiration Date extraction
-    // Looks for patterns like "Crane Cert Exp Date: 6-23-2030", "Expiration Date: 10/12/2028", "Expires: 2028-10-15"
-    const expRegex = /(?:(?:crane\s*cert\s*)?exp(?:iration)?\s*(?:date)?|expires?|valid\s*(?:through|thru|until)|end\s*date)\s*[:\-]?\s*([0-1]?\d[\/\-\.][0-3]?\d[\/\-\.]\d{2,4})/i;
+    // Look for patterns like "Crane Cert Exp Date: 6-23-2030", "Expiration Date: 10/12/2028", "Expires: 2028-10-15", "4b Expires: 05/13/2027", "4b: 05/13/2027"
+    const expRegex = /(?:(?:crane\s*cert\s*)?exp(?:iration)?\s*(?:date)?|expires?|valid\s*(?:through|thru|until)|end\s*date|\b4b\b(?:\s*expires?)?)\s*[:\-]?\s*([0-1]?\d[\/\-\.][0-3]?\d[\/\-\.]\d{2,4})/i;
     const expMatch = text.match(expRegex);
     if (expMatch) {
       result.expDate = this.normalizeScannedDateStr(expMatch[1]);
     }
 
     // 3. Date Acquired / Test Date / Issue Date
-    // Looks for patterns like "Date: 8/4/2026", "Issue Date: 05/10/2025", "Date Acquired: 06/01/2026"
-    const acqRegex = /(?:(?:issue|eval(?:uation)?|training|course)\s*date|date\s*acquired|date\s*completed|\bdate)\s*[:\-]?\s*([0-1]?\d[\/\-\.][0-3]?\d[\/\-\.]\d{2,4})/i;
+    // Look for patterns like "Date: 8/4/2026", "Issue Date: 05/10/2025", "4a Issued: 04/09/2026", "Date Acquired: 06/01/2026"
+    const acqRegex = /(?:(?:issue|issued|eval(?:uation)?|training|course)\s*date|date\s*acquired|date\s*completed|\b4a\b(?:\s*issued?)?|issued|\bdate)\s*[:\-]?\s*([0-1]?\d[\/\-\.][0-3]?\d[\/\-\.]\d{2,4})/i;
     const acqMatch = text.match(acqRegex);
     if (acqMatch) {
       const dStr = this.normalizeScannedDateStr(acqMatch[1]);
@@ -3575,11 +3726,11 @@ class SheetNavigator {
     const lower = text.toLowerCase();
     if (lower.includes('crane operator evaluation') || lower.includes('crane eval')) {
       result.certType = 'Crane Cert';
-    } else if (lower.includes('medical examiner') || lower.includes('dot card') || lower.includes('mec')) {
+    } else if (lower.includes('medical examiner') || lower.includes('dot card') || lower.includes('mec') || lower.includes('national registry of certified medical')) {
       result.certType = 'MEC Expiration';
     } else if (lower.includes('cpr') && (lower.includes('first aid') || lower.includes('1st aid'))) {
       result.certType = '1st Aid & CPR';
-    } else if (lower.includes('driver license') || lower.includes('cdl')) {
+    } else if (lower.includes('commercial license') || lower.includes('driver license') || lower.includes('driver\'s license') || lower.includes('cdl') || lower.includes('class: a') || lower.includes('class a') || lower.includes('dl#') || lower.includes('intrastate') || lower.includes('interstate')) {
       result.certType = 'DL';
     } else if (lower.includes('forklift')) {
       result.certType = 'Forklift';
@@ -3587,6 +3738,12 @@ class SheetNavigator {
       result.certType = 'Pole Top Rescue';
     } else if (lower.includes('trench')) {
       result.certType = 'OSHA Trench Comp Person';
+    } else if (lower.includes('rigging') || lower.includes('signalperson')) {
+      result.certType = 'Rigging & Signaling/Signalperson & Spotter Cert';
+    } else if (lower.includes('first aid') || lower.includes('1st aid')) {
+      result.certType = '1st Aid';
+    } else if (lower.includes('cpr')) {
+      result.certType = 'CPR';
     }
 
     return result;
@@ -3661,8 +3818,37 @@ class SheetNavigator {
           badge.textContent = `✨ Auto-detected`;
         }
 
+        // Re-evaluate vault status with newly resolved employee name & cert type & dates
+        item.alreadyInVault = this.isScannedCertAlreadyAdded(item);
+        const vaultBadge = document.getElementById(`scanned-vault-badge-${item.id}`);
+        if (vaultBadge) {
+          vaultBadge.style.display = item.alreadyInVault ? 'inline-block' : 'none';
+        }
+
+        const hideVaultedCheckbox = document.getElementById('cert-scan-hide-vaulted');
+        const hideVaulted = hideVaultedCheckbox ? hideVaultedCheckbox.checked : true;
+
+        if (item.alreadyInVault && hideVaulted) {
+          const cardEl = document.getElementById(`scanned-cert-card-${item.id}`);
+          if (cardEl) {
+            cardEl.style.transition = 'all 0.3s ease';
+            cardEl.style.opacity = '0';
+            cardEl.style.transform = 'scale(0.92)';
+            setTimeout(() => {
+              if (cardEl && cardEl.parentNode) cardEl.remove();
+              this.updateScannedVaultCountBadges();
+            }, 300);
+          } else {
+            this.updateScannedVaultCountBadges();
+          }
+        } else {
+          this.updateScannedVaultCountBadges();
+        }
+
         if (userInitiated && typeof window.showToast === 'function') {
-          if (updatedCount > 0) {
+          if (item.alreadyInVault) {
+            window.showToast(`✨ Detected ${item.employeeName} (${item.certType}) — Already in Vault!`, 'info');
+          } else if (updatedCount > 0) {
             window.showToast(`✨ Extracted from photo: ${item.employeeName || ''} ${item.expDate ? `(Exp: ${item.expDate})` : ''}`, 'success');
           } else {
             window.showToast('Photo scanned, but no new fields were detected', 'info');

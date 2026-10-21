@@ -681,6 +681,16 @@ class LocalDatabase {
       if (front) return front;
       const back = this.snapshot.configs.cert_photos[this.getCertPhotoKey(employeeName, 'DL (Back)')];
       if (back) return back;
+    } else if (norm === 'dl (front)' || norm === 'dl (back)') {
+      const dl = this.snapshot.configs.cert_photos[this.getCertPhotoKey(employeeName, 'DL')];
+      if (dl) return dl;
+      if (norm === 'dl (front)') {
+        const back = this.snapshot.configs.cert_photos[this.getCertPhotoKey(employeeName, 'DL (Back)')];
+        if (back) return back;
+      } else {
+        const front = this.snapshot.configs.cert_photos[this.getCertPhotoKey(employeeName, 'DL (Front)')];
+        if (front) return front;
+      }
     } else if (norm === '1st aid & cpr' || norm === 'first aid & cpr' || norm === '1st aid/cpr') {
       const fa = this.snapshot.configs.cert_photos[this.getCertPhotoKey(employeeName, '1st Aid')];
       if (fa) return fa;

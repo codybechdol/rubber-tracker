@@ -4,3 +4,5 @@ desktop/node_modules/
 *.log
 scratch/
 push_output.txt
+*.traineddata
+
