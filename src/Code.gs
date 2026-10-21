@@ -36081,6 +36081,24 @@ function scanCertRenewalEmails(options) {
       return false;
     }
 
+    function levenshteinDist(a, b) {
+      if (a === b) return 0;
+      if (!a.length) return b.length;
+      if (!b.length) return a.length;
+      var row = [];
+      for (var i = 0; i <= b.length; i++) row[i] = i;
+      for (var i = 1; i <= a.length; i++) {
+        var prev = i;
+        for (var j = 1; j <= b.length; j++) {
+          var val = (b.charAt(j - 1) === a.charAt(i - 1)) ? row[j - 1] : Math.min(row[j - 1], prev, row[j]) + 1;
+          row[j - 1] = prev;
+          prev = val;
+        }
+        row[b.length] = prev;
+      }
+      return row[b.length];
+    }
+
     function detectEmployeeName(text) {
       if (!text) return '';
       var clean = String(text)
@@ -36105,6 +36123,87 @@ function scanCertRenewalEmails(options) {
           var canon = altNameToCanonical[altKey];
           if (!previousEmployeesSet[canon.toLowerCase()]) {
             return canon;
+          }
+        }
+      }
+
+      // 2.5 Inverted Full Name: Last, First or Last First or First Middle Last
+      for (var invIdx = 0; invIdx < knownEmployees.length; invIdx++) {
+        var kEmp = knownEmployees[invIdx];
+        if (previousEmployeesSet[kEmp.toLowerCase()]) continue;
+        var kParts = kEmp.replace(/\s+(jr|sr|ii|iii|iv)\.?$/i, '').split(/\s+/);
+        if (kParts.length >= 2) {
+          var kFn = kParts[0].replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&');
+          var kLn = kParts[kParts.length - 1].replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&');
+          var kInv1 = new RegExp('\\b' + kLn + '\\s*,\\s*' + kFn + '\\b', 'i');
+          var kInv2 = new RegExp('\\b' + kLn + '\\s+' + kFn + '\\b', 'i');
+          var kMid = new RegExp('\\b' + kFn + '\\s+[A-Za-z\'\\.-]+\\s+' + kLn + '\\b', 'i');
+          if (kInv1.test(clean) || kInv2.test(clean) || kMid.test(clean)) {
+            return kEmp;
+          }
+        }
+      }
+
+      // 2.6 Unique Last Name + Fuzzy First Name or Cert Keyword (handles typos, e.g. "Rile Cremer" -> "Riley Cremer")
+      var cleanWords = clean.replace(/[^a-zA-Z0-9\s'-]/g, ' ').split(/\s+/);
+      var wordsList = [];
+      for (var cw = 0; cw < cleanWords.length; cw++) {
+        if (cleanWords[cw].length >= 2) wordsList.push(cleanWords[cw]);
+      }
+
+      var hasCertKw = /\b(1st\s*aid|first\s*aid|cpr|dl|cdl|mec|medical\s*card|med\s*card|dot\s*card|crane|forklift|osha|msha|bnsf|pole\s*top|dig\s*safe|trench|rigging|cert|renewal|card)\b/i.test(clean);
+
+      for (var w = 0; w < wordsList.length; w++) {
+        var wordLow = wordsList[w].toLowerCase();
+        if (wordLow === 'cert' || wordLow === 'card' || wordLow === 'license' || wordLow === 'renewal' || wordLow === 'medical' || wordLow === 'photo' || wordLow === 'scan' || wordLow === 'front' || wordLow === 'back') continue;
+
+        var matchingEmps = [];
+        for (var ke = 0; ke < knownEmployees.length; ke++) {
+          var kn = knownEmployees[ke];
+          if (previousEmployeesSet[kn.toLowerCase()]) continue;
+          var p = kn.replace(/\s+(jr|sr|ii|iii|iv)\.?$/i, '').split(/\s+/);
+          if (p.length >= 2 && p[p.length - 1].toLowerCase() === wordLow) {
+            matchingEmps.push(kn);
+          }
+        }
+
+        if (matchingEmps.length === 1) {
+          var matchedEmp = matchingEmps[0];
+          var mParts = matchedEmp.replace(/\s+(jr|sr|ii|iii|iv)\.?$/i, '').split(/\s+/);
+          var mFn = mParts[0].toLowerCase();
+
+          var fnFound = false;
+          for (var ow = 0; ow < wordsList.length; ow++) {
+            if (ow === w) continue;
+            var oLow = wordsList[ow].toLowerCase();
+            if (
+              (oLow.length >= 3 && mFn.indexOf(oLow) === 0) ||
+              (mFn.length >= 3 && oLow.indexOf(mFn) === 0) ||
+              levenshteinDist(oLow, mFn) <= 1
+            ) {
+              fnFound = true;
+              break;
+            }
+          }
+
+          if (fnFound || (hasCertKw && wordLow.length >= 4)) {
+            return matchedEmp;
+          }
+        } else if (matchingEmps.length > 1) {
+          for (var me = 0; me < matchingEmps.length; me++) {
+            var mCandidate = matchingEmps[me];
+            var mcParts = mCandidate.replace(/\s+(jr|sr|ii|iii|iv)\.?$/i, '').split(/\s+/);
+            var mcFn = mcParts[0].toLowerCase();
+            for (var ow2 = 0; ow2 < wordsList.length; ow2++) {
+              if (ow2 === w) continue;
+              var oLow2 = wordsList[ow2].toLowerCase();
+              if (
+                (oLow2.length >= 3 && mcFn.indexOf(oLow2) === 0) ||
+                levenshteinDist(oLow2, mcFn) <= 1
+              ) {
+                return mCandidate;
+              }
+            }
           }
         }
       }

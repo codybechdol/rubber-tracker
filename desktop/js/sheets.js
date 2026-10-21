@@ -1853,10 +1853,12 @@ class SheetNavigator {
           return true;
         });
 
-        // Pre-match active employee names from subject or filename if missing
+        // Pre-match active employee names from candidate name, subject, or filename
         this.scannedCertItems.forEach(item => {
           if (!item.employeeName || !activeEmps.some(n => n.toLowerCase() === item.employeeName.toLowerCase())) {
-            const matched = this.matchEmployeeFromText(item.subject, activeEmps) || this.matchEmployeeFromText(item.fileName, activeEmps);
+            const matched = (item.employeeName ? this.matchEmployeeFromText(item.employeeName, activeEmps) : '') ||
+                            this.matchEmployeeFromText(item.subject, activeEmps) ||
+                            this.matchEmployeeFromText(item.fileName, activeEmps);
             if (matched) {
               item.employeeName = matched;
             }
@@ -2049,12 +2051,25 @@ class SheetNavigator {
    * If a newer renewal email exists (email date > existing email date / recorded date), returns false.
    */
   isScannedCertAlreadyAdded(item) {
-    if (!item || !item.employeeName || !item.certType) return false;
+    if (!item || !item.certType) return false;
     if (!this.db || !this.db.snapshot) return false;
 
-    const empName = String(item.employeeName).trim();
+    let empName = String(item.employeeName || '').trim();
     const certType = String(item.certType).trim();
-    if (!empName || !certType) return false;
+    if (!certType) return false;
+
+    // Resolve employee name if missing or not an exact match against active workers
+    const activeEmps = this.getActiveEmployeeNamesList ? this.getActiveEmployeeNamesList() : [];
+    if (!empName || (activeEmps.length > 0 && !activeEmps.some(n => n.toLowerCase() === empName.toLowerCase()))) {
+      const resolved = (empName ? this.matchEmployeeFromText(empName, activeEmps) : '') ||
+                       this.matchEmployeeFromText(item.subject, activeEmps) ||
+                       this.matchEmployeeFromText(item.fileName, activeEmps);
+      if (resolved) {
+        empName = resolved;
+        item.employeeName = resolved;
+      }
+    }
+    if (!empName) return false;
 
     // Check cert_photos vault
     const existing = this.db.getCertPhotoRecord ? this.db.getCertPhotoRecord(empName, certType) : null;
@@ -2190,9 +2205,21 @@ class SheetNavigator {
     const hideVaultedCheckbox = document.getElementById('cert-scan-hide-vaulted');
     const hideVaulted = hideVaultedCheckbox ? hideVaultedCheckbox.checked : true;
 
+    // Fetch employee names for dropdown (strictly currently employed workers)
+    const employeeOptions = this.getActiveEmployeeNamesList();
+
     // Evaluate vault status for each item
     let vaultedCount = 0;
     this.scannedCertItems.forEach(item => {
+      // Auto-preselect employee if missing or not in active employees list
+      if (!item.employeeName || !employeeOptions.some(n => n.toLowerCase() === item.employeeName.toLowerCase())) {
+        const matched = (item.employeeName ? this.matchEmployeeFromText(item.employeeName, employeeOptions) : '') ||
+                        this.matchEmployeeFromText(item.subject, employeeOptions) ||
+                        this.matchEmployeeFromText(item.fileName, employeeOptions);
+        if (matched) {
+          item.employeeName = matched;
+        }
+      }
       item.alreadyInVault = this.isScannedCertAlreadyAdded(item);
       if (item.alreadyInVault) vaultedCount++;
     });
@@ -2237,9 +2264,6 @@ class SheetNavigator {
       }
     }
 
-    // Fetch employee names for dropdown (strictly currently employed workers)
-    const employeeOptions = this.getActiveEmployeeNamesList();
-
     const certTypes = [
       'DL',
       'DL (Front)',
@@ -2268,7 +2292,9 @@ class SheetNavigator {
     displayItems.forEach(item => {
       // Auto-preselect employee if missing or not in active employees list
       if (!item.employeeName || !employeeOptions.some(n => n.toLowerCase() === item.employeeName.toLowerCase())) {
-        const matched = this.matchEmployeeFromText(item.subject, employeeOptions) || this.matchEmployeeFromText(item.fileName, employeeOptions);
+        const matched = (item.employeeName ? this.matchEmployeeFromText(item.employeeName, employeeOptions) : '') ||
+                        this.matchEmployeeFromText(item.subject, employeeOptions) ||
+                        this.matchEmployeeFromText(item.fileName, employeeOptions);
         if (matched) {
           item.employeeName = matched;
         }
@@ -3559,6 +3585,117 @@ class SheetNavigator {
                   return canonicalName;
                 }
               }
+            }
+          }
+        }
+      }
+    }
+
+    // 3. Inverted Full Name: Last, First or Last First or First Middle Last
+    for (const emp of sorted) {
+      if (prevSet && prevSet.has(emp.toLowerCase())) continue;
+      const parts = emp.replace(/\s+(jr|sr|ii|iii|iv)\.?$/i, '').split(/\s+/);
+      if (parts.length >= 2) {
+        const fn = parts[0].replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&');
+        const ln = parts[parts.length - 1].replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&');
+        const invRe1 = new RegExp('\\b' + ln + '\\s*,\\s*' + fn + '\\b', 'i');
+        const invRe2 = new RegExp('\\b' + ln + '\\s+' + fn + '\\b', 'i');
+        const midRe = new RegExp('\\b' + fn + '\\s+[A-Za-z\'\\.-]+\\s+' + ln + '\\b', 'i');
+        if (invRe1.test(clean) || invRe2.test(clean) || midRe.test(clean)) {
+          return emp;
+        }
+      }
+    }
+
+    // 4. Unique Last Name + Fuzzy First Name or Cert Keyword (handles typos, e.g. "Rile Cremer" -> "Riley Cremer")
+    const lastNameMap = {};
+    for (const emp of activeList) {
+      if (prevSet && prevSet.has(emp.toLowerCase())) continue;
+      const parts = emp.replace(/\s+(jr|sr|ii|iii|iv)\.?$/i, '').split(/\s+/);
+      if (parts.length >= 2) {
+        const ln = parts[parts.length - 1].toLowerCase();
+        if (!lastNameMap[ln]) lastNameMap[ln] = [];
+        lastNameMap[ln].push(emp);
+      }
+    }
+
+    const words = clean.replace(/[^a-zA-Z0-9\s'-]/g, ' ').split(/\s+/).filter(w => w.length >= 2);
+    const certKeywordsRe = /\b(1st\s*aid|first\s*aid|cpr|dl|cdl|mec|medical\s*card|med\s*card|dot\s*card|crane|forklift|osha|msha|bnsf|pole\s*top|dig\s*safe|trench|rigging|cert|renewal|card)\b/i;
+    const hasCertKeyword = certKeywordsRe.test(clean);
+
+    const calcLevenshtein = (a, b) => {
+      if (a === b) return 0;
+      if (!a.length) return b.length;
+      if (!b.length) return a.length;
+      const matrix = [];
+      for (let i = 0; i <= b.length; i++) matrix[i] = [i];
+      for (let j = 0; j <= a.length; j++) matrix[0][j] = j;
+      for (let i = 1; i <= b.length; i++) {
+        for (let j = 1; j <= a.length; j++) {
+          if (b.charAt(i - 1) === a.charAt(j - 1)) {
+            matrix[i][j] = matrix[i - 1][j - 1];
+          } else {
+            matrix[i][j] = Math.min(
+              matrix[i - 1][j - 1] + 1,
+              matrix[i][j - 1] + 1,
+              matrix[i - 1][j] + 1
+            );
+          }
+        }
+      }
+      return matrix[b.length][a.length];
+    };
+
+    const ignoredWords = new Set([
+      'the', 'and', 'for', 'with', 'card', 'cert', 'certs', 'license', 'driver', 'drivers',
+      'medical', 'examiner', 'certificate', 'expiration', 'renewal', 'photo', 'image',
+      'scan', 'scanned', 'front', 'back', 'temp', 'update', 'proof', 'attachment'
+    ]);
+
+    for (const word of words) {
+      const wLower = word.toLowerCase();
+      if (ignoredWords.has(wLower)) continue;
+      const empsWithLn = lastNameMap[wLower];
+      if (empsWithLn && empsWithLn.length === 1) {
+        const candidateEmp = empsWithLn[0];
+        const candidateParts = candidateEmp.replace(/\s+(jr|sr|ii|iii|iv)\.?$/i, '').split(/\s+/);
+        const candFn = candidateParts[0].toLowerCase();
+
+        let fnMatched = false;
+        for (const otherWord of words) {
+          if (otherWord.toLowerCase() === wLower) continue;
+          const otherLower = otherWord.toLowerCase();
+          if (ignoredWords.has(otherLower)) continue;
+          if (
+            calcLevenshtein(otherLower, candFn) <= 1 ||
+            (otherLower.length >= 3 && candFn.startsWith(otherLower)) ||
+            (candFn.length >= 3 && otherLower.startsWith(candFn))
+          ) {
+            fnMatched = true;
+            break;
+          }
+        }
+
+        if (fnMatched) {
+          return candidateEmp;
+        }
+
+        if (hasCertKeyword && wLower.length >= 4) {
+          return candidateEmp;
+        }
+      } else if (empsWithLn && empsWithLn.length > 1) {
+        for (const candidateEmp of empsWithLn) {
+          const candidateParts = candidateEmp.replace(/\s+(jr|sr|ii|iii|iv)\.?$/i, '').split(/\s+/);
+          const candFn = candidateParts[0].toLowerCase();
+          for (const otherWord of words) {
+            if (otherWord.toLowerCase() === wLower) continue;
+            const otherLower = otherWord.toLowerCase();
+            if (ignoredWords.has(otherLower)) continue;
+            if (
+              calcLevenshtein(otherLower, candFn) <= 1 ||
+              (otherLower.length >= 3 && candFn.startsWith(otherLower))
+            ) {
+              return candidateEmp;
             }
           }
         }
