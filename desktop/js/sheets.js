@@ -1949,7 +1949,9 @@ class SheetNavigator {
         else if (daysLeft <= 30) status = 'Expiring Soon';
         else status = 'Valid';
       }
-    } catch (e) {}
+    } catch {
+      // Ignore date parsing errors
+    }
 
     if (row) {
       const rowIdx = row._rowIdx;
@@ -3579,7 +3581,7 @@ class SheetNavigator {
 
         const altNames = String(row['Alternate Names'] || '').trim();
         if (altNames) {
-          const parts = altNames.split(/[,;\/|]+/);
+          const parts = altNames.split(/[,;/|]+/);
           for (const p of parts) {
             const altTrim = p.trim();
             if (altTrim.length >= 3) {
@@ -3736,8 +3738,8 @@ class SheetNavigator {
    */
   normalizeScannedDateStr(raw) {
     if (!raw) return '';
-    const clean = String(raw).trim().replace(/[^\d\/\-\.]/g, '');
-    const parts = clean.split(/[\/\-\.]/);
+    const clean = String(raw).trim().replace(/[^\d/.-]/g, '');
+    const parts = clean.split(/[/.-]/);
     if (parts.length === 3) {
       let [m, d, y] = parts;
       if (m.length === 4) {
@@ -3773,7 +3775,7 @@ class SheetNavigator {
 
     // 1. Employee Name extraction
     // A. Explicit form headers (Operator Name, Employee Name, Candidate, Trainee, Cardholder, Name of Employee, etc.)
-    const nameFieldRegex = /(?:operator(?:\s*name)?|employee(?:\s*name)?|trainee(?:\s*name)?|student(?:\s*name)?|candidate(?:\s*name)?|cardholder(?:\s*name)?|name\s+of\s+employee|name)\s*[:\-]\s*([A-Za-z\s'\.-]+)/i;
+    const nameFieldRegex = /(?:operator(?:\s*name)?|employee(?:\s*name)?|trainee(?:\s*name)?|student(?:\s*name)?|candidate(?:\s*name)?|cardholder(?:\s*name)?|name\s+of\s+employee|name)\s*[:-]\s*([A-Za-z\s'.-]+)/i;
     const nameMatch = text.match(nameFieldRegex);
     if (nameMatch) {
       const rawCandidate = nameMatch[1].trim().split('\n')[0].trim();
@@ -3787,8 +3789,8 @@ class SheetNavigator {
     // Common on US/Montana/Idaho/Washington DLs:
     // "1 ORESMAN \n 2 XANDERKIELENE" or "1. ORESMAN \n 2. XANDER" or "LN: ORESMAN \n FN: XANDER"
     if (!result.employeeName) {
-      const dlLastMatch = text.match(/(?:^|\n)\s*(?:1[.\-]?\s+|LN:?\s*|Last(?:\s*Name)?[:\-]\s*)([A-Za-z'-]+)/i);
-      const dlFirstMatch = text.match(/(?:^|\n)\s*(?:2[.\-]?\s+|FN:?\s*|First(?:\s*Name)?[:\-]\s*)([A-Za-z'-]+)/i);
+      const dlLastMatch = text.match(/(?:^|\n)\s*(?:1[.-]?\s+|LN:?\s*|Last(?:\s*Name)?[:-]\s*)([A-Za-z'-]+)/i);
+      const dlFirstMatch = text.match(/(?:^|\n)\s*(?:2[.-]?\s+|FN:?\s*|First(?:\s*Name)?[:-]\s*)([A-Za-z'-]+)/i);
       if (dlLastMatch && dlFirstMatch) {
         const ln = dlLastMatch[1].trim().toLowerCase();
         const fnToken = dlFirstMatch[1].trim().toLowerCase();
@@ -3937,7 +3939,7 @@ class SheetNavigator {
 
     // 2. Expiration Date extraction
     // Look for patterns like "Crane Cert Exp Date: 6-23-2030", "Expiration Date: 10/12/2028", "Expires: 2028-10-15", "4b Expires: 05/13/2027", "4b: 05/13/2027"
-    const expRegex = /(?:(?:crane\s*cert\s*)?exp(?:iration)?\s*(?:date)?|expires?|valid\s*(?:through|thru|until)|end\s*date|\b4b\b(?:\s*expires?)?)\s*[:\-]?\s*([0-1]?\d[\/\-\.][0-3]?\d[\/\-\.]\d{2,4})/i;
+    const expRegex = /(?:(?:crane\s*cert\s*)?exp(?:iration)?\s*(?:date)?|expires?|valid\s*(?:through|thru|until)|end\s*date|\b4b\b(?:\s*expires?)?)\s*[:-]?\s*([0-1]?\d[/.-][0-3]?\d[/.-]\d{2,4})/i;
     const expMatch = text.match(expRegex);
     if (expMatch) {
       result.expDate = this.normalizeScannedDateStr(expMatch[1]);
@@ -3945,7 +3947,7 @@ class SheetNavigator {
 
     // Fallback: If no explicit expiration label was matched, look for future dates on the document (e.g. DL expiry in future year)
     if (!result.expDate) {
-      const allDateMatches = text.match(/\b([0-1]?\d[\/\-\.][0-3]?\d[\/\-\.]\d{2,4})\b/g);
+      const allDateMatches = text.match(/\b([0-1]?\d[/.-][0-3]?\d[/.-]\d{2,4})\b/g);
       if (allDateMatches && allDateMatches.length > 0) {
         const currentYear = new Date().getFullYear();
         for (const rawDate of allDateMatches) {
@@ -3964,7 +3966,7 @@ class SheetNavigator {
 
     // 3. Date Acquired / Test Date / Issue Date
     // Look for patterns like "Date: 8/4/2026", "Issue Date: 05/10/2025", "4a Issued: 04/09/2026", "Date Acquired: 06/01/2026"
-    const acqRegex = /(?:(?:issue|issued|eval(?:uation)?|training|course)\s*date|date\s*acquired|date\s*completed|\b4a\b(?:\s*issued?)?|issued|\bdate)\s*[:\-]?\s*([0-1]?\d[\/\-\.][0-3]?\d[\/\-\.]\d{2,4})/i;
+    const acqRegex = /(?:(?:issue|issued|eval(?:uation)?|training|course)\s*date|date\s*acquired|date\s*completed|\b4a\b(?:\s*issued?)?|issued|\bdate)\s*[:-]?\s*([0-1]?\d[/.-][0-3]?\d[/.-]\d{2,4})/i;
     const acqMatch = text.match(acqRegex);
     if (acqMatch) {
       const dStr = this.normalizeScannedDateStr(acqMatch[1]);
