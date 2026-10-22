@@ -2061,11 +2061,57 @@ class SheetNavigator {
    * If a newer renewal email exists (email date > existing email date / recorded date), returns false.
    */
   isScannedCertAlreadyAdded(item) {
-    if (!item || !item.certType) return false;
+    if (!item) return false;
     if (!this.db || !this.db.snapshot) return false;
 
     let empName = String(item.employeeName || '').trim();
-    const certType = String(item.certType).trim();
+    let certType = String(item.certType || '').trim();
+
+    // Fast-path 1: Check if this exact email attachment is already recorded in cert_photos
+    const cp = this.db.snapshot.configs && this.db.snapshot.configs.cert_photos;
+    if (cp && item.messageId) {
+      const targetMsgId = String(item.messageId).trim();
+      for (const record of Object.values(cp)) {
+        if (!record) continue;
+        const recMsgId = record.emailMessageId ? String(record.emailMessageId).trim() : '';
+        if (recMsgId === targetMsgId) {
+          const matchAttIdx = record.emailAttIdx !== undefined && item.attIdx !== undefined && Number(record.emailAttIdx) === Number(item.attIdx);
+          const matchSize = record.fileSize !== undefined && item.fileSize !== undefined && Number(record.fileSize) === Number(item.fileSize);
+          const matchFile = record.origFileName && item.fileName && record.origFileName.toLowerCase() === item.fileName.toLowerCase();
+          if (matchAttIdx || matchSize || matchFile) {
+            if (!empName && record.employeeName) {
+              empName = record.employeeName;
+              item.employeeName = record.employeeName;
+            }
+            if ((!certType || certType === 'Other Cert') && record.certType) {
+              certType = record.certType;
+              item.certType = record.certType;
+            }
+            return true;
+          }
+        }
+      }
+    }
+
+    // Fast-path 2: Check by exact file size match in cert_photos (for non-trivial attachments)
+    if (cp && item.fileSize && Number(item.fileSize) > 50000) {
+      const targetSize = Number(item.fileSize);
+      for (const record of Object.values(cp)) {
+        if (!record) continue;
+        if (record.fileSize && Number(record.fileSize) === targetSize) {
+          if (!empName && record.employeeName) {
+            empName = record.employeeName;
+            item.employeeName = record.employeeName;
+          }
+          if ((!certType || certType === 'Other Cert') && record.certType) {
+            certType = record.certType;
+            item.certType = record.certType;
+          }
+          return true;
+        }
+      }
+    }
+
     if (!certType) return false;
 
     // Resolve employee name if missing or not an exact match against active workers
@@ -2423,10 +2469,14 @@ class SheetNavigator {
             <div>
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px;">
                 <label style="font-size: 11px; color: #94a3b8; font-weight: 600;">Assigned Employee</label>
-                ${isMultiOrGroup ? `<span style="font-size: 10px; color: #f59e0b; font-weight: 600;">⚠️ Check Name</span>` : ''}
+                <span id="scanned-emp-status-${item.id}">
+                  ${!item.employeeName && !item.base64Data ? `
+                    <span style="font-size: 10px; color: #38bdf8; font-weight: 600;">🔍 Scanning photo...</span>
+                  ` : (isMultiOrGroup ? `<span style="font-size: 10px; color: #f59e0b; font-weight: 600;">⚠️ Check Name</span>` : '')}
+                </span>
               </div>
               <select id="scanned-emp-select-${item.id}" onchange="window.sheetNavigator.handleScannedCardEmployeeChange('${this.escapeJs(item.id)}', this.value)" style="width: 100%; background: #0f172a; color: #f8fafc; border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 5px 8px; font-size: 12px; font-weight: 600;">
-                <option value="">-- Select Employee --</option>
+                <option value="">${!item.employeeName && !item.base64Data ? '-- Scanning Photo for Name... --' : '-- Select Employee --'}</option>
                 ${item.employeeName && !employeeOptions.some(n => n.toLowerCase() === item.employeeName.toLowerCase()) ? `
                   <option value="${this.escapeHtml(item.employeeName)}" selected>
                     ${this.escapeHtml(item.employeeName)} (New Hire)
@@ -2748,12 +2798,19 @@ class SheetNavigator {
     const hideVaulted = hideVaultedCheckbox ? hideVaultedCheckbox.checked : true;
 
     // Only load attachments for cards that are NOT already in the vault when hideVaulted is active
-    const targetItems = hideVaulted
+    let targetItems = hideVaulted
       ? this.scannedCertItems.filter(item => !item.alreadyInVault)
-      : this.scannedCertItems;
+      : this.scannedCertItems.slice();
 
-    // Fetch attachments concurrently (2 workers) for snappy, non-blocking preview loading
-    const concurrency = 2;
+    // Prioritize cards that lack an employee name so OCR runs on their photos immediately
+    targetItems.sort((a, b) => {
+      const aNeed = (!a.employeeName || a.employeeName === '') ? 0 : 1;
+      const bNeed = (!b.employeeName || b.employeeName === '') ? 0 : 1;
+      return aNeed - bNeed;
+    });
+
+    // Fetch attachments concurrently (3 workers) for snappy preview loading and fast OCR detection
+    const concurrency = 3;
     let nextIdx = 0;
 
     const worker = async () => {
@@ -2836,6 +2893,9 @@ class SheetNavigator {
           fullPath: saveRes.fullPath,
           dateAdded: todayStr,
           emailMessageId: item.messageId || '',
+          emailAttIdx: item.attIdx !== undefined ? item.attIdx : null,
+          origFileName: item.fileName || '',
+          fileSize: item.fileSize || 0,
           emailDate: item.date || todayStr,
           subject: item.subject || '',
           source: 'gmail_scan',
@@ -2937,6 +2997,9 @@ class SheetNavigator {
             fullPath: saveRes.fullPath,
             dateAdded: todayStr,
             emailMessageId: item.messageId || '',
+            emailAttIdx: item.attIdx !== undefined ? item.attIdx : null,
+            origFileName: item.fileName || '',
+            fileSize: item.fileSize || 0,
             emailDate: item.date || todayStr,
             subject: item.subject || '',
             source: 'gmail_scan',
@@ -3959,22 +4022,25 @@ class SheetNavigator {
     }
 
     // B. Driver's License Standards (AAMVA Line 1 = Surname, Line 2 = First/Given Name)
-    // Common on US/Montana/Idaho/Washington DLs:
-    // "1 ORESMAN \n 2 XANDERKIELENE" or "1. ORESMAN \n 2. XANDER" or "LN: ORESMAN \n FN: XANDER"
+    // Common on US/Montana/Idaho/Washington/Oregon DLs:
+    // "1 ORESMAN \n 2 XANDERKIELENE" or "1. ORESMAN \n 2. XANDER" or "1 \"LINDEMANN \n i CLAYTON" or "LN: ORESMAN \n FN: XANDER"
     if (!result.employeeName) {
-      const dlLastMatch = text.match(/(?:^|\n)\s*(?:1[.-]?\s+|LN:?\s*|Last(?:\s*Name)?[:-]\s*)([A-Za-z'-]+)/i);
-      const dlFirstMatch = text.match(/(?:^|\n)\s*(?:2[.-]?\s+|FN:?\s*|First(?:\s*Name)?[:-]\s*)([A-Za-z'-]+)/i);
-      if (dlLastMatch && dlFirstMatch) {
-        const ln = dlLastMatch[1].trim().toLowerCase();
-        const fnToken = dlFirstMatch[1].trim().toLowerCase();
+      const dlLastMatch = text.match(/(?:^|\n)\s*(?:1[.-]?\s*|LN:?\s*|Last(?:\s*Name)?[:-]\s*)[^A-Za-z\n]*([A-Za-z\s'-]+)/i);
+      const dlFirstMatch = text.match(/(?:^|\n)\s*(?:[2i!][.-]?\s*|FN:?\s*|First(?:\s*Name)?[:-]\s*)[^A-Za-z\n]*([A-Za-z\s'-]+)/i);
+      if (dlLastMatch) {
+        const rawLn = dlLastMatch[1].trim().split('\n')[0].replace(/[^A-Za-z'-]/g, '').toLowerCase();
+        const fnToken = dlFirstMatch ? dlFirstMatch[1].trim().split('\n')[0].replace(/[^A-Za-z'-]/g, '').toLowerCase() : '';
         for (const emp of filteredActiveList) {
           const parts = emp.trim().replace(/\s+(jr|sr|ii|iii|iv)\.?$/i, '').split(/\s+/);
           if (parts.length >= 2) {
             const empFn = parts[0].toLowerCase();
             const empLn = parts[parts.length - 1].toLowerCase();
-            if (empLn === ln && (fnToken.startsWith(empFn) || empFn.startsWith(fnToken))) {
-              result.employeeName = emp;
-              break;
+            const lnMatches = (empLn === rawLn) || (rawLn.length >= 4 && (rawLn.startsWith(empLn) || empLn.startsWith(rawLn)));
+            if (lnMatches) {
+              if (!fnToken || fnToken.startsWith(empFn) || empFn.startsWith(fnToken) || text.toLowerCase().includes(empFn)) {
+                result.employeeName = emp;
+                break;
+              }
             }
           }
         }
@@ -4274,17 +4340,38 @@ class SheetNavigator {
           item.employeeName = parsed.employeeName;
           const empSelect = document.getElementById(`scanned-emp-select-${item.id}`);
           if (empSelect) empSelect.value = parsed.employeeName;
+          const empStatus = document.getElementById(`scanned-emp-status-${item.id}`);
+          if (empStatus) {
+            empStatus.innerHTML = `<span style="font-size: 10px; color: #34d399; font-weight: 600;">✨ Found in photo</span>`;
+          }
           updatedCount++;
 
           // Propagate employee name to sibling cards from the same email message (e.g. DL Back)
           if (item.messageId && this.scannedCertItems) {
             const hideVaultedCheckbox = document.getElementById('cert-scan-hide-vaulted');
             const hideVaulted = hideVaultedCheckbox ? hideVaultedCheckbox.checked : true;
+            const subLower = String(item.subject || '').toLowerCase();
+            const isGroupEmail = /\b(apes|apprentices|new hires|crew|cards|roster|group)\b/i.test(subLower) ||
+                                 (this.scannedCertItems.filter(s => s.messageId === item.messageId).length > 2);
+
             this.scannedCertItems.forEach(sib => {
               if (sib.id !== item.id && sib.messageId === item.messageId && (!sib.employeeName || sib.employeeName === '')) {
+                // If it's a multi-person email, only propagate to the immediate adjacent DL Back card
+                if (isGroupEmail) {
+                  const isAdjacentBack = (sib.attIdx !== undefined && item.attIdx !== undefined && sib.attIdx === item.attIdx + 1);
+                  const sibFile = String(sib.fileName || '').toLowerCase();
+                  if (!isAdjacentBack && !sibFile.includes('back')) {
+                    return; // DO NOT propagate across different employees in multi-person emails!
+                  }
+                }
+
                 sib.employeeName = parsed.employeeName;
                 const sibSelect = document.getElementById(`scanned-emp-select-${sib.id}`);
                 if (sibSelect) sibSelect.value = parsed.employeeName;
+                const sibStatus = document.getElementById(`scanned-emp-status-${sib.id}`);
+                if (sibStatus) {
+                  sibStatus.innerHTML = `<span style="font-size: 10px; color: #34d399; font-weight: 600;">✨ Paired DL</span>`;
+                }
 
                 // If item is DL Front and sib is DL Back, specialize cert types
                 const sibFile = String(sib.fileName || '').toLowerCase();
