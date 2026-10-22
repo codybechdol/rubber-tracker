@@ -702,6 +702,20 @@ class LocalDatabase {
     } else if (norm === 'cpr') {
       const combo = this.snapshot.configs.cert_photos[this.getCertPhotoKey(employeeName, '1st Aid & CPR')];
       if (combo) return combo;
+    } else if (norm === 'mec' || norm === 'mec expiration' || norm === 'medical card' || norm === 'med card') {
+      const mecExp = this.snapshot.configs.cert_photos[this.getCertPhotoKey(employeeName, 'MEC Expiration')];
+      if (mecExp) return mecExp;
+      const mec = this.snapshot.configs.cert_photos[this.getCertPhotoKey(employeeName, 'MEC')];
+      if (mec) return mec;
+      const medCard = this.snapshot.configs.cert_photos[this.getCertPhotoKey(employeeName, 'Medical Card')];
+      if (medCard) return medCard;
+    } else if (norm === 'crane cert' || norm === 'crane evaluation' || norm === 'crane') {
+      const cc = this.snapshot.configs.cert_photos[this.getCertPhotoKey(employeeName, 'Crane Cert')];
+      if (cc) return cc;
+      const ce = this.snapshot.configs.cert_photos[this.getCertPhotoKey(employeeName, 'Crane Evaluation')];
+      if (ce) return ce;
+      const c = this.snapshot.configs.cert_photos[this.getCertPhotoKey(employeeName, 'Crane')];
+      if (c) return c;
     }
 
     return null;

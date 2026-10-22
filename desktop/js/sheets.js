@@ -2684,9 +2684,11 @@ class SheetNavigator {
             imgEl.style.display = 'block';
           }
 
-          // If employee name or expiration date is not yet known, auto-pull it off the picture!
+          // If employee name or expiration date is not yet known, auto-pull it off the picture asynchronously in the background!
           if (!item.isPdf && (!item.employeeName || !item.expDate)) {
-            await this.extractCertInfoFromImage(item, false);
+            this.extractCertInfoFromImage(item, false).catch(err => {
+              console.warn(`Background OCR note for card ${item.id}:`, err);
+            });
           }
         }
         return b64;
@@ -2711,7 +2713,7 @@ class SheetNavigator {
   }
 
   /**
-   * Queues background fetching of card images & PDFs smoothly without flooding Google Apps Script.
+   * Queues background fetching of card images & PDFs smoothly and concurrently for fast preview loading.
    */
   async loadScannedCertImagesQueue() {
     if (!this.scannedCertItems || this.scannedCertItems.length === 0) return;
@@ -2723,13 +2725,29 @@ class SheetNavigator {
       ? this.scannedCertItems.filter(item => !item.alreadyInVault)
       : this.scannedCertItems;
 
-    for (let i = 0; i < targetItems.length; i++) {
-      const item = targetItems[i];
-      if (!item || item.base64Data || item.isLoading) continue;
-      await this.loadScannedCertAttachment(item.id);
-      // Clean delay between requests to keep Google Apps Script happy
-      await new Promise(r => setTimeout(r, 250));
+    // Fetch attachments concurrently (2 workers) for snappy, non-blocking preview loading
+    const concurrency = 2;
+    let nextIdx = 0;
+
+    const worker = async () => {
+      while (nextIdx < targetItems.length) {
+        const item = targetItems[nextIdx++];
+        if (!item || item.base64Data || item.isLoading) continue;
+        try {
+          await this.loadScannedCertAttachment(item.id);
+        } catch (err) {
+          console.warn('Queue item error:', err);
+        }
+        await new Promise(r => setTimeout(r, 100));
+      }
+    };
+
+    const workers = [];
+    for (let w = 0; w < Math.min(concurrency, targetItems.length); w++) {
+      workers.push(worker());
+      await new Promise(r => setTimeout(r, 80));
     }
+    await Promise.all(workers);
   }
 
   /**
@@ -3730,6 +3748,75 @@ class SheetNavigator {
       }
     }
 
+    // 5. Token Pair Matching: First Name + Last Name co-occurrence with typo tolerance (e.g. "Gavin Rudd" -> "Gavin Ruud")
+    let bestCandidate = null;
+    let bestScore = -1;
+
+    for (const emp of activeList) {
+      if (prevSet && prevSet.has(emp.toLowerCase())) continue;
+      const parts = emp.replace(/\s+(jr|sr|ii|iii|iv)\.?$/i, '').split(/\s+/);
+      if (parts.length < 2) continue;
+      const fn = parts[0].toLowerCase();
+      const ln = parts[parts.length - 1].toLowerCase();
+
+      for (let i = 0; i < words.length; i++) {
+        const w1 = words[i].toLowerCase();
+        if (ignoredWords.has(w1)) continue;
+
+        for (let j = 0; j < words.length; j++) {
+          if (i === j) continue;
+          const w2 = words[j].toLowerCase();
+          if (ignoredWords.has(w2)) continue;
+
+          const fnDist = calcLevenshtein(w1, fn);
+          const lnDist = calcLevenshtein(w2, ln);
+          const maxLnDist = ln.length <= 4 ? 1 : 2;
+          const maxFnDist = fn.length <= 4 ? 1 : 2;
+
+          let score = -1;
+          if (w1 === fn && w2 === ln) {
+            score = 100;
+          } else if (w1 === fn && lnDist <= maxLnDist) {
+            score = 90 - lnDist * 10;
+          } else if (w2 === ln && fnDist <= maxFnDist) {
+            score = 90 - fnDist * 10;
+          } else if ((w1.length >= 3 && fn.startsWith(w1)) && (w2 === ln || lnDist <= 1)) {
+            score = 85;
+          }
+
+          if (score > bestScore) {
+            bestScore = score;
+            bestCandidate = emp;
+          }
+        }
+      }
+    }
+
+    if (bestCandidate && bestScore >= 70) {
+      return bestCandidate;
+    }
+
+    // 6. Unique First Name + Cert Keyword (e.g. "Gavin MEC" or "Gavin DL")
+    if (hasCertKeyword) {
+      const fnMap = {};
+      for (const emp of activeList) {
+        if (prevSet && prevSet.has(emp.toLowerCase())) continue;
+        const fn = emp.split(/\s+/)[0].toLowerCase();
+        fnMap[fn] = (fnMap[fn] || 0) + 1;
+      }
+      for (const w of words) {
+        const wLow = w.toLowerCase();
+        if (ignoredWords.has(wLow)) continue;
+        if (fnMap[wLow] === 1 && wLow.length >= 4) {
+          const emp = activeList.find(e => {
+            if (prevSet && prevSet.has(e.toLowerCase())) return false;
+            return e.split(/\s+/)[0].toLowerCase() === wLow;
+          });
+          if (emp) return emp;
+        }
+      }
+    }
+
     return '';
   }
 
@@ -3933,6 +4020,53 @@ class SheetNavigator {
             if (result.employeeName) break;
           }
           if (result.employeeName) break;
+        }
+      }
+
+      // D3. Token-Pair Co-occurrence with Typo Tolerance across OCR tokens (e.g. "Gavin" and "Rudd" on photo)
+      if (!result.employeeName) {
+        let bestCandidate = null;
+        let bestScore = -1;
+
+        for (const emp of filteredActiveList) {
+          const parts = emp.replace(/\s+(jr|sr|ii|iii|iv)\.?$/i, '').split(/\s+/);
+          if (parts.length < 2) continue;
+          const fn = parts[0].toLowerCase();
+          const ln = parts[parts.length - 1].toLowerCase();
+
+          for (let i = 0; i < cleanTokens.length; i++) {
+            const w1 = cleanTokens[i].toLowerCase();
+            if (w1.length < 3) continue;
+
+            for (let j = 0; j < cleanTokens.length; j++) {
+              if (i === j) continue;
+              const w2 = cleanTokens[j].toLowerCase();
+              if (w2.length < 3) continue;
+
+              const fnDist = this.calcLevenshtein(w1, fn);
+              const lnDist = this.calcLevenshtein(w2, ln);
+              const maxLnDist = ln.length <= 4 ? 1 : 2;
+              const maxFnDist = fn.length <= 4 ? 1 : 2;
+
+              let score = -1;
+              if (w1 === fn && w2 === ln) {
+                score = 100;
+              } else if (w1 === fn && lnDist <= maxLnDist) {
+                score = 90 - lnDist * 10;
+              } else if (w2 === ln && fnDist <= maxFnDist) {
+                score = 90 - fnDist * 10;
+              }
+
+              if (score > bestScore) {
+                bestScore = score;
+                bestCandidate = emp;
+              }
+            }
+          }
+        }
+
+        if (bestCandidate && bestScore >= 70) {
+          result.employeeName = bestCandidate;
         }
       }
     }

@@ -5480,6 +5480,50 @@ function scanCertRenewalEmails(options) {
         }
       }
 
+      // 2.7 Token Pair Matching: First Name + Last Name co-occurrence with typo tolerance (e.g. "Gavin Rudd" -> "Gavin Ruud")
+      var bestBackendCandidate = null;
+      var bestBackendScore = -1;
+
+      for (var fke = 0; fke < knownEmployees.length; fke++) {
+        var fkn = knownEmployees[fke];
+        if (previousEmployeesSet[fkn.toLowerCase()]) continue;
+        var fParts = fkn.replace(/\s+(jr|sr|ii|iii|iv)\.?$/i, '').split(/\s+/);
+        if (fParts.length < 2) continue;
+        var fFn = fParts[0].toLowerCase();
+        var fLn = fParts[fParts.length - 1].toLowerCase();
+
+        for (var wi = 0; wi < wordsList.length; wi++) {
+          var w1 = wordsList[wi].toLowerCase();
+          for (var wj = 0; wj < wordsList.length; wj++) {
+            if (wi === wj) continue;
+            var w2 = wordsList[wj].toLowerCase();
+
+            var fnD = levenshteinDist(w1, fFn);
+            var lnD = levenshteinDist(w2, fLn);
+            var maxLnD = fLn.length <= 4 ? 1 : 2;
+            var maxFnD = fFn.length <= 4 ? 1 : 2;
+
+            var tScore = -1;
+            if (w1 === fFn && w2 === fLn) {
+              tScore = 100;
+            } else if (w1 === fFn && lnD <= maxLnD) {
+              tScore = 90 - lnD * 10;
+            } else if (w2 === fLn && fnD <= maxFnD) {
+              tScore = 90 - fnD * 10;
+            }
+
+            if (tScore > bestBackendScore) {
+              bestBackendScore = tScore;
+              bestBackendCandidate = fkn;
+            }
+          }
+        }
+      }
+
+      if (bestBackendCandidate && bestBackendScore >= 70) {
+        return bestBackendCandidate;
+      }
+
       // 3. Fallback heuristic: extract name from subject if subject matches "<First> <Last> <CertType>"
       var stripped = clean
         .replace(/\b(1st\s*aid|first\s*aid|fa|cpr|dl|cdl|driver'?s?\s*license|mec|medical\s*card|med\s*card|dot\s*card|crane|forklift|osha|msha|bnsf|pole\s*top|dig\s*safe|trench|rigging|signalperson|spotter|evaluation|eval|cards?|certs?|certification|new|renewal|update|proof|photo|image|picture|scanned|scan|temp|updated)\b/ig, '')
