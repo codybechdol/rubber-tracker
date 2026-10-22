@@ -1844,13 +1844,18 @@ class SheetNavigator {
           if (emp && prevSet.has(emp)) return false;
           const subjLow = String(item.subject || '').toLowerCase();
           const fileLow = String(item.fileName || '').toLowerCase();
-          for (const prevName of prevSet) {
-            if (!prevName || prevName.length < 3) continue;
-            const re = new RegExp('\\b' + prevName.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&') + '\\b', 'i');
-            if (re.test(subjLow) || re.test(fileLow)) return false;
-            const parts = prevName.split(/\s+/);
-            if (parts.length >= 2 && parts[0].length >= 3 && parts[parts.length - 1].length >= 3) {
-              if (subjLow.includes(parts[0]) && subjLow.includes(parts[parts.length - 1])) return false;
+          const isNewHire = /\bnew\s*hire\b/i.test(subjLow);
+          if (!isNewHire) {
+            for (const prevName of prevSet) {
+              if (!prevName || prevName.length < 3) continue;
+              const re = new RegExp('\\b' + prevName.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&') + '\\b', 'i');
+              if (re.test(subjLow) || re.test(fileLow)) return false;
+              const parts = prevName.split(/\s+/);
+              if (parts.length >= 2 && parts[0].length >= 3 && parts[parts.length - 1].length >= 3) {
+                const fnRe = new RegExp('\\b' + parts[0].replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&') + '\\b', 'i');
+                const lnRe = new RegExp('\\b' + parts[parts.length - 1].replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&') + '\\b', 'i');
+                if ((fnRe.test(subjLow) && lnRe.test(subjLow)) || (fnRe.test(fileLow) && lnRe.test(fileLow))) return false;
+              }
             }
           }
           return true;
@@ -1860,7 +1865,7 @@ class SheetNavigator {
         this.scannedCertItems.forEach(item => {
           if (!item.employeeName || !activeEmps.some(n => n.toLowerCase() === item.employeeName.toLowerCase())) {
             const matched = (item.employeeName ? this.matchEmployeeFromText(item.employeeName, activeEmps) : '') ||
-                            this.matchEmployeeFromText(item.subject, activeEmps) ||
+                            this.matchEmployeeFromText(item.subject, activeEmps, true) ||
                             this.matchEmployeeFromText(item.fileName, activeEmps);
             if (matched) {
               item.employeeName = matched;
@@ -2219,7 +2224,7 @@ class SheetNavigator {
       // Auto-preselect employee if missing or not in active employees list
       if (!item.employeeName || !employeeOptions.some(n => n.toLowerCase() === item.employeeName.toLowerCase())) {
         const matched = (item.employeeName ? this.matchEmployeeFromText(item.employeeName, employeeOptions) : '') ||
-                        this.matchEmployeeFromText(item.subject, employeeOptions) ||
+                        this.matchEmployeeFromText(item.subject, employeeOptions, true) ||
                         this.matchEmployeeFromText(item.fileName, employeeOptions);
         if (matched) {
           item.employeeName = matched;
@@ -2422,6 +2427,11 @@ class SheetNavigator {
               </div>
               <select id="scanned-emp-select-${item.id}" onchange="window.sheetNavigator.handleScannedCardEmployeeChange('${this.escapeJs(item.id)}', this.value)" style="width: 100%; background: #0f172a; color: #f8fafc; border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; padding: 5px 8px; font-size: 12px; font-weight: 600;">
                 <option value="">-- Select Employee --</option>
+                ${item.employeeName && !employeeOptions.some(n => n.toLowerCase() === item.employeeName.toLowerCase()) ? `
+                  <option value="${this.escapeHtml(item.employeeName)}" selected>
+                    ${this.escapeHtml(item.employeeName)} (New Hire)
+                  </option>
+                ` : ''}
                 ${employeeOptions.map(name => `
                   <option value="${name}" ${item.employeeName && item.employeeName.toLowerCase() === name.toLowerCase() ? 'selected' : ''}>
                     ${name}
@@ -2701,8 +2711,8 @@ class SheetNavigator {
             imgEl.style.display = 'block';
           }
 
-          // If employee name or expiration date is not yet known, auto-pull it off the picture asynchronously in the background!
-          if (!item.isPdf && (!item.employeeName || !item.expDate)) {
+          // If employee name, expiration date, or cert type is not yet known/specialized, auto-pull it off the picture asynchronously in the background!
+          if (!item.isPdf && (!item.employeeName || !item.expDate || !item.certType || item.certType === 'Other Cert')) {
             this.extractCertInfoFromImage(item, false).catch(err => {
               console.warn(`Background OCR note for card ${item.id}:`, err);
             });
@@ -3612,7 +3622,7 @@ class SheetNavigator {
    * Matches an active employee from arbitrary text (email subject, attachment filename, or OCR text).
    * Supports full names, alternate names (e.g. John-Michael Baker -> John Baker), and compound parts.
    */
-  matchEmployeeFromText(text, employeeList = null) {
+  matchEmployeeFromText(text, employeeList = null, allowNewHireCandidate = false) {
     if (!text) return '';
     const clean = String(text)
       .replace(/^(fwd|re|fw):\s*/ig, '')
@@ -3622,6 +3632,36 @@ class SheetNavigator {
 
     const activeList = employeeList || this.getActiveEmployeeNamesList();
     const prevSet = this.getPreviousEmployeeNamesSet();
+
+    // 0. Dedicated New Hire format: "(Employee Name) New Hire Certs", "Employee Name New Hire Certs", "New Hire Certs - Employee Name", etc.
+    const mNewHire1 = clean.match(/^(?:[([{]\s*)?([A-Za-z\s'.-]+?)(?:\s*[)}\]])?\s*(?:[-–—:]\s*)?new\s*hire\s*(?:certs?|certifications?|cards?|paperwork|docs?|documents?)/i);
+    const mNewHire2 = !mNewHire1 ? clean.match(/new\s*hire\s*(?:certs?|certifications?|cards?|paperwork|docs?|documents?)\s*(?:[-–—:]\s*)?(?:[([{]\s*)?([A-Za-z\s'.-]+?)(?:\s*[)}\]])?$/i) : null;
+    const newHireCand = mNewHire1 ? mNewHire1[1] : (mNewHire2 ? mNewHire2[1] : '');
+    if (newHireCand) {
+      const nhClean = newHireCand.replace(/[-–—:_()[\]{}#@!?,.]/g, ' ').replace(/\s+/g, ' ').trim();
+      const nhWords = nhClean.split(' ');
+      if (nhWords.length >= 2 && nhWords.length <= 4) {
+        const nhFormatted = nhWords.map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+        // Check if matches a known employee (exact or fuzzy/token-pair)
+        for (const emp of activeList) {
+          if (prevSet && prevSet.has(emp.toLowerCase())) continue;
+          if (emp.toLowerCase() === nhFormatted.toLowerCase()) return emp;
+          const parts = emp.replace(/\s+(jr|sr|ii|iii|iv)\.?$/i, '').split(/\s+/);
+          if (parts.length >= 2) {
+            const fn = parts[0].toLowerCase();
+            const ln = parts[parts.length - 1].toLowerCase();
+            const cFn = nhWords[0].toLowerCase();
+            const cLn = nhWords[nhWords.length - 1].toLowerCase();
+            if ((cFn === fn || this.calcLevenshtein(cFn, fn) <= 1) && (cLn === ln || this.calcLevenshtein(cLn, ln) <= 1)) {
+              return emp;
+            }
+          }
+        }
+        if (allowNewHireCandidate && (!prevSet || !prevSet.has(nhFormatted.toLowerCase()))) {
+          return nhFormatted;
+        }
+      }
+    }
 
     // 1. Check exact active employee full names first (longer names first)
     const sorted = [...activeList].sort((a, b) => b.length - a.length);
@@ -3739,7 +3779,9 @@ class SheetNavigator {
     const ignoredWords = new Set([
       'the', 'and', 'for', 'with', 'card', 'cert', 'certs', 'license', 'driver', 'drivers',
       'medical', 'examiner', 'certificate', 'expiration', 'renewal', 'photo', 'image',
-      'scan', 'scanned', 'front', 'back', 'temp', 'update', 'proof', 'attachment'
+      'scan', 'scanned', 'front', 'back', 'temp', 'update', 'proof', 'attachment',
+      'new', 'hire', 'hires', 'hiring', 'paperwork', 'packet', 'pdf', 'documents', 'document',
+      'oregon', 'montana', 'idaho', 'washington'
     ]);
 
     for (const word of words) {
@@ -4162,15 +4204,27 @@ class SheetNavigator {
     } else if (lower.includes('cpr') && (lower.includes('first aid') || lower.includes('1st aid'))) {
       result.certType = '1st Aid & CPR';
     } else if (lower.includes('commercial license') || lower.includes('driver license') || lower.includes('driver\'s license') || lower.includes('cdl') || lower.includes('class: a') || lower.includes('class a') || lower.includes('dl#') || lower.includes('intrastate') || lower.includes('interstate')) {
-      result.certType = 'DL';
+      if (lower.includes('endorsements') || lower.includes('restrictions') || lower.includes('magnetic') || lower.includes('licensee\'s immediate possession')) {
+        result.certType = 'DL (Back)';
+      } else {
+        result.certType = 'DL';
+      }
     } else if (lower.includes('forklift')) {
       result.certType = 'Forklift';
     } else if (lower.includes('pole top') || lower.includes('ptr')) {
       result.certType = 'Pole Top Rescue';
     } else if (lower.includes('trench')) {
       result.certType = 'OSHA Trench Comp Person';
-    } else if (lower.includes('rigging') || lower.includes('signalperson')) {
+    } else if (lower.includes('rigging') || lower.includes('signalperson') || lower.includes('spotter')) {
       result.certType = 'Rigging & Signaling/Signalperson & Spotter Cert';
+    } else if (lower.includes('osha 1910') || lower.includes('osha 10') || lower.includes('osha 30') || lower.includes('occupational safety')) {
+      result.certType = 'OSHA 1910';
+    } else if (lower.includes('msha') || lower.includes('mine safety')) {
+      result.certType = 'MSHA';
+    } else if (lower.includes('bnsf') || lower.includes('railroad')) {
+      result.certType = 'BNSF';
+    } else if (lower.includes('dig safe') || lower.includes('call before you dig') || lower.includes('811')) {
+      result.certType = 'Dig Safe';
     } else if (lower.includes('first aid') || lower.includes('1st aid')) {
       result.certType = '1st Aid';
     } else if (lower.includes('cpr')) {
