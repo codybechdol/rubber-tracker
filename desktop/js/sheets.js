@@ -1842,12 +1842,15 @@ class SheetNavigator {
         this.scannedCertItems = rawCerts.filter(item => {
           const emp = String(item.employeeName || '').toLowerCase().trim();
           if (emp && prevSet.has(emp)) return false;
-          const subjEmp = this.matchEmployeeFromText(item.subject, activeEmps);
-          if (!subjEmp) {
-            // Check if subject is for a previous employee
-            for (const prevName of prevSet) {
-              const re = new RegExp('\\b' + prevName.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&') + '\\b', 'i');
-              if (re.test(item.subject)) return false;
+          const subjLow = String(item.subject || '').toLowerCase();
+          const fileLow = String(item.fileName || '').toLowerCase();
+          for (const prevName of prevSet) {
+            if (!prevName || prevName.length < 3) continue;
+            const re = new RegExp('\\b' + prevName.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&') + '\\b', 'i');
+            if (re.test(subjLow) || re.test(fileLow)) return false;
+            const parts = prevName.split(/\s+/);
+            if (parts.length >= 2 && parts[0].length >= 3 && parts[parts.length - 1].length >= 3) {
+              if (subjLow.includes(parts[0]) && subjLow.includes(parts[parts.length - 1])) return false;
             }
           }
           return true;
@@ -2227,12 +2230,26 @@ class SheetNavigator {
     });
 
     const prevNamesSet = this.getPreviousEmployeeNamesSet();
+    const isPreviousItem = (item) => {
+      const emp = String(item.employeeName || '').toLowerCase().trim();
+      if (emp && prevNamesSet.has(emp)) return true;
+      const subjLow = String(item.subject || '').toLowerCase();
+      const fileLow = String(item.fileName || '').toLowerCase();
+      for (const prevName of prevNamesSet) {
+        if (!prevName || prevName.length < 3) continue;
+        const re = new RegExp('\\b' + prevName.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&') + '\\b', 'i');
+        if (re.test(subjLow) || re.test(fileLow)) return true;
+        const parts = prevName.split(/\s+/);
+        if (parts.length >= 2 && parts[0].length >= 3 && parts[parts.length - 1].length >= 3) {
+          if (subjLow.includes(parts[0]) && subjLow.includes(parts[parts.length - 1])) return true;
+        }
+      }
+      return false;
+    };
+
     const displayItems = (hideVaulted
       ? this.scannedCertItems.filter(item => !item.alreadyInVault)
-      : this.scannedCertItems).filter(item => {
-        const emp = String(item.employeeName || '').toLowerCase().trim();
-        return !prevNamesSet.has(emp);
-      });
+      : this.scannedCertItems).filter(item => !isPreviousItem(item));
 
     if (batchActions) batchActions.style.display = displayItems.length > 0 ? 'flex' : 'none';
     if (countBadge) {
@@ -3486,6 +3503,33 @@ class SheetNavigator {
         if (pName && !activeNames.has(pName)) prevEmpNames.add(pName);
       });
     }
+
+    // Also pull historical departed employees from employee_history table
+    const histTable = this.db ? this.db.getTable('employee_history') : null;
+    if (histTable && histTable.rows) {
+      histTable.rows.forEach(r => {
+        const hName = String(r['Employee Name'] || r['Name'] || '').toLowerCase().trim();
+        if (!hName || /^\d{2}\/\d{2}\/\d{4}$/.test(hName) || hName.length < 3) return;
+        if (activeNames.has(hName)) return;
+
+        const ev = String(r['Event Type'] || '').toUpperCase();
+        const loc = String(r['Location'] || '').toLowerCase();
+        const notes = String(r['Notes'] || '').toLowerCase();
+        const lastDay = r['Last Day'];
+        const reason = String(r['Last Day Reason'] || '').toLowerCase();
+
+        if (
+          ev.includes('DEPART') || ev.includes('TERMINAT') || ev.includes('QUIT') || ev.includes('FIRED') || ev.includes('RESIGN') ||
+          loc.includes('previous') ||
+          notes.includes('quit on') || notes.includes('terminated') || notes.includes('departure') || notes.includes('previous employee') ||
+          lastDay || reason ||
+          !activeNames.has(hName)
+        ) {
+          prevEmpNames.add(hName);
+        }
+      });
+    }
+
     // Ensure no currently active employees are treated as previous employees
     activeNames.forEach(n => prevEmpNames.delete(n));
     return prevEmpNames;

@@ -5265,6 +5265,31 @@ function scanCertRenewalEmails(options) {
       Logger.log('Employees sheet scan note: ' + empErr);
     }
 
+    // Check Employee History sheet for departed employees
+    try {
+      if (ss) {
+        var histSheetRef = ss.getSheetByName(typeof SHEET_EMPLOYEE_HISTORY !== 'undefined' ? SHEET_EMPLOYEE_HISTORY : 'Employee History');
+        if (histSheetRef && histSheetRef.getLastRow() > 1) {
+          var histGrid = histSheetRef.getDataRange().getValues();
+          var hNameIdx = 1;
+          for (var hc = 0; hc < histGrid[0].length; hc++) {
+            if (String(histGrid[0][hc] || '').toLowerCase().indexOf('name') !== -1) {
+              hNameIdx = hc;
+              break;
+            }
+          }
+          for (var hr = 1; hr < histGrid.length; hr++) {
+            var hn = String(histGrid[hr][hNameIdx] || '').toLowerCase().trim();
+            if (hn && hn.length >= 3 && !/^\d{2}\/\d{2}\/\d{4}$/.test(hn)) {
+              previousEmployeesSet[hn] = true;
+            }
+          }
+        }
+      }
+    } catch (histErr) {
+      Logger.log('Employee History sheet scan note: ' + histErr);
+    }
+
     if (Array.isArray(options.activeEmployees) && options.activeEmployees.length > 0) {
       // Use active employees provided by client
       for (var aIdx = 0; aIdx < options.activeEmployees.length; aIdx++) {
@@ -5285,6 +5310,11 @@ function scanCertRenewalEmails(options) {
           }
         }
       }
+    }
+
+    // Ensure currently active employees are never treated as previous employees
+    for (var ke = 0; ke < knownEmployees.length; ke++) {
+      delete previousEmployeesSet[knownEmployees[ke].toLowerCase()];
     }
 
     // Sort employees by name length descending so longer full names match first
@@ -5688,6 +5718,27 @@ function scanCertRenewalEmails(options) {
         if (subjectEmp && previousEmployeesSet[subjectEmp.toLowerCase()]) {
           continue; // Discard emails for departed employees
         }
+
+        // Discard if subject or sender mentions ANY previous employee directly
+        var subLowCheck = subject.toLowerCase();
+        var isDepartedSubj = false;
+        for (var pEmpName in previousEmployeesSet) {
+          if (pEmpName.length < 3) continue;
+          var pRe = new RegExp('\\b' + pEmpName.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&') + '\\b', 'i');
+          if (pRe.test(subLowCheck)) {
+            isDepartedSubj = true;
+            break;
+          }
+          var pParts = pEmpName.split(/\s+/);
+          if (pParts.length >= 2 && pParts[0].length >= 3 && pParts[pParts.length - 1].length >= 3) {
+            if (subLowCheck.indexOf(pParts[0]) !== -1 && subLowCheck.indexOf(pParts[pParts.length - 1]) !== -1) {
+              isDepartedSubj = true;
+              break;
+            }
+          }
+        }
+        if (isDepartedSubj) continue;
+
         var detectedEmp = subjectEmp;
         if (!detectedEmp) {
           var sender = String(msg.getFrom() || '');
@@ -5703,6 +5754,19 @@ function scanCertRenewalEmails(options) {
         for (var a = 0; a < validAttachments.length; a++) {
           var vItem = validAttachments[a];
           var detectedCert = detectAttachmentCert(subject, vItem.name, a, validAttachments.length);
+
+          // Discard if attachment filename mentions any previous employee
+          var fLowCheck = String(vItem.name || '').toLowerCase();
+          var isDepartedFile = false;
+          for (var pFileEmp in previousEmployeesSet) {
+            if (pFileEmp.length < 3) continue;
+            var pfRe = new RegExp('\\b' + pFileEmp.replace(/[-[\]{}()*+?.,\\^$|#\s]/g, '\\$&') + '\\b', 'i');
+            if (pfRe.test(fLowCheck)) {
+              isDepartedFile = true;
+              break;
+            }
+          }
+          if (isDepartedFile) continue;
 
           // Check if attachment filename itself names the employee
           var attEmp = detectEmployeeName(vItem.name);
