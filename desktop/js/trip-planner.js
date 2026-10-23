@@ -537,6 +537,7 @@ class TripPlannerApp {
                   jobNum: rawJob,
                   isCompleted: true,
                   completedDate: this.formatDisplayDate(rawDate),
+                  dateKey: targetDateKey,
                   _sKey: sKey
                 });
               }
@@ -636,6 +637,7 @@ class TripPlannerApp {
                   jobNum: rawJob,
                   isCompleted: true,
                   completedDate: this.formatDisplayDate(rawDate),
+                  dateKey: targetDateKey,
                   _sKey: sKey
                 });
               }
@@ -1707,10 +1709,10 @@ class TripPlannerApp {
         seen.add(crewId);
         crews.push({
           crewId,
-          foreman: foreman || 'Lead',
+          foreman: foreman || 'Foreman',
           location: loc || 'Helena',
           jobName,
-          display: `Crew ${crewId} — ${foreman || 'Lead'}${loc ? ` (${loc})` : ''}`
+          display: `Crew ${crewId} — ${foreman || 'Foreman'}${loc ? ` (${loc})` : ''}`
         });
       });
     }
@@ -1725,7 +1727,7 @@ class TripPlannerApp {
         seen.add(crewId);
         crews.push({
           crewId,
-          foreman: 'Lead',
+          foreman: 'Foreman',
           location: 'Helena',
           jobName: '',
           display: `Crew ${crewId}`
@@ -2084,14 +2086,14 @@ class TripPlannerApp {
 
     container.innerHTML = this.selectedClassCrews.map(cId => {
       const members = this.getCrewMembers(cId);
-      let foreman = 'Lead';
+      let foreman = 'Foreman';
       const jRow = jobRows.find(r => {
         const jNum = this.getSignificantJobNumber(String(r['Job Number'] || r['Crew'] || '')).toLowerCase();
         const jStat = String(r['Status'] || r['Job Status'] || '').toLowerCase();
         return jNum === cId.toLowerCase() && !jStat.includes('completed') && !jStat.includes('on hold');
       });
       if (jRow) {
-        const jLead = String(jRow['Foreman'] || jRow['Crew Lead'] || jRow['Lead'] || 'Lead').trim();
+        const jLead = String(jRow['Foreman'] || jRow['Crew Lead'] || jRow['Lead'] || 'Foreman').trim();
         if (!this.isDepartedOrPreviousEmployee(jLead)) {
           foreman = jLead;
         } else if (members.length > 0 && members[0].isForeman) {
@@ -4094,7 +4096,7 @@ class TripPlannerApp {
         foremanName = String(jRow['Foreman'] || jRow['Crew Lead'] || jRow['Lead'] || '').trim();
       }
     }
-    if (!foremanName) foremanName = 'Lead / Foreman';
+    if (!foremanName) foremanName = 'Foreman';
 
     // 6. Query Inventory Details for Old & New Items
     const invTable = this.db ? this.db.getTable(invKey) : null;
@@ -4153,6 +4155,20 @@ class TripPlannerApp {
     const projectedChgOutStr = `${String(projectedDate.getMonth() + 1).padStart(2, '0')}/${String(projectedDate.getDate()).padStart(2, '0')}/${projectedDate.getFullYear()}`;
 
     const todayIso = today.toISOString().split('T')[0];
+
+    // Determine the scheduled trip date (if scheduled on a planner day)
+    const targetScheduledDate = target.dateKey || (target._scheduledEntry && target._scheduledEntry.dateKey) || target.scheduledDate || null;
+    let initialDateVal = targetScheduledDate || todayIso;
+
+    // Check if there is an existing completed date
+    let curCompletedIso = '';
+    const rawCompletedDate = dateChangedVal || oldDateAssigned || (target && target.completedDate);
+    if (rawCompletedDate) {
+      const parsedD = this.parseDate(rawCompletedDate);
+      if (parsedD && !isNaN(parsedD.getTime())) {
+        curCompletedIso = parsedD.toISOString().split('T')[0];
+      }
+    }
 
     // Update Header
     if (iconEl) iconEl.textContent = isReclaim ? '📦' : itemIcon;
@@ -4347,15 +4363,26 @@ class TripPlannerApp {
           ` : ''}
         </div>
 
-        ${!isAlreadyCompleted ? `
+        ${isAlreadyCompleted ? `
+          <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 6px; padding: 10px 12px; background: rgba(0,0,0,0.2); border-radius: 6px; border: 1px solid rgba(255,255,255,0.08);">
+            <label style="font-size: 12px; font-weight: 700; color: #cbd5e1; display: flex; align-items: center; gap: 6px;">
+              <span>📅 Change Completed Date:</span>
+              <input type="date" id="swap-edit-completion-date" value="${curCompletedIso || initialDateVal}" class="form-control" style="padding: 4px 8px; font-size: 12px; background: var(--bg-primary); color: #f8fafc; border: 1px solid var(--border-color); border-radius: 4px;" />
+            </label>
+            <button class="btn btn-secondary admin-only-control" style="padding: 4px 10px; font-size: 11.5px; font-weight: 700; color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.4); border-radius: 4px; cursor: pointer;" onclick="window.tripPlanner.updateCompletedSwapDate('${tableKey}', ${swRowIdx !== null ? swRowIdx : `'${this.escapeJs(empName)}'`}, '${this.escapeJs(empName)}', '${this.escapeJs(oldItemNum)}')">
+              <span>Save Date</span>
+            </button>
+            <span style="font-size: 11px; color: var(--text-muted);">${targetScheduledDate ? `Scheduled Trip: ${targetScheduledDate}` : ''}</span>
+          </div>
+        ` : `
           <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-top: 4px;">
             <label style="font-size: 12px; font-weight: 700; color: #cbd5e1; display: flex; align-items: center; gap: 6px;">
               <span>📅 ${isReclaim ? 'Reclaim Date:' : 'Swap Date:'}</span>
-              <input type="date" id="swap-completion-date" value="${todayIso}" class="form-control" style="padding: 5px 10px; font-size: 12px; background: var(--bg-primary); color: #f8fafc; border: 1px solid var(--border-color); border-radius: 4px;" />
+              <input type="date" id="swap-completion-date" value="${initialDateVal}" class="form-control" style="padding: 5px 10px; font-size: 12px; background: var(--bg-primary); color: #f8fafc; border: 1px solid var(--border-color); border-radius: 4px;" />
             </label>
-            <span style="font-size: 11px; color: var(--text-muted);">Defaults to today (${today.toLocaleDateString()})</span>
+            <span style="font-size: 11px; color: var(--text-muted);">${targetScheduledDate ? `Defaults to scheduled trip day (${targetScheduledDate})` : `Defaults to today (${today.toLocaleDateString()})`}</span>
           </div>
-        ` : ''}
+        `}
       </div>
     `;
 
@@ -4414,6 +4441,71 @@ class TripPlannerApp {
     this.showToast(`Dismissed completed swap for ${empName} from schedule.`);
     this.renderPlanner();
     this.renderPickedSwapsList();
+  }
+
+  async updateCompletedSwapDate(tableKey, rowIdxOrEmp, empName, currentItem) {
+    if (window.currentRoleMode === 'view_only') return;
+    const dateInput = document.getElementById('swap-edit-completion-date');
+    const dateVal = dateInput ? dateInput.value : '';
+    if (!dateVal) {
+      alert('Please select a valid date for the swap completion.');
+      return;
+    }
+
+    const dObj = this.parseDate(dateVal) || new Date();
+    const dateFormatted = `${String(dObj.getMonth() + 1).padStart(2, '0')}/${String(dObj.getDate()).padStart(2, '0')}/${dObj.getFullYear()}`;
+
+    const swTable = this.db ? this.db.getTable(tableKey) : null;
+    let swRow = null;
+    if (swTable && swTable.rows) {
+      const isMatchForEmp = (r) => {
+        if (!r) return false;
+        const emp = String(r['Employee'] || r['Crew Lead / Employee'] || '').trim().toLowerCase();
+        return emp === (empName || '').toLowerCase() || (window.employeeResolver && typeof window.employeeResolver.areSameEmployee === 'function' && window.employeeResolver.areSameEmployee(emp, empName));
+      };
+      if (typeof rowIdxOrEmp === 'number' && swTable.rows[rowIdxOrEmp] && isMatchForEmp(swTable.rows[rowIdxOrEmp])) {
+        swRow = swTable.rows[rowIdxOrEmp];
+      } else {
+        swRow = swTable.rows.find(r => {
+          if (!isMatchForEmp(r)) return false;
+          const itm = String(r['Current Glove #'] || r['Current Sleeve #'] || r['Current Blanket #'] || r['Current Item #'] || '').trim().toLowerCase();
+          return !currentItem || itm === (currentItem || '').toLowerCase();
+        });
+      }
+    }
+
+    const sm = window.swapEngine || window.swapsManager;
+    if (sm && typeof sm.handleDateChangedEdit === 'function') {
+      await sm.handleDateChangedEdit(tableKey, swRow || rowIdxOrEmp, dateFormatted, empName, currentItem);
+    }
+
+    // Update scheduledSwaps entry if exists
+    if (this.scheduledSwaps) {
+      const targetEmp = (empName || '').trim().toLowerCase();
+      const targetItm = (currentItem || '').trim().toLowerCase();
+      let changed = false;
+      Object.keys(this.scheduledSwaps).forEach(k => {
+        const kLower = k.toLowerCase();
+        if (kLower.includes(targetEmp) && (!targetItm || kLower.includes(targetItm))) {
+          if (typeof this.scheduledSwaps[k] === 'object') {
+            this.scheduledSwaps[k].completed = true;
+            this.scheduledSwaps[k].completedDate = dateFormatted;
+            changed = true;
+          }
+        }
+      });
+      if (changed) this.saveScheduledSwaps();
+    }
+
+    this.closeSwapDetailsModal();
+    this.showToast(`Updated completion date for ${empName} to ${dateFormatted}.`);
+    this.renderPlanner();
+    this.renderPickedSwapsList();
+    this.notifyAccomplishmentsModal();
+
+    if (this.activeModalCrewId) {
+      this.openCrewTasksModal(this.activeModalCrewId, this.activeModalLocation, this.activeModalCat, this.activeModalDateKey);
+    }
   }
 
   async executeCompleteSwapFromModal(tableKey, rowIdxOrEmp, empName, currentItem) {
@@ -6353,7 +6445,7 @@ class TripPlannerApp {
             if (crewId && !activeCrewsByLoc[loc].some(c => c.crewId === crewId)) {
               activeCrewsByLoc[loc].push({
                 crewId: crewId,
-                foreman: foreman || 'Lead',
+                foreman: foreman || 'Foreman',
                 crewSize: crewSize,
                 jobName: jobName,
                 status: status
@@ -7038,7 +7130,7 @@ class TripPlannerApp {
                                 <div id="class-roster-${this.escapeHtml(mt.id)}" style="display: ${isRosterOpen ? 'flex' : 'none'}; flex-direction: column; gap: 3px; margin-top: 5px; padding: 4px 6px; background: rgba(0,0,0,0.25); border-radius: 4px;">
                                   ${resolved.crews.length > 1 ? resolved.crews.map(c => `
                                     <div style="font-size: 9.5px; font-weight: 800; color: #93c5fd; margin-top: 4px; padding-bottom: 2px; border-bottom: 1px solid rgba(255,255,255,0.08); display: flex; justify-content: space-between; align-items: center;">
-                                      <span>🚚 Crew ${this.escapeHtml(c.crewId)} (${this.escapeHtml(c.foreman || 'Lead')})</span>
+                                      <span>🚚 Crew ${this.escapeHtml(c.crewId)} (${this.escapeHtml(c.foreman || 'Foreman')})</span>
                                       <span style="font-size: 8.5px; color: #34d399;">${c.members.length} linemen</span>
                                     </div>
                                     ${c.members.map(m => `
@@ -7132,7 +7224,7 @@ class TripPlannerApp {
                               ${this.escapeHtml(tr.topic)}
                             </div>
                             <div style="font-size: 11px; margin-top: 3px; color: #cbd5e1; line-height: 1.3;">
-                              <span>👤 <strong>Lead:</strong> ${this.escapeHtml(tr.lead || 'Lead')}</span>
+                              <span>👤 <strong>Foreman:</strong> ${this.escapeHtml(tr.lead || 'Foreman')}</span>
                               ${tr.location ? `<span style="color: #93c5fd; margin-left: 6px;">📍 ${this.escapeHtml(tr.location)}</span>` : ''}
                               ${tr.attendees ? `
                                 <div style="font-size: 10px; color: #94a3b8; margin-top: 2px;">
@@ -7200,7 +7292,7 @@ class TripPlannerApp {
                             </div>
 
                             <div style="font-size: 11px; margin-top: 3px; color: #cbd5e1; line-height: 1.3;">
-                              <span>👤 <strong>Lead:</strong> ${this.escapeHtml(tr.lead || 'Lead')}</span>
+                              <span>👤 <strong>Foreman:</strong> ${this.escapeHtml(tr.lead || 'Foreman')}</span>
                               ${tr.attendees ? `
                                 <div style="font-size: 10px; color: #94a3b8; margin-top: 2px;">
                                   👥 <strong>Crew Members:</strong> ${this.escapeHtml(tr.attendees)}
@@ -7332,6 +7424,7 @@ class TripPlannerApp {
                   ...item,
                   _sKey: sKey,
                   _scheduledEntry: entry,
+                  dateKey: dateKey,
                   isCompleted: isDone,
                   completedDate: compDate
                 });
@@ -9382,7 +9475,7 @@ class TripPlannerApp {
         const cInfo = this.getCrewInfo(rawCrew, rawLead, r['Location']);
         const crewId = rawCrew || cInfo.crewId || 'Unassigned';
         const activeCrewId = cInfo.crewId || crewId;
-        const lead = cInfo.foreman || rawLead || 'Lead';
+        const lead = cInfo.foreman || rawLead || 'Foreman';
         const location = cInfo.location || 'Helena';
         const status = String(r['Status'] || r['Training Status'] || '').trim();
         const isCompleted = status.toLowerCase() === 'completed' || status.toLowerCase() === 'complete';
@@ -9395,7 +9488,7 @@ class TripPlannerApp {
           if (liveMembers && liveMembers.length > 0) {
             attendees = liveMembers.map(m => m.name).join(', ');
           }
-        } else if (lead && lead !== 'Lead' && attendees) {
+        } else if (lead && lead !== 'Foreman' && lead !== 'Lead' && attendees) {
           // Ensure active foreman / lead is listed first in attendees if present
           const parts = attendees.split(',').map(s => s.trim()).filter(Boolean);
           const leadIdx = parts.findIndex(p => p.toLowerCase() === lead.toLowerCase());
@@ -9868,7 +9961,7 @@ class TripPlannerApp {
 
     // Get crew details from Job Tracking
     const jobTable = this.db.getTable('job_tracking');
-    let foreman = 'Lead';
+    let foreman = 'Foreman';
     let loc = location || 'Helena';
     let crewSize = 0;
     let jobName = '';
@@ -9876,7 +9969,7 @@ class TripPlannerApp {
     if (jobTable && jobTable.rows) {
       const jobRow = jobTable.rows.find(r => String(r['Job Number'] || r['Crew'] || r['Job #'] || '').trim() === String(crewId).trim());
       if (jobRow) {
-        foreman = String(jobRow['Foreman'] || jobRow['Crew Lead'] || jobRow['Lead'] || 'Lead').trim();
+        foreman = String(jobRow['Foreman'] || jobRow['Crew Lead'] || jobRow['Lead'] || 'Foreman').trim();
         loc = String(jobRow['Location'] || loc).trim();
         crewSize = parseInt(jobRow['Crew Size'] || jobRow['Size'] || 0, 10) || 0;
         jobName = String(jobRow['Job Name'] || '').trim();

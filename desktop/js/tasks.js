@@ -566,7 +566,7 @@ class TaskManagerApp {
             type: '🎓 Safety Training',
             itemType: topic,
             currentItem: `Month: ${month}`,
-            employee: attendees ? `Crew Members: ${attendees}` : (crewForeman ? `Lead: ${crewForeman}` : `Crew ${crewId}`),
+            employee: attendees ? `Crew Members: ${attendees}` : (crewForeman ? `Foreman: ${crewForeman}` : `Crew ${crewId}`),
             crewId: crewId,
             foreman: crewForeman,
             location: this.cleanLocation(loc),

@@ -1546,7 +1546,7 @@ class WeeklySummaryEngine {
                         ${this.escapeHtml(tr.topic)}
                       </div>
                       <div style="font-size: 10px; color: #cbd5e1; margin-top: 2px; display: flex; align-items: center; gap: 5px; flex-wrap: wrap;">
-                        ${tr.lead ? `<span>👤 <strong>Lead:</strong> ${this.escapeHtml(tr.lead)}</span>` : ''}
+                        ${tr.lead ? `<span>👤 <strong>Foreman:</strong> ${this.escapeHtml(tr.lead)}</span>` : ''}
                         ${tr.location ? `<span style="color: #93c5fd;">📍 ${this.escapeHtml(tr.location)}</span>` : ''}
                         ${tr.time ? `<span style="color: #6ee7b7;">🕒 ${this.escapeHtml(tr.time)}</span>` : ''}
                       </div>
@@ -2687,7 +2687,7 @@ class WeeklySummaryEngine {
               const mark = isDone ? '✅' : '⏳';
               taskItems.push(`
                 <div style="margin-bottom: 3px; font-size: 11px; ${isDone ? 'color: #64748b;' : 'color: #065f46; font-weight: 600;'}">
-                  ${mark} 🎓 <strong>${this.escapeHtml(tr.topic)}</strong>${tr.crewId ? ` · Crew ${this.escapeHtml(tr.crewId)}` : ''}${tr.lead ? ` (Lead: ${this.escapeHtml(tr.lead)})` : ''}${tr.location ? ` [📍 ${this.escapeHtml(tr.location)}]` : ''}
+                  ${mark} 🎓 <strong>${this.escapeHtml(tr.topic)}</strong>${tr.crewId ? ` · Crew ${this.escapeHtml(tr.crewId)}` : ''}${tr.lead ? ` (Foreman: ${this.escapeHtml(tr.lead)})` : ''}${tr.location ? ` [📍 ${this.escapeHtml(tr.location)}]` : ''}
                 </div>
               `);
             });
@@ -3001,7 +3001,7 @@ class WeeklySummaryEngine {
         }
         if (d.trainings && d.trainings.length > 0) {
           d.trainings.forEach(tr => {
-            text += `   🎓 Training: ${tr.topic}${tr.crewId ? ` — Crew ${tr.crewId}` : ''}${tr.lead ? ` (Lead: ${tr.lead})` : ''} [📍 ${tr.location}] ${tr.isCompleted ? '[Done]' : '[Scheduled]'}\n`;
+            text += `   🎓 Training: ${tr.topic}${tr.crewId ? ` — Crew ${tr.crewId}` : ''}${tr.lead ? ` (Foreman: ${tr.lead})` : ''} [📍 ${tr.location}] ${tr.isCompleted ? '[Done]' : '[Scheduled]'}\n`;
           });
         }
         if (d.equipment && d.equipment.length > 0) {

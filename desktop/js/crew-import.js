@@ -4582,7 +4582,7 @@ class CrewImportEngine {
                         </td>
                         <td style="padding: 8px 12px; font-weight: 700; color: #06b6d4; font-family: monospace;">📋 ${this.escapeHtml(nj.jobNumber)}</td>
                         <td style="padding: 8px 12px;"><span class="badge" style="background: rgba(6, 182, 212, 0.2); color: #06b6d4; padding: 2px 6px; border-radius: 4px; font-weight: 700;">New Job</span></td>
-                        <td style="padding: 8px 12px; color: var(--text-muted);">New Job in ${this.escapeHtml(nj.location)} (Crew Size: ${nj.crewSize}, Lead: ${this.escapeHtml(nj.suggestedForeman || 'TBD')}, Sched: ${this.escapeHtml(nj.scheduleLabel)})</td>
+                        <td style="padding: 8px 12px; color: var(--text-muted);">New Job in ${this.escapeHtml(nj.location)} (Crew Size: ${nj.crewSize}, Foreman: ${this.escapeHtml(nj.suggestedForeman || 'TBD')}, Sched: ${this.escapeHtml(nj.scheduleLabel)})</td>
                       </tr>
                     `;
                   }).join('') : ''}

@@ -796,14 +796,130 @@ function getMissingTimesAlert(tasks) {
 }
 
 /**
- * Formats the breakdown into plain text for timesheet.
+ * Formats daily accomplishments into conversational paragraphs without emojis or bullets.
  *
  * @param {Object} breakdown - Daily breakdown object
- * @param {string} format - Output format: 'text', 'bullets', or 'table'
+ * @return {string} Formatted output
+ */
+function formatBreakdownAsParagraph(breakdown) {
+  var sections = [];
+
+  for (var d = 0; d < breakdown.dayOrder.length; d++) {
+    var dayKey = breakdown.dayOrder[d];
+    var day = breakdown.days[dayKey];
+    var sentences = [];
+
+    if (day.isOfficeDay) {
+      sentences.push('Spent the day in the Helena office focusing on safety administration.');
+      var helenaTasks = day.locations['Helena'] || day.locations['helena'];
+      if (helenaTasks) {
+        var parts = [];
+        if (helenaTasks.gloveSwaps.length > 0) parts.push(helenaTasks.gloveSwaps.length + ' glove swap' + (helenaTasks.gloveSwaps.length === 1 ? '' : 's'));
+        if (helenaTasks.sleeveSwaps.length > 0) parts.push(helenaTasks.sleeveSwaps.length + ' sleeve swap' + (helenaTasks.sleeveSwaps.length === 1 ? '' : 's'));
+        if (parts.length > 0) {
+          sentences.push('Completed equipment exchanges: delivered ' + parts.join(' and ') + '.');
+        }
+        if (helenaTasks.trainings.length > 0) {
+          var tTopics = [];
+          for (var t = 0; t < helenaTasks.trainings.length; t++) {
+            tTopics.push(String(helenaTasks.trainings[t].taskType).replace(/^Training:\s*/i, ''));
+          }
+          sentences.push('Conducted training on ' + tTopics.join(', ') + '.');
+        }
+        if (helenaTasks.missingSafetyNotices && Object.keys(helenaTasks.missingSafetyNotices).length > 0) {
+          var foremenNotified = Object.keys(helenaTasks.missingSafetyNotices);
+          sentences.push('Followed up with ' + foremenNotified.join(', ') + ' regarding missing safety reports.');
+        }
+        if (helenaTasks.otherTasks.length > 0) {
+          var oTasks = [];
+          for (var ot = 0; ot < helenaTasks.otherTasks.length; ot++) {
+            oTasks.push(helenaTasks.otherTasks[ot].taskType);
+          }
+          sentences.push('Completed administrative tasks: ' + oTasks.join(', ') + '.');
+        }
+      }
+    } else {
+      var nonHelenaLocs = [];
+      var visitedCrews = [];
+      for (var l = 0; l < day.locationOrder.length; l++) {
+        var locName = day.locationOrder[l];
+        if (locName.toLowerCase() !== 'helena') {
+          nonHelenaLocs.push(locName);
+          var locData = day.locations[locName];
+          if (locData && locData.crew) visitedCrews.push('Crew ' + locData.crew);
+        }
+      }
+
+      if (nonHelenaLocs.length > 0) {
+        var visitDesc = 'Traveled to ' + nonHelenaLocs.join(' and ');
+        if (visitedCrews.length > 0) {
+          visitDesc += ' to visit ' + visitedCrews.join(', ');
+        }
+        visitDesc += '.';
+        sentences.push(visitDesc);
+      }
+
+      var totalGloves = 0;
+      var totalSleeves = 0;
+      var trainingTopics = [];
+      for (var lo = 0; lo < day.locationOrder.length; lo++) {
+        var ld = day.locations[day.locationOrder[lo]];
+        if (!ld) continue;
+        totalGloves += ld.gloveSwaps.length;
+        totalSleeves += ld.sleeveSwaps.length;
+        for (var tr = 0; tr < ld.trainings.length; tr++) {
+          trainingTopics.push(String(ld.trainings[tr].taskType).replace(/^Training:\s*/i, ''));
+        }
+      }
+
+      var swapParts = [];
+      if (totalGloves > 0) swapParts.push(totalGloves + ' glove' + (totalGloves === 1 ? '' : 's'));
+      if (totalSleeves > 0) swapParts.push(totalSleeves + ' sleeve' + (totalSleeves === 1 ? '' : 's'));
+      if (swapParts.length > 0) {
+        sentences.push('Completed equipment deliveries and exchanges (' + swapParts.join(', ') + ').');
+      }
+
+      if (trainingTopics.length > 0) {
+        sentences.push('Conducted monthly safety training: ' + trainingTopics.join(', ') + '.');
+      }
+    }
+
+    if (sentences.length > 0) {
+      sections.push(day.dateFormatted + '\n' + sentences.join(' '));
+    }
+  }
+
+  if (sections.length === 0) {
+    return 'No completed tasks found for the selected period.';
+  }
+
+  if (breakdown.weekSummary && breakdown.dayOrder.length > 1) {
+    var ws = breakdown.weekSummary;
+    var sumParts = [];
+    if (ws.crewsVisited && ws.crewsVisited.length > 0) sumParts.push(ws.crewsVisited.length + ' crews visited');
+    if (ws.taskCounts.swaps > 0) sumParts.push(ws.taskCounts.swaps + ' swaps');
+    if (ws.taskCounts.trainings > 0) sumParts.push(ws.taskCounts.trainings + ' trainings');
+    if (ws.taskCounts.missingReportFollowUps > 0) sumParts.push(ws.taskCounts.missingReportFollowUps + ' report follow-ups');
+    if (sumParts.length > 0) {
+      sections.push('Summary: Completed ' + sumParts.join(', ') + '.');
+    }
+  }
+
+  return sections.join('\n\n');
+}
+
+/**
+ * Formats the breakdown into plain text, bullets, or conversational paragraph for timesheet.
+ *
+ * @param {Object} breakdown - Daily breakdown object
+ * @param {string} format - Output format: 'paragraph', 'text', or 'bullets'
  * @return {string} Formatted output
  */
 function formatBreakdownForTimesheet(breakdown, format) {
-  format = format || 'text';
+  format = format || 'paragraph';
+  if (format === 'paragraph') {
+    return formatBreakdownAsParagraph(breakdown);
+  }
   var output = [];
 
   for (var d = 0; d < breakdown.dayOrder.length; d++) {

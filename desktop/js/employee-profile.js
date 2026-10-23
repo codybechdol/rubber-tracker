@@ -1299,7 +1299,7 @@ class EmployeeProfileEngine {
             const trainDetails = [
               trObj.month && trObj.month !== 'N/A' ? `Month: ${trObj.month}` : '',
               trObj.crew ? `Crew: ${trObj.crew}` : (jobNumber && jobNumber !== 'N/A' ? `Crew: ${jobNumber}` : ''),
-              trObj.lead ? `Lead: ${trObj.lead}` : '',
+              trObj.lead ? `Foreman: ${trObj.lead}` : '',
               trObj.hours ? `${trObj.hours} hrs` : '',
               trObj.trainer ? `Trainer: ${trObj.trainer}` : '',
               trObj.completionDate ? `Date: ${trObj.completionDate}` : '',

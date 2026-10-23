@@ -11,6 +11,7 @@ class TimeBreakdownEngine {
     this.startDate = null;
     this.endDate = null;
     this.presetRange = 'this_week'; // 'today', 'this_week', 'last_week', 'this_month', 'custom'
+    this.reportFormat = 'paragraph'; // 'paragraph' (conversational) or 'bullets'
   }
 
   /**
@@ -122,6 +123,87 @@ class TimeBreakdownEngine {
     return map[key] || key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
   }
 
+  cleanPhysicalLocation(loc) {
+    if (!loc) return '';
+    let clean = String(loc).trim();
+    const parenMatch = clean.match(/^([^(]+)\s*\([^)]+\)$/);
+    if (parenMatch) clean = parenMatch[1].trim();
+    return clean.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+  }
+
+  isStatusLocation(loc) {
+    const lower = String(loc || '').toLowerCase().trim();
+    const statusValues = [
+      'vacation', 'light duty', 'weeds', 'leave', 'previous employee', 'medical', 
+      "worker's comp", 'unknown', 'in testing', 'location', 'lost', 'destroyed', 
+      "cody's truck", 'arnett / jm test', 'arnett'
+    ];
+    return statusValues.some(s => lower === s || lower.includes(`(${s})`));
+  }
+
+  formatTaskSentence(rawTitle, rawNotes) {
+    let title = String(rawTitle || '').trim();
+    if (!title) return '';
+
+    // Strip trailing punctuation
+    title = title.replace(/[.\s]+$/, '');
+
+    // Convert leading imperative verbs to natural past tense
+    const verbMap = [
+      [/^deliver\b/i, 'Delivered'],
+      [/^drop off\b/i, 'Dropped off'],
+      [/^pick up\b/i, 'Picked up'],
+      [/^meet with\b/i, 'Met with'],
+      [/^meet\b/i, 'Met'],
+      [/^check\b/i, 'Checked'],
+      [/^inspect\b/i, 'Inspected'],
+      [/^audit\b/i, 'Audited'],
+      [/^review\b/i, 'Reviewed'],
+      [/^send\b/i, 'Sent'],
+      [/^order\b/i, 'Ordered'],
+      [/^clean\b/i, 'Cleaned'],
+      [/^organize\b/i, 'Organized'],
+      [/^fix\b/i, 'Fixed'],
+      [/^repair\b/i, 'Repaired'],
+      [/^schedule\b/i, 'Scheduled'],
+      [/^coordinate\b/i, 'Coordinated'],
+      [/^assist\b/i, 'Assisted'],
+      [/^help\b/i, 'Helped'],
+      [/^take\b/i, 'Took'],
+      [/^bring\b/i, 'Brought'],
+      [/^issue\b/i, 'Issued'],
+      [/^exchange\b/i, 'Exchanged'],
+      [/^swap\b/i, 'Swapped'],
+      [/^replace\b/i, 'Replaced'],
+      [/^provide\b/i, 'Provided'],
+      [/^teach\b/i, 'Taught'],
+      [/^train\b/i, 'Trained'],
+      [/^install\b/i, 'Installed'],
+      [/^test\b/i, 'Tested'],
+      [/^perform\b/i, 'Performed'],
+      [/^complete\b/i, 'Completed'],
+      [/^handle\b/i, 'Handled'],
+      [/^follow up\b/i, 'Followed up']
+    ];
+
+    let matched = false;
+    for (const [pattern, replacement] of verbMap) {
+      if (pattern.test(title)) {
+        title = title.replace(pattern, replacement);
+        matched = true;
+        break;
+      }
+    }
+
+    if (!matched && !/^[A-Z][a-z]+ed\b/.test(title)) {
+      title = title.charAt(0).toUpperCase() + title.slice(1);
+    }
+
+    const cleanNotes = rawNotes ? String(rawNotes).replace(/\r?\n+/g, ' ').replace(/[.\s]+$/, '').trim() : '';
+    const fullText = cleanNotes ? `${title} (${cleanNotes})` : title;
+    return `${fullText}.`;
+  }
+
   /**
    * Collects all completed tasks, trips, and trainings in the date range.
    */
@@ -147,6 +229,7 @@ class TimeBreakdownEngine {
         }
       });
     }
+    this.empMap = empMap;
 
     const invLookup = {};
     const invTables = ['gloves', 'sleeves', 'blankets', 'macks', 'hv_testers', 'phasing_sets', 'aed', 'grounds', 'hot_sticks'];
@@ -219,6 +302,36 @@ class TimeBreakdownEngine {
     });
 
     // 4. Collect Completed Equipment Swaps from Manual Picks and Swap Sheets
+    // Gather scheduled swaps registry from Trip Planner first so we know which dateKey each swap was scheduled on
+    const schedRegistry = {};
+    if (this.db && typeof this.db.getScheduledSwaps === 'function') {
+      Object.assign(schedRegistry, this.db.getScheduledSwaps() || {});
+    }
+    if (this.db && this.db.snapshot && this.db.snapshot.configs && this.db.snapshot.configs.scheduled_swaps) {
+      Object.assign(schedRegistry, this.db.snapshot.configs.scheduled_swaps);
+    }
+    try {
+      const localSched = JSON.parse(localStorage.getItem('TRIP_PLANNER_SCHEDULED_SWAPS') || localStorage.getItem('sa_trip_scheduled_swaps') || '{}');
+      Object.assign(schedRegistry, localSched);
+    } catch { /* ignore */ }
+
+    // Map scheduled swap keys to their scheduled trip dateKey
+    const scheduledDateMap = {};
+    Object.keys(schedRegistry).forEach(k => {
+      const entry = schedRegistry[k];
+      if (!entry) return;
+      const sDateKey = entry.dateKey || (entry.swap && entry.swap.dateKey) || '';
+      if (sDateKey) {
+        const swapData = entry.swap || entry;
+        const emp = String(entry.employeeName || swapData.employeeName || swapData.employee || '').trim().toLowerCase();
+        const oldItm = String(swapData.currentItem || swapData.oldItem || entry.currentItem || '').trim().toLowerCase();
+        const newItm = String(swapData.pickItem || swapData.newItem || entry.pickItem || '').trim().toLowerCase();
+        if (emp && oldItm) scheduledDateMap[`${emp}_${oldItm}`] = sDateKey;
+        if (emp && newItm) scheduledDateMap[`${emp}_${newItm}`] = sDateKey;
+        if (emp) scheduledDateMap[emp] = sDateKey;
+      }
+    });
+
     const swapSheets = [
       { sw: 'glove_swaps', inv: 'gloves', label: 'Glove' },
       { sw: 'sleeve_swaps', inv: 'sleeves', label: 'Sleeve' },
@@ -251,14 +364,21 @@ class TimeBreakdownEngine {
           const invTable = invLookup[cfg.inv] || {};
           const newInvItem = invTable[entry.pickListNum] || {};
 
-          let rawDate = entry.deliveredDate || (entry.timestamp ? entry.timestamp.substring(0, 10) : '') || newInvItem['Date Assigned'];
+          const rawPick = String(entry.pickListNum || '').trim();
+          const cleanNew = (rawPick === '—' || rawPick === '-') ? '' : rawPick;
+          const cleanOld = String(entry.currentItemNum || '').trim();
+          const isReclaim = !cleanNew;
+          const dedupe = `${cfg.label}_${empClean}_${cleanNew}_${cleanOld}`.toLowerCase();
+
+          // Prioritize scheduled trip dateKey over entry.deliveredDate if user checked box on later day
+          const empKey = empClean.toLowerCase();
+          const oldItmKey = cleanOld.toLowerCase();
+          const newItmKey = cleanNew.toLowerCase();
+          const schedTripDate = scheduledDateMap[`${empKey}_${oldItmKey}`] || scheduledDateMap[`${empKey}_${newItmKey}`] || scheduledDateMap[empKey];
+
+          let rawDate = schedTripDate || entry.deliveredDate || (entry.timestamp ? entry.timestamp.substring(0, 10) : '') || newInvItem['Date Assigned'];
           const dKey = this.normalizeDateKey(rawDate);
           if (daysMap[dKey]) {
-            const rawPick = String(entry.pickListNum || '').trim();
-            const cleanNew = (rawPick === '—' || rawPick === '-') ? '' : rawPick;
-            const cleanOld = String(entry.currentItemNum || '').trim();
-            const isReclaim = !cleanNew;
-            const dedupe = `${cfg.label}_${empClean}_${cleanNew}_${cleanOld}`.toLowerCase();
             if (!seenSwapKeys.has(dedupe)) {
               seenSwapKeys.add(dedupe);
               const swapObj = {
@@ -314,13 +434,20 @@ class TimeBreakdownEngine {
           const dateChanged = String(r['Date Changed'] || r['Delivered Date'] || r['Completed Date'] || '').trim();
 
           if (dateChanged || status.includes('delivered') || status === 'complete' || status === 'resolved') {
-            const rawDate = dateChanged || r['Stage 3 Date'] || r['Stage 2 Date'] || r['Date'];
+            const empClean = String(r['Employee'] || r['Assigned To'] || 'Worker').trim();
+            const oldItem = String(r['Current Glove #'] || r['Current Sleeve #'] || r['Current Item #'] || r['Item #'] || '').trim();
+            const rawPick = String(r['Pick List Glove #'] || r['Pick List Sleeve #'] || r['Pick List Item #'] || '').trim();
+            const cleanNew = (rawPick === '—' || rawPick === '-') ? '' : rawPick;
+
+            // Prioritize scheduled trip dateKey over dateChanged if user checked box on later day
+            const empKey = empClean.toLowerCase();
+            const oldItmKey = oldItem.toLowerCase();
+            const newItmKey = cleanNew.toLowerCase();
+            const schedTripDate = scheduledDateMap[`${empKey}_${oldItmKey}`] || scheduledDateMap[`${empKey}_${newItmKey}`] || scheduledDateMap[empKey];
+
+            const rawDate = schedTripDate || dateChanged || r['Stage 3 Date'] || r['Stage 2 Date'] || r['Date'];
             const dKey = this.normalizeDateKey(rawDate);
             if (daysMap[dKey]) {
-              const empClean = String(r['Employee'] || r['Assigned To'] || 'Worker').trim();
-              const oldItem = String(r['Current Glove #'] || r['Current Sleeve #'] || r['Current Item #'] || r['Item #'] || '').trim();
-              const rawPick = String(r['Pick List Glove #'] || r['Pick List Sleeve #'] || r['Pick List Item #'] || '').trim();
-              const cleanNew = (rawPick === '—' || rawPick === '-') ? '' : rawPick;
               const isReclaim = Boolean(!cleanNew || String(r['Days Left'] || '').toUpperCase().includes('PREV') || status.includes('return to shelf'));
               const dedupe = `${cfg.label}_${empClean}_${cleanNew}_${oldItem}`.toLowerCase();
               if (!seenSwapKeys.has(dedupe)) {
@@ -369,23 +496,12 @@ class TimeBreakdownEngine {
     });
 
     // C. Completed Equipment Swaps & Reclaims from Trip Planner (scheduled_swaps)
-    const schedRegistry = {};
-    if (this.db && typeof this.db.getScheduledSwaps === 'function') {
-      Object.assign(schedRegistry, this.db.getScheduledSwaps() || {});
-    }
-    if (this.db && this.db.snapshot && this.db.snapshot.configs && this.db.snapshot.configs.scheduled_swaps) {
-      Object.assign(schedRegistry, this.db.snapshot.configs.scheduled_swaps);
-    }
-    try {
-      const localSched = JSON.parse(localStorage.getItem('TRIP_PLANNER_SCHEDULED_SWAPS') || localStorage.getItem('sa_trip_scheduled_swaps') || '{}');
-      Object.assign(schedRegistry, localSched);
-    } catch { /* ignore */ }
-
     Object.keys(schedRegistry).forEach(k => {
       const entry = schedRegistry[k];
       if (!entry || (!entry.completed && !entry.isCompleted)) return;
 
-      const rawDate = entry.completedDate || entry.dateKey || entry.date;
+      // Prioritize the scheduled dateKey of the trip day
+      const rawDate = entry.dateKey || entry.completedDate || entry.date;
       const dKey = this.normalizeDateKey(rawDate);
       if (!daysMap[dKey]) return;
 
@@ -646,17 +762,427 @@ class TimeBreakdownEngine {
   }
 
   /**
-   * Generates formatted text report for timesheet copy/paste.
+   * Switches output format (conversational paragraph vs clean bullet list) and re-renders report.
    */
-  generateTextReport(days) {
+  setFormat(format) {
+    this.reportFormat = format || 'paragraph';
+    const textarea = document.getElementById('time-breakdown-output');
+    if (textarea) {
+      const days = this.collectAccomplishments();
+      textarea.value = this.generateTextReport(days);
+    }
+  }
+
+  /**
+   * Helper to format an array of strings into a natural English list ("A, B, and C").
+   */
+  formatListNatural(arr) {
+    if (!arr || arr.length === 0) return '';
+    const clean = arr.filter(Boolean).map(s => String(s).trim()).filter(Boolean);
+    if (clean.length === 0) return '';
+    if (clean.length === 1) return clean[0];
+    if (clean.length === 2) return `${clean[0]} and ${clean[1]}`;
+    return `${clean.slice(0, -1).join(', ')}, and ${clean[clean.length - 1]}`;
+  }
+
+  /**
+   * Generates a conversational, human-friendly paragraph for a single day,
+   * grouped by city with natural travel/movement transitions.
+   */
+  generateDayParagraph(day) {
+    // 1. Group all accomplishments for the day by city bucket
+    const cityMap = {};
+    const getCityBucket = (cityName) => {
+      const clean = this.cleanPhysicalLocation(cityName) || 'Helena';
+      if (!cityMap[clean]) {
+        cityMap[clean] = {
+          name: clean,
+          swaps: [],
+          classes: [],
+          trainings: [],
+          deliveries: [],
+          drugTests: [],
+          officeTasks: [],
+          crewsVisited: new Set()
+        };
+      }
+      return cityMap[clean];
+    };
+
+    // Helper to resolve an office / manual task location
+    const resolveTaskLocation = (task) => {
+      if (task.location && !this.isStatusLocation(task.location)) {
+        return this.cleanPhysicalLocation(task.location);
+      }
+      const text = (String(task.title || '') + ' ' + String(task.notes || '')).toLowerCase();
+      // Check if employee name is mentioned in task title or notes
+      if (this.db) {
+        const empTable = this.db.getTable('employees');
+        if (empTable && empTable.rows) {
+          for (const r of empTable.rows) {
+            const eName = String(r['Employee Name'] || '').trim().toLowerCase();
+            if (eName && eName.length > 4 && text.includes(eName)) {
+              const loc = String(r['Location'] || '').trim();
+              if (loc && !this.isStatusLocation(loc)) return this.cleanPhysicalLocation(loc);
+            }
+          }
+        }
+      }
+      // Check if known Montana city is mentioned
+      const knownCities = ['Great Falls', 'Bozeman', 'Belgrade', 'Billings', 'Missoula', 'Butte', 'Kalispell', 'Helena', 'Townsend', 'Ennis', 'Whitehall', 'Havre', 'Miles City', 'Livingston', 'Dillon', 'Lewistown'];
+      for (const city of knownCities) {
+        if (text.includes(city.toLowerCase())) return city;
+      }
+      // If day has planned trips to another city and this is a delivery / field task
+      const nonHelenaTrips = Object.keys(day.locations || {}).filter(k => k.toLowerCase() !== 'helena');
+      if (nonHelenaTrips.length === 1 && /deliver|drop off|field|truck|swap|tools?|gear|parts?/i.test(text)) {
+        return this.cleanPhysicalLocation(nonHelenaTrips[0]);
+      }
+      return 'Helena';
+    };
+
+    // Helper to resolve clinic city for drug test
+    const resolveClinicCity = (dt) => {
+      if (dt['Location'] || dt['City']) return this.cleanPhysicalLocation(dt['Location'] || dt['City']);
+      const clinic = String(dt['Clinic Name'] || dt['Collection Type'] || '').toLowerCase();
+      if (clinic.includes('drug information systems') || clinic.includes('dis') || clinic.includes('helena')) return 'Helena';
+      if (clinic.includes('great falls')) return 'Great Falls';
+      if (clinic.includes('bozeman')) return 'Bozeman';
+      if (clinic.includes('billings')) return 'Billings';
+      if (clinic.includes('missoula')) return 'Missoula';
+      if (clinic.includes('butte')) return 'Butte';
+      if (clinic.includes('kalispell')) return 'Kalispell';
+      return 'Helena';
+    };
+
+    // A. Add planned trip locations & crews
+    Object.keys(day.locations || {}).forEach(locKey => {
+      const locObj = day.locations[locKey];
+      const b = getCityBucket(locKey);
+      (locObj.crews || []).forEach(c => b.crewsVisited.add(c));
+      (locObj.swaps || []).forEach(sw => b.swaps.push(sw));
+    });
+
+    // B. Add unattached day.tasks (swaps / generic tasks)
+    (day.tasks || []).forEach(t => {
+      const loc = t.location || 'Helena';
+      const b = getCityBucket(loc);
+      b.swaps.push(t);
+    });
+
+    // C. Add training classes
+    (day.classes || []).forEach(c => {
+      const loc = c.location || 'Helena';
+      getCityBucket(loc).classes.push(c);
+    });
+
+    // D. Add monthly safety trainings
+    (day.trainings || []).forEach(tr => {
+      const loc = tr.location || tr['Location'] || 'Helena';
+      getCityBucket(loc).trainings.push(tr);
+    });
+
+    // E. Add equipment deliveries
+    (day.equipmentDeliveries || []).forEach(eq => {
+      const loc = eq.location || 'Helena';
+      getCityBucket(loc).deliveries.push(eq);
+    });
+
+    // F. Add drug tests
+    (day.drugTests || []).forEach(dt => {
+      const loc = resolveClinicCity(dt);
+      getCityBucket(loc).drugTests.push(dt);
+    });
+
+    // G. Add office / manual tasks
+    (day.officeTasks || []).forEach(ot => {
+      const loc = resolveTaskLocation(ot);
+      getCityBucket(loc).officeTasks.push(ot);
+    });
+
+    // 2. Order the cities logically: Helena first if active (home shop), then destinations visited
+    const allCities = Object.keys(cityMap);
+    if (allCities.length === 0) {
+      return 'No specific accomplishments logged for this day.';
+    }
+
+    const orderedCities = [];
+    if (cityMap['Helena']) {
+      orderedCities.push('Helena');
+    }
+    allCities.forEach(c => {
+      if (c !== 'Helena' && !orderedCities.includes(c)) {
+        orderedCities.push(c);
+      }
+    });
+    if (orderedCities.length === 0) {
+      orderedCities.push(...allCities);
+    }
+
+    // 3. Generate natural text for each city
+    const cityBlocks = [];
+    let prevCity = null;
+    const empMap = this.empMap || {};
+
+    orderedCities.forEach((cityName, idx) => {
+      const b = cityMap[cityName];
+      const sentences = [];
+
+      // A. DOT Drug Tests in this city
+      if (b.drugTests.length > 0) {
+        const firstType = b.drugTests[0]['Test Type'] || 'Drug Only';
+        const firstClinic = b.drugTests[0]['Clinic Name'] || b.drugTests[0]['Collection Type'] || '';
+        const allSame = b.drugTests.every(dt => 
+          (dt['Test Type'] || 'Drug Only') === firstType &&
+          (dt['Clinic Name'] || dt['Collection Type'] || '') === firstClinic
+        );
+
+        if (allSame && b.drugTests.length > 1) {
+          const names = b.drugTests.map(dt => dt['Employee Name'] || dt['Name'] || 'worker');
+          const detailsStr = firstClinic ? `${firstType} at ${firstClinic}` : firstType;
+          sentences.push(`Coordinated DOT drug testing for ${this.formatListNatural(names)} (${detailsStr}).`);
+        } else {
+          const testSummaries = b.drugTests.map(dt => {
+            const emp = dt['Employee Name'] || dt['Name'] || 'worker';
+            const testType = dt['Test Type'] || 'drug test';
+            const clinic = dt['Clinic Name'] || dt['Collection Type'] || '';
+            return `${emp} (${testType}${clinic ? ' at ' + clinic : ''})`;
+          });
+          sentences.push(`Coordinated DOT drug testing for ${this.formatListNatural(testSummaries)}.`);
+        }
+      }
+
+      // B. Equipment Swaps & Reclaims in this city
+      if (b.swaps.length > 0) {
+        let isAllGloves = true;
+        let isAllSleeves = true;
+        let isAllBlankets = true;
+
+        const swapDescriptions = b.swaps.map(sw => {
+          const emp = sw.employee || sw['Assigned To'] || 'Worker';
+          const isReclaim = Boolean(sw.isReclaim || (!sw.newItem || sw.newItem === '—' || sw.newItem === '-'));
+          const label = (sw.label || sw.type || 'equipment').replace(/\s*(Swap|Reclaim)\s*/i, '').trim().toLowerCase();
+
+          if (!label.includes('glove')) isAllGloves = false;
+          if (!label.includes('sleeve')) isAllSleeves = false;
+          if (!label.includes('blanket')) isAllBlankets = false;
+
+          let itemDesc = '';
+          if (isReclaim) {
+            itemDesc = sw.oldItem ? `returned ${label} #${sw.oldItem} to shelf` : `returned ${label} to shelf`;
+          } else if (sw.oldItem && sw.newItem && sw.newItem !== '—' && sw.newItem !== '-') {
+            itemDesc = `${label} swap #${sw.oldItem} to #${sw.newItem}`;
+          } else if (sw.newItem && sw.newItem !== '—' && sw.newItem !== '-') {
+            itemDesc = `new ${label} #${sw.newItem}`;
+          } else {
+            itemDesc = `${label} exchange`;
+          }
+
+          const details = [];
+          if (sw.size) details.push(`size ${sw.size}`);
+          if (sw.itemClass) details.push(`class ${sw.itemClass}`);
+          if (sw.kv) details.push(`${sw.kv} kV`);
+          const detailStr = details.length > 0 ? `, ${details.join(', ')}` : '';
+
+          return `${emp} (${itemDesc}${detailStr})`;
+        });
+
+        const swapTypeWord = isAllGloves ? 'glove swap' :
+                             isAllSleeves ? 'sleeve swap' :
+                             isAllBlankets ? 'blanket swap' : 'equipment exchange';
+
+        if (b.swaps.length === 1) {
+          sentences.push(`Completed a ${swapTypeWord} for ${swapDescriptions[0]}.`);
+        } else {
+          const pluralWord = isAllGloves ? 'glove swaps' :
+                             isAllSleeves ? 'sleeve swaps' :
+                             isAllBlankets ? 'blanket swaps' : 'equipment exchanges';
+          sentences.push(`Completed ${pluralWord} for ${this.formatListNatural(swapDescriptions)}.`);
+        }
+      }
+
+      // C. Office / Field Tasks in this city (natural past tense, NO overly formal boilerplate)
+      if (b.officeTasks.length > 0) {
+        b.officeTasks.forEach(ot => {
+          const sentence = this.formatTaskSentence(ot.title, ot.notes);
+          if (sentence) sentences.push(sentence);
+        });
+      }
+
+      // D. Training Classes in this city
+      if (b.classes.length > 0) {
+        const classSummaries = b.classes.map(c => {
+          const title = c.title || 'safety certification';
+          const crewStr = (c.crewIds && c.crewIds.length > 0) ? ` for Crew ${c.crewIds.join(', ')}` : (c.crewId ? ` for Crew ${c.crewId}` : '');
+          const attendees = c.assignedEmployees || (c.employee ? [c.employee] : []);
+          let attStr = '';
+          if (attendees.length > 0) {
+            attStr = ` with ${attendees.length} attendee${attendees.length === 1 ? '' : 's'} (${this.formatListNatural(attendees)})`;
+          }
+          return `${title}${crewStr}${attStr}`;
+        });
+        sentences.push(`Conducted training: ${this.formatListNatural(classSummaries)}.`);
+      }
+
+      // E. Monthly Safety Trainings in this city (Foreman instead of Lead)
+      if (b.trainings.length > 0) {
+        const trainingSummaries = b.trainings.map(tr => {
+          const topic = tr['Training Topic'] || tr['Topic'] || tr['Training'] || 'Safety Training';
+          const crew = tr['Crew #'] || tr['Crew'] || tr['Job #'] || '';
+          const foreman = tr['Foreman'] || tr['Crew Lead'] || tr['Lead'] || '';
+          let res = topic;
+          if (crew) res += ` with Crew ${crew}`;
+          if (foreman) res += ` (Foreman: ${foreman})`;
+          return res;
+        });
+        sentences.push(`Completed monthly safety training on ${this.formatListNatural(trainingSummaries)}.`);
+      }
+
+      // F. Equipment Deliveries in this city
+      if (b.deliveries.length > 0) {
+        const deliverySummaries = b.deliveries.map(eq => {
+          let desc = eq.equipmentType || 'safety gear';
+          if (eq.vehicleNumber) desc += ` for Unit ${eq.vehicleNumber}`;
+          if (eq.crewId) desc += ` (Crew ${this.getSignificantJobNumber(eq.crewId)})`;
+          if (eq.notes) desc += ` - ${eq.notes}`;
+          return desc;
+        });
+        sentences.push(`Delivered equipment including ${this.formatListNatural(deliverySummaries)}.`);
+      }
+
+      // G. Crews visited in this city who didn't already have swaps or training
+      const unmentionedCrews = Array.from(b.crewsVisited).filter(crewId => {
+        const sig = this.getSignificantJobNumber(crewId);
+        const hasSwap = b.swaps.some(s => {
+          const sCrew = this.getSignificantJobNumber(s.crew || s.crewId || s.jobNum || s['Crew #'] || s['Job Number']);
+          if (sCrew && sCrew === sig) return true;
+          const sEmp = String(s.employee || s['Assigned To'] || '').toLowerCase();
+          if (sEmp && empMap && empMap[sEmp]) {
+            const empCrew = this.getSignificantJobNumber(empMap[sEmp].jobNum);
+            if (empCrew && empCrew === sig) return true;
+          }
+          return false;
+        });
+        const hasTrain = b.trainings.some(t => this.getSignificantJobNumber(t['Crew #'] || t['Crew']) === sig);
+        const hasClass = b.classes.some(c => (c.crewIds || [c.crewId]).map(x => this.getSignificantJobNumber(x)).includes(sig));
+        return !hasSwap && !hasTrain && !hasClass;
+      });
+
+      if (unmentionedCrews.length > 0) {
+        const crewStrs = unmentionedCrews.map(c => {
+          const str = String(c).trim();
+          return str.toLowerCase().startsWith('crew') ? str : `Crew ${str}`;
+        });
+        sentences.push(`Visited ${this.formatListNatural(crewStrs)}.`);
+      }
+
+      // If no specific tasks were logged for this city
+      if (sentences.length === 0) {
+        if (cityName === 'Helena') {
+          sentences.push(`Spent time focusing on safety operations, inventory management, and shop support.`);
+        } else {
+          sentences.push(`Conducted field visits and safety walk-throughs.`);
+        }
+      }
+
+      // Build city header / movement transition
+      let cityHeader = '';
+      if (idx === 0) {
+        cityHeader = `${cityName} - `;
+      } else {
+        const fromCity = prevCity || 'Helena';
+        cityHeader = `Moved from ${fromCity} to ${cityName} - `;
+      }
+
+      cityBlocks.push(`${cityHeader}${sentences.join(' ')}`);
+      prevCity = cityName;
+    });
+
+    return cityBlocks.join(' ');
+  }
+
+  /**
+   * Generates conversational paragraph format (default).
+   */
+  generateParagraphReport(days) {
+    if (!days || days.length === 0) return 'No tasks found for the selected period.';
+
+    let totalTrips = 0;
+    let totalSwaps = 0;
+    let totalClasses = 0;
+    let totalOfficeTasks = 0;
+    let totalTrainings = 0;
+    let totalDrugTests = 0;
+    let totalEquipDeliveries = 0;
+    let daysWithContent = 0;
+
+    const sections = [];
+
+    days.forEach(day => {
+      const locKeys = Object.keys(day.locations || {});
+      const hasClasses = day.classes && day.classes.length > 0;
+      const hasOffice = day.officeTasks && day.officeTasks.length > 0;
+      const hasTasks = day.tasks && day.tasks.length > 0;
+      const hasTrainings = day.trainings && day.trainings.length > 0;
+      const hasDrugTests = day.drugTests && day.drugTests.length > 0;
+      const hasEquip = day.equipmentDeliveries && day.equipmentDeliveries.length > 0;
+      const hasLocations = locKeys.length > 0;
+
+      let locSwapsCount = 0;
+      locKeys.forEach(lk => {
+        if (day.locations[lk].swaps) locSwapsCount += day.locations[lk].swaps.length;
+      });
+
+      const hasContent = hasLocations || hasClasses || hasOffice || hasTasks || hasTrainings || hasDrugTests || hasEquip || locSwapsCount > 0;
+      if (!hasContent) return;
+
+      daysWithContent++;
+      totalTrips += locKeys.filter(k => k.toLowerCase() !== 'helena').length;
+      totalSwaps += locSwapsCount;
+      if (day.tasks) {
+        totalSwaps += day.tasks.filter(t => t.isReclaim || (t.type && (t.type.toLowerCase().includes('swap') || t.type.toLowerCase().includes('reclaim'))) || t.label).length;
+      }
+      if (day.classes) totalClasses += day.classes.length;
+      if (day.officeTasks) totalOfficeTasks += day.officeTasks.length;
+      if (day.trainings) totalTrainings += day.trainings.length;
+      if (day.equipmentDeliveries) totalEquipDeliveries += day.equipmentDeliveries.length;
+      if (day.drugTests) totalDrugTests += day.drugTests.length;
+
+      const dayName = day.date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+      const paragraph = this.generateDayParagraph(day);
+      sections.push(`${dayName}\n${paragraph}`);
+    });
+
+    if (daysWithContent === 0) {
+      return 'No completed tasks, field visits, or trainings recorded for the selected period.';
+    }
+
+    const summaryParts = [];
+    if (totalTrips > 0) summaryParts.push(`${totalTrips} field visit${totalTrips === 1 ? '' : 's'}`);
+    if (totalSwaps > 0) summaryParts.push(`${totalSwaps} equipment swap${totalSwaps === 1 ? '' : 's'}`);
+    if (totalClasses > 0) summaryParts.push(`${totalClasses} training class${totalClasses === 1 ? '' : 'es'}`);
+    if (totalTrainings > 0) summaryParts.push(`${totalTrainings} monthly training${totalTrainings === 1 ? '' : 's'}`);
+    if (totalEquipDeliveries > 0) summaryParts.push(`${totalEquipDeliveries} equipment deliver${totalEquipDeliveries === 1 ? 'y' : 'ies'}`);
+    if (totalDrugTests > 0) summaryParts.push(`${totalDrugTests} drug test${totalDrugTests === 1 ? '' : 's'}`);
+    if (totalOfficeTasks > 0) summaryParts.push(`${totalOfficeTasks} office task${totalOfficeTasks === 1 ? '' : 's'}`);
+
+    if (summaryParts.length > 0 && daysWithContent > 1) {
+      sections.push(`Period Summary: Completed ${this.formatListNatural(summaryParts)}.`);
+    }
+
+    return sections.join('\n\n');
+  }
+
+  /**
+   * Generates clean bullet format without emojis or picture icons.
+   */
+  generateBulletReport(days) {
     if (!days || days.length === 0) return 'No tasks found for the selected period.';
 
     let lines = [];
-    lines.push(`=======================================================`);
-    lines.push(`📋 DAILY ACCOMPLISHMENTS REPORT`);
+    lines.push(`DAILY ACCOMPLISHMENTS REPORT`);
     lines.push(`Period: ${this.formatDateKey(this.startDate)} to ${this.formatDateKey(this.endDate)}`);
-    lines.push(`Generated: ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}`);
-    lines.push(`=======================================================\n`);
+    lines.push(`Generated: ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString()}\n`);
 
     let totalTrips = 0;
     let totalSwaps = 0;
@@ -687,19 +1213,19 @@ class TimeBreakdownEngine {
       if (!hasContent) return;
 
       daysWithContent++;
-      lines.push(`📅 ${dayName}`);
+      lines.push(`${dayName}`);
       lines.push(`-------------------------------------------------------`);
 
-      // Locations & Field Visits with associated equipment swaps
+      // Field Visits
       if (hasLocations) {
         locKeys.forEach(locKey => {
           totalTrips++;
           const loc = day.locations[locKey];
           const crewStr = (loc.crews && loc.crews.filter(Boolean).length > 0) ? ` [${loc.crews.filter(Boolean).join(', ')}]` : '';
-          lines.push(`  🚗 Field Visit: ${loc.name}${crewStr}`);
+          lines.push(`  Field Visit: ${loc.name}${crewStr}`);
 
           if (loc.swaps && loc.swaps.length > 0) {
-            lines.push(`     • Completed Equipment Swaps & Reclaims (${loc.swaps.length}):`);
+            lines.push(`     Completed Equipment Swaps & Reclaims (${loc.swaps.length}):`);
             loc.swaps.forEach(sw => {
               totalSwaps++;
               const crewTag = sw.crew ? ` (Crew ${this.getSignificantJobNumber(sw.crew)})` : '';
@@ -715,9 +1241,9 @@ class TimeBreakdownEngine {
               const swapAction = isReclaim ? `${sw.label} Reclaim` : `${sw.label} Swap`;
               let swapDetails = '';
               if (isReclaim) {
-                swapDetails = `#${sw.oldItem} ➔ ${sw.location || 'Helena'}`;
+                swapDetails = `#${sw.oldItem} to ${sw.location || 'Helena'}`;
               } else if (sw.oldItem && sw.newItem) {
-                swapDetails = `#${sw.oldItem} ➔ #${sw.newItem}`;
+                swapDetails = `#${sw.oldItem} to #${sw.newItem}`;
               } else {
                 swapDetails = `#${sw.newItem || sw.oldItem}`;
               }
@@ -729,7 +1255,7 @@ class TimeBreakdownEngine {
 
       // Completed Classes Taught
       if (hasClasses) {
-        lines.push(`  🎓 Training Classes Taught (${day.classes.length}):`);
+        lines.push(`  Training Classes Taught (${day.classes.length}):`);
         day.classes.forEach(c => {
           totalClasses++;
           const loc = c.location ? ` [${c.location}]` : '';
@@ -741,9 +1267,9 @@ class TimeBreakdownEngine {
         });
       }
 
-      // Completed Personal / Office / Safety Admin Tasks
+      // Office & Safety Admin Tasks
       if (hasOffice) {
-        lines.push(`  💼 Completed Office & Safety Tasks (${day.officeTasks.length}):`);
+        lines.push(`  Completed Office & Safety Tasks (${day.officeTasks.length}):`);
         day.officeTasks.forEach(ot => {
           totalOfficeTasks++;
           const loc = (ot.location && ot.location !== 'Helena Office') ? ` [${ot.location}]` : '';
@@ -754,9 +1280,9 @@ class TimeBreakdownEngine {
         });
       }
 
-      // Other Completed Equipment Swaps & Tasks (not tied to a specific field visit location)
+      // Other Completed Equipment Swaps & Tasks
       if (hasTasks) {
-        lines.push(`  🔧 Other Completed Equipment Swaps & Tasks (${day.tasks.length}):`);
+        lines.push(`  Other Completed Equipment Swaps & Tasks (${day.tasks.length}):`);
         day.tasks.forEach(t => {
           totalSwaps++;
           const emp = t.employee || t['Assigned To'] || t['Employee'] || 'Unassigned';
@@ -768,9 +1294,9 @@ class TimeBreakdownEngine {
 
           let swapDetails = '';
           if (isReclaim) {
-            swapDetails = `#${t.oldItem} ➔ ${t.location || 'Helena'}`;
+            swapDetails = `#${t.oldItem} to ${t.location || 'Helena'}`;
           } else if (t.oldItem || t.newItem) {
-            swapDetails = (t.oldItem && t.newItem && t.newItem !== '—' && t.newItem !== '-') ? `#${t.oldItem} ➔ #${t.newItem}` : `#${t.newItem || t.oldItem}`;
+            swapDetails = (t.oldItem && t.newItem && t.newItem !== '—' && t.newItem !== '-') ? `#${t.oldItem} to #${t.newItem}` : `#${t.newItem || t.oldItem}`;
           } else {
             swapDetails = t.item || t['Description'] || t['Item'] || '';
           }
@@ -787,34 +1313,34 @@ class TimeBreakdownEngine {
         });
       }
 
-      // Completed Monthly Safety Trainings
+      // Monthly Safety Trainings
       if (hasTrainings) {
-        lines.push(`  📚 Monthly Safety Training Records (${day.trainings.length}):`);
+        lines.push(`  Monthly Safety Training Records (${day.trainings.length}):`);
         day.trainings.forEach(tr => {
           totalTrainings++;
           const topic = tr['Training Topic'] || tr['Topic'] || tr['Training'] || 'Safety Training';
           const crew = tr['Crew #'] || tr['Crew'] || tr['Job #'] || '';
-          const lead = tr['Crew Lead'] || tr['Lead'] || tr['Foreman'] || '';
-          lines.push(`     • ${topic}${crew ? ' · Crew ' + crew : ''}${lead ? ' (Lead: ' + lead + ')' : ''}`);
+          const foreman = tr['Foreman'] || tr['Crew Lead'] || tr['Lead'] || '';
+          lines.push(`     • ${topic}${crew ? ' · Crew ' + crew : ''}${foreman ? ' (Foreman: ' + foreman + ')' : ''}`);
         });
       }
 
-      // Completed Equipment Deliveries
+      // Equipment Deliveries
       if (hasEquip) {
-        lines.push(`  🧰 Completed Equipment Deliveries (${day.equipmentDeliveries.length}):`);
+        lines.push(`  Completed Equipment Deliveries (${day.equipmentDeliveries.length}):`);
         day.equipmentDeliveries.forEach(eq => {
           totalEquipDeliveries++;
           const crew = eq.crewId ? ` · Crew ${this.getSignificantJobNumber(eq.crewId)}` : '';
           const unit = eq.vehicleNumber ? ` [Unit ${eq.vehicleNumber}]` : '';
-          const loc = eq.location ? ` (📍 ${eq.location})` : '';
+          const loc = eq.location ? ` (${eq.location})` : '';
           const notes = eq.notes ? ` · ${eq.notes}` : '';
           lines.push(`     • ${eq.equipmentType}${unit}${crew}${loc}${notes}`);
         });
       }
 
-      // Completed DOT Drug Tests
+      // DOT Drug Tests
       if (hasDrugTests) {
-        lines.push(`  🧪 Completed DOT Drug Tests (${day.drugTests.length}):`);
+        lines.push(`  Completed DOT Drug Tests (${day.drugTests.length}):`);
         day.drugTests.forEach(dt => {
           totalDrugTests++;
           const emp = dt['Employee Name'] || dt['Name'] || 'Worker';
@@ -840,11 +1366,19 @@ class TimeBreakdownEngine {
     if (totalEquipDeliveries > 0) summaryParts.push(`${totalEquipDeliveries} Equipment Deliveries`);
     if (totalDrugTests > 0) summaryParts.push(`${totalDrugTests} Drug Tests`);
 
-    lines.push(`=======================================================`);
     lines.push(`SUMMARY: ${summaryParts.join(' | ') || '0 Accomplishments'}`);
-    lines.push(`=======================================================`);
 
     return lines.join('\n');
+  }
+
+  /**
+   * Generates formatted text report for timesheet copy/paste.
+   */
+  generateTextReport(days) {
+    if (this.reportFormat === 'bullets') {
+      return this.generateBulletReport(days);
+    }
+    return this.generateParagraphReport(days);
   }
 
   /**
@@ -873,17 +1407,28 @@ class TimeBreakdownEngine {
             <button class="btn btn-secondary ${this.presetRange === 'this_month' ? 'active' : ''}" onclick="window.timeBreakdownEngine.setPresetRange('this_month')" style="font-size: 11.5px; padding: 4px 10px;">This Month</button>
           </div>
 
-          <!-- Custom Date Inputs -->
-          <div style="display: flex; align-items: center; gap: 8px;">
-            <input type="date" id="tb-start-date" value="${startVal}" class="sheet-search" style="padding: 4px 8px; font-size: 11.5px;" onchange="window.timeBreakdownEngine.onCustomDateChange()">
-            <span style="color: var(--text-muted); font-size: 11.5px;">to</span>
-            <input type="date" id="tb-end-date" value="${endVal}" class="sheet-search" style="padding: 4px 8px; font-size: 11.5px;" onchange="window.timeBreakdownEngine.onCustomDateChange()">
+          <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+            <!-- Format Selector -->
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <span style="font-size: 11.5px; color: var(--text-muted); font-weight: 700; text-transform: uppercase;">Format:</span>
+              <select id="tb-format-select" class="sheet-search" style="padding: 4px 10px; font-size: 11.5px; border-radius: 6px; background: var(--bg-secondary); color: var(--text-primary); cursor: pointer;" onchange="window.timeBreakdownEngine.setFormat(this.value)">
+                <option value="paragraph" ${this.reportFormat === 'paragraph' ? 'selected' : ''}>Conversational Paragraph</option>
+                <option value="bullets" ${this.reportFormat === 'bullets' ? 'selected' : ''}>Bullet Points (No Emojis)</option>
+              </select>
+            </div>
+
+            <!-- Custom Date Inputs -->
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <input type="date" id="tb-start-date" value="${startVal}" class="sheet-search" style="padding: 4px 8px; font-size: 11.5px;" onchange="window.timeBreakdownEngine.onCustomDateChange()">
+              <span style="color: var(--text-muted); font-size: 11.5px;">to</span>
+              <input type="date" id="tb-end-date" value="${endVal}" class="sheet-search" style="padding: 4px 8px; font-size: 11.5px;" onchange="window.timeBreakdownEngine.onCustomDateChange()">
+            </div>
           </div>
         </div>
 
         <!-- Formatted Report Output Area -->
         <div style="position: relative;">
-          <textarea id="time-breakdown-output" readonly style="width: 100%; height: 380px; font-family: 'Consolas', 'Courier New', monospace; font-size: 12px; line-height: 1.45; background: #0f172a; border: 1px solid var(--border-color); border-radius: 8px; padding: 14px; color: #f8fafc; resize: none; white-space: pre;">${this.escapeHtml(textReport)}</textarea>
+          <textarea id="time-breakdown-output" readonly style="width: 100%; height: 380px; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; font-size: 13px; line-height: 1.6; background: #0f172a; border: 1px solid var(--border-color); border-radius: 8px; padding: 16px; color: #f8fafc; resize: none; white-space: pre-wrap; word-break: break-word;">${this.escapeHtml(textReport)}</textarea>
         </div>
       </div>
     `;
@@ -931,7 +1476,7 @@ class TimeBreakdownEngine {
       date: activeDateKey,
       user: 'Safety Coordinator',
       crews: visitedCrews.join(', '),
-      route: visitedCities.join(' ➔ '),
+      route: visitedCities.join(' to '),
       driveTime: day.driveTimeFormatted || '',
       swapsCount: swapsCount,
       trainingsCount: trainingsCount,
