@@ -1098,7 +1098,7 @@ class TimeBreakdownEngine {
       prevCity = cityName;
     });
 
-    return cityBlocks.join(' ');
+    return cityBlocks.join('\n\n');
   }
 
   /**
