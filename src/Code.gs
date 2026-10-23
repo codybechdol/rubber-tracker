@@ -36062,7 +36062,7 @@ function scanCertRenewalEmails(options) {
     knownEmployees.sort(function(a, b) { return b.length - a.length; });
     var knownEmployeesLower = knownEmployees.map(function(e) { return e.toLowerCase(); });
 
-    var exclusionFilter = '-subject:("Job Hazard" OR "Safety Meeting" OR "Weekly Repairs" OR "Weekly Report" OR "Incident Report" OR "Training Opportunities" OR "Newsletter" OR "Invoice" OR "Statement" OR "Receipt" OR "Payroll")';
+    var exclusionFilter = '-subject:("Job Hazard" OR "Safety Meeting" OR "Weekly Repairs" OR "Weekly Report" OR "Incident Report" OR "Safety Checklist" OR "Inspection Report" OR "Checklist Report" OR "Training Opportunities" OR "Newsletter" OR "Invoice" OR "Statement" OR "Receipt" OR "Payroll")';
 
     var baseQuery = 'has:attachment';
     if (options.query && String(options.query).trim()) {
@@ -36391,7 +36391,12 @@ function scanCertRenewalEmails(options) {
 
       if (/\b(mec|medical\s*card|med\s*card|dot\s*card)\b/i.test(combined)) return 'MEC Expiration';
       if (/\b(crane\s*eval(uation)?)\b/i.test(combined)) return 'Crane Evaluation';
-      if (/\bcrane\b/i.test(combined)) return 'Crane Cert';
+      if (/\bcrane\b/i.test(combined)) {
+        if (/\b(checklist|inspection|pre-op|daily|repair)\b/i.test(combined)) {
+          return 'Other Cert';
+        }
+        return 'Crane Cert';
+      }
       if (/\b(rigging|signal(person)?|spotter)\b/i.test(combined)) return 'Rigging & Signaling/Signalperson & Spotter Cert';
       if (/\bforklift\b/i.test(combined)) return 'Forklift';
       if (/\b(pole\s*top|ptr)\b/i.test(combined)) return 'Pole Top Rescue';
@@ -36429,6 +36434,15 @@ function scanCertRenewalEmails(options) {
           subLower.indexOf('safety assistant weekly report') !== -1 ||
           subLower.indexOf('weekly report') !== -1 ||
           subLower.indexOf('incident report') !== -1 ||
+          subLower.indexOf('safety checklist') !== -1 ||
+          subLower.indexOf('checklist report') !== -1 ||
+          subLower.indexOf('inspection report') !== -1 ||
+          subLower.indexOf('vehicle inspection') !== -1 ||
+          subLower.indexOf('equipment inspection') !== -1 ||
+          subLower.indexOf('daily accomplishment') !== -1 ||
+          subLower.indexOf('trip log') !== -1 ||
+          subLower.indexOf('fuel receipt') !== -1 ||
+          subLower.indexOf('mileage') !== -1 ||
           subLower.indexOf('montana state fund') !== -1 ||
           subLower.indexOf('training opportunities') !== -1 ||
           subLower.indexOf('training opportunity') !== -1 ||
@@ -36459,7 +36473,13 @@ function scanCertRenewalEmails(options) {
           var isPdf = rType.indexOf('application/pdf') !== -1 || rName.endsWith('.pdf');
 
           if (isImg || isPdf) {
+            // Ignore checklists, inspection reports, timecards, receipts by filename
+            if (/(checklist|inspection|pre-trip|post-trip|timecard|timesheet|fuel_receipt|receipt|invoice|statement)/i.test(rName)) {
+              continue;
+            }
             var attSize = rAtt.getSize();
+            // Skip huge non-cert files > 25MB
+            if (attSize > 25 * 1024 * 1024) continue;
             if (isImg) {
               if (attSize > 0 && attSize < 12000) continue;
               if (!isNewHireEmail) {
@@ -36644,6 +36664,9 @@ function getCertEmailAttachment(messageId, attIdx) {
     if (!atts || idx >= atts.length) return { success: false, error: 'Attachment index out of bounds' };
     var att = atts[idx];
     var bytes = att.getBytes();
+    if (bytes.length > 20 * 1024 * 1024) {
+      return { success: false, isTooLarge: true, fileSize: bytes.length, error: 'Document is too large (' + (bytes.length / 1024 / 1024).toFixed(1) + ' MB)' };
+    }
     var rType = String(att.getContentType() || '').toLowerCase();
     var rName = String(att.getName() || '').toLowerCase();
     var isHeic = rType.indexOf('heic') !== -1 || rType.indexOf('heif') !== -1 || rName.endsWith('.heic') || rName.endsWith('.heif');

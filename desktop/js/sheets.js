@@ -2395,29 +2395,55 @@ class SheetNavigator {
           
           <!-- Image / PDF Preview Container -->
           <div style="height: 180px; background: #090d16; display: flex; align-items: center; justify-content: center; position: relative; overflow: hidden; border-bottom: 1px solid rgba(255,255,255,0.06);">
-            ${isPdf ? `
-              <div id="scanned-card-preview-container-${item.id}" style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; position: relative;">
-                ${(item.blobUrl || item.base64Data) ? `
-                  <div style="width: 100%; height: 100%; position: relative; cursor: pointer;" onclick="window.sheetNavigator.openPdfViewerModal('${this.escapeJs(item.id)}')" title="Click to view full PDF">
-                    <object data="${item.blobUrl || item.base64Data}#toolbar=0&navpanes=0&scrollbar=0&view=FitH" type="application/pdf" style="width: 100%; height: 100%; pointer-events: none; border: none; background: #090d16;"></object>
-                    <div style="position: absolute; inset: 0; background: rgba(0,0,0,0.02); pointer-events: none;"></div>
+            ${(() => {
+              const isLargeFile = (item.fileSize || 0) > 3.5 * 1024 * 1024;
+              if (isPdf) {
+                return `
+                  <div id="scanned-card-preview-container-${item.id}" style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; position: relative;">
+                    ${(item.blobUrl || item.base64Data) ? `
+                      <div style="width: 100%; height: 100%; position: relative; cursor: pointer;" onclick="window.sheetNavigator.openPdfViewerModal('${this.escapeJs(item.id)}')" title="Click to view full PDF">
+                        <object data="${item.blobUrl || item.base64Data}#toolbar=0&navpanes=0&scrollbar=0&view=FitH" type="application/pdf" style="width: 100%; height: 100%; pointer-events: none; border: none; background: #090d16;"></object>
+                        <div style="position: absolute; inset: 0; background: rgba(0,0,0,0.02); pointer-events: none;"></div>
+                      </div>
+                    ` : (isLargeFile ? `
+                      <div id="scanned-card-loading-${item.id}" style="display: flex; flex-direction: column; align-items: center; justify-content: center; color: #94a3b8; font-size: 11px; gap: 7px; padding: 12px; text-align: center;">
+                        <span style="font-size: 26px;">📑</span>
+                        <span style="font-size: 11px; font-weight: 600; color: #cbd5e1; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${this.escapeHtml(item.fileName || 'Document.pdf')}</span>
+                        <span style="font-size: 10px; color: #94a3b8;">${(item.fileSize / 1024 / 1024).toFixed(1)} MB Document</span>
+                        <button type="button" class="btn btn-secondary" onclick="window.sheetNavigator.loadScannedCertAttachment('${this.escapeJs(item.id)}')" style="font-size: 10.5px; padding: 3px 10px; border-color: rgba(56, 189, 248, 0.5); color: #38bdf8; background: rgba(56, 189, 248, 0.12); border-radius: 6px; cursor: pointer;">
+                          📥 Load Preview
+                        </button>
+                      </div>
+                    ` : `
+                      <div id="scanned-card-loading-${item.id}" style="display: flex; flex-direction: column; align-items: center; justify-content: center; color: #94a3b8; font-size: 12px; gap: 8px;">
+                        <div class="cert-scan-card-spinner" style="width: 24px; height: 24px; border: 2.5px solid rgba(248, 113, 113, 0.2); border-top-color: #f87171; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
+                        <span style="font-size: 11px; color: #cbd5e1;">Loading PDF...</span>
+                      </div>
+                    `)}
                   </div>
+                `;
+              } else {
+                return (item.base64Data ? `
+                  <img id="scanned-card-preview-${item.id}" src="${item.base64Data}" alt="Cert Preview" style="max-height: 100%; max-width: 100%; object-fit: contain; cursor: pointer;" onclick="window.sheetNavigator.openPhotoCropperModal('${this.escapeJs(item.id)}')" title="Click to open Crop &amp; Rotate tool">
+                ` : (isLargeFile ? `
+                  <div id="scanned-card-loading-${item.id}" style="display: flex; flex-direction: column; align-items: center; justify-content: center; color: #94a3b8; font-size: 11px; gap: 7px; padding: 12px; text-align: center;">
+                    <span style="font-size: 26px;">🖼️</span>
+                    <span style="font-size: 11px; font-weight: 600; color: #cbd5e1; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${this.escapeHtml(item.fileName || 'Photo.jpg')}</span>
+                    <span style="font-size: 10px; color: #94a3b8;">${(item.fileSize / 1024 / 1024).toFixed(1)} MB Photo</span>
+                    <button type="button" class="btn btn-secondary" onclick="window.sheetNavigator.loadScannedCertAttachment('${this.escapeJs(item.id)}')" style="font-size: 10.5px; padding: 3px 10px; border-color: rgba(56, 189, 248, 0.5); color: #38bdf8; background: rgba(56, 189, 248, 0.12); border-radius: 6px; cursor: pointer;">
+                      📥 Load Preview
+                    </button>
+                  </div>
+                  <img id="scanned-card-preview-${item.id}" src="" alt="Cert Preview" style="display: none; max-height: 100%; max-width: 100%; object-fit: contain; cursor: pointer;" onclick="window.sheetNavigator.openPhotoCropperModal('${this.escapeJs(item.id)}')" title="Click to open Crop &amp; Rotate tool">
                 ` : `
                   <div id="scanned-card-loading-${item.id}" style="display: flex; flex-direction: column; align-items: center; justify-content: center; color: #94a3b8; font-size: 12px; gap: 8px;">
-                    <div class="cert-scan-card-spinner" style="width: 24px; height: 24px; border: 2.5px solid rgba(248, 113, 113, 0.2); border-top-color: #f87171; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
-                    <span style="font-size: 11px; color: #cbd5e1;">Loading PDF...</span>
+                    <div class="cert-scan-card-spinner" style="width: 24px; height: 24px; border: 2.5px solid rgba(56, 189, 248, 0.2); border-top-color: #38bdf8; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
+                    <span style="font-size: 11px; color: #cbd5e1;">Loading photo...</span>
                   </div>
-                `}
-              </div>
-            ` : (item.base64Data ? `
-              <img id="scanned-card-preview-${item.id}" src="${item.base64Data}" alt="Cert Preview" style="max-height: 100%; max-width: 100%; object-fit: contain; cursor: pointer;" onclick="window.sheetNavigator.openPhotoCropperModal('${this.escapeJs(item.id)}')" title="Click to open Crop &amp; Rotate tool">
-            ` : `
-              <div id="scanned-card-loading-${item.id}" style="display: flex; flex-direction: column; align-items: center; justify-content: center; color: #94a3b8; font-size: 12px; gap: 8px;">
-                <div class="cert-scan-card-spinner" style="width: 24px; height: 24px; border: 2.5px solid rgba(56, 189, 248, 0.2); border-top-color: #38bdf8; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
-                <span style="font-size: 11px; color: #cbd5e1;">Loading photo...</span>
-              </div>
-              <img id="scanned-card-preview-${item.id}" src="" alt="Cert Preview" style="display: none; max-height: 100%; max-width: 100%; object-fit: contain; cursor: pointer;" onclick="window.sheetNavigator.openPhotoCropperModal('${this.escapeJs(item.id)}')" title="Click to open Crop &amp; Rotate tool">
-            `)}
+                  <img id="scanned-card-preview-${item.id}" src="" alt="Cert Preview" style="display: none; max-height: 100%; max-width: 100%; object-fit: contain; cursor: pointer;" onclick="window.sheetNavigator.openPhotoCropperModal('${this.escapeJs(item.id)}')" title="Click to open Crop &amp; Rotate tool">
+                `));
+              }
+            })()}
             
             <!-- Top Action Controls -->
             <div style="position: absolute; top: 8px; right: 8px; display: flex; gap: 6px; z-index: 2;">
@@ -2681,6 +2707,17 @@ class SheetNavigator {
     if (item.isLoading) return null;
 
     item.isLoading = true;
+
+    // Immediately update UI to show active downloading state
+    const loadingEl = document.getElementById(`scanned-card-loading-${item.id}`);
+    if (loadingEl) {
+      const fMb = item.fileSize ? ` (${(item.fileSize / 1024 / 1024).toFixed(1)} MB)` : '';
+      loadingEl.innerHTML = `
+        <div class="cert-scan-card-spinner" style="width: 24px; height: 24px; border: 2.5px solid ${item.isPdf ? 'rgba(248, 113, 113, 0.2)' : 'rgba(56, 189, 248, 0.2)'}; border-top-color: ${item.isPdf ? '#f87171' : '#38bdf8'}; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
+        <span style="font-size: 11px; color: #cbd5e1;">Loading ${item.isPdf ? 'PDF' : 'photo'}${fMb}...</span>
+      `;
+    }
+
     try {
       const syncUrl = window.syncEngine ? window.syncEngine.getSyncUrl() : '';
       if (!syncUrl) return null;
@@ -2691,27 +2728,30 @@ class SheetNavigator {
         attIdx: item.attIdx
       };
 
+      // Calculate dynamic timeout based on file size: Google's echo server streams at ~20-30 KB/s.
+      // Give plenty of buffer so 2MB-3MB files never get prematurely terminated.
+      const fSize = item.fileSize || (1024 * 1024);
+      const timeoutMs = Math.max(60000, Math.min(240000, Math.round((fSize / 15000) * 1000) + 30000));
+
       let res = null;
       let lastErr = null;
-      for (let attempt = 1; attempt <= 2; attempt++) {
-        try {
-          if (window.syncEngine && typeof window.syncEngine.executeNetworkRequest === 'function') {
-            res = await window.syncEngine.executeNetworkRequest(syncUrl, 'POST', payload, 35000);
-          } else {
-            const resp = await fetch(syncUrl, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(payload)
-            });
-            res = await resp.json();
-          }
-          if (res && res.success && res.base64Data) break;
-          if (res && res.error) lastErr = new Error(res.error);
-        } catch (fetchErr) {
-          lastErr = fetchErr;
-          if (attempt === 2) break;
-          await new Promise(r => setTimeout(r, 700));
+      try {
+        if (window.syncEngine && typeof window.syncEngine.executeNetworkRequest === 'function') {
+          res = await window.syncEngine.executeNetworkRequest(syncUrl, 'POST', payload, timeoutMs);
+        } else {
+          const controller = new AbortController();
+          const tId = setTimeout(() => controller.abort(), timeoutMs);
+          const resp = await fetch(syncUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload),
+            signal: controller.signal
+          });
+          clearTimeout(tId);
+          res = await resp.json();
         }
+      } catch (fetchErr) {
+        lastErr = fetchErr;
       }
 
       if (res && res.success && res.base64Data) {
@@ -2753,9 +2793,9 @@ class SheetNavigator {
           }
         } else {
           // Update DOM elements if present
-          const loadingEl = document.getElementById(`scanned-card-loading-${item.id}`);
+          const curLoadingEl = document.getElementById(`scanned-card-loading-${item.id}`);
           const imgEl = document.getElementById(`scanned-card-preview-${item.id}`);
-          if (loadingEl) loadingEl.style.display = 'none';
+          if (curLoadingEl) curLoadingEl.style.display = 'none';
           if (imgEl) {
             imgEl.src = b64;
             imgEl.style.display = 'block';
@@ -2774,9 +2814,9 @@ class SheetNavigator {
       }
     } catch (err) {
       console.warn(`Failed to load attachment for card ${item.id}:`, err);
-      const loadingEl = document.getElementById(`scanned-card-loading-${item.id}`);
-      if (loadingEl) {
-        loadingEl.innerHTML = `
+      const curLoadingEl = document.getElementById(`scanned-card-loading-${item.id}`);
+      if (curLoadingEl) {
+        curLoadingEl.innerHTML = `
           <div style="display: flex; flex-direction: column; align-items: center; gap: 4px;">
             <span style="font-size: 10px; color: #f87171;">⚠️ Failed to load</span>
             <button type="button" class="btn btn-secondary" style="font-size: 10px; padding: 2px 8px; border-color: rgba(56, 189, 248, 0.45); color: #38bdf8; background: rgba(56, 189, 248, 0.1); border-radius: 4px; cursor: pointer;" onclick="window.sheetNavigator.retryLoadScannedCert('${this.escapeJs(item.id)}')">🔄 Retry</button>
@@ -2798,15 +2838,21 @@ class SheetNavigator {
     const hideVaulted = hideVaultedCheckbox ? hideVaultedCheckbox.checked : true;
 
     // Only load attachments for cards that are NOT already in the vault when hideVaulted is active
-    let targetItems = hideVaulted
+    let candidateItems = hideVaulted
       ? this.scannedCertItems.filter(item => !item.alreadyInVault)
       : this.scannedCertItems.slice();
 
-    // Prioritize cards that lack an employee name so OCR runs on their photos immediately
+    // Auto-queue only files <= 3.5 MB in the background queue.
+    // Giant multi-page handbook packets (> 3.5 MB) load on-demand when the user clicks 'Load Preview'.
+    const MAX_AUTO_QUEUE_SIZE = 3.5 * 1024 * 1024;
+    let targetItems = candidateItems.filter(item => (item.fileSize || 0) <= MAX_AUTO_QUEUE_SIZE);
+
+    // CRITICAL: Sort by file size ASCENDING (smallest first)!
+    // All 100KB-800KB cert photos load within seconds so cards appear instantly without queue starvation!
     targetItems.sort((a, b) => {
-      const aNeed = (!a.employeeName || a.employeeName === '') ? 0 : 1;
-      const bNeed = (!b.employeeName || b.employeeName === '') ? 0 : 1;
-      return aNeed - bNeed;
+      const sizeA = a.fileSize || 0;
+      const sizeB = b.fileSize || 0;
+      return sizeA - sizeB;
     });
 
     // Fetch attachments concurrently (3 workers) for snappy preview loading and fast OCR detection
@@ -2822,7 +2868,7 @@ class SheetNavigator {
         } catch (err) {
           console.warn('Queue item error:', err);
         }
-        await new Promise(r => setTimeout(r, 100));
+        await new Promise(r => setTimeout(r, 60));
       }
     };
 
