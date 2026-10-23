@@ -25,6 +25,7 @@
     "dexie": "^4.0.10",
     "heic2any": "^0.0.4",
     "leaflet": "^1.9.4",
+    "pdfjs-dist": "^3.11.174",
     "tesseract.js": "^7.0.0"
   },
   "build": {

@@ -2447,14 +2447,17 @@ class SheetNavigator {
             
             <!-- Top Action Controls -->
             <div style="position: absolute; top: 8px; right: 8px; display: flex; gap: 6px; z-index: 2;">
-              <button type="button" class="btn btn-secondary" style="font-size: 11px; padding: 3px 8px; background: rgba(15, 23, 42, 0.88); border: 1px solid rgba(168, 85, 247, 0.55); color: #c084fc; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 3px;" onclick="window.sheetNavigator.duplicateScannedCertCard('${this.escapeJs(item.id)}')" title="Split / Duplicate card (useful for 1st Aid &amp; CPR in one photo or Front &amp; Back of DL)">
-                <span>📋</span> Split
-              </button>
               ${isPdf ? `
+                <button type="button" class="btn btn-secondary" style="font-size: 11px; font-weight: 600; padding: 3px 9px; background: rgba(15, 23, 42, 0.88); border: 1px solid rgba(56, 189, 248, 0.6); color: #38bdf8; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 4px;" onclick="window.sheetNavigator.extractPdfPagesToCards('${this.escapeJs(item.id)}')" title="Split all pages of this PDF into individual photo cards so you can split &amp; crop each cert">
+                  <span>📑</span> Split Pages
+                </button>
                 <button type="button" class="btn btn-secondary" style="font-size: 11px; padding: 3px 8px; background: rgba(15, 23, 42, 0.88); border: 1px solid rgba(248, 113, 113, 0.6); color: #fca5a5; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 3px;" onclick="window.sheetNavigator.openPdfViewerModal('${this.escapeJs(item.id)}')" title="View full PDF document">
                   <span>👁️</span> View
                 </button>
               ` : `
+                <button type="button" class="btn btn-secondary" style="font-size: 11px; padding: 3px 8px; background: rgba(15, 23, 42, 0.88); border: 1px solid rgba(168, 85, 247, 0.55); color: #c084fc; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 3px;" onclick="window.sheetNavigator.duplicateScannedCertCard('${this.escapeJs(item.id)}')" title="Split / Duplicate card (useful for 1st Aid &amp; CPR in one photo or Front &amp; Back of DL)">
+                  <span>📋</span> Split
+                </button>
                 <button type="button" class="btn btn-secondary" id="btn-scan-ocr-${item.id}" style="font-size: 11px; padding: 3px 8px; background: rgba(15, 23, 42, 0.88); border: 1px solid rgba(14, 165, 233, 0.55); color: #38bdf8; border-radius: 6px; cursor: pointer; display: flex; align-items: center; gap: 3px;" onclick="window.sheetNavigator.extractCertInfoFromImage('${this.escapeJs(item.id)}', true)" title="Scan document photo with OCR to pull name, expiration date, and cert type directly off the picture">
                   <span>✨</span> Scan Photo
                 </button>
@@ -2602,6 +2605,11 @@ class SheetNavigator {
     const itemIndex = this.scannedCertItems.findIndex(x => x.id === itemId);
     if (itemIndex === -1) return;
     const original = this.scannedCertItems[itemIndex];
+
+    // If card is a multi-page PDF, split its pages into individual croppable photo cards
+    if (original.isPdf) {
+      return this.extractPdfPagesToCards(itemId);
+    }
 
     const currentEmpSelect = document.getElementById(`scanned-emp-select-${itemId}`);
     const currentCertSelect = document.getElementById(`scanned-cert-select-${itemId}`);
@@ -3157,6 +3165,29 @@ class SheetNavigator {
         </iframe>
       </object>
     `;
+
+    // Asynchronously detect page count using pdfjsLib to update extract buttons and metadata
+    if (window.pdfjsLib && item.base64Data) {
+      try {
+        const rawB64 = item.base64Data.includes('base64,') ? item.base64Data.split('base64,')[1] : item.base64Data;
+        const binaryStr = atob(rawB64);
+        const bytes = new Uint8Array(binaryStr.length);
+        for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+        window.pdfjsLib.getDocument({ data: bytes }).promise.then(pdf => {
+          const numPages = pdf.numPages;
+          item.totalPdfPages = numPages;
+          const extBtn = document.getElementById('cert-pdf-btn-extract-all');
+          const extFooterBtn = document.getElementById('cert-pdf-btn-footer-extract');
+          if (extBtn) extBtn.innerHTML = `<span>📑</span> Split ${numPages} Pages into Photos`;
+          if (extFooterBtn) extFooterBtn.innerHTML = `<span>📑</span> Split All ${numPages} Pages into Photos (Split &amp; Crop)`;
+          if (infoEl) {
+            infoEl.textContent = `Attachment: ${item.fileName || 'PDF'} (${item.fileSize ? Math.round(item.fileSize / 1024) + ' KB' : 'PDF'}) · ${numPages} Pages`;
+          }
+        }).catch(err => console.warn('PDF page count check error:', err));
+      } catch (cntErr) {
+        console.warn('PDF count error:', cntErr);
+      }
+    }
   }
 
   /**
@@ -3167,6 +3198,10 @@ class SheetNavigator {
     if (modal) {
       modal.style.display = 'none';
       modal.classList.remove('active');
+    }
+    const body = document.getElementById('cert-pdf-modal-body');
+    if (body) {
+      body.innerHTML = ''; // Clear embedded viewer to free memory
     }
   }
 
@@ -3210,6 +3245,139 @@ class SheetNavigator {
           window.showToast('Saved PDF successfully!', 'success');
         }
       }
+    }
+  }
+
+  /**
+   * Helper called from inside cert-pdf-viewer-modal.
+   */
+  async extractActivePdfPagesToCards() {
+    if (!this.activePdfItem) return;
+    await this.extractPdfPagesToCards(this.activePdfItem.id);
+  }
+
+  /**
+   * Converts all pages of a multi-page PDF into separate high-resolution photo cards
+   * so each page can be individually split (e.g. DL Front & Back), cropped, rotated, and saved to the Cert Vault.
+   */
+  async extractPdfPagesToCards(itemId) {
+    if (!this.scannedCertItems) return;
+    const itemIndex = this.scannedCertItems.findIndex(x => x.id === itemId);
+    if (itemIndex === -1) return;
+    const item = this.scannedCertItems[itemIndex];
+
+    // Ensure document bytes are loaded
+    if (!item.base64Data) {
+      if (typeof window.showToast === 'function') {
+        window.showToast('📥 Downloading PDF from Gmail before splitting pages...', 'info');
+      }
+      const b64 = await this.loadScannedCertAttachment(itemId);
+      if (!b64) {
+        alert('Could not download PDF attachment. Please click Retry.');
+        return;
+      }
+    }
+
+    if (!window.pdfjsLib) {
+      alert('PDF rendering engine is not available. Please restart the desktop application.');
+      return;
+    }
+
+    const extBtn = document.getElementById('cert-pdf-btn-extract-all');
+    const extFooterBtn = document.getElementById('cert-pdf-btn-footer-extract');
+    if (extBtn) extBtn.disabled = true;
+    if (extFooterBtn) extFooterBtn.disabled = true;
+
+    if (typeof window.showToast === 'function') {
+      window.showToast('📑 Converting PDF pages into high-resolution photo cards...', 'info');
+    }
+
+    try {
+      const rawB64 = item.base64Data.includes('base64,') ? item.base64Data.split('base64,')[1] : item.base64Data;
+      const binaryStr = atob(rawB64);
+      const bytes = new Uint8Array(binaryStr.length);
+      for (let i = 0; i < binaryStr.length; i++) {
+        bytes[i] = binaryStr.charCodeAt(i);
+      }
+
+      const loadingTask = window.pdfjsLib.getDocument({ data: bytes });
+      const pdf = await loadingTask.promise;
+      const numPages = pdf.numPages;
+
+      if (!numPages || numPages === 0) {
+        alert('No pages found in this PDF document.');
+        return;
+      }
+
+      const currentEmpSelect = document.getElementById(`scanned-emp-select-${itemId}`);
+      const activeEmp = currentEmpSelect ? currentEmpSelect.value.trim() : (item.employeeName || '');
+      const baseClean = (item.fileName || 'Document').replace(/\.[^.]+$/, '');
+      const newPhotoCards = [];
+
+      for (let p = 1; p <= numPages; p++) {
+        const page = await pdf.getPage(p);
+        // Render at scale 2.0 for crisp, high-resolution cert photos suitable for cropping and OCR
+        const viewport = page.getViewport({ scale: 2.0 });
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(viewport.width);
+        canvas.height = Math.round(viewport.height);
+        const ctx = canvas.getContext('2d');
+
+        await page.render({
+          canvasContext: ctx,
+          viewport: viewport
+        }).promise;
+
+        const pageDataUrl = canvas.toDataURL('image/jpeg', 0.90);
+
+        // Intelligent cert type pre-selection: Page 1 of new hire packet is usually DL
+        let pCertType = 'Other Cert';
+        const subLow = (item.subject || '').toLowerCase();
+        if (p === 1 && (subLow.includes('dl') || subLow.includes('driver') || subLow.includes('license') || subLow.includes('montana') || subLow.includes('new hire') || subLow.includes('ape'))) {
+          pCertType = 'DL';
+        } else if (subLow.includes('mec') || subLow.includes('med card')) {
+          pCertType = 'MEC Expiration';
+        } else if (subLow.includes('cpr') || subLow.includes('1st aid')) {
+          pCertType = '1st Aid & CPR';
+        }
+
+        const pageItem = {
+          ...item,
+          id: `${item.messageId}_p${p}_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+          fileName: `${baseClean}_Page_${p}.jpg`,
+          contentType: 'image/jpeg',
+          base64Data: pageDataUrl,
+          fileSize: Math.round(pageDataUrl.length * 0.75),
+          isPdf: false,
+          blobUrl: null,
+          certType: pCertType,
+          employeeName: activeEmp,
+          sourcePage: p,
+          totalPdfPages: numPages,
+          alreadyInVault: false
+        };
+
+        newPhotoCards.push(pageItem);
+      }
+
+      // Replace original multi-page PDF card with individual page photo cards
+      this.scannedCertItems.splice(itemIndex, 1, ...newPhotoCards);
+
+      // Close PDF viewer modal if it was open
+      this.closePdfViewerModal();
+
+      // Re-render scanner review grid
+      this.renderScannedCertItems();
+
+      if (typeof window.showToast === 'function') {
+        window.showToast(`🎉 Converted ${numPages} PDF pages into separate photo cards! You can now Split and Crop each picture.`, 'success');
+      }
+    } catch (err) {
+      console.error('Error extracting PDF pages:', err);
+      alert('Failed to extract PDF pages: ' + (err.message || err));
+    } finally {
+      if (extBtn) extBtn.disabled = false;
+      if (extFooterBtn) extFooterBtn.disabled = false;
     }
   }
 
