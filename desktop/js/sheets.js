@@ -5053,15 +5053,117 @@ class SheetNavigator {
     setTimeout(() => { td.style.backgroundColor = ''; }, 450);
   }
 
+  reconcileTrainingTrackingLocal() {
+    if (!this.db) return { updatedLeads: 0, updatedAttendees: 0, updatedSizes: 0 };
+    const tt = this.db.getTable('training_tracking');
+    const jt = this.db.getTable('job_tracking');
+    const emp = this.db.getTable('employees');
+    if (!tt || !jt || !emp) return { updatedLeads: 0, updatedAttendees: 0, updatedSizes: 0 };
+
+    // 1. Map active job foremen from Job Tracking
+    const foremanByJob = {};
+    (jt.rows || []).forEach(r => {
+      const num = String(r['Job Number'] || r['Job #'] || '').trim();
+      const status = String(r['Status'] || '').toLowerCase().trim();
+      const foreman = String(r['Foreman'] || r['Crew Lead'] || '').trim();
+      if (num && (status === 'active' || !status) && foreman) {
+        foremanByJob[num] = foreman;
+      }
+    });
+
+    // 2. Build active roster by base crew
+    const rosterByCrew = {};
+    (emp.rows || []).forEach(r => {
+      const name = String(r['Name'] || r['Employee Name'] || '').trim();
+      const job = String(r['Job Number'] || r['Job #'] || '').trim();
+      const loc = String(r['Location'] || '').toLowerCase().trim();
+      const stat = String(r['Status'] || '').toLowerCase().trim();
+      const last = String(r['Last Day'] || '').trim();
+
+      const isPrev = loc === 'previous employee' || loc.includes('previous') ||
+                     stat === 'previous employee' || stat.includes('inactive') ||
+                     stat.includes('terminated') || last;
+
+      if (!name || isPrev || !job || job.startsWith('002-')) return;
+
+      const base = job.split('.')[0].trim();
+      if (!base) return;
+
+      if (!rosterByCrew[base]) rosterByCrew[base] = [];
+      if (!rosterByCrew[base].includes(name)) {
+        rosterByCrew[base].push(name);
+      }
+    });
+
+    let updatedLeads = 0;
+    let updatedAttendees = 0;
+    let updatedSizes = 0;
+
+    (tt.rows || []).forEach(r => {
+      const status = String(r['Status'] || r['Training Status'] || '').toLowerCase().trim();
+      const compDate = String(r['Completion Date'] || r['Date Completed'] || '').trim();
+      // Never alter completed historical trainings
+      if (status === 'complete' || status === 'completed' || compDate) return;
+
+      const crew = String(r['Crew #'] || r['Job Number'] || r['Crew'] || '').trim();
+      if (!crew) return;
+
+      const jtForeman = foremanByJob[crew];
+      const activeMembers = rosterByCrew[crew] || [];
+
+      // Update Crew Lead
+      if (jtForeman) {
+        const curLead = String(r['Crew Lead'] || r['Lead'] || '').trim();
+        if (curLead.toLowerCase() !== jtForeman.toLowerCase()) {
+          r['Crew Lead'] = jtForeman;
+          updatedLeads++;
+        }
+      }
+
+      // Update Attendees and Crew Size
+      if (activeMembers.length > 0) {
+        const sorted = [...activeMembers];
+        const leadToUse = jtForeman || r['Crew Lead'];
+        if (leadToUse) {
+          const idx = sorted.findIndex(n => n.toLowerCase() === leadToUse.toLowerCase());
+          if (idx > 0) {
+            const [lName] = sorted.splice(idx, 1);
+            sorted.unshift(lName);
+          }
+        }
+        const newAttendeesStr = sorted.join(', ');
+        const curAttendeesStr = String(r['Attendees'] || '').trim();
+
+        if (curAttendeesStr !== newAttendeesStr) {
+          r['Attendees'] = newAttendeesStr;
+          updatedAttendees++;
+        }
+
+        const curSize = String(r['Size'] || r['Crew Size'] || '').trim();
+        const newSize = String(sorted.length);
+        if (curSize !== newSize) {
+          if (r['Size'] !== undefined) r['Size'] = parseInt(newSize, 10);
+          if (r['Crew Size'] !== undefined) r['Crew Size'] = newSize;
+          updatedSizes++;
+        }
+      }
+    });
+
+    // Rebuild rawGrid if present
+    if (tt.headers && tt.rawGrid) {
+      tt.rawGrid = [tt.headers];
+      tt.rows.forEach(r => {
+        tt.rawGrid.push(tt.headers.map(h => r[h] !== undefined ? r[h] : ''));
+      });
+      tt.maxRows = tt.rawGrid.length;
+    }
+
+    return { updatedLeads, updatedAttendees, updatedSizes };
+  }
+
   async syncAttendees() {
     if (!confirm('🔄 Synchronize training attendees and crew leads with current active crew rosters?')) return;
     
-    const syncUrl = window.syncEngine ? window.syncEngine.getSyncUrl() : '';
-    if (!syncUrl) {
-      alert('⚠️ Sync URL is not configured in Settings.');
-      return;
-    }
-
     const btn = document.getElementById('btn-sync-attendees');
     if (btn) {
       btn.disabled = true;
@@ -5069,23 +5171,53 @@ class SheetNavigator {
     }
 
     try {
-      const json = (window.syncEngine && typeof window.syncEngine.executeNetworkRequest === 'function')
-        ? await window.syncEngine.executeNetworkRequest(syncUrl, 'POST', { action: 'syncTrainingAttendees' })
-        : await (await fetch(`${syncUrl}?action=syncTrainingAttendees`)).json();
-      if (json && (json.success || json.status === 'ok')) {
-        alert('✅ Training attendees and crew leads successfully synchronized with active crew rosters!');
-      } else {
-        alert('⚠️ Sync response: ' + (json.message || json.error || 'Synced'));
+      // 1. Reconcile locally in the desktop database
+      const localResult = this.reconcileTrainingTrackingLocal();
+
+      // 2. Queue REPLACE_TABLE_DATA mutation if any rows were updated
+      const tt = this.db ? this.db.getTable('training_tracking') : null;
+      if (tt && tt.rows && (localResult.updatedLeads > 0 || localResult.updatedAttendees > 0 || localResult.updatedSizes > 0)) {
+        await this.db.addMutation({
+          type: 'REPLACE_TABLE_DATA',
+          action: 'REPLACE_TABLE_DATA',
+          table: 'training_tracking',
+          tableKey: 'training_tracking',
+          sheetName: 'Training Tracking',
+          data: tt.rows,
+          headers: tt.headers,
+          timestamp: new Date().toISOString()
+        });
+        if (typeof this.db.schedulePersistSnapshot === 'function') {
+          this.db.schedulePersistSnapshot(this.db.snapshot, 100);
+        }
       }
+
+      // 3. Notify backend Apps Script endpoint if configured
+      const syncUrl = window.syncEngine ? window.syncEngine.getSyncUrl() : '';
+      if (syncUrl) {
+        try {
+          if (window.syncEngine && typeof window.syncEngine.executeNetworkRequest === 'function') {
+            await window.syncEngine.executeNetworkRequest(syncUrl, 'POST', { action: 'syncTrainingAttendees' });
+          } else {
+            await (await fetch(`${syncUrl}?action=syncTrainingAttendees`)).json();
+          }
+        } catch (netErr) {
+          console.warn('Backend sync trigger error (local DB updated successfully):', netErr);
+        }
+
+        if (window.syncEngine) {
+          await window.syncEngine.syncWithGoogleSheets();
+        }
+      }
+
+      alert(`✅ Training tracking successfully synchronized!\n\n• Foremen updated: ${localResult.updatedLeads}\n• Attendee lists updated: ${localResult.updatedAttendees}\n• Crew sizes updated: ${localResult.updatedSizes}`);
     } catch (err) {
-      console.warn('Sync trigger error, performing full sync:', err);
+      console.error('syncAttendees error:', err);
+      alert('⚠️ Error synchronizing attendees: ' + err.message);
     } finally {
       if (btn) {
         btn.disabled = false;
         btn.innerHTML = '<span>🔄</span> Sync Attendees';
-      }
-      if (window.syncEngine) {
-        await window.syncEngine.syncWithGoogleSheets();
       }
       this.renderTraining();
     }

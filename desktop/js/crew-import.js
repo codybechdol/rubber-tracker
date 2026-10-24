@@ -921,7 +921,9 @@ class CrewImportEngine {
     const orderList = this.parsedCrews.map(c => String(c.jobNumber || '').replace(/\.\d+.*$/, '').trim()).filter(Boolean);
     try {
       localStorage.setItem('CREW_IMPORT_ORDER', JSON.stringify(orderList));
-    } catch (e) {}
+    } catch (e) {
+      console.warn('Could not cache crew import order in localStorage:', e);
+    }
     window._crewImportOrder = orderList;
     if (this.db?.snapshot) {
       if (!this.db.snapshot.configs) this.db.snapshot.configs = {};
@@ -3794,7 +3796,9 @@ class CrewImportEngine {
     const orderList = this.parsedCrews.map(c => String(c.jobNumber || '').replace(/\.\d+.*$/, '').trim()).filter(Boolean);
     try {
       localStorage.setItem('CREW_IMPORT_ORDER', JSON.stringify(orderList));
-    } catch (e) {}
+    } catch (e) {
+      console.warn('Could not cache crew import order in localStorage:', e);
+    }
     window._crewImportOrder = orderList;
     if (this.db?.snapshot) {
       if (!this.db.snapshot.configs) this.db.snapshot.configs = {};
@@ -5280,6 +5284,13 @@ class CrewImportEngine {
       const res = await this.applyCrewChanges();
       alert(`✅ ${res.message}`);
       if (window.sheetNavigator) {
+        if (typeof window.sheetNavigator.reconcileTrainingTrackingLocal === 'function') {
+          try {
+            window.sheetNavigator.reconcileTrainingTrackingLocal();
+          } catch (ttErr) {
+            console.warn('Could not auto-reconcile training tracking:', ttErr);
+          }
+        }
         window.sheetNavigator.renderCurrentSheet();
       }
       if (window.tripPlanner && typeof window.tripPlanner.renderPlanner === 'function') {

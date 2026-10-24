@@ -6135,13 +6135,14 @@ function refreshTrainingAttendeesSilent() {
     if (empSheetR && empSheetR.getLastRow() >= 2) {
       var empDataR = empSheetR.getDataRange().getValues();
       var empHeadersR = empDataR[0];
-      var empNameColR = -1, empJobNumColR = -1, empLastDayColR = -1, empClassColR = -1;
+      var empNameColR = -1, empJobNumColR = -1, empLastDayColR = -1, empClassColR = -1, empLocColR = -1;
       for (var erh = 0; erh < empHeadersR.length; erh++) {
         var erhVal = String(empHeadersR[erh]).toLowerCase().trim();
         if (erhVal === 'name' || erhVal === 'employee name') empNameColR = erh;
         if (erhVal === 'job number') empJobNumColR = erh;
         if (erhVal === 'last day') empLastDayColR = erh;
         if (erhVal === 'job classification') empClassColR = erh;
+        if (erhVal === 'location') empLocColR = erh;
       }
       // Classification priority for determining crew lead (lower = higher rank)
       var classRankR = { 'SUP': 1, 'GF': 2, 'F': 3, 'GTO F': 4, 'JRY': 5,
@@ -6157,11 +6158,15 @@ function refreshTrainingAttendeesSilent() {
           var erName = String(erRow[empNameColR] || '').trim();
           var erJobNum = String(erRow[empJobNumColR] || '').trim();
           var erLastDay = empLastDayColR !== -1 ? erRow[empLastDayColR] : '';
-          if (!erName || !erJobNum || erLastDay) continue;
+          var erLoc = empLocColR !== -1 ? String(erRow[empLocColR] || '').toLowerCase().trim() : '';
+          var isPrevEmp = erLoc === 'previous employee' || erLoc.indexOf('previous') !== -1 || (typeof isStatusLocation === 'function' && isStatusLocation(erLoc) === 'previous employee');
+          if (!erName || !erJobNum || erLastDay || isPrevEmp || erJobNum.indexOf('002-') === 0) continue;
           var erDot = erJobNum.lastIndexOf('.');
           var erCrew = erDot !== -1 ? erJobNum.substring(0, erDot) : erJobNum;
           if (!crewAttendeesMapR[erCrew]) crewAttendeesMapR[erCrew] = [];
-          crewAttendeesMapR[erCrew].push(erName);
+          if (crewAttendeesMapR[erCrew].indexOf(erName) === -1) {
+            crewAttendeesMapR[erCrew].push(erName);
+          }
           // Track best crew lead candidate by classification rank
           var erClass = empClassColR !== -1 ? String(erRow[empClassColR] || '').trim() : '';
           var erRank = classRankR[erClass] !== undefined ? classRankR[erClass] : 99;
@@ -6175,6 +6180,35 @@ function refreshTrainingAttendeesSilent() {
     Logger.log('refreshTrainingAttendeesSilent: Could not build attendees map: ' + empErrR);
   }
 
+  // Also read canonical Foremen from Job Tracking
+  var jtForemanMapR = {};
+  try {
+    var jtSheetR = ss.getSheetByName(SHEET_JOB_TRACKING);
+    if (jtSheetR && jtSheetR.getLastRow() >= 2) {
+      var jtDataR = jtSheetR.getDataRange().getValues();
+      var jtHeadersR = jtDataR[0];
+      var jtJobColR = -1, jtForemanColR = -1, jtStatColR = -1;
+      for (var jth = 0; jth < jtHeadersR.length; jth++) {
+        var jhVal = String(jtHeadersR[jth]).toLowerCase().trim();
+        if (jhVal === 'job number' || jhVal === 'job #' || jhVal === 'crew #') jtJobColR = jth;
+        if (jhVal === 'foreman' || jhVal === 'crew lead') jtForemanColR = jth;
+        if (jhVal === 'status') jtStatColR = jth;
+      }
+      if (jtJobColR !== -1 && jtForemanColR !== -1) {
+        for (var jti = 1; jti < jtDataR.length; jti++) {
+          var jNum = String(jtDataR[jti][jtJobColR] || '').trim();
+          var jForeman = String(jtDataR[jti][jtForemanColR] || '').trim();
+          var jStat = jtStatColR !== -1 ? String(jtDataR[jti][jtStatColR] || '').toLowerCase().trim() : '';
+          if (jNum && jForeman && (jStat === 'active' || !jStat)) {
+            jtForemanMapR[jNum] = jForeman;
+          }
+        }
+      }
+    }
+  } catch (jtErrR) {
+    Logger.log('refreshTrainingAttendeesSilent: Could not build Job Tracking foremen map: ' + jtErrR);
+  }
+
   var updatedCount = 0;
   var skippedCount = 0;
 
@@ -6182,7 +6216,7 @@ function refreshTrainingAttendeesSilent() {
     return crewAttendeesMapR[crewNum] || [];
   }
 
-  var statusesToUpdate = ['pending', '', 'n/a'];
+  var statusesToUpdate = ['pending', 'scheduled', '', 'n/a'];
   var rowsToUpdate = [];
 
   for (var i = dataStartIdx; i < data.length; i++) {
@@ -6204,13 +6238,23 @@ function refreshTrainingAttendeesSilent() {
       continue;
     }
 
-    var newAttendees = members.join(', ');
-    var newLead = (crewLeadCandidatesR && crewLeadCandidatesR[crewNum]) ? crewLeadCandidatesR[crewNum].name : '';
+    var newLead = jtForemanMapR[crewNum] || ((crewLeadCandidatesR && crewLeadCandidatesR[crewNum]) ? crewLeadCandidatesR[crewNum].name : '');
+    
+    // Sort members so foreman / lead appears first
+    var sortedMembers = members.slice();
+    if (newLead) {
+      var lIdx = sortedMembers.indexOf(newLead);
+      if (lIdx > 0) {
+        sortedMembers.splice(lIdx, 1);
+        sortedMembers.unshift(newLead);
+      }
+    }
+    var newAttendees = sortedMembers.join(', ');
     var attendeesChanged = newAttendees !== currentAttendees;
-    var leadChanged = leadCol !== -1 && currentLead === '' && newLead !== '';
+    var leadChanged = leadCol !== -1 && newLead !== '' && newLead.toLowerCase() !== (currentLead || '').toLowerCase();
 
     if (attendeesChanged || leadChanged) {
-      rowsToUpdate.push({ rowIdx: i + 1, attendees: newAttendees, size: members.length, lead: newLead, attendeesChanged: attendeesChanged, leadChanged: leadChanged });
+      rowsToUpdate.push({ rowIdx: i + 1, attendees: newAttendees, size: sortedMembers.length, lead: newLead, attendeesChanged: attendeesChanged, leadChanged: leadChanged });
       updatedCount++;
     } else {
       skippedCount++;
@@ -6374,7 +6418,7 @@ function updateTrainingTrackingCrewLeadsSilent() {
 
   Logger.log('updateTrainingTrackingCrewLeadsSilent: Current month is ' + currentMonthName + ' (index ' + currentMonthIndex + ')');
 
-  // Build map of crew number to current crew lead using getCrewLead
+  // Build map of crew number to current crew lead using getCrewLead & Job Tracking
   var crewLeadMap = {};
   var updatedRows = 0;
   var skippedPastMonths = 0;
@@ -6387,6 +6431,34 @@ function updateTrainingTrackingCrewLeadsSilent() {
       var crewLead = getCrewLead ? getCrewLead(crewNum) : null;
       crewLeadMap[crewNum] = crewLead ? crewLead.name : null;
     }
+  }
+
+  // Also check Job Tracking sheet for canonical active foremen
+  try {
+    var jtSheetLeads = ss.getSheetByName(SHEET_JOB_TRACKING);
+    if (jtSheetLeads && jtSheetLeads.getLastRow() >= 2) {
+      var jtDataLeads = jtSheetLeads.getDataRange().getValues();
+      var jtHeadersLeads = jtDataLeads[0];
+      var jtJobColL = -1, jtForemanColL = -1, jtStatColL = -1;
+      for (var jthl = 0; jthl < jtHeadersLeads.length; jthl++) {
+        var jhlVal = String(jtHeadersLeads[jthl]).toLowerCase().trim();
+        if (jhlVal === 'job number' || jhlVal === 'job #' || jhlVal === 'crew #') jtJobColL = jthl;
+        if (jhlVal === 'foreman' || jhlVal === 'crew lead') jtForemanColL = jthl;
+        if (jhlVal === 'status') jtStatColL = jthl;
+      }
+      if (jtJobColL !== -1 && jtForemanColL !== -1) {
+        for (var jtil = 1; jtil < jtDataLeads.length; jtil++) {
+          var jNumL = String(jtDataLeads[jtil][jtJobColL] || '').trim();
+          var jForemanL = String(jtDataLeads[jtil][jtForemanColL] || '').trim();
+          var jStatL = jtStatColL !== -1 ? String(jtDataLeads[jtil][jtStatColL] || '').toLowerCase().trim() : '';
+          if (jNumL && jForemanL && (jStatL === 'active' || !jStatL)) {
+            crewLeadMap[jNumL] = jForemanL;
+          }
+        }
+      }
+    }
+  } catch (jtErrL) {
+    Logger.log('updateTrainingTrackingCrewLeadsSilent: Could not read Job Tracking: ' + jtErrL);
   }
 
   // Second pass: update rows where crew lead doesn't match (ONLY current and future months)
