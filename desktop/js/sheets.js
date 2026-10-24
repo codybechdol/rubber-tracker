@@ -5095,9 +5095,40 @@ class SheetNavigator {
       }
     });
 
+    // 3. Map completed/closed/inactive jobs from Job Tracking
+    const completedJobNums = new Set();
+    (jt.rows || []).forEach(r => {
+      const num = String(r['Job Number'] || r['Job #'] || '').trim();
+      const status = String(r['Status'] || '').toLowerCase().trim();
+      if (num && (status === 'completed' || status === 'closed' || status === 'inactive')) {
+        completedJobNums.add(num);
+      }
+    });
+
     let updatedLeads = 0;
     let updatedAttendees = 0;
     let updatedSizes = 0;
+    let prunedRows = 0;
+
+    // Prune uncompleted / pending rows for completed jobs
+    if (completedJobNums.size > 0 && tt.rows) {
+      tt.rows = tt.rows.filter(r => {
+        const crew = String(r['Crew #'] || r['Job Number'] || r['Crew'] || '').trim();
+        const status = String(r['Status'] || r['Training Status'] || '').toLowerCase().trim();
+        const compDate = String(r['Completion Date'] || r['Date Completed'] || '').trim();
+        const isComp = status === 'complete' || status === 'completed' || compDate;
+
+        if (completedJobNums.has(crew) && !isComp) {
+          prunedRows++;
+          return false;
+        }
+        return true;
+      });
+
+      tt.rows.forEach((r, idx) => {
+        r._rowIdx = idx + 2;
+      });
+    }
 
     (tt.rows || []).forEach(r => {
       const status = String(r['Status'] || r['Training Status'] || '').toLowerCase().trim();
@@ -5158,7 +5189,7 @@ class SheetNavigator {
       tt.maxRows = tt.rawGrid.length;
     }
 
-    return { updatedLeads, updatedAttendees, updatedSizes };
+    return { updatedLeads, updatedAttendees, updatedSizes, prunedRows };
   }
 
   async syncAttendees() {
@@ -5174,9 +5205,9 @@ class SheetNavigator {
       // 1. Reconcile locally in the desktop database
       const localResult = this.reconcileTrainingTrackingLocal();
 
-      // 2. Queue REPLACE_TABLE_DATA mutation if any rows were updated
+      // 2. Queue REPLACE_TABLE_DATA mutation if any rows were updated or pruned
       const tt = this.db ? this.db.getTable('training_tracking') : null;
-      if (tt && tt.rows && (localResult.updatedLeads > 0 || localResult.updatedAttendees > 0 || localResult.updatedSizes > 0)) {
+      if (tt && tt.rows && (localResult.updatedLeads > 0 || localResult.updatedAttendees > 0 || localResult.updatedSizes > 0 || localResult.prunedRows > 0)) {
         await this.db.addMutation({
           type: 'REPLACE_TABLE_DATA',
           action: 'REPLACE_TABLE_DATA',
@@ -5210,7 +5241,11 @@ class SheetNavigator {
         }
       }
 
-      alert(`✅ Training tracking successfully synchronized!\n\n• Foremen updated: ${localResult.updatedLeads}\n• Attendee lists updated: ${localResult.updatedAttendees}\n• Crew sizes updated: ${localResult.updatedSizes}`);
+      let summaryMsg = `✅ Training tracking successfully synchronized!\n\n• Foremen updated: ${localResult.updatedLeads}\n• Attendee lists updated: ${localResult.updatedAttendees}\n• Crew sizes updated: ${localResult.updatedSizes}`;
+      if (localResult.prunedRows > 0) {
+        summaryMsg += `\n• Completed job pending rows pruned: ${localResult.prunedRows}`;
+      }
+      alert(summaryMsg);
     } catch (err) {
       console.error('syncAttendees error:', err);
       alert('⚠️ Error synchronizing attendees: ' + err.message);

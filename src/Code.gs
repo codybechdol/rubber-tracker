@@ -5694,42 +5694,16 @@ function removeCrewsFromTrainingTracking(crewNumbers) {
       var status = statusCol !== -1 ? String(row[statusCol]).trim() : '';
       var hasCompletion = completionDateCol !== -1 && row[completionDateCol] && row[completionDateCol] !== '';
 
-      // Rule 1: ALWAYS preserve past months (historical data)
-      if (rowMonthIndex !== -1 && rowMonthIndex < currentMonth.monthIndex) {
-        preservedRows++;
-        Logger.log('removeCrewsFromTrainingTracking: Preserved past month ' + monthName + ' for ' + crewValue);
-        continue;
-      }
-
-      // Rule 2: ALWAYS preserve completed training (any month)
-      if (status === 'Complete' || hasCompletion) {
+      // Rule 1: ALWAYS preserve completed training (any month)
+      var isCompleted = status.toLowerCase() === 'complete' || status.toLowerCase() === 'completed' || status.toLowerCase() === 'done' || hasCompletion;
+      if (isCompleted) {
         preservedRows++;
         Logger.log('removeCrewsFromTrainingTracking: Preserved completed training ' + monthName + ' for ' + crewValue);
         continue;
       }
 
-      // Rule 3: For current month - only delete if Pending or N/A
-      if (rowMonthIndex === currentMonth.monthIndex) {
-        if (status === 'Pending' || status === 'N/A' || status === '') {
-          rowsToDelete.push(i + 1); // +1 because sheet rows are 1-indexed
-        } else {
-          preservedRows++;
-        }
-        continue;
-      }
-
-      // Rule 4: Future months - delete if pending/N/A (no historical value)
-      if (rowMonthIndex > currentMonth.monthIndex) {
-        if (status === 'Pending' || status === 'N/A' || status === '') {
-          rowsToDelete.push(i + 1);
-        } else {
-          preservedRows++;
-        }
-        continue;
-      }
-
-      // Unknown month - preserve to be safe
-      preservedRows++;
+      // Rule 2: For inactive/removed/completed crews, delete uncompleted/pending/N/A rows
+      rowsToDelete.push(i + 1); // +1 because sheet rows are 1-indexed
     }
   }
 

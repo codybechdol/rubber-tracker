@@ -9528,8 +9528,14 @@ class TripPlannerApp {
             crewId: sig,
             foreman: String(r['Foreman'] || r['Crew Lead'] || r['Lead'] || '').trim(),
             location: this.cleanPhysicalLocation(String(r['Location'] || '').trim()),
-            jobName: String(r['Job Name'] || '').trim()
+            jobName: String(r['Job Name'] || '').trim(),
+            status: String(r['Status'] || '').trim()
           };
+          if (rawCrew && !crewMap[rawCrew]) {
+            crewMap[rawCrew] = crewMap[sig];
+          }
+        } else if (sig && crewMap[sig] && rawCrew && !crewMap[rawCrew]) {
+          crewMap[rawCrew] = crewMap[sig];
         }
       });
       const aliasMap = (this.db && this.db.snapshot && this.db.snapshot.configs && this.db.snapshot.configs['FY_TRANSITION_ALIAS_MAP']) || {};
@@ -9589,11 +9595,21 @@ class TripPlannerApp {
         const dateDone = String(r['Completion Date'] || r['Date Completed'] || r['Date'] || '').trim();
         let attendees = String(r['Attendees'] || '').trim();
 
-        // If not completed yet, refresh attendees to current active crew members
+        // Skip completed, on-hold, or inactive jobs if training is not completed
         if (!isCompleted) {
+          const sigCrew = this.getSignificantJobNumber(crewId);
+          const jInfo = crewMap[sigCrew] || crewMap[crewId];
+          const jStatus = String((jInfo && jInfo.status) || (cInfo && cInfo.jobStatus) || '').toLowerCase();
+          if (jStatus.includes('completed') || jStatus.includes('on hold') || jStatus === 'closed' || jStatus === 'inactive') {
+            return;
+          }
+
+          // If not completed yet, refresh attendees to current active crew members
           const liveMembers = this.getCrewMembers(activeCrewId || crewId);
           if (liveMembers && liveMembers.length > 0) {
             attendees = liveMembers.map(m => m.name).join(', ');
+          } else if (!lead || lead === 'Foreman' || (this.isDepartedOrPreviousEmployee && this.isDepartedOrPreviousEmployee(lead))) {
+            return;
           }
         } else if (lead && lead !== 'Foreman' && lead !== 'Lead' && attendees) {
           // Ensure active foreman / lead is listed first in attendees if present
