@@ -3806,32 +3806,67 @@ class TripPlannerApp {
       const liveLead = (cInfo && cInfo.foreman && cInfo.foreman !== 'Foreman') ? cInfo.foreman : (tr.lead || '');
       const members = this.getCrewMembers(tr.crewId);
       const liveAttendees = (members && members.length > 0) ? members.map(m => m.name).join(', ') : (tr.attendees || '');
-      const trKey = tr.id || `train_${tr.crewId}_${tr._rowIdx || 0}_${tr.topic}`;
+      const rowId = tr.rowIdx || tr._rowIdx || 0;
+      const trKey = tr.id || `train_${tr.crewId}_${rowId}_${tr.topic}`;
       this.scheduledTrainingNeeds[trKey] = {
         dateKey: dateKey,
         location: targetLoc,
         crewId: tr.crewId || '',
-        training: { ...tr, lead: liveLead, location: targetLoc, attendees: liveAttendees }
+        training: { ...tr, rowIdx: rowId, lead: liveLead, location: targetLoc, attendees: liveAttendees }
       };
+
+      const trainTable = this.db ? this.db.getTable('training_tracking') : null;
+      if (trainTable && trainTable.rows) {
+        const sigTarget = this.getSignificantJobNumber(tr.crewId || '').toLowerCase();
+        const topicTarget = String(tr.topic || '').trim().toLowerCase();
+        const targetRow = trainTable.rows.find(r => {
+          if (rowId && (r._rowIdx === rowId || trainTable.rows.indexOf(r) + 2 === rowId)) return true;
+          const cSig = this.getSignificantJobNumber(r['Crew #'] || r['Crew'] || '').toLowerCase();
+          const rTopic = String(r['Topic'] || r['Training Topic'] || '').trim().toLowerCase();
+          return (sigTarget && cSig === sigTarget) && (rTopic === topicTarget || rTopic.includes(topicTarget) || topicTarget.includes(rTopic));
+        });
+        if (targetRow && (!targetRow['Status'] || String(targetRow['Status']).toLowerCase() === 'pending')) {
+          targetRow['Status'] = 'Scheduled';
+          targetRow['Training Status'] = 'Scheduled';
+        }
+      }
+
       this.saveScheduledTrainingNeeds();
       this.renderPlanner();
       this.renderTrainingNeedsList();
       this.showToast(`🎓 Scheduled Training "${tr.topic}" for Crew ${tr.crewId} on ${dateKey}`);
     } else if (payload.type === 'training_crew' && Array.isArray(payload.trainings)) {
       const targetLoc = location || (payload.trainings[0] && payload.trainings[0].location) || '';
+      const trainTable = this.db ? this.db.getTable('training_tracking') : null;
       payload.trainings.forEach(tr => {
         const cInfo = this.getCrewInfo(tr.crewId, tr.lead, tr.location);
         const trLoc = tr.location || targetLoc || (cInfo && cInfo.location) || '';
         const liveLead = (cInfo && cInfo.foreman && cInfo.foreman !== 'Foreman') ? cInfo.foreman : (tr.lead || '');
         const members = this.getCrewMembers(tr.crewId);
         const liveAttendees = (members && members.length > 0) ? members.map(m => m.name).join(', ') : (tr.attendees || '');
-        const trKey = tr.id || `train_${tr.crewId}_${tr._rowIdx || 0}_${tr.topic}`;
+        const rowId = tr.rowIdx || tr._rowIdx || 0;
+        const trKey = tr.id || `train_${tr.crewId}_${rowId}_${tr.topic}`;
         this.scheduledTrainingNeeds[trKey] = {
           dateKey: dateKey,
           location: trLoc,
           crewId: tr.crewId || '',
-          training: { ...tr, lead: liveLead, location: trLoc, attendees: liveAttendees }
+          training: { ...tr, rowIdx: rowId, lead: liveLead, location: trLoc, attendees: liveAttendees }
         };
+
+        if (trainTable && trainTable.rows) {
+          const sigTarget = this.getSignificantJobNumber(tr.crewId || '').toLowerCase();
+          const topicTarget = String(tr.topic || '').trim().toLowerCase();
+          const targetRow = trainTable.rows.find(r => {
+            if (rowId && (r._rowIdx === rowId || trainTable.rows.indexOf(r) + 2 === rowId)) return true;
+            const cSig = this.getSignificantJobNumber(r['Crew #'] || r['Crew'] || '').toLowerCase();
+            const rTopic = String(r['Topic'] || r['Training Topic'] || '').trim().toLowerCase();
+            return (sigTarget && cSig === sigTarget) && (rTopic === topicTarget || rTopic.includes(topicTarget) || topicTarget.includes(rTopic));
+          });
+          if (targetRow && (!targetRow['Status'] || String(targetRow['Status']).toLowerCase() === 'pending')) {
+            targetRow['Status'] = 'Scheduled';
+            targetRow['Training Status'] = 'Scheduled';
+          }
+        }
       });
       this.saveScheduledTrainingNeeds();
       this.renderPlanner();
@@ -8839,14 +8874,37 @@ class TripPlannerApp {
         const location = crewInfo.location || 'Helena';
 
         const eqKey = `equip_${crewId}_${rowIdx}_${equipType}`;
-        if (this.scheduledEquipmentNeeds && this.scheduledEquipmentNeeds[eqKey]) {
-          const s = this.scheduledEquipmentNeeds[eqKey];
-          const sDate = typeof s === 'object' ? s.dateKey : s;
-          if (sDate && sDate >= todayKey) {
-            // Already scheduled for today or an upcoming day, filter out from available sidebar
-            return;
+        let isEqScheduled = false;
+        if (this.scheduledEquipmentNeeds) {
+          if (this.scheduledEquipmentNeeds[eqKey]) {
+            const s = this.scheduledEquipmentNeeds[eqKey];
+            const sDate = typeof s === 'object' ? s.dateKey : s;
+            if (sDate) isEqScheduled = true;
+          }
+          if (!isEqScheduled) {
+            const sigCrew = this.getSignificantJobNumber(crewId).toLowerCase();
+            const vehTarget = String(vehNum || '').trim().toLowerCase();
+            const typeTarget = String(equipType || '').trim().toLowerCase();
+            for (const [k, s] of Object.entries(this.scheduledEquipmentNeeds)) {
+              if (!s) continue;
+              const sDate = typeof s === 'object' ? s.dateKey : s;
+              if (!sDate) continue;
+              const sItm = s.item || s;
+              if (k === eqKey || sItm.id === eqKey || sItm._eqKey === eqKey) {
+                isEqScheduled = true;
+                break;
+              }
+              const sCrewSig = this.getSignificantJobNumber(sItm.crewId || s.crewId || '').toLowerCase();
+              const sVeh = String(sItm.vehicleNumber || '').trim().toLowerCase();
+              const sType = String(sItm.equipmentType || '').trim().toLowerCase();
+              if (sigCrew && sCrewSig && sigCrew === sCrewSig && vehTarget && sVeh && vehTarget === sVeh && typeTarget && sType && typeTarget === sType) {
+                isEqScheduled = true;
+                break;
+              }
+            }
           }
         }
+        if (isEqScheduled) return;
 
         const sourceEmailId = String(r['Source Email ID'] || r['Email ID'] || '').trim();
         const emailSubject = String(r['Email Subject'] || r['Subject'] || '').trim();
@@ -8884,7 +8942,7 @@ class TripPlannerApp {
       if (this.scheduledEquipmentNeeds && this.scheduledEquipmentNeeds[eqKey]) {
         const s = this.scheduledEquipmentNeeds[eqKey];
         const sDate = typeof s === 'object' ? s.dateKey : s;
-        if (sDate && sDate >= todayKey) {
+        if (sDate) {
           isScheduled = true;
         }
       }
@@ -9402,6 +9460,58 @@ class TripPlannerApp {
   }
 
   /**
+   * Checks whether a training need is scheduled in Trip Planner.
+   * Matches by direct key, rowIdx, id, or significant crewId + topic + month.
+   * Returns { dateKey, location, key, entry } or null if not scheduled.
+   */
+  getTrainingScheduleInfo(crewId, topic, rowIdx = null, month = '') {
+    if (!this.scheduledTrainingNeeds) return null;
+    const directKey = `train_${crewId}_${rowIdx || 0}_${topic}`;
+    if (this.scheduledTrainingNeeds[directKey]) {
+      const entry = this.scheduledTrainingNeeds[directKey];
+      const dateKey = typeof entry === 'object' ? entry.dateKey : entry;
+      if (dateKey) return { dateKey, location: entry.location || '', key: directKey, entry };
+    }
+
+    const sigTarget = this.getSignificantJobNumber(crewId || '').toLowerCase();
+    const topicTarget = String(topic || '').trim().toLowerCase();
+    const monthTarget = String(month || '').trim().toLowerCase();
+    const rowNum = Number(rowIdx);
+
+    for (const [k, entry] of Object.entries(this.scheduledTrainingNeeds)) {
+      if (!entry) continue;
+      const dateKey = typeof entry === 'object' ? entry.dateKey : entry;
+      if (!dateKey) continue;
+
+      const tr = entry.training || entry;
+      if (k === directKey || tr.id === directKey || tr._trKey === directKey) {
+        return { dateKey, location: entry.location || '', key: k, entry };
+      }
+
+      const trRow = Number(tr.rowIdx || tr._rowIdx || 0);
+      if (rowNum && trRow && rowNum === trRow) {
+        return { dateKey, location: entry.location || '', key: k, entry };
+      }
+
+      if (sigTarget && topicTarget) {
+        const cSig = this.getSignificantJobNumber(tr.crewId || entry.crewId || '').toLowerCase();
+        const rTopic = String(tr.topic || '').trim().toLowerCase();
+        const rMonth = String(tr.month || '').trim().toLowerCase();
+
+        const crewMatch = (cSig === sigTarget) || (String(tr.crewId || entry.crewId || '').toLowerCase() === String(crewId || '').toLowerCase());
+        const topicMatch = rTopic && (rTopic === topicTarget || rTopic.includes(topicTarget) || topicTarget.includes(rTopic));
+        const monthMatch = !monthTarget || !rMonth || rMonth.includes(monthTarget) || monthTarget.includes(rMonth);
+
+        if (crewMatch && topicMatch && monthMatch) {
+          return { dateKey, location: entry.location || '', key: k, entry };
+        }
+      }
+    }
+
+    return null;
+  }
+
+  /**
    * Retrieves and groups Training Tracking curriculum for selected month
    */
   getTrainingNeedsData() {
@@ -9440,10 +9550,7 @@ class TripPlannerApp {
     const curMonthName = monthNames[curMonthIdx];
     const curMonthShort = curMonthName.substring(0, 3).toLowerCase();
 
-    const today = new Date();
-    const todayKey = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-
-    const trainings = [];
+    const allMonthTrainings = [];
 
     if (trainTable && trainTable.rows) {
       trainTable.rows.forEach((r, idx) => {
@@ -9478,7 +9585,7 @@ class TripPlannerApp {
         const lead = cInfo.foreman || rawLead || 'Foreman';
         const location = cInfo.location || 'Helena';
         const status = String(r['Status'] || r['Training Status'] || '').trim();
-        const isCompleted = status.toLowerCase() === 'completed' || status.toLowerCase() === 'complete';
+        const isCompleted = status.toLowerCase() === 'completed' || status.toLowerCase() === 'complete' || status.toLowerCase() === 'done';
         const dateDone = String(r['Completion Date'] || r['Date Completed'] || r['Date'] || '').trim();
         let attendees = String(r['Attendees'] || '').trim();
 
@@ -9500,24 +9607,20 @@ class TripPlannerApp {
         }
 
         const rowIdx = r._rowIdx || (idx + 2);
-
         const trKey = `train_${crewId}_${rowIdx}_${topic}`;
 
-        // Check if scheduled
-        let isScheduled = false;
-        if (this.scheduledTrainingNeeds && this.scheduledTrainingNeeds[trKey]) {
-          const s = this.scheduledTrainingNeeds[trKey];
-          const sDate = typeof s === 'object' ? s.dateKey : s;
-          if (sDate && sDate >= todayKey) {
-            isScheduled = true;
-          }
+        // Robust check whether scheduled in Trip Planner
+        const schedInfo = this.getTrainingScheduleInfo(crewId, topic, rowIdx, rowMonth || curMonthName);
+        let isScheduled = !!schedInfo;
+        let scheduledDate = schedInfo ? schedInfo.dateKey : '';
+
+        // Also check if DB row itself is marked Scheduled
+        if (!isScheduled && status.toLowerCase() === 'scheduled') {
+          isScheduled = true;
+          scheduledDate = String(r['Scheduled Date'] || r['Date'] || '').trim();
         }
 
-        // Apply Status Filter
-        if (this.trainingFilter === 'pending' && (isCompleted || isScheduled)) return;
-        if (this.trainingFilter === 'completed' && !isCompleted) return;
-
-        trainings.push({
+        allMonthTrainings.push({
           id: trKey,
           tableKey: 'training_tracking',
           rowIdx: rowIdx,
@@ -9527,19 +9630,30 @@ class TripPlannerApp {
           activeCrewId: activeCrewId,
           lead: lead,
           location: location,
-          status: status || 'Pending',
+          status: isCompleted ? 'Completed' : (isScheduled ? 'Scheduled' : (status || 'Pending')),
           isCompleted: isCompleted,
           dateDone: dateDone,
           attendees: attendees,
-          isScheduled: isScheduled
+          isScheduled: isScheduled,
+          scheduledDate: scheduledDate
         });
       });
     }
 
+    // Pending count = trainings that are NOT complete AND NOT yet scheduled
+    const pendingCount = allMonthTrainings.filter(t => !t.isCompleted && !t.isScheduled).length;
+
+    // Apply Status Filter
+    let filteredTrainings = allMonthTrainings;
+    if (this.trainingFilter === 'pending') {
+      filteredTrainings = allMonthTrainings.filter(t => !t.isCompleted && !t.isScheduled);
+    } else if (this.trainingFilter === 'completed') {
+      filteredTrainings = allMonthTrainings.filter(t => t.isCompleted);
+    }
+
     // Apply Search Filter
-    let filteredTrainings = trainings;
     if (this.trainingSearchTerm) {
-      const q = this.trainingSearchTerm;
+      const q = this.trainingSearchTerm.toLowerCase();
       filteredTrainings = filteredTrainings.filter(t => {
         return (t.crewId || '').toLowerCase().includes(q) ||
           (t.lead || '').toLowerCase().includes(q) ||
@@ -9563,14 +9677,12 @@ class TripPlannerApp {
       crewGroups[cId].trainings.push(tr);
     });
 
-    const pendingCount = trainings.filter(t => !t.isCompleted).length;
-
     return {
       trainings: filteredTrainings,
       crewGroups: Object.values(crewGroups),
       monthLabel: `${curMonthName} ${curYear}`,
       pendingCount: pendingCount,
-      totalCount: trainings.length
+      totalCount: allMonthTrainings.length
     };
   }
 
@@ -9645,11 +9757,13 @@ class TripPlannerApp {
 
       // Render individual training items
       cg.trainings.forEach(tr => {
+        const isScheduled = !!tr.isScheduled;
+        const isDone = !!tr.isCompleted;
         const trCard = document.createElement('div');
-        trCard.draggable = !tr.isCompleted;
-        trCard.style.cssText = `background: var(--bg-primary); border: 1px solid var(--border-color); border-left: 3px solid ${tr.isCompleted ? '#10b981' : '#34d399'}; border-radius: 5px; padding: 8px 9px; margin-bottom: 6px; cursor: ${tr.isCompleted ? 'default' : 'grab'}; user-select: none; transition: border-color 0.15s ease, transform 0.15s ease; box-shadow: 0 1px 3px rgba(0,0,0,0.2); opacity: ${tr.isCompleted ? '0.7' : '1'};`;
-        trCard.title = tr.isCompleted ? 'Training Completed' : `Drag to calendar to schedule training for Crew ${cg.crewId}`;
-        if (!tr.isCompleted) {
+        trCard.draggable = !isDone && !isScheduled;
+        trCard.style.cssText = `background: var(--bg-primary); border: 1px solid var(--border-color); border-left: 3px solid ${isDone ? '#10b981' : (isScheduled ? '#60a5fa' : '#34d399')}; border-radius: 5px; padding: 8px 9px; margin-bottom: 6px; cursor: ${isDone || isScheduled ? 'default' : 'grab'}; user-select: none; transition: border-color 0.15s ease, transform 0.15s ease; box-shadow: 0 1px 3px rgba(0,0,0,0.2); opacity: ${isDone || isScheduled ? '0.75' : '1'};`;
+        trCard.title = isDone ? 'Training Completed' : (isScheduled ? `Already scheduled for ${tr.scheduledDate || 'calendar'}` : `Drag to calendar to schedule training for Crew ${cg.crewId}`);
+        if (!isDone && !isScheduled) {
           trCard.onmouseover = () => { trCard.style.borderColor = '#34d399'; trCard.style.transform = 'translateY(-1px)'; };
           trCard.onmouseout = () => { trCard.style.borderColor = 'var(--border-color)'; trCard.style.borderLeftColor = '#34d399'; trCard.style.transform = 'translateY(0)'; };
           trCard.addEventListener('dragstart', (e) => {
@@ -9665,13 +9779,13 @@ class TripPlannerApp {
         trCard.innerHTML = `
           <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 6px;">
             <div style="flex: 1; min-width: 0;">
-              <div style="font-size: 11.5px; font-weight: 700; color: ${tr.isCompleted ? '#94a3b8' : '#f8fafc'}; text-decoration: ${tr.isCompleted ? 'line-through' : 'none'}; margin-bottom: 3px; line-height: 1.3;">
+              <div style="font-size: 11.5px; font-weight: 700; color: ${isDone ? '#94a3b8' : '#f8fafc'}; text-decoration: ${isDone ? 'line-through' : 'none'}; margin-bottom: 3px; line-height: 1.3;">
                 🎓 ${this.escapeHtml(tr.topic)}
               </div>
               <div style="display: flex; justify-content: space-between; align-items: center; font-size: 9.5px; color: #94a3b8; margin-top: 4px;">
                 <span>📅 ${this.escapeHtml(tr.month)}</span>
-                <span style="color: ${tr.isCompleted ? '#4ade80' : '#facc15'}; font-weight: 700;">
-                  ${tr.isCompleted ? `✅ Done ${tr.dateDone ? `(${this.escapeHtml(tr.dateDone)})` : ''}` : '⏳ Pending'}
+                <span style="color: ${isDone ? '#4ade80' : (isScheduled ? '#60a5fa' : '#facc15')}; font-weight: 700;">
+                  ${isDone ? `✅ Done ${tr.dateDone ? `(${this.escapeHtml(tr.dateDone)})` : ''}` : (isScheduled ? `⏳ Scheduled ${tr.scheduledDate ? `(${this.escapeHtml(this.formatDateKeyToSlash(tr.scheduledDate))})` : ''}` : '⏳ Pending')}
                 </span>
               </div>
               ${tr.attendees ? `
@@ -9681,7 +9795,7 @@ class TripPlannerApp {
               ` : ''}
             </div>
             <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
-              ${!tr.isCompleted ? `
+              ${!isDone ? `
                 <button class="btn btn-secondary" style="padding: 2px 6px; font-size: 9px; color: #34d399; background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.3); font-weight: 700; cursor: pointer; border-radius: 3px; white-space: nowrap;" onclick="event.stopPropagation(); window.tripPlanner.completeTrainingNeed(${JSON.stringify(tr).replace(/"/g, '&quot;')})" title="Mark Training Completed">
                   ✅ Done
                 </button>
@@ -9699,9 +9813,39 @@ class TripPlannerApp {
   }
 
   unscheduleTrainingNeed(key) {
-    if (this.scheduledTrainingNeeds && this.scheduledTrainingNeeds[key]) {
-      delete this.scheduledTrainingNeeds[key];
+    if (!this.scheduledTrainingNeeds) return;
+    let targetKey = key;
+    if (!this.scheduledTrainingNeeds[targetKey]) {
+      for (const [k, v] of Object.entries(this.scheduledTrainingNeeds)) {
+        if (k === key || (v && v.training && (v.training.id === key || v.training._trKey === key))) {
+          targetKey = k;
+          break;
+        }
+      }
+    }
+    if (this.scheduledTrainingNeeds && this.scheduledTrainingNeeds[targetKey]) {
+      const entry = this.scheduledTrainingNeeds[targetKey];
+      const tr = (entry && entry.training) ? entry.training : entry;
+      delete this.scheduledTrainingNeeds[targetKey];
       this.saveScheduledTrainingNeeds();
+
+      const trainTable = this.db ? this.db.getTable('training_tracking') : null;
+      if (trainTable && trainTable.rows && tr) {
+        const rowId = tr.rowIdx || tr._rowIdx;
+        const sigTarget = this.getSignificantJobNumber(tr.crewId || entry.crewId || '').toLowerCase();
+        const topicTarget = String(tr.topic || '').trim().toLowerCase();
+        const targetRow = trainTable.rows.find(r => {
+          if (rowId && (r._rowIdx === rowId || trainTable.rows.indexOf(r) + 2 === rowId)) return true;
+          const cSig = this.getSignificantJobNumber(r['Crew #'] || r['Crew'] || '').toLowerCase();
+          const rTopic = String(r['Topic'] || r['Training Topic'] || '').trim().toLowerCase();
+          return (sigTarget && cSig === sigTarget) && (rTopic === topicTarget || rTopic.includes(topicTarget) || topicTarget.includes(rTopic));
+        });
+        if (targetRow && String(targetRow['Status']).toLowerCase() === 'scheduled') {
+          targetRow['Status'] = 'Pending';
+          targetRow['Training Status'] = 'Pending';
+        }
+      }
+
       this.renderPlanner();
       this.renderTrainingNeedsList();
       this.notifyAccomplishmentsModal();
