@@ -676,7 +676,14 @@ class EmployeeProfileEngine {
     const mpEmail = primaryRow ? (primaryRow['MP Email'] || '') : '';
     const notifEmail = primaryRow ? (primaryRow['Notification Emails'] || '') : '';
     const hireDate = primaryRow ? (primaryRow['Hire Date'] || primaryRow['Hire'] || '') : '';
-    const status = primaryRow ? (primaryRow['Status'] || '') : '';
+    let status = primaryRow ? String(primaryRow['Status'] || '').trim() : '';
+    if (!status || status.toLowerCase() === 'active') {
+      const locLower = String(location || '').toLowerCase().trim();
+      if (locLower.includes('(vacation)') || locLower === 'vacation') status = 'Vacation';
+      else if (locLower.includes('(light duty)') || locLower === 'light duty' || locLower.includes('(weeds)') || locLower === 'weeds') status = 'Light Duty';
+      else if (locLower.includes('(leave)') || locLower === 'leave' || locLower.includes('fmla') || locLower.includes('military')) status = 'Leave';
+      else if (locLower.includes('(medical)') || locLower === 'medical' || locLower.includes("worker's comp") || locLower.includes('(injury)')) status = 'Medical';
+    }
     const parsedHire = this.parseDate(hireDate);
     const today = new Date();
     today.setHours(0, 0, 0, 0);
@@ -1873,6 +1880,7 @@ class EmployeeProfileEngine {
     const altKey = getFieldKey('Alternate Names');
     const hireKey = getFieldKey('Hire Date');
     const statusKey = getFieldKey('Status');
+    const locKey = getFieldKey('Location');
 
     const updatedFields = {
       [phoneKey]: newPhone,
@@ -1886,8 +1894,21 @@ class EmployeeProfileEngine {
       [altKey]: newAltNames
     };
 
-    if (newStatus && statusKey) {
-      updatedFields[statusKey] = newStatus;
+    if (newStatus) {
+      if (statusKey) {
+        updatedFields[statusKey] = newStatus;
+      }
+      const curLocRaw = String(row[locKey] || row['Location'] || 'Helena').trim();
+      let cleanCity = curLocRaw.replace(/\s*\([^)]*\)/g, '').trim();
+      if (!cleanCity || ['vacation', 'light duty', 'leave', 'medical', 'weeds', "worker's comp", 'unassigned', 'previous employee'].includes(cleanCity.toLowerCase())) {
+        cleanCity = 'Helena';
+      }
+      const nonFieldStatuses = ['vacation', 'light duty', 'leave', 'medical'];
+      if (nonFieldStatuses.includes(newStatus.toLowerCase())) {
+        updatedFields[locKey] = `${cleanCity} (${newStatus})`;
+      } else if (newStatus === 'Active' || newStatus === 'Pending') {
+        updatedFields[locKey] = cleanCity;
+      }
     }
 
     if (formattedHireDate) {

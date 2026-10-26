@@ -531,8 +531,9 @@ class TaskManagerApp {
         // Skip completed or N/A
         if (status.toLowerCase() === 'complete' || status.toLowerCase() === 'n/a') return;
 
-        // Skip training for completed, on-hold, or inactive crews
+        // Skip training for completed, on-hold, inactive, or untracked/invalid crews
         const jInfo = jobLookup[sigCrew] || jobLookup[crewId];
+        if (!jInfo) return;
         const jStat = String(jInfo?.status || '').toLowerCase();
         if (jStat.includes('completed') || jStat.includes('on hold') || jStat === 'closed' || jStat === 'inactive') {
           return;

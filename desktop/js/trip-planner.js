@@ -2523,26 +2523,31 @@ class TripPlannerApp {
   }
 
   async toggleManualTask(taskId) {
-    if (!this.manualTasks) this.manualTasks = this.loadManualTasks();
-    const task = this.manualTasks.find(t => t.id === taskId);
-    if (task) {
-      const isCert = (task.taskCategory === 'cert_class' || !!task.certType);
-      const willBeComplete = (task.status !== 'Complete');
+    try {
+      if (!this.manualTasks) this.manualTasks = this.loadManualTasks();
+      const task = this.manualTasks.find(t => t.id === taskId);
+      if (task) {
+        const isCert = (task.taskCategory === 'cert_class' || !!task.certType);
+        const willBeComplete = (task.status !== 'Complete');
 
-      task.status = willBeComplete ? 'Complete' : 'Pending';
-      task.completedAt = willBeComplete ? new Date().toISOString() : null;
-      this.saveManualTasks(this.manualTasks);
-      this.renderPlanner();
-      this.notifyAccomplishmentsModal();
+        task.status = willBeComplete ? 'Complete' : 'Pending';
+        task.completedAt = willBeComplete ? new Date().toISOString() : null;
+        this.saveManualTasks(this.manualTasks);
+        this.renderPlanner();
+        this.notifyAccomplishmentsModal();
 
-      if (isCert) {
-        if (willBeComplete) {
-          await this.syncClassCompletionToExpiringCerts(task);
-          await this.syncClassCompletionToTrainingTracking(task);
-        } else {
-          this.showToast('Class status set to Pending. (Existing cert records preserved).');
+        if (isCert) {
+          if (willBeComplete) {
+            await this.syncClassCompletionToExpiringCerts(task);
+            await this.syncClassCompletionToTrainingTracking(task);
+          } else {
+            this.showToast('Class status set to Pending. (Existing cert records preserved).');
+          }
         }
       }
+    } catch (err) {
+      console.error('Error toggling manual training task:', err);
+      this.showToast('Error updating class status: ' + (err.message || err), 'error');
     }
   }
 
@@ -6986,7 +6991,6 @@ class TripPlannerApp {
               let dbCompletionDate = '';
               if (trainTable && trainTable.rows) {
                 const targetRow = trainTable.rows.find(r => {
-                  if (trItem.rowIdx && (r._rowIdx === trItem.rowIdx || trainTable.rows.indexOf(r) + 2 === trItem.rowIdx)) return true;
                   const cRaw = String(r['Crew #'] || r['Crew'] || r['Job Number'] || r['Job #'] || '').trim();
                   const cSig = this.getSignificantJobNumber(cRaw).toLowerCase();
                   const tSig = this.getSignificantJobNumber(trItem.crewId || '').toLowerCase();
@@ -6997,6 +7001,10 @@ class TripPlannerApp {
                   const rMonth = String(r['Month'] || r['Scheduled Month'] || '').trim().toLowerCase();
                   const mTarget = String(trItem.month || '').trim().toLowerCase();
                   const monthMatches = !mTarget || !rMonth || rMonth.includes(mTarget) || mTarget.includes(rMonth);
+
+                  if (trItem.rowIdx && (r._rowIdx === trItem.rowIdx || trainTable.rows.indexOf(r) + 2 === trItem.rowIdx)) {
+                    if (crewMatches && topicMatches) return true;
+                  }
                   return crewMatches && topicMatches && monthMatches;
                 });
                 if (targetRow) {
@@ -7101,7 +7109,7 @@ class TripPlannerApp {
                     <div class="manual-task-card cert-class-card" style="background: var(--bg-primary); border: 1px solid ${isDone ? 'rgba(16, 185, 129, 0.3)' : 'rgba(16, 185, 129, 0.4)'}; border-left: 4px solid ${isDone ? '#10b981' : '#059669'}; border-radius: 6px; padding: 7px 9px; box-shadow: 0 1px 4px rgba(0,0,0,0.25); opacity: ${isDone ? '0.65' : '1'}; transition: opacity 0.2s;">
                       <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 6px;">
                         <div style="display: flex; align-items: flex-start; gap: 7px; flex: 1; min-width: 0;">
-                          <input type="checkbox" ${isDone ? 'checked' : ''} onchange="window.tripPlanner.toggleManualTask('${this.escapeHtml(mt.id)}')" style="cursor: pointer; margin-top: 2px; accent-color: #10b981; width: 14px; height: 14px;" title="${isDone ? 'Mark Pending' : 'Mark Class Complete'}">
+                          <input type="checkbox" ${isDone ? 'checked' : ''} onclick="event.stopPropagation()" onchange="window.tripPlanner.toggleManualTask('${this.escapeJs(mt.id)}')" style="cursor: pointer; margin-top: 2px; accent-color: #10b981; width: 14px; height: 14px;" title="${isDone ? 'Mark Pending' : 'Mark Class Complete'}">
                           <div style="flex: 1; min-width: 0;">
                             <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 3px; flex-wrap: wrap;">
                               <span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); font-size: 9px; font-weight: 800; padding: 1px 5px; border-radius: 3px;">
@@ -7231,7 +7239,7 @@ class TripPlannerApp {
                     <div class="manual-task-card scheduled-training-card ${isDone ? 'completed-training-card' : ''}" style="background: var(--bg-primary); border: 1px solid ${isDone ? 'rgba(16, 185, 129, 0.3)' : 'rgba(52, 211, 153, 0.35)'}; border-left: 4px solid ${isDone ? '#10b981' : '#34d399'}; border-radius: 6px; padding: 7px 9px; box-shadow: 0 1px 4px rgba(0,0,0,0.25); opacity: ${isDone ? '0.72' : '1'}; transition: all 0.15s ease;">
                       <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 6px;">
                         <div style="display: flex; align-items: flex-start; gap: 7px; flex: 1; min-width: 0;">
-                          <input type="checkbox" ${isDone ? 'checked' : ''} onclick="event.stopPropagation(); window.tripPlanner.toggleScheduledTraining('${this.escapeJs(tr._trKey || tr.id)}', '${dateKey}')" style="cursor: pointer; margin-top: 3px; accent-color: #10b981; width: 14px; height: 14px;" title="${isDone ? 'Completed (click to revert)' : 'Click to mark complete'}">
+                          <input type="checkbox" ${isDone ? 'checked' : ''} onclick="event.stopPropagation()" onchange="window.tripPlanner.toggleScheduledTraining('${this.escapeJs(tr._trKey || tr.id)}', '${dateKey}')" style="cursor: pointer; margin-top: 3px; accent-color: #10b981; width: 14px; height: 14px;" title="${isDone ? 'Completed (click to revert)' : 'Click to mark complete'}">
                           <div style="flex: 1; min-width: 0;">
                             <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 3px; flex-wrap: wrap;">
                               <span class="badge" style="background: rgba(16, 185, 129, 0.18); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.35); font-size: 9px; font-weight: 800; padding: 1px 5px; border-radius: 3px;">
@@ -9595,10 +9603,16 @@ class TripPlannerApp {
         const dateDone = String(r['Completion Date'] || r['Date Completed'] || r['Date'] || '').trim();
         let attendees = String(r['Attendees'] || '').trim();
 
-        // Skip completed, on-hold, or inactive jobs if training is not completed
+        // Skip completed, on-hold, inactive, or invalid/untracked jobs if training is not completed
         if (!isCompleted) {
           const sigCrew = this.getSignificantJobNumber(crewId);
           const jInfo = crewMap[sigCrew] || crewMap[crewId];
+          if (!jInfo) {
+            const directMembers = this.getCrewMembers(sigCrew || crewId);
+            if (!directMembers || directMembers.length === 0) {
+              return;
+            }
+          }
           const jStatus = String((jInfo && jInfo.status) || (cInfo && cInfo.jobStatus) || '').toLowerCase();
           if (jStatus.includes('completed') || jStatus.includes('on hold') || jStatus === 'closed' || jStatus === 'inactive') {
             return;
@@ -9882,7 +9896,21 @@ class TripPlannerApp {
       let targetRow = null;
       if (trainTable && trainTable.rows) {
         if (tr.rowIdx) {
-          targetRow = trainTable.rows.find(r => r._rowIdx === tr.rowIdx || trainTable.rows.indexOf(r) + 2 === tr.rowIdx);
+          targetRow = trainTable.rows.find(r => {
+            const matchesRow = (r._rowIdx === tr.rowIdx || trainTable.rows.indexOf(r) + 2 === tr.rowIdx);
+            if (!matchesRow) return false;
+            if (tr.crewId && tr.topic) {
+              const sigTarget = this.getSignificantJobNumber(tr.crewId).toLowerCase();
+              const cRaw = String(r['Crew #'] || r['Crew'] || r['Job Number'] || r['Job #'] || '').trim();
+              const cSig = this.getSignificantJobNumber(cRaw).toLowerCase();
+              const crewMatches = (sigTarget && cSig === sigTarget) || cRaw.toLowerCase() === String(tr.crewId || '').trim().toLowerCase();
+              const rTopic = String(r['Topic'] || r['Training Topic'] || r['Training'] || '').trim().toLowerCase();
+              const topicTarget = String(tr.topic || '').trim().toLowerCase();
+              const topicMatches = rTopic && topicTarget && (rTopic === topicTarget || rTopic.includes(topicTarget) || topicTarget.includes(rTopic));
+              return crewMatches && topicMatches;
+            }
+            return true;
+          });
         }
         if (!targetRow && tr.crewId && tr.topic) {
           const sigTarget = this.getSignificantJobNumber(tr.crewId).toLowerCase();
@@ -9898,6 +9926,16 @@ class TripPlannerApp {
             const monthMatches = !monthTarget || !rMonth || rMonth.includes(monthTarget) || monthTarget.includes(rMonth);
             return crewMatches && topicMatches && monthMatches;
           });
+          if (!targetRow) {
+            targetRow = trainTable.rows.find(r => {
+              const cRaw = String(r['Crew #'] || r['Crew'] || r['Job Number'] || r['Job #'] || '').trim();
+              const cSig = this.getSignificantJobNumber(cRaw).toLowerCase();
+              const crewMatches = (sigTarget && cSig === sigTarget) || cRaw.toLowerCase() === String(tr.crewId || '').trim().toLowerCase();
+              const rTopic = String(r['Topic'] || r['Training Topic'] || r['Training'] || '').trim().toLowerCase();
+              const topicMatches = rTopic && topicTarget && (rTopic === topicTarget || rTopic.includes(topicTarget) || topicTarget.includes(rTopic));
+              return crewMatches && topicMatches;
+            });
+          }
         }
 
         if (targetRow) {
@@ -9998,10 +10036,50 @@ class TripPlannerApp {
   }
 
   async toggleScheduledTraining(key, dateKey) {
-    if (!this.scheduledTrainingNeeds || !this.scheduledTrainingNeeds[key]) return;
-    const entry = this.scheduledTrainingNeeds[key];
+    if (!this.scheduledTrainingNeeds) return;
+    let targetKey = key;
+    if (!this.scheduledTrainingNeeds[targetKey]) {
+      for (const [k, v] of Object.entries(this.scheduledTrainingNeeds)) {
+        if (k === key || (v && v.training && (v.training.id === key || v.training._trKey === key))) {
+          targetKey = k;
+          break;
+        }
+      }
+    }
+    if (!this.scheduledTrainingNeeds[targetKey] && key) {
+      const kLower = String(key).toLowerCase();
+      for (const [k, v] of Object.entries(this.scheduledTrainingNeeds)) {
+        const trObj = (v && v.training) ? v.training : v;
+        if (trObj && trObj.crewId && trObj.topic) {
+          if (kLower.includes(String(trObj.crewId).toLowerCase()) && kLower.includes(String(trObj.topic).toLowerCase())) {
+            targetKey = k;
+            break;
+          }
+        }
+      }
+    }
+
+    if (!this.scheduledTrainingNeeds[targetKey]) {
+      console.warn('Could not find scheduled training need for key:', key);
+      const trainTable = this.db ? this.db.getTable('training_tracking') : null;
+      if (trainTable && trainTable.rows) {
+        const kLower = String(key).toLowerCase();
+        const found = trainTable.rows.find(r => {
+          const cRaw = String(r['Crew #'] || r['Crew'] || r['Job Number'] || '').toLowerCase();
+          const rTopic = String(r['Topic'] || r['Training Topic'] || '').toLowerCase();
+          return cRaw && rTopic && kLower.includes(cRaw) && kLower.includes(rTopic);
+        });
+        if (found) {
+          await this.completeTrainingNeed({ crewId: found['Crew #'] || found['Crew'], topic: found['Topic'] || found['Training Topic'], rowIdx: found._rowIdx }, dateKey);
+          return;
+        }
+      }
+      return;
+    }
+
+    const entry = this.scheduledTrainingNeeds[targetKey];
     const tr = entry.training || entry;
-    tr._trKey = key;
+    tr._trKey = targetKey;
     const isCurrentlyDone = !!(entry.completed || entry.isCompleted || (entry.training && (entry.training.isCompleted || entry.training.completed)));
 
     if (!isCurrentlyDone) {
@@ -10022,7 +10100,21 @@ class TripPlannerApp {
         let rowIdx = tr.rowIdx || (entry.training && entry.training.rowIdx);
         let targetRow = null;
         if (rowIdx) {
-          targetRow = trainTable.rows.find(r => r._rowIdx === rowIdx || trainTable.rows.indexOf(r) + 2 === rowIdx);
+          targetRow = trainTable.rows.find(r => {
+            const matchesRow = (r._rowIdx === rowIdx || trainTable.rows.indexOf(r) + 2 === rowIdx);
+            if (!matchesRow) return false;
+            if (tr.crewId || entry.crewId) {
+              const sigTarget = this.getSignificantJobNumber(tr.crewId || entry.crewId).toLowerCase();
+              const cRaw = String(r['Crew #'] || r['Crew'] || r['Job Number'] || r['Job #'] || '').trim();
+              const cSig = this.getSignificantJobNumber(cRaw).toLowerCase();
+              const crewMatches = (sigTarget && cSig === sigTarget) || cRaw.toLowerCase() === String(tr.crewId || entry.crewId || '').trim().toLowerCase();
+              const rTopic = String(r['Topic'] || r['Training Topic'] || r['Training'] || '').trim().toLowerCase();
+              const topicTarget = String(tr.topic || (entry.training && entry.training.topic) || '').trim().toLowerCase();
+              const topicMatches = rTopic && (rTopic === topicTarget || rTopic.includes(topicTarget) || topicTarget.includes(rTopic));
+              return crewMatches && topicMatches;
+            }
+            return true;
+          });
         }
         if (!targetRow && (tr.crewId || entry.crewId) && (tr.topic || (entry.training && entry.training.topic))) {
           const sigTarget = this.getSignificantJobNumber(tr.crewId || entry.crewId).toLowerCase();

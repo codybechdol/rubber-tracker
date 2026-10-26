@@ -310,6 +310,26 @@ class LocalDatabase {
     }
 
     if (this.snapshot) {
+      if (this.snapshot.tables) {
+        const tt = this.snapshot.tables.training_tracking;
+        if (!tt || !Array.isArray(tt.rows) || tt.rows.length === 0) {
+          try {
+            const resp = await fetch('./js/training-recovery.json');
+            if (resp && resp.ok) {
+              const recoveredTT = await resp.json();
+              if (recoveredTT && Array.isArray(recoveredTT.rows) && recoveredTT.rows.length > 0) {
+                this.snapshot.tables.training_tracking = recoveredTT;
+                console.log(`✅ [LocalDB] Auto-restored ${recoveredTT.rows.length} Training Tracking rows from backup recovery.`);
+                setTimeout(() => {
+                  this.persistSnapshot(this.snapshot).catch(() => {});
+                }, 200);
+              }
+            }
+          } catch (recErr) {
+            console.warn('Could not load training-recovery.json:', recErr);
+          }
+        }
+      }
       this.normalizeSnapshot(this.snapshot);
     }
 
@@ -3829,6 +3849,7 @@ class LocalDatabase {
     if (!mutation.sheetName && mutation.sheet) mutation.sheetName = mutation.sheet;
     if (!mutation.tableKey && mutation.sheetName) mutation.tableKey = this.getTableKeyForSheet(mutation.sheetName);
     if (!mutation.rowData && mutation.data) mutation.rowData = mutation.data;
+    if (!mutation.rows && Array.isArray(mutation.data)) mutation.rows = mutation.data;
 
     // Hard Guard: Disallow adding mutations in View Only mode
     const isViewOnly = (typeof window !== 'undefined' && window.currentRoleMode === 'view_only') ||
@@ -4725,16 +4746,40 @@ class LocalDatabase {
     if ((mut.action === 'REPLACE_TABLE_DATA' || mut.action === 'REPLACE_SWAP_TABLE') && this.snapshot && this.snapshot.tables) {
       const tableKey = mut.tableKey || this.getTableKeyForSheet(mut.sheetName);
       if (tableKey) {
-        this.snapshot.tables[tableKey] = {
-          name: mut.sheetName || this.getSheetNameForTableKey(tableKey) || tableKey,
-          headers: mut.headers || [],
-          rows: mut.rows || [],
-          rawGrid: mut.rawGrid || [],
-          rowCount: (mut.rows && mut.rows.length) || 0,
-          maxRows: (mut.rawGrid && mut.rawGrid.length) || 0,
-          maxCols: (mut.headers && mut.headers.length) || 0,
-          _normalized: true
-        };
+        const existingTable = this.snapshot.tables[tableKey];
+        const incomingHeaders = (mut.headers && mut.headers.length > 0)
+          ? mut.headers
+          : (existingTable && existingTable.headers ? existingTable.headers : []);
+        const incomingRows = Array.isArray(mut.rows)
+          ? mut.rows
+          : (Array.isArray(mut.data) ? mut.data : null);
+        let incomingRawGrid = Array.isArray(mut.rawGrid) && mut.rawGrid.length > 0
+          ? mut.rawGrid
+          : null;
+
+        if (!incomingRawGrid && incomingRows && incomingHeaders.length > 0) {
+          incomingRawGrid = [
+            incomingHeaders,
+            ...incomingRows.map(r => incomingHeaders.map(h => (r && r[h] !== undefined && r[h] !== null) ? r[h] : ''))
+          ];
+        }
+
+        if (!incomingRows && !incomingRawGrid && existingTable && existingTable.rows && existingTable.rows.length > 0) {
+          console.warn(`[applyLocalMutation] Blocked empty ${mut.action} for ${tableKey} (missing rows and rawGrid)`);
+        } else {
+          const finalRows = incomingRows || [];
+          const finalRawGrid = incomingRawGrid || (incomingHeaders.length > 0 ? [incomingHeaders] : []);
+          this.snapshot.tables[tableKey] = {
+            name: mut.sheetName || this.getSheetNameForTableKey(tableKey) || tableKey,
+            headers: incomingHeaders,
+            rows: finalRows,
+            rawGrid: finalRawGrid,
+            rowCount: finalRows.length,
+            maxRows: finalRawGrid.length,
+            maxCols: incomingHeaders.length,
+            _normalized: true
+          };
+        }
       }
     }
 

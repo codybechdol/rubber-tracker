@@ -1760,12 +1760,12 @@ class SyncEngine {
     while (attempt < maxAttempts) {
       attempt++;
       try {
-        const activeUrl = this.syncUrl || DEFAULT_SYNC_URL;
+        const backupTimeoutMs = 360000; // 360 seconds (6 minutes) for Google Drive spreadsheet duplication
         resp = await this.executeNetworkRequest(activeUrl, 'POST', {
           action: 'createBackup',
           forceFullCopy: true,
           snapshot: (this.db && this.db.snapshot) ? this.db.snapshot : null
-        }, 180000);
+        }, backupTimeoutMs);
 
         if (resp && resp.status === 'ok' && resp.success) {
           lastErr = null;

@@ -4829,6 +4829,235 @@ class ProcurementEngine {
   // BATCH DELIVERY TO INVENTORY MODAL & WORKFLOW
   // =========================================================================
 
+  /**
+   * Opens the batch delivery receiving modal pre-filtered to the line items of a specific PO/Order.
+   */
+  openBatchDeliveryModalForPo(poNum) {
+    if (!poNum) {
+      this.openBatchDeliveryModal();
+      return;
+    }
+    const clean = String(poNum).trim().toLowerCase();
+    const matched = (this.items || []).filter(i => {
+      if (i.section !== 'ordered_pending') return false;
+      const oNum = String(i.orderInfo?.vendorOrderNumber || i.orderInfo?.orderNumber || i.orderInfo?.poNumber || '').trim().toLowerCase();
+      if (oNum === clean || (clean.length >= 3 && oNum.includes(clean))) return true;
+      if (i.employees && i.employees.some(e => {
+        const eo = String(e.orderInfo?.vendorOrderNumber || e.orderInfo?.orderNumber || '').trim().toLowerCase();
+        return eo === clean || (clean.length >= 3 && eo.includes(clean));
+      })) return true;
+      return false;
+    });
+    if (matched.length) {
+      this.openBatchDeliveryModal(matched);
+    } else {
+      this.openBatchDeliveryModal();
+    }
+  }
+
+  /**
+   * Comprehensive handler to resolve and clear matching line items across All Needs & Orders
+   * (safety_equipment_needs, swap sheets, and purchase_orders) when an order is received or marked delivered.
+   */
+  async resolveReceivedOrderItems(poIdentifiers, options = {}) {
+    const snap = (this.db && typeof this.db.getSnapshot === 'function')
+      ? this.db.getSnapshot()
+      : (window.localDB ? window.localDB.getSnapshot() : null);
+
+    const isReadyForDelivery = !!options.isReadyForDelivery;
+    const todayStr = options.todayStr || (this.formatToMdY ? this.formatToMdY(new Date().toISOString().split('T')[0]) : new Date().toLocaleDateString());
+
+    // 1. Normalize all PO / Order Numbers to match against
+    const rawIds = Array.isArray(poIdentifiers) ? poIdentifiers : [poIdentifiers];
+    const poNumSet = new Set();
+    for (const id of rawIds) {
+      if (!id) continue;
+      const clean = String(id).trim();
+      if (clean && clean.toLowerCase() !== 'ed' && clean.toLowerCase() !== 'pending') {
+        poNumSet.add(clean);
+        poNumSet.add(clean.toLowerCase());
+      }
+    }
+
+    // Also look up PO row if poRowIdx or matched PO row exists to harvest any additional order numbers
+    const poTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('purchase_orders') : null) || snap?.tables?.['purchase_orders'];
+    let targetPoRows = [];
+    if (poTable && poTable.rows) {
+      targetPoRows = poTable.rows.filter((r, idx) => {
+        const rIdx = r._rowIdx || (idx + 2);
+        if (options.poRowIdx && rIdx === options.poRowIdx) return true;
+        const p1 = String(r['PO Number'] || r['PO #'] || '').trim();
+        if (p1 && (poNumSet.has(p1) || poNumSet.has(p1.toLowerCase()))) return true;
+        const notes = String(r['Notes'] || '');
+        for (const pid of poNumSet) {
+          if (pid.length >= 3 && notes.toLowerCase().includes(pid.toLowerCase())) return true;
+        }
+        return false;
+      });
+      for (const poRow of targetPoRows) {
+        const p1 = String(poRow['PO Number'] || poRow['PO #'] || '').trim();
+        if (p1 && p1.toLowerCase() !== 'ed') {
+          poNumSet.add(p1);
+          poNumSet.add(p1.toLowerCase());
+        }
+        const parsedNotes = this.parseOrderInfoFromNotes(poRow['Notes'] || '');
+        if (parsedNotes?.vendorOrderNumber && parsedNotes.vendorOrderNumber.toLowerCase() !== 'ed') {
+          poNumSet.add(parsedNotes.vendorOrderNumber);
+          poNumSet.add(parsedNotes.vendorOrderNumber.toLowerCase());
+        }
+      }
+    }
+
+    // 2. Normalize assigned employees
+    const empNamesSet = new Set();
+    if (options.assignedEmployees) {
+      for (const e of options.assignedEmployees) {
+        if (!e) continue;
+        const clean = this.cleanEmployeeName(e);
+        if (clean && !clean.toLowerCase().includes('shelf') && !clean.toLowerCase().includes('stock')) {
+          empNamesSet.add(this.normalizeName(clean));
+        }
+      }
+    }
+    if (options.units) {
+      for (const u of options.units) {
+        const name = u.empName;
+        if (name && !name.toLowerCase().includes('shelf') && !name.toLowerCase().includes('stock')) {
+          empNamesSet.add(this.normalizeName(name));
+        }
+        if (u.orderInfo?.orderNumber) poNumSet.add(String(u.orderInfo.orderNumber).trim());
+        if (u.orderInfo?.vendorOrderNumber) poNumSet.add(String(u.orderInfo.vendorOrderNumber).trim());
+      }
+    }
+    for (const poRow of targetPoRows) {
+      const notes = String(poRow['Notes'] || '');
+      const forMatch = notes.match(/(?:for|assign(?:ed)?\s*to)\s*[:=]?\s*([A-Za-z0-9\s.',&-]+?)(?:;|\)|$)/i);
+      if (forMatch) {
+        const parsedEmps = forMatch[1].split(',').map(n => this.cleanEmployeeName(n)).filter(Boolean);
+        for (const pe of parsedEmps) {
+          if (!pe.toLowerCase().includes('shelf') && !pe.toLowerCase().includes('stock')) {
+            empNamesSet.add(this.normalizeName(pe));
+          }
+        }
+      }
+    }
+
+    const matchesPoOrEmp = (empName, statusStr, notesStr) => {
+      const s = String(statusStr || '').toLowerCase();
+      const n = String(notesStr || '').toLowerCase();
+      // Check PO numbers match
+      for (const pid of poNumSet) {
+        if (pid.length >= 2) {
+          const lowerPid = pid.toLowerCase();
+          if (s.includes(lowerPid) || n.includes(lowerPid)) return true;
+        }
+      }
+      // Check employee name match if item is marked ordered
+      if (empName && (s.includes('order') || n.includes('order'))) {
+        const normEmp = this.normalizeName(empName);
+        if (normEmp && empNamesSet.has(normEmp)) return true;
+        for (const ke of empNamesSet) {
+          if (this.isNameMatch(ke, empName)) return true;
+        }
+      }
+      return false;
+    };
+
+    // 3. Update safety_equipment_needs
+    const needsTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('safety_equipment_needs') : null) || snap?.tables?.['safety_equipment_needs'];
+    if (needsTable && needsTable.rows) {
+      for (const nr of needsTable.rows) {
+        const emp = String(nr['Employee'] || '').trim();
+        const stat = String(nr['Status'] || '');
+        const notes = String(nr['Notes'] || '');
+        if (matchesPoOrEmp(emp, stat, notes)) {
+          nr['Status'] = isReadyForDelivery ? 'Ready For Delivery' : 'Fulfilled';
+          nr['Notes'] = `${notes}; Order received & fulfilled on ${todayStr}`.trim().replace(/^;\s*/, '');
+          this.db.syncRowToRawGrid(needsTable, nr);
+          const nrIdx = nr._rowIdx || (needsTable.rows.indexOf(nr) + 2);
+          await this.db.addMutation({
+            action: 'UPDATE_ROW',
+            sheetName: needsTable.name || 'Safety Equipment Needs',
+            tableKey: 'safety_equipment_needs',
+            row: nrIdx,
+            rowData: nr
+          });
+        }
+      }
+    }
+
+    // 4. Update swap tables (glove_swaps, sleeve_swaps, blanket_swaps, mack_swaps)
+    const swapKeys = ['glove_swaps', 'sleeve_swaps', 'blanket_swaps', 'mack_swaps'];
+    for (const sk of swapKeys) {
+      const sTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable(sk) : null) || snap?.tables?.[sk];
+      if (sTable && sTable.rows) {
+        for (const sr of sTable.rows) {
+          const emp = String(sr['Employee'] || sr['Employee Name'] || sr['Assigned To'] || Object.values(sr)[0] || '').trim();
+          const stat = String(sr['Status'] || '');
+          const notes = String(sr['Notes'] || '');
+          if (matchesPoOrEmp(emp, stat, notes)) {
+            // Find unit itemNum if available
+            let assignedItemNum = '';
+            if (options.units) {
+              const matchedU = options.units.find(u => this.isNameMatch(u.empName, emp));
+              if (matchedU && (matchedU.suggestedNum || matchedU.itemNum)) {
+                assignedItemNum = matchedU.suggestedNum || matchedU.itemNum;
+              }
+            }
+            if (isReadyForDelivery) {
+              sr['Status'] = 'Ready For Delivery 🚚';
+              if (assignedItemNum) {
+                sr['Pick List Item #'] = assignedItemNum;
+                sr['Picked For'] = assignedItemNum;
+              }
+              sr['Picked'] = true;
+            } else {
+              sr['Status'] = 'Complete';
+              if (assignedItemNum) {
+                sr['Pick List Item #'] = assignedItemNum;
+                sr['Picked For'] = assignedItemNum;
+              }
+              sr['Picked'] = true;
+            }
+            this.db.syncRowToRawGrid(sTable, sr);
+            const rIdx = sr._rowIdx || (sTable.rows.indexOf(sr) + 2);
+            await this.db.addMutation({
+              action: 'UPDATE_ROW',
+              sheetName: sTable.name,
+              tableKey: sk,
+              row: rIdx,
+              rowData: sr
+            });
+            if (isReadyForDelivery && assignedItemNum && typeof this.db.saveManualPick === 'function') {
+              const oldItemNum = String(sr['Current Item #'] || sr['Current Item'] || sr['Glove'] || sr['Sleeve'] || sr['Blanket'] || sr['MACK'] || '').trim();
+              this.db.saveManualPick(sk, emp, oldItemNum, assignedItemNum, 'Ready For Delivery 🚚', true);
+            }
+          }
+        }
+      }
+    }
+
+    // 5. Update purchase_orders table
+    if (poTable && poTable.rows) {
+      for (const po of targetPoRows) {
+        po['Status'] = 'Received';
+        if (!po['Expected Delivery'] || po['Expected Delivery'] === 'Pending') {
+          po['Expected Delivery'] = todayStr;
+        }
+        po['Notes'] = `${po['Notes'] || ''}; Received on ${todayStr}`.trim().replace(/^;\s*/, '');
+        this.db.syncRowToRawGrid(poTable, po);
+        const rIdx = po._rowIdx || (poTable.rows.indexOf(po) + 2);
+        await this.db.addMutation({
+          action: 'UPDATE_ROW',
+          sheetName: poTable.name || 'Purchase Orders',
+          tableKey: 'purchase_orders',
+          row: rIdx,
+          rowData: po
+        });
+      }
+    }
+  }
+
   openBatchDeliveryModal(itemsToDeliver = null) {
     let items = itemsToDeliver;
     if (!items || !items.length) {
@@ -5246,29 +5475,16 @@ class ProcurementEngine {
         }
       }
 
-      const poTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('purchase_orders') : null) || snap?.tables?.['purchase_orders'];
-      if (poTable && poTable.rows) {
-        for (const po of poTable.rows) {
-          const stat = String(po['Status'] || '').toLowerCase();
-          if (stat.includes('ordered')) {
-            const poNum = String(po['PO Number'] || po['PO #'] || '');
-            const matchedUnit = this._pendingDeliveryUnits.find(u => u.orderInfo?.orderNumber === poNum);
-            if (matchedUnit) {
-              po['Status'] = 'Received';
-              po['Notes'] = `${po['Notes'] || ''}; Delivered and added to inventory on ${todayStr}`.trim().replace(/^;\s*/, '');
-              this.db.syncRowToRawGrid(poTable, po);
-              const rIdx = po._rowIdx || (poTable.rows.indexOf(po) + 2);
-              await this.db.addMutation({
-                action: 'UPDATE_ROW',
-                sheetName: poTable.name || 'Purchase Orders',
-                tableKey: 'purchase_orders',
-                row: rIdx,
-                rowData: po
-              });
-            }
-          }
-        }
-      }
+      // Resolve and clear all matching line items across swap sheets, safety equipment needs, and purchase orders
+      const poNums = [...new Set(this._pendingDeliveryUnits.map(u => u.orderInfo?.vendorOrderNumber || u.orderInfo?.orderNumber || u.origItem?.orderInfo?.orderNumber).filter(Boolean))];
+      const assignedEmps = this._pendingDeliveryUnits.map(u => u.empName).filter(Boolean);
+
+      await this.resolveReceivedOrderItems(poNums, {
+        units: this._pendingDeliveryUnits,
+        assignedEmployees: assignedEmps,
+        isReadyForDelivery: isReadyForDelivery,
+        todayStr: todayStr
+      });
 
       this.closeBatchDeliveryModal();
       await this.loadData();
@@ -5307,77 +5523,18 @@ class ProcurementEngine {
         ? this.db.getSnapshot()
         : (window.localDB ? window.localDB.getSnapshot() : null);
 
-      const formatToMdY = (dStr) => {
-        if (!dStr) return '';
-        if (dStr.includes('/')) return dStr;
-        const parts = dStr.split('-');
-        if (parts.length === 3) return `${parts[1]}/${parts[2]}/${parts[0]}`;
-        return dStr;
-      };
-
-      const todayStr = formatToMdY(new Date().toISOString().split('T')[0]);
+      const todayStr = this.formatToMdY ? this.formatToMdY(new Date().toISOString().split('T')[0]) : new Date().toLocaleDateString();
 
       // Collect all PO numbers and assigned employees from pending units
-      const poNums = new Set();
-      for (const u of this._pendingDeliveryUnits) {
-        if (u.orderInfo?.orderNumber) {
-          poNums.add(String(u.orderInfo.orderNumber).trim());
-        }
-        const assignedTo = u.empName;
-        if (assignedTo && !assignedTo.toLowerCase().includes('shelf') && !assignedTo.toLowerCase().includes('stock')) {
-          const cat = (u.category || '').toLowerCase();
-          let swapKey = '';
-          if (cat.includes('glove')) swapKey = 'glove_swaps';
-          else if (cat.includes('sleeve')) swapKey = 'sleeve_swaps';
-          else if (cat.includes('blanket')) swapKey = 'blanket_swaps';
-          else if (cat.includes('mack')) swapKey = 'mack_swaps';
+      const poNums = [...new Set(this._pendingDeliveryUnits.map(u => u.orderInfo?.vendorOrderNumber || u.orderInfo?.orderNumber || u.origItem?.orderInfo?.orderNumber).filter(Boolean))];
+      const assignedEmps = this._pendingDeliveryUnits.map(u => u.empName).filter(Boolean);
 
-          const swapTable = swapKey ? ((this.db && typeof this.db.getTable === 'function' ? this.db.getTable(swapKey) : null) || snap?.tables?.[swapKey]) : null;
-          if (swapTable && swapTable.rows) {
-            const sRow = swapTable.rows.find(sr => {
-              const name = String(sr['Employee'] || sr['Employee Name'] || sr['Assigned To'] || Object.values(sr)[0] || '').trim();
-              return this.isNameMatch(name, assignedTo);
-            });
-            if (sRow && String(sRow['Status'] || '').toLowerCase().includes('ordered')) {
-              sRow['Status'] = 'Complete';
-              this.db.syncRowToRawGrid(swapTable, sRow);
-              const rIdx = sRow._rowIdx || (swapTable.rows.indexOf(sRow) + 2);
-              await this.db.addMutation({
-                action: 'UPDATE_CELL',
-                sheetName: swapTable.name,
-                tableKey: swapKey,
-                row: rIdx,
-                col: 8,
-                value: 'Complete'
-              });
-            }
-          }
-        }
-      }
-
-      // Update purchase_orders table
-      const poTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('purchase_orders') : null) || snap?.tables?.['purchase_orders'];
-      if (poTable && poTable.rows) {
-        for (const po of poTable.rows) {
-          const pNum = String(po['PO Number'] || po['PO #'] || '').trim();
-          const stat = String(po['Status'] || '').toLowerCase();
-          if (poNums.has(pNum) || (poNums.size === 0 && stat.includes('ordered'))) {
-            po['Status'] = 'Received';
-            if (!po['Expected Delivery'] || po['Expected Delivery'] === 'Pending') {
-              po['Expected Delivery'] = todayStr;
-            }
-            this.db.syncRowToRawGrid(poTable, po);
-            const rIdx = po._rowIdx || (poTable.rows.indexOf(po) + 2);
-            await this.db.addMutation({
-              action: 'UPDATE_ROW',
-              sheetName: poTable.name || 'Purchase Orders',
-              tableKey: 'purchase_orders',
-              row: rIdx,
-              rowData: po
-            });
-          }
-        }
-      }
+      await this.resolveReceivedOrderItems(poNums, {
+        units: this._pendingDeliveryUnits,
+        assignedEmployees: assignedEmps,
+        isReadyForDelivery: false,
+        todayStr: todayStr
+      });
 
       this.closeBatchDeliveryModal();
       await this.loadData();
@@ -5387,7 +5544,7 @@ class ProcurementEngine {
         window.ppeTrackingEngine.refresh();
       }
 
-      alert('✅ Order marked as Received/Delivered. No duplicate items were added to the Gloves inventory page.');
+      alert('✅ Order marked as Received/Delivered and cleared from All Needs & Orders.');
     } catch (err) {
       console.error('Error marking delivered without inventory:', err);
       alert('❌ Failed to update order: ' + (err.message || err));
@@ -5793,10 +5950,10 @@ class ProcurementEngine {
             <td style="padding: 8px 10px; text-align: center;">
               <div style="display: flex; align-items: center; justify-content: center; gap: 4px; flex-wrap: wrap;">
                 ${isDeliverable ? `
-                  <button class="btn btn-xs" onclick="window.procurementEngine.openBatchDeliveryModal()" style="background: rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.4); color: #93c5fd; padding: 3px 7px; font-size: 11px; border-radius: 3px; cursor: pointer; display: inline-flex; align-items: center; gap: 3px;" title="Receive items and generate inventory serial numbers on Gloves/Sleeves page">
+                  <button class="btn btn-xs" onclick="window.procurementEngine.openBatchDeliveryModalForPo('${this.escapeJs(po.vendorOrderNum || po.poNum)}')" style="background: rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.4); color: #93c5fd; padding: 3px 7px; font-size: 11px; border-radius: 3px; cursor: pointer; display: inline-flex; align-items: center; gap: 3px;" title="Receive items and generate inventory serial numbers on Gloves/Sleeves page">
                     <span>🚚</span> Receive
                   </button>
-                  <button class="btn btn-xs" onclick="window.procurementEngine.quickMarkOrderReceived(${po.rowIdx}, '${this.escapeJs(po.vendorOrderNum || po.poNum)}')" style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); color: #6ee7b7; padding: 3px 7px; font-size: 11px; border-radius: 3px; cursor: pointer; display: inline-flex; align-items: center; gap: 3px;" title="Quick mark as Received WITHOUT adding duplicate items to Gloves page">
+                  <button class="btn btn-xs" onclick="window.procurementEngine.quickMarkOrderReceived(${po.rowIdx}, '${this.escapeJs(po.vendorOrderNum || po.poNum)}')" style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); color: #6ee7b7; padding: 3px 7px; font-size: 11px; border-radius: 3px; cursor: pointer; display: inline-flex; align-items: center; gap: 3px;" title="Quick mark as Received and clear all matching line items from All Needs & Orders">
                     <span>✅</span> Mark Rec'd
                   </button>
                 ` : ''}
@@ -5903,54 +6060,27 @@ class ProcurementEngine {
   }
 
   async quickMarkOrderReceived(rowIdx, poNum) {
-    if (!confirm(`Mark Order #${poNum || ''} as Received?\n\nThis will update the order tracking status to "Received" WITHOUT adding duplicate items to the Gloves/Sleeves inventory page.`)) {
+    if (!confirm(`Mark Order #${poNum || ''} as Received?\n\nThis will update the order tracking status to "Received" and clear all matching line items from All Needs & Orders WITHOUT adding duplicate items to the Gloves/Sleeves inventory page.`)) {
       return;
     }
 
     try {
-      const snap = (this.db && typeof this.db.getSnapshot === 'function')
-        ? this.db.getSnapshot()
-        : (window.localDB ? window.localDB.getSnapshot() : null);
+      const todayStr = this.formatToMdY ? this.formatToMdY(new Date().toISOString().split('T')[0]) : new Date().toLocaleDateString();
 
-      const poTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('purchase_orders') : null) || snap?.tables?.['purchase_orders'];
-      if (!poTable) throw new Error('Purchase Orders table not found');
-
-      const todayStr = new Date().toLocaleDateString();
-
-      // Find row in poTable
-      let targetRow = null;
-      let targetIdx = rowIdx;
-      if (poTable.rows) {
-        targetRow = poTable.rows.find((r, idx) => {
-          const rIdx = r._rowIdx || (idx + 2);
-          return rIdx === rowIdx;
-        });
-        if (targetRow) {
-          targetIdx = targetRow._rowIdx || (poTable.rows.indexOf(targetRow) + 2);
-        }
-      }
-
-      if (targetRow) {
-        targetRow['Status'] = 'Received';
-        if (!targetRow['Expected Delivery'] || targetRow['Expected Delivery'] === 'Pending') {
-          targetRow['Expected Delivery'] = todayStr;
-        }
-        this.db.syncRowToRawGrid(poTable, targetRow);
-      }
-
-      await this.db.addMutation({
-        action: 'UPDATE_CELL',
-        sheetName: poTable.name || 'Purchase Orders',
-        tableKey: 'purchase_orders',
-        row: targetIdx,
-        col: 7, // Column G is Status
-        value: 'Received'
+      await this.resolveReceivedOrderItems(poNum, {
+        poRowIdx: rowIdx,
+        isReadyForDelivery: false,
+        todayStr: todayStr
       });
 
       await this.loadData();
       this.render();
 
-      alert(`✅ Order #${poNum || ''} marked as Received in Order history!`);
+      if (window.ppeTrackingEngine && typeof window.ppeTrackingEngine.refresh === 'function') {
+        window.ppeTrackingEngine.refresh();
+      }
+
+      alert(`✅ Order #${poNum || ''} marked as Received and cleared from All Needs & Orders!`);
     } catch (err) {
       console.error('Error marking order received:', err);
       alert('❌ Failed to update order status: ' + (err.message || err));
@@ -6657,8 +6787,16 @@ class ProcurementEngine {
         }
       }
 
-      // If line items are assigned to linemen, sync to their swap sheet and safety equipment rows
-      if (this.editingOrderItems && this.editingOrderItems.length) {
+      // If order is marked Received, resolve and clear all matching items from swap sheets and safety equipment needs
+      if (status === 'Received') {
+        const assignedEmps = (this.editingOrderItems || []).map(it => it.employeeName).filter(Boolean);
+        await this.resolveReceivedOrderItems(orderNum, {
+          assignedEmployees: assignedEmps,
+          isReadyForDelivery: false,
+          todayStr: this.formatToMdY(delivDate) || new Date().toLocaleDateString()
+        });
+      } else if (this.editingOrderItems && this.editingOrderItems.length) {
+        // If line items are assigned to linemen, sync to their swap sheet and safety equipment rows as Ordered
         for (const item of this.editingOrderItems) {
           const catKey = (item.itemType || item.category || '').toLowerCase();
           let swapKey = '';

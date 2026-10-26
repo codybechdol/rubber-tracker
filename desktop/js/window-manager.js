@@ -238,6 +238,17 @@ class WindowManager {
               }
             }
           });
+          m.removedNodes.forEach(node => {
+            if (node.nodeType === 1) {
+              if (node.classList && node.classList.contains('modal-overlay')) {
+                if (this.activeModals.has(node)) this.onModalClosed(node);
+              } else if (node.querySelectorAll) {
+                node.querySelectorAll('.modal-overlay').forEach(sm => {
+                  if (this.activeModals.has(sm)) this.onModalClosed(sm);
+                });
+              }
+            }
+          });
         }
       }
     });
@@ -412,10 +423,11 @@ class WindowManager {
   bringToFront(modal) {
     if (!modal) return;
     const isAlreadyTop = this.getTopmostModal() === modal;
-    if (isAlreadyTop && modal.classList.contains('is-topmost')) {
-      return; // Already topmost, avoid redundant DOM class/style mutations
+    const curZ = parseInt(modal.style.zIndex || '0', 10);
+    if (isAlreadyTop && modal.classList.contains('is-topmost') && curZ >= this.baseZIndex) {
+      return; // Already topmost and above backdrop, avoid redundant DOM class/style mutations
     }
-    if (!modal.style.zIndex || !isAlreadyTop) {
+    if (!modal.style.zIndex || curZ < this.baseZIndex || !isAlreadyTop) {
       this.currentZIndex++;
       modal.style.zIndex = String(this.currentZIndex);
     }
@@ -431,6 +443,10 @@ class WindowManager {
     let top = null;
     let maxZ = -1;
     this.activeModals.forEach(m => {
+      if (!m.isConnected) {
+        this.activeModals.delete(m);
+        return;
+      }
       const z = parseInt(m.style.zIndex || '0', 10);
       if (z > maxZ) {
         maxZ = z;
@@ -442,6 +458,9 @@ class WindowManager {
 
   updateBackdrop() {
     if (!this.backdropEl) this.ensureGlobalBackdrop();
+    this.activeModals.forEach(m => {
+      if (!m.isConnected) this.activeModals.delete(m);
+    });
     if (this.activeModals.size > 0) {
       this.backdropEl.classList.add('active');
     } else {

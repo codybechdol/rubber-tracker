@@ -4910,6 +4910,16 @@ class SheetNavigator {
       this.searchTerm = '';
     }
 
+    if (!this._reconciledTrainingOnce && this.db && typeof this.reconcileTrainingTrackingLocal === 'function') {
+      this._reconciledTrainingOnce = true;
+      const recRes = this.reconcileTrainingTrackingLocal();
+      if (recRes && (recRes.updatedLeads > 0 || recRes.updatedAttendees > 0 || recRes.updatedSizes > 0 || recRes.prunedRows > 0)) {
+        if (typeof this.db.schedulePersistSnapshot === 'function') {
+          this.db.schedulePersistSnapshot(this.db.snapshot, 100);
+        }
+      }
+    }
+
     const tableData = this.db.getTable(this.currentSheetKey);
     this.renderStandardTable(container, countBadge, tableData);
   }
@@ -5095,13 +5105,23 @@ class SheetNavigator {
       }
     });
 
-    // 3. Map completed/closed/inactive jobs from Job Tracking
+    // 3. Map completed/closed/inactive jobs and all valid jobs from Job Tracking + FY aliases
+    const aliasMap = (this.db.snapshot && this.db.snapshot.configs && this.db.snapshot.configs['FY_TRANSITION_ALIAS_MAP']) || {};
+    const revAlias = {};
+    Object.entries(aliasMap).forEach(([oldJ, newJ]) => {
+      revAlias[newJ] = oldJ;
+    });
+
+    const allJobNums = new Set();
     const completedJobNums = new Set();
     (jt.rows || []).forEach(r => {
       const num = String(r['Job Number'] || r['Job #'] || '').trim();
       const status = String(r['Status'] || '').toLowerCase().trim();
-      if (num && (status === 'completed' || status === 'closed' || status === 'inactive')) {
-        completedJobNums.add(num);
+      if (num) {
+        allJobNums.add(num);
+        if (status === 'completed' || status === 'closed' || status === 'inactive') {
+          completedJobNums.add(num);
+        }
       }
     });
 
@@ -5110,24 +5130,35 @@ class SheetNavigator {
     let updatedSizes = 0;
     let prunedRows = 0;
 
-    // Prune uncompleted / pending rows for completed jobs
-    if (completedJobNums.size > 0 && tt.rows) {
+    // Prune uncompleted / pending rows for completed jobs or invalid/orphaned job numbers (e.g. typos not in Job Tracking)
+    if (tt.rows) {
       tt.rows = tt.rows.filter(r => {
         const crew = String(r['Crew #'] || r['Job Number'] || r['Crew'] || '').trim();
+        if (!crew) return true;
         const status = String(r['Status'] || r['Training Status'] || '').toLowerCase().trim();
         const compDate = String(r['Completion Date'] || r['Date Completed'] || '').trim();
-        const isComp = status === 'complete' || status === 'completed' || compDate;
+        const isComp = status === 'complete' || status === 'completed' || status === 'n/a' || Boolean(compDate);
+        if (isComp) return true;
 
-        if (completedJobNums.has(crew) && !isComp) {
+        const mapped = aliasMap[crew] || crew;
+        const oldCrew = revAlias[crew] || crew;
+        const isCompletedJob = completedJobNums.has(crew) || completedJobNums.has(mapped) || (completedJobNums.has(oldCrew) && !allJobNums.has(crew));
+        const isKnownJob = allJobNums.has(crew) || allJobNums.has(mapped) || allJobNums.has(oldCrew) ||
+                           (rosterByCrew[crew] && rosterByCrew[crew].length > 0) ||
+                           (rosterByCrew[mapped] && rosterByCrew[mapped].length > 0);
+
+        if (isCompletedJob || !isKnownJob) {
           prunedRows++;
           return false;
         }
         return true;
       });
 
-      tt.rows.forEach((r, idx) => {
-        r._rowIdx = idx + 2;
-      });
+      if (prunedRows > 0) {
+        tt.rows.forEach((r, idx) => {
+          r._rowIdx = idx + 2;
+        });
+      }
     }
 
     (tt.rows || []).forEach(r => {
@@ -5214,6 +5245,8 @@ class SheetNavigator {
           table: 'training_tracking',
           tableKey: 'training_tracking',
           sheetName: 'Training Tracking',
+          rows: tt.rows,
+          rawGrid: tt.rawGrid,
           data: tt.rows,
           headers: tt.headers,
           timestamp: new Date().toISOString()
@@ -5223,9 +5256,13 @@ class SheetNavigator {
         }
       }
 
-      // 3. Notify backend Apps Script endpoint if configured
+      // 3. Push updated table to Google Sheets first, then notify backend Apps Script endpoint if configured
       const syncUrl = window.syncEngine ? window.syncEngine.getSyncUrl() : '';
       if (syncUrl) {
+        if (window.syncEngine) {
+          await window.syncEngine.syncWithGoogleSheets();
+        }
+
         try {
           if (window.syncEngine && typeof window.syncEngine.executeNetworkRequest === 'function') {
             await window.syncEngine.executeNetworkRequest(syncUrl, 'POST', { action: 'syncTrainingAttendees' });
@@ -5235,15 +5272,11 @@ class SheetNavigator {
         } catch (netErr) {
           console.warn('Backend sync trigger error (local DB updated successfully):', netErr);
         }
-
-        if (window.syncEngine) {
-          await window.syncEngine.syncWithGoogleSheets();
-        }
       }
 
       let summaryMsg = `✅ Training tracking successfully synchronized!\n\n• Foremen updated: ${localResult.updatedLeads}\n• Attendee lists updated: ${localResult.updatedAttendees}\n• Crew sizes updated: ${localResult.updatedSizes}`;
       if (localResult.prunedRows > 0) {
-        summaryMsg += `\n• Completed job pending rows pruned: ${localResult.prunedRows}`;
+        summaryMsg += `\n• Completed / invalid job pending rows pruned: ${localResult.prunedRows}`;
       }
       alert(summaryMsg);
     } catch (err) {
@@ -7313,16 +7346,19 @@ class SheetNavigator {
 
     // Clean physical city
     let city = String(sourceLoc || emp['Location'] || '').replace(/\s*\([^)]*\)/g, '').trim();
-    if (!city || city.toLowerCase() === 'unassigned' || city.toLowerCase() === 'previous employee') city = 'Helena';
+    if (!city || ['unassigned', 'previous employee', 'vacation', 'light duty', 'leave', 'medical', 'weeds'].includes(city.toLowerCase())) {
+      city = 'Helena';
+    }
+    const formattedLoc = `${city} (${statusType})`;
 
-    if (confirm(`Move ${empName} to ${statusType}?\n\nLocation: "${city}"\nStatus: "${statusType}"`)) {
-      emp['Location'] = city;
+    if (confirm(`Move ${empName} to ${statusType}?\n\nLocation: "${formattedLoc}"\nStatus: "${statusType}"`)) {
+      emp['Location'] = formattedLoc;
       emp['Status'] = statusType;
       const locColIdx = (empTable.headers || []).findIndex(h => /^location$/i.test(h)) + 1;
       const statusColIdx = (empTable.headers || []).findIndex(h => /^status$/i.test(h)) + 1;
       const rIdx = emp._rowIdx || (empTable.rows.indexOf(emp) + 2);
       if (empTable.rawGrid && empTable.rawGrid[rIdx - 1]) {
-        if (locColIdx > 0) empTable.rawGrid[rIdx - 1][locColIdx - 1] = city;
+        if (locColIdx > 0) empTable.rawGrid[rIdx - 1][locColIdx - 1] = formattedLoc;
         if (statusColIdx > 0) empTable.rawGrid[rIdx - 1][statusColIdx - 1] = statusType;
       }
 
@@ -7333,7 +7369,7 @@ class SheetNavigator {
         row: rIdx,
         itemIdentifier: empName,
         updatedFields: {
-          'Location': city,
+          'Location': formattedLoc,
           'Status': statusType
         }
       });

@@ -2153,7 +2153,6 @@ class InventoryManager {
     modal = document.createElement('div');
     modal.id = 'transfer-equipment-modal';
     modal.className = 'modal-overlay active';
-    modal.style.zIndex = '1100';
     modal.style.display = 'flex';
     modal.innerHTML = `
       <div class="modal-box" style="max-width: 650px; width: 92%; max-height: 90vh; display: flex; flex-direction: column;">
@@ -2400,7 +2399,10 @@ class InventoryManager {
       }
 
       // Save database snapshot
-      if (this.db && typeof this.db.setSnapshot === 'function') {
+      if (this.db && typeof this.db.persistSnapshot === 'function') {
+        await this.db.persistSnapshot(this.db.snapshot);
+        if (typeof this.db.notify === 'function') this.db.notify();
+      } else if (this.db && typeof this.db.setSnapshot === 'function') {
         await this.db.setSnapshot(this.db.snapshot);
       }
 
