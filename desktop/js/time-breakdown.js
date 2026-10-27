@@ -200,6 +200,29 @@ class TimeBreakdownEngine {
     }
 
     const cleanNotes = rawNotes ? String(rawNotes).replace(/\r?\n+/g, ' ').replace(/[.\s]+$/, '').trim() : '';
+    if (cleanNotes && cleanNotes.includes('Recorded from Rubber PPE Tracker')) {
+      const m = cleanNotes.match(/Assigned\s+([^#]+)#([^\s(]+)(?:\s*\(([^)]+)\))?\s+to\s+(.+?)(?:\s+on\s+Crew\s+([^,]+?))?\s+at\s+([^.]+?)\s*\.\s*\(Recorded/i);
+      if (m) {
+        const itemType = m[1].trim().toLowerCase();
+        const itemNum = m[2].trim();
+        const specs = m[3] ? ` (${m[3].trim()})` : '';
+        const emp = m[4].trim();
+        const crew = m[5] ? m[5].trim() : "";
+        const loc = m[6] ? m[6].trim() : "";
+        const tagParts = [];
+        if (crew) tagParts.push(`Crew ${crew}`);
+        if (loc) tagParts.push(loc);
+        const tag = tagParts.length > 0 ? ` (${tagParts.join(", ")})` : "";
+        return `Assigned and staged initial ${itemType} #${itemNum}${specs} in the shop for ${emp}${tag}.`;
+      }
+      return `Assigned and staged ${title} in the shop for field delivery.`;
+    }
+    if (title.toLowerCase() === 'dentist') {
+      return 'Personal appointment (Dentist).';
+    }
+    if (title.toLowerCase() === 'doctor') {
+      return 'Personal appointment (Doctor).';
+    }
     const fullText = cleanNotes ? `${title} (${cleanNotes})` : title;
     return `${fullText}.`;
   }
@@ -315,6 +338,62 @@ class TimeBreakdownEngine {
       Object.assign(schedRegistry, localSched);
     } catch { /* ignore */ }
 
+    // Load office task registry for swaps/reclaims
+    const swapOfficeRegistry = {};
+    try {
+      const localOffice = JSON.parse(localStorage.getItem('TRIP_PLANNER_SWAP_OFFICE_TASKS') || '{}');
+      Object.assign(swapOfficeRegistry, localOffice);
+    } catch { /* ignore */ }
+
+    const cleanNum = (s) => String(s || '').replace(/^[#\s]+/, '').trim().toLowerCase();
+
+    const getSwapOfficeInfo = (sKey, emp, oldItm, newItm, type, dKey) => {
+      if (sKey && swapOfficeRegistry[sKey] && swapOfficeRegistry[sKey].isOfficeTask) {
+        return { isOfficeTask: true, officeNote: swapOfficeRegistry[sKey].officeNote || '' };
+      }
+      if (sKey && schedRegistry[sKey] && schedRegistry[sKey].isOfficeTask) {
+        return { isOfficeTask: true, officeNote: schedRegistry[sKey].officeNote || '' };
+      }
+      const empK = String(emp || '').trim().toLowerCase();
+      const oldK = cleanNum(oldItm);
+      const newK = cleanNum(newItm);
+      const typeK = String(type || '').trim().toLowerCase();
+      const candidates = [
+        `${typeK}_${empK}_${oldK}_${dKey}`,
+        `${typeK}_${empK}_${oldK}`,
+        `${empK}_${oldK}_${dKey}`,
+        `${empK}_${oldK}`,
+        `${typeK}_${empK}_${newK}`,
+        `${empK}_${newK}`
+      ];
+      for (const ck of candidates) {
+        if (swapOfficeRegistry[ck] && swapOfficeRegistry[ck].isOfficeTask) {
+          return { isOfficeTask: true, officeNote: swapOfficeRegistry[ck].officeNote || '' };
+        }
+      }
+      for (const [k, entry] of Object.entries(swapOfficeRegistry)) {
+        if (entry && entry.isOfficeTask) {
+          const entryEmp = String(entry.employeeName || '').trim().toLowerCase();
+          const entryOld = cleanNum(entry.currentItem || entry.oldItem);
+          if (entryEmp === empK && (!oldK || entryOld === oldK)) {
+            return { isOfficeTask: true, officeNote: entry.officeNote || '' };
+          }
+        }
+      }
+      for (const [sk, entry] of Object.entries(schedRegistry)) {
+        if (entry && entry.isOfficeTask) {
+          const sDate = entry.dateKey || (entry.swap && entry.swap.dateKey) || '';
+          if (dKey && sDate && sDate !== dKey) continue;
+          const sEmp = String(entry.employeeName || (entry.swap && entry.swap.employeeName) || '').trim().toLowerCase();
+          const sOld = cleanNum(entry.currentItem || (entry.swap && entry.swap.currentItem));
+          if (sEmp === empK && (!oldK || sOld === oldK)) {
+            return { isOfficeTask: true, officeNote: entry.officeNote || '' };
+          }
+        }
+      }
+      return { isOfficeTask: false, officeNote: '' };
+    };
+
     // Map scheduled swap keys to their scheduled trip dateKey
     const scheduledDateMap = {};
     Object.keys(schedRegistry).forEach(k => {
@@ -391,6 +470,8 @@ class TimeBreakdownEngine {
           if (daysMap[dKey]) {
             if (!seenSwapKeys.has(dedupe)) {
               seenSwapKeys.add(dedupe);
+              const sKey = `${cfg.sw}|${empClean.toLowerCase()}|${cfg.label.toLowerCase()}|${cleanOld.toLowerCase()}`;
+              const officeInfo = getSwapOfficeInfo(sKey, empClean, cleanOld, cleanNew, cfg.label, dKey);
               const swapObj = {
                 type: isReclaim ? `${cfg.label} Reclaim` : `${cfg.label} Swap`,
                 label: cfg.label,
@@ -405,7 +486,9 @@ class TimeBreakdownEngine {
                 length: newInvItem['Length'] || '',
                 location: newInvItem['Location'] || empInfo.loc || 'Helena',
                 crew: empInfo.crew || '',
-                status: 'Delivered'
+                status: 'Delivered',
+                isOfficeTask: officeInfo.isOfficeTask,
+                officeNote: officeInfo.officeNote
               };
 
               // Try to attach to a matching field visit location on that day
@@ -428,19 +511,33 @@ class TimeBreakdownEngine {
                 }
               }
 
-              if (!attached) {
-                const cleanSwapLoc = this.cleanPhysicalLocation(swapObj.location);
-                if (cleanSwapLoc && cleanSwapLoc.toLowerCase() !== 'helena' && !this.isStatusLocation(cleanSwapLoc)) {
-                  if (!daysMap[dKey].locations[cleanSwapLoc]) {
-                    daysMap[dKey].locations[cleanSwapLoc] = {
-                      name: cleanSwapLoc,
-                      crews: [],
-                      swaps: []
-                    };
+              const cleanSwapLoc = this.cleanPhysicalLocation(swapObj.location) || 'Helena';
+              swapObj.originCity = cleanSwapLoc;
+
+              if (swapObj.isOfficeTask) {
+                // Handled in office / shop — belongs to Helena! Does not create a field trip or travel leg!
+                if (!daysMap[dKey].locations['Helena']) {
+                  daysMap[dKey].locations['Helena'] = {
+                    name: 'Helena',
+                    crews: [],
+                    swaps: []
+                  };
+                }
+                daysMap[dKey].locations['Helena'].swaps.push(swapObj);
+              } else {
+                if (!attached) {
+                  if (cleanSwapLoc && cleanSwapLoc.toLowerCase() !== 'helena' && !this.isStatusLocation(cleanSwapLoc)) {
+                    if (!daysMap[dKey].locations[cleanSwapLoc]) {
+                      daysMap[dKey].locations[cleanSwapLoc] = {
+                        name: cleanSwapLoc,
+                        crews: [],
+                        swaps: []
+                      };
+                    }
+                    daysMap[dKey].locations[cleanSwapLoc].swaps.push(swapObj);
+                  } else {
+                    daysMap[dKey].tasks.push(swapObj);
                   }
-                  daysMap[dKey].locations[cleanSwapLoc].swaps.push(swapObj);
-                } else {
-                  daysMap[dKey].tasks.push(swapObj);
                 }
               }
             }
@@ -478,6 +575,8 @@ class TimeBreakdownEngine {
               if (!seenSwapKeys.has(dedupe)) {
                 seenSwapKeys.add(dedupe);
                 const empInfo = empMap[empClean.toLowerCase()] || {};
+                const sKey = `${cfg.sw}|${empClean.toLowerCase()}|${cfg.label.toLowerCase()}|${oldItem.toLowerCase()}`;
+                const officeInfo = getSwapOfficeInfo(sKey, empClean, oldItem, cleanNew, cfg.label, dKey);
                 const swapObj = {
                   type: isReclaim ? `${cfg.label} Reclaim` : `${cfg.label} Swap`,
                   label: cfg.label,
@@ -492,7 +591,9 @@ class TimeBreakdownEngine {
                   length: r['Length'] || '',
                   location: r['Location'] || empInfo.loc || 'Helena',
                   crew: r['Job Number'] || r['Job #'] || empInfo.crew || '',
-                  status: 'Delivered'
+                  status: 'Delivered',
+                  isOfficeTask: officeInfo.isOfficeTask,
+                  officeNote: officeInfo.officeNote
                 };
 
                 let attached = false;
@@ -510,19 +611,33 @@ class TimeBreakdownEngine {
                   }
                 }
 
-                if (!attached) {
-                  const cleanSwapLoc = this.cleanPhysicalLocation(swapObj.location);
-                  if (cleanSwapLoc && cleanSwapLoc.toLowerCase() !== 'helena' && !this.isStatusLocation(cleanSwapLoc)) {
-                    if (!daysMap[dKey].locations[cleanSwapLoc]) {
-                      daysMap[dKey].locations[cleanSwapLoc] = {
-                        name: cleanSwapLoc,
-                        crews: [],
-                        swaps: []
-                      };
+                const cleanSwapLoc = this.cleanPhysicalLocation(swapObj.location) || 'Helena';
+                swapObj.originCity = cleanSwapLoc;
+
+                if (swapObj.isOfficeTask) {
+                  // Handled in office / shop — belongs to Helena! Does not create a field trip or travel leg!
+                  if (!daysMap[dKey].locations['Helena']) {
+                    daysMap[dKey].locations['Helena'] = {
+                      name: 'Helena',
+                      crews: [],
+                      swaps: []
+                    };
+                  }
+                  daysMap[dKey].locations['Helena'].swaps.push(swapObj);
+                } else {
+                  if (!attached) {
+                    if (cleanSwapLoc && cleanSwapLoc.toLowerCase() !== 'helena' && !this.isStatusLocation(cleanSwapLoc)) {
+                      if (!daysMap[dKey].locations[cleanSwapLoc]) {
+                        daysMap[dKey].locations[cleanSwapLoc] = {
+                          name: cleanSwapLoc,
+                          crews: [],
+                          swaps: []
+                        };
+                      }
+                      daysMap[dKey].locations[cleanSwapLoc].swaps.push(swapObj);
+                    } else {
+                      daysMap[dKey].tasks.push(swapObj);
                     }
-                    daysMap[dKey].locations[cleanSwapLoc].swaps.push(swapObj);
-                  } else {
-                    daysMap[dKey].tasks.push(swapObj);
                   }
                 }
               }
@@ -647,13 +762,26 @@ class TimeBreakdownEngine {
       });
     }
 
-    // 6. Enrich planned trip locations with active crews from job_tracking if empty
+    // 6. Enrich planned trip locations with active crews from job_tracking ONLY if this location was an explicit planned field trip
     const jobTable = this.db ? this.db.getTable('job_tracking') : null;
     if (jobTable && jobTable.rows) {
       Object.keys(daysMap).forEach(dKey => {
+        const plannedTripLocs = new Set();
+        const dayTrips = trips[dKey];
+        if (dayTrips) {
+          const tripList = Array.isArray(dayTrips) ? dayTrips : [dayTrips];
+          tripList.forEach(t => {
+            if (t && t.location) {
+              const cl = this.cleanPhysicalLocation(t.location);
+              if (cl) plannedTripLocs.add(cl.toLowerCase());
+            }
+          });
+        }
+
         const locs = daysMap[dKey].locations;
         Object.keys(locs).forEach(lKey => {
-          if (locs[lKey].crews.length === 0) {
+          // ONLY enrich if the user explicitly planned a field trip to this location
+          if (locs[lKey].crews.length === 0 && plannedTripLocs.has(lKey.toLowerCase()) && lKey.toLowerCase() !== 'helena') {
             const matchedCrews = jobTable.rows
               .filter(jr => {
                 const jLoc = String(jr['Location'] || '').toLowerCase().trim();
@@ -860,10 +988,19 @@ class TimeBreakdownEngine {
 
     // Helper to resolve an office / manual task location
     const resolveTaskLocation = (task) => {
+      const rawText = (String(task.title || '') + ' ' + String(task.notes || '')).toLowerCase();
+      // Rubber PPE Tracker records are shop prep/assignment actions done in Helena
+      if (rawText.includes('recorded from rubber ppe tracker') || (task.title && task.title.toLowerCase().startsWith('assigned rubber'))) {
+        return 'Helena';
+      }
+      // Personal appointments (Dentist, etc.) are handled locally in Helena
+      if (rawText.includes('dentist') || rawText.includes('doctor') || (task.title && task.title.toLowerCase().includes('dentist'))) {
+        return 'Helena';
+      }
       if (task.location && !this.isStatusLocation(task.location)) {
         return this.cleanPhysicalLocation(task.location);
       }
-      const text = (String(task.title || '') + ' ' + String(task.notes || '')).toLowerCase();
+      const text = rawText;
       // Check if employee name is mentioned in task title or notes
       if (this.db) {
         const empTable = this.db.getTable('employees');
@@ -1019,52 +1156,91 @@ class TimeBreakdownEngine {
 
       // B. Equipment Swaps & Reclaims in this city
       if (b.swaps.length > 0) {
-        let isAllGloves = true;
-        let isAllSleeves = true;
-        let isAllBlankets = true;
+        const officeSwaps = b.swaps.filter(sw => sw.isOfficeTask);
+        const fieldSwaps = b.swaps.filter(sw => !sw.isOfficeTask);
 
-        const swapDescriptions = b.swaps.map(sw => {
-          const emp = sw.employee || sw['Assigned To'] || 'Worker';
-          const isReclaim = Boolean(sw.isReclaim || (!sw.newItem || sw.newItem === '—' || sw.newItem === '-'));
-          const label = (sw.label || sw.type || 'equipment').replace(/\s*(Swap|Reclaim)\s*/i, '').trim().toLowerCase();
+        // 1. Office-handled equipment returns and swaps (brought to shop or handed off in office)
+        if (officeSwaps.length > 0) {
+          const empGroups = {};
+          officeSwaps.forEach(sw => {
+            const emp = sw.employee || 'Worker';
+            if (!empGroups[emp]) empGroups[emp] = [];
+            empGroups[emp].push(sw);
+          });
 
-          if (!label.includes('glove')) isAllGloves = false;
-          if (!label.includes('sleeve')) isAllSleeves = false;
-          if (!label.includes('blanket')) isAllBlankets = false;
+          const officePhrases = Object.entries(empGroups).map(([emp, items]) => {
+            const origin = items[0].originCity && items[0].originCity !== 'Helena' ? `${items[0].originCity} - ` : '';
+            const itemPhrases = items.map(sw => {
+              const label = (sw.label || sw.type || 'equipment').replace(/\s*(Swap|Reclaim)\s*/i, '').trim().toLowerCase();
+              const isReclaim = Boolean(sw.isReclaim || (!sw.newItem || sw.newItem === '—' || sw.newItem === '-'));
+              let desc = isReclaim ? `returned ${label} #${sw.oldItem || ''} to shelf` : `${label} swap #${sw.oldItem} to #${sw.newItem}`;
+              const specs = [];
+              if (!label.includes('glove')) {
+                if (sw.size) specs.push(`size ${sw.size}`);
+                if (sw.itemClass) specs.push(`class ${sw.itemClass}`);
+              }
+              if (sw.kv) specs.push(`${sw.kv} kV`);
+              if (specs.length > 0) desc += ` (${specs.join(', ')})`;
+              return desc;
+            });
 
-          let itemDesc = '';
-          if (isReclaim) {
-            itemDesc = sw.oldItem ? `returned ${label} #${sw.oldItem} to shelf` : `returned ${label} to shelf`;
-          } else if (sw.oldItem && sw.newItem && sw.newItem !== '—' && sw.newItem !== '-') {
-            itemDesc = `${label} swap #${sw.oldItem} to #${sw.newItem}`;
-          } else if (sw.newItem && sw.newItem !== '—' && sw.newItem !== '-') {
-            itemDesc = `new ${label} #${sw.newItem}`;
+            const note = items.find(sw => sw.officeNote) ? items.find(sw => sw.officeNote).officeNote : '';
+            const noteStr = note ? `; ${note}` : '';
+            return `${emp} (${origin}${this.formatListNatural(itemPhrases)}${noteStr})`;
+          });
+
+          sentences.push(`Processed equipment returns brought to the shop: ${this.formatListNatural(officePhrases)}.`);
+        }
+
+        // 2. Standard field swaps
+        if (fieldSwaps.length > 0) {
+          let isAllGloves = true;
+          let isAllSleeves = true;
+          let isAllBlankets = true;
+
+          const swapDescriptions = fieldSwaps.map(sw => {
+            const emp = sw.employee || sw['Assigned To'] || 'Worker';
+            const isReclaim = Boolean(sw.isReclaim || (!sw.newItem || sw.newItem === '—' || sw.newItem === '-'));
+            const label = (sw.label || sw.type || 'equipment').replace(/\s*(Swap|Reclaim)\s*/i, '').trim().toLowerCase();
+
+            if (!label.includes('glove')) isAllGloves = false;
+            if (!label.includes('sleeve')) isAllSleeves = false;
+            if (!label.includes('blanket')) isAllBlankets = false;
+
+            let itemDesc = '';
+            if (isReclaim) {
+              itemDesc = sw.oldItem ? `returned ${label} #${sw.oldItem} to shelf` : `returned ${label} to shelf`;
+            } else if (sw.oldItem && sw.newItem && sw.newItem !== '—' && sw.newItem !== '-') {
+              itemDesc = `${label} swap #${sw.oldItem} to #${sw.newItem}`;
+            } else if (sw.newItem && sw.newItem !== '—' && sw.newItem !== '-') {
+              itemDesc = `new ${label} #${sw.newItem}`;
+            } else {
+              itemDesc = `${label} exchange`;
+            }
+
+            const details = [];
+            if (!label.includes('glove')) {
+              if (sw.size) details.push(`size ${sw.size}`);
+              if (sw.itemClass) details.push(`class ${sw.itemClass}`);
+            }
+            if (sw.kv) details.push(`${sw.kv} kV`);
+            const detailStr = details.length > 0 ? `, ${details.join(', ')}` : '';
+
+            return `${emp} (${itemDesc}${detailStr})`;
+          });
+
+          const swapTypeWord = isAllGloves ? 'glove swap' :
+                               isAllSleeves ? 'sleeve swap' :
+                               isAllBlankets ? 'blanket swap' : 'equipment exchange';
+
+          if (fieldSwaps.length === 1) {
+            sentences.push(`Completed a ${swapTypeWord} for ${swapDescriptions[0]}.`);
           } else {
-            itemDesc = `${label} exchange`;
+            const pluralWord = isAllGloves ? 'glove swaps' :
+                               isAllSleeves ? 'sleeve swaps' :
+                               isAllBlankets ? 'blanket swaps' : 'equipment exchanges';
+            sentences.push(`Completed ${pluralWord} for ${this.formatListNatural(swapDescriptions)}.`);
           }
-
-          const details = [];
-          if (!label.includes('glove')) {
-            if (sw.size) details.push(`size ${sw.size}`);
-            if (sw.itemClass) details.push(`class ${sw.itemClass}`);
-          }
-          if (sw.kv) details.push(`${sw.kv} kV`);
-          const detailStr = details.length > 0 ? `, ${details.join(', ')}` : '';
-
-          return `${emp} (${itemDesc}${detailStr})`;
-        });
-
-        const swapTypeWord = isAllGloves ? 'glove swap' :
-                             isAllSleeves ? 'sleeve swap' :
-                             isAllBlankets ? 'blanket swap' : 'equipment exchange';
-
-        if (b.swaps.length === 1) {
-          sentences.push(`Completed a ${swapTypeWord} for ${swapDescriptions[0]}.`);
-        } else {
-          const pluralWord = isAllGloves ? 'glove swaps' :
-                             isAllSleeves ? 'sleeve swaps' :
-                             isAllBlankets ? 'blanket swaps' : 'equipment exchanges';
-          sentences.push(`Completed ${pluralWord} for ${this.formatListNatural(swapDescriptions)}.`);
         }
       }
 
@@ -1126,17 +1302,25 @@ class TimeBreakdownEngine {
         }
       }
 
+      // Check if this entire city was handled in office/shop (no field travel)
+      const allOfficeSwaps = b.swaps.length > 0 && b.swaps.every(sw => sw.isOfficeTask);
+      const isCityAllOffice = allOfficeSwaps && b.crewsVisited.size === 0 && b.classes.length === 0 && b.trainings.length === 0 && b.deliveries.length === 0 && b.drugTests.length === 0 && b.officeTasks.length === 0;
+
       // Build city header / movement transition
       let cityHeader = '';
       if (idx === 0) {
-        cityHeader = `${cityName} - `;
+        cityHeader = isCityAllOffice && cityName !== 'Helena' ? `${cityName} (Handled in Office / Shop - No Travel) - ` : `${cityName} - `;
+      } else if (isCityAllOffice) {
+        cityHeader = `${cityName} (Handled in Office / Shop - No Travel) - `;
       } else {
         const fromCity = prevCity || 'Helena';
         cityHeader = `Moved from ${fromCity} to ${cityName} - `;
       }
 
       cityBlocks.push(`${cityHeader}${sentences.join(' ')}`);
-      prevCity = cityName;
+      if (!isCityAllOffice) {
+        prevCity = cityName;
+      }
     });
 
     return cityBlocks.join('\n\n');
@@ -1178,8 +1362,24 @@ class TimeBreakdownEngine {
       if (!hasContent) return;
 
       daysWithContent++;
-      totalTrips += locKeys.filter(k => k.toLowerCase() !== 'helena').length;
+      totalTrips += locKeys.filter(k => {
+        if (k.toLowerCase() === 'helena') return false;
+        const loc = day.locations[k];
+        if (!loc) return false;
+        const allOfficeSwaps = loc.swaps && loc.swaps.length > 0 && loc.swaps.every(s => s.isOfficeTask);
+        const noOtherFieldActivities = (!loc.crews || loc.crews.length === 0) &&
+          (!day.classes || !day.classes.some(c => (c.location || '').toLowerCase() === k.toLowerCase())) &&
+          (!day.trainings || !day.trainings.some(t => (t.location || '').toLowerCase() === k.toLowerCase())) &&
+          (!day.equipmentDeliveries || !day.equipmentDeliveries.some(e => (e.location || '').toLowerCase() === k.toLowerCase()));
+        return !(allOfficeSwaps && noOtherFieldActivities);
+      }).length;
       totalSwaps += locSwapsCount;
+      locKeys.forEach(lk => {
+        const loc = day.locations[lk];
+        if (loc && loc.swaps) {
+          totalOfficeTasks += loc.swaps.filter(s => s.isOfficeTask).length;
+        }
+      });
       if (day.tasks) {
         totalSwaps += day.tasks.filter(t => t.isReclaim || (t.type && (t.type.toLowerCase().includes('swap') || t.type.toLowerCase().includes('reclaim'))) || t.label).length;
       }
@@ -1257,13 +1457,24 @@ class TimeBreakdownEngine {
       lines.push(`${dayName}`);
       lines.push(`-------------------------------------------------------`);
 
-      // Field Visits
+      // Field Visits & Office Handled Locations
       if (hasLocations) {
         locKeys.forEach(locKey => {
-          totalTrips++;
           const loc = day.locations[locKey];
-          const crewStr = (loc.crews && loc.crews.filter(Boolean).length > 0) ? ` [${loc.crews.filter(Boolean).join(', ')}]` : '';
-          lines.push(`  Field Visit: ${loc.name}${crewStr}`);
+          const allOfficeSwaps = loc.swaps && loc.swaps.length > 0 && loc.swaps.every(s => s.isOfficeTask);
+          const noOtherFieldActivities = (!loc.crews || loc.crews.length === 0) &&
+            (!day.classes || !day.classes.some(c => (c.location || '').toLowerCase() === locKey.toLowerCase())) &&
+            (!day.trainings || !day.trainings.some(t => (t.location || '').toLowerCase() === locKey.toLowerCase())) &&
+            (!day.equipmentDeliveries || !day.equipmentDeliveries.some(e => (e.location || '').toLowerCase() === locKey.toLowerCase()));
+
+          if (allOfficeSwaps && noOtherFieldActivities) {
+            lines.push(`  Office / Shop Task: ${loc.name} (Handled in Office - No Travel)`);
+            totalOfficeTasks += loc.swaps.length;
+          } else {
+            totalTrips++;
+            const crewStr = (loc.crews && loc.crews.filter(Boolean).length > 0) ? ` [${loc.crews.filter(Boolean).join(', ')}]` : '';
+            lines.push(`  Field Visit: ${loc.name}${crewStr}`);
+          }
 
           if (loc.swaps && loc.swaps.length > 0) {
             lines.push(`     Completed Equipment Swaps & Reclaims (${loc.swaps.length}):`);
@@ -1279,6 +1490,9 @@ class TimeBreakdownEngine {
               if (sw.kv) specParts.push(`${sw.kv} kV`);
               if (sw.model) specParts.push(`Model ${sw.model}`);
               if (sw.length) specParts.push(`${sw.length}`);
+              if (sw.isOfficeTask) {
+                specParts.push(sw.officeNote ? `Office Task: ${sw.officeNote}` : 'Office Task');
+              }
               const specs = specParts.join(', ');
 
               const isReclaim = Boolean(sw.isReclaim || (!sw.newItem || sw.newItem === '—' || sw.newItem === '-'));
@@ -1510,7 +1724,11 @@ class TimeBreakdownEngine {
     let trainingsCount = 0;
 
     Object.values(day.locations || {}).forEach(loc => {
-      if (loc.name && !visitedCities.includes(loc.name)) visitedCities.push(loc.name);
+      const allOfficeSwaps = loc.swaps && loc.swaps.length > 0 && loc.swaps.every(s => s.isOfficeTask);
+      const noOtherFieldActivities = (!loc.crews || loc.crews.length === 0);
+      if (loc.name && !visitedCities.includes(loc.name) && !(allOfficeSwaps && noOtherFieldActivities)) {
+        visitedCities.push(loc.name);
+      }
       (loc.crews || []).forEach(c => {
         if (!visitedCrews.includes(c)) visitedCrews.push(c);
       });

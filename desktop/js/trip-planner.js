@@ -82,6 +82,7 @@ class TripPlannerApp {
     this.dismissedMonthlyTrainings = this.loadDismissedMonthlyTrainings();
     this.dismissedSwaps = this.loadDismissedSwaps();
     this.scheduledSwaps = this.loadScheduledSwaps();
+    this.swapOfficeTasks = this.loadSwapOfficeTasks();
     this.activeTab = 'board'; // 'board' or 'map'
   }
 
@@ -133,6 +134,289 @@ class TripPlannerApp {
     if (this.db && typeof this.db.saveScheduledSwaps === 'function') {
       this.db.saveScheduledSwaps(this.scheduledSwaps);
     }
+  }
+
+  loadSwapOfficeTasks() {
+    try {
+      return JSON.parse(localStorage.getItem('TRIP_PLANNER_SWAP_OFFICE_TASKS') || '{}');
+    } catch {
+      return {};
+    }
+  }
+
+  saveSwapOfficeTasks() {
+    try {
+      localStorage.setItem('TRIP_PLANNER_SWAP_OFFICE_TASKS', JSON.stringify(this.swapOfficeTasks || {}));
+    } catch { /* ignore */ }
+  }
+
+  getSwapOfficeTaskInfo(s, dateKey) {
+    if (!this.swapOfficeTasks) this.swapOfficeTasks = this.loadSwapOfficeTasks();
+    if (!s) return { isOfficeTask: false, officeNote: '' };
+
+    if (s.isOfficeTask !== undefined && s.isOfficeTask !== null) {
+      return { isOfficeTask: !!s.isOfficeTask, officeNote: s.officeNote || '' };
+    }
+
+    const sKey = s._sKey || (typeof this.getSwapKey === 'function' ? this.getSwapKey(s) : '');
+    if (sKey && this.swapOfficeTasks[sKey] && this.swapOfficeTasks[sKey].isOfficeTask) {
+      return { isOfficeTask: true, officeNote: this.swapOfficeTasks[sKey].officeNote || '' };
+    }
+    if (sKey && this.scheduledSwaps && this.scheduledSwaps[sKey] && this.scheduledSwaps[sKey].isOfficeTask) {
+      return { isOfficeTask: true, officeNote: this.scheduledSwaps[sKey].officeNote || '' };
+    }
+
+    const emp = String(s.employeeName || s.employee || s.empName || '').trim().toLowerCase();
+    const oldItm = String(s.currentItem || s.currentItemNum || s.oldItem || '').trim().toLowerCase();
+    const newItm = String(s.pickItem || s.pickListNum || s.newItem || '').trim().toLowerCase();
+    const type = String(s.type || s.label || '').trim().toLowerCase();
+    const dKey = dateKey || s.dateKey || '';
+
+    const candidates = [
+      `${type}_${emp}_${oldItm}_${dKey}`,
+      `${type}_${emp}_${oldItm}`,
+      `${emp}_${oldItm}_${dKey}`,
+      `${emp}_${oldItm}`,
+      `${type}_${emp}_${newItm}`,
+      `${emp}_${newItm}`
+    ];
+
+    for (const ck of candidates) {
+      if (this.swapOfficeTasks[ck] && this.swapOfficeTasks[ck].isOfficeTask) {
+        return { isOfficeTask: true, officeNote: this.swapOfficeTasks[ck].officeNote || '' };
+      }
+    }
+
+    if (this.scheduledSwaps) {
+      for (const [sk, entry] of Object.entries(this.scheduledSwaps)) {
+        if (entry && entry.isOfficeTask) {
+          const sDate = entry.dateKey || (entry.swap && entry.swap.dateKey) || '';
+          if (dKey && sDate && sDate !== dKey) continue;
+          const sEmp = String(entry.employeeName || (entry.swap && entry.swap.employeeName) || '').trim().toLowerCase();
+          const sOld = String(entry.currentItem || (entry.swap && entry.swap.currentItem) || '').trim().toLowerCase();
+          if (sEmp === emp && (!oldItm || sOld === oldItm)) {
+            return { isOfficeTask: true, officeNote: entry.officeNote || '' };
+          }
+        }
+      }
+    }
+
+    return { isOfficeTask: false, officeNote: '' };
+  }
+
+  setSwapOfficeTask(sKey, dateKey, swapData, isOffice, note = '') {
+    if (window.currentRoleMode === 'view_only') return;
+    if (!this.swapOfficeTasks) this.swapOfficeTasks = this.loadSwapOfficeTasks();
+    if (!this.scheduledSwaps) this.scheduledSwaps = this.loadScheduledSwaps();
+
+    const emp = String((swapData && (swapData.employeeName || swapData.employee)) || '').trim();
+    const oldItm = String((swapData && (swapData.currentItem || swapData.currentItemNum || swapData.oldItem)) || '').trim();
+    const newItm = String((swapData && (swapData.pickItem || swapData.pickListNum || swapData.newItem)) || '').trim();
+    const type = String((swapData && (swapData.type || swapData.label)) || 'Glove').trim();
+    const effectiveKey = sKey || (swapData && swapData._sKey) || (typeof this.getSwapKey === 'function' && swapData ? this.getSwapKey(swapData) : '');
+
+    const record = {
+      isOfficeTask: !!isOffice,
+      officeNote: note || '',
+      dateKey: dateKey || '',
+      employeeName: emp,
+      currentItem: oldItm,
+      pickItem: newItm,
+      type: type,
+      updatedAt: new Date().toISOString()
+    };
+
+    const empK = emp.toLowerCase();
+    const oldK = oldItm.toLowerCase();
+    const newK = newItm.toLowerCase();
+    const typeK = type.toLowerCase();
+
+    if (isOffice) {
+      if (effectiveKey) this.swapOfficeTasks[effectiveKey] = record;
+      if (empK && oldK) {
+        if (dateKey) this.swapOfficeTasks[`${typeK}_${empK}_${oldK}_${dateKey}`] = record;
+        this.swapOfficeTasks[`${typeK}_${empK}_${oldK}`] = record;
+        if (dateKey) this.swapOfficeTasks[`${empK}_${oldK}_${dateKey}`] = record;
+        this.swapOfficeTasks[`${empK}_${oldK}`] = record;
+      }
+      if (empK && newK) {
+        this.swapOfficeTasks[`${typeK}_${empK}_${newK}`] = record;
+        this.swapOfficeTasks[`${empK}_${newK}`] = record;
+      }
+
+      if (effectiveKey) {
+        if (!this.scheduledSwaps[effectiveKey]) {
+          this.scheduledSwaps[effectiveKey] = {
+            dateKey: dateKey,
+            location: (swapData && swapData.location) || 'Helena',
+            employeeName: emp,
+            crewId: (swapData && (swapData.crewId || swapData.jobNum)) || '',
+            type: type,
+            currentItem: oldItm,
+            pickItem: newItm,
+            isReclaim: !!(swapData && swapData.isReclaim),
+            isOfficeTask: true,
+            officeNote: note || '',
+            completed: !!(swapData && swapData.isCompleted),
+            completedDate: (swapData && swapData.completedDate) || dateKey
+          };
+        } else if (typeof this.scheduledSwaps[effectiveKey] === 'object') {
+          this.scheduledSwaps[effectiveKey].isOfficeTask = true;
+          this.scheduledSwaps[effectiveKey].officeNote = note || '';
+        }
+      }
+    } else {
+      if (effectiveKey) delete this.swapOfficeTasks[effectiveKey];
+      if (dateKey) delete this.swapOfficeTasks[`${typeK}_${empK}_${oldK}_${dateKey}`];
+      delete this.swapOfficeTasks[`${typeK}_${empK}_${oldK}`];
+      if (dateKey) delete this.swapOfficeTasks[`${empK}_${oldK}_${dateKey}`];
+      delete this.swapOfficeTasks[`${empK}_${oldK}`];
+      delete this.swapOfficeTasks[`${typeK}_${empK}_${newK}`];
+      delete this.swapOfficeTasks[`${empK}_${newK}`];
+
+      if (effectiveKey && this.scheduledSwaps[effectiveKey] && typeof this.scheduledSwaps[effectiveKey] === 'object') {
+        delete this.scheduledSwaps[effectiveKey].isOfficeTask;
+        delete this.scheduledSwaps[effectiveKey].officeNote;
+      }
+    }
+
+    this.saveSwapOfficeTasks();
+    this.saveScheduledSwaps();
+    this.notifyAccomplishmentsModal();
+  }
+
+  promptSwapOfficeTask(sKey, dateKey, swapData) {
+    if (window.currentRoleMode === 'view_only') return;
+    const curInfo = this.getSwapOfficeTaskInfo(swapData || { _sKey: sKey }, dateKey);
+    const isCurrentlyOffice = curInfo.isOfficeTask;
+
+    const isReclaim = swapData && swapData.isReclaim;
+    const actionLabel = isReclaim ? 'reclaim' : 'swap';
+    const defaultHint = isReclaim ? 'Brought to shop by...' : 'Given to... to complete';
+
+    const promptMsg = isCurrentlyOffice
+      ? `This ${actionLabel} is currently marked as an Office Task.\n\nEnter or update note description (who brought the reclaim or who you gave the swap to):\n(Clear text and click OK to revert to standard field task)`
+      : `Mark this ${actionLabel} as an Office Task?\n\nEnter note description (who brought the reclaim or who you gave the swap to to complete):\n(e.g., "${defaultHint}")`;
+
+    const note = window.prompt(promptMsg, curInfo.officeNote || '');
+    if (note === null) return; // User pressed Cancel
+
+    const trimmed = note.trim();
+    if (!trimmed && isCurrentlyOffice) {
+      this.setSwapOfficeTask(sKey, dateKey, swapData, false, '');
+      this.showToast(`Reverted ${actionLabel} to standard field task.`);
+    } else if (trimmed) {
+      this.setSwapOfficeTask(sKey, dateKey, swapData, true, trimmed);
+      this.showToast(`Marked ${actionLabel} as Office Task: "${trimmed}"`);
+    } else {
+      this.setSwapOfficeTask(sKey, dateKey, swapData, true, 'Handled in office / shop');
+      this.showToast(`Marked ${actionLabel} as Office Task.`);
+    }
+
+    this.renderPlanner();
+  }
+
+  removeSwapOfficeTask(sKey, dateKey, swapData) {
+    if (window.currentRoleMode === 'view_only') return;
+    const isReclaim = swapData && swapData.isReclaim;
+    this.setSwapOfficeTask(sKey, dateKey, swapData, false, '');
+    this.showToast(`Reverted ${isReclaim ? 'reclaim' : 'swap'} to standard field task.`);
+    this.renderPlanner();
+  }
+
+  formatDaysLeftBadge(daysLeft, changeOutDate, isReclaim) {
+    if (isReclaim || String(daysLeft || '').toUpperCase().includes('PREV')) {
+      return '';
+    }
+
+    let numDays = null;
+    let isOverdue = false;
+
+    if (typeof daysLeft === 'number' && !isNaN(daysLeft)) {
+      numDays = daysLeft;
+    } else if (typeof daysLeft === 'string' && daysLeft.trim()) {
+      const clean = daysLeft.trim().toUpperCase();
+      if (clean === 'OVERDUE' || clean.includes('EXP')) {
+        isOverdue = true;
+      } else {
+        const parsed = parseInt(clean, 10);
+        if (!isNaN(parsed)) {
+          numDays = parsed;
+        }
+      }
+    }
+
+    // Fallback: calculate from changeOutDate if numDays is null
+    if (numDays === null && !isOverdue && changeOutDate) {
+      const dObj = this.parseDate(changeOutDate);
+      if (dObj && !isNaN(dObj.getTime())) {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const targetMid = new Date(dObj.getFullYear(), dObj.getMonth(), dObj.getDate());
+        numDays = Math.round((targetMid - today) / (1000 * 60 * 60 * 24));
+      }
+    }
+
+    if (numDays === null && !isOverdue) {
+      return '';
+    }
+
+    if (isOverdue || numDays < 0) {
+      const overdueCount = numDays !== null ? Math.abs(numDays) : '';
+      const text = overdueCount ? `${overdueCount}d overdue` : 'Overdue';
+      const title = changeOutDate ? `Change-out date was ${changeOutDate} (${overdueCount ? `${overdueCount} days overdue` : 'Overdue'})` : 'Overdue for swap';
+      return `
+        <span class="badge days-left-badge days-overdue" style="background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.35); font-size: 8.5px; font-weight: 700; padding: 1px 5px; border-radius: 3px;" title="${this.escapeHtml(title)}">
+          🚨 ${this.escapeHtml(text)}
+        </span>
+      `;
+    }
+
+    if (numDays === 0) {
+      const title = changeOutDate ? `Change-out date is today: ${changeOutDate}` : 'Due today';
+      return `
+        <span class="badge days-left-badge days-due-today" style="background: rgba(245, 158, 11, 0.25); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); font-size: 8.5px; font-weight: 700; padding: 1px 5px; border-radius: 3px;" title="${this.escapeHtml(title)}">
+          ⚠️ Due today
+        </span>
+      `;
+    }
+
+    if (numDays <= 7) {
+      const title = changeOutDate ? `Change-out date: ${changeOutDate} (${numDays} days remaining)` : `${numDays} days remaining`;
+      return `
+        <span class="badge days-left-badge days-urgent" style="background: rgba(245, 158, 11, 0.18); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.35); font-size: 8.5px; font-weight: 700; padding: 1px 5px; border-radius: 3px;" title="${this.escapeHtml(title)}">
+          ⏳ ${numDays}d left
+        </span>
+      `;
+    }
+
+    if (numDays <= 30) {
+      const title = changeOutDate ? `Change-out date: ${changeOutDate} (${numDays} days remaining)` : `${numDays} days remaining`;
+      return `
+        <span class="badge days-left-badge days-warning" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.3); font-size: 8.5px; font-weight: 700; padding: 1px 5px; border-radius: 3px;" title="${this.escapeHtml(title)}">
+          📅 ${numDays}d left
+        </span>
+      `;
+    }
+
+    const title = changeOutDate ? `Change-out date: ${changeOutDate} (${numDays} days remaining)` : `${numDays} days remaining`;
+    return `
+      <span class="badge days-left-badge days-ok" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); font-size: 8.5px; font-weight: 700; padding: 1px 5px; border-radius: 3px;" title="${this.escapeHtml(title)}">
+        ✅ ${numDays}d left
+      </span>
+    `;
+  }
+
+  saveOfficeTaskFromModal(target, dateKey) {
+    if (window.currentRoleMode === 'view_only') return;
+    const chk = document.getElementById('swap-is-office-task-modal');
+    const input = document.getElementById('swap-office-note-input');
+    const isOffice = chk ? chk.checked : false;
+    const note = input ? input.value.trim() : '';
+    const sKey = (target && target._sKey) || (typeof this.getSwapKey === 'function' && target ? this.getSwapKey(target) : '');
+    this.setSwapOfficeTask(sKey, dateKey, target, isOffice, note);
+    this.showToast(isOffice ? `Saved Office Task note: "${note || 'Handled in shop'}"` : 'Reverted to field task.');
+    this.renderPlanner();
   }
 
   loadScheduledEquipmentNeeds() {
@@ -804,6 +1088,797 @@ class TripPlannerApp {
     } else {
       this.renderPlanner();
     }
+  }
+
+  safeKey(str) {
+    return String(str || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+  }
+
+  loadDayOrderConfig() {
+    try {
+      const raw = localStorage.getItem('TRIP_PLANNER_DAY_ORDER');
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  }
+
+  saveDayOrderConfig() {
+    try {
+      localStorage.setItem('TRIP_PLANNER_DAY_ORDER', JSON.stringify(this.dayOrderConfig || {}));
+    } catch { /* ignore */ }
+  }
+
+  getDayOrder(dateKey) {
+    if (!this.dayOrderConfig) {
+      this.dayOrderConfig = this.loadDayOrderConfig();
+    }
+    if (!this.dayOrderConfig[dateKey]) {
+      this.dayOrderConfig[dateKey] = { locations: [], crews: {} };
+    }
+    if (!this.dayOrderConfig[dateKey].crews) {
+      this.dayOrderConfig[dateKey].crews = {};
+    }
+    return this.dayOrderConfig[dateKey];
+  }
+
+  getOrderedLocations(dateKey, actualLocs) {
+    const dayOrder = this.getDayOrder(dateKey);
+    const saved = dayOrder.locations || [];
+    const ordered = saved.filter(loc => actualLocs.includes(loc));
+    actualLocs.forEach(loc => {
+      if (!ordered.includes(loc)) {
+        ordered.push(loc);
+      }
+    });
+    dayOrder.locations = ordered;
+    this.saveDayOrderConfig();
+    return ordered;
+  }
+
+  getOrderedCrews(dateKey, locName, actualCrews) {
+    const dayOrder = this.getDayOrder(dateKey);
+    const saved = (dayOrder.crews && dayOrder.crews[locName]) || [];
+    const ordered = saved.filter(c => actualCrews.includes(c));
+    actualCrews.forEach(c => {
+      if (!ordered.includes(c)) {
+        ordered.push(c);
+      }
+    });
+    if (!dayOrder.crews) dayOrder.crews = {};
+    dayOrder.crews[locName] = ordered;
+    this.saveDayOrderConfig();
+    return ordered;
+  }
+
+  moveLocationOrder(dateKey, locName, direction) {
+    const dayOrder = this.getDayOrder(dateKey);
+    const list = [...(dayOrder.locations || [])];
+    const idx = list.indexOf(locName);
+    if (idx === -1) return;
+    const newIdx = idx + direction;
+    if (newIdx < 0 || newIdx >= list.length) return;
+    const temp = list[idx];
+    list[idx] = list[newIdx];
+    list[newIdx] = temp;
+    dayOrder.locations = list;
+    this.saveDayOrderConfig();
+
+    if (this.plannedTrips && this.plannedTrips[dateKey] && Array.isArray(this.plannedTrips[dateKey])) {
+      this.plannedTrips[dateKey].sort((a, b) => {
+        const idxA = list.indexOf(a.location);
+        const idxB = list.indexOf(b.location);
+        return (idxA === -1 ? 999 : idxA) - (idxB === -1 ? 999 : idxB);
+      });
+      this.saveTrips();
+    }
+
+    this.renderPlanner();
+    if (window.tripRouteMap) {
+      window.tripRouteMap.render();
+    }
+  }
+
+  moveCrewOrder(dateKey, locName, crewId, direction) {
+    const dayOrder = this.getDayOrder(dateKey);
+    if (!dayOrder.crews) dayOrder.crews = {};
+    const list = [...((dayOrder.crews && dayOrder.crews[locName]) || [])];
+    const idx = list.indexOf(crewId);
+    if (idx === -1) return;
+    const newIdx = idx + direction;
+    if (newIdx < 0 || newIdx >= list.length) return;
+    const temp = list[idx];
+    list[idx] = list[newIdx];
+    list[newIdx] = temp;
+    dayOrder.crews[locName] = list;
+    this.saveDayOrderConfig();
+    this.renderPlanner();
+  }
+
+  reorderLocation(dateKey, sourceLoc, targetLoc) {
+    if (sourceLoc === targetLoc) return;
+    const dayOrder = this.getDayOrder(dateKey);
+    const list = [...(dayOrder.locations || [])];
+    const srcIdx = list.indexOf(sourceLoc);
+    const tgtIdx = list.indexOf(targetLoc);
+    if (srcIdx === -1 || tgtIdx === -1) return;
+    list.splice(srcIdx, 1);
+    const insertIdx = list.indexOf(targetLoc);
+    list.splice(insertIdx >= 0 ? insertIdx : tgtIdx, 0, sourceLoc);
+    dayOrder.locations = list;
+    this.saveDayOrderConfig();
+
+    if (this.plannedTrips && this.plannedTrips[dateKey] && Array.isArray(this.plannedTrips[dateKey])) {
+      this.plannedTrips[dateKey].sort((a, b) => {
+        const idxA = list.indexOf(a.location);
+        const idxB = list.indexOf(b.location);
+        return (idxA === -1 ? 999 : idxA) - (idxB === -1 ? 999 : idxB);
+      });
+      this.saveTrips();
+    }
+
+    this.renderPlanner();
+    if (window.tripRouteMap) {
+      window.tripRouteMap.render();
+    }
+  }
+
+  reorderCrew(dateKey, locName, sourceCrew, targetCrew) {
+    if (sourceCrew === targetCrew) return;
+    const dayOrder = this.getDayOrder(dateKey);
+    if (!dayOrder.crews) dayOrder.crews = {};
+    const list = [...((dayOrder.crews && dayOrder.crews[locName]) || [])];
+    const srcIdx = list.indexOf(sourceCrew);
+    const tgtIdx = list.indexOf(targetCrew);
+    if (srcIdx === -1 || tgtIdx === -1) return;
+    list.splice(srcIdx, 1);
+    const insertIdx = list.indexOf(targetCrew);
+    list.splice(insertIdx >= 0 ? insertIdx : tgtIdx, 0, sourceCrew);
+    dayOrder.crews[locName] = list;
+    this.saveDayOrderConfig();
+    this.renderPlanner();
+  }
+
+  handleSectionDragStart(e, sectionType, dateKey, locName, crewId) {
+    e.dataTransfer.setData('application/json', JSON.stringify({
+      type: 'reorder_section',
+      sectionType,
+      dateKey,
+      locName,
+      crewId
+    }));
+    e.dataTransfer.effectAllowed = 'move';
+  }
+
+  handleSectionDragOver(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  }
+
+  handleSectionDrop(e, sectionType, dateKey, targetLoc, targetCrew) {
+    const rawData = e.dataTransfer.getData('application/json');
+    if (!rawData) return;
+    try {
+      const payload = JSON.parse(rawData);
+      if (payload.type === 'reorder_section' && payload.dateKey === dateKey && payload.sectionType === sectionType) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (sectionType === 'location') {
+          this.reorderLocation(dateKey, payload.locName, targetLoc);
+        } else if (sectionType === 'crew' && payload.locName === targetLoc) {
+          this.reorderCrew(dateKey, targetLoc, payload.crewId, targetCrew);
+        }
+      }
+    } catch { /* ignore */ }
+  }
+
+  renderDrugTestCardHtml(dt, dateKey) {
+    return `
+      <div class="drug-test-appointment-card" style="background: var(--bg-primary); border: 1px solid rgba(168, 85, 247, 0.35); border-left: 4px solid #a855f7; border-radius: 6px; padding: 8px 10px; box-shadow: 0 2px 6px rgba(0,0,0,0.25);">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px;">
+          <div style="font-weight: 700; font-size: 12.5px; color: #f8fafc; cursor: pointer;" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(dt.employee)}', 'history');}" title="Click to view employee profile">
+            👤 <span style="color: #60a5fa; text-decoration: underline dotted;">${this.escapeHtml(dt.employee)}</span>
+          </div>
+          <span class="badge" style="font-size: 9.5px; padding: 1px 5px; font-weight: 700; ${dt.time ? 'background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4);' : 'background: rgba(148, 163, 184, 0.15); color: #94a3b8;'}">
+            ⏰ ${dt.time ? this.formatTimeDisplay(dt.time) : 'Time TBD'}
+          </span>
+        </div>
+
+        <div style="font-size: 10px; color: #cbd5e1; margin-bottom: 4px; display: flex; align-items: center; gap: 4px; flex-wrap: wrap;">
+          <span class="badge" style="background: rgba(168, 85, 247, 0.15); color: #d8b4fe; font-size: 9.5px; padding: 1px 4px;">
+            ${this.escapeHtml(dt.testType)} (${this.escapeHtml(dt.classification)})
+          </span>
+          <span class="badge" style="background: ${dt.isMobile ? 'rgba(245, 158, 11, 0.15)' : 'rgba(59, 130, 246, 0.15)'}; color: ${dt.isMobile ? '#fcd34d' : '#93c5fd'}; font-size: 9.5px; padding: 1px 4px;">
+            ${dt.isMobile ? '🚐 Mobile' : '🏥 Clinic'}
+          </span>
+          <span class="badge" style="background: ${dt.status === 'Completed' ? 'rgba(16, 185, 129, 0.2)' : (dt.status === 'Scheduled' ? 'rgba(59, 130, 246, 0.2)' : 'rgba(234, 179, 8, 0.2)')}; color: ${dt.status === 'Completed' ? '#34d399' : (dt.status === 'Scheduled' ? '#93c5fd' : '#facc15')}; font-size: 9.5px; padding: 1px 4px;">
+            ${dt.status === 'Completed' ? '✅ Done' : (dt.status === 'Scheduled' ? '📅 Sched' : '⏳ Pending')}
+          </span>
+        </div>
+
+        ${dt.meetingAddr ? `
+          <div style="font-size: 10.5px; color: #94a3b8; margin-top: 3px; line-height: 1.3;">
+            📍 <strong style="color: #cbd5e1;">Meet:</strong> ${this.escapeHtml(dt.meetingAddr)}
+          </div>
+        ` : (dt.clinicName ? `
+          <div style="font-size: 10.5px; color: #94a3b8; margin-top: 3px; line-height: 1.3;">
+            🏥 <strong style="color: #cbd5e1;">Clinic:</strong> ${this.escapeHtml(dt.clinicName)}${dt.clinicCity ? ' (' + this.escapeHtml(dt.clinicCity) + ')' : ''}
+          </div>
+        ` : '')}
+
+        ${dt.phone ? `
+          <div style="font-size: 10px; color: #64748b; margin-top: 2px;">
+            📞 ${this.escapeHtml(dt.phone)} ${dt.job ? `· Job ${this.escapeHtml(dt.job)}` : ''}
+          </div>
+        ` : ''}
+
+        <div style="display: flex; justify-content: flex-end; gap: 4px; margin-top: 5px; padding-top: 4px; border-top: 1px solid rgba(255,255,255,0.06);">
+          ${dt.status !== 'Completed' ? `
+            <button class="btn btn-primary" style="padding: 2px 7px; font-size: 10px; background: #10b981; border: none; font-weight: 700; cursor: pointer;" onclick="window.tripPlanner.markDrugTestDone('${this.escapeJs(dt.employee)}', '${dateKey}')" title="Mark test completed today">
+              ✅ Done
+            </button>
+          ` : `
+            <span style="font-size: 10px; color: #34d399; font-weight: 700; display: flex; align-items: center; gap: 2px;">✓ Completed</span>
+          `}
+          <button class="btn btn-secondary" style="padding: 2px 6px; font-size: 10px; color: #c084fc; border-color: rgba(168, 85, 247, 0.3); cursor: pointer;" onclick="window.sheetNavigator.switchWorkspace('drug_testing')" title="View in DOT Drug Testing">
+            🔍 Details
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  renderCertClassCardHtml(mt, dateKey) {
+    const isDone = mt.status === 'Complete';
+    const resolved = mt.resolved || this.resolveClassAttendees(mt);
+    const isRosterOpen = !!(this._rosterExpanded && this._rosterExpanded[mt.id]);
+    return `
+      <div class="manual-task-card cert-class-card" style="background: var(--bg-primary); border: 1px solid ${isDone ? 'rgba(16, 185, 129, 0.3)' : 'rgba(16, 185, 129, 0.4)'}; border-left: 4px solid ${isDone ? '#10b981' : '#059669'}; border-radius: 6px; padding: 7px 9px; box-shadow: 0 1px 4px rgba(0,0,0,0.25); opacity: ${isDone ? '0.65' : '1'}; transition: opacity 0.2s;">
+        <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 6px;">
+          <div style="display: flex; align-items: flex-start; gap: 7px; flex: 1; min-width: 0;">
+            <input type="checkbox" ${isDone ? 'checked' : ''} onclick="event.stopPropagation()" onchange="window.tripPlanner.toggleManualTask('${this.escapeJs(mt.id)}')" style="cursor: pointer; margin-top: 2px; accent-color: #10b981; width: 14px; height: 14px;" title="${isDone ? 'Mark Pending' : 'Mark Class Complete'}">
+            <div style="flex: 1; min-width: 0;">
+              <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 3px; flex-wrap: wrap;">
+                <span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); font-size: 9px; font-weight: 800; padding: 1px 5px; border-radius: 3px;">
+                  🎓 Cert Class
+                </span>
+                ${isDone ? `
+                  <span class="badge" style="background: rgba(16, 185, 129, 0.25); color: #a7f3d0; font-size: 9px; padding: 1px 4px;">
+                    ✅ Completed
+                  </span>
+                  <span class="badge" style="background: rgba(59, 130, 246, 0.18); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.35); font-size: 9px; font-weight: 700; padding: 1px 4px; border-radius: 3px;" title="Certification records synced to Expiring Certs">
+                    🔄 Certs Updated
+                  </span>
+                ` : ''}
+                ${resolved.crews && resolved.crews.length > 0 ? `
+                  <span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.3); font-size: 9px; font-weight: 700; padding: 1px 4px; border-radius: 3px;" title="Crew makeup auto-syncs with Employees sheet">
+                    🔄 ${resolved.crews.length === 1 ? `Crew ${this.escapeHtml(resolved.crews[0].crewId)}` : `${resolved.crews.length} Crews (${resolved.crewIds.join(', ')})`}
+                  </span>
+                ` : ''}
+              </div>
+              <div style="font-size: 12px; font-weight: 800; color: ${isDone ? '#94a3b8' : '#f8fafc'}; text-decoration: ${isDone ? 'line-through' : 'none'}; word-break: break-word; line-height: 1.3;">
+                ${this.escapeHtml(mt.certType || mt.title)}
+              </div>
+
+              <!-- Attendees / Audience Header -->
+              ${resolved.crews && resolved.crews.length > 0 ? `
+                <div style="font-size: 11px; margin-top: 3px; color: #cbd5e1; line-height: 1.3;">
+                  ${resolved.crews.length === 1 ? `
+                    <span>🚚 <strong>Crew ${this.escapeHtml(resolved.crews[0].crewId)}</strong></span>
+                    ${resolved.crews[0].foreman ? `<span> (${this.escapeHtml(resolved.crews[0].foreman)})</span>` : ''}
+                    <span style="color: #94a3b8;"> · ${resolved.totalCount} Linemen</span>
+                  ` : `
+                    <span>🚚 <strong>${resolved.crews.length} Crews:</strong> ${resolved.crews.map(c => `Crew ${this.escapeHtml(c.crewId)}${c.foreman ? ` (${this.escapeHtml(c.foreman)})` : ''}`).join(', ')}</span>
+                    <span style="color: #94a3b8;"> · ${resolved.totalCount} Linemen</span>
+                  `}
+                </div>
+              ` : (resolved.totalCount > 0 ? `
+                <div style="font-size: 11px; margin-top: 3px; color: #cbd5e1; line-height: 1.3;">
+                  <span>👥 <strong>${resolved.totalCount} Attendee${resolved.totalCount > 1 ? 's' : ''}:</strong> ${this.escapeHtml(resolved.allAttendees.slice(0, 2).join(', '))}${resolved.totalCount > 2 ? ` +${resolved.totalCount - 2} more` : ''}</span>
+                </div>
+              ` : `
+                <div style="font-size: 11px; margin-top: 3px; color: #94a3b8; font-style: italic;">
+                  Unassigned Attendees
+                </div>
+              `)}
+
+              <div style="font-size: 10px; color: #94a3b8; margin-top: 4px; display: flex; align-items: center; gap: 4px; flex-wrap: wrap;">
+                ${mt.location ? `<span class="badge" style="background: rgba(255,255,255,0.06); color: #cbd5e1; font-size: 9px; padding: 1px 4px;">📍 ${this.escapeHtml(mt.location)}</span>` : ''}
+                ${mt.time ? `<span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #6ee7b7; font-size: 9px; padding: 1px 4px;">⏰ ${this.escapeHtml(mt.time)}</span>` : ''}
+                ${mt.instructor ? `<span class="badge" style="background: rgba(255,255,255,0.04); color: #94a3b8; font-size: 9px; padding: 1px 4px;">👨‍🏫 ${this.escapeHtml(mt.instructor)}</span>` : ''}
+                ${mt.notes ? `<div style="color: var(--text-muted); font-size: 9.5px; margin-top: 2px; width: 100%; word-break: break-word;">📝 ${this.escapeHtml(mt.notes)}</div>` : ''}
+              </div>
+
+              <!-- Expandable Attendee Roster -->
+              ${resolved.totalCount > 0 ? `
+                <div style="margin-top: 5px; padding-top: 4px; border-top: 1px solid rgba(255,255,255,0.06);">
+                  <div style="font-size: 10px; font-weight: 700; color: #60a5fa; cursor: pointer; display: flex; align-items: center; gap: 4px; user-select: none;" onclick="window.tripPlanner.toggleClassRoster('${this.escapeHtml(mt.id)}')" title="Click to show/hide attendee list">
+                    <span id="class-roster-toggle-${this.escapeHtml(mt.id)}">${isRosterOpen ? '▼' : '▶'}</span>
+                    <span>📋 View Attendees (${resolved.totalCount})</span>
+                    ${resolved.crews && resolved.crews.length > 0 ? `<span style="font-size: 9px; color: #34d399; margin-left: auto;">🔄 Synced</span>` : ''}
+                  </div>
+                  <div id="class-roster-${this.escapeHtml(mt.id)}" style="display: ${isRosterOpen ? 'flex' : 'none'}; flex-direction: column; gap: 3px; margin-top: 5px; padding: 4px 6px; background: rgba(0,0,0,0.25); border-radius: 4px;">
+                    ${resolved.crews && resolved.crews.length > 1 ? resolved.crews.map(c => `
+                      <div style="font-size: 9.5px; font-weight: 800; color: #93c5fd; margin-top: 4px; padding-bottom: 2px; border-bottom: 1px solid rgba(255,255,255,0.08); display: flex; justify-content: space-between; align-items: center;">
+                        <span>🚚 Crew ${this.escapeHtml(c.crewId)} (${this.escapeHtml(c.foreman || 'Foreman')})</span>
+                        <span style="font-size: 8.5px; color: #34d399;">${c.members.length} linemen</span>
+                      </div>
+                      ${c.members.map(m => `
+                        <div style="font-size: 10px; color: #cbd5e1; display: flex; justify-content: space-between; align-items: center; padding-left: 6px;">
+                          <span style="cursor: pointer;" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(m.name)}');}" title="View employee profile">
+                            ${m.isForeman ? '👑' : '👤'} <strong style="color: ${m.isForeman ? '#facc15' : '#60a5fa'}; text-decoration: underline dotted;">${this.escapeHtml(m.name)}</strong>
+                          </span>
+                          <span class="badge" style="font-size: 8.5px; padding: 1px 4px; background: rgba(255,255,255,0.06); color: #94a3b8;">${this.escapeHtml(m.role || (m.isForeman ? 'Foreman' : 'Crew'))}</span>
+                        </div>
+                      `).join('')}
+                    `).join('') : (resolved.crewMembers || []).map(m => `
+                      <div style="font-size: 10px; color: #cbd5e1; display: flex; justify-content: space-between; align-items: center;">
+                        <span style="cursor: pointer;" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(m.name)}');}" title="View employee profile">
+                          ${m.isForeman ? '👑' : '👤'} <strong style="color: ${m.isForeman ? '#facc15' : '#60a5fa'}; text-decoration: underline dotted;">${this.escapeHtml(m.name)}</strong>
+                        </span>
+                        <span class="badge" style="font-size: 8.5px; padding: 1px 4px; background: rgba(255,255,255,0.06); color: #94a3b8;">${this.escapeHtml(m.role || (m.isForeman ? 'Foreman' : 'Crew'))}</span>
+                      </div>
+                    `).join('')}
+                    ${resolved.individualMembers && resolved.individualMembers.length > 0 ? `
+                      <div style="font-size: 9.5px; font-weight: 800; color: #a78bfa; margin-top: 4px; padding-bottom: 2px; border-bottom: 1px solid rgba(255,255,255,0.08);">
+                        👤 Individual Attendees (${resolved.individualMembers.length})
+                      </div>
+                      ${resolved.individualMembers.map(m => `
+                        <div style="font-size: 10px; color: #cbd5e1; display: flex; justify-content: space-between; align-items: center; padding-left: 6px;">
+                          <span style="cursor: pointer;" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(m.name)}');}" title="View employee profile">
+                            👤 <strong style="color: #60a5fa; text-decoration: underline dotted;">${this.escapeHtml(m.name)}</strong>
+                          </span>
+                          <span class="badge" style="font-size: 8.5px; padding: 1px 4px; background: rgba(59, 130, 246, 0.15); color: #93c5fd;">Individual</span>
+                        </div>
+                      `).join('')}
+                    ` : ''}
+                  </div>
+                </div>
+              ` : ''}
+            </div>
+          </div>
+          <div style="display: flex; align-items: center; gap: 3px;">
+            <button style="background: none; border: none; color: #34d399; cursor: pointer; padding: 1px 3px; font-size: 11.5px; line-height: 1; border-radius: 3px;" onmouseover="this.style.color='#10b981'" onmouseout="this.style.color='#34d399'" onclick="window.tripPlanner.openComposeTrainingEmailModal('${this.escapeHtml(mt.id)}')" title="Compose Email for this Class">
+              ✉️
+            </button>
+            <button class="admin-only-control" style="background: none; border: none; color: #64748b; cursor: pointer; padding: 1px 3px; font-size: 11px; line-height: 1; border-radius: 3px;" onmouseover="this.style.color='#60a5fa'" onmouseout="this.style.color='#64748b'" onclick="window.tripPlanner.openEditManualTaskModal('${this.escapeHtml(mt.id)}')" title="Edit Class">
+              ✏️
+            </button>
+            <button class="admin-only-control" style="background: none; border: none; color: #64748b; cursor: pointer; padding: 1px 4px; font-size: 12px; line-height: 1; border-radius: 3px;" onmouseover="this.style.color='#f87171'" onmouseout="this.style.color='#64748b'" onclick="window.tripPlanner.deleteManualTask('${this.escapeHtml(mt.id)}')" title="Delete Class">
+              ✕
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  renderTrainingNeedCardHtml(tr, dateKey) {
+    const isDone = !!tr.isCompleted;
+    return `
+      <div class="manual-task-card scheduled-training-card ${isDone ? 'completed-training-card' : ''}" data-trkey="${this.escapeHtml(tr._trKey || tr.id)}" style="background: var(--bg-primary); border: 1px solid ${isDone ? 'rgba(16, 185, 129, 0.3)' : 'rgba(52, 211, 153, 0.35)'}; border-left: 4px solid ${isDone ? '#10b981' : '#34d399'}; border-radius: 6px; padding: 7px 9px; box-shadow: 0 1px 4px rgba(0,0,0,0.25); opacity: ${isDone ? '0.72' : '1'}; transition: all 0.15s ease;">
+        <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 6px;">
+          <div style="display: flex; align-items: flex-start; gap: 7px; flex: 1; min-width: 0;">
+            <input type="checkbox" ${isDone ? 'checked' : ''} onclick="event.stopPropagation()" onchange="window.tripPlanner.toggleScheduledTraining('${this.escapeJs(tr._trKey || tr.id)}', '${dateKey}')" style="cursor: pointer; margin-top: 3px; accent-color: #10b981; width: 14px; height: 14px;" title="${isDone ? 'Completed (click to revert)' : 'Click to mark complete'}">
+            <div style="flex: 1; min-width: 0;">
+              <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 3px; flex-wrap: wrap;">
+                <span class="badge" style="background: rgba(16, 185, 129, 0.18); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.35); font-size: 9px; font-weight: 800; padding: 1px 5px; border-radius: 3px;">
+                  🎓 Crew Training
+                </span>
+                <span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); font-size: 9px; font-weight: 700; padding: 1px 4px; border-radius: 3px;">
+                  🚚 Crew ${this.escapeHtml(tr.crewId)}
+                </span>
+                ${tr.month ? `
+                  <span class="badge" style="background: rgba(168, 85, 247, 0.15); color: #c084fc; font-size: 9px; padding: 1px 4px; border-radius: 3px;">
+                    📅 ${this.escapeHtml(tr.month)}
+                  </span>
+                ` : ''}
+                ${isDone ? `
+                  <span class="badge" style="background: rgba(16, 185, 129, 0.25); color: #a7f3d0; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 9px; font-weight: 800; padding: 1px 5px; border-radius: 3px;">
+                    ✅ Completed${tr.completedDate ? ` (${this.escapeHtml(tr.completedDate)})` : ''}
+                  </span>
+                ` : `
+                  <span class="badge" style="background: rgba(234, 179, 8, 0.2); color: #facc15; font-size: 9px; padding: 1px 4px;">
+                    ⏳ Scheduled
+                  </span>
+                `}
+              </div>
+              <div style="font-size: 12px; font-weight: 800; color: ${isDone ? '#94a3b8' : '#f8fafc'}; text-decoration: ${isDone ? 'line-through' : 'none'}; word-break: break-word; line-height: 1.3;">
+                ${this.escapeHtml(tr.topic)}
+              </div>
+              <div style="font-size: 11px; margin-top: 3px; color: #cbd5e1; line-height: 1.3;">
+                <span>👤 <strong>Foreman:</strong> ${this.escapeHtml(tr.lead || 'Foreman')}</span>
+                ${tr.location ? `<span style="color: #93c5fd; margin-left: 6px;">📍 ${this.escapeHtml(tr.location)}</span>` : ''}
+                ${tr.attendees ? `
+                  <div style="font-size: 10px; color: #94a3b8; margin-top: 2px;">
+                    👥 <strong>Crew:</strong> ${this.escapeHtml(tr.attendees)}
+                  </div>
+                ` : ''}
+              </div>
+            </div>
+          </div>
+          <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
+            ${!isDone ? `
+              <button class="btn btn-primary" style="padding: 2px 7px; font-size: 10px; background: #10b981; border: none; font-weight: 700; cursor: pointer; border-radius: 3px; white-space: nowrap;" onclick="event.stopPropagation(); window.tripPlanner.completeTrainingNeed(${JSON.stringify(tr).replace(/"/g, '&quot;')}, '${dateKey}')" title="Mark Training Complete">
+                ✅ Done
+              </button>
+            ` : `
+              <button class="btn btn-secondary" style="padding: 2px 6px; font-size: 9px; color: #a7f3d0; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.35); font-weight: 700; cursor: pointer; border-radius: 3px; white-space: nowrap;" onclick="event.stopPropagation(); window.tripPlanner.toggleScheduledTraining('${this.escapeJs(tr._trKey || tr.id)}', '${dateKey}')" title="Click to re-open">
+                ✓ Done
+              </button>
+            `}
+            <button class="admin-only-control" style="background: none; border: none; color: #64748b; cursor: pointer; padding: 1px 4px; font-size: 12px; line-height: 1; border-radius: 3px;" onmouseover="this.style.color='#f87171'" onmouseout="this.style.color='#64748b'" onclick="event.stopPropagation(); window.tripPlanner.unscheduleTrainingNeed('${this.escapeJs(tr._trKey)}')" title="Remove from this day and return to sidebar">
+              ✕
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  renderMonthlyTrainingCardHtml(tr, dateKey) {
+    const isDone = tr.status === 'Complete' || tr.status === 'Completed' || !!tr.isCompleted;
+    return `
+      <div class="manual-task-card monthly-training-card" style="background: var(--bg-primary); border: 1px solid ${isDone ? 'rgba(16, 185, 129, 0.3)' : 'rgba(59, 130, 246, 0.35)'}; border-left: 4px solid ${isDone ? '#10b981' : '#3b82f6'}; border-radius: 6px; padding: 7px 9px; box-shadow: 0 1px 4px rgba(0,0,0,0.25); opacity: ${isDone ? '0.65' : '1'}; transition: opacity 0.2s;">
+        <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 6px;">
+          <div style="display: flex; align-items: flex-start; gap: 7px; flex: 1; min-width: 0;">
+            <input type="checkbox" ${isDone ? 'checked' : ''} onchange="window.tripPlanner.toggleMonthlyTraining('${this.escapeJs(tr.crewId)}', '${this.escapeJs(tr.topic)}', '${this.escapeJs(tr.month)}', '${dateKey}', ${tr._rowIdx || 0})" style="cursor: pointer; margin-top: 2px; accent-color: #10b981; width: 14px; height: 14px;" title="${isDone ? 'Mark Incomplete' : 'Mark Monthly Training Complete'}">
+            <div style="flex: 1; min-width: 0;">
+              <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 3px; flex-wrap: wrap;">
+                <span class="badge" style="background: rgba(59, 130, 246, 0.18); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.35); font-size: 9px; font-weight: 800; padding: 1px 5px; border-radius: 3px;">
+                  🎓 Monthly Training
+                </span>
+                <span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); font-size: 9px; font-weight: 700; padding: 1px 4px; border-radius: 3px;">
+                  🚚 Crew ${this.escapeHtml(tr.crewId)}
+                </span>
+                ${tr.month ? `
+                  <span class="badge" style="background: rgba(168, 85, 247, 0.15); color: #c084fc; font-size: 9px; padding: 1px 4px; border-radius: 3px;">
+                    📅 ${this.escapeHtml(tr.month)}
+                  </span>
+                ` : ''}
+                ${isDone ? `
+                  <span class="badge" style="background: rgba(16, 185, 129, 0.25); color: #a7f3d0; font-size: 9px; padding: 1px 4px;">
+                    ✅ Completed${tr.dateDone ? ` (${this.escapeHtml(tr.dateDone)})` : ''}
+                  </span>
+                ` : (tr.isOverdue ? `
+                  <span class="badge" style="background: rgba(239, 68, 68, 0.2); color: #f87171; font-size: 9px; padding: 1px 4px;">
+                    🔴 Overdue
+                  </span>
+                ` : `
+                  <span class="badge" style="background: rgba(234, 179, 8, 0.2); color: #facc15; font-size: 9px; padding: 1px 4px;">
+                    ⏳ Scheduled
+                  </span>
+                `)}
+              </div>
+
+              <div style="font-size: 12px; font-weight: 800; color: ${isDone ? '#94a3b8' : '#f8fafc'}; text-decoration: ${isDone ? 'line-through' : 'none'}; word-break: break-word; line-height: 1.3;">
+                ${this.escapeHtml(tr.topic)}
+              </div>
+
+              <div style="font-size: 11px; margin-top: 3px; color: #cbd5e1; line-height: 1.3;">
+                <span>👤 <strong>Foreman:</strong> ${this.escapeHtml(tr.lead || 'Foreman')}</span>
+                ${tr.attendees ? `
+                  <div style="font-size: 10px; color: #94a3b8; margin-top: 2px;">
+                    👥 <strong>Crew Members:</strong> ${this.escapeHtml(tr.attendees)}
+                  </div>
+                ` : ''}
+              </div>
+            </div>
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 4px;">
+            ${!isDone ? `
+              <button class="btn btn-primary" style="padding: 2px 7px; font-size: 10px; background: #10b981; border: none; font-weight: 700; cursor: pointer; border-radius: 3px;" onclick="window.tripPlanner.toggleMonthlyTraining('${this.escapeJs(tr.crewId)}', '${this.escapeJs(tr.topic)}', '${this.escapeJs(tr.month)}', '${dateKey}', ${tr._rowIdx || 0})" title="Mark Monthly Training Complete">
+                ✅ Done
+              </button>
+            ` : `
+              <button class="btn btn-secondary" style="padding: 2px 5px; font-size: 9px; color: #94a3b8; border: 1px solid rgba(255,255,255,0.1); cursor: pointer; border-radius: 3px;" onclick="window.tripPlanner.toggleMonthlyTraining('${this.escapeJs(tr.crewId)}', '${this.escapeJs(tr.topic)}', '${this.escapeJs(tr.month)}', '${dateKey}', ${tr._rowIdx || 0})" title="Re-open Training">
+                ↩
+              </button>
+            `}
+            <button style="background: none; border: none; color: #64748b; cursor: pointer; padding: 1px 4px; font-size: 12px; line-height: 1; border-radius: 3px;" onmouseover="this.style.color='#f87171'" onmouseout="this.style.color='#64748b'" onclick="window.tripPlanner.dismissMonthlyTraining('${this.escapeJs(tr.crewId)}', '${this.escapeJs(tr.topic)}', '${this.escapeJs(tr.month)}', '${dateKey}')" title="Dismiss / Remove from this day's visit">
+              ✕
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  renderPersonalTaskCardHtml(mt, dateKey, taskIdx, totalTasks) {
+    const isDone = mt.status === 'Complete';
+    const assignee = mt.assignedTo || 'Myself';
+    return `
+      <div class="manual-task-card personal-task-card" style="background: var(--bg-primary); border: 1px solid ${isDone ? 'rgba(16, 185, 129, 0.3)' : 'rgba(249, 115, 22, 0.3)'}; border-left: 4px solid ${isDone ? '#10b981' : (mt.priority === 'High' ? '#ef4444' : '#f97316')}; border-radius: 6px; padding: 7px 9px; box-shadow: 0 1px 4px rgba(0,0,0,0.25); opacity: ${isDone ? '0.65' : '1'}; transition: all 0.15s ease; cursor: pointer;" onclick="window.tripPlanner.openEditManualTaskModal('${this.escapeHtml(mt.id)}')" onmouseover="this.style.borderColor='rgba(251, 146, 60, 0.7)'; this.style.transform='translateY(-1px)';" onmouseout="this.style.borderColor='${isDone ? 'rgba(16, 185, 129, 0.3)' : 'rgba(249, 115, 22, 0.3)'}'; this.style.transform='translateY(0)';" title="Click to view / edit task details">
+        <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 6px;">
+          <div style="display: flex; align-items: flex-start; gap: 7px; flex: 1; min-width: 0;">
+            <input type="checkbox" ${isDone ? 'checked' : ''} onclick="event.stopPropagation()" onchange="window.tripPlanner.toggleManualTask('${this.escapeHtml(mt.id)}')" style="cursor: pointer; margin-top: 2px; accent-color: #10b981; width: 14px; height: 14px;" title="${isDone ? 'Mark Pending' : 'Mark Complete'}">
+            <div style="flex: 1; min-width: 0;">
+              <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 3px; flex-wrap: wrap;">
+                <span class="badge" style="background: rgba(249, 115, 22, 0.15); color: #fdba74; border: 1px solid rgba(249, 115, 22, 0.3); font-size: 9px; font-weight: 800; padding: 1px 5px; border-radius: 3px;">
+                  💼 Personal / Office
+                </span>
+                ${mt.priority === 'High' ? `
+                  <span class="badge" style="background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.35); font-size: 9px; padding: 1px 4px;">
+                    🔴 High
+                  </span>
+                ` : ''}
+                ${isDone ? `
+                  <span class="badge" style="background: rgba(16, 185, 129, 0.25); color: #a7f3d0; font-size: 9px; padding: 1px 4px;">
+                    ✅ Completed
+                  </span>
+                ` : ''}
+              </div>
+              <div style="font-size: 12px; font-weight: 700; color: ${isDone ? '#94a3b8' : '#f8fafc'}; text-decoration: ${isDone ? 'line-through' : 'none'}; word-break: break-word; line-height: 1.3;">
+                ${this.escapeHtml(mt.title)}
+              </div>
+              <div style="font-size: 10.5px; color: #94a3b8; margin-top: 3px;">
+                👤 <strong style="color: #cbd5e1;">Assigned:</strong> ${this.escapeHtml(assignee)}
+              </div>
+              <div style="font-size: 10px; color: #94a3b8; margin-top: 4px; display: flex; align-items: center; gap: 4px; flex-wrap: wrap;">
+                ${mt.location ? `<span class="badge" style="background: rgba(255,255,255,0.06); color: #cbd5e1; font-size: 9px; padding: 1px 4px;">📍 ${this.escapeHtml(mt.location)}</span>` : ''}
+                ${mt.time ? `<span class="badge" style="background: rgba(249, 115, 22, 0.15); color: #fdba74; font-size: 9px; padding: 1px 4px;">⏰ ${this.escapeHtml(mt.time)}</span>` : ''}
+                ${mt.notes ? `
+                  <div style="color: #94a3b8; font-size: 9.5px; margin-top: 3px; width: 100%; word-break: break-word; line-height: 1.35; white-space: pre-line; background: rgba(0,0,0,0.2); padding: 3px 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.05);">
+                    📝 ${this.escapeHtml(mt.notes.length > 90 ? mt.notes.substring(0, 85) + '...' : mt.notes)}
+                    ${mt.notes.length > 90 ? `<span style="color: #fb923c; font-weight: 700; font-size: 9px; margin-left: 4px;">(Click to view details)</span>` : ''}
+                  </div>
+                ` : ''}
+              </div>
+            </div>
+          </div>
+          <div style="display: flex; align-items: center; gap: 3px;">
+            ${totalTasks > 1 ? `
+              <button style="background: none; border: none; color: ${taskIdx > 0 ? '#94a3b8' : '#334155'}; cursor: ${taskIdx > 0 ? 'pointer' : 'default'}; padding: 1px 2px; font-size: 10px; line-height: 1; border-radius: 3px;" ${taskIdx > 0 ? `onclick="event.stopPropagation(); window.tripPlanner.moveManualTask('${this.escapeHtml(mt.id)}', -1)" onmouseover="this.style.color='#fb923c'"` : 'disabled'} title="${taskIdx > 0 ? 'Move Task Up' : ''}">
+                ▲
+              </button>
+              <button style="background: none; border: none; color: ${taskIdx < totalTasks - 1 ? '#94a3b8' : '#334155'}; cursor: ${taskIdx < totalTasks - 1 ? 'pointer' : 'default'}; padding: 1px 2px; font-size: 10px; line-height: 1; border-radius: 3px;" ${taskIdx < totalTasks - 1 ? `onclick="event.stopPropagation(); window.tripPlanner.moveManualTask('${this.escapeHtml(mt.id)}', 1)" onmouseover="this.style.color='#fb923c'"` : 'disabled'} title="${taskIdx < totalTasks - 1 ? 'Move Task Down' : ''}">
+                ▼
+              </button>
+            ` : ''}
+            <button class="admin-only-control" style="background: none; border: none; color: #64748b; cursor: pointer; padding: 1px 3px; font-size: 11px; line-height: 1; border-radius: 3px;" onmouseover="this.style.color='#fb923c'" onmouseout="this.style.color='#64748b'" onclick="event.stopPropagation(); window.tripPlanner.openEditManualTaskModal('${this.escapeHtml(mt.id)}')" title="Edit Task">
+              ✏️
+            </button>
+            <button class="admin-only-control" style="background: none; border: none; color: #64748b; cursor: pointer; padding: 1px 4px; font-size: 12px; line-height: 1; border-radius: 3px;" onmouseover="this.style.color='#f87171'" onmouseout="this.style.color='#64748b'" onclick="event.stopPropagation(); window.tripPlanner.deleteManualTask('${this.escapeHtml(mt.id)}')" title="Delete Task">
+              ✕
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  renderScheduledSwapCardHtml(s, dateKey) {
+    const isGlove = (s.type || '').toLowerCase() === 'glove';
+    const isReclaim = !!s.isReclaim;
+    const loc = s.location || '';
+    const isDone = !!s.isCompleted;
+    const officeInfo = this.getSwapOfficeTaskInfo(s, dateKey);
+    const isOffice = !!officeInfo.isOfficeTask;
+    const officeNote = officeInfo.officeNote || '';
+
+    return `
+      <div class="scheduled-swap-card ${isDone ? 'completed-swap-card' : ''}" draggable="${!isDone}" data-skey="${this.escapeHtml(s._sKey)}" style="background: var(--bg-primary); border: 1px solid ${isDone ? 'rgba(16, 185, 129, 0.25)' : (isReclaim ? 'rgba(245, 158, 11, 0.35)' : 'rgba(59, 130, 246, 0.35)')}; border-left: 4px solid ${isDone ? '#10b981' : (isReclaim ? '#f59e0b' : '#3b82f6')}; ${isOffice ? 'border-right: 3.5px solid #a855f7;' : ''} border-radius: 6px; padding: 7px 9px; box-shadow: 0 1px 4px rgba(0,0,0,0.25); cursor: ${isDone ? 'default' : 'grab'}; opacity: ${isDone ? '0.72' : '1'}; transition: all 0.15s ease;" onmouseover="this.style.borderColor='${isDone ? '#34d399' : (isReclaim ? '#fbbf24' : '#60a5fa')}';" onmouseout="this.style.borderColor='${isDone ? 'rgba(16, 185, 129, 0.25)' : (isReclaim ? 'rgba(245, 158, 11, 0.35)' : 'rgba(59, 130, 246, 0.35)')}';">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 6px;">
+          <div style="display: flex; align-items: flex-start; gap: 7px; flex: 1; min-width: 0;">
+            <input type="checkbox" ${isDone ? 'checked' : ''} style="cursor: pointer; margin-top: 3px; accent-color: ${isDone ? '#10b981' : (isReclaim ? '#f59e0b' : '#3b82f6')}; width: 14px; height: 14px;" title="${isDone ? 'Completed (click to view / revert)' : 'Click to view / complete'}" onclick="event.stopPropagation(); window.tripPlanner.openSwapDetailsModal(${JSON.stringify(s).replace(/"/g, '&quot;')}, '${this.escapeJs(s.crewId || '')}', '${this.escapeJs(loc)}')">
+            <div style="flex: 1; min-width: 0;">
+              <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 3px;">
+                <span style="font-weight: 700; font-size: 12px; color: ${isDone ? '#94a3b8' : '#f8fafc'}; text-decoration: ${isDone ? 'line-through' : 'none'}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                  ${this.escapeHtml(s.employeeName)}
+                  ${isReclaim ? `<span style="font-size: 9.5px; color: #f87171; font-weight: 600; margin-left: 4px;">(Prev Emp)</span>` : ''}
+                </span>
+                <div style="display: flex; gap: 4px; align-items: center; flex-wrap: wrap;">
+                  ${isOffice ? `<span class="badge" style="background: rgba(147, 51, 234, 0.22); color: #d8b4fe; border: 1px solid rgba(147, 51, 234, 0.4); font-size: 8.5px; font-weight: 800; padding: 1px 5px; border-radius: 3px;" title="Handled as Office Task">🏢 Office Task</span>` : ''}
+                  ${s.classification ? `<span class="badge" style="background: rgba(148, 163, 184, 0.15); color: #94a3b8; font-size: 9px; padding: 1px 4px; border-radius: 3px;">${this.escapeHtml(s.classification)}</span>` : ''}
+                  ${loc ? `<span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; font-size: 9px; padding: 1px 4px; border-radius: 3px;">📍 ${this.escapeHtml(loc)}</span>` : ''}
+                </div>
+              </div>
+              <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: #cbd5e1; margin-top: 4px; flex-wrap: wrap; gap: 4px;">
+                <div style="display: flex; align-items: center; gap: 4px; flex-wrap: wrap;">
+                  <span class="badge" style="background: ${isReclaim ? 'rgba(245, 158, 11, 0.18)' : (isGlove ? 'rgba(59, 130, 246, 0.18)' : 'rgba(168, 85, 247, 0.18)')}; color: ${isReclaim ? '#fbbf24' : (isGlove ? '#93c5fd' : '#d8b4fe')}; border: 1px solid ${isReclaim ? 'rgba(245, 158, 11, 0.35)' : (isGlove ? 'rgba(59, 130, 246, 0.35)' : 'rgba(168, 85, 247, 0.35)')}; font-size: 9.5px; font-weight: 700; padding: 1px 5px; border-radius: 3px;">
+                    ${isReclaim ? '📦 Reclaim ' : ''}${isGlove ? '🧤 Glove' : '🧤 Sleeve'}${s.itemClass ? ` (CL ${this.escapeHtml(s.itemClass)})` : ''}
+                  </span>
+                  ${!isDone ? this.formatDaysLeftBadge(s.daysLeft, s.changeOutDate, isReclaim) : ''}
+                  ${isDone ? `
+                    <span class="badge" style="background: rgba(16, 185, 129, 0.25); color: #a7f3d0; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 9px; font-weight: 800; padding: 1px 5px; border-radius: 3px;">
+                      ✅ Completed${s.completedDate ? ` (${this.escapeHtml(s.completedDate)})` : ''}
+                    </span>
+                  ` : ''}
+                </div>
+                <span style="font-size: 11px; color: #e2e8f0;">
+                  ${isReclaim ? (isDone ? `
+                    Reclaimed: <strong style="color: #94a3b8; text-decoration: line-through;">#${this.escapeHtml(s.currentItem || '—')}</strong>
+                    &nbsp;➔&nbsp;
+                    <strong style="color: #4ade80;">Helena 🏢</strong>
+                  ` : `
+                    Reclaim: <strong style="color: #fca5a5;">#${this.escapeHtml(s.currentItem || '—')}</strong>
+                    &nbsp;➔&nbsp;
+                    <strong style="color: #fbbf24;">Helena 🏢</strong>
+                  `) : (isDone ? `
+                    Returned: <strong style="color: #94a3b8; text-decoration: line-through;">${this.escapeHtml(s.currentItem || '—')}</strong>
+                    &nbsp;➔&nbsp;
+                    Assigned: <strong style="color: #4ade80;">${this.escapeHtml(s.pickItem || '—')}</strong>
+                  ` : `
+                    Current: <strong style="color: #fca5a5;">${this.escapeHtml(s.currentItem || '—')}</strong>
+                    &nbsp;➔&nbsp;
+                    Pick: <strong style="color: #4ade80;">${this.escapeHtml(s.pickItem || '—')}</strong>
+                  `)}
+                  ${s.size ? `<span style="color: #94a3b8; font-size: 9.5px;"> (${this.escapeHtml(s.size)})</span>` : ''}
+                </span>
+              </div>
+              ${isOffice ? `
+                <div style="margin-top: 5px; padding: 4px 7px; background: rgba(147, 51, 234, 0.12); border: 1px solid rgba(147, 51, 234, 0.35); border-radius: 4px; display: flex; align-items: center; justify-content: space-between; gap: 6px;">
+                  <div style="font-size: 10px; color: #d8b4fe; display: flex; align-items: center; gap: 5px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                    <span style="font-weight: 800; color: #e9d5ff;">📝 Office Note:</span>
+                    <span style="color: #f1f5f9; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${this.escapeHtml(officeNote || 'Handled in office / shop')}">${this.escapeHtml(officeNote || 'Handled in office / shop')}</span>
+                  </div>
+                  <div style="display: flex; align-items: center; gap: 4px; flex-shrink: 0;">
+                    <button class="admin-only-control" style="background: none; border: none; color: #c084fc; cursor: pointer; padding: 0 2px; font-size: 10px;" onclick="event.stopPropagation(); window.tripPlanner.promptSwapOfficeTask('${this.escapeJs(s._sKey)}', '${dateKey}', ${JSON.stringify(s).replace(/"/g, '&quot;')})" title="Edit Office Note">
+                      ✏️
+                    </button>
+                    <button class="admin-only-control" style="background: none; border: none; color: #94a3b8; cursor: pointer; padding: 0 2px; font-size: 10px;" onmouseover="this.style.color='#f87171'" onmouseout="this.style.color='#94a3b8'" onclick="event.stopPropagation(); window.tripPlanner.removeSwapOfficeTask('${this.escapeJs(s._sKey)}', '${dateKey}', ${JSON.stringify(s).replace(/"/g, '&quot;')})" title="Remove Office Task status (revert to field task)">
+                      ✕
+                    </button>
+                  </div>
+                </div>
+              ` : ''}
+              ${s.crewId ? `
+                <div style="font-size: 10px; color: #94a3b8; margin-top: 3px; display: flex; align-items: center; gap: 5px;">
+                  <span style="color: #60a5fa;">👷 Crew ${this.escapeHtml(s.crewId)}</span>
+                  ${s.foreman ? `<span style="color: #64748b;">(${this.escapeHtml(s.foreman)})</span>` : ''}
+                </div>
+              ` : ''}
+            </div>
+          </div>
+          <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 6px; margin-left: 4px;">
+            ${!isDone ? `
+              <button class="btn btn-primary" style="padding: 2px 7px; font-size: 9px; background: ${isReclaim ? '#f59e0b; color: #000;' : '#2563eb;'}; color: #fff; border: none; font-weight: 700; cursor: pointer; border-radius: 3px; white-space: nowrap;" onclick="event.stopPropagation(); window.tripPlanner.openSwapDetailsModal(${JSON.stringify(s).replace(/"/g, '&quot;')}, '${this.escapeJs(s.crewId || '')}', '${this.escapeJs(loc)}')">
+                ${isReclaim ? '📦 Reclaim' : '🔍 Swap'}
+              </button>
+            ` : `
+              <button class="btn btn-secondary" style="padding: 2px 6px; font-size: 9px; color: #a7f3d0; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.35); font-weight: 700; cursor: pointer; border-radius: 3px; white-space: nowrap;" onclick="event.stopPropagation(); window.tripPlanner.openSwapDetailsModal(${JSON.stringify(s).replace(/"/g, '&quot;')}, '${this.escapeJs(s.crewId || '')}', '${this.escapeJs(loc)}')">
+                ✓ Done
+              </button>
+            `}
+            <button class="btn btn-secondary admin-only-control" style="padding: 2px 5px; font-size: 8.5px; font-weight: 700; color: ${isOffice ? '#d8b4fe' : '#94a3b8'}; background: ${isOffice ? 'rgba(147, 51, 234, 0.2)' : 'rgba(255, 255, 255, 0.05)'}; border: 1px solid ${isOffice ? 'rgba(147, 51, 234, 0.4)' : 'rgba(255, 255, 255, 0.1)'}; border-radius: 3px; cursor: pointer; white-space: nowrap;" onclick="event.stopPropagation(); window.tripPlanner.promptSwapOfficeTask('${this.escapeJs(s._sKey)}', '${dateKey}', ${JSON.stringify(s).replace(/"/g, '&quot;')})" title="${isOffice ? 'Edit Office Task note description' : 'Mark as Office Task (e.g. brought to shop / handed off in office)'}">
+              ${isOffice ? '🏢 Note' : '+ Office'}
+            </button>
+            <button class="admin-only-control" style="background: none; border: none; color: #64748b; cursor: pointer; padding: 1px 4px; font-size: 12px; line-height: 1; border-radius: 3px;" onmouseover="this.style.color='#f87171'" onmouseout="this.style.color='#64748b'" onclick="event.stopPropagation(); window.tripPlanner.unscheduleSwap('${this.escapeJs(s._sKey)}')" title="${isDone ? 'Remove completed swap from this day' : 'Remove swap from this day and return to sidebar'}">
+              ✕
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  renderEquipmentCardHtml(item, dateKey) {
+    const isAed = (item.equipmentType || '').toLowerCase().includes('aed');
+    const isFe = (item.equipmentType || '').toLowerCase().includes('extinguisher') || (item.equipmentType || '').toLowerCase().includes('fire');
+    const isFa = (item.equipmentType || '').toLowerCase().includes('aid') || (item.equipmentType || '').toLowerCase().includes('eye');
+    const icon = isAed ? '⚡' : (isFe ? '🧯' : (isFa ? '🩹' : '🚗'));
+    const isDone = !!(item.resolved || item.isResolved || item.completed || item.isCompleted);
+    return `
+      <div class="scheduled-equipment-card ${isDone ? 'completed-equipment-card' : ''}" data-eqkey="${this.escapeHtml(item._eqKey || item.id)}" style="background: var(--bg-primary); border: 1px solid ${isDone ? 'rgba(16, 185, 129, 0.3)' : 'rgba(245, 158, 11, 0.35)'}; border-left: 4px solid ${isDone ? '#10b981' : '#f59e0b'}; border-radius: 6px; padding: 7px 9px; box-shadow: 0 1px 4px rgba(0,0,0,0.25); cursor: pointer; opacity: ${isDone ? '0.72' : '1'}; transition: all 0.15s ease;" onclick="window.tripPlanner.openEquipmentNeedPdf(${JSON.stringify(item).replace(/"/g, '&quot;')})" onmouseover="this.style.borderColor='${isDone ? '#34d399' : '#fbbf24'}';" onmouseout="this.style.borderColor='${isDone ? 'rgba(16, 185, 129, 0.3)' : 'rgba(245, 158, 11, 0.35)'}';" title="Click to view source Checklist PDF">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 6px;">
+          <div style="display: flex; align-items: flex-start; gap: 7px; flex: 1; min-width: 0;">
+            <input type="checkbox" ${isDone ? 'checked' : ''} onclick="event.stopPropagation(); window.tripPlanner.toggleScheduledEquipment('${this.escapeJs(item._eqKey || item.id)}')" style="cursor: pointer; margin-top: 3px; accent-color: #10b981; width: 14px; height: 14px;" title="${isDone ? 'Delivered (click to revert)' : 'Click to mark delivered'}">
+            <div style="flex: 1; min-width: 0;">
+              <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 2px;">
+                <span style="font-weight: 700; font-size: 12px; color: ${isDone ? '#94a3b8' : '#f8fafc'}; text-decoration: ${isDone ? 'line-through' : 'none'}; display: flex; align-items: center; gap: 4px;">
+                  <span>${icon}</span> ${item.equipmentType === 'AED' && (/needs\s*aed\s*pads/i.test(item.notes || '') || (item.desc || '').toLowerCase() === 'needs aed pads') ? 'Needs AED Pads' : this.escapeHtml(item.equipmentType)}
+                </span>
+                <div style="display: flex; align-items: center; gap: 4px;">
+                  ${isDone ? `
+                    <span class="badge" style="background: rgba(16, 185, 129, 0.25); color: #a7f3d0; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 9px; font-weight: 800; padding: 1px 5px; border-radius: 3px;">
+                      ✅ Delivered${item.completedDate ? ` (${this.escapeHtml(item.completedDate)})` : ''}
+                    </span>
+                  ` : ''}
+                  ${item.vehicleNumber ? `
+                    <span class="badge" style="background: rgba(234, 179, 8, 0.2); color: #fde047; font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px;">
+                      🚛 Unit ${this.escapeHtml(item.vehicleNumber)}
+                    </span>
+                  ` : ''}
+                </div>
+              </div>
+              <div style="font-size: 11px; color: ${isDone ? '#94a3b8' : '#cbd5e1'}; text-decoration: ${isDone ? 'line-through' : 'none'}; margin-bottom: 3px; line-height: 1.3;">
+                ${this.escapeHtml(item.notes || 'Equipment defect / need')}
+              </div>
+              <div style="font-size: 10px; color: #94a3b8; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                <span style="color: #60a5fa;">👷 Crew ${this.escapeHtml(item.crewId)}</span>
+                ${item.foreman ? `<span style="color: #94a3b8;">(${this.escapeHtml(item.foreman)})</span>` : ''}
+                ${item.location ? `<span style="color: #93c5fd;">📍 ${this.escapeHtml(item.location)}</span>` : ''}
+                <span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.3); font-size: 8.5px; padding: 1px 4px; border-radius: 3px; font-weight: 700;" title="Click to view source Checklist PDF">
+                  📄 View PDF
+                </span>
+              </div>
+            </div>
+          </div>
+          <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 5px; margin-left: 4px;">
+            ${!isDone ? `
+              <button class="btn btn-secondary" style="padding: 2px 6px; font-size: 9px; color: #a7f3d0; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.35); font-weight: 700; cursor: pointer; border-radius: 3px; white-space: nowrap;" onclick="event.stopPropagation(); window.tripPlanner.markEquipmentNeedResolved(${JSON.stringify(item).replace(/"/g, '&quot;')})" title="Mark Delivered & Resolved">
+                ✅ Delivered
+              </button>
+            ` : `
+              <button class="btn btn-secondary" style="padding: 2px 6px; font-size: 9px; color: #a7f3d0; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.35); font-weight: 700; cursor: pointer; border-radius: 3px; white-space: nowrap;" onclick="event.stopPropagation(); window.tripPlanner.toggleScheduledEquipment('${this.escapeJs(item._eqKey || item.id)}')" title="Click to revert">
+                ✓ Done
+              </button>
+            `}
+            <button class="admin-only-control" style="background: none; border: none; color: #64748b; cursor: pointer; padding: 1px 4px; font-size: 12px; line-height: 1; border-radius: 3px;" onmouseover="this.style.color='#f87171'" onmouseout="this.style.color='#64748b'" onclick="event.stopPropagation(); window.tripPlanner.unscheduleEquipmentNeed('${this.escapeJs(item._eqKey)}')" title="Remove from this day and return to sidebar">
+              ✕
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  renderCityCardHtml(trip, dateKey, locInfo, drive, weekMonday) {
+    return `
+      <div class="location-card" draggable="true" data-date="${dateKey}" data-location="${this.escapeHtml(trip.location)}" style="border-left: 4px solid #38bdf8; background: var(--bg-primary); margin-bottom: 5px; border-radius: 6px; padding: 7px 9px;">
+        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px;">
+          <div class="location-card-title" style="color: #60a5fa; font-size: 12.5px; font-weight: 800; display: flex; align-items: center; gap: 4px;">
+            📍 ${this.escapeHtml(trip.location)} City Visit
+          </div>
+          <span class="badge" style="background: rgba(56, 189, 248, 0.2); color: #38bdf8; font-size: 9.5px; font-weight: 700; padding: 1px 5px; border-radius: 4px;">
+            🚗 ${this.escapeHtml(drive.time)}
+          </span>
+        </div>
+        
+        <div class="location-card-meta" style="line-height: 1.4; margin-bottom: 4px;">
+          <div style="color: #94a3b8; font-size: 10px;">Distance: <strong>${this.escapeHtml(drive.desc)}</strong></div>
+          ${locInfo && locInfo.activeCrews && locInfo.activeCrews.length > 0 ? `
+            <div style="margin-top: 4px; padding-top: 4px; border-top: 1px solid rgba(255,255,255,0.08);">
+              <div style="font-size: 10.5px; font-weight: 700; color: #4ade80; margin-bottom: 4px;">
+                🟢 Active Field Crews (${locInfo.activeCrews.length}):
+              </div>
+              ${locInfo.activeCrews.map(c => {
+                const crewTasks = window.taskManager ? window.taskManager.getTasksByCrew(c.crewId, weekMonday) : [];
+                const summary = this.getCrewTaskSummary(crewTasks);
+
+                return `
+                  <div class="crew-task-box" onclick="window.tripPlanner.openCrewTasksModal('${this.escapeHtml(c.crewId)}', '${this.escapeHtml(trip.location)}', 'All', '${dateKey}', false)" title="Click to view all tasks for Crew ${this.escapeHtml(c.crewId)}">
+                    <div style="font-size: 10.5px; color: #cbd5e1; display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px;">
+                      <span><strong style="color: #60a5fa;">Crew ${this.escapeHtml(c.crewId)}</strong> (${this.escapeHtml(c.foreman)})</span>
+                      <div style="display: flex; align-items: center; gap: 4px;">
+                        ${summary.overdue > 0 ? `
+                          <span class="badge" style="background: #ef4444; color: #fff; font-size: 8.5px; font-weight: 700; padding: 1px 3px; border-radius: 3px;">
+                            🔴 ${summary.overdue}
+                          </span>
+                        ` : ''}
+                        <span class="badge" style="background: ${summary.total > 0 ? 'rgba(59, 130, 246, 0.25)' : 'rgba(16, 185, 129, 0.2)'}; color: ${summary.total > 0 ? '#93c5fd' : '#4ade80'}; font-size: 8.5px; font-weight: 700; padding: 1px 4px;">
+                          ${summary.total > 0 ? `${summary.total} Tasks 🔍` : '✓ Current'}
+                        </span>
+                      </div>
+                    </div>
+
+                    <!-- Task Count Overview Pills -->
+                    <div style="display: flex; flex-wrap: wrap; gap: 3px; margin-top: 2px;">
+                      ${summary.gloves > 0 ? `<span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; font-size: 8.5px; padding: 1px 3px; border: 1px solid rgba(59, 130, 246, 0.3);">🧤 ${summary.gloves}</span>` : ''}
+                      ${summary.sleeves > 0 ? `<span class="badge" style="background: rgba(168, 85, 247, 0.15); color: #d8b4fe; font-size: 8.5px; padding: 1px 3px; border: 1px solid rgba(168, 85, 247, 0.3);">🧤 ${summary.sleeves}</span>` : ''}
+                      ${summary.blankets > 0 ? `<span class="badge" style="background: rgba(236, 72, 153, 0.15); color: #f472b6; font-size: 8.5px; padding: 1px 3px; border: 1px solid rgba(236, 72, 153, 0.3);">🛏️ ${summary.blankets}</span>` : ''}
+                      ${summary.macks > 0 ? `<span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fcd34d; font-size: 8.5px; padding: 1px 3px; border: 1px solid rgba(245, 158, 11, 0.3);">⚡ ${summary.macks}</span>` : ''}
+                      ${summary.equipment > 0 ? `<span class="badge" style="background: rgba(20, 184, 166, 0.15); color: #5eead4; font-size: 8.5px; padding: 1px 3px; border: 1px solid rgba(20, 184, 166, 0.3);">🧰 ${summary.equipment}</span>` : ''}
+                      ${summary.certs > 0 ? `<span class="badge" style="background: rgba(239, 68, 68, 0.15); color: #fca5a5; font-size: 8.5px; padding: 1px 3px; border: 1px solid rgba(239, 68, 68, 0.3);">📜 ${summary.certs}</span>` : ''}
+                      ${summary.reports > 0 ? `<span class="badge" style="background: rgba(249, 115, 22, 0.15); color: #fdba74; font-size: 8.5px; padding: 1px 3px; border: 1px solid rgba(249, 115, 22, 0.3);">📋 ${summary.reports}</span>` : ''}
+                      ${summary.drugTests > 0 ? `<span class="badge" style="background: rgba(139, 92, 246, 0.15); color: #c084fc; font-size: 8.5px; padding: 1px 3px; border: 1px solid rgba(139, 92, 246, 0.3);">🧪 ${summary.drugTests}</span>` : ''}
+                      ${summary.total === 0 ? `<span style="font-size: 8.5px; color: #94a3b8; font-style: italic;">✓ No pending tasks</span>` : ''}
+                    </div>
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          ` : `
+            <div style="margin-top: 3px; font-size: 10px; color: #94a3b8;">Base / Non-crew visit</div>
+          `}
+        </div>
+
+        <div style="display: flex; justify-content: flex-end; margin-top: 3px;">
+          <button class="btn btn-secondary admin-only-control" style="padding: 1px 6px; font-size: 9px; color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3);" onclick="window.tripPlanner.removeTrip('${dateKey}', '${this.escapeHtml(trip.location)}')">❌ Remove City</button>
+        </div>
+      </div>
+    `;
   }
 
   init() {
@@ -4298,6 +5373,7 @@ class TripPlannerApp {
     // Determine the scheduled trip date (if scheduled on a planner day)
     const targetScheduledDate = target.dateKey || (target._scheduledEntry && target._scheduledEntry.dateKey) || target.scheduledDate || null;
     let initialDateVal = targetScheduledDate || todayIso;
+    const officeInfo = this.getSwapOfficeTaskInfo(target, targetScheduledDate || initialDateVal);
 
     // Check if there is an existing completed date
     let curCompletedIso = '';
@@ -4522,6 +5598,25 @@ class TripPlannerApp {
             <span style="font-size: 11px; color: var(--text-muted);">${targetScheduledDate ? `Defaults to scheduled trip day (${targetScheduledDate})` : `Defaults to today (${today.toLocaleDateString()})`}</span>
           </div>
         `}
+
+        <!-- Office Task Toggle and Description -->
+        <div style="background: rgba(147, 51, 234, 0.1); border: 1px solid rgba(147, 51, 234, 0.3); border-radius: 6px; padding: 10px 12px; margin-top: 8px;">
+          <label style="font-size: 12px; font-weight: 700; color: #d8b4fe; display: flex; align-items: center; gap: 7px; cursor: pointer;">
+            <input type="checkbox" id="swap-is-office-task-modal" ${officeInfo.isOfficeTask ? 'checked' : ''} style="accent-color: #a855f7; width: 15px; height: 15px;" onchange="const c = document.getElementById('swap-office-note-row'); if (c) c.style.display = this.checked ? 'block' : 'none';" />
+            <span>🏢 Handled as Office Task (Delivered to / from shop — no field travel to ${this.escapeHtml(location || 'destination')})</span>
+          </label>
+          <div id="swap-office-note-row" style="display: ${officeInfo.isOfficeTask ? 'block' : 'none'}; margin-top: 8px;">
+            <label style="font-size: 11px; color: #cbd5e1; display: block; margin-bottom: 4px;">
+              Note description (who brought the reclaim or who you gave the swap to to complete):
+            </label>
+            <div style="display: flex; gap: 6px;">
+              <input type="text" id="swap-office-note-input" value="${this.escapeHtml(officeInfo.officeNote || '')}" placeholder="e.g. Brought to shop by Colton Walter" class="form-control" style="flex: 1; padding: 5px 8px; font-size: 12px; background: var(--bg-primary); color: #f8fafc; border: 1px solid var(--border-color); border-radius: 4px;" />
+              <button type="button" class="btn btn-secondary admin-only-control" style="padding: 4px 10px; font-size: 11px; font-weight: 700; color: #d8b4fe; border: 1px solid rgba(147, 51, 234, 0.4); border-radius: 4px; cursor: pointer; white-space: nowrap;" onclick="window.tripPlanner.saveOfficeTaskFromModal(${JSON.stringify(target).replace(/"/g, '&quot;')}, '${this.escapeJs(targetScheduledDate || initialDateVal)}')">
+                Save Note
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     `;
 
@@ -4637,7 +5732,17 @@ class TripPlannerApp {
     }
 
     this.closeSwapDetailsModal();
-    this.showToast(`Updated completion date for ${empName} to ${dateFormatted}.`);
+    const chkOfficeEdit = document.getElementById('swap-is-office-task-modal');
+    const inputOfficeEdit = document.getElementById('swap-office-note-input');
+    if (chkOfficeEdit) {
+      const isOffice = chkOfficeEdit.checked;
+      const note = inputOfficeEdit ? inputOfficeEdit.value.trim() : '';
+      const sKey = (typeof this.getSwapKey === 'function') ? this.getSwapKey({ tableKey, employeeName: empName, currentItem }) : '';
+      const dateKeyIso = this.normalizeDateKey(dateVal) || '';
+      this.setSwapOfficeTask(sKey, dateKeyIso, { tableKey, employeeName: empName, currentItem, isCompleted: true, completedDate: dateFormatted }, isOffice, note);
+    }
+
+        this.showToast(`Updated completion date for ${empName} to ${dateFormatted}.`);
     this.renderPlanner();
     this.renderPickedSwapsList();
     this.notifyAccomplishmentsModal();
@@ -4702,7 +5807,17 @@ class TripPlannerApp {
     }
 
     this.closeSwapDetailsModal();
-    const isModalReclaim = (swRow && (swRow['Days Left'] === 'PREV EMP' || String(swRow['Days Left'] || '').includes('PREV') || String(swRow['Status'] || '').toLowerCase().includes('return to shelf'))) || !swRow || !swRow['Pick List Item #'] || swRow['Pick List Item #'] === '—';
+    const chkOffice = document.getElementById('swap-is-office-task-modal');
+    const inputOffice = document.getElementById('swap-office-note-input');
+    if (chkOffice) {
+      const isOffice = chkOffice.checked;
+      const note = inputOffice ? inputOffice.value.trim() : '';
+      const sKey = (typeof this.getSwapKey === 'function') ? this.getSwapKey({ tableKey, employeeName: empName, currentItem }) : '';
+      const dateKeyIso = this.normalizeDateKey(dateVal) || '';
+      this.setSwapOfficeTask(sKey, dateKeyIso, { tableKey, employeeName: empName, currentItem, isCompleted: true, completedDate: dateFormatted }, isOffice, note);
+    }
+
+        const isModalReclaim = (swRow && (swRow['Days Left'] === 'PREV EMP' || String(swRow['Days Left'] || '').includes('PREV') || String(swRow['Status'] || '').toLowerCase().includes('return to shelf'))) || !swRow || !swRow['Pick List Item #'] || swRow['Pick List Item #'] === '—';
     if (isModalReclaim) {
       this.showToast(`✅ Reclaim completed for ${empName}! Item #${currentItem || ''} transferred to Cody's Truck (Ready For Test).`);
     } else {
@@ -7113,79 +8228,7 @@ class TripPlannerApp {
         const col = document.createElement('div');
         col.className = 'day-column';
 
-        // 1. Render Drug Test appointments if scheduled on this date
-        let drugTestsHtml = '';
-        if (drugTests.length > 0) {
-          const isCollapsed = this.isSectionCollapsed(dateKey, 'drug_tests');
-          drugTestsHtml = `
-            <div class="day-section-collapsible drug-tests-day-section" style="margin-bottom: 8px;">
-              <div style="font-size: 10.5px; font-weight: 800; color: #c084fc; display: flex; align-items: center; justify-content: space-between; padding: 4px 7px; background: rgba(168, 85, 247, 0.12); border-radius: 4px; border-left: 3px solid #a855f7; cursor: pointer; user-select: none;" onclick="window.tripPlanner.toggleSectionCollapse('${dateKey}', 'drug_tests')" title="Click to collapse / expand DOT Drug Tests">
-                <span style="display: flex; align-items: center; gap: 5px;">
-                  <span id="section-chevron-${dateKey}-drug_tests" style="font-size: 8px; width: 10px; display: inline-block;">${isCollapsed ? '▶' : '▼'}</span>
-                  <span>🧪 DOT Drug Tests (${drugTests.length})</span>
-                </span>
-                <button class="btn btn-secondary" style="padding: 1px 6px; font-size: 9.5px; color: #c084fc; border-color: rgba(168, 85, 247, 0.35); background: rgba(168, 85, 247, 0.08); cursor: pointer;" onclick="event.stopPropagation(); window.sheetNavigator.switchWorkspace('drug_testing')" title="Open DOT Drug Testing Workspace">Manage ↗</button>
-              </div>
-              <div id="section-body-${dateKey}-drug_tests" style="display: ${isCollapsed ? 'none' : 'flex'}; flex-direction: column; gap: 6px; margin-top: 5px;">
-                ${drugTests.map(dt => `
-                  <div class="drug-test-appointment-card" style="background: var(--bg-primary); border: 1px solid rgba(168, 85, 247, 0.35); border-left: 4px solid #a855f7; border-radius: 6px; padding: 8px 10px; box-shadow: 0 2px 6px rgba(0,0,0,0.25);">
-                    <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px;">
-                      <div style="font-weight: 700; font-size: 12.5px; color: #f8fafc; cursor: pointer;" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(dt.employee)}', 'history');}" title="Click to view employee profile">
-                        👤 <span style="color: #60a5fa; text-decoration: underline dotted;">${this.escapeHtml(dt.employee)}</span>
-                      </div>
-                      <span class="badge" style="font-size: 9.5px; padding: 1px 5px; font-weight: 700; ${dt.time ? 'background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4);' : 'background: rgba(148, 163, 184, 0.15); color: #94a3b8;'}">
-                        ⏰ ${dt.time ? this.formatTimeDisplay(dt.time) : 'Time TBD'}
-                      </span>
-                    </div>
-
-                    <div style="font-size: 10px; color: #cbd5e1; margin-bottom: 4px; display: flex; align-items: center; gap: 4px; flex-wrap: wrap;">
-                      <span class="badge" style="background: rgba(168, 85, 247, 0.15); color: #d8b4fe; font-size: 9.5px; padding: 1px 4px;">
-                        ${this.escapeHtml(dt.testType)} (${this.escapeHtml(dt.classification)})
-                      </span>
-                      <span class="badge" style="background: ${dt.isMobile ? 'rgba(245, 158, 11, 0.15)' : 'rgba(59, 130, 246, 0.15)'}; color: ${dt.isMobile ? '#fcd34d' : '#93c5fd'}; font-size: 9.5px; padding: 1px 4px;">
-                        ${dt.isMobile ? '🚐 Mobile' : '🏥 Clinic'}
-                      </span>
-                      <span class="badge" style="background: ${dt.status === 'Completed' ? 'rgba(16, 185, 129, 0.2)' : (dt.status === 'Scheduled' ? 'rgba(59, 130, 246, 0.2)' : 'rgba(234, 179, 8, 0.2)')}; color: ${dt.status === 'Completed' ? '#34d399' : (dt.status === 'Scheduled' ? '#93c5fd' : '#facc15')}; font-size: 9.5px; padding: 1px 4px;">
-                        ${dt.status === 'Completed' ? '✅ Done' : (dt.status === 'Scheduled' ? '📅 Sched' : '⏳ Pending')}
-                      </span>
-                    </div>
-
-                    ${dt.meetingAddr ? `
-                      <div style="font-size: 10.5px; color: #94a3b8; margin-top: 3px; line-height: 1.3;">
-                        📍 <strong style="color: #cbd5e1;">Meet:</strong> ${this.escapeHtml(dt.meetingAddr)}
-                      </div>
-                    ` : (dt.clinicName ? `
-                      <div style="font-size: 10.5px; color: #94a3b8; margin-top: 3px; line-height: 1.3;">
-                        🏥 <strong style="color: #cbd5e1;">Clinic:</strong> ${this.escapeHtml(dt.clinicName)}${dt.clinicCity ? ' (' + this.escapeHtml(dt.clinicCity) + ')' : ''}
-                      </div>
-                    ` : '')}
-
-                    ${dt.phone ? `
-                      <div style="font-size: 10px; color: #64748b; margin-top: 2px;">
-                        📞 ${this.escapeHtml(dt.phone)} ${dt.job ? `· Job ${this.escapeHtml(dt.job)}` : ''}
-                      </div>
-                    ` : ''}
-
-                    <div style="display: flex; justify-content: flex-end; gap: 4px; margin-top: 5px; padding-top: 4px; border-top: 1px solid rgba(255,255,255,0.06);">
-                      ${dt.status !== 'Completed' ? `
-                        <button class="btn btn-primary" style="padding: 2px 7px; font-size: 10px; background: #10b981; border: none; font-weight: 700; cursor: pointer;" onclick="window.tripPlanner.markDrugTestDone('${this.escapeJs(dt.employee)}', '${dateKey}')" title="Mark test completed today">
-                          ✅ Done
-                        </button>
-                      ` : `
-                        <span style="font-size: 10px; color: #34d399; font-weight: 700; display: flex; align-items: center; gap: 2px;">✓ Completed</span>
-                      `}
-                      <button class="btn btn-secondary" style="padding: 2px 6px; font-size: 10px; color: #c084fc; border-color: rgba(168, 85, 247, 0.3); cursor: pointer;" onclick="window.sheetNavigator.switchWorkspace('drug_testing')" title="View in DOT Drug Testing">
-                        🔍 Details
-                      </button>
-                    </div>
-                  </div>
-                `).join('')}
-              </div>
-            </div>
-          `;
-        }
-
-        // 2. Render Training Section (Classes Cody teaches + Monthly Safety Trainings for visited crews)
+        // 1. Gather all tasks, tests, swaps, equipment, trainings, classes for this day
         const allManualTasks = this.getManualTasksForDate(dateKey);
         const trainingClasses = allManualTasks
           .filter(m => m.taskCategory === 'cert_class' || !!m.certType)
@@ -7194,8 +8237,7 @@ class TripPlannerApp {
           .filter(m => m.taskCategory === 'personal_task' && !m.certType)
           .sort((a, b) => this.compareTasksByTime(a, b));
 
-        // Training Section contains classes Cody teaches, scheduled via "+ Class" or manual tasks,
-        // and monthly crew trainings scheduled via the Training Needs sidebar.
+        // Gather scheduled trainings from Training Needs sidebar
         const dayScheduledTrainings = [];
         if (this.scheduledTrainingNeeds) {
           const trainTable = this.db ? this.db.getTable('training_tracking') : null;
@@ -7299,379 +8341,7 @@ class TripPlannerApp {
         }
         const monthlyTrainings = [];
 
-        const totalTrainings = trainingClasses.length + dayScheduledTrainings.length;
-        const pendingTrainingsCount = trainingClasses.filter(m => m.status !== 'Complete').length + dayScheduledTrainings.filter(t => !t.isCompleted).length;
-        const hasDismissedTrainings = false;
-
-        let trainingHtml = '';
-        if (totalTrainings > 0 || hasDismissedTrainings) {
-          const isCollapsed = this.isSectionCollapsed(dateKey, 'training');
-          trainingHtml = `
-            <div class="day-section-collapsible training-day-section" style="margin-bottom: 8px;">
-              <div style="font-size: 10.5px; font-weight: 800; color: #34d399; display: flex; align-items: center; justify-content: space-between; padding: 4px 7px; background: rgba(16, 185, 129, 0.12); border-radius: 4px; border-left: 3px solid #10b981; cursor: pointer; user-select: none;" onclick="window.tripPlanner.toggleSectionCollapse('${dateKey}', 'training')" title="Click to collapse / expand Training Classes & Monthly Trainings">
-                <span style="display: flex; align-items: center; gap: 5px;">
-                  <span id="section-chevron-${dateKey}-training" style="font-size: 8px; width: 10px; display: inline-block;">${isCollapsed ? '▶' : '▼'}</span>
-                  <span>🎓 Training (${pendingTrainingsCount}/${totalTrainings})</span>
-                </span>
-                <div style="display: flex; gap: 4px; align-items: center;">
-                  ${hasDismissedTrainings ? `
-                    <button class="btn btn-secondary" style="padding: 1px 6px; font-size: 9.5px; color: #94a3b8; border-color: rgba(255, 255, 255, 0.2); background: rgba(255, 255, 255, 0.05); cursor: pointer;" onclick="event.stopPropagation(); window.tripPlanner.restoreDismissedMonthlyTrainings('${dateKey}')" title="Restore removed monthly trainings for this day">↩ Restore (${(this.dismissedMonthlyTrainings[dateKey] || []).length})</button>
-                  ` : ''}
-                  <button class="btn btn-secondary" style="padding: 1px 6px; font-size: 9.5px; color: #34d399; border-color: rgba(16, 185, 129, 0.35); background: rgba(16, 185, 129, 0.08); cursor: pointer;" onclick="event.stopPropagation(); window.tripPlanner.openComposeTrainingEmailModalForDate('${dateKey}')" title="Compose email for scheduled training classes on ${day.dayName}">📧 Email</button>
-                  <button class="btn btn-secondary admin-only-control" style="padding: 1px 6px; font-size: 9.5px; color: #34d399; border-color: rgba(16, 185, 129, 0.35); background: rgba(16, 185, 129, 0.08); cursor: pointer;" onclick="event.stopPropagation(); window.tripPlanner.openAddManualTaskModal('${dateKey}', '${this.escapeJs(day.dayName)}, ${this.escapeJs(day.formattedDate)}', 'cert_class')" title="Schedule Training Class on ${day.dayName}">+ Class</button>
-                </div>
-              </div>
-              <div id="section-body-${dateKey}-training" style="display: ${isCollapsed ? 'none' : 'flex'}; flex-direction: column; gap: 5px; margin-top: 5px;">
-                ${trainingClasses.map((mt, classIdx) => {
-                  const isDone = mt.status === 'Complete';
-                  const resolved = this.resolveClassAttendees(mt);
-                  const isRosterOpen = !!(this._rosterExpanded && this._rosterExpanded[mt.id]);
-                  return `
-                    <div class="manual-task-card cert-class-card" style="background: var(--bg-primary); border: 1px solid ${isDone ? 'rgba(16, 185, 129, 0.3)' : 'rgba(16, 185, 129, 0.4)'}; border-left: 4px solid ${isDone ? '#10b981' : '#059669'}; border-radius: 6px; padding: 7px 9px; box-shadow: 0 1px 4px rgba(0,0,0,0.25); opacity: ${isDone ? '0.65' : '1'}; transition: opacity 0.2s;">
-                      <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 6px;">
-                        <div style="display: flex; align-items: flex-start; gap: 7px; flex: 1; min-width: 0;">
-                          <input type="checkbox" ${isDone ? 'checked' : ''} onclick="event.stopPropagation()" onchange="window.tripPlanner.toggleManualTask('${this.escapeJs(mt.id)}')" style="cursor: pointer; margin-top: 2px; accent-color: #10b981; width: 14px; height: 14px;" title="${isDone ? 'Mark Pending' : 'Mark Class Complete'}">
-                          <div style="flex: 1; min-width: 0;">
-                            <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 3px; flex-wrap: wrap;">
-                              <span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); font-size: 9px; font-weight: 800; padding: 1px 5px; border-radius: 3px;">
-                                🎓 Cert Class
-                              </span>
-                              ${isDone ? `
-                                <span class="badge" style="background: rgba(16, 185, 129, 0.25); color: #a7f3d0; font-size: 9px; padding: 1px 4px;">
-                                  ✅ Completed
-                                </span>
-                                <span class="badge" style="background: rgba(59, 130, 246, 0.18); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.35); font-size: 9px; font-weight: 700; padding: 1px 4px; border-radius: 3px;" title="Certification records synced to Expiring Certs">
-                                  🔄 Certs Updated
-                                </span>
-                              ` : ''}
-                              ${resolved.crews.length > 0 ? `
-                                <span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.3); font-size: 9px; font-weight: 700; padding: 1px 4px; border-radius: 3px;" title="Crew makeup auto-syncs with Employees sheet">
-                                  🔄 ${resolved.crews.length === 1 ? `Crew ${this.escapeHtml(resolved.crews[0].crewId)}` : `${resolved.crews.length} Crews (${resolved.crewIds.join(', ')})`}
-                                </span>
-                              ` : ''}
-                            </div>
-                            <div style="font-size: 12px; font-weight: 800; color: ${isDone ? '#94a3b8' : '#f8fafc'}; text-decoration: ${isDone ? 'line-through' : 'none'}; word-break: break-word; line-height: 1.3;">
-                              ${this.escapeHtml(mt.certType || mt.title)}
-                            </div>
-
-                            <!-- Attendees / Audience Header -->
-                            ${resolved.crews.length > 0 ? `
-                              <div style="font-size: 11px; margin-top: 3px; color: #cbd5e1; line-height: 1.3;">
-                                ${resolved.crews.length === 1 ? `
-                                  <span>🚚 <strong>Crew ${this.escapeHtml(resolved.crews[0].crewId)}</strong></span>
-                                  ${resolved.crews[0].foreman ? `<span> (${this.escapeHtml(resolved.crews[0].foreman)})</span>` : ''}
-                                  <span style="color: #94a3b8;"> · ${resolved.totalCount} Linemen</span>
-                                ` : `
-                                  <span>🚚 <strong>${resolved.crews.length} Crews:</strong> ${resolved.crews.map(c => `Crew ${this.escapeHtml(c.crewId)}${c.foreman ? ` (${this.escapeHtml(c.foreman)})` : ''}`).join(', ')}</span>
-                                  <span style="color: #94a3b8;"> · ${resolved.totalCount} Linemen</span>
-                                `}
-                              </div>
-                            ` : (resolved.totalCount > 0 ? `
-                              <div style="font-size: 11px; margin-top: 3px; color: #cbd5e1; line-height: 1.3;">
-                                <span>👥 <strong>${resolved.totalCount} Attendee${resolved.totalCount > 1 ? 's' : ''}:</strong> ${this.escapeHtml(resolved.allAttendees.slice(0, 2).join(', '))}${resolved.totalCount > 2 ? ` +${resolved.totalCount - 2} more` : ''}</span>
-                              </div>
-                            ` : `
-                              <div style="font-size: 11px; margin-top: 3px; color: #94a3b8; font-style: italic;">
-                                Unassigned Attendees
-                              </div>
-                            `)}
-
-                            <div style="font-size: 10px; color: #94a3b8; margin-top: 4px; display: flex; align-items: center; gap: 4px; flex-wrap: wrap;">
-                              ${mt.location ? `<span class="badge" style="background: rgba(255,255,255,0.06); color: #cbd5e1; font-size: 9px; padding: 1px 4px;">📍 ${this.escapeHtml(mt.location)}</span>` : ''}
-                              ${mt.time ? `<span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #6ee7b7; font-size: 9px; padding: 1px 4px;">⏰ ${this.escapeHtml(mt.time)}</span>` : ''}
-                              ${mt.instructor ? `<span class="badge" style="background: rgba(255,255,255,0.04); color: #94a3b8; font-size: 9px; padding: 1px 4px;">👨‍🏫 ${this.escapeHtml(mt.instructor)}</span>` : ''}
-                              ${mt.notes ? `<div style="color: var(--text-muted); font-size: 9.5px; margin-top: 2px; width: 100%; word-break: break-word;">📝 ${this.escapeHtml(mt.notes)}</div>` : ''}
-                            </div>
-
-                            <!-- Expandable Attendee Roster -->
-                            ${resolved.totalCount > 0 ? `
-                              <div style="margin-top: 5px; padding-top: 4px; border-top: 1px solid rgba(255,255,255,0.06);">
-                                <div style="font-size: 10px; font-weight: 700; color: #60a5fa; cursor: pointer; display: flex; align-items: center; gap: 4px; user-select: none;" onclick="window.tripPlanner.toggleClassRoster('${this.escapeHtml(mt.id)}')" title="Click to show/hide attendee list">
-                                  <span id="class-roster-toggle-${this.escapeHtml(mt.id)}">${isRosterOpen ? '▼' : '▶'}</span>
-                                  <span>📋 View Attendees (${resolved.totalCount})</span>
-                                  ${resolved.crews.length > 0 ? `<span style="font-size: 9px; color: #34d399; margin-left: auto;">🔄 Synced</span>` : ''}
-                                </div>
-                                <div id="class-roster-${this.escapeHtml(mt.id)}" style="display: ${isRosterOpen ? 'flex' : 'none'}; flex-direction: column; gap: 3px; margin-top: 5px; padding: 4px 6px; background: rgba(0,0,0,0.25); border-radius: 4px;">
-                                  ${resolved.crews.length > 1 ? resolved.crews.map(c => `
-                                    <div style="font-size: 9.5px; font-weight: 800; color: #93c5fd; margin-top: 4px; padding-bottom: 2px; border-bottom: 1px solid rgba(255,255,255,0.08); display: flex; justify-content: space-between; align-items: center;">
-                                      <span>🚚 Crew ${this.escapeHtml(c.crewId)} (${this.escapeHtml(c.foreman || 'Foreman')})</span>
-                                      <span style="font-size: 8.5px; color: #34d399;">${c.members.length} linemen</span>
-                                    </div>
-                                    ${c.members.map(m => `
-                                      <div style="font-size: 10px; color: #cbd5e1; display: flex; justify-content: space-between; align-items: center; padding-left: 6px;">
-                                        <span style="cursor: pointer;" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(m.name)}');}" title="View employee profile">
-                                          ${m.isForeman ? '👑' : '👤'} <strong style="color: ${m.isForeman ? '#facc15' : '#60a5fa'}; text-decoration: underline dotted;">${this.escapeHtml(m.name)}</strong>
-                                        </span>
-                                        <span class="badge" style="font-size: 8.5px; padding: 1px 4px; background: rgba(255,255,255,0.06); color: #94a3b8;">${this.escapeHtml(m.role || (m.isForeman ? 'Foreman' : 'Crew'))}</span>
-                                      </div>
-                                    `).join('')}
-                                  `).join('') : resolved.crewMembers.map(m => `
-                                    <div style="font-size: 10px; color: #cbd5e1; display: flex; justify-content: space-between; align-items: center;">
-                                      <span style="cursor: pointer;" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(m.name)}');}" title="View employee profile">
-                                        ${m.isForeman ? '👑' : '👤'} <strong style="color: ${m.isForeman ? '#facc15' : '#60a5fa'}; text-decoration: underline dotted;">${this.escapeHtml(m.name)}</strong>
-                                      </span>
-                                      <span class="badge" style="font-size: 8.5px; padding: 1px 4px; background: rgba(255,255,255,0.06); color: #94a3b8;">${this.escapeHtml(m.role || (m.isForeman ? 'Foreman' : 'Crew'))}</span>
-                                    </div>
-                                  `).join('')}
-                                  ${resolved.individualMembers.length > 0 ? `
-                                    <div style="font-size: 9.5px; font-weight: 800; color: #a78bfa; margin-top: 4px; padding-bottom: 2px; border-bottom: 1px solid rgba(255,255,255,0.08);">
-                                      👤 Individual Attendees (${resolved.individualMembers.length})
-                                    </div>
-                                    ${resolved.individualMembers.map(m => `
-                                      <div style="font-size: 10px; color: #cbd5e1; display: flex; justify-content: space-between; align-items: center; padding-left: 6px;">
-                                        <span style="cursor: pointer;" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(m.name)}');}" title="View employee profile">
-                                          👤 <strong style="color: #60a5fa; text-decoration: underline dotted;">${this.escapeHtml(m.name)}</strong>
-                                        </span>
-                                        <span class="badge" style="font-size: 8.5px; padding: 1px 4px; background: rgba(59, 130, 246, 0.15); color: #93c5fd;">Individual</span>
-                                      </div>
-                                    `).join('')}
-                                  ` : ''}
-                                </div>
-                              </div>
-                            ` : ''}
-                          </div>
-                        </div>
-                        <div style="display: flex; align-items: center; gap: 3px;">
-                          ${trainingClasses.length > 1 ? `
-                            <button style="background: none; border: none; color: ${classIdx > 0 ? '#94a3b8' : '#334155'}; cursor: ${classIdx > 0 ? 'pointer' : 'default'}; padding: 1px 2px; font-size: 10px; line-height: 1; border-radius: 3px;" ${classIdx > 0 ? `onclick="window.tripPlanner.moveManualTask('${this.escapeHtml(mt.id)}', -1)" onmouseover="this.style.color='#34d399'" onmouseout="this.style.color='#94a3b8'"` : 'disabled'} title="${classIdx > 0 ? 'Move Class Up' : ''}">
-                              ▲
-                            </button>
-                            <button style="background: none; border: none; color: ${classIdx < trainingClasses.length - 1 ? '#94a3b8' : '#334155'}; cursor: ${classIdx < trainingClasses.length - 1 ? 'pointer' : 'default'}; padding: 1px 2px; font-size: 10px; line-height: 1; border-radius: 3px;" ${classIdx < trainingClasses.length - 1 ? `onclick="window.tripPlanner.moveManualTask('${this.escapeHtml(mt.id)}', 1)" onmouseover="this.style.color='#34d399'" onmouseout="this.style.color='#94a3b8'"` : 'disabled'} title="${classIdx < trainingClasses.length - 1 ? 'Move Class Down' : ''}">
-                              ▼
-                            </button>
-                          ` : ''}
-                          <button style="background: none; border: none; color: #34d399; cursor: pointer; padding: 1px 3px; font-size: 11.5px; line-height: 1; border-radius: 3px;" onmouseover="this.style.color='#10b981'" onmouseout="this.style.color='#34d399'" onclick="window.tripPlanner.openComposeTrainingEmailModal('${this.escapeHtml(mt.id)}')" title="Compose Email for this Class">
-                            ✉️
-                          </button>
-                          <button class="admin-only-control" style="background: none; border: none; color: #64748b; cursor: pointer; padding: 1px 3px; font-size: 11px; line-height: 1; border-radius: 3px;" onmouseover="this.style.color='#60a5fa'" onmouseout="this.style.color='#64748b'" onclick="window.tripPlanner.openEditManualTaskModal('${this.escapeHtml(mt.id)}')" title="Edit Class">
-                            ✏️
-                          </button>
-                          <button class="admin-only-control" style="background: none; border: none; color: #64748b; cursor: pointer; padding: 1px 4px; font-size: 12px; line-height: 1; border-radius: 3px;" onmouseover="this.style.color='#f87171'" onmouseout="this.style.color='#64748b'" onclick="window.tripPlanner.deleteManualTask('${this.escapeHtml(mt.id)}')" title="Delete Class">
-                            ✕
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  `;
-                }).join('')}
-                ${dayScheduledTrainings.map(tr => {
-                  const isDone = !!tr.isCompleted;
-                  return `
-                    <div class="manual-task-card scheduled-training-card ${isDone ? 'completed-training-card' : ''}" style="background: var(--bg-primary); border: 1px solid ${isDone ? 'rgba(16, 185, 129, 0.3)' : 'rgba(52, 211, 153, 0.35)'}; border-left: 4px solid ${isDone ? '#10b981' : '#34d399'}; border-radius: 6px; padding: 7px 9px; box-shadow: 0 1px 4px rgba(0,0,0,0.25); opacity: ${isDone ? '0.72' : '1'}; transition: all 0.15s ease;">
-                      <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 6px;">
-                        <div style="display: flex; align-items: flex-start; gap: 7px; flex: 1; min-width: 0;">
-                          <input type="checkbox" ${isDone ? 'checked' : ''} onclick="event.stopPropagation()" onchange="window.tripPlanner.toggleScheduledTraining('${this.escapeJs(tr._trKey || tr.id)}', '${dateKey}')" style="cursor: pointer; margin-top: 3px; accent-color: #10b981; width: 14px; height: 14px;" title="${isDone ? 'Completed (click to revert)' : 'Click to mark complete'}">
-                          <div style="flex: 1; min-width: 0;">
-                            <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 3px; flex-wrap: wrap;">
-                              <span class="badge" style="background: rgba(16, 185, 129, 0.18); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.35); font-size: 9px; font-weight: 800; padding: 1px 5px; border-radius: 3px;">
-                                🎓 Crew Training
-                              </span>
-                              <span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); font-size: 9px; font-weight: 700; padding: 1px 4px; border-radius: 3px;">
-                                🚚 Crew ${this.escapeHtml(tr.crewId)}
-                              </span>
-                              ${tr.month ? `
-                                <span class="badge" style="background: rgba(168, 85, 247, 0.15); color: #c084fc; font-size: 9px; padding: 1px 4px; border-radius: 3px;">
-                                  📅 ${this.escapeHtml(tr.month)}
-                                </span>
-                              ` : ''}
-                              ${isDone ? `
-                                <span class="badge" style="background: rgba(16, 185, 129, 0.25); color: #a7f3d0; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 9px; font-weight: 800; padding: 1px 5px; border-radius: 3px;">
-                                  ✅ Completed${tr.completedDate ? ` (${this.escapeHtml(tr.completedDate)})` : ''}
-                                </span>
-                              ` : `
-                                <span class="badge" style="background: rgba(234, 179, 8, 0.2); color: #facc15; font-size: 9px; padding: 1px 4px;">
-                                  ⏳ Scheduled
-                                </span>
-                              `}
-                            </div>
-                            <div style="font-size: 12px; font-weight: 800; color: ${isDone ? '#94a3b8' : '#f8fafc'}; text-decoration: ${isDone ? 'line-through' : 'none'}; word-break: break-word; line-height: 1.3;">
-                              ${this.escapeHtml(tr.topic)}
-                            </div>
-                            <div style="font-size: 11px; margin-top: 3px; color: #cbd5e1; line-height: 1.3;">
-                              <span>👤 <strong>Foreman:</strong> ${this.escapeHtml(tr.lead || 'Foreman')}</span>
-                              ${tr.location ? `<span style="color: #93c5fd; margin-left: 6px;">📍 ${this.escapeHtml(tr.location)}</span>` : ''}
-                              ${tr.attendees ? `
-                                <div style="font-size: 10px; color: #94a3b8; margin-top: 2px;">
-                                  👥 <strong>Crew:</strong> ${this.escapeHtml(tr.attendees)}
-                                </div>
-                              ` : ''}
-                            </div>
-                          </div>
-                        </div>
-                        <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 4px;">
-                          ${!isDone ? `
-                            <button class="btn btn-primary" style="padding: 2px 7px; font-size: 10px; background: #10b981; border: none; font-weight: 700; cursor: pointer; border-radius: 3px; white-space: nowrap;" onclick="event.stopPropagation(); window.tripPlanner.completeTrainingNeed(${JSON.stringify(tr).replace(/"/g, '&quot;')}, '${dateKey}')" title="Mark Training Complete">
-                              ✅ Done
-                            </button>
-                          ` : `
-                            <button class="btn btn-secondary" style="padding: 2px 6px; font-size: 9px; color: #a7f3d0; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.35); font-weight: 700; cursor: pointer; border-radius: 3px; white-space: nowrap;" onclick="event.stopPropagation(); window.tripPlanner.toggleScheduledTraining('${this.escapeJs(tr._trKey || tr.id)}', '${dateKey}')" title="Click to re-open">
-                              ✓ Done
-                            </button>
-                          `}
-                          <button class="admin-only-control" style="background: none; border: none; color: #64748b; cursor: pointer; padding: 1px 4px; font-size: 12px; line-height: 1; border-radius: 3px;" onmouseover="this.style.color='#f87171'" onmouseout="this.style.color='#64748b'" onclick="event.stopPropagation(); window.tripPlanner.unscheduleTrainingNeed('${this.escapeJs(tr._trKey)}')" title="Remove from this day and return to sidebar">
-                            ✕
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  `;
-                }).join('')}
-                ${monthlyTrainings.map(tr => {
-                  const isDone = tr.status === 'Complete' || tr.status === 'Completed' || !!tr.isCompleted;
-                  return `
-                    <div class="manual-task-card monthly-training-card" style="background: var(--bg-primary); border: 1px solid ${isDone ? 'rgba(16, 185, 129, 0.3)' : 'rgba(59, 130, 246, 0.35)'}; border-left: 4px solid ${isDone ? '#10b981' : '#3b82f6'}; border-radius: 6px; padding: 7px 9px; box-shadow: 0 1px 4px rgba(0,0,0,0.25); opacity: ${isDone ? '0.65' : '1'}; transition: opacity 0.2s;">
-                      <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 6px;">
-                        <div style="display: flex; align-items: flex-start; gap: 7px; flex: 1; min-width: 0;">
-                          <input type="checkbox" ${isDone ? 'checked' : ''} onchange="window.tripPlanner.toggleMonthlyTraining('${this.escapeJs(tr.crewId)}', '${this.escapeJs(tr.topic)}', '${this.escapeJs(tr.month)}', '${dateKey}', ${tr._rowIdx || 0})" style="cursor: pointer; margin-top: 2px; accent-color: #10b981; width: 14px; height: 14px;" title="${isDone ? 'Mark Incomplete' : 'Mark Monthly Training Complete'}">
-                          <div style="flex: 1; min-width: 0;">
-                            <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 3px; flex-wrap: wrap;">
-                              <span class="badge" style="background: rgba(59, 130, 246, 0.18); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.35); font-size: 9px; font-weight: 800; padding: 1px 5px; border-radius: 3px;">
-                                🎓 Monthly Training
-                              </span>
-                              <span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3); font-size: 9px; font-weight: 700; padding: 1px 4px; border-radius: 3px;">
-                                🚚 Crew ${this.escapeHtml(tr.crewId)}
-                              </span>
-                              ${tr.month ? `
-                                <span class="badge" style="background: rgba(168, 85, 247, 0.15); color: #c084fc; font-size: 9px; padding: 1px 4px; border-radius: 3px;">
-                                  📅 ${this.escapeHtml(tr.month)}
-                                </span>
-                              ` : ''}
-                              ${isDone ? `
-                                <span class="badge" style="background: rgba(16, 185, 129, 0.25); color: #a7f3d0; font-size: 9px; padding: 1px 4px;">
-                                  ✅ Completed${tr.dateDone ? ` (${this.escapeHtml(tr.dateDone)})` : ''}
-                                </span>
-                              ` : (tr.isOverdue ? `
-                                <span class="badge" style="background: rgba(239, 68, 68, 0.2); color: #f87171; font-size: 9px; padding: 1px 4px;">
-                                  🔴 Overdue
-                                </span>
-                              ` : `
-                                <span class="badge" style="background: rgba(234, 179, 8, 0.2); color: #facc15; font-size: 9px; padding: 1px 4px;">
-                                  ⏳ Scheduled
-                                </span>
-                              `)}
-                            </div>
-
-                            <div style="font-size: 12px; font-weight: 800; color: ${isDone ? '#94a3b8' : '#f8fafc'}; text-decoration: ${isDone ? 'line-through' : 'none'}; word-break: break-word; line-height: 1.3;">
-                              ${this.escapeHtml(tr.topic)}
-                            </div>
-
-                            <div style="font-size: 11px; margin-top: 3px; color: #cbd5e1; line-height: 1.3;">
-                              <span>👤 <strong>Foreman:</strong> ${this.escapeHtml(tr.lead || 'Foreman')}</span>
-                              ${tr.attendees ? `
-                                <div style="font-size: 10px; color: #94a3b8; margin-top: 2px;">
-                                  👥 <strong>Crew Members:</strong> ${this.escapeHtml(tr.attendees)}
-                                </div>
-                              ` : ''}
-                            </div>
-                          </div>
-                        </div>
-
-                        <div style="display: flex; align-items: center; gap: 4px;">
-                          ${!isDone ? `
-                            <button class="btn btn-primary" style="padding: 2px 7px; font-size: 10px; background: #10b981; border: none; font-weight: 700; cursor: pointer; border-radius: 3px;" onclick="window.tripPlanner.toggleMonthlyTraining('${this.escapeJs(tr.crewId)}', '${this.escapeJs(tr.topic)}', '${this.escapeJs(tr.month)}', '${dateKey}', ${tr._rowIdx || 0})" title="Mark Monthly Training Complete">
-                              ✅ Done
-                            </button>
-                          ` : `
-                            <button class="btn btn-secondary" style="padding: 2px 5px; font-size: 9px; color: #94a3b8; border: 1px solid rgba(255,255,255,0.1); cursor: pointer; border-radius: 3px;" onclick="window.tripPlanner.toggleMonthlyTraining('${this.escapeJs(tr.crewId)}', '${this.escapeJs(tr.topic)}', '${this.escapeJs(tr.month)}', '${dateKey}', ${tr._rowIdx || 0})" title="Re-open Training">
-                              ↩
-                            </button>
-                          `}
-                          <button style="background: none; border: none; color: #64748b; cursor: pointer; padding: 1px 4px; font-size: 12px; line-height: 1; border-radius: 3px;" onmouseover="this.style.color='#f87171'" onmouseout="this.style.color='#64748b'" onclick="window.tripPlanner.dismissMonthlyTraining('${this.escapeJs(tr.crewId)}', '${this.escapeJs(tr.topic)}', '${this.escapeJs(tr.month)}', '${dateKey}')" title="Dismiss / Remove from this day's visit">
-                            ✕
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  `;
-                }).join('')}
-              </div>
-            </div>
-          `;
-        }
-
-        // 3. Render Personal / Office Tasks
-        let officeHtml = '';
-        if (personalTasks.length > 0) {
-          const isCollapsed = this.isSectionCollapsed(dateKey, 'office');
-          const pendingCount = personalTasks.filter(m => m.status !== 'Complete').length;
-          officeHtml = `
-            <div class="day-section-collapsible office-tasks-day-section" style="margin-bottom: 8px;">
-              <div style="font-size: 10.5px; font-weight: 800; color: #fdba74; display: flex; align-items: center; justify-content: space-between; padding: 4px 7px; background: rgba(249, 115, 22, 0.12); border-radius: 4px; border-left: 3px solid #f97316; cursor: pointer; user-select: none;" onclick="window.tripPlanner.toggleSectionCollapse('${dateKey}', 'office')" title="Click to collapse / expand Office Tasks">
-                <span style="display: flex; align-items: center; gap: 5px;">
-                  <span id="section-chevron-${dateKey}-office" style="font-size: 8px; width: 10px; display: inline-block;">${isCollapsed ? '▶' : '▼'}</span>
-                  <span>💼 Office Tasks (${pendingCount}/${personalTasks.length})</span>
-                </span>
-                <button class="btn btn-secondary admin-only-control" style="padding: 1px 6px; font-size: 9.5px; color: #fdba74; border-color: rgba(249, 115, 22, 0.35); background: rgba(249, 115, 22, 0.08); cursor: pointer;" onclick="event.stopPropagation(); window.tripPlanner.openAddManualTaskModal('${dateKey}', '${this.escapeJs(day.dayName)}, ${this.escapeJs(day.formattedDate)}', 'personal_task')" title="Add Office Task">+ Task</button>
-              </div>
-              <div id="section-body-${dateKey}-office" style="display: ${isCollapsed ? 'none' : 'flex'}; flex-direction: column; gap: 5px; margin-top: 5px; max-height: 480px; overflow-y: auto; padding-right: 3px;">
-                ${personalTasks.map((mt, taskIdx) => {
-                  const isDone = mt.status === 'Complete';
-                  const assignee = mt.assignedTo || 'Myself';
-                  return `
-                    <div class="manual-task-card personal-task-card" style="background: var(--bg-primary); border: 1px solid ${isDone ? 'rgba(16, 185, 129, 0.3)' : 'rgba(249, 115, 22, 0.3)'}; border-left: 4px solid ${isDone ? '#10b981' : (mt.priority === 'High' ? '#ef4444' : '#f97316')}; border-radius: 6px; padding: 7px 9px; box-shadow: 0 1px 4px rgba(0,0,0,0.25); opacity: ${isDone ? '0.65' : '1'}; transition: all 0.15s ease; cursor: pointer;" onclick="window.tripPlanner.openEditManualTaskModal('${this.escapeHtml(mt.id)}')" onmouseover="this.style.borderColor='rgba(251, 146, 60, 0.7)'; this.style.transform='translateY(-1px)';" onmouseout="this.style.borderColor='${isDone ? 'rgba(16, 185, 129, 0.3)' : 'rgba(249, 115, 22, 0.3)'}'; this.style.transform='translateY(0)';" title="Click to view / edit task details">
-                      <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 6px;">
-                        <div style="display: flex; align-items: flex-start; gap: 7px; flex: 1; min-width: 0;">
-                          <input type="checkbox" ${isDone ? 'checked' : ''} onclick="event.stopPropagation()" onchange="window.tripPlanner.toggleManualTask('${this.escapeHtml(mt.id)}')" style="cursor: pointer; margin-top: 2px; accent-color: #10b981; width: 14px; height: 14px;" title="${isDone ? 'Mark Pending' : 'Mark Complete'}">
-                          <div style="flex: 1; min-width: 0;">
-                            <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 3px; flex-wrap: wrap;">
-                              <span class="badge" style="background: rgba(249, 115, 22, 0.15); color: #fdba74; border: 1px solid rgba(249, 115, 22, 0.3); font-size: 9px; font-weight: 800; padding: 1px 5px; border-radius: 3px;">
-                                💼 Personal / Office
-                              </span>
-                              ${mt.priority === 'High' ? `
-                                <span class="badge" style="background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.35); font-size: 9px; padding: 1px 4px;">
-                                  🔴 High
-                                </span>
-                              ` : ''}
-                              ${isDone ? `
-                                <span class="badge" style="background: rgba(16, 185, 129, 0.25); color: #a7f3d0; font-size: 9px; padding: 1px 4px;">
-                                  ✅ Completed
-                                </span>
-                              ` : ''}
-                            </div>
-                            <div style="font-size: 12px; font-weight: 700; color: ${isDone ? '#94a3b8' : '#f8fafc'}; text-decoration: ${isDone ? 'line-through' : 'none'}; word-break: break-word; line-height: 1.3;">
-                              ${this.escapeHtml(mt.title)}
-                            </div>
-                            <div style="font-size: 10.5px; color: #94a3b8; margin-top: 3px;">
-                              👤 <strong style="color: #cbd5e1;">Assigned:</strong> ${this.escapeHtml(assignee)}
-                            </div>
-                            <div style="font-size: 10px; color: #94a3b8; margin-top: 4px; display: flex; align-items: center; gap: 4px; flex-wrap: wrap;">
-                              ${mt.location ? `<span class="badge" style="background: rgba(255,255,255,0.06); color: #cbd5e1; font-size: 9px; padding: 1px 4px;">📍 ${this.escapeHtml(mt.location)}</span>` : ''}
-                              ${mt.time ? `<span class="badge" style="background: rgba(249, 115, 22, 0.15); color: #fdba74; font-size: 9px; padding: 1px 4px;">⏰ ${this.escapeHtml(mt.time)}</span>` : ''}
-                              ${mt.notes ? `
-                                <div style="color: #94a3b8; font-size: 9.5px; margin-top: 3px; width: 100%; word-break: break-word; line-height: 1.35; white-space: pre-line; background: rgba(0,0,0,0.2); padding: 3px 6px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.05);">
-                                  📝 ${this.escapeHtml(mt.notes.length > 90 ? mt.notes.substring(0, 85) + '...' : mt.notes)}
-                                  ${mt.notes.length > 90 ? `<span style="color: #fb923c; font-weight: 700; font-size: 9px; margin-left: 4px;">(Click to view details)</span>` : ''}
-                                </div>
-                              ` : ''}
-                            </div>
-                          </div>
-                        </div>
-                        <div style="display: flex; align-items: center; gap: 3px;">
-                          ${personalTasks.length > 1 ? `
-                            <button style="background: none; border: none; color: ${taskIdx > 0 ? '#94a3b8' : '#334155'}; cursor: ${taskIdx > 0 ? 'pointer' : 'default'}; padding: 1px 2px; font-size: 10px; line-height: 1; border-radius: 3px;" ${taskIdx > 0 ? `onclick="event.stopPropagation(); window.tripPlanner.moveManualTask('${this.escapeHtml(mt.id)}', -1)" onmouseover="this.style.color='#fb923c'"` : 'disabled'} title="${taskIdx > 0 ? 'Move Task Up' : ''}">
-                              ▲
-                            </button>
-                            <button style="background: none; border: none; color: ${taskIdx < personalTasks.length - 1 ? '#94a3b8' : '#334155'}; cursor: ${taskIdx < personalTasks.length - 1 ? 'pointer' : 'default'}; padding: 1px 2px; font-size: 10px; line-height: 1; border-radius: 3px;" ${taskIdx < personalTasks.length - 1 ? `onclick="event.stopPropagation(); window.tripPlanner.moveManualTask('${this.escapeHtml(mt.id)}', 1)" onmouseover="this.style.color='#fb923c'"` : 'disabled'} title="${taskIdx < personalTasks.length - 1 ? 'Move Task Down' : ''}">
-                              ▼
-                            </button>
-                          ` : ''}
-                          <button class="admin-only-control" style="background: none; border: none; color: #64748b; cursor: pointer; padding: 1px 3px; font-size: 11px; line-height: 1; border-radius: 3px;" onmouseover="this.style.color='#fb923c'" onmouseout="this.style.color='#64748b'" onclick="event.stopPropagation(); window.tripPlanner.openEditManualTaskModal('${this.escapeHtml(mt.id)}')" title="Edit Task">
-                            ✏️
-                          </button>
-                          <button class="admin-only-control" style="background: none; border: none; color: #64748b; cursor: pointer; padding: 1px 4px; font-size: 12px; line-height: 1; border-radius: 3px;" onmouseover="this.style.color='#f87171'" onmouseout="this.style.color='#64748b'" onclick="event.stopPropagation(); window.tripPlanner.deleteManualTask('${this.escapeHtml(mt.id)}')" title="Delete Task">
-                            ✕
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  `;
-                }).join('')}
-              </div>
-            </div>
-          `;
-        }
-
-        // 4. Gather scheduled individual swaps for this specific dateKey
+        // Gather scheduled swaps
         const dayScheduledSwaps = [];
         if (this.scheduledSwaps) {
           Object.keys(this.scheduledSwaps).forEach(sKey => {
@@ -7684,13 +8354,16 @@ class TripPlannerApp {
                 const compInfo = this.getSwapCompletionInfo(item);
                 const isDone = compInfo.isCompleted || !!(entry && entry.completed);
                 const compDate = this.formatDisplayDate((entry && entry.completedDate) || compInfo.date || '');
+                const officeInfo = this.getSwapOfficeTaskInfo(item, dateKey);
                 dayScheduledSwaps.push({
                   ...item,
                   _sKey: sKey,
                   _scheduledEntry: entry,
                   dateKey: dateKey,
                   isCompleted: isDone,
-                  completedDate: compDate
+                  completedDate: compDate,
+                  isOfficeTask: officeInfo.isOfficeTask,
+                  officeNote: officeInfo.officeNote
                 });
               }
             }
@@ -7712,113 +8385,14 @@ class TripPlannerApp {
             return empMatch && typeMatch && (curMatch || pickMatch);
           });
           if (!already) {
+            const officeInfo = this.getSwapOfficeTaskInfo(cs, dateKey);
+            cs.isOfficeTask = officeInfo.isOfficeTask;
+            cs.officeNote = officeInfo.officeNote;
             dayScheduledSwaps.push(cs);
           }
         });
 
-        // Render Scheduled Swaps Section (individual glove/sleeve swaps added to this day)
-        let swapsHtml = '';
-        if (dayScheduledSwaps.length > 0) {
-          const isSwapsCollapsed = this.isSectionCollapsed(dateKey, 'swaps');
-          const pendingSwapsCount = dayScheduledSwaps.filter(s => !s.isCompleted).length;
-          const totalSwapsCount = dayScheduledSwaps.length;
-          const completedSwapsCount = totalSwapsCount - pendingSwapsCount;
-
-          swapsHtml = `
-            <div class="day-section-collapsible swaps-day-section" style="margin-bottom: 8px;">
-              <div style="font-size: 10.5px; font-weight: 800; color: #93c5fd; display: flex; align-items: center; justify-content: space-between; padding: 4px 7px; background: rgba(59, 130, 246, 0.12); border-radius: 4px; border-left: 3px solid #3b82f6; cursor: pointer; user-select: none;" onclick="window.tripPlanner.toggleSectionCollapse('${dateKey}', 'swaps')" title="Click to collapse / expand Swaps">
-                <span style="display: flex; align-items: center; gap: 5px;">
-                  <span id="section-chevron-${dateKey}-swaps" style="font-size: 8px; width: 10px; display: inline-block;">${isSwapsCollapsed ? '▶' : '▼'}</span>
-                  <span>🚚 ${completedSwapsCount > 0 ? `Picked Swaps (${pendingSwapsCount}/${totalSwapsCount})` : `Picked Swaps Ready (${totalSwapsCount})`}</span>
-                </span>
-                <span style="font-size: 9px; color: #bfdbfe; opacity: 0.9;">${completedSwapsCount > 0 && pendingSwapsCount === 0 ? '✓ All Completed' : (completedSwapsCount > 0 ? `${completedSwapsCount} Done · PPE Swaps` : 'PPE Swaps')}</span>
-              </div>
-              <div id="section-body-${dateKey}-swaps" style="display: ${isSwapsCollapsed ? 'none' : 'flex'}; flex-direction: column; gap: 5px; margin-top: 5px;">
-                ${dayScheduledSwaps.map(s => {
-                  const isGlove = (s.type || '').toLowerCase() === 'glove';
-                  const isReclaim = !!s.isReclaim;
-                  const loc = s.location || '';
-                  const isDone = !!s.isCompleted;
-                  return `
-                    <div class="scheduled-swap-card ${isDone ? 'completed-swap-card' : ''}" draggable="${!isDone}" data-skey="${this.escapeHtml(s._sKey)}" style="background: var(--bg-primary); border: 1px solid ${isDone ? 'rgba(16, 185, 129, 0.25)' : (isReclaim ? 'rgba(245, 158, 11, 0.35)' : 'rgba(59, 130, 246, 0.35)')}; border-left: 4px solid ${isDone ? '#10b981' : (isReclaim ? '#f59e0b' : '#3b82f6')}; border-radius: 6px; padding: 7px 9px; box-shadow: 0 1px 4px rgba(0,0,0,0.25); cursor: ${isDone ? 'default' : 'grab'}; opacity: ${isDone ? '0.72' : '1'}; transition: all 0.15s ease;" onmouseover="this.style.borderColor='${isDone ? '#34d399' : (isReclaim ? '#fbbf24' : '#60a5fa')}';" onmouseout="this.style.borderColor='${isDone ? 'rgba(16, 185, 129, 0.25)' : (isReclaim ? 'rgba(245, 158, 11, 0.35)' : 'rgba(59, 130, 246, 0.35)')}';">
-                      <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 6px;">
-                        <div style="display: flex; align-items: flex-start; gap: 7px; flex: 1; min-width: 0;">
-                          <input type="checkbox" ${isDone ? 'checked' : ''} style="cursor: pointer; margin-top: 3px; accent-color: ${isDone ? '#10b981' : (isReclaim ? '#f59e0b' : '#3b82f6')}; width: 14px; height: 14px;" title="${isDone ? 'Completed (click to view / revert)' : 'Click to view / complete'}" onclick="event.stopPropagation(); window.tripPlanner.openSwapDetailsModal(${JSON.stringify(s).replace(/"/g, '&quot;')}, '${this.escapeJs(s.crewId || '')}', '${this.escapeJs(loc)}')">
-                          <div style="flex: 1; min-width: 0;">
-                            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 3px;">
-                              <span style="font-weight: 700; font-size: 12px; color: ${isDone ? '#94a3b8' : '#f8fafc'}; text-decoration: ${isDone ? 'line-through' : 'none'}; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                                ${this.escapeHtml(s.employeeName)}
-                                ${isReclaim ? `<span style="font-size: 9.5px; color: #f87171; font-weight: 600; margin-left: 4px;">(Prev Emp)</span>` : ''}
-                              </span>
-                              <div style="display: flex; gap: 4px; align-items: center;">
-                                ${s.classification ? `<span class="badge" style="background: rgba(148, 163, 184, 0.15); color: #94a3b8; font-size: 9px; padding: 1px 4px; border-radius: 3px;">${this.escapeHtml(s.classification)}</span>` : ''}
-                                ${loc ? `<span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; font-size: 9px; padding: 1px 4px; border-radius: 3px;">📍 ${this.escapeHtml(loc)}</span>` : ''}
-                              </div>
-                            </div>
-                            <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11px; color: #cbd5e1; margin-top: 4px; flex-wrap: wrap; gap: 4px;">
-                              <div style="display: flex; align-items: center; gap: 4px; flex-wrap: wrap;">
-                                <span class="badge" style="background: ${isReclaim ? 'rgba(245, 158, 11, 0.18)' : (isGlove ? 'rgba(59, 130, 246, 0.18)' : 'rgba(168, 85, 247, 0.18)')}; color: ${isReclaim ? '#fbbf24' : (isGlove ? '#93c5fd' : '#d8b4fe')}; border: 1px solid ${isReclaim ? 'rgba(245, 158, 11, 0.35)' : (isGlove ? 'rgba(59, 130, 246, 0.35)' : 'rgba(168, 85, 247, 0.35)')}; font-size: 9.5px; font-weight: 700; padding: 1px 5px; border-radius: 3px;">
-                                  ${isReclaim ? '📦 Reclaim ' : ''}${isGlove ? '🧤 Glove' : '🧤 Sleeve'}${s.itemClass ? ` (CL ${this.escapeHtml(s.itemClass)})` : ''}
-                                </span>
-                                ${isDone ? `
-                                  <span class="badge" style="background: rgba(16, 185, 129, 0.25); color: #a7f3d0; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 9px; font-weight: 800; padding: 1px 5px; border-radius: 3px;">
-                                    ✅ Completed${s.completedDate ? ` (${this.escapeHtml(s.completedDate)})` : ''}
-                                  </span>
-                                ` : ''}
-                              </div>
-                              <span style="font-size: 11px; color: #e2e8f0;">
-                                ${isReclaim ? (isDone ? `
-                                  Reclaimed: <strong style="color: #94a3b8; text-decoration: line-through;">#${this.escapeHtml(s.currentItem || '—')}</strong>
-                                  &nbsp;➔&nbsp;
-                                  <strong style="color: #4ade80;">Helena 🏢</strong>
-                                ` : `
-                                  Reclaim: <strong style="color: #fca5a5;">#${this.escapeHtml(s.currentItem || '—')}</strong>
-                                  &nbsp;➔&nbsp;
-                                  <strong style="color: #fbbf24;">Helena 🏢</strong>
-                                `) : (isDone ? `
-                                  Returned: <strong style="color: #94a3b8; text-decoration: line-through;">${this.escapeHtml(s.currentItem || '—')}</strong>
-                                  &nbsp;➔&nbsp;
-                                  Assigned: <strong style="color: #4ade80;">${this.escapeHtml(s.pickItem || '—')}</strong>
-                                ` : `
-                                  Current: <strong style="color: #fca5a5;">${this.escapeHtml(s.currentItem || '—')}</strong>
-                                  &nbsp;➔&nbsp;
-                                  Pick: <strong style="color: #4ade80;">${this.escapeHtml(s.pickItem || '—')}</strong>
-                                `)}
-                                ${s.size ? `<span style="color: #94a3b8; font-size: 9.5px;"> (${this.escapeHtml(s.size)})</span>` : ''}
-                              </span>
-                            </div>
-                            ${s.crewId ? `
-                              <div style="font-size: 10px; color: #94a3b8; margin-top: 3px; display: flex; align-items: center; gap: 5px;">
-                                <span style="color: #60a5fa;">👷 Crew ${this.escapeHtml(s.crewId)}</span>
-                                ${s.foreman ? `<span style="color: #64748b;">(${this.escapeHtml(s.foreman)})</span>` : ''}
-                              </div>
-                            ` : ''}
-                          </div>
-                        </div>
-                        <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 6px; margin-left: 4px;">
-                          ${!isDone ? `
-                            <button class="btn btn-primary" style="padding: 2px 7px; font-size: 9px; background: ${isReclaim ? '#f59e0b; color: #000;' : '#2563eb;'}; color: #fff; border: none; font-weight: 700; cursor: pointer; border-radius: 3px; white-space: nowrap;" onclick="event.stopPropagation(); window.tripPlanner.openSwapDetailsModal(${JSON.stringify(s).replace(/"/g, '&quot;')}, '${this.escapeJs(s.crewId || '')}', '${this.escapeJs(loc)}')">
-                              ${isReclaim ? '📦 Reclaim' : '🔍 Swap'}
-                            </button>
-                          ` : `
-                            <button class="btn btn-secondary" style="padding: 2px 6px; font-size: 9px; color: #a7f3d0; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.35); font-weight: 700; cursor: pointer; border-radius: 3px; white-space: nowrap;" onclick="event.stopPropagation(); window.tripPlanner.openSwapDetailsModal(${JSON.stringify(s).replace(/"/g, '&quot;')}, '${this.escapeJs(s.crewId || '')}', '${this.escapeJs(loc)}')">
-                              ✓ Done
-                            </button>
-                          `}
-                          <button class="admin-only-control" style="background: none; border: none; color: #64748b; cursor: pointer; padding: 1px 4px; font-size: 12px; line-height: 1; border-radius: 3px;" onmouseover="this.style.color='#f87171'" onmouseout="this.style.color='#64748b'" onclick="event.stopPropagation(); window.tripPlanner.unscheduleSwap('${this.escapeJs(s._sKey)}')" title="${isDone ? 'Remove completed swap from this day' : 'Remove swap from this day and return to sidebar'}">
-                            ✕
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  `;
-                }).join('')}
-              </div>
-            </div>
-          `;
-        }
-
-        // 4b. Gather scheduled Equipment Needs for this specific dateKey
+        // Gather scheduled equipment needs
         const dayScheduledEquipment = [];
         if (this.scheduledEquipmentNeeds) {
           Object.keys(this.scheduledEquipmentNeeds).forEach(eqKey => {
@@ -7839,86 +8413,7 @@ class TripPlannerApp {
           });
         }
 
-        let equipmentHtml = '';
-        if (dayScheduledEquipment.length > 0) {
-          const isEquipCollapsed = this.isSectionCollapsed(dateKey, 'equipment');
-          equipmentHtml = `
-            <div class="day-section-collapsible equipment-day-section" style="margin-bottom: 8px;">
-              <div style="font-size: 10.5px; font-weight: 800; color: #fbbf24; display: flex; align-items: center; justify-content: space-between; padding: 4px 7px; background: rgba(245, 158, 11, 0.12); border-radius: 4px; border-left: 3px solid #f59e0b; cursor: pointer; user-select: none;" onclick="window.tripPlanner.toggleSectionCollapse('${dateKey}', 'equipment')" title="Click to collapse / expand Equipment Needs">
-                <span style="display: flex; align-items: center; gap: 5px;">
-                  <span id="section-chevron-${dateKey}-equipment" style="font-size: 8px; width: 10px; display: inline-block;">${isEquipCollapsed ? '▶' : '▼'}</span>
-                  <span>🧰 Equipment Deliveries (${dayScheduledEquipment.length})</span>
-                </span>
-                <span style="font-size: 9px; color: #fde047; opacity: 0.9;">Supplies</span>
-              </div>
-              <div id="section-body-${dateKey}-equipment" style="display: ${isEquipCollapsed ? 'none' : 'flex'}; flex-direction: column; gap: 5px; margin-top: 5px;">
-                ${dayScheduledEquipment.map(item => {
-                  const isAed = (item.equipmentType || '').toLowerCase().includes('aed');
-                  const isFe = (item.equipmentType || '').toLowerCase().includes('extinguisher') || (item.equipmentType || '').toLowerCase().includes('fire');
-                  const isFa = (item.equipmentType || '').toLowerCase().includes('aid') || (item.equipmentType || '').toLowerCase().includes('eye');
-                  const icon = isAed ? '⚡' : (isFe ? '🧯' : (isFa ? '🩹' : '🚗'));
-                  const isDone = !!(item.resolved || item.isResolved || item.completed || item.isCompleted);
-                  return `
-                    <div class="scheduled-equipment-card ${isDone ? 'completed-equipment-card' : ''}" style="background: var(--bg-primary); border: 1px solid ${isDone ? 'rgba(16, 185, 129, 0.3)' : 'rgba(245, 158, 11, 0.35)'}; border-left: 4px solid ${isDone ? '#10b981' : '#f59e0b'}; border-radius: 6px; padding: 7px 9px; box-shadow: 0 1px 4px rgba(0,0,0,0.25); cursor: pointer; opacity: ${isDone ? '0.72' : '1'}; transition: all 0.15s ease;" onclick="window.tripPlanner.openEquipmentNeedPdf(${JSON.stringify(item).replace(/"/g, '&quot;')})" onmouseover="this.style.borderColor='${isDone ? '#34d399' : '#fbbf24'}';" onmouseout="this.style.borderColor='${isDone ? 'rgba(16, 185, 129, 0.3)' : 'rgba(245, 158, 11, 0.35)'}';" title="Click to view source Checklist PDF">
-                      <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 6px;">
-                        <div style="display: flex; align-items: flex-start; gap: 7px; flex: 1; min-width: 0;">
-                          <input type="checkbox" ${isDone ? 'checked' : ''} onclick="event.stopPropagation(); window.tripPlanner.toggleScheduledEquipment('${this.escapeJs(item._eqKey || item.id)}')" style="cursor: pointer; margin-top: 3px; accent-color: #10b981; width: 14px; height: 14px;" title="${isDone ? 'Delivered (click to revert)' : 'Click to mark delivered'}">
-                          <div style="flex: 1; min-width: 0;">
-                            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 2px;">
-                              <span style="font-weight: 700; font-size: 12px; color: ${isDone ? '#94a3b8' : '#f8fafc'}; text-decoration: ${isDone ? 'line-through' : 'none'}; display: flex; align-items: center; gap: 4px;">
-                                <span>${icon}</span> ${item.equipmentType === 'AED' && (/needs\s*aed\s*pads/i.test(item.notes || '') || (item.desc || '').toLowerCase() === 'needs aed pads') ? 'Needs AED Pads' : this.escapeHtml(item.equipmentType)}
-                              </span>
-                              <div style="display: flex; align-items: center; gap: 4px;">
-                                ${isDone ? `
-                                  <span class="badge" style="background: rgba(16, 185, 129, 0.25); color: #a7f3d0; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 9px; font-weight: 800; padding: 1px 5px; border-radius: 3px;">
-                                    ✅ Delivered${item.completedDate ? ` (${this.escapeHtml(item.completedDate)})` : ''}
-                                  </span>
-                                ` : ''}
-                                ${item.vehicleNumber ? `
-                                  <span class="badge" style="background: rgba(234, 179, 8, 0.2); color: #fde047; font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px;">
-                                    🚛 Unit ${this.escapeHtml(item.vehicleNumber)}
-                                  </span>
-                                ` : ''}
-                              </div>
-                            </div>
-                            <div style="font-size: 11px; color: ${isDone ? '#94a3b8' : '#cbd5e1'}; text-decoration: ${isDone ? 'line-through' : 'none'}; margin-bottom: 3px; line-height: 1.3;">
-                              ${this.escapeHtml(item.notes || 'Equipment defect / need')}
-                            </div>
-                            <div style="font-size: 10px; color: #94a3b8; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
-                              <span style="color: #60a5fa;">👷 Crew ${this.escapeHtml(item.crewId)}</span>
-                              ${item.foreman ? `<span style="color: #94a3b8;">(${this.escapeHtml(item.foreman)})</span>` : ''}
-                              ${item.location ? `<span style="color: #93c5fd;">📍 ${this.escapeHtml(item.location)}</span>` : ''}
-                              <span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.3); font-size: 8.5px; padding: 1px 4px; border-radius: 3px; font-weight: 700;" title="Click to view source Checklist PDF">
-                                📄 View PDF
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                        <div style="display: flex; flex-direction: column; align-items: flex-end; gap: 5px; margin-left: 4px;">
-                          ${!isDone ? `
-                            <button class="btn btn-secondary" style="padding: 2px 6px; font-size: 9px; color: #a7f3d0; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.35); font-weight: 700; cursor: pointer; border-radius: 3px; white-space: nowrap;" onclick="event.stopPropagation(); window.tripPlanner.markEquipmentNeedResolved(${JSON.stringify(item).replace(/"/g, '&quot;')})" title="Mark Delivered & Resolved">
-                              ✅ Delivered
-                            </button>
-                          ` : `
-                            <button class="btn btn-secondary" style="padding: 2px 6px; font-size: 9px; color: #a7f3d0; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.35); font-weight: 700; cursor: pointer; border-radius: 3px; white-space: nowrap;" onclick="event.stopPropagation(); window.tripPlanner.toggleScheduledEquipment('${this.escapeJs(item._eqKey || item.id)}')" title="Click to revert">
-                              ✓ Done
-                            </button>
-                          `}
-                          <button class="admin-only-control" style="background: none; border: none; color: #64748b; cursor: pointer; padding: 1px 4px; font-size: 12px; line-height: 1; border-radius: 3px;" onmouseover="this.style.color='#f87171'" onmouseout="this.style.color='#64748b'" onclick="event.stopPropagation(); window.tripPlanner.unscheduleEquipmentNeed('${this.escapeJs(item._eqKey)}')" title="Remove from this day and return to sidebar">
-                            ✕
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  `;
-                }).join('')}
-              </div>
-            </div>
-          `;
-        }
-
-        // 5. Render Tasks (Sidebar Locations, Crews, & Full Field Trips)
-        let tasksHtml = '';
+        // Calculate summary counters for Day Header badges
         let totalCrewTasksCount = 0;
         let dayPickedCount = dayScheduledSwaps.length;
         trips.forEach(trip => {
@@ -7931,109 +8426,351 @@ class TripPlannerApp {
             });
           }
         });
+        const totalTrainings = trainingClasses.length + dayScheduledTrainings.length;
+        const pendingTrainingsCount = trainingClasses.filter(m => m.status !== 'Complete').length + dayScheduledTrainings.filter(t => !t.isCompleted).length;
 
-        if (trips.length > 0) {
-          const isCollapsed = this.isSectionCollapsed(dateKey, 'tasks');
-          tasksHtml = `
-            <div class="day-section-collapsible tasks-day-section" style="margin-bottom: 8px;">
-              <div style="font-size: 10.5px; font-weight: 800; color: #38bdf8; display: flex; align-items: center; justify-content: space-between; padding: 4px 7px; background: rgba(56, 189, 248, 0.12); border-radius: 4px; border-left: 3px solid #38bdf8; cursor: pointer; user-select: none;" onclick="window.tripPlanner.toggleSectionCollapse('${dateKey}', 'tasks')" title="Click to collapse / expand Tasks">
-                <span style="display: flex; align-items: center; gap: 5px;">
-                  <span id="section-chevron-${dateKey}-tasks" style="font-size: 8px; width: 10px; display: inline-block;">${isCollapsed ? '▶' : '▼'}</span>
-                  <span>📋 Tasks (${totalCrewTasksCount > 0 ? `${totalCrewTasksCount} Tasks · ` : ''}${trips.length} ${trips.length === 1 ? 'Location' : 'Locations'})</span>
-                </span>
-                <span style="font-size: 9px; color: #7dd3fc; opacity: 0.85;">Crews & PPE</span>
-              </div>
-              <div id="section-body-${dateKey}-tasks" style="display: ${isCollapsed ? 'none' : 'flex'}; flex-direction: column; gap: 6px; margin-top: 5px;">
-                ${trips.map(trip => {
-                  const locInfo = locMap[trip.location] || null;
-                  const drive = this.getDriveTime(trip.location);
+        // 2. Build Hierarchy: Group tasks by Location, then Crew, then Task Type (Cities, Swaps, Equipment, Training)
+        const locationGroups = {};
 
-                  return `
-                    <div class="location-card" draggable="true" data-date="${dateKey}" data-location="${this.escapeHtml(trip.location)}" style="border-left: 4px solid #38bdf8; background: var(--bg-primary); margin-bottom: 4px;">
-                      <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 6px;">
-                        <div class="location-card-title" style="color: #60a5fa; font-size: 13.5px; font-weight: 800; display: flex; align-items: center; gap: 4px;">
-                          📍 ${this.escapeHtml(trip.location)}
-                        </div>
-                        <span class="badge" style="background: rgba(56, 189, 248, 0.2); color: #38bdf8; font-size: 10px; font-weight: 700; padding: 2px 6px; border-radius: 4px;">
-                          🚗 ${this.escapeHtml(drive.time)}
-                        </span>
-                      </div>
-                      
-                      <div class="location-card-meta" style="line-height: 1.4; margin-bottom: 6px;">
-                        <div style="color: #94a3b8; font-size: 10.5px;">Distance: <strong>${this.escapeHtml(drive.desc)}</strong></div>
-                        ${locInfo && locInfo.activeCrews.length > 0 ? `
-                          <div style="margin-top: 6px; padding-top: 6px; border-top: 1px solid rgba(255,255,255,0.08);">
-                            <div style="font-size: 11px; font-weight: 700; color: #4ade80; margin-bottom: 6px;">
-                              🟢 Active Crews & Tasks (${locInfo.activeCrews.length}):
-                            </div>
-                            ${locInfo.activeCrews.map(c => {
-                              const crewTasks = window.taskManager ? window.taskManager.getTasksByCrew(c.crewId, weekMonday) : [];
-                              const summary = this.getCrewTaskSummary(crewTasks);
+        const getLocGroup = (locName) => {
+          let cleanLoc = locName ? String(locName).trim() : 'Helena';
+          if (!cleanLoc || this.isStatusLocation(cleanLoc)) {
+            cleanLoc = 'Helena';
+          }
+          if (!locationGroups[cleanLoc]) {
+            locationGroups[cleanLoc] = {
+              location: cleanLoc,
+              drive: this.getDriveTime(cleanLoc),
+              crews: {},
+              locationCities: []
+            };
+          }
+          return locationGroups[cleanLoc];
+        };
 
-                              return `
-                                <div class="crew-task-box" onclick="window.tripPlanner.openCrewTasksModal('${this.escapeHtml(c.crewId)}', '${this.escapeHtml(trip.location)}', 'All', '${dateKey}', false)" title="Click to view all tasks for Crew ${this.escapeHtml(c.crewId)}">
-                                  <div style="font-size: 11px; color: #cbd5e1; display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-                                    <span><strong style="color: #60a5fa;">Crew ${this.escapeHtml(c.crewId)}</strong> (${this.escapeHtml(c.foreman)})</span>
-                                    <div style="display: flex; align-items: center; gap: 4px;">
-                                      ${summary.overdue > 0 ? `
-                                        <span class="badge" style="background: #ef4444; color: #fff; font-size: 9px; font-weight: 700; padding: 1px 4px; border-radius: 3px;">
-                                          🔴 ${summary.overdue}
-                                        </span>
-                                      ` : ''}
-                                      <span class="badge" style="background: ${summary.total > 0 ? 'rgba(59, 130, 246, 0.25)' : 'rgba(16, 185, 129, 0.2)'}; color: ${summary.total > 0 ? '#93c5fd' : '#4ade80'}; font-size: 9px; font-weight: 700; padding: 1px 5px;">
-                                        ${summary.total > 0 ? `${summary.total} Tasks 🔍` : '✓ Current'}
-                                      </span>
-                                    </div>
-                                  </div>
+        const getCrewGroup = (locName, crewId, foremanHint) => {
+          const lg = getLocGroup(locName);
+          let cId = crewId ? String(crewId).trim() : 'Unassigned';
+          if (!cId) cId = 'Unassigned';
+          if (!lg.crews[cId]) {
+            let foreman = foremanHint || '';
+            if (!foreman || foreman.toLowerCase() === 'foreman') {
+              const cInfo = this.getCrewInfo(cId, '', locName);
+              if (cInfo && cInfo.foreman && cInfo.foreman.toLowerCase() !== 'foreman') {
+                foreman = cInfo.foreman;
+              }
+            }
+            lg.crews[cId] = {
+              crewId: cId,
+              foreman: foreman || (cId === 'Unassigned' || cId === 'Office / Personal' || cId === 'DOT Drug Tests' ? '' : 'Foreman'),
+              tasks: {
+                cities: [],
+                swaps: [],
+                equipment: [],
+                training: [],
+                office: [],
+                drug_tests: []
+              }
+            };
+          }
+          return lg.crews[cId];
+        };
 
-                                  <!-- Task Count Overview Pills -->
-                                  <div style="display: flex; flex-wrap: wrap; gap: 3px; margin-top: 3px;">
-                                    ${summary.gloves > 0 ? `<span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; font-size: 9px; padding: 1px 4px; border: 1px solid rgba(59, 130, 246, 0.3);">🧤 ${summary.gloves}</span>` : ''}
-                                    ${summary.sleeves > 0 ? `<span class="badge" style="background: rgba(168, 85, 247, 0.15); color: #d8b4fe; font-size: 9px; padding: 1px 4px; border: 1px solid rgba(168, 85, 247, 0.3);">🧤 ${summary.sleeves}</span>` : ''}
-                                    ${summary.blankets > 0 ? `<span class="badge" style="background: rgba(236, 72, 153, 0.15); color: #f472b6; font-size: 9px; padding: 1px 4px; border: 1px solid rgba(236, 72, 153, 0.3);">🛏️ ${summary.blankets}</span>` : ''}
-                                    ${summary.macks > 0 ? `<span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fcd34d; font-size: 9px; padding: 1px 4px; border: 1px solid rgba(245, 158, 11, 0.3);">⚡ ${summary.macks}</span>` : ''}
-                                    ${summary.equipment > 0 ? `<span class="badge" style="background: rgba(20, 184, 166, 0.15); color: #5eead4; font-size: 9px; padding: 1px 4px; border: 1px solid rgba(20, 184, 166, 0.3);">🧰 ${summary.equipment}</span>` : ''}
-                                    ${summary.certs > 0 ? `<span class="badge" style="background: rgba(239, 68, 68, 0.15); color: #fca5a5; font-size: 9px; padding: 1px 4px; border: 1px solid rgba(239, 68, 68, 0.3);">📜 ${summary.certs}</span>` : ''}
-                                    ${summary.reports > 0 ? `<span class="badge" style="background: rgba(249, 115, 22, 0.15); color: #fdba74; font-size: 9px; padding: 1px 4px; border: 1px solid rgba(249, 115, 22, 0.3);">📋 ${summary.reports}</span>` : ''}
-                                    ${summary.drugTests > 0 ? `<span class="badge" style="background: rgba(139, 92, 246, 0.15); color: #c084fc; font-size: 9px; padding: 1px 4px; border: 1px solid rgba(139, 92, 246, 0.3);">🧪 ${summary.drugTests}</span>` : ''}
-                                    ${summary.total === 0 ? `<span style="font-size: 9px; color: #94a3b8; font-style: italic;">✓ No pending tasks</span>` : ''}
-                                  </div>
-                                </div>
-                              `;
-                            }).join('')}
-                          </div>
-                        ` : `
-                          <div style="margin-top: 4px; font-size: 11px; color: #94a3b8;">Base / Non-crew visit</div>
-                        `}
-                      </div>
+        // Group Scheduled City Trips
+        trips.forEach(trip => {
+          const loc = trip.location || 'Helena';
+          const lg = getLocGroup(loc);
+          if (trip.crew) {
+            const cg = getCrewGroup(loc, trip.crew);
+            cg.tasks.cities.push(trip);
+          } else {
+            lg.locationCities.push(trip);
+          }
+        });
 
-                      <div style="display: flex; justify-content: flex-end; margin-top: 4px;">
-                        <button class="btn btn-secondary admin-only-control" style="padding: 2px 7px; font-size: 9.5px; color: #f87171; border: 1px solid rgba(239, 68, 68, 0.3);" onclick="window.tripPlanner.removeTrip('${dateKey}', '${this.escapeHtml(trip.location)}')">❌ Remove</button>
-                      </div>
-                    </div>
-                  `;
-                }).join('')}
+        // Group Scheduled Swaps
+        dayScheduledSwaps.forEach(s => {
+          let loc = s.location;
+          if (!loc || this.isStatusLocation(loc)) {
+            const cInfo = this.getCrewInfo(s.crewId, s.employeeName, '');
+            loc = (cInfo && cInfo.location) || 'Helena';
+          }
+          const crewId = s.crewId || s.jobNum || 'Unassigned';
+          const cg = getCrewGroup(loc, crewId, s.foreman);
+          cg.tasks.swaps.push(s);
+        });
 
-                ${!isHoliday ? `
-                  <div style="color: var(--text-muted); font-size: 10.5px; text-align: center; border: 1px dashed rgba(255,255,255,0.1); border-radius: 6px; padding: 6px; opacity: 0.85;">
-                    + Drop another city from sidebar
-                  </div>
-                ` : ''}
-              </div>
-            </div>
-          `;
-        } else {
-          const hasOtherSections = (drugTests.length > 0) || (totalTrainings > 0) || (personalTasks.length > 0) || (dayScheduledSwaps.length > 0) || (dayScheduledEquipment.length > 0);
-          tasksHtml = `
-            <div class="tasks-drop-placeholder" style="margin-top: ${hasOtherSections ? '4px' : '20px'};">
-              <div style="color: var(--text-muted); font-size: 11px; text-align: center; border: 1px dashed var(--border-color); border-radius: 6px; padding: ${hasOtherSections ? '8px 6px' : '14px 10px'};">
+        // Group Scheduled Equipment Needs
+        dayScheduledEquipment.forEach(eq => {
+          let loc = eq.location;
+          if (!loc || this.isStatusLocation(loc)) {
+            const cInfo = this.getCrewInfo(eq.crewId, eq.foreman, '');
+            loc = (cInfo && cInfo.location) || 'Helena';
+          }
+          const crewId = eq.crewId || 'Unassigned';
+          const cg = getCrewGroup(loc, crewId, eq.foreman);
+          cg.tasks.equipment.push(eq);
+        });
+
+        // Group Scheduled Trainings
+        dayScheduledTrainings.forEach(tr => {
+          let loc = tr.location;
+          if (!loc || this.isStatusLocation(loc)) {
+            const cInfo = this.getCrewInfo(tr.crewId, tr.lead, '');
+            loc = (cInfo && cInfo.location) || 'Helena';
+          }
+          const crewId = tr.crewId || 'Unassigned';
+          const cg = getCrewGroup(loc, crewId, tr.lead);
+          cg.tasks.training.push({ ...tr, _itemType: 'training_need' });
+        });
+
+        // Group Scheduled Cert Classes
+        trainingClasses.forEach(mt => {
+          const resolved = this.resolveClassAttendees(mt);
+          let loc = mt.location;
+          if (!loc && resolved.crews && resolved.crews.length > 0 && resolved.crews[0].location) {
+            loc = resolved.crews[0].location;
+          }
+          if (!loc) loc = 'Helena';
+          const crewId = (resolved.crewIds && resolved.crewIds[0]) || mt.crewId || 'Unassigned';
+          const foreman = (resolved.crews && resolved.crews[0] && resolved.crews[0].foreman) || '';
+          const cg = getCrewGroup(loc, crewId, foreman);
+          cg.tasks.training.push({ ...mt, _itemType: 'cert_class', resolved });
+        });
+
+        // Group Monthly Trainings
+        monthlyTrainings.forEach(tr => {
+          let loc = tr.location;
+          if (!loc) {
+            const cInfo = this.getCrewInfo(tr.crewId, tr.lead, '');
+            loc = (cInfo && cInfo.location) || 'Helena';
+          }
+          const crewId = tr.crewId || 'Unassigned';
+          const cg = getCrewGroup(loc, crewId, tr.lead);
+          cg.tasks.training.push({ ...tr, _itemType: 'monthly_training' });
+        });
+
+        // Group Personal / Office Tasks
+        personalTasks.forEach(mt => {
+          const loc = mt.location || 'Helena';
+          const cg = getCrewGroup(loc, 'Office / Personal', '');
+          cg.tasks.office.push(mt);
+        });
+
+        // Group Drug Tests
+        drugTests.forEach(dt => {
+          const loc = dt.clinicCity || dt.location || (dt.meetingAddr ? this.cleanPhysicalLocation(dt.meetingAddr) : '') || 'Helena';
+          const crewId = dt.job || 'DOT Drug Tests';
+          const cg = getCrewGroup(loc, crewId, '');
+          cg.tasks.drug_tests.push(dt);
+        });
+
+        // 3. Render Cards HTML sorted by Location, then Crew, then Task Type (Cities, Swaps, Equipment, Training)
+        const presentLocs = Object.keys(locationGroups);
+        const orderedLocs = this.getOrderedLocations(dateKey, presentLocs);
+        let cardsHtml = '';
+
+        if (orderedLocs.length === 0) {
+          cardsHtml = `
+            <div class="tasks-drop-placeholder" style="margin-top: 20px;">
+              <div style="color: var(--text-muted); font-size: 11px; text-align: center; border: 1px dashed var(--border-color); border-radius: 6px; padding: 14px 10px;">
                 ${isHoliday ? '🏖️ Holiday Day' : '+ Drop city / crew tasks from sidebar'}
               </div>
             </div>
           `;
-        }
+        } else {
+          cardsHtml = orderedLocs.map((locName, locIdx) => {
+            const lg = locationGroups[locName];
+            const safeLoc = this.safeKey(locName);
+            const locSectionKey = `loc_${safeLoc}`;
+            const isLocCollapsed = this.isSectionCollapsed(dateKey, locSectionKey);
+            const drive = lg.drive || this.getDriveTime(locName);
 
-        const cardsHtml = drugTestsHtml + trainingHtml + officeHtml + swapsHtml + equipmentHtml + tasksHtml;
+            // Calculate total tasks in this location and check if all are office tasks
+            const presentCrews = Object.keys(lg.crews);
+            const orderedCrews = this.getOrderedCrews(dateKey, locName, presentCrews);
+            let locTasksCount = lg.locationCities.length;
+            let totalSwapsInLoc = 0;
+            let totalOfficeSwapsInLoc = 0;
+            let otherTasksInLoc = lg.locationCities.length;
+
+            orderedCrews.forEach(cId => {
+              const cg = lg.crews[cId];
+              locTasksCount += cg.tasks.cities.length + cg.tasks.swaps.length + cg.tasks.equipment.length + cg.tasks.training.length + cg.tasks.office.length + cg.tasks.drug_tests.length;
+              otherTasksInLoc += cg.tasks.cities.length + cg.tasks.equipment.length + cg.tasks.training.length + cg.tasks.office.length + cg.tasks.drug_tests.length;
+              totalSwapsInLoc += cg.tasks.swaps.length;
+              totalOfficeSwapsInLoc += cg.tasks.swaps.filter(s => {
+                const oi = this.getSwapOfficeTaskInfo(s, dateKey);
+                return !!oi.isOfficeTask;
+              }).length;
+            });
+
+            const isLocationAllOffice = totalSwapsInLoc > 0 && totalSwapsInLoc === totalOfficeSwapsInLoc && otherTasksInLoc === 0;
+
+            // Render City Overview Card(s) under Cities
+            let citiesHtml = '';
+            if (lg.locationCities.length > 0) {
+              const locInfo = locMap[locName] || null;
+              citiesHtml = lg.locationCities.map(trip => this.renderCityCardHtml(trip, dateKey, locInfo, drive, weekMonday)).join('');
+            }
+
+            // Render Crew Sections
+            const crewsHtml = orderedCrews.map((cId, crewIdx) => {
+              const cg = lg.crews[cId];
+              const safeCrew = this.safeKey(cId);
+              const crewSectionKey = `crew_${safeLoc}_${safeCrew}`;
+              const isCrewCollapsed = this.isSectionCollapsed(dateKey, crewSectionKey);
+
+              const crewTotalTasks = cg.tasks.cities.length + cg.tasks.swaps.length + cg.tasks.equipment.length + cg.tasks.training.length + cg.tasks.office.length + cg.tasks.drug_tests.length;
+              const crewSwapsOfficeCount = cg.tasks.swaps.filter(s => {
+                const oi = this.getSwapOfficeTaskInfo(s, dateKey);
+                return !!oi.isOfficeTask;
+              }).length;
+              const isCrewAllOffice = cg.tasks.swaps.length > 0 && cg.tasks.swaps.length === crewSwapsOfficeCount && (cg.tasks.cities.length + cg.tasks.equipment.length + cg.tasks.training.length + cg.tasks.office.length + cg.tasks.drug_tests.length === 0);
+
+              // Render tasks inside crew sorted by type: (Cities, Swaps, Equipment, Training, Office, Drug Tests)
+              let crewTasksHtml = '';
+
+              // 1. Cities
+              if (cg.tasks.cities.length > 0) {
+                const locInfo = locMap[locName] || null;
+                crewTasksHtml += cg.tasks.cities.map(trip => this.renderCityCardHtml(trip, dateKey, locInfo, drive, weekMonday)).join('');
+              }
+
+              // 2. Swaps
+              if (cg.tasks.swaps.length > 0) {
+                crewTasksHtml += cg.tasks.swaps.map(s => this.renderScheduledSwapCardHtml(s, dateKey)).join('');
+              }
+
+              // 3. Equipment
+              if (cg.tasks.equipment.length > 0) {
+                crewTasksHtml += cg.tasks.equipment.map(item => this.renderEquipmentCardHtml(item, dateKey)).join('');
+              }
+
+              // 4. Training
+              if (cg.tasks.training.length > 0) {
+                crewTasksHtml += cg.tasks.training.map(tr => {
+                  if (tr._itemType === 'cert_class') {
+                    return this.renderCertClassCardHtml(tr, dateKey);
+                  } else if (tr._itemType === 'monthly_training') {
+                    return this.renderMonthlyTrainingCardHtml(tr, dateKey);
+                  } else {
+                    return this.renderTrainingNeedCardHtml(tr, dateKey);
+                  }
+                }).join('');
+              }
+
+              // 5. Office
+              if (cg.tasks.office.length > 0) {
+                crewTasksHtml += cg.tasks.office.map((mt, idx) => this.renderPersonalTaskCardHtml(mt, dateKey, idx, cg.tasks.office.length)).join('');
+              }
+
+              // 6. Drug Tests
+              if (cg.tasks.drug_tests.length > 0) {
+                crewTasksHtml += cg.tasks.drug_tests.map(dt => this.renderDrugTestCardHtml(dt, dateKey)).join('');
+              }
+
+              // Crew Header Title
+              let crewTitle = `Crew ${this.escapeHtml(cId)}`;
+              if (cId === 'Unassigned') crewTitle = 'Unassigned Items';
+              else if (cId === 'Office / Personal') crewTitle = 'Office / Personal Tasks';
+              else if (cId === 'DOT Drug Tests') crewTitle = 'DOT Drug Tests';
+
+              return `
+                <div class="day-section-collapsible crew-day-section" data-crew="${this.escapeHtml(cId)}" style="margin-bottom: 6px; background: rgba(15, 23, 42, 0.45); border-radius: 6px; padding: 4px; border: 1px solid rgba(255, 255, 255, 0.06);">
+                  <div style="font-size: 10px; font-weight: 700; color: #93c5fd; display: flex; align-items: center; justify-content: space-between; padding: 4px 6px; background: rgba(59, 130, 246, 0.12); border-radius: 4px; border-left: 3px solid #3b82f6; cursor: pointer; user-select: none;"
+                       draggable="true"
+                       ondragstart="window.tripPlanner.handleSectionDragStart(event, 'crew', '${dateKey}', '${this.escapeJs(locName)}', '${this.escapeJs(cId)}')"
+                       ondragover="window.tripPlanner.handleSectionDragOver(event)"
+                       ondrop="window.tripPlanner.handleSectionDrop(event, 'crew', '${dateKey}', '${this.escapeJs(locName)}', '${this.escapeJs(cId)}')"
+                       onclick="window.tripPlanner.toggleSectionCollapse('${dateKey}', '${crewSectionKey}')"
+                       title="Click to collapse / expand ${this.escapeHtml(crewTitle)}. Drag or use arrows to reorder.">
+                    <span style="display: flex; align-items: center; gap: 5px; min-width: 0; flex-wrap: wrap;">
+                      <span id="section-chevron-${dateKey}-${crewSectionKey}" style="font-size: 8px; width: 9px; display: inline-block;">${isCrewCollapsed ? '▶' : '▼'}</span>
+                      <span style="font-weight: 800; color: #f8fafc;">👷 ${crewTitle}</span>
+                      ${cg.foreman ? `<span style="color: #94a3b8; font-size: 9.5px;">(${this.escapeHtml(cg.foreman)})</span>` : ''}
+                      <span class="badge" style="background: rgba(59, 130, 246, 0.25); color: #bfdbfe; font-size: 8.5px; padding: 1px 4px; border-radius: 3px; font-weight: 800;">
+                        ${crewTotalTasks} ${crewTotalTasks === 1 ? 'task' : 'tasks'}
+                      </span>
+                      ${isCrewAllOffice ? `<span class="badge" style="background: rgba(147, 51, 234, 0.2); color: #d8b4fe; border: 1px solid rgba(147, 51, 234, 0.35); font-size: 8px; padding: 1px 3px;">🏢 Office</span>` : ''}
+                      ${cg.tasks.swaps.length > 0 ? `<span class="badge" style="background: rgba(59, 130, 246, 0.2); color: #93c5fd; font-size: 8px; padding: 1px 3px;">🧤 ${cg.tasks.swaps.length}</span>` : ''}
+                      ${cg.tasks.equipment.length > 0 ? `<span class="badge" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; font-size: 8px; padding: 1px 3px;">🧰 ${cg.tasks.equipment.length}</span>` : ''}
+                      ${cg.tasks.training.length > 0 ? `<span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; font-size: 8px; padding: 1px 3px;">🎓 ${cg.tasks.training.length}</span>` : ''}
+                    </span>
+                    <div style="display: flex; align-items: center; gap: 2px;" onclick="event.stopPropagation()">
+                      ${orderedCrews.length > 1 ? `
+                        <button class="reorder-btn" style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); color: ${crewIdx > 0 ? '#60a5fa' : '#475569'}; cursor: ${crewIdx > 0 ? 'pointer' : 'default'}; padding: 0 4px; font-size: 9px; line-height: 1.3; border-radius: 3px;"
+                                ${crewIdx > 0 ? `onclick="window.tripPlanner.moveCrewOrder('${dateKey}', '${this.escapeJs(locName)}', '${this.escapeJs(cId)}', -1)" title="Move Crew Up"` : 'disabled'}>
+                          ▲
+                        </button>
+                        <button class="reorder-btn" style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); color: ${crewIdx < orderedCrews.length - 1 ? '#60a5fa' : '#475569'}; cursor: ${crewIdx < orderedCrews.length - 1 ? 'pointer' : 'default'}; padding: 0 4px; font-size: 9px; line-height: 1.3; border-radius: 3px;"
+                                ${crewIdx < orderedCrews.length - 1 ? `onclick="window.tripPlanner.moveCrewOrder('${dateKey}', '${this.escapeJs(locName)}', '${this.escapeJs(cId)}', 1)" title="Move Crew Down"` : 'disabled'}>
+                          ▼
+                        </button>
+                      ` : ''}
+                    </div>
+                  </div>
+                  <div id="section-body-${dateKey}-${crewSectionKey}" style="display: ${isCrewCollapsed ? 'none' : 'flex'}; flex-direction: column; gap: 5px; margin-top: 5px;">
+                    ${crewTasksHtml}
+                  </div>
+                </div>
+              `;
+            }).join('');
+
+            return `
+              <div class="day-section-collapsible location-day-section" data-loc="${this.escapeHtml(locName)}" style="margin-bottom: 10px;">
+                <div style="font-size: 11px; font-weight: 800; color: #38bdf8; display: flex; align-items: center; justify-content: space-between; padding: 5px 8px; background: rgba(56, 189, 248, 0.12); border-radius: 5px; border-left: 3.5px solid #0284c7; cursor: pointer; user-select: none;"
+                     draggable="true"
+                     ondragstart="window.tripPlanner.handleSectionDragStart(event, 'location', '${dateKey}', '${this.escapeJs(locName)}')"
+                     ondragover="window.tripPlanner.handleSectionDragOver(event)"
+                     ondrop="window.tripPlanner.handleSectionDrop(event, 'location', '${dateKey}', '${this.escapeJs(locName)}')"
+                     onclick="window.tripPlanner.toggleSectionCollapse('${dateKey}', '${locSectionKey}')"
+                     title="Click to collapse / expand ${this.escapeHtml(locName)}. Drag or use arrows to reorder.">
+                  <span style="display: flex; align-items: center; gap: 6px; min-width: 0; flex-wrap: wrap;">
+                    <span id="section-chevron-${dateKey}-${locSectionKey}" style="font-size: 8px; width: 10px; display: inline-block;">${isLocCollapsed ? '▶' : '▼'}</span>
+                    <span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">📍 ${this.escapeHtml(locName)}</span>
+                    <span class="badge" style="background: rgba(56, 189, 248, 0.22); color: #7dd3fc; font-size: 9px; padding: 1px 5px; border-radius: 3px; font-weight: 800;">
+                      ${locTasksCount} ${locTasksCount === 1 ? 'Task' : 'Tasks'}
+                    </span>
+                    ${drive && drive.time ? (isLocationAllOffice ? `
+                      <span class="badge" style="background: rgba(147, 51, 234, 0.2); color: #d8b4fe; border: 1px solid rgba(147, 51, 234, 0.4); font-size: 8.5px; padding: 1px 5px; border-radius: 3px;" title="All tasks in ${this.escapeHtml(locName)} were handled in the office / shop (no driving required)">
+                        🏢 In Office / Shop (No Travel)
+                      </span>
+                    ` : `
+                      <span class="badge" style="background: rgba(255, 255, 255, 0.08); color: #cbd5e1; font-size: 8.5px; padding: 1px 4px; border-radius: 3px;">
+                        🚗 ${this.escapeHtml(drive.time)}
+                      </span>
+                    `) : ''}
+                  </span>
+                  <div style="display: flex; align-items: center; gap: 3px;" onclick="event.stopPropagation()">
+                    ${orderedLocs.length > 1 ? `
+                      <button class="reorder-btn" style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); color: ${locIdx > 0 ? '#38bdf8' : '#475569'}; cursor: ${locIdx > 0 ? 'pointer' : 'default'}; padding: 0 4px; font-size: 10px; line-height: 1.3; border-radius: 3px;"
+                              ${locIdx > 0 ? `onclick="window.tripPlanner.moveLocationOrder('${dateKey}', '${this.escapeJs(locName)}', -1)" title="Move Location Up"` : 'disabled'}>
+                        ▲
+                      </button>
+                      <button class="reorder-btn" style="background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.12); color: ${locIdx < orderedLocs.length - 1 ? '#38bdf8' : '#475569'}; cursor: ${locIdx < orderedLocs.length - 1 ? 'pointer' : 'default'}; padding: 0 4px; font-size: 10px; line-height: 1.3; border-radius: 3px;"
+                              ${locIdx < orderedLocs.length - 1 ? `onclick="window.tripPlanner.moveLocationOrder('${dateKey}', '${this.escapeJs(locName)}', 1)" title="Move Location Down"` : 'disabled'}>
+                        ▼
+                      </button>
+                    ` : ''}
+                  </div>
+                </div>
+                <div id="section-body-${dateKey}-${locSectionKey}" style="display: ${isLocCollapsed ? 'none' : 'flex'}; flex-direction: column; gap: 6px; margin-top: 6px; padding-left: 2px;">
+                  ${citiesHtml}
+                  ${crewsHtml}
+                </div>
+              </div>
+            `;
+          }).join('');
+
+          if (!isHoliday) {
+            cardsHtml += `
+              <div style="color: var(--text-muted); font-size: 10px; text-align: center; border: 1px dashed rgba(255,255,255,0.08); border-radius: 6px; padding: 5px; opacity: 0.8; margin-top: 4px;">
+                + Drop city / crew tasks from sidebar
+              </div>
+            `;
+          }
+        }
 
         col.innerHTML = `
           <div class="day-header" style="background: ${isHoliday ? 'linear-gradient(90deg, #854d0e 0%, #1e293b 100%)' : (drugTests.length > 0 ? 'linear-gradient(90deg, rgba(88, 28, 135, 0.4) 0%, #1e293b 100%)' : '#1e293b')};">
@@ -8104,6 +8841,9 @@ class TripPlannerApp {
             if (rawData) {
               try {
                 const payload = JSON.parse(rawData);
+                if (payload.type === 'reorder_section') {
+                  return; // Reordering is handled directly by header ondrop
+                }
                 this.handleSwapOrLocationDrop(dateKey, payload);
                 return;
               } catch { /* fallback to text/plain */ }
@@ -8115,7 +8855,38 @@ class TripPlannerApp {
           });
         }
 
-        // Setup dragstart for scheduled swap cards so they can be moved between days
+        // Setup dragstart for scheduled equipment cards
+        col.querySelectorAll('.scheduled-equipment-card').forEach(ecEl => {
+          ecEl.setAttribute('draggable', 'true');
+          ecEl.addEventListener('dragstart', (e) => {
+            const eqKey = ecEl.getAttribute('data-eqkey');
+            const foundItem = dayScheduledEquipment.find(eq => (eq._eqKey || eq.id) === eqKey);
+            if (foundItem) {
+              e.dataTransfer.setData('application/json', JSON.stringify({
+                type: 'equipment_need',
+                location: foundItem.location || '',
+                item: foundItem
+              }));
+            }
+          });
+        });
+
+        // Setup dragstart for scheduled training cards
+        col.querySelectorAll('.scheduled-training-card').forEach(tcEl => {
+          tcEl.setAttribute('draggable', 'true');
+          tcEl.addEventListener('dragstart', (e) => {
+            const trKey = tcEl.getAttribute('data-trkey');
+            const foundTr = dayScheduledTrainings.find(tr => (tr._trKey || tr.id) === trKey);
+            if (foundTr) {
+              e.dataTransfer.setData('application/json', JSON.stringify({
+                type: 'training_need',
+                location: foundTr.location || '',
+                training: foundTr
+              }));
+            }
+          });
+        });
+
         col.querySelectorAll('.scheduled-swap-card').forEach(scEl => {
           scEl.addEventListener('dragstart', (e) => {
             const sKey = scEl.getAttribute('data-skey');
@@ -8471,8 +9242,30 @@ class TripPlannerApp {
           itemClass = String(itRow['Class']).trim();
         }
         const status = String(r['Status'] || (isReclaim ? 'Return to Shelf' : 'Ready For Delivery 🚚')).trim();
-        const changeOutDate = r['Change Out Date'] || '';
-        const daysLeft = r['Days Left'] !== undefined ? r['Days Left'] : (isReclaim ? 'PREV EMP' : '');
+        let changeOutDate = String(r['Change Out Date'] || r['Change-Out Date'] || r['Due Date'] || (itRow && itRow['Change Out Date']) || '').trim();
+        let daysLeft = (r['Days Left'] !== undefined && r['Days Left'] !== '') ? r['Days Left'] : (r['Days Remaining'] !== undefined && r['Days Remaining'] !== '' ? r['Days Remaining'] : (itRow && itRow['Days Left'] !== undefined && itRow['Days Left'] !== '' ? itRow['Days Left'] : (isReclaim ? 'PREV EMP' : '')));
+
+        if (!changeOutDate && itRow && !isReclaim) {
+          const baseDate = itRow['Date Assigned'] || itRow['Test Date'];
+          if (baseDate) {
+            const bObj = this.parseDate(baseDate);
+            if (bObj && !isNaN(bObj.getTime())) {
+              const projected = new Date(bObj);
+              projected.setMonth(projected.getMonth() + 3);
+              changeOutDate = `${String(projected.getMonth() + 1).padStart(2, '0')}/${String(projected.getDate()).padStart(2, '0')}/${projected.getFullYear()}`;
+            }
+          }
+        }
+
+        if ((daysLeft === '' || daysLeft === undefined || daysLeft === null) && changeOutDate && !isReclaim) {
+          const dObj = this.parseDate(changeOutDate);
+          if (dObj && !isNaN(dObj.getTime())) {
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const targetMid = new Date(dObj.getFullYear(), dObj.getMonth(), dObj.getDate());
+            daysLeft = Math.round((targetMid - today) / (1000 * 60 * 60 * 24));
+          }
+        }
 
         const rawJob = empInfo.jobNum || '';
         const classification = empInfo.classification || '';
@@ -8533,8 +9326,30 @@ class TripPlannerApp {
           itemClass = String(itRow['Class']).trim();
         }
         const status = String(r['Status'] || (isReclaim ? 'Return to Shelf' : 'Ready For Delivery 🚚')).trim();
-        const changeOutDate = r['Change Out Date'] || '';
-        const daysLeft = r['Days Left'] !== undefined ? r['Days Left'] : (isReclaim ? 'PREV EMP' : '');
+        let changeOutDate = String(r['Change Out Date'] || r['Change-Out Date'] || r['Due Date'] || (itRow && itRow['Change Out Date']) || '').trim();
+        let daysLeft = (r['Days Left'] !== undefined && r['Days Left'] !== '') ? r['Days Left'] : (r['Days Remaining'] !== undefined && r['Days Remaining'] !== '' ? r['Days Remaining'] : (itRow && itRow['Days Left'] !== undefined && itRow['Days Left'] !== '' ? itRow['Days Left'] : (isReclaim ? 'PREV EMP' : '')));
+
+        if (!changeOutDate && itRow && !isReclaim) {
+          const baseDate = itRow['Date Assigned'] || itRow['Test Date'];
+          if (baseDate) {
+            const bObj = this.parseDate(baseDate);
+            if (bObj && !isNaN(bObj.getTime())) {
+              const projected = new Date(bObj);
+              projected.setFullYear(projected.getFullYear() + 1);
+              changeOutDate = `${String(projected.getMonth() + 1).padStart(2, '0')}/${String(projected.getDate()).padStart(2, '0')}/${projected.getFullYear()}`;
+            }
+          }
+        }
+
+        if ((daysLeft === '' || daysLeft === undefined || daysLeft === null) && changeOutDate && !isReclaim) {
+          const dObj = this.parseDate(changeOutDate);
+          if (dObj && !isNaN(dObj.getTime())) {
+            const today = new Date();
+            today.setHours(0, 0, 0, 0);
+            const targetMid = new Date(dObj.getFullYear(), dObj.getMonth(), dObj.getDate());
+            daysLeft = Math.round((targetMid - today) / (1000 * 60 * 60 * 24));
+          }
+        }
 
         const rawJob = empInfo.jobNum || '';
         const classification = empInfo.classification || '';
@@ -8864,6 +9679,7 @@ class TripPlannerApp {
                     ${isReclaim ? '📦 Reclaim ' : ''}${isGlove ? '🧤 Glove' : '🧤 Sleeve'}${s.itemClass ? ` (CL ${this.escapeHtml(s.itemClass)})` : ''}
                   </span>
                   <div style="display: flex; gap: 4px; align-items: center;">
+                    ${this.formatDaysLeftBadge(s.daysLeft, s.changeOutDate, isReclaim)}
                     ${s._missedScheduleDate ? `
                       <span class="badge" style="background: rgba(239, 68, 68, 0.2); color: #f87171; font-size: 8.5px; font-weight: 700; padding: 1px 4px; border: 1px solid rgba(239, 68, 68, 0.35); border-radius: 3px;" title="Scheduled on ${s._missedScheduleDate} but was not completed. Re-added to list.">
                         ⚠️ Missed ${s._missedScheduleDate}
