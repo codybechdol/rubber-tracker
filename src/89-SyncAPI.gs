@@ -637,6 +637,7 @@ function syncAndSaveCloudDatabase(payload) {
     }
 
     snapObj.revision = nextRev;
+    snapObj.version = (snapObj && snapObj.version) || '2026.1.0';
     snapObj.exportedAt = nowIso;
 
     var jsonStr = JSON.stringify(snapObj);
@@ -644,6 +645,11 @@ function syncAndSaveCloudDatabase(payload) {
 
     // 1. Update the live cloud database file (SafetyAssistant_Sync_Snapshot.json) via cached ID
     var liveFile = generateAndStoreSyncSnapshot(jsonStr);
+    if (liveFile) {
+      try {
+        liveFile.setDescription('Safety Assistant Cloud Database - Revision ' + nextRev + ' (v' + snapObj.version + ') - ' + nowIso);
+      } catch (dErr) {}
+    }
 
     // 2. Create a rolling point-in-time JSON restore point in Google Drive > Glove Manager Backups
     var createRestore = payload.createRestorePoint !== false;
@@ -654,8 +660,13 @@ function syncAndSaveCloudDatabase(payload) {
       if (folder) {
         var tz = Session.getScriptTimeZone() || 'America/Denver';
         var stamp = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd_HH-mm-ss');
-        jsonBackupName = 'Safety Assistant - Backup ' + stamp + '.json';
+        var revTag = 'Rev ' + nextRev;
+        var verTag = snapObj.version ? ('v' + snapObj.version) : 'v2026.1.0';
+        jsonBackupName = 'Safety Assistant - Backup ' + stamp + ' (' + revTag + ' - ' + verTag + ').json';
         restoreFile = folder.createFile(jsonBackupName, jsonStr, MimeType.PLAIN_TEXT);
+        try {
+          restoreFile.setDescription('Safety Assistant Restore Point - ' + revTag + ' (' + verTag + ') - ' + nowIso);
+        } catch (rdErr) {}
 
         // Update fast CLOUD_BACKUP_INDEX in ScriptProperties and prune > 35 without enumerating Drive folder
         try {

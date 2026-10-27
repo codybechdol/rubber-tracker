@@ -115,7 +115,9 @@ async function writeRollingLocalBackup(snapshot, label = 'auto') {
     const now = new Date();
     const pad = (n) => (n < 10 ? '0' + n : String(n));
     const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
-    const filename = `SafetyAssistant_Backup_${stamp}_${label}.json`;
+    const revStr = (snapshot && snapshot.revision) ? `_Rev${snapshot.revision}` : '';
+    const verStr = (snapshot && snapshot.version) ? `_v${snapshot.version}` : '';
+    const filename = `SafetyAssistant_Backup_${stamp}${revStr}${verStr}_${label}.json`;
     const fullPath = path.join(LOCAL_BACKUPS_DIR, filename);
     const jsonStr = JSON.stringify(snapshot);
     await fs.promises.writeFile(fullPath, jsonStr, 'utf8');

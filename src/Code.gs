@@ -13551,7 +13551,9 @@ function createBackupSnapshotFast(forceFullCopy, clientSnapshot) {
     var now = new Date();
     var nowTime = now.getTime();
     var timestamp = Utilities.formatDate(now, ss.getSpreadsheetTimeZone(), 'yyyy-MM-dd_HH-mm-ss');
-    var backupName = ssName + ' - Backup ' + timestamp;
+    var curRev = (typeof PropertiesService !== 'undefined' && PropertiesService.getScriptProperties) ? (PropertiesService.getScriptProperties().getProperty('CLOUD_DB_REVISION') || '') : '';
+    var revTag = curRev ? (' (Rev ' + curRev + ')') : '';
+    var backupName = ssName + ' - Backup ' + timestamp + revTag;
 
     var scriptProps = PropertiesService.getScriptProperties();
     var lastBackupStr = scriptProps.getProperty('LAST_FULL_DRIVE_BACKUP_TIME');
