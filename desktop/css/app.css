@@ -572,7 +572,9 @@ body {
 #manage-vendors-modal,
 #cert-photo-modal,
 #cert-email-scanner-modal,
-#cert-photo-cropper-modal {
+#cert-photo-cropper-modal,
+#safety-pdf-modal,
+#edit-log-entry-modal {
   z-index: 13500 !important;
   pointer-events: auto !important;
 }
@@ -586,7 +588,9 @@ body {
 #manage-vendors-modal.active,
 #cert-photo-modal.active,
 #cert-email-scanner-modal.active,
-#cert-photo-cropper-modal.active {
+#cert-photo-cropper-modal.active,
+#safety-pdf-modal.active,
+#edit-log-entry-modal.active {
   display: flex !important;
 }
 
@@ -600,7 +604,9 @@ body {
 #manage-vendors-modal .modal-box,
 #cert-photo-modal .modal-box,
 #cert-email-scanner-modal .modal-box,
-#cert-photo-cropper-modal .modal-box {
+#cert-photo-cropper-modal .modal-box,
+#safety-pdf-modal .modal-box,
+#edit-log-entry-modal .modal-box {
   pointer-events: auto !important;
   position: relative;
   z-index: 13501 !important;

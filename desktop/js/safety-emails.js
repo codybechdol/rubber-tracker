@@ -1632,6 +1632,10 @@ class SafetyEmailsEngine {
 
     modal.style.display = 'flex';
     modal.classList.remove('hidden');
+    modal.classList.add('active');
+    if (window.windowManager && typeof window.windowManager.bringToFront === 'function') {
+      window.windowManager.bringToFront(modal);
+    }
 
     const logType = log.type || log.reportType || 'Safety Document';
     const logJob = log.jobNumber || log.crewId || 'N/A';
@@ -1785,7 +1789,11 @@ class SafetyEmailsEngine {
     const modal = document.getElementById('safety-pdf-modal');
     if (modal) {
       modal.style.display = 'none';
+      modal.classList.remove('active');
       modal.classList.add('hidden');
+      if (window.windowManager && typeof window.windowManager.syncBackdrop === 'function') {
+        window.windowManager.syncBackdrop();
+      }
     }
   }
 
@@ -1861,17 +1869,17 @@ class SafetyEmailsEngine {
 
     const modal = document.createElement('div');
     modal.id = 'edit-log-entry-modal';
-    modal.className = 'modal-backdrop';
-    modal.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.8); z-index: 10000; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(4px);';
+    modal.className = 'modal-overlay active';
+    modal.style.cssText = 'position: fixed; inset: 0; background: transparent; z-index: 13500; display: flex; align-items: center; justify-content: center; pointer-events: none;';
 
     modal.innerHTML = `
-      <div style="background: #1e293b; border: 1px solid var(--border-color); border-radius: 12px; width: 480px; max-width: 95vw; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.7);">
-        <div style="display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--border-color); background: rgba(0,0,0,0.2);">
+      <div class="modal-box" style="background: #1e293b; border: 1px solid var(--border-color); border-radius: 12px; width: 480px; max-width: 95vw; overflow: hidden; box-shadow: 0 25px 50px -12px rgba(0,0,0,0.7); pointer-events: auto; position: relative; z-index: 13501;">
+        <div class="modal-header wm-draggable-header" style="display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--border-color); background: rgba(0,0,0,0.2);">
           <div style="display: flex; align-items: center; gap: 8px;">
             <span style="font-size: 18px;">✏️</span>
             <h3 style="margin: 0; font-size: 15px; font-weight: 700; color: #f8fafc;">Edit Safety Log Record</h3>
           </div>
-          <button onclick="document.getElementById('edit-log-entry-modal').remove()" style="background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 18px;">✕</button>
+          <button onclick="document.getElementById('edit-log-entry-modal')?.remove(); if(window.windowManager) window.windowManager.syncBackdrop();" style="background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 18px;">✕</button>
         </div>
 
         <div style="padding: 18px; display: flex; flex-direction: column; gap: 12px; max-height: 70vh; overflow-y: auto;">
@@ -1917,13 +1925,17 @@ class SafetyEmailsEngine {
         </div>
 
         <div style="padding: 12px 18px; border-top: 1px solid var(--border-color); background: rgba(0,0,0,0.2); display: flex; align-items: center; justify-content: flex-end; gap: 8px;">
-          <button class="btn btn-secondary" onclick="document.getElementById('edit-log-entry-modal').remove()">Cancel</button>
+          <button class="btn btn-secondary" onclick="document.getElementById('edit-log-entry-modal')?.remove(); if(window.windowManager) window.windowManager.syncBackdrop();">Cancel</button>
           <button class="btn btn-primary" onclick="window.safetyComplianceEngine.saveLogEntryEdit('${this.escapeHtml(logId)}')" style="font-weight: 700; background: #10b981; border: none; padding: 8px 20px;">Save Changes</button>
         </div>
       </div>
     `;
 
     document.body.appendChild(modal);
+    if (window.windowManager && typeof window.windowManager.enhanceModal === 'function') {
+      window.windowManager.enhanceModal(modal);
+      window.windowManager.bringToFront(modal);
+    }
   }
 
   /**
@@ -1980,6 +1992,9 @@ class SafetyEmailsEngine {
     // Close edit modal
     const editModal = document.getElementById('edit-log-entry-modal');
     if (editModal) editModal.remove();
+    if (window.windowManager && typeof window.windowManager.syncBackdrop === 'function') {
+      window.windowManager.syncBackdrop();
+    }
 
     // Re-render table
     const container = document.getElementById('safety-logs-table-container');

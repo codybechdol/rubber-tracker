@@ -2018,6 +2018,10 @@ function calculateComplianceFromLogs(weekStartDate, options) {
   // Used to filter out On Hold/Completed/Pending Start crews from unknownJobs
   var jobTrackingStatuses = getJobTrackingStatusMap();
 
+  // Load custom mappings & FY transition alias map early so all report types (JHA, Weekly, Monthly) can resolve aliases
+  var customMappings = getCustomJobForemanMappings();
+  Logger.log("calculateComplianceFromLogs: Custom mappings loaded: " + JSON.stringify(customMappings));
+
   // === READ JHA LOG ===
   var jhaSheet = getJHALogSheet();
   var jhaCreditsApplied = 0;
@@ -2163,6 +2167,19 @@ function calculateComplianceFromLogs(weekStartDate, options) {
         crewToCredit = creditedTo;
       }
 
+      // Priority 2.5: Check alias mappings (e.g. FY_TRANSITION_ALIAS_MAP 029-26 -> 029-27)
+      if (!crewToCredit && customMappings) {
+        var aliasCredited = creditedTo ? (customMappings[creditedTo] || customMappings[creditedTo.split('.')[0]]) : null;
+        var aliasOrig = originalJobNumber ? (customMappings[originalJobNumber] || customMappings[originalJobNumber.split('.')[0]]) : null;
+        if (aliasCredited && crewCompliance[aliasCredited]) {
+          crewToCredit = aliasCredited;
+          Logger.log("calculateComplianceFromLogs: Alias mapping match for creditedTo " + creditedTo + " → " + aliasCredited);
+        } else if (aliasOrig && crewCompliance[aliasOrig]) {
+          crewToCredit = aliasOrig;
+          Logger.log("calculateComplianceFromLogs: Alias mapping match for originalJobNumber " + originalJobNumber + " → " + aliasOrig);
+        }
+      }
+
       // Priority 3: If creditedTo crew exists but was excluded (e.g., start date filter),
       // look up the foreman and find any other tracked crew they're associated with
       if (!crewToCredit && creditedTo) {
@@ -2175,6 +2192,18 @@ function calculateComplianceFromLogs(weekStartDate, options) {
               Logger.log("calculateComplianceFromLogs: Foreman fallback - " + creditedTo + " not tracked, but foreman " + foremanLookup.name + " found on " + crewKey);
               break;
             }
+          }
+        }
+      }
+
+      // Priority 3.5: Match directly by JHA Foreman name
+      if (!crewToCredit && jhaForeman && jhaForeman !== 'UNKNOWN') {
+        var jhaForemanLower = jhaForeman.toLowerCase().trim();
+        for (var fKey in crewCompliance) {
+          if (crewCompliance[fKey].foreman && crewCompliance[fKey].foreman.toLowerCase().trim() === jhaForemanLower) {
+            crewToCredit = fKey;
+            Logger.log("calculateComplianceFromLogs: Foreman direct match - " + jhaForeman + " found on " + fKey);
+            break;
           }
         }
       }
@@ -2275,6 +2304,17 @@ function calculateComplianceFromLogs(weekStartDate, options) {
           crewToCredit = subCrewKey || originalJobNumber;
         } else if (creditedTo && crewCompliance[creditedTo]) {
           crewToCredit = creditedTo;
+        }
+
+        // Priority 2.5: Check alias mappings (e.g. FY_TRANSITION_ALIAS_MAP 029-26 -> 029-27)
+        if (!crewToCredit && customMappings) {
+          var wmAliasCredited = creditedTo ? (customMappings[creditedTo] || customMappings[creditedTo.split('.')[0]]) : null;
+          var wmAliasOrig = originalJobNumber ? (customMappings[originalJobNumber] || customMappings[originalJobNumber.split('.')[0]]) : null;
+          if (wmAliasCredited && crewCompliance[wmAliasCredited]) {
+            crewToCredit = wmAliasCredited;
+          } else if (wmAliasOrig && crewCompliance[wmAliasOrig]) {
+            crewToCredit = wmAliasOrig;
+          }
         }
 
         // Priority 3: Foreman fallback - look up the foreman of creditedTo crew
@@ -2415,6 +2455,13 @@ function calculateComplianceFromLogs(weekStartDate, options) {
         var targetCrew = creditedTo;
 
         // If creditedTo has sub-crews in crewCompliance, check if monthlyForeman matches a sub-crew
+        if (!crewCompliance[targetCrew] && customMappings) {
+          var mAlias = customMappings[targetCrew] || customMappings[targetCrew.split('.')[0]];
+          if (mAlias && crewCompliance[mAlias]) {
+            targetCrew = mAlias;
+          }
+        }
+
         if (crewCompliance[targetCrew]) {
           for (var ck in crewCompliance) {
             if (ck !== targetCrew && (ck.indexOf(targetCrew + ' (') === 0 || ck.indexOf(targetCrew + ' -') === 0)) {
@@ -4381,9 +4428,26 @@ function resolveJobToCrew(jobNumber, context) {
     };
   }
 
-  // 2. Check custom mappings (user-configured from dialog)
+  // 2. Check custom mappings (user-configured from dialog or FY_TRANSITION_ALIAS_MAP)
   if (customMappings[baseJob]) {
-    var customForeman = customMappings[baseJob];
+    var mappedVal = customMappings[baseJob];
+
+    // Check if mappedVal is an alias to another job number (e.g., "029-27", "013-27")
+    var isJobNumAlias = /^\d{3}-\d{2}/.test(String(mappedVal || '').trim());
+    if (isJobNumAlias) {
+      var targetCrew = String(mappedVal).split('.')[0].trim();
+      var targetForemanLookup = lookupForemanByJobNumber(targetCrew);
+      var targetForemanName = targetForemanLookup.name || context.foreman || '';
+      return {
+        found: true,
+        crew: targetCrew,
+        foreman: targetForemanName,
+        source: 'custom_job_alias',
+        reason: 'Job alias mapping: ' + baseJob + ' → ' + targetCrew
+      };
+    }
+
+    var customForeman = mappedVal;
     // Find this foreman's primary crew
     var primaryCrew = findForemanPrimaryCrew(customForeman, context.employeeData);
     Logger.log("resolveJobToCrew: Custom mapping " + baseJob + " → " + customForeman + ", primaryCrew=" + primaryCrew + ", tracked=" + (primaryCrew ? !!trackedCrews[primaryCrew] : false));

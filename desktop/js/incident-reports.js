@@ -941,7 +941,11 @@ class IncidentReportsEngine {
     if (!modal || !body) return;
 
     modal.classList.remove('hidden');
+    modal.classList.add('active');
     modal.style.display = 'flex';
+    if (window.windowManager && typeof window.windowManager.bringToFront === 'function') {
+      window.windowManager.bringToFront(modal);
+    }
     if (titleEl) titleEl.textContent = `Incident Report Form`;
     if (subtitleEl) subtitleEl.textContent = pdfFilename || 'Incident_Report.pdf';
 
@@ -1183,7 +1187,11 @@ class IncidentReportsEngine {
     const modal = document.getElementById('safety-pdf-modal');
     if (modal) {
       modal.style.display = 'none';
+      modal.classList.remove('active');
       modal.classList.add('hidden');
+      if (window.windowManager && typeof window.windowManager.syncBackdrop === 'function') {
+        window.windowManager.syncBackdrop();
+      }
     }
     const verSelector = document.getElementById('safety-pdf-version-selector');
     if (verSelector) {
