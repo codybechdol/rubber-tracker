@@ -987,6 +987,11 @@ class TripPlannerApp {
 
   loadSavedTrips() {
     this.plannedTrips = this.db.getPlannedTrips() || {};
+    this.scheduledSwaps = this.loadScheduledSwaps();
+    this.scheduledEquipmentNeeds = this.loadScheduledEquipmentNeeds();
+    this.scheduledTrainingNeeds = this.loadScheduledTrainingNeeds();
+    this.dismissedSwaps = this.loadDismissedSwaps();
+    this.dismissedTrainings = this.loadDismissedTrainings();
     // Clean up duplicate location trip on 2026-10-26 where only a Picked Swap was scheduled for Ennis
     if (this.plannedTrips['2026-10-26'] && Array.isArray(this.plannedTrips['2026-10-26'])) {
       const filtered = this.plannedTrips['2026-10-26'].filter(t => String(t.location || '').toLowerCase() !== 'ennis');

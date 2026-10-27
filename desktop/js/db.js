@@ -353,9 +353,6 @@ class LocalDatabase {
         }
         snapshot = this.snapshot;
       } else if (this.snapshot && this.snapshot.tables && snapshot.tables) {
-        if (this.snapshot.configs) {
-          snapshot.configs = Object.assign({}, this.snapshot.configs, snapshot.configs || {});
-        }
         // Protect local history from being wiped out if incoming snapshot is missing history tables
         const historyTableKeys = [
           'gloves_history', 'sleeves_history', 'blankets_history', 'macks_history',
@@ -378,22 +375,41 @@ class LocalDatabase {
     }
     this.snapshot = snapshot;
 
+    // Sync manual picks from incoming snapshot if present, or clear stale picks
+    if (snapshot && snapshot.manualPicks && typeof snapshot.manualPicks === 'object') {
+      try {
+        localStorage.setItem('sa_manual_picks', JSON.stringify(snapshot.manualPicks));
+      } catch { /* ignore */ }
+    }
+
     // Keep localStorage config caches in sync with fresh snapshot
     if (snapshot && snapshot.configs) {
-      if (snapshot.configs.plannedTrips) {
+      if (snapshot.configs.plannedTrips !== undefined) {
         try {
-          localStorage.setItem('sa_planned_trips', JSON.stringify(snapshot.configs.plannedTrips));
+          localStorage.setItem('sa_planned_trips', JSON.stringify(snapshot.configs.plannedTrips || {}));
         } catch { /* ignore */ }
       }
-      if (Array.isArray(snapshot.configs.manual_tasks)) {
+      if (snapshot.configs.manual_tasks !== undefined) {
         try {
-          localStorage.setItem('sa_trip_manual_tasks', JSON.stringify(snapshot.configs.manual_tasks));
+          localStorage.setItem('sa_trip_manual_tasks', JSON.stringify(snapshot.configs.manual_tasks || []));
         } catch { /* ignore */ }
       }
-      if (snapshot.configs.scheduled_swaps && typeof snapshot.configs.scheduled_swaps === 'object') {
+      if (snapshot.configs.scheduled_swaps !== undefined) {
         try {
-          localStorage.setItem('sa_trip_scheduled_swaps', JSON.stringify(snapshot.configs.scheduled_swaps));
-          localStorage.setItem('TRIP_PLANNER_SCHEDULED_SWAPS', JSON.stringify(snapshot.configs.scheduled_swaps));
+          localStorage.setItem('sa_trip_scheduled_swaps', JSON.stringify(snapshot.configs.scheduled_swaps || {}));
+          localStorage.setItem('TRIP_PLANNER_SCHEDULED_SWAPS', JSON.stringify(snapshot.configs.scheduled_swaps || {}));
+        } catch { /* ignore */ }
+      }
+      if (snapshot.configs.scheduled_equipment !== undefined) {
+        try {
+          localStorage.setItem('sa_trip_scheduled_equipment', JSON.stringify(snapshot.configs.scheduled_equipment || {}));
+          localStorage.setItem('TRIP_PLANNER_SCHEDULED_EQUIPMENT', JSON.stringify(snapshot.configs.scheduled_equipment || {}));
+        } catch { /* ignore */ }
+      }
+      if (snapshot.configs.scheduled_training !== undefined) {
+        try {
+          localStorage.setItem('sa_trip_scheduled_training', JSON.stringify(snapshot.configs.scheduled_training || {}));
+          localStorage.setItem('TRIP_PLANNER_SCHEDULED_TRAINING', JSON.stringify(snapshot.configs.scheduled_training || {}));
         } catch { /* ignore */ }
       }
       if (snapshot.configs.workSchedule) {
@@ -401,7 +417,7 @@ class LocalDatabase {
           localStorage.setItem('sa_work_schedule', snapshot.configs.workSchedule);
         } catch { /* ignore */ }
       }
-      if (snapshot.configs.holidays && (Array.isArray(snapshot.configs.holidays) ? snapshot.configs.holidays.length > 0 : Object.keys(snapshot.configs.holidays).length > 0)) {
+      if (snapshot.configs.holidays) {
         try {
           localStorage.setItem('sa_holidays', JSON.stringify(snapshot.configs.holidays));
         } catch { /* ignore */ }
@@ -4864,6 +4880,33 @@ class LocalDatabase {
     try {
       localStorage.setItem('sa_dismissed_tasks', JSON.stringify(Array.from(this.dismissedTaskIds)));
     } catch { /* ignore */ }
+  }
+
+  async clear() {
+    this.snapshot = null;
+    this.outbox = [];
+    this._rowIndices.clear();
+    this._empAliasMap = null;
+    try {
+      await SnapshotStorage.delete('sa_snapshot');
+    } catch { /* ignore */ }
+    const keysToRemove = [
+      'sa_snapshot', 'sa_outbox', 'sa_planned_trips', 'sa_trip_manual_tasks',
+      'sa_trip_scheduled_swaps', 'TRIP_PLANNER_SCHEDULED_SWAPS',
+      'TRIP_PLANNER_SCHEDULED_EQUIPMENT', 'sa_trip_scheduled_equipment',
+      'TRIP_PLANNER_SCHEDULED_TRAINING', 'sa_trip_scheduled_training',
+      'TRIP_PLANNER_DISMISSED_SWAPS', 'TRIP_PLANNER_DISMISSED_TRAININGS',
+      'sa_manual_picks', 'sa_dismissed_tasks', 'sa_resolved_equip_needs',
+      'sa_resolved_equip_2108_aed', 'sa_work_schedule', 'sa_holidays',
+      'CREW_IMPORT_ORDER', 'FY_TRANSITION_ALIAS_MAP',
+      'CREW_IMPORT_LEAD_SELECTIONS', 'CREW_IMPORT_MISSING_ROSTER_ACTIONS',
+      'CREW_IMPORT_PRIMARY_JOB_SELECTIONS', 'sa_certs_config',
+      'sa_ppe_excluded_employees', 'sa_emp_preferred_classes'
+    ];
+    keysToRemove.forEach(k => {
+      try { localStorage.removeItem(k); } catch { /* ignore */ }
+    });
+    this.notify();
   }
 
   async clearOutbox() {
