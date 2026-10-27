@@ -1562,6 +1562,11 @@ class SyncEngine {
         if (window.itemStatsEngine) {
           window.itemStatsEngine.invalidateCache();
         }
+        if (window.ppeTrackingEngine) {
+          window.ppeTrackingEngine.excludedEmployeeMap = window.ppeTrackingEngine.loadExcludedEmployeeMap();
+          window.ppeTrackingEngine.compileAuditData();
+          window.ppeTrackingEngine.updateToolbarBadge();
+        }
 
         this.updateStatusUI('synced', `Synced in ${durationFormatted}`);
         this.renderModalChanges([], `✅ Latest database snapshot successfully downloaded and loaded in ${durationFormatted}!`, 'success', false);

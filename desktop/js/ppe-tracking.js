@@ -55,17 +55,24 @@ class RubberPpeTrackingEngine {
   loadExcludedEmployeeMap() {
     const map = new Map();
     try {
-      const raw = localStorage.getItem('sa_ppe_excluded_employees');
-      if (raw) {
-        const arr = JSON.parse(raw);
-        if (Array.isArray(arr)) {
-          arr.forEach(name => {
-            const clean = String(name || '').trim();
-            if (clean) {
-              map.set(this.normalizeName(clean), clean);
-            }
-          });
+      let arr = null;
+      if (this.db && this.db.snapshot && this.db.snapshot.configs && Array.isArray(this.db.snapshot.configs.ppe_excluded_employees)) {
+        arr = this.db.snapshot.configs.ppe_excluded_employees;
+      }
+      if (!arr) {
+        const raw = localStorage.getItem('sa_ppe_excluded_employees');
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (Array.isArray(parsed)) arr = parsed;
         }
+      }
+      if (Array.isArray(arr)) {
+        arr.forEach(name => {
+          const clean = String(name || '').trim();
+          if (clean) {
+            map.set(this.normalizeName(clean), clean);
+          }
+        });
       }
     } catch (e) {
       console.warn('Error reading excluded PPE employees config:', e);
@@ -74,12 +81,20 @@ class RubberPpeTrackingEngine {
   }
 
   /**
-   * Persists excluded employee list to localStorage
+   * Persists excluded employee list to localStorage and database snapshot configs
    */
   saveExcludedEmployeeMap() {
     try {
       const list = Array.from(this.excludedEmployeeMap.values());
       localStorage.setItem('sa_ppe_excluded_employees', JSON.stringify(list));
+      if (this.db) {
+        if (!this.db.snapshot) this.db.snapshot = { configs: {}, tables: {} };
+        if (!this.db.snapshot.configs) this.db.snapshot.configs = {};
+        this.db.snapshot.configs.ppe_excluded_employees = list;
+        if (typeof this.db.schedulePersistSnapshot === 'function') {
+          this.db.schedulePersistSnapshot(this.db.snapshot, 500);
+        }
+      }
     } catch (e) {
       console.error('Error saving excluded PPE employees config:', e);
     }

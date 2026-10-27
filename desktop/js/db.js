@@ -422,6 +422,11 @@ class LocalDatabase {
           localStorage.setItem('sa_holidays', JSON.stringify(snapshot.configs.holidays));
         } catch { /* ignore */ }
       }
+      if (Array.isArray(snapshot.configs.ppe_excluded_employees)) {
+        try {
+          localStorage.setItem('sa_ppe_excluded_employees', JSON.stringify(snapshot.configs.ppe_excluded_employees));
+        } catch { /* ignore */ }
+      }
       if (Array.isArray(snapshot.configs.CREW_IMPORT_ORDER)) {
         try {
           localStorage.setItem('CREW_IMPORT_ORDER', JSON.stringify(snapshot.configs.CREW_IMPORT_ORDER));
