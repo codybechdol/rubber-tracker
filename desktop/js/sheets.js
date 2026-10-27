@@ -5147,7 +5147,16 @@ class SheetNavigator {
                            (rosterByCrew[crew] && rosterByCrew[crew].length > 0) ||
                            (rosterByCrew[mapped] && rosterByCrew[mapped].length > 0);
 
-        if (isCompletedJob || !isKnownJob) {
+        // Prune phantom pending rows for dead/aliased crews with no lead, no attendees, 0 crew size, and no active crew structure
+        const hasLead = Boolean(String(r['Crew Lead'] || r['Lead'] || '').trim());
+        const hasAttendees = Boolean(String(r['Attendees'] || '').trim());
+        const sizeVal = String(r['Size'] || r['Crew Size'] || '').trim();
+        const hasSize = Boolean(sizeVal && sizeVal !== '0');
+        const isDirectJob = allJobNums.has(crew);
+        const hasDirectRoster = Boolean(rosterByCrew[crew] && rosterByCrew[crew].length > 0);
+        const isOrphanPending = !hasLead && !hasAttendees && !hasSize && (!isDirectJob || !hasDirectRoster);
+
+        if (isCompletedJob || !isKnownJob || isOrphanPending) {
           prunedRows++;
           return false;
         }
@@ -5164,14 +5173,24 @@ class SheetNavigator {
     (tt.rows || []).forEach(r => {
       const status = String(r['Status'] || r['Training Status'] || '').toLowerCase().trim();
       const compDate = String(r['Completion Date'] || r['Date Completed'] || '').trim();
-      // Never alter completed historical trainings
-      if (status === 'complete' || status === 'completed' || compDate) return;
+      const isComp = status === 'complete' || status === 'completed' || Boolean(compDate);
 
       const crew = String(r['Crew #'] || r['Job Number'] || r['Crew'] || '').trim();
       if (!crew) return;
 
-      const jtForeman = foremanByJob[crew];
+      const jtForeman = foremanByJob[crew] || (aliasMap[crew] && foremanByJob[aliasMap[crew]]);
       const activeMembers = rosterByCrew[crew] || [];
+
+      // For completed historical trainings: do NOT overwrite recorded attendees,
+      // but if Crew Lead is completely blank, safely populate from Job Tracking foreman
+      if (isComp) {
+        const curLead = String(r['Crew Lead'] || r['Lead'] || '').trim();
+        if (!curLead && jtForeman) {
+          r['Crew Lead'] = jtForeman;
+          updatedLeads++;
+        }
+        return;
+      }
 
       // Update Crew Lead
       if (jtForeman) {
