@@ -679,15 +679,20 @@ class EmployeeProfileEngine {
     let status = primaryRow ? String(primaryRow['Status'] || '').trim() : '';
     if (!status || status.toLowerCase() === 'active') {
       const locLower = String(location || '').toLowerCase().trim();
+      const jobLower = String(jobNumber || '').toLowerCase().trim();
       if (locLower.includes('(vacation)') || locLower === 'vacation') status = 'Vacation';
-      else if (locLower.includes('(light duty)') || locLower === 'light duty' || locLower.includes('(weeds)') || locLower === 'weeds') status = 'Light Duty';
+      else if (locLower.includes('(weeds)') || locLower === 'weeds' || jobLower === 'weeds') status = 'Weeds';
+      else if (locLower.includes('(light duty)') || locLower === 'light duty') status = 'Light Duty';
       else if (locLower.includes('(leave)') || locLower === 'leave' || locLower.includes('fmla') || locLower.includes('military')) status = 'Leave';
       else if (locLower.includes('(medical)') || locLower === 'medical' || locLower.includes("worker's comp") || locLower.includes('(injury)')) status = 'Medical';
     }
     const parsedHire = this.parseDate(hireDate);
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const isPending = status.toLowerCase().includes('pending') || Boolean(parsedHire && parsedHire > today);
+    const now = new Date();
+    const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+    const isPending = parsedHire ? (parsedHire > todayEnd) : status.toLowerCase().includes('pending');
+    if (!isPending && status.toLowerCase() === 'pending') {
+      status = 'Active';
+    }
 
     // 2. Scan ALL equipment sheets for items currently assigned to this employee
     const equipmentSheets = [
@@ -1443,7 +1448,11 @@ class EmployeeProfileEngine {
                     bg = 'rgba(245, 158, 11, 0.2)';
                     color = '#fcd34d';
                     icon = '🏖️';
-                  } else if (sLower.includes('light') || sLower.includes('weeds')) {
+                  } else if (sLower.includes('weeds')) {
+                    bg = 'rgba(132, 204, 22, 0.2)';
+                    color = '#a3e635';
+                    icon = '🌾';
+                  } else if (sLower.includes('light')) {
                     bg = 'rgba(168, 85, 247, 0.2)';
                     color = '#d8b4fe';
                     icon = '🩺';
@@ -1693,7 +1702,7 @@ class EmployeeProfileEngine {
     }
 
     const curStatus = String(data.status || (data.isPending ? 'Pending' : 'Active')).trim();
-    const statusOptions = ['Active', 'Vacation', 'Light Duty', 'Leave', 'Medical', 'Pending'];
+    const statusOptions = ['Active', 'Weeds', 'Light Duty', 'Vacation', 'Leave', 'Medical', 'Pending'];
 
     return `
       <div style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 8px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.2);">
@@ -1903,9 +1912,13 @@ class EmployeeProfileEngine {
       if (!cleanCity || ['vacation', 'light duty', 'leave', 'medical', 'weeds', "worker's comp", 'unassigned', 'previous employee'].includes(cleanCity.toLowerCase())) {
         cleanCity = 'Helena';
       }
-      const nonFieldStatuses = ['vacation', 'light duty', 'leave', 'medical'];
+      const nonFieldStatuses = ['vacation', 'light duty', 'weeds', 'leave', 'medical'];
       if (nonFieldStatuses.includes(newStatus.toLowerCase())) {
         updatedFields[locKey] = `${cleanCity} (${newStatus})`;
+        if (newStatus.toLowerCase() === 'weeds') {
+          const jobKey = headers.find(h => /^(job\s*#|job\s*number)$/i.test(h)) || 'Job Number';
+          updatedFields[jobKey] = 'Weeds';
+        }
       } else if (newStatus === 'Active' || newStatus === 'Pending') {
         updatedFields[locKey] = cleanCity;
       }

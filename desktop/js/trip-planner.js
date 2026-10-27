@@ -306,8 +306,16 @@ class TripPlannerApp {
           const empMatch = entryEmp === empName || (window.employeeResolver && typeof window.employeeResolver.areSameEmployee === 'function' && window.employeeResolver.areSameEmployee(entryEmp, empName));
           const itmMatch = (!oldItm || entryCur === oldItm) && (!pickItm || entryPick === pickItm);
           if (empMatch && itmMatch) {
-            const rawDate = entry.timestamp ? entry.timestamp.substring(0, 10) : '';
-            return { isCompleted: true, date: rawDate, manualPick: entry };
+            let assignedDate = '';
+            const invTbl = this.db.getTable(invKey);
+            if (invTbl && invTbl.rows && entryPick) {
+              const pRow = invTbl.rows.find(it => String(it['Item #'] || it['Glove'] || it['Sleeve'] || it['Blanket'] || it['MACK'] || it['Serial #'] || '').trim() === entryPick);
+              if (pRow && String(pRow['Assigned To'] || '').trim().toLowerCase() === entryEmp) {
+                assignedDate = String(pRow['Date Assigned'] || '').trim();
+              }
+            }
+            const rawDate = assignedDate || entry.deliveredDate || (entry.timestamp ? entry.timestamp.substring(0, 10) : '');
+            return { isCompleted: true, date: this.formatDisplayDate(rawDate), manualPick: entry };
           }
         }
       }
@@ -466,6 +474,27 @@ class TripPlannerApp {
 
     const seenSwapKeys = new Set();
 
+    // Index swaps already scheduled in Trip Planner so a swap scheduled on one day (e.g. Mon 10/26)
+    // is never duplicated onto another day (e.g. Tue 10/27) if checked off later.
+    const scheduledSwapDates = {};
+    if (this.scheduledSwaps) {
+      Object.entries(this.scheduledSwaps).forEach(([sk, sEntry]) => {
+        const sDate = this.normalizeDateKey(typeof sEntry === 'object' ? sEntry.dateKey : sEntry);
+        if (!sDate) return;
+        scheduledSwapDates[sk.toLowerCase()] = sDate;
+        if (sEntry && typeof sEntry === 'object') {
+          const swObj = sEntry.swap || sEntry;
+          const sEmp = String(sEntry.employeeName || swObj.employeeName || '').trim().toLowerCase();
+          const sOld = String(swObj.currentItem || sEntry.currentItem || '').trim().toLowerCase();
+          const sType = String(sEntry.type || swObj.type || '').trim().toLowerCase();
+          if (sEmp && sOld) {
+            scheduledSwapDates[`${sType}_${sEmp}_${sOld}`] = sDate;
+            scheduledSwapDates[`${sEmp}_${sOld}`] = sDate;
+          }
+        }
+      });
+    }
+
     swapSheets.forEach(cfg => {
       // A. Manual picks registry (contains real-time delivered swaps in desktop app)
       const mpRegistry = {};
@@ -485,7 +514,22 @@ class TripPlannerApp {
           const invTable = invLookup[cfg.inv] || {};
           const newInvItem = invTable[entry.pickListNum] || {};
 
-          let rawDate = newInvItem['Date Assigned'] || (entry.timestamp ? entry.timestamp.substring(0, 10) : '');
+          const sKey = this.getSwapKey({
+            tableKey: cfg.sw,
+            employeeName: empClean,
+            type: cfg.label,
+            currentItem: entry.currentItemNum || '',
+            pickItem: entry.pickListNum || ''
+          });
+          const empOldKey = `${cfg.label.toLowerCase()}_${empClean.toLowerCase()}_${String(entry.currentItemNum || '').trim().toLowerCase()}`;
+          const schedDateForSwap = scheduledSwapDates[sKey.toLowerCase()] || scheduledSwapDates[empOldKey];
+          if (schedDateForSwap && schedDateForSwap !== targetDateKey) {
+            return; // Already scheduled on a different Trip Planner day
+          }
+
+          const isStillAssignedToEmp = newInvItem && String(newInvItem['Assigned To'] || '').trim().toLowerCase() === empClean.toLowerCase();
+          let rawDate = schedDateForSwap || (isStillAssignedToEmp && newInvItem['Date Assigned'] ? newInvItem['Date Assigned'] : '') || entry.deliveredDate || (entry.timestamp ? entry.timestamp.substring(0, 10) : '');
+
           const dKey = this.normalizeDateKey(rawDate);
           if (dKey === targetDateKey) {
             const dedupe = `${cfg.label}_${empClean}_${entry.pickListNum}_${entry.currentItemNum}`.toLowerCase();
@@ -506,14 +550,6 @@ class TripPlannerApp {
               } else if (rawLoc) {
                 location = this.cleanPhysicalLocation(rawLoc);
               }
-
-              const sKey = this.getSwapKey({
-                tableKey: cfg.sw,
-                employeeName: empClean,
-                type: cfg.label,
-                currentItem: entry.currentItemNum || '',
-                pickItem: entry.pickListNum || ''
-              });
 
               if (!this.isSwapDismissed(sKey) && !this.isSwapDismissed(`comp_${cfg.sw}_${empClean.toLowerCase()}_${entry.currentItemNum}_${targetDateKey}`)) {
                 results.push({
@@ -584,6 +620,12 @@ class TripPlannerApp {
             }
           }
 
+          const empOldKey = `${cfg.label.toLowerCase()}_${empClean.toLowerCase()}_${oldItem.toLowerCase()}`;
+          const schedDateForRow = scheduledSwapDates[empOldKey] || scheduledSwapDates[`${empClean.toLowerCase()}_${oldItem.toLowerCase()}`];
+          if (schedDateForRow && schedDateForRow !== targetDateKey) {
+            return; // Already scheduled on a different Trip Planner day
+          }
+
           const dKey = this.normalizeDateKey(rawDate);
           if (dKey === targetDateKey) {
             const dedupe = `${cfg.label}_${empClean}_${newItem}_${oldItem}`.toLowerCase();
@@ -615,8 +657,10 @@ class TripPlannerApp {
               });
 
               if (!this.isSwapDismissed(sKey) && !this.isSwapDismissed(`comp_${cfg.sw}_${empClean.toLowerCase()}_${oldItem}_${targetDateKey}`)) {
+                const isReclaimRow = Boolean(!newItem || newItem === '—' || newItem === '-' || String(r['Days Left'] || '').toUpperCase().includes('PREV') || status.includes('return to shelf'));
                 results.push({
                   type: cfg.label,
+                  isReclaim: isReclaimRow,
                   employeeName: empClean,
                   currentItem: oldItem,
                   pickItem: newItem,
@@ -943,6 +987,18 @@ class TripPlannerApp {
 
   loadSavedTrips() {
     this.plannedTrips = this.db.getPlannedTrips() || {};
+    // Clean up duplicate location trip on 2026-10-26 where only a Picked Swap was scheduled for Ennis
+    if (this.plannedTrips['2026-10-26'] && Array.isArray(this.plannedTrips['2026-10-26'])) {
+      const filtered = this.plannedTrips['2026-10-26'].filter(t => String(t.location || '').toLowerCase() !== 'ennis');
+      if (filtered.length !== this.plannedTrips['2026-10-26'].length) {
+        if (filtered.length === 0) {
+          delete this.plannedTrips['2026-10-26'];
+        } else {
+          this.plannedTrips['2026-10-26'] = filtered;
+        }
+        this.saveTrips();
+      }
+    }
     this.holidaysMap = this.loadHolidays();
     this.manualTasks = this.loadManualTasks();
     try {
@@ -3743,7 +3799,7 @@ class TripPlannerApp {
       } else {
         this.showToast(`🚚 Scheduled ${payload.swap.type || 'glove'} swap for ${payload.employeeName || payload.swap.employeeName || 'employee'} on ${dateKey}`);
       }
-    } else if (payload.type === 'employee' && Array.isArray(payload.swaps)) {
+    } else if ((payload.type === 'employee' || payload.type === 'swap_location' || (payload.type === 'location' && Array.isArray(payload.swaps))) && Array.isArray(payload.swaps)) {
       payload.swaps.forEach(s => {
         const sKey = this.getSwapKey(s);
         if (sKey) {
@@ -3763,7 +3819,7 @@ class TripPlannerApp {
       if (window.tripRouteMap) {
         window.tripRouteMap.render();
       }
-      this.showToast(`🚚 Scheduled ${payload.swaps.length} swap(s) for ${payload.employeeName || 'employee'} on ${dateKey}`);
+      this.showToast(`🚚 Scheduled ${payload.swaps.length} swap(s) for ${payload.employeeName || location || 'employee'} on ${dateKey}`);
     } else if (payload.type === 'location') {
       if (location) {
         this.addTrip(dateKey, location);
@@ -3779,9 +3835,6 @@ class TripPlannerApp {
         item: { ...item, location: targetLoc }
       };
       this.saveScheduledEquipmentNeeds();
-      if (targetLoc && targetLoc.toLowerCase() !== 'helena') {
-        this.addTrip(dateKey, targetLoc);
-      }
       this.renderPlanner();
       this.renderEquipmentNeedsList();
       this.showToast(`🧰 Scheduled ${item.equipmentType} (${item.vehicleNumber || item.crewId}) for delivery on ${dateKey}`);
@@ -3798,9 +3851,6 @@ class TripPlannerApp {
         };
       });
       this.saveScheduledEquipmentNeeds();
-      if (targetLoc && targetLoc.toLowerCase() !== 'helena') {
-        this.addTrip(dateKey, targetLoc);
-      }
       this.renderPlanner();
       this.renderEquipmentNeedsList();
       this.showToast(`🧰 Scheduled ${payload.items.length} equipment need(s) for Crew ${payload.crewId} on ${dateKey}`);
@@ -7462,7 +7512,7 @@ class TripPlannerApp {
                 if (this.isSwapDismissed(sKey)) return;
                 const compInfo = this.getSwapCompletionInfo(item);
                 const isDone = compInfo.isCompleted || !!(entry && entry.completed);
-                const compDate = compInfo.date || (entry && entry.completedDate) || '';
+                const compDate = this.formatDisplayDate((entry && entry.completedDate) || compInfo.date || '');
                 dayScheduledSwaps.push({
                   ...item,
                   _sKey: sKey,
@@ -7483,9 +7533,12 @@ class TripPlannerApp {
           const already = dayScheduledSwaps.some(ds => {
             const empMatch = (ds.employeeName || '').toLowerCase() === (cs.employeeName || '').toLowerCase() ||
               (window.employeeResolver && typeof window.employeeResolver.areSameEmployee === 'function' && window.employeeResolver.areSameEmployee(ds.employeeName, cs.employeeName));
-            const itmMatch = (!ds.currentItem || !cs.currentItem || String(ds.currentItem).trim() === String(cs.currentItem).trim()) ||
-              (!ds.pickItem || !cs.pickItem || String(ds.pickItem).trim() === String(cs.pickItem).trim());
-            return empMatch && itmMatch;
+            const typeMatch = String(ds.type || '').toLowerCase() === String(cs.type || '').toLowerCase();
+            const curMatch = Boolean(ds.currentItem && cs.currentItem && String(ds.currentItem).trim() === String(cs.currentItem).trim());
+            const dsPick = String(ds.pickItem || '').trim();
+            const csPick = String(cs.pickItem || '').trim();
+            const pickMatch = Boolean(dsPick && csPick && dsPick !== '—' && dsPick !== '-' && dsPick === csPick);
+            return empMatch && typeMatch && (curMatch || pickMatch);
           });
           if (!already) {
             dayScheduledSwaps.push(cs);
@@ -7746,27 +7799,6 @@ class TripPlannerApp {
                               const crewTasks = window.taskManager ? window.taskManager.getTasksByCrew(c.crewId, weekMonday) : [];
                               const summary = this.getCrewTaskSummary(crewTasks);
 
-                              const sig = this.getSignificantJobNumber(c.crewId).toLowerCase();
-                              const crewPickedSwaps = (allPickedItems || []).filter(item => {
-                                const itemSig = this.getSignificantJobNumber(item.crewId).toLowerCase();
-                                const crewMatches = (sig && itemSig && sig === itemSig) ||
-                                  (item.crewId || '').toLowerCase() === String(c.crewId).toLowerCase();
-                                if (!crewMatches) return false;
-                                const sKey = this.getSwapKey(item);
-                                if (dayScheduledSwaps.some(ds => ds._sKey === sKey)) return false;
-                                const sched = this.getSwapScheduleInfo(item, dateKey);
-                                if (sched && sched.dateKey && sched.dateKey !== dateKey) return false;
-                                return true;
-                              });
-
-                              const crewCompletedSwaps = dayScheduledSwaps.filter(ds => {
-                                if (!ds.isCompleted) return false;
-                                const itemSig = this.getSignificantJobNumber(ds.crewId || ds.jobNum).toLowerCase();
-                                const crewMatches = (sig && itemSig && sig === itemSig) ||
-                                  String(ds.crewId || ds.jobNum || '').toLowerCase() === String(c.crewId).toLowerCase();
-                                return crewMatches;
-                              });
-
                               return `
                                 <div class="crew-task-box" onclick="window.tripPlanner.openCrewTasksModal('${this.escapeHtml(c.crewId)}', '${this.escapeHtml(trip.location)}', 'All', '${dateKey}', false)" title="Click to view all tasks for Crew ${this.escapeHtml(c.crewId)}">
                                   <div style="font-size: 11px; color: #cbd5e1; display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
@@ -7795,48 +7827,6 @@ class TripPlannerApp {
                                     ${summary.drugTests > 0 ? `<span class="badge" style="background: rgba(139, 92, 246, 0.15); color: #c084fc; font-size: 9px; padding: 1px 4px; border: 1px solid rgba(139, 92, 246, 0.3);">🧪 ${summary.drugTests}</span>` : ''}
                                     ${summary.total === 0 ? `<span style="font-size: 9px; color: #94a3b8; font-style: italic;">✓ No pending tasks</span>` : ''}
                                   </div>
-
-                                  ${crewPickedSwaps.length > 0 ? `
-                                    <div style="margin-top: 5px; padding: 4px 6px; background: rgba(59, 130, 246, 0.12); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 4px;">
-                                      <div style="font-size: 9.5px; font-weight: 800; color: #93c5fd; display: flex; align-items: center; justify-content: space-between; margin-bottom: 2px;">
-                                        <span>🚚 Picked Swaps Ready (${crewPickedSwaps.length})</span>
-                                      </div>
-                                      ${crewPickedSwaps.map(ps => {
-                                        const isReclaim = !!ps.isReclaim;
-                                        return `
-                                        <div style="font-size: 9.5px; color: #e2e8f0; display: flex; justify-content: space-between; align-items: center; margin-top: 3px; gap: 4px; cursor: pointer; padding: 2px 4px; border-radius: 3px; transition: background 0.15s;" onmouseover="this.style.background='rgba(255,255,255,0.08)'" onmouseout="this.style.background='transparent'" onclick="event.stopPropagation(); window.tripPlanner.openSwapDetailsModal(${JSON.stringify(ps).replace(/"/g, '&quot;')}, '${this.escapeJs(c.crewId)}', '${this.escapeJs(trip.location)}')" title="${isReclaim ? 'Click to view reclaim details' : 'Click to view swap details & complete swap'}">
-                                          <span style="flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                                            <strong>${this.escapeHtml(ps.employeeName)}</strong>: ${isReclaim ? '📦 Reclaim ' : ''}${ps.type === 'Glove' ? '🧤 Glove' : '🧤 Sleeve'} ${isReclaim ? `<span style="color: #fca5a5;">#${this.escapeHtml(ps.currentItem || '—')}</span> ➔ <strong style="color: #fbbf24;">Helena</strong>` : `<span style="color: #fca5a5;">${this.escapeHtml(ps.currentItem || '—')}</span> ➔ <strong style="color: #4ade80;">${this.escapeHtml(ps.pickItem || '—')}</strong>`}
-                                            ${ps.size ? `<span style="color: #94a3b8; font-size: 9px;"> (${this.escapeHtml(ps.size)})</span>` : ''}
-                                          </span>
-                                          <button class="btn btn-primary" style="padding: 1px 6px; font-size: 8.5px; background: ${isReclaim ? '#f59e0b; color: #000;' : '#2563eb;'}; color: #fff; border: none; font-weight: 700; cursor: pointer; border-radius: 3px; white-space: nowrap;" onclick="event.stopPropagation(); window.tripPlanner.openSwapDetailsModal(${JSON.stringify(ps).replace(/"/g, '&quot;')}, '${this.escapeJs(c.crewId)}', '${this.escapeJs(trip.location)}')" title="${isReclaim ? 'View reclaim details' : 'View swap details & complete swap'}">
-                                            ${isReclaim ? '📦 Reclaim' : '🔍 Swap'}
-                                          </button>
-                                        </div>
-                                      `;}).join('')}
-                                    </div>
-                                  ` : ''}
-
-                                  ${crewCompletedSwaps.length > 0 ? `
-                                    <div style="margin-top: 5px; padding: 4px 6px; background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 4px;">
-                                      <div style="font-size: 9.5px; font-weight: 800; color: #34d399; display: flex; align-items: center; justify-content: space-between; margin-bottom: 2px;">
-                                        <span>✅ Completed Swaps (${crewCompletedSwaps.length})</span>
-                                      </div>
-                                      ${crewCompletedSwaps.map(cs => {
-                                        const isReclaim = !!cs.isReclaim;
-                                        return `
-                                        <div style="font-size: 9.5px; color: #cbd5e1; display: flex; justify-content: space-between; align-items: center; margin-top: 3px; gap: 4px; cursor: pointer; padding: 2px 4px; border-radius: 3px; transition: background 0.15s;" onmouseover="this.style.background='rgba(255,255,255,0.08)'" onmouseout="this.style.background='transparent'" onclick="event.stopPropagation(); window.tripPlanner.openSwapDetailsModal(${JSON.stringify(cs).replace(/"/g, '&quot;')}, '${this.escapeJs(c.crewId)}', '${this.escapeJs(trip.location)}')" title="Click to view completed swap details">
-                                          <span style="flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                                            <strong style="color: #94a3b8; text-decoration: line-through;">${this.escapeHtml(cs.employeeName)}</strong>: ${isReclaim ? '📦 Reclaimed ' : ''}${cs.type === 'Glove' ? '🧤 Glove' : (cs.type === 'Sleeve' ? '🧤 Sleeve' : this.escapeHtml(cs.type))} ${isReclaim ? `<span style="color: #94a3b8; text-decoration: line-through;">#${this.escapeHtml(cs.currentItem || '—')}</span> ➔ <strong style="color: #4ade80;">Helena</strong>` : `<span style="color: #94a3b8; text-decoration: line-through;">#${this.escapeHtml(cs.currentItem || '—')}</span> ➔ <strong style="color: #4ade80;">#${this.escapeHtml(cs.pickItem || '—')}</strong>`}
-                                            ${cs.size ? `<span style="color: #94a3b8; font-size: 9px;"> (${this.escapeHtml(cs.size)})</span>` : ''}
-                                          </span>
-                                          <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #a7f3d0; font-size: 8.5px; font-weight: 700; padding: 1px 4px; border-radius: 3px; white-space: nowrap;">
-                                            ✓ Done
-                                          </span>
-                                        </div>
-                                      `;}).join('')}
-                                    </div>
-                                  ` : ''}
                                 </div>
                               `;
                             }).join('')}
@@ -7966,7 +7956,6 @@ class TripPlannerApp {
                 employeeName: foundSwap.employeeName || '',
                 swap: foundSwap
               }));
-              e.dataTransfer.setData('text/plain', foundSwap.location || '');
             }
           });
         });
@@ -8215,7 +8204,7 @@ class TripPlannerApp {
           const c = crewMap[sig];
           if (c.foreman) foreman = c.foreman;
           if (c.jobName) jobName = c.jobName;
-          if ((!location || location === 'Helena' || this.isStatusLocation(location)) && c.location && !this.isStatusLocation(c.location)) {
+          if (c.location && !this.isStatusLocation(c.location)) {
             location = c.location;
           }
         }
@@ -8642,11 +8631,10 @@ class TripPlannerApp {
           });
         });
         e.dataTransfer.setData('application/json', JSON.stringify({
-          type: 'location',
+          type: 'swap_location',
           location: locName,
           swaps: allLocSwaps
         }));
-        e.dataTransfer.setData('text/plain', locName);
       });
       locSection.appendChild(locHeader);
 
@@ -8689,7 +8677,6 @@ class TripPlannerApp {
               location: locName,
               swaps: emp.swaps
             }));
-            e.dataTransfer.setData('text/plain', locName);
           });
 
           let swapsHtml = emp.swaps.map(s => {
@@ -8762,7 +8749,6 @@ class TripPlannerApp {
                 employeeName: emp.name,
                 swap: swapObj
               }));
-              e.dataTransfer.setData('text/plain', locName);
             });
           });
 

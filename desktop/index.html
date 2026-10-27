@@ -54,16 +54,16 @@
         📁 Import Snapshot
       </button>
 
-      <button class="btn btn-secondary" id="download-snapshot-btn" onclick="window.syncEngine.downloadLatestSnapshot()" title="Download fresh database snapshot from Google Sheets (Replaces local data)">
+      <button class="btn btn-secondary" id="download-snapshot-btn" onclick="window.syncEngine.downloadLatestSnapshot()" title="Download latest JSON database from Google Drive (Replaces local data)">
         ⬇️ Download Snapshot
       </button>
 
-      <button class="btn btn-primary admin-only-control" id="push-changes-btn" onclick="window.syncEngine.pushChangesToGoogleSheets()" title="Push pending offline changes to Google Sheets">
-        ⬆️ Push Changes to Sheets
+      <button class="btn btn-primary admin-only-control" id="push-changes-btn" onclick="window.syncEngine.syncAndSaveToCloud()" title="Save authoritative JSON database to Google Drive and create a point-in-time restore point">
+        ☁️ Sync & Save
       </button>
 
-      <button class="btn btn-secondary" id="backup-drive-btn" style="border-color: #3b82f6; color: #60a5fa;" onclick="window.syncEngine.createGoogleDriveBackup()" title="Create an immediate full backup copy of the Google Sheet and a timestamped JSON database snapshot in Google Drive">
-        💾 Backup to Drive
+      <button class="btn btn-secondary" id="backup-drive-btn" style="border-color: #3b82f6; color: #60a5fa;" onclick="window.syncEngine.openRestoreAndRebuildModal()" title="Browse cloud & local restore points or rebuild inventory from history">
+        🕰️ Restore / Rebuild
       </button>
     </div>
   </header>
@@ -82,15 +82,15 @@
         <button class="btn btn-primary" onclick="window.syncEngine.downloadLatestSnapshot(); window.toggleMobileSidebar();" style="width: 100%; justify-content: center; font-size: 12px; font-weight: 700; background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%);">
           ⬇️ Download Database
         </button>
-        <button class="btn btn-secondary" onclick="window.syncEngine.importLocalSnapshotFile(); window.toggleMobileSidebar();" style="width: 100%; justify-content: center; font-size: 12px; font-weight: 600; border-color: rgba(52, 211, 153, 0.4); color: #34d399;">
-          📁 Import Snapshot File
+        <button class="btn btn-primary admin-only-control" onclick="window.syncEngine.syncAndSaveToCloud(); window.toggleMobileSidebar();" style="width: 100%; justify-content: center; font-size: 12px; font-weight: 700; background: linear-gradient(135deg, #059669 0%, #047857 100%); border: none;">
+          ☁️ Sync & Save
         </button>
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px;">
-          <button class="btn btn-secondary admin-only-control" onclick="window.syncEngine.pushChangesToGoogleSheets(); window.toggleMobileSidebar();" style="justify-content: center; font-size: 11px; padding: 5px 2px; color: #fde047;">
-            ⬆️ Push
+          <button class="btn btn-secondary" onclick="window.syncEngine.openRestoreAndRebuildModal(); window.toggleMobileSidebar();" style="justify-content: center; font-size: 11px; padding: 5px 2px; color: #60a5fa;" title="Restore or rebuild database">
+            🕰️ Restore
           </button>
-          <button class="btn btn-secondary" onclick="window.syncEngine.createGoogleDriveBackup(); window.toggleMobileSidebar();" style="justify-content: center; font-size: 11px; padding: 5px 2px; color: #60a5fa;" title="Create Google Drive backup">
-            💾 Backup
+          <button class="btn btn-secondary" onclick="window.syncEngine.importLocalSnapshotFile(); window.toggleMobileSidebar();" style="justify-content: center; font-size: 11px; padding: 5px 2px; color: #34d399;">
+            📁 Import
           </button>
         </div>
       </div>
@@ -1057,13 +1057,12 @@
               Manage your offline storage snapshot and synchronize independently with Google Sheets.
             </p>
             <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-              <button class="btn btn-secondary" onclick="window.localDB.clear(); location.reload();">🗑️ Clear Offline Cache</button>
-              <button class="btn btn-primary" onclick="window.syncEngine.downloadLatestSnapshot()">⬇️ Download Fresh Snapshot</button>
+              <button class="btn btn-primary" onclick="window.syncEngine.syncAndSaveToCloud()">☁️ Sync & Save to Cloud</button>
+              <button class="btn btn-primary" onclick="window.syncEngine.downloadLatestSnapshot()">⬇️ Download Latest Snapshot</button>
+              <button class="btn btn-secondary" style="border-color: #3b82f6; color: #60a5fa;" onclick="window.syncEngine.openRestoreAndRebuildModal()">🕰️ Restore / Rebuild Manager</button>
               <button class="btn btn-secondary" style="border-color: #34d399; color: #34d399;" onclick="window.syncEngine.importLocalSnapshotFile()">📁 Import Snapshot File</button>
-              <button class="btn btn-primary" onclick="window.syncEngine.pushChangesToGoogleSheets()">⬆️ Push Offline Changes</button>
-              <button class="btn btn-secondary" style="border-color: #10b981; color: #34d399;" onclick="window.syncEngine.forcePushChangesToGoogleSheets()" title="Push all offline changes to Google Sheets, overriding any detected conflicts">⚡ Force Push (Overwrite Conflicts)</button>
-              <button class="btn btn-secondary" style="border-color: #f59e0b; color: #fbbf24;" onclick="window.syncEngine.pushAllCleanData()" title="Directly overwrite Google Sheets Employees and Job Tracking with your clean, organized local data">🧹 Overwrite Sheets with Clean Local Tables</button>
-              <button class="btn btn-secondary" style="border-color: #3b82f6; color: #60a5fa;" onclick="window.syncEngine.createGoogleDriveBackup()" title="Create an immediate full backup copy of the Google Sheet and a timestamped JSON database snapshot in Google Drive">💾 Create Drive Backup (Sheet + JSON)</button>
+              <button class="btn btn-secondary" style="border-color: #8b5cf6; color: #a78bfa;" onclick="window.syncEngine.pushAllTablesExactCopy()" title="Optionally mirror current JSON tables into Google Sheets tabs">📊 Mirror Tables to Google Sheets</button>
+              <button class="btn btn-secondary" onclick="window.localDB.clear(); location.reload();">🗑️ Clear Offline Cache</button>
             </div>
           </div>
         </div>
@@ -1093,8 +1092,8 @@
       </div>
       <div class="modal-footer" id="sync-modal-footer" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
         <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-          <button class="btn btn-secondary" id="sync-modal-backup-btn" style="border-color: #3b82f6; color: #60a5fa;" onclick="window.syncEngine.createGoogleDriveBackup()" title="Create an immediate full backup copy of the Google Sheet and a timestamped JSON database snapshot in Google Drive">💾 Backup to Drive</button>
-          <button class="btn btn-secondary" id="sync-modal-exact-copy-btn" style="border-color: #8b5cf6; color: #a78bfa;" onclick="window.syncEngine.pushAllTablesExactCopy()" title="Ensure Google Sheets is an exact 1:1 copy of the desktop app, overwriting sheets with current app data and removing all duplicate or orphaned rows">🔄 Overwrite Sheets (Exact Copy)</button>
+          <button class="btn btn-primary" id="sync-modal-sync-save-btn" onclick="window.syncEngine.syncAndSaveToCloud()" title="Save authoritative JSON database to Google Drive and create a restore point">☁️ Sync & Save Now</button>
+          <button class="btn btn-secondary" id="sync-modal-backup-btn" style="border-color: #3b82f6; color: #60a5fa;" onclick="window.syncEngine.openRestoreAndRebuildModal()" title="Browse cloud & local restore points or rebuild inventory from history">🕰️ Restore / Rebuild</button>
         </div>
         <div style="display: flex; gap: 8px;">
           <button class="btn btn-secondary" id="sync-modal-clear-btn" style="display: none;" onclick="window.syncEngine.clearPendingOutbox()">🗑️ Clear Outbox</button>

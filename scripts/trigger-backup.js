@@ -10,6 +10,9 @@
  */
 
 const https = require('https');
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
 const { URL } = require('url');
 
 const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbzsCSiAhGr5aOMoEF6OlSInIgdnkvQbx_9zRcgdtA7usX7nZbPzlfZulyHDVTfStiuA/exec';
@@ -81,9 +84,21 @@ async function triggerBackup() {
   console.log('----------------------------------------');
 
   const startTime = Date.now();
+  let clientSnapshot = null;
+  try {
+    const localSnapPath = path.join(os.homedir(), 'AppData', 'Roaming', 'safety-assistant-desktop', 'SafetyAssistantData', 'local_snapshot.json');
+    if (fs.existsSync(localSnapPath)) {
+      clientSnapshot = JSON.parse(fs.readFileSync(localSnapPath, 'utf8'));
+      console.log('Loaded authoritative desktop local_snapshot.json for Drive sync cache.');
+    }
+  } catch (snapErr) {
+    console.warn('Could not read local_snapshot.json (falling back to server export):', snapErr.message);
+  }
+
   const payload = JSON.stringify({
-    action: 'createBackup',
-    forceFullCopy: true
+    action: 'syncAndSaveSnapshot',
+    createRestorePoint: true,
+    snapshot: clientSnapshot
   });
 
   try {
@@ -101,10 +116,10 @@ async function triggerBackup() {
       console.log('\n========================================');
       console.log('  GOOGLE DRIVE BACKUP COMPLETED!');
       console.log('========================================');
-      console.log(` [OK] Google Sheet Backup:  ${result.backupName || 'Created'}`);
-      console.log(` [OK] JSON Snapshot Backup:  ${result.jsonBackupName || (result.backupName ? result.backupName + '.json' : 'Created')}`);
+      console.log(` [OK] Cloud Revision:        Rev #${result.revision || 'Latest'}`);
+      console.log(` [OK] JSON Snapshot Backup:  ${result.jsonBackupName || 'Created'}`);
       console.log(` [OK] Offline Sync Cache:    SafetyAssistant_Sync_Snapshot.json (Updated)`);
-      console.log(` [OK] Destination Folder:    Google Drive > Glove Manager Backups`);
+      console.log(` [OK] Destination Folder:    Google Drive > Safety Assistant Backups`);
       console.log(` [OK] Elapsed Time:          ${elapsed}s`);
       console.log('========================================\n');
       process.exit(0);

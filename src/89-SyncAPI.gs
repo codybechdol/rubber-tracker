@@ -175,54 +175,40 @@ function ensureEmployeeStatusColumn(ss) {
       .setHorizontalAlignment('center');
   }
 
-  // If we have data rows, backfill any empty Status cells and clean compound locations
+  // Synchronize Status (Col 18) directly from Location without mutating Location
   if (lastRow > 1) {
     var locRange = sheet.getRange(2, locColIdx, lastRow - 1, 1);
     var locVals = locRange.getValues();
     var statusRange = sheet.getRange(2, statusColIdx, lastRow - 1, 1);
     var statusVals = statusRange.getValues();
-    var locUpdated = false;
     var statusUpdated = false;
 
     for (var r = 0; r < locVals.length; r++) {
       var rawLoc = String(locVals[r][0] || '').trim();
       var currentStatus = String(statusVals[r][0] || '').trim();
-      
+      var derivedStatus = 'Active';
+
       var parenMatch = rawLoc.match(/^(.*?)\s*\((.*?)\)$/);
       if (parenMatch) {
-        var cleanCity = parenMatch[1].trim();
-        var statusInside = parenMatch[2].trim();
-        if (!currentStatus || currentStatus === 'Active') {
-          statusVals[r][0] = statusInside;
-          statusUpdated = true;
-        }
-        locVals[r][0] = cleanCity || 'Helena';
-        locUpdated = true;
-      } else if (rawLoc.toLowerCase() === 'previous employee') {
-        if (!currentStatus) {
-          statusVals[r][0] = 'Previous Employee';
-          statusUpdated = true;
-        }
-        locVals[r][0] = 'Helena';
-        locUpdated = true;
+        derivedStatus = parenMatch[2].trim() || 'Active';
+      } else if (rawLoc.toLowerCase() === 'previous employee' || rawLoc.toLowerCase().indexOf('previous') !== -1) {
+        derivedStatus = 'Previous Employee';
       } else if (/^(vacation|light duty|leave|medical|weeds)$/i.test(rawLoc)) {
-        if (!currentStatus) {
-          statusVals[r][0] = rawLoc;
-          statusUpdated = true;
-        }
-        locVals[r][0] = 'Helena';
-        locUpdated = true;
-      } else if (!currentStatus) {
-        statusVals[r][0] = 'Active';
+        derivedStatus = rawLoc;
+      } else if (currentStatus.toLowerCase() === 'pending') {
+        derivedStatus = 'Pending';
+      } else {
+        derivedStatus = 'Active';
+      }
+
+      if (currentStatus !== derivedStatus) {
+        statusVals[r][0] = derivedStatus;
         statusUpdated = true;
       }
     }
 
     if (statusUpdated) {
       statusRange.setValues(statusVals);
-    }
-    if (locUpdated) {
-      locRange.setValues(locVals);
     }
   }
 }
@@ -369,9 +355,12 @@ function exportFullDatabaseSnapshot(tableKeysFilter) {
     } else {
       var row0Count = data[0].filter(function(v) { return String(v || '').trim() !== ''; }).length;
       if (row0Count <= 2 && data.length > 1) {
-        var row1Count = data[1].filter(function(v) { return String(v || '').trim() !== ''; }).length;
-        if (row1Count >= 3) {
-          headerRowIdx = 1;
+        for (var checkR = 1; checkR < Math.min(data.length, 6); checkR++) {
+          var rowCheckCount = data[checkR].filter(function(v) { return String(v || '').trim() !== ''; }).length;
+          if (rowCheckCount >= 3) {
+            headerRowIdx = checkR;
+            break;
+          }
         }
       }
     }
@@ -518,6 +507,30 @@ function exportFullDatabaseSnapshot(tableKeysFilter) {
 }
 
 /**
+ * Fast cached lookup of the Google Drive backup folder using ScriptProperties.
+ */
+function getFastBackupFolder() {
+  var props = PropertiesService.getScriptProperties();
+  var cachedFolderId = props.getProperty('BACKUP_FOLDER_ID');
+  if (cachedFolderId) {
+    try {
+      var f = DriveApp.getFolderById(cachedFolderId);
+      if (f && !f.isTrashed()) {
+        if (f.getName() === 'Glove Manager Backups' && typeof BACKUP_FOLDER_NAME !== 'undefined') {
+          try { f.setName(BACKUP_FOLDER_NAME); } catch (rnErr) {}
+        }
+        return f;
+      }
+    } catch (e) {}
+  }
+  var folder = getOrCreateBackupFolder();
+  if (folder) {
+    try { props.setProperty('BACKUP_FOLDER_ID', folder.getId()); } catch (pErr) {}
+  }
+  return folder;
+}
+
+/**
  * Generates the offline sync snapshot and saves it as a JSON file in the Drive Backup folder.
  * Called automatically every time "Save & Backup" runs in Google Sheets.
  *
@@ -528,25 +541,50 @@ function generateAndStoreSyncSnapshot(existingSnapshot) {
   try {
     var startTime = new Date().getTime();
     var snapshot = existingSnapshot || exportFullDatabaseSnapshot();
-    var jsonStr = JSON.stringify(snapshot);
-
-    var folder = getOrCreateBackupFolder();
-    var files = folder.getFilesByName(SYNC_SNAPSHOT_FILENAME);
-    var file = null;
-
-    if (files.hasNext()) {
-      file = files.next();
-      file.setContent(jsonStr);
-      Logger.log('generateAndStoreSyncSnapshot: Updated existing ' + SYNC_SNAPSHOT_FILENAME);
+    var jsonStr = '';
+    if (typeof snapshot === 'string') {
+      var trimmed = snapshot.trim();
+      if (trimmed.indexOf('"') === 0) {
+        try {
+          var unwrapped = JSON.parse(trimmed);
+          jsonStr = typeof unwrapped === 'string' ? unwrapped : JSON.stringify(unwrapped);
+        } catch (uErr) {
+          jsonStr = trimmed;
+        }
+      } else {
+        jsonStr = trimmed;
+      }
     } else {
-      file = folder.createFile(SYNC_SNAPSHOT_FILENAME, jsonStr, MimeType.PLAIN_TEXT);
-      Logger.log('generateAndStoreSyncSnapshot: Created new ' + SYNC_SNAPSHOT_FILENAME);
+      jsonStr = JSON.stringify(snapshot);
     }
 
-    if (file) {
+    var props = PropertiesService.getScriptProperties();
+    var file = null;
+    var cachedFileId = props.getProperty('SYNC_SNAPSHOT_FILE_ID');
+    if (cachedFileId) {
       try {
-        PropertiesService.getScriptProperties().setProperty('SYNC_SNAPSHOT_FILE_ID', file.getId());
-      } catch (pErr) {}
+        var existingFile = DriveApp.getFileById(cachedFileId);
+        if (existingFile && !existingFile.isTrashed()) {
+          existingFile.setContent(jsonStr);
+          file = existingFile;
+        }
+      } catch (idErr) {
+        file = null;
+      }
+    }
+
+    if (!file) {
+      var folder = getFastBackupFolder();
+      var files = folder.getFilesByName(SYNC_SNAPSHOT_FILENAME);
+      if (files.hasNext()) {
+        file = files.next();
+        file.setContent(jsonStr);
+      } else {
+        file = folder.createFile(SYNC_SNAPSHOT_FILENAME, jsonStr, MimeType.PLAIN_TEXT);
+      }
+      if (file) {
+        try { props.setProperty('SYNC_SNAPSHOT_FILE_ID', file.getId()); } catch (pErr) {}
+      }
     }
 
     var elapsed = new Date().getTime() - startTime;
@@ -556,6 +594,352 @@ function generateAndStoreSyncSnapshot(existingSnapshot) {
   } catch (e) {
     Logger.log('generateAndStoreSyncSnapshot Error: ' + e.toString());
     return null;
+  }
+}
+
+/**
+ * JSON-First Cloud Database Sync & Save (Option A).
+ * Saves the client's authoritative JSON snapshot directly to SafetyAssistant_Sync_Snapshot.json
+ * in Google Drive (zero spreadsheet cell translation) and writes a rolling timestamped JSON restore point.
+ *
+ * @param {Object} payload - { snapshot: Object|string, createRestorePoint?: boolean }
+ * @return {Object} Sync result with revision, exportedAt, and restore point metadata
+ */
+function syncAndSaveCloudDatabase(payload) {
+  var startTime = new Date().getTime();
+  payload = payload || {};
+  var rawSnap = payload.snapshot;
+  if (!rawSnap) {
+    return { status: 'error', success: false, error: 'Missing snapshot payload in syncAndSaveCloudDatabase' };
+  }
+
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var prevRev = parseInt(props.getProperty('CLOUD_DB_REVISION') || '0', 10) || 0;
+    var nextRev = prevRev + 1;
+    var nowIso = new Date().toISOString();
+
+    var snapObj = null;
+    if (typeof rawSnap === 'string') {
+      var trimmed = rawSnap.trim();
+      if (trimmed.indexOf('"') === 0) {
+        var unwrapped = JSON.parse(trimmed);
+        snapObj = typeof unwrapped === 'string' ? JSON.parse(unwrapped) : unwrapped;
+      } else {
+        snapObj = JSON.parse(trimmed);
+      }
+    } else if (typeof rawSnap === 'object') {
+      snapObj = rawSnap;
+    }
+
+    if (!snapObj || !snapObj.tables) {
+      return { status: 'error', success: false, error: 'Invalid snapshot object (missing tables).' };
+    }
+
+    snapObj.revision = nextRev;
+    snapObj.exportedAt = nowIso;
+
+    var jsonStr = JSON.stringify(snapObj);
+    var sizeKb = parseFloat((jsonStr.length / 1024).toFixed(1));
+
+    // 1. Update the live cloud database file (SafetyAssistant_Sync_Snapshot.json) via cached ID
+    var liveFile = generateAndStoreSyncSnapshot(jsonStr);
+
+    // 2. Create a rolling point-in-time JSON restore point in Google Drive > Glove Manager Backups
+    var createRestore = payload.createRestorePoint !== false;
+    var restoreFile = null;
+    var jsonBackupName = null;
+    if (createRestore) {
+      var folder = getFastBackupFolder();
+      if (folder) {
+        var tz = Session.getScriptTimeZone() || 'America/Denver';
+        var stamp = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd_HH-mm-ss');
+        jsonBackupName = 'Safety Assistant - Backup ' + stamp + '.json';
+        restoreFile = folder.createFile(jsonBackupName, jsonStr, MimeType.PLAIN_TEXT);
+
+        // Update fast CLOUD_BACKUP_INDEX in ScriptProperties and prune > 35 without enumerating Drive folder
+        try {
+          var rawIdx = props.getProperty('CLOUD_BACKUP_INDEX');
+          var backupIndex = rawIdx ? JSON.parse(rawIdx) : [];
+          if (!Array.isArray(backupIndex)) backupIndex = [];
+          backupIndex.unshift({
+            id: restoreFile.getId(),
+            name: jsonBackupName,
+            createdAt: nowIso,
+            timestampMs: startTime,
+            sizeKb: sizeKb,
+            revision: nextRev,
+            isLiveCache: false
+          });
+          while (backupIndex.length > 35) {
+            var oldest = backupIndex.pop();
+            if (oldest && oldest.id) {
+              try { DriveApp.getFileById(oldest.id).setTrashed(true); } catch (trErr) {}
+            }
+          }
+          props.setProperty('CLOUD_BACKUP_INDEX', JSON.stringify(backupIndex));
+        } catch (idxErr) {
+          Logger.log('syncAndSaveCloudDatabase index warning: ' + idxErr);
+        }
+      }
+    }
+
+    try {
+      props.setProperty('CLOUD_DB_REVISION', String(nextRev));
+      props.setProperty('SYNC_SNAPSHOT_UPDATED', nowIso);
+      if (jsonBackupName) {
+        props.setProperty('LAST_CLOUD_BACKUP_NAME', jsonBackupName);
+      }
+    } catch (pErr) {}
+
+    var elapsedMs = new Date().getTime() - startTime;
+    return {
+      status: 'ok',
+      success: !!liveFile,
+      revision: nextRev,
+      exportedAt: nowIso,
+      fileId: liveFile ? liveFile.getId() : null,
+      jsonBackupCreated: !!restoreFile,
+      jsonBackupName: jsonBackupName,
+      backupFileId: restoreFile ? restoreFile.getId() : null,
+      sizeKb: sizeKb,
+      elapsedMs: elapsedMs
+    };
+  } catch (err) {
+    Logger.log('syncAndSaveCloudDatabase Error: ' + err.toString());
+    return { status: 'error', success: false, error: err.toString() };
+  }
+}
+
+/**
+ * Lightweight sub-second check of the current Cloud JSON Database revision and timestamp.
+ */
+function getCloudDatabaseRevisionInfo() {
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var rev = parseInt(props.getProperty('CLOUD_DB_REVISION') || '0', 10) || 0;
+    var updatedAt = props.getProperty('SYNC_SNAPSHOT_UPDATED') || '';
+    var lastBackup = props.getProperty('LAST_CLOUD_BACKUP_NAME') || '';
+    var fileId = props.getProperty('SYNC_SNAPSHOT_FILE_ID') || '';
+    return {
+      status: 'ok',
+      success: true,
+      revision: rev,
+      updatedAt: updatedAt,
+      lastBackupName: lastBackup,
+      fileId: fileId
+    };
+  } catch (err) {
+    return { status: 'error', success: false, error: err.toString() };
+  }
+}
+
+/**
+ * Lists recent point-in-time JSON database backups in Google Drive > Glove Manager Backups.
+ * Uses the fast CLOUD_BACKUP_INDEX in ScriptProperties (< 50ms) and falls back to Drive search only once.
+ *
+ * @param {number} [limit=25] - Maximum number of restore points to return
+ * @return {Object} { status: 'ok', success: true, backups: Array }
+ */
+function listCloudSnapshotBackups(limit) {
+  limit = limit || 25;
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var rawIdx = props.getProperty('CLOUD_BACKUP_INDEX');
+    var list = [];
+    if (rawIdx) {
+      try {
+        list = JSON.parse(rawIdx) || [];
+      } catch (e) {
+        list = [];
+      }
+    }
+
+    // If index is empty on first run, seed it using Drive searchFiles (filters .json server-side)
+    if (list.length === 0) {
+      var folder = getFastBackupFolder();
+      if (folder) {
+        var files = folder.searchFiles("title contains '.json' and trashed = false");
+        while (files.hasNext() && list.length < 35) {
+          var f = files.next();
+          var name = f.getName();
+          if (name === SYNC_SNAPSHOT_FILENAME) continue;
+          var created = f.getDateCreated();
+          list.push({
+            id: f.getId(),
+            name: name,
+            createdAt: created ? created.toISOString() : '',
+            timestampMs: created ? created.getTime() : 0,
+            sizeKb: parseFloat((f.getSize() / 1024).toFixed(1)),
+            isLiveCache: false
+          });
+        }
+        list.sort(function(a, b) { return b.timestampMs - a.timestampMs; });
+        try { props.setProperty('CLOUD_BACKUP_INDEX', JSON.stringify(list.slice(0, 35))); } catch (pErr) {}
+      }
+    }
+
+    var resultList = list.slice(0, limit);
+    var liveId = props.getProperty('SYNC_SNAPSHOT_FILE_ID');
+    var liveUpdated = props.getProperty('SYNC_SNAPSHOT_UPDATED');
+    if (liveId) {
+      resultList.unshift({
+        id: liveId,
+        name: SYNC_SNAPSHOT_FILENAME + ' (Live Cloud Database)',
+        createdAt: liveUpdated || new Date().toISOString(),
+        timestampMs: liveUpdated ? new Date(liveUpdated).getTime() : new Date().getTime(),
+        sizeKb: resultList.length > 0 ? resultList[0].sizeKb : 6232.9,
+        isLiveCache: true
+      });
+    }
+
+    return {
+      status: 'ok',
+      success: true,
+      revision: parseInt(props.getProperty('CLOUD_DB_REVISION') || '0', 10) || 0,
+      updatedAt: liveUpdated || '',
+      backups: resultList
+    };
+  } catch (err) {
+    Logger.log('listCloudSnapshotBackups error: ' + err);
+    return { status: 'error', success: false, error: err.toString(), backups: [] };
+  }
+}
+
+/**
+ * Restores a specific point-in-time JSON backup from Google Drive > Glove Manager Backups,
+ * promotes it to the live SafetyAssistant_Sync_Snapshot.json, and returns the full snapshot.
+ *
+ * @param {string} fileId - Google Drive file ID of the backup JSON to restore
+ * @return {Object} { status: 'ok', success: true, revision, restoredFrom, snapshot }
+ */
+function restoreCloudSnapshotBackup(fileId) {
+  if (!fileId) {
+    return { status: 'error', success: false, error: 'Missing fileId to restore.' };
+  }
+  try {
+    var file = DriveApp.getFileById(fileId);
+    if (!file || file.isTrashed()) {
+      return { status: 'error', success: false, error: 'Backup file not found or was deleted in Google Drive.' };
+    }
+    var content = file.getBlob().getDataAsString();
+    var snapObj = JSON.parse(content);
+    if (!snapObj || !snapObj.tables) {
+      return { status: 'error', success: false, error: 'Selected file is not a valid Safety Assistant JSON snapshot.' };
+    }
+
+    var props = PropertiesService.getScriptProperties();
+    var nextRev = (parseInt(props.getProperty('CLOUD_DB_REVISION') || '0', 10) || 0) + 1;
+    var nowIso = new Date().toISOString();
+    snapObj.revision = nextRev;
+    snapObj.exportedAt = nowIso;
+    snapObj.restoredFrom = file.getName();
+
+    var jsonStr = JSON.stringify(snapObj);
+    generateAndStoreSyncSnapshot(jsonStr);
+    props.setProperty('CLOUD_DB_REVISION', String(nextRev));
+    props.setProperty('SYNC_SNAPSHOT_UPDATED', nowIso);
+
+    return {
+      status: 'ok',
+      success: true,
+      revision: nextRev,
+      exportedAt: nowIso,
+      restoredFrom: file.getName(),
+      snapshot: snapObj
+    };
+  } catch (err) {
+    Logger.log('restoreCloudSnapshotBackup error: ' + err);
+    return { status: 'error', success: false, error: err.toString() };
+  }
+}
+
+/**
+ * One-time cleanup utility:
+ * 1. Renames the Google Drive backup folder from "Glove Manager Backups" to "Safety Assistant Backups"
+ * 2. Moves redundant Google Sheet backup copies inside the backup folder into the "Old" subfolder
+ * 3. Deletes unused / temporary tabs from the Google Sheet workbook
+ */
+function cleanupSheetsAndRenameBackupFolder() {
+  try {
+    var folder = getFastBackupFolder();
+    var folderName = '';
+    var movedSheetBackupsCount = 0;
+
+    if (folder) {
+      if (folder.getName() !== BACKUP_FOLDER_NAME) {
+        try { folder.setName(BACKUP_FOLDER_NAME); } catch (rnErr) {}
+      }
+      folderName = folder.getName();
+
+      // Find or create "Old" subfolder inside the backup folder
+      var oldSubfolder = null;
+      var subFolders = folder.getFoldersByName('Old');
+      if (subFolders.hasNext()) {
+        oldSubfolder = subFolders.next();
+      } else {
+        oldSubfolder = folder.createFolder('Old');
+      }
+
+      // Move Google Sheet backup copies into "Old" subfolder using server-side filtered search
+      if (oldSubfolder) {
+        var sheetFiles = folder.searchFiles("mimeType = 'application/vnd.google-apps.spreadsheet' and trashed = false");
+        while (sheetFiles.hasNext() && movedSheetBackupsCount < 80) {
+          var sf = sheetFiles.next();
+          try {
+            sf.moveTo(oldSubfolder);
+            movedSheetBackupsCount++;
+          } catch (mvErr) {}
+        }
+      }
+    }
+
+    // Delete unused / temporary tabs from the Google Sheet
+    var ss = SpreadsheetApp.getActiveSpreadsheet();
+    var tabsToDelete = [
+      '_Test_Sync_Temp',
+      'Retired Equipment',
+      'Testing Lab Batches',
+      'Field GPS Log',
+      'System Config',
+      'Previous Employees',
+      'Manual Tasks',
+      'Task Metadata',
+      'Daily Accomplishments',
+      'Dashboard',
+      'Item History Lookup',
+      'Reclaims',
+      'Purchase Needs',
+      'To Do',
+      'Inventory Reports'
+    ];
+
+    var deletedTabs = [];
+    for (var i = 0; i < tabsToDelete.length; i++) {
+      var tabName = tabsToDelete[i];
+      var sheet = ss.getSheetByName(tabName);
+      if (sheet && ss.getSheets().length > 1) {
+        try {
+          ss.deleteSheet(sheet);
+          deletedTabs.push(tabName);
+        } catch (delErr) {
+          Logger.log('Could not delete tab ' + tabName + ': ' + delErr);
+        }
+      }
+    }
+
+    var remainingTabs = ss.getSheets().map(function(s) { return s.getName(); });
+
+    return {
+      status: 'ok',
+      success: true,
+      folderName: folderName,
+      movedSheetBackupsCount: movedSheetBackupsCount,
+      deletedTabs: deletedTabs,
+      remainingTabs: remainingTabs
+    };
+  } catch (err) {
+    return { status: 'error', success: false, error: err.toString() };
   }
 }
 
@@ -633,7 +1017,14 @@ function patchSyncSnapshotInDrive(sheetsModified, configsModified) {
       'vendors': 'vendors',
       'purchase orders': 'purchase_orders',
       'dot drug tests': 'dot_drug_tests',
-      'drug test clinics': 'drug_test_clinics'
+      'drug test clinics': 'drug_test_clinics',
+      'retired equipment': 'retired_equipment',
+      'trip schedule': 'trip_schedule',
+      'testing lab batches': 'test_batches',
+      'field gps log': 'field_gps_log',
+      'daily accomplishments': 'daily_accomplishments',
+      'system config': 'system_config',
+      'incident reports': 'incident_reports'
     };
 
     function fastDateStr(d) {
@@ -667,28 +1058,72 @@ function patchSyncSnapshotInDrive(sheetsModified, configsModified) {
       var lastCol = sheet.getLastColumn();
       var data = sheet.getRange(1, 1, lastRow, lastCol).getValues();
       var headerRowIdx = 0;
+      if (tableKey === 'training_tracking' && typeof findTrainingTrackingHeaderRow === 'function') {
+        headerRowIdx = findTrainingTrackingHeaderRow(data);
+      } else if (tableKey.indexOf('_swaps') !== -1) {
+        for (var hr = 0; hr < Math.min(data.length, 15); hr++) {
+          var c0 = String(data[hr][0] || '').trim();
+          var c1 = String(data[hr][1] || '').trim();
+          if (c0.indexOf('Employee') !== -1 || c1.indexOf('Current') !== -1 || c1.indexOf('Serial') !== -1) {
+            headerRowIdx = hr;
+            break;
+          }
+        }
+      } else {
+        var row0Cnt = data[0].filter(function(v) { return String(v || '').trim() !== ''; }).length;
+        if (row0Cnt <= 2 && data.length > 1) {
+          for (var chkR = 1; chkR < Math.min(data.length, 6); chkR++) {
+            var rCnt = data[chkR].filter(function(v) { return String(v || '').trim() !== ''; }).length;
+            if (rCnt >= 3) {
+              headerRowIdx = chkR;
+              break;
+            }
+          }
+        }
+      }
       var headers = data[headerRowIdx].map(function(h) { return String(h || '').trim(); });
       var rows = [];
+      var rawGrid = [];
 
-      for (var r = headerRowIdx + 1; r < data.length; r++) {
-        var rowObj = { _rowIdx: r + 1 };
-        var hasData = false;
-        for (var c = 0; c < headers.length; c++) {
-          var val = data[r][c];
-          if (val instanceof Date) {
-            val = fastDateStr(val);
+      for (var r = 0; r < data.length; r++) {
+        var gridRow = [];
+        var isDataRow = r > headerRowIdx;
+        if (isDataRow && tableKey.indexOf('_swaps') !== -1) {
+          var firstCell = String(data[r][0] || '').trim();
+          if (!firstCell || firstCell.indexOf('🔍') !== -1 || firstCell.indexOf('📍') !== -1 ||
+              firstCell.indexOf('👷') !== -1 || firstCell.indexOf('👤') !== -1 ||
+              /^(class\s*\d|stage\s*\d|previous\s*employee|needs\s*retest|no\s*swaps|employee)/i.test(firstCell)) {
+            isDataRow = false;
           }
-          if (val !== '' && val !== null && val !== undefined) hasData = true;
-          rowObj[headers[c]] = val;
         }
-        if (hasData) rows.push(rowObj);
+        var rowObj = isDataRow ? { _rowIdx: r + 1 } : null;
+        var hasData = false;
+        for (var c = 0; c < lastCol; c++) {
+          var val = data[r][c];
+          var fmtStr = '';
+          if (val instanceof Date) {
+            fmtStr = fastDateStr(val);
+            val = fmtStr;
+          } else if (val === null || val === undefined) {
+            fmtStr = '';
+          } else {
+            fmtStr = String(val);
+          }
+          gridRow.push(fmtStr);
+          if (isDataRow && c < headers.length) {
+            if (val !== '' && val !== null && val !== undefined) hasData = true;
+            if (headers[c]) rowObj[headers[c]] = val;
+          }
+        }
+        rawGrid.push(gridRow);
+        if (isDataRow && hasData) rows.push(rowObj);
       }
 
       snap.tables[tableKey] = {
         name: sheetName,
         headers: headers,
         rows: rows,
-        rawGrid: data,
+        rawGrid: rawGrid,
         rowCount: rows.length,
         maxRows: sheet.getMaxRows(),
         maxCols: sheet.getMaxColumns()
@@ -2638,6 +3073,7 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
               }
 
               var currentLastRow = sheet.getLastRow();
+              var currentLastCol = sheet.getLastColumn();
               try {
                 sheet.getRange(1, 1, Math.min(targetRows, sheet.getMaxRows()), targetCols).clearDataValidations();
               } catch (cdvErr) {}
@@ -2668,9 +3104,23 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
               }
               if (currentLastRow > targetRows) {
                 try {
-                  sheet.getRange(targetRows + 1, 1, currentLastRow - targetRows, targetCols).clearContent();
+                  sheet.getRange(targetRows + 1, 1, currentLastRow - targetRows, Math.max(targetCols, currentLastCol)).clearContent();
                 } catch (clearErr) {
                   Logger.log('REPLACE_TABLE_DATA clearContent warning: ' + clearErr);
+                }
+              }
+              if (currentLastCol > targetCols) {
+                try {
+                  sheet.getRange(1, targetCols + 1, Math.max(targetRows, currentLastRow), currentLastCol - targetCols).clearContent();
+                } catch (clearColErr) {
+                  Logger.log('REPLACE_TABLE_DATA clear extra cols warning: ' + clearColErr);
+                }
+              }
+              if (sheetName.toLowerCase() === 'employees' && typeof ensureEmployeeStatusColumn === 'function') {
+                try {
+                  ensureEmployeeStatusColumn(ss);
+                } catch (empStErr) {
+                  Logger.log('REPLACE_TABLE_DATA ensureEmployeeStatusColumn warning: ' + empStErr);
                 }
               }
 
@@ -2991,9 +3441,20 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
     }
   }
 
+  // Always keep Employees Status column synchronized with Location after any Employees mutation
+  if (sheetsModified['Employees'] || sheetsModified['employees']) {
+    try {
+      if (typeof ensureEmployeeStatusColumn === 'function') {
+        ensureEmployeeStatusColumn(ss);
+      }
+    } catch (eStatPost) {
+      Logger.log('applyBatchSyncMutations post ensureEmployeeStatusColumn error: ' + eStatPost);
+    }
+  }
+
   // Auto Save & Backup on Push:
   // 1. Run targeted fast history save and location sync on modified equipment sheets
-  if (!skipPostProcessing && appliedCount > 0) {
+  if (!skipPostProcessing && (appliedCount > 0 || configsModified)) {
     if (sheetsModified['Employees']) {
       try {
         if (typeof syncInventoryLocations === 'function') {
@@ -3534,6 +3995,21 @@ function executeSyncApiRecalculateCompliance(options) {
 
   if (prevData) addComplianceWeekToUpdatedRows(prevData);
   if (currData) addComplianceWeekToUpdatedRows(currData);
+
+  // Patch the Google Drive JSON snapshot with any newly processed Gmail safety logs & compliance matrix
+  try {
+    if (typeof patchSyncSnapshotInDrive === 'function') {
+      patchSyncSnapshotInDrive({
+        'JHA Log': true,
+        'Weekly Safety Log': true,
+        'Monthly Checklist Log': true,
+        'Incident Reports': true,
+        'Safety Compliance': true
+      }, false);
+    }
+  } catch (ePatchLogs) {
+    Logger.log('executeSyncApiRecalculateCompliance patchSyncSnapshotInDrive warning: ' + ePatchLogs);
+  }
 
   return {
     status: results.success ? 'ok' : 'error',

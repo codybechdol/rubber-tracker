@@ -326,9 +326,15 @@ class TimeBreakdownEngine {
         const emp = String(entry.employeeName || swapData.employeeName || swapData.employee || '').trim().toLowerCase();
         const oldItm = String(swapData.currentItem || swapData.oldItem || entry.currentItem || '').trim().toLowerCase();
         const newItm = String(swapData.pickItem || swapData.newItem || entry.pickItem || '').trim().toLowerCase();
-        if (emp && oldItm) scheduledDateMap[`${emp}_${oldItm}`] = sDateKey;
-        if (emp && newItm) scheduledDateMap[`${emp}_${newItm}`] = sDateKey;
-        if (emp) scheduledDateMap[emp] = sDateKey;
+        const swType = String(entry.type || swapData.type || '').trim().toLowerCase();
+        if (emp && oldItm) {
+          scheduledDateMap[`${emp}_${oldItm}`] = sDateKey;
+          if (swType) scheduledDateMap[`${swType}_${emp}_${oldItm}`] = sDateKey;
+        }
+        if (emp && newItm && newItm !== '—' && newItm !== '-') {
+          scheduledDateMap[`new_${emp}_${newItm}`] = sDateKey;
+          if (swType) scheduledDateMap[`new_${swType}_${emp}_${newItm}`] = sDateKey;
+        }
       }
     });
 
@@ -374,9 +380,13 @@ class TimeBreakdownEngine {
           const empKey = empClean.toLowerCase();
           const oldItmKey = cleanOld.toLowerCase();
           const newItmKey = cleanNew.toLowerCase();
-          const schedTripDate = scheduledDateMap[`${empKey}_${oldItmKey}`] || scheduledDateMap[`${empKey}_${newItmKey}`] || scheduledDateMap[empKey];
+          const swType = cfg.label.toLowerCase();
+          const schedTripDate = scheduledDateMap[`${swType}_${empKey}_${oldItmKey}`] ||
+            scheduledDateMap[`${empKey}_${oldItmKey}`] ||
+            (newItmKey ? (scheduledDateMap[`new_${swType}_${empKey}_${newItmKey}`] || scheduledDateMap[`new_${empKey}_${newItmKey}`]) : '');
 
-          let rawDate = schedTripDate || entry.deliveredDate || (entry.timestamp ? entry.timestamp.substring(0, 10) : '') || newInvItem['Date Assigned'];
+          const isStillAssignedToEmp = newInvItem && String(newInvItem['Assigned To'] || '').trim().toLowerCase() === empKey;
+          let rawDate = schedTripDate || (isStillAssignedToEmp && newInvItem['Date Assigned'] ? newInvItem['Date Assigned'] : '') || entry.deliveredDate || (entry.timestamp ? entry.timestamp.substring(0, 10) : '');
           const dKey = this.normalizeDateKey(rawDate);
           if (daysMap[dKey]) {
             if (!seenSwapKeys.has(dedupe)) {
@@ -419,7 +429,19 @@ class TimeBreakdownEngine {
               }
 
               if (!attached) {
-                daysMap[dKey].tasks.push(swapObj);
+                const cleanSwapLoc = this.cleanPhysicalLocation(swapObj.location);
+                if (cleanSwapLoc && cleanSwapLoc.toLowerCase() !== 'helena' && !this.isStatusLocation(cleanSwapLoc)) {
+                  if (!daysMap[dKey].locations[cleanSwapLoc]) {
+                    daysMap[dKey].locations[cleanSwapLoc] = {
+                      name: cleanSwapLoc,
+                      crews: [],
+                      swaps: []
+                    };
+                  }
+                  daysMap[dKey].locations[cleanSwapLoc].swaps.push(swapObj);
+                } else {
+                  daysMap[dKey].tasks.push(swapObj);
+                }
               }
             }
           }
@@ -443,7 +465,10 @@ class TimeBreakdownEngine {
             const empKey = empClean.toLowerCase();
             const oldItmKey = oldItem.toLowerCase();
             const newItmKey = cleanNew.toLowerCase();
-            const schedTripDate = scheduledDateMap[`${empKey}_${oldItmKey}`] || scheduledDateMap[`${empKey}_${newItmKey}`] || scheduledDateMap[empKey];
+            const swType = cfg.label.toLowerCase();
+            const schedTripDate = scheduledDateMap[`${swType}_${empKey}_${oldItmKey}`] ||
+              scheduledDateMap[`${empKey}_${oldItmKey}`] ||
+              (newItmKey ? (scheduledDateMap[`new_${swType}_${empKey}_${newItmKey}`] || scheduledDateMap[`new_${empKey}_${newItmKey}`]) : '');
 
             const rawDate = schedTripDate || dateChanged || r['Stage 3 Date'] || r['Stage 2 Date'] || r['Date'];
             const dKey = this.normalizeDateKey(rawDate);
@@ -486,7 +511,19 @@ class TimeBreakdownEngine {
                 }
 
                 if (!attached) {
-                  daysMap[dKey].tasks.push(swapObj);
+                  const cleanSwapLoc = this.cleanPhysicalLocation(swapObj.location);
+                  if (cleanSwapLoc && cleanSwapLoc.toLowerCase() !== 'helena' && !this.isStatusLocation(cleanSwapLoc)) {
+                    if (!daysMap[dKey].locations[cleanSwapLoc]) {
+                      daysMap[dKey].locations[cleanSwapLoc] = {
+                        name: cleanSwapLoc,
+                        crews: [],
+                        swaps: []
+                      };
+                    }
+                    daysMap[dKey].locations[cleanSwapLoc].swaps.push(swapObj);
+                  } else {
+                    daysMap[dKey].tasks.push(swapObj);
+                  }
                 }
               }
             }
@@ -566,7 +603,19 @@ class TimeBreakdownEngine {
         }
 
         if (!attached) {
-          daysMap[dKey].tasks.push(swapObj);
+          const cleanSwapLoc = this.cleanPhysicalLocation(swapObj.location);
+          if (cleanSwapLoc && cleanSwapLoc.toLowerCase() !== 'helena' && !this.isStatusLocation(cleanSwapLoc)) {
+            if (!daysMap[dKey].locations[cleanSwapLoc]) {
+              daysMap[dKey].locations[cleanSwapLoc] = {
+                name: cleanSwapLoc,
+                crews: [],
+                swaps: []
+              };
+            }
+            daysMap[dKey].locations[cleanSwapLoc].swaps.push(swapObj);
+          } else {
+            daysMap[dKey].tasks.push(swapObj);
+          }
         }
       }
     });
@@ -928,6 +977,22 @@ class TimeBreakdownEngine {
       const b = cityMap[cityName];
       const sentences = [];
 
+      // 0. Crews visited in this city (placed at the very beginning of the city paragraph)
+      const unmentionedCrews = Array.from(b.crewsVisited).filter(crewId => {
+        const sig = this.getSignificantJobNumber(crewId);
+        const hasTrain = b.trainings.some(t => this.getSignificantJobNumber(t['Crew #'] || t['Crew']) === sig);
+        const hasClass = b.classes.some(c => (c.crewIds || [c.crewId]).map(x => this.getSignificantJobNumber(x)).includes(sig));
+        return !hasTrain && !hasClass;
+      });
+
+      if (unmentionedCrews.length > 0) {
+        const crewStrs = unmentionedCrews.map(c => {
+          const str = String(c).trim();
+          return str.toLowerCase().startsWith('crew') ? str : `Crew ${str}`;
+        });
+        sentences.push(`Visited ${this.formatListNatural(crewStrs)}.`);
+      }
+
       // A. DOT Drug Tests in this city
       if (b.drugTests.length > 0) {
         const firstType = b.drugTests[0]['Test Type'] || 'Drug Only';
@@ -979,8 +1044,10 @@ class TimeBreakdownEngine {
           }
 
           const details = [];
-          if (sw.size) details.push(`size ${sw.size}`);
-          if (sw.itemClass) details.push(`class ${sw.itemClass}`);
+          if (!label.includes('glove')) {
+            if (sw.size) details.push(`size ${sw.size}`);
+            if (sw.itemClass) details.push(`class ${sw.itemClass}`);
+          }
           if (sw.kv) details.push(`${sw.kv} kV`);
           const detailStr = details.length > 0 ? `, ${details.join(', ')}` : '';
 
@@ -1048,32 +1115,6 @@ class TimeBreakdownEngine {
           return desc;
         });
         sentences.push(`Delivered equipment including ${this.formatListNatural(deliverySummaries)}.`);
-      }
-
-      // G. Crews visited in this city who didn't already have swaps or training
-      const unmentionedCrews = Array.from(b.crewsVisited).filter(crewId => {
-        const sig = this.getSignificantJobNumber(crewId);
-        const hasSwap = b.swaps.some(s => {
-          const sCrew = this.getSignificantJobNumber(s.crew || s.crewId || s.jobNum || s['Crew #'] || s['Job Number']);
-          if (sCrew && sCrew === sig) return true;
-          const sEmp = String(s.employee || s['Assigned To'] || '').toLowerCase();
-          if (sEmp && empMap && empMap[sEmp]) {
-            const empCrew = this.getSignificantJobNumber(empMap[sEmp].jobNum);
-            if (empCrew && empCrew === sig) return true;
-          }
-          return false;
-        });
-        const hasTrain = b.trainings.some(t => this.getSignificantJobNumber(t['Crew #'] || t['Crew']) === sig);
-        const hasClass = b.classes.some(c => (c.crewIds || [c.crewId]).map(x => this.getSignificantJobNumber(x)).includes(sig));
-        return !hasSwap && !hasTrain && !hasClass;
-      });
-
-      if (unmentionedCrews.length > 0) {
-        const crewStrs = unmentionedCrews.map(c => {
-          const str = String(c).trim();
-          return str.toLowerCase().startsWith('crew') ? str : `Crew ${str}`;
-        });
-        sentences.push(`Visited ${this.formatListNatural(crewStrs)}.`);
       }
 
       // If no specific tasks were logged for this city
@@ -1229,9 +1270,12 @@ class TimeBreakdownEngine {
             loc.swaps.forEach(sw => {
               totalSwaps++;
               const crewTag = sw.crew ? ` (Crew ${this.getSignificantJobNumber(sw.crew)})` : '';
+              const isGloveSwap = String(sw.label || sw.type || '').toLowerCase().includes('glove');
               const specParts = [];
-              if (sw.size) specParts.push(`Size ${sw.size}`);
-              if (sw.itemClass) specParts.push(`Class ${sw.itemClass}`);
+              if (!isGloveSwap) {
+                if (sw.size) specParts.push(`Size ${sw.size}`);
+                if (sw.itemClass) specParts.push(`Class ${sw.itemClass}`);
+              }
               if (sw.kv) specParts.push(`${sw.kv} kV`);
               if (sw.model) specParts.push(`Model ${sw.model}`);
               if (sw.length) specParts.push(`${sw.length}`);
@@ -1301,9 +1345,12 @@ class TimeBreakdownEngine {
             swapDetails = t.item || t['Description'] || t['Item'] || '';
           }
 
+          const isGloveTask = String(t.label || t.type || '').toLowerCase().includes('glove');
           const specParts = [];
-          if (t.size) specParts.push(`Size ${t.size}`);
-          if (t.itemClass) specParts.push(`Class ${t.itemClass}`);
+          if (!isGloveTask) {
+            if (t.size) specParts.push(`Size ${t.size}`);
+            if (t.itemClass) specParts.push(`Class ${t.itemClass}`);
+          }
           if (t.kv) specParts.push(`${t.kv} kV`);
           if (t.model) specParts.push(`Model ${t.model}`);
           if (t.length) specParts.push(`${t.length}`);

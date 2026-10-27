@@ -127,7 +127,7 @@ var HISTORY_COLOR_HOT_STICK_1 = '#e8eaf6'; // Light indigo
 var HISTORY_COLOR_HOT_STICK_2 = '#ffffff'; // White
 
 // Backup folder name in Google Drive
-var BACKUP_FOLDER_NAME = 'Glove Manager Backups';
+var BACKUP_FOLDER_NAME = 'Safety Assistant Backups';
 
 // =============================================================================
 // COLUMN CONSTANTS - Per Workflow_and_Sheet_Expectations.md

@@ -3833,7 +3833,7 @@ class SheetNavigator {
     const stat = String(r['Status'] || '').toLowerCase().trim();
     const job = String(r['Job Number'] || r['Job #'] || '').toLowerCase().trim();
     if (loc === 'previous employee' || loc.includes('previous') ||
-        stat === 'previous employee' || stat.includes('inactive') || stat.includes('terminated') ||
+        (!loc && (stat === 'previous employee' || stat.includes('inactive') || stat.includes('terminated'))) ||
         job.includes('previous') || job.startsWith('002-') || eName.includes('former')) {
       return true;
     }
@@ -6168,6 +6168,7 @@ class SheetNavigator {
     const vacationList = [];
     const leaveList = [];
     const lightDutyList = [];
+    const weedsList = [];
     const medicalList = [];
     const fieldCrewMembers = [];
 
@@ -6176,6 +6177,7 @@ class SheetNavigator {
       const loc = String(r['Location'] || '').trim();
       const locLower = loc.toLowerCase();
       const job = String(r['Job Number'] || r['Job #'] || '').trim();
+      const jobLower = job.toLowerCase();
       const classification = String(r['Job Classification'] || r['Classification'] || r['Role'] || '').trim();
       const secondaryJob = String(r['Secondary Job Number'] || r['Secondary Job #'] || '').trim();
       const altNames = String(r['Alternate Names'] || '').trim();
@@ -6184,9 +6186,10 @@ class SheetNavigator {
       const notes = String(r['Notes'] || '').trim();
       const hireDate = String(r['Hire Date'] || r['HireDate'] || '').trim();
       const status = String(r['Status'] || '').trim();
+      const statLower = String(status || '').toLowerCase().trim();
 
-      let isPending = status.toLowerCase() === 'pending';
-      if (!isPending && hireDate) {
+      let isPending = statLower === 'pending';
+      if (hireDate) {
         const parts = hireDate.split(/[-/]/);
         if (parts.length === 3) {
           let y, m, d;
@@ -6200,11 +6203,19 @@ class SheetNavigator {
             y = parseInt(parts[2], 10);
           }
           const hDate = new Date(y, m, d, 12, 0, 0);
-          const today = new Date();
-          today.setHours(0, 0, 0, 0);
-          if (hDate > today) isPending = true;
+          const now = new Date();
+          const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+          if (!isNaN(hDate.getTime())) {
+            isPending = hDate > todayEnd;
+            if (!isPending && statLower === 'pending') {
+              r['Status'] = 'Active';
+            }
+          }
         }
       }
+
+      const isWeeds = locLower.includes('(weeds)') || locLower === 'weeds' || statLower === 'weeds' || jobLower === 'weeds';
+      const isLightDuty = !isWeeds && (locLower.includes('(light duty)') || locLower === 'light duty' || statLower === 'light duty' || jobLower === 'light duty');
 
       const empObj = {
         raw: r,
@@ -6219,17 +6230,25 @@ class SheetNavigator {
         notes,
         hireDate,
         status,
-        isPending
+        isPending,
+        isWeeds,
+        isLightDuty
       };
 
-      const statLower = String(status || '').toLowerCase().trim();
-      if (statLower === 'vacation' || locLower.includes('(vacation)') || locLower === 'vacation') {
+      if (locLower.includes('(vacation)') || locLower === 'vacation' || (!locLower && statLower === 'vacation')) {
         vacationList.push(empObj);
-      } else if (statLower === 'leave' || locLower.includes('(leave)') || locLower === 'leave' || locLower.includes('fmla') || locLower.includes('military')) {
+      } else if (locLower.includes('(leave)') || locLower === 'leave' || locLower.includes('fmla') || locLower.includes('military') || (!locLower && statLower === 'leave')) {
         leaveList.push(empObj);
-      } else if (statLower === 'light duty' || locLower.includes('(light duty)') || locLower === 'light duty' || locLower.includes('(weeds)') || locLower === 'weeds') {
+      } else if (isWeeds) {
+        weedsList.push(empObj);
+      } else if (isLightDuty) {
         lightDutyList.push(empObj);
-      } else if (statLower === 'medical' || locLower.includes('(medical)') || locLower === 'medical' || locLower.includes("worker's comp") || locLower.includes('(injury)')) {
+        // Light Duty employees assigned to a specific crew job number (e.g., JT on 005-27.7 or 005-24)
+        // must appear in BOTH the Light Duty section AND their assigned Crew card.
+        if (job && !['light duty', 'weeds', 'unassigned', 'vacation', 'leave', 'medical', 'previous employee'].includes(jobLower)) {
+          fieldCrewMembers.push(empObj);
+        }
+      } else if (locLower.includes('(medical)') || locLower === 'medical' || locLower.includes("worker's comp") || locLower.includes('(injury)') || (!locLower && statLower === 'medical')) {
         medicalList.push(empObj);
       } else {
         fieldCrewMembers.push(empObj);
@@ -6504,8 +6523,8 @@ class SheetNavigator {
       return a.baseJob.localeCompare(b.baseJob, undefined, { numeric: true });
     });
 
-    // Update row count badge in toolbar
-    const totalMatching = vacationList.length + leaveList.length + lightDutyList.length + medicalList.length + fieldCrewMembers.length;
+    // Update row count badge in toolbar (use activeRows.length so Light Duty crew members aren't double-counted)
+    const totalMatching = activeRows.length;
     if (countBadge) {
       countBadge.textContent = searchTerm
         ? `${totalMatching} of ${totalActiveCount} employees (${crewCards.length} crews)`
@@ -6532,6 +6551,10 @@ class SheetNavigator {
         const badgeLabel = shortDate ? `⏳ Starts ${shortDate}` : `⏳ Pending`;
         pendingBadge = `<span class="badge" style="background: rgba(245, 158, 11, 0.18); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); font-size: 9.5px; font-weight: 700; padding: 1px 5px; border-radius: 3px; cursor: pointer; transition: all 0.15s ease;" onclick="event.stopPropagation(); window.sheetNavigator.promptChangeHireDate('${this.escapeJs(e.name)}', '${this.escapeJs(e.hireDate || '')}')" onmouseover="this.style.borderColor='#f59e0b'; this.style.color='#fef3c7';" onmouseout="this.style.borderColor='rgba(245, 158, 11, 0.4)'; this.style.color='#fbbf24';" title="Pending New Hire — Click to change start date or activate today">${badgeLabel}</span>`;
       }
+
+      const lightDutyBadge = e.isLightDuty
+        ? `<span class="badge" style="background: rgba(52, 211, 153, 0.16); color: #34d399; border: 1px solid rgba(52, 211, 153, 0.4); font-size: 9.5px; font-weight: 700; padding: 1px 5px; border-radius: 3px;" title="On Light Duty — Also listed in the Light Duty status section">🩺 Light Duty</span>`
+        : '';
 
       return `
         <div class="crew-member-row"
@@ -6564,6 +6587,7 @@ class SheetNavigator {
               ${isLead ? '<span title="Crew Foreman / Lead" style="margin-right: 2px;">👑</span>' : ''}
               <span>${this.escapeHtml(e.name)}</span>
             </a>
+            ${lightDutyBadge}
             ${pendingBadge}
             ${window.ppeTrackingEngine ? window.ppeTrackingEngine.getMemberRowBadge(e.name, e.classification) : ''}
             ${e.isSecondaryMember && e.primaryJobNumber ? `
@@ -6599,7 +6623,7 @@ class SheetNavigator {
       `;
     };
 
-    // Helper for rendering a status card (Vacation, Leave, Light Duty)
+    // Helper for rendering a status card (Vacation, Leave, Light Duty, Weeds, Medical)
     const renderStatusCard = (title, icon, color, borderColor, badgeBg, list, emptyMsg) => {
       return `
         <div class="crew-card status-crew-card"
@@ -6617,7 +6641,11 @@ class SheetNavigator {
           </div>
           <!-- Employee List (Status Drop Zone) -->
           <div class="status-drop-zone" style="flex: 1; min-height: 48px;">
-            ${list.length > 0 ? list.map(e => `
+            ${list.length > 0 ? list.map(e => {
+              const jnRaw = String(e.jobNumber || '').trim();
+              const isCrewAssigned = jnRaw && !['light duty', 'weeds', 'unassigned', 'vacation', 'leave', 'medical'].includes(jnRaw.toLowerCase());
+              const crewBaseFromJob = isCrewAssigned ? jnRaw.replace(/\.\d+.*$/, '').trim() : title;
+              return `
               <div class="crew-member-row status-member-row"
                    draggable="true"
                    data-emp-name="${this.escapeHtml(e.name)}"
@@ -6633,7 +6661,8 @@ class SheetNavigator {
                   <span class="drag-handle" style="cursor: grab; color: var(--text-muted); font-size: 13px; user-select: none; padding: 0 2px;" title="Drag to reassign to a field crew">
                     ⠿
                   </span>
-                  <span style="color: #60a5fa; font-weight: 700; font-size: 11px; font-family: monospace; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; padding: 1px 5px;">
+                  <span style="color: #60a5fa; font-weight: 700; font-size: 11px; font-family: monospace; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; padding: 1px 5px;"
+                        title="${isCrewAssigned ? `Assigned to Crew ${this.escapeHtml(crewBaseFromJob)} (shown on both cards)` : ''}">
                     ${this.escapeHtml(e.jobNumber || '—')}
                   </span>
                   <a href="javascript:void(0)" onclick="window.employeeProfileEngine.openProfileModal('${this.escapeJs(e.name)}')"
@@ -6652,14 +6681,25 @@ class SheetNavigator {
                   <span class="badge" style="background: rgba(255,255,255,0.05); color: var(--text-muted); font-size: 10px; padding: 1px 5px; border-radius: 4px;">
                     📍 ${this.escapeHtml(e.location)}
                   </span>
+                  ${title === 'Weeds' && e.notes ? `
+                    <span class="badge" style="background: rgba(163, 230, 53, 0.12); color: #bef264; border: 1px solid rgba(163, 230, 53, 0.3); font-size: 9.5px; padding: 1px 5px; border-radius: 4px;" title="${this.escapeHtml(e.notes)}">
+                      ${this.escapeHtml(e.notes.length > 34 ? e.notes.slice(0, 32) + '…' : e.notes)}
+                    </span>
+                  ` : ''}
                 </div>
-                <div style="display: flex; align-items: center; gap: 5px; flex-shrink: 0;">
+                <div style="display: flex; align-items: center; gap: 4px; flex-shrink: 0;">
                   <span class="badge" style="background: var(--bg-tertiary); color: var(--text-muted); font-size: 10px; padding: 1px 6px; border-radius: 3px; font-weight: 700;">
                     ${this.escapeHtml(e.classification || '—')}
                   </span>
+                  <button class="btn btn-xs" style="background: transparent; border: none; color: var(--text-muted); cursor: pointer; padding: 1px 4px; font-size: 12px; border-radius: 3px;"
+                          onclick="window.sheetNavigator.openMemberRowActions(event, '${this.escapeJs(e.name)}', '${this.escapeJs(crewBaseFromJob)}', false, false)"
+                          title="Employee options">
+                    ⋮
+                  </button>
                 </div>
               </div>
-            `).join('') : `
+            `;
+            }).join('') : `
               <div style="color: var(--text-muted); font-size: 12px; font-style: italic; padding: 16px 8px; text-align: center; background: rgba(0,0,0,0.12); border-radius: 6px;">
                 ${emptyMsg}
               </div>
@@ -7027,6 +7067,9 @@ class SheetNavigator {
             <span style="color: #34d399; display: flex; align-items: center; gap: 5px;">
               🩺 <strong>${lightDutyList.length}</strong> Light Duty
             </span>
+            <span style="color: #a3e635; display: flex; align-items: center; gap: 5px;">
+              🌾 <strong>${weedsList.length}</strong> Weeds
+            </span>
             ${medicalList.length > 0 ? `
               <span style="color: #f472b6; display: flex; align-items: center; gap: 5px;">
                 🏥 <strong>${medicalList.length}</strong> Medical
@@ -7034,7 +7077,7 @@ class SheetNavigator {
             ` : ''}
           </div>
           <div style="font-size: 11px; color: var(--text-muted);">
-            💡 <em>Drag employees between crews to reassign • Click ✏️ Edit on any card to update schedule, location, or foreman</em>
+            💡 <em>Drag employees between crews & status cards to reassign or rotate • Click ✏️ Edit on any card to update schedule, location, or foreman</em>
           </div>
         </div>
 
@@ -7054,15 +7097,16 @@ class SheetNavigator {
           <option value="Lewistown">
         </datalist>
 
-        <!-- 1. Dedicated Status Cards (Vacation, Leave, Light Duty, Medical) -->
+        <!-- 1. Dedicated Status Cards (Vacation, Leave, Light Duty, Weeds, Medical) -->
         <div style="margin-bottom: 20px;">
           <div style="font-size: 12px; font-weight: 800; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.5px; margin-bottom: 10px; display: flex; align-items: center; gap: 6px;">
             <span>📋</span> Status Assignments
           </div>
-          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px;">
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 14px;">
             ${renderStatusCard('Vacation', '🏖️', '#fbbf24', 'rgba(245, 158, 11, 0.4)', 'rgba(245, 158, 11, 0.15)', vacationList, 'No employees currently on Vacation')}
             ${renderStatusCard('Leave', '🌴', '#60a5fa', 'rgba(59, 130, 246, 0.4)', 'rgba(59, 130, 246, 0.15)', leaveList, 'No employees currently on Leave')}
             ${renderStatusCard('Light Duty', '🩺', '#34d399', 'rgba(16, 185, 129, 0.4)', 'rgba(16, 185, 129, 0.15)', lightDutyList, 'No employees currently on Light Duty')}
+            ${renderStatusCard('Weeds', '🌾', '#a3e635', 'rgba(132, 204, 22, 0.4)', 'rgba(132, 204, 22, 0.15)', weedsList, 'No employees currently on Weeds (Job Attached)')}
             ${medicalList.length > 0 ? renderStatusCard('Medical', '🏥', '#f472b6', 'rgba(244, 114, 182, 0.4)', 'rgba(244, 114, 182, 0.15)', medicalList, 'No employees currently on Medical') : ''}
           </div>
         </div>
@@ -7219,7 +7263,20 @@ class SheetNavigator {
     if (!dragData || !destBaseJob) return;
     const { empName, fromBaseJob, fromSlot, isSecondary } = dragData;
 
-    if (fromBaseJob === destBaseJob) {
+    const statusCardNames = ['Vacation', 'Leave', 'Light Duty', 'Weeds', 'Medical'];
+    const statusCardLower = statusCardNames.map(s => s.toLowerCase());
+    let effectiveFromBaseJob = fromBaseJob;
+    if (statusCardNames.includes(fromBaseJob)) {
+      const slotClean = String(fromSlot || '').trim();
+      const derivedBase = slotClean.replace(/\.\d+.*$/, '').trim();
+      if (derivedBase && !statusCardLower.includes(derivedBase.toLowerCase()) && derivedBase.toLowerCase() !== 'unassigned') {
+        effectiveFromBaseJob = derivedBase;
+      } else {
+        effectiveFromBaseJob = '';
+      }
+    }
+
+    if (effectiveFromBaseJob === destBaseJob) {
       if (typeof window.showToast === 'function') {
         window.showToast(`${empName} is already on crew ${destBaseJob}.`, 'info');
       }
@@ -7229,6 +7286,11 @@ class SheetNavigator {
     const empTable = this.db.getTable('employees');
     const jtTable = this.db.getTable('job_tracking');
     if (!empTable || !jtTable) return;
+
+    const empRow = (empTable.rows || []).find(e => String(e['Employee Name'] || e['Name'] || '').trim().toLowerCase() === empName.toLowerCase());
+    const empLocLower = String(empRow?.['Location'] || '').toLowerCase();
+    const empStatLower = String(empRow?.['Status'] || '').toLowerCase().trim();
+    const empIsLightDuty = empLocLower.includes('(light duty)') || empLocLower === 'light duty' || empStatLower === 'light duty';
 
     // Find destination Job Tracking row & Location
     const destJt = (jtTable.rows || []).find(j => {
@@ -7262,11 +7324,11 @@ class SheetNavigator {
     let oldSourceSize = 0;
     let newSourceSize = 0;
 
-    if (!isSecondary && fromBaseJob && fromBaseJob !== 'Vacation' && fromBaseJob !== 'Leave' && fromBaseJob !== 'Light Duty') {
+    if (!isSecondary && effectiveFromBaseJob && !statusCardNames.includes(effectiveFromBaseJob)) {
       const sourceMembers = (empTable.rows || []).filter(e => {
         if (!this.isEmployeeActive(e, prevEmpNames)) return false;
         const jn = String(e['Job Number'] || e['Job #'] || '').trim();
-        return jn === fromBaseJob || jn.startsWith(fromBaseJob + '.');
+        return jn === effectiveFromBaseJob || jn.startsWith(effectiveFromBaseJob + '.');
       });
       oldSourceSize = sourceMembers.length;
       newSourceSize = Math.max(0, oldSourceSize - 1);
@@ -7284,7 +7346,7 @@ class SheetNavigator {
             membersToRenumber.push({
               emp: m,
               oldSlot: String(m['Job Number'] || m['Job #'] || ''),
-              newSlot: `${fromBaseJob}.${sNum - 1}`
+              newSlot: `${effectiveFromBaseJob}.${sNum - 1}`
             });
           }
         }
@@ -7319,7 +7381,7 @@ class SheetNavigator {
 
     // Show Confirmation Modal
     this.showCrewReassignmentModal({
-      dragData,
+      dragData: { ...dragData, fromBaseJob: effectiveFromBaseJob, rawFromCard: fromBaseJob },
       destBaseJob,
       newSlot,
       destLoc,
@@ -7328,17 +7390,20 @@ class SheetNavigator {
       oldSourceSize,
       newSourceSize,
       oldDestSize: destMembers.length,
-      newDestSize: destMembers.length + 1
+      newDestSize: destMembers.length + 1,
+      empIsLightDuty
     });
   }
 
   /**
-   * Handles dropping an employee onto a dedicated status card (Vacation, Leave, Light Duty, Medical)
+   * Handles dropping an employee onto a dedicated status card (Vacation, Leave, Light Duty, Weeds, Medical)
    */
   async handleStatusCardDrop(dragData, statusType) {
     if (!dragData || !statusType) return;
-    const { empName, sourceLoc } = dragData;
+    const { empName, sourceLoc, fromBaseJob, fromSlot } = dragData;
     const empTable = this.db.getTable('employees');
+    const jtTable = this.db.getTable('job_tracking');
+    const histTable = this.db.getTable('employee_history');
     if (!empTable || !empTable.rows) return;
 
     const emp = empTable.rows.find(e => String(e['Employee Name'] || e['Name'] || '').trim().toLowerCase() === empName.toLowerCase());
@@ -7350,8 +7415,165 @@ class SheetNavigator {
       city = 'Helena';
     }
     const formattedLoc = `${city} (${statusType})`;
+    const now = new Date();
+    const todayFormatted = `${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')}/${now.getFullYear()}`;
 
-    if (confirm(`Move ${empName} to ${statusType}?\n\nLocation: "${formattedLoc}"\nStatus: "${statusType}"`)) {
+    const curJob = String(emp['Job Number'] || emp['Job #'] || fromSlot || '').trim();
+    const statusCardNames = ['vacation', 'leave', 'light duty', 'weeds', 'medical', 'unassigned', 'previous employee'];
+    const curBaseJob = curJob.replace(/\.\d+.*$/, '').trim();
+    const hasFieldCrewJob = Boolean(curBaseJob && !statusCardNames.includes(curBaseJob.toLowerCase()));
+
+    // Special workflow for Weeds (Job Attached — rotating off crew while waiting for next crew assignment)
+    if (statusType === 'Weeds') {
+      const promptMsg = hasFieldCrewJob
+        ? `Rotate ${empName} from Crew ${curBaseJob} to 🌾 Weeds (Job Attached)?\n\n• Status: "Weeds"\n• Location: "${formattedLoc}"\n• Job Number: "Weeds"\n• Removes ${empName} from Crew ${curBaseJob} and renumbers remaining crew slots`
+        : `Assign ${empName} to 🌾 Weeds (Job Attached)?\n\n• Status: "Weeds"\n• Location: "${formattedLoc}"\n• Job Number: "Weeds"`;
+
+      if (!confirm(promptMsg)) return;
+
+      const prevNote = hasFieldCrewJob
+        ? `From Crew ${curBaseJob} (${todayFormatted})`
+        : `Weeds (${todayFormatted})`;
+
+      emp['Location'] = formattedLoc;
+      emp['Status'] = 'Weeds';
+      emp['Job Number'] = 'Weeds';
+      if (emp['Job #'] !== undefined) emp['Job #'] = 'Weeds';
+      emp['Notes'] = prevNote;
+
+      const locColIdx = (empTable.headers || []).findIndex(h => /^location$/i.test(h)) + 1;
+      const statusColIdx = (empTable.headers || []).findIndex(h => /^status$/i.test(h)) + 1;
+      const jobColIdx = (empTable.headers || []).findIndex(h => /^(job\s*#|job\s*number)$/i.test(h)) + 1;
+      const notesColIdx = (empTable.headers || []).findIndex(h => /^notes$/i.test(h)) + 1;
+      const rIdx = emp._rowIdx || (empTable.rows.indexOf(emp) + 2);
+
+      if (empTable.rawGrid && empTable.rawGrid[rIdx - 1]) {
+        if (locColIdx > 0) empTable.rawGrid[rIdx - 1][locColIdx - 1] = formattedLoc;
+        if (statusColIdx > 0) empTable.rawGrid[rIdx - 1][statusColIdx - 1] = 'Weeds';
+        if (jobColIdx > 0) empTable.rawGrid[rIdx - 1][jobColIdx - 1] = 'Weeds';
+        if (notesColIdx > 0) empTable.rawGrid[rIdx - 1][notesColIdx - 1] = prevNote;
+      }
+
+      await this.db.addMutation({
+        action: 'UPDATE_ROW',
+        sheetName: empTable.name || 'Employees',
+        tableKey: 'employees',
+        row: rIdx,
+        itemIdentifier: empName,
+        updatedFields: {
+          'Location': formattedLoc,
+          'Status': 'Weeds',
+          'Job Number': 'Weeds',
+          'Notes': prevNote
+        }
+      });
+
+      // If rotating off a field crew, renumber remaining members and update Job Tracking Crew Size
+      if (hasFieldCrewJob) {
+        const prevEmpNames = this.getPreviousEmployeeNamesSet();
+        const fromMatch = curJob.match(/\.(\d+)/);
+        const fromNum = fromMatch ? parseInt(fromMatch[1], 10) : 999;
+
+        const remainingMembers = (empTable.rows || []).filter(e => {
+          if (!this.isEmployeeActive(e, prevEmpNames)) return false;
+          const eName = String(e['Employee Name'] || e['Name'] || '').trim();
+          if (eName.toLowerCase() === empName.toLowerCase()) return false;
+          const jn = String(e['Job Number'] || e['Job #'] || '').trim();
+          return jn === curBaseJob || jn.startsWith(curBaseJob + '.');
+        });
+
+        for (const m of remainingMembers) {
+          const sMatch = String(m['Job Number'] || m['Job #'] || '').match(/\.(\d+)/);
+          if (sMatch) {
+            const sNum = parseInt(sMatch[1], 10);
+            if (sNum > fromNum) {
+              const oldSlot = String(m['Job Number'] || m['Job #'] || '');
+              const newSlot = `${curBaseJob}.${sNum - 1}`;
+              m['Job Number'] = newSlot;
+              if (m['Job #'] !== undefined) m['Job #'] = newSlot;
+              const mRowIdx = m._rowIdx || (empTable.rows.indexOf(m) + 2);
+              if (empTable.rawGrid && empTable.rawGrid[mRowIdx - 1] && jobColIdx > 0) {
+                empTable.rawGrid[mRowIdx - 1][jobColIdx - 1] = newSlot;
+              }
+              await this.db.addMutation({
+                action: 'UPDATE_CELL',
+                sheetName: empTable.name || 'Employees',
+                tableKey: 'employees',
+                row: mRowIdx,
+                col: jobColIdx > 0 ? jobColIdx : 2,
+                header: 'Job Number',
+                itemIdentifier: String(m['Employee Name'] || m['Name'] || ''),
+                oldValue: oldSlot,
+                value: newSlot
+              });
+            }
+          }
+        }
+
+        if (jtTable && jtTable.rows) {
+          const sizeColIdx = (jtTable.headers || []).findIndex(h => /^crew\s*size$/i.test(h)) + 1;
+          const sourceJt = jtTable.rows.find(j => {
+            const jn = String(j['Job Number'] || j['Job #'] || '').trim();
+            return jn === curBaseJob || jn.replace(/\.\d+.*$/, '').trim() === curBaseJob;
+          });
+          if (sourceJt) {
+            const activeSourceCount = remainingMembers.length;
+            sourceJt['Crew Size'] = activeSourceCount;
+            const sRowIdx = sourceJt._rowIdx || (jtTable.rows.indexOf(sourceJt) + 2);
+            if (jtTable.rawGrid && jtTable.rawGrid[sRowIdx - 1] && sizeColIdx > 0) {
+              jtTable.rawGrid[sRowIdx - 1][sizeColIdx - 1] = activeSourceCount;
+            }
+            await this.db.addMutation({
+              action: 'UPDATE_CELL',
+              sheetName: jtTable.name || 'Job Tracking',
+              tableKey: 'job_tracking',
+              row: sRowIdx,
+              col: sizeColIdx > 0 ? sizeColIdx : 4,
+              header: 'Crew Size',
+              itemIdentifier: curBaseJob,
+              value: activeSourceCount
+            });
+          }
+        }
+      }
+
+      // Log Weeds rotation in Employee History
+      if (histTable && Array.isArray(histTable.rows)) {
+        const histRow = {
+          'Date': todayFormatted,
+          'Employee Name': empName,
+          'Event Type': 'Weeds',
+          'Location': formattedLoc,
+          'Job Number': 'Weeds',
+          'Notes': hasFieldCrewJob ? `Rotated to Weeds from Crew ${curBaseJob} (${ curJob })` : 'Assigned to Weeds (Job Attached)'
+        };
+        histTable.rows.unshift(histRow);
+        histTable.rowCount = histTable.rows.length;
+        if (typeof this.syncRowToRawGrid === 'function') {
+          this.syncRowToRawGrid(histTable, histRow, true);
+        }
+        await this.db.addMutation({
+          action: 'ADD_ROW',
+          sheetName: histTable.name || 'Employee History',
+          tableKey: 'employee_history',
+          rowData: histRow
+        });
+      }
+
+      await this.db.persistSnapshot(this.db.snapshot);
+      this.renderCurrentSheet();
+      if (typeof window.showToast === 'function') {
+        window.showToast(`🌾 Rotated ${empName} to Weeds (${city}).`);
+      }
+      return;
+    }
+
+    // Light Duty workflow: keeps current crew Job Number intact so employee shows in BOTH Light Duty and their Crew Card
+    const confirmText = statusType === 'Light Duty' && hasFieldCrewJob
+      ? `Mark ${empName} as 🩺 Light Duty?\n\n• Location: "${formattedLoc}"\n• Status: "Light Duty"\n• Crew Assignment: Keeps "${curJob}" (shows in BOTH Light Duty & Crew ${curBaseJob})`
+      : `Move ${empName} to ${statusType}?\n\nLocation: "${formattedLoc}"\nStatus: "${statusType}"`;
+
+    if (confirm(confirmText)) {
       emp['Location'] = formattedLoc;
       emp['Status'] = statusType;
       const locColIdx = (empTable.headers || []).findIndex(h => /^location$/i.test(h)) + 1;
@@ -7374,10 +7596,35 @@ class SheetNavigator {
         }
       });
 
+      if (histTable && Array.isArray(histTable.rows)) {
+        const histRow = {
+          'Date': todayFormatted,
+          'Employee Name': empName,
+          'Event Type': statusType,
+          'Location': formattedLoc,
+          'Job Number': curJob || statusType,
+          'Notes': statusType === 'Light Duty' && hasFieldCrewJob
+            ? `Marked Light Duty while assigned to Crew ${curBaseJob} (${curJob})`
+            : `Assigned to ${statusType}`
+        };
+        histTable.rows.unshift(histRow);
+        histTable.rowCount = histTable.rows.length;
+        if (typeof this.syncRowToRawGrid === 'function') {
+          this.syncRowToRawGrid(histTable, histRow, true);
+        }
+        await this.db.addMutation({
+          action: 'ADD_ROW',
+          sheetName: histTable.name || 'Employee History',
+          tableKey: 'employee_history',
+          rowData: histRow
+        });
+      }
+
       await this.db.persistSnapshot(this.db.snapshot);
       this.renderCurrentSheet();
       if (typeof window.showToast === 'function') {
-        window.showToast(`🏖️ Assigned ${empName} to ${statusType} (${city}).`);
+        const icon = statusType === 'Light Duty' ? '🩺' : '🏖️';
+        window.showToast(`${icon} Assigned ${empName} to ${statusType} (${city}).`);
       }
     }
   }
@@ -7386,7 +7633,7 @@ class SheetNavigator {
    * Displays the confirmation modal with detailed cascading updates before committing a move
    */
   showCrewReassignmentModal(params) {
-    const { dragData, destBaseJob, newSlot, destLoc, membersToRenumber, affectedEquipment, oldSourceSize, newSourceSize, oldDestSize, newDestSize } = params;
+    const { dragData, destBaseJob, newSlot, destLoc, membersToRenumber, affectedEquipment, oldSourceSize, newSourceSize, oldDestSize, newDestSize, empIsLightDuty } = params;
     const empName = dragData.empName;
     const fromBaseJob = dragData.fromBaseJob;
     const fromSlot = dragData.fromSlot;
@@ -7419,8 +7666,8 @@ class SheetNavigator {
             </div>
             <div style="display: grid; grid-template-columns: 1fr auto 1fr; gap: 8px; align-items: center; text-align: center; font-size: 13px;">
               <div style="background: var(--bg-secondary); padding: 8px; border-radius: 6px; border: 1px solid var(--border-color);">
-                <div style="font-size: 10.5px; font-weight: 700; color: var(--text-muted); margin-bottom: 2px;">FROM CREW</div>
-                <div style="font-weight: 800; color: #94a3b8; font-family: monospace;">${this.escapeHtml(fromSlot)}</div>
+                <div style="font-size: 10.5px; font-weight: 700; color: var(--text-muted); margin-bottom: 2px;">FROM</div>
+                <div style="font-weight: 800; color: #94a3b8; font-family: monospace;">${this.escapeHtml(fromSlot || fromBaseJob || 'Unassigned')}</div>
                 <div style="font-size: 11px; color: var(--text-muted);">${this.escapeHtml(dragData.sourceLoc || 'Helena')}</div>
               </div>
               <div style="font-size: 18px; color: #60a5fa; font-weight: 800;">➔</div>
@@ -7444,9 +7691,25 @@ class SheetNavigator {
                 👥 Employees Table:
               </div>
               <div style="color: var(--text-muted); font-size: 12px; margin-left: 12px;">
-                • <strong>${this.escapeHtml(empName)}</strong>: Job Number ➔ <code>${this.escapeHtml(newSlot)}</code>, Location ➔ <code>${this.escapeHtml(destLoc)}</code>
+                • <strong>${this.escapeHtml(empName)}</strong>: Job Number ➔ <code>${this.escapeHtml(newSlot)}</code>, Location ➔ <code>${this.escapeHtml(empIsLightDuty ? `${destLoc} (Light Duty)` : destLoc)}</code>
               </div>
             </div>
+
+            ${empIsLightDuty ? `
+              <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 6px; padding: 10px 12px;">
+                <label style="display: flex; align-items: flex-start; gap: 8px; cursor: pointer;">
+                  <input type="checkbox" id="chk-keep-light-duty" checked style="margin-top: 2px;">
+                  <div>
+                    <div style="font-weight: 700; color: #34d399;">
+                      🩺 Keep ${this.escapeHtml(empName)} on Light Duty while assigned to Crew ${this.escapeHtml(destBaseJob)}
+                    </div>
+                    <div style="color: var(--text-muted); font-size: 11.5px; margin-top: 3px;">
+                      When checked, ${this.escapeHtml(empName)} appears in <strong>both</strong> the Light Duty card and Crew ${this.escapeHtml(destBaseJob)}. Uncheck to return to full Active duty.
+                    </div>
+                  </div>
+                </label>
+              </div>
+            ` : ''}
 
             <!-- Job Tracking Updates -->
             <div style="background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px 12px;">
@@ -7516,15 +7779,16 @@ class SheetNavigator {
     document.getElementById('btn-execute-reassign')?.addEventListener('click', async () => {
       const doRenumber = document.getElementById('chk-renumber-source')?.checked ?? true;
       const doUpdateEquip = document.getElementById('chk-update-equipment')?.checked ?? true;
+      const keepLightDuty = empIsLightDuty ? (document.getElementById('chk-keep-light-duty')?.checked ?? true) : false;
       modal.remove();
-      await this.executeCrewReassignment(params, doRenumber, doUpdateEquip);
+      await this.executeCrewReassignment(params, doRenumber, doUpdateEquip, keepLightDuty);
     });
   }
 
   /**
    * Executes the full cascading reassignment after user confirmation
    */
-  async executeCrewReassignment(params, doRenumber, doUpdateEquip) {
+  async executeCrewReassignment(params, doRenumber, doUpdateEquip, keepLightDuty = false) {
     const { dragData, destBaseJob, newSlot, destLoc, membersToRenumber, affectedEquipment } = params;
     const empName = dragData.empName;
     const fromBaseJob = dragData.fromBaseJob;
@@ -7532,7 +7796,11 @@ class SheetNavigator {
 
     const empTable = this.db.getTable('employees');
     const jtTable = this.db.getTable('job_tracking');
+    const histTable = this.db.getTable('employee_history');
     if (!empTable || !jtTable) return;
+
+    const now = new Date();
+    const todayFormatted = `${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')}/${now.getFullYear()}`;
 
     // 1. Update Moved Employee row
     const emp = empTable.rows.find(e => String(e['Employee Name'] || e['Name'] || '').trim().toLowerCase() === empName.toLowerCase());
@@ -7560,10 +7828,17 @@ class SheetNavigator {
           value: finalSec
         });
       } else {
+        const oldJobVal = String(emp['Job Number'] || emp['Job #'] || dragData.fromSlot || '').trim();
+        const oldStatVal = String(emp['Status'] || '').trim();
+        const wasOnWeeds = oldJobVal.toLowerCase() === 'weeds' || oldStatVal.toLowerCase() === 'weeds' || dragData.rawFromCard === 'Weeds';
+
+        const finalLocation = keepLightDuty ? `${destLoc} (Light Duty)` : destLoc;
+        const finalStatus = keepLightDuty ? 'Light Duty' : 'Active';
+
         emp['Job Number'] = newSlot;
         if (emp['Job #']) emp['Job #'] = newSlot;
-        emp['Location'] = destLoc;
-        emp['Status'] = 'Active';
+        emp['Location'] = finalLocation;
+        emp['Status'] = finalStatus;
 
         const jobColIdx = (empTable.headers || []).findIndex(h => /^(job\s*#|job\s*number)$/i.test(h)) + 1;
         const locColIdx = (empTable.headers || []).findIndex(h => /^location$/i.test(h)) + 1;
@@ -7572,8 +7847,8 @@ class SheetNavigator {
 
         if (empTable.rawGrid && empTable.rawGrid[eRowIdx - 1]) {
           if (jobColIdx > 0) empTable.rawGrid[eRowIdx - 1][jobColIdx - 1] = newSlot;
-          if (locColIdx > 0) empTable.rawGrid[eRowIdx - 1][locColIdx - 1] = destLoc;
-          if (statusColIdx > 0) empTable.rawGrid[eRowIdx - 1][statusColIdx - 1] = 'Active';
+          if (locColIdx > 0) empTable.rawGrid[eRowIdx - 1][locColIdx - 1] = finalLocation;
+          if (statusColIdx > 0) empTable.rawGrid[eRowIdx - 1][statusColIdx - 1] = finalStatus;
         }
 
         await this.db.addMutation({
@@ -7584,10 +7859,35 @@ class SheetNavigator {
           row: eRowIdx,
           updatedFields: {
             'Job Number': newSlot,
-            'Location': destLoc,
-            'Status': 'Active'
+            'Location': finalLocation,
+            'Status': finalStatus
           }
         });
+
+        // Log crew assignment / winter rotation to Employee History
+        if (histTable && Array.isArray(histTable.rows)) {
+          const histRow = {
+            'Date': todayFormatted,
+            'Employee Name': empName,
+            'Event Type': wasOnWeeds ? 'Rotation from Weeds' : 'Transfer',
+            'Location': finalLocation,
+            'Job Number': newSlot,
+            'Notes': wasOnWeeds
+              ? `Rotated from Weeds to Crew ${destBaseJob} (${newSlot})`
+              : `Reassigned from ${oldJobVal || fromBaseJob || 'Unassigned'} to ${newSlot}${keepLightDuty ? ' (Light Duty)' : ''}`
+          };
+          histTable.rows.unshift(histRow);
+          histTable.rowCount = histTable.rows.length;
+          if (typeof this.syncRowToRawGrid === 'function') {
+            this.syncRowToRawGrid(histTable, histRow, true);
+          }
+          await this.db.addMutation({
+            action: 'ADD_ROW',
+            sheetName: histTable.name || 'Employee History',
+            tableKey: 'employee_history',
+            rowData: histRow
+          });
+        }
       }
     }
 
@@ -8756,7 +9056,23 @@ class SheetNavigator {
 
     const empTable = this.db.getTable('employees');
     const emp = (empTable?.rows || []).find(e => String(e['Employee Name'] || e['Name'] || '').trim().toLowerCase() === empName.toLowerCase());
-    const isPending = emp && (String(emp['Status'] || '').toLowerCase().includes('pending') || (emp['Hire Date'] && new Date(emp['Hire Date']) > new Date()));
+    const isPending = (() => {
+      if (!emp) return false;
+      const hd = String(emp['Hire Date'] || emp['HireDate'] || '').trim();
+      if (hd) {
+        const parts = hd.split(/[-/]/);
+        if (parts.length === 3) {
+          const y = parts[0].length === 4 ? parseInt(parts[0], 10) : parseInt(parts[2], 10);
+          const m = parts[0].length === 4 ? parseInt(parts[1], 10) - 1 : parseInt(parts[0], 10) - 1;
+          const d = parts[0].length === 4 ? parseInt(parts[2], 10) : parseInt(parts[1], 10);
+          const hDate = new Date(y, m, d, 12, 0, 0);
+          const now = new Date();
+          const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+          if (!isNaN(hDate.getTime())) return hDate > todayEnd;
+        }
+      }
+      return String(emp['Status'] || '').toLowerCase().includes('pending');
+    })();
 
     if (isPending) {
       menu.appendChild(makeItem('🚀', 'Activate Employee Today', () => {
@@ -8795,6 +9111,37 @@ class SheetNavigator {
       }
     }));
 
+    const empLocLower = String(emp?.['Location'] || '').toLowerCase();
+    const empStatLower = String(emp?.['Status'] || '').toLowerCase().trim();
+    const empJobLower = String(emp?.['Job Number'] || emp?.['Job #'] || '').toLowerCase().trim();
+    const isCurrentlyLightDuty = empLocLower.includes('(light duty)') || empLocLower === 'light duty' || empStatLower === 'light duty';
+    const isCurrentlyWeeds = empLocLower.includes('(weeds)') || empLocLower === 'weeds' || empStatLower === 'weeds' || empJobLower === 'weeds';
+
+    const statusDivider = document.createElement('div');
+    statusDivider.style.cssText = 'height: 1px; background: var(--border-color); margin: 4px 0;';
+    menu.appendChild(statusDivider);
+
+    if (isCurrentlyLightDuty) {
+      menu.appendChild(makeItem('✅', 'Return to Full Duty (Clear Light Duty)', () => {
+        this.toggleEmployeeLightDuty(empName, false);
+      }));
+    } else {
+      menu.appendChild(makeItem('🩺', 'Mark as Light Duty (Keep on Crew)', () => {
+        this.toggleEmployeeLightDuty(empName, true);
+      }));
+    }
+
+    if (!isCurrentlyWeeds) {
+      menu.appendChild(makeItem('🌾', 'Rotate to Weeds (Job Attached)', () => {
+        this.handleStatusCardDrop({
+          empName,
+          fromBaseJob: baseJob,
+          fromSlot: emp?.['Job Number'] || emp?.['Job #'] || '',
+          sourceLoc: emp?.['Location'] || 'Helena'
+        }, 'Weeds');
+      }));
+    }
+
     const divider = document.createElement('div');
     divider.style.cssText = 'height: 1px; background: var(--border-color); margin: 4px 0;';
     menu.appendChild(divider);
@@ -8812,6 +9159,82 @@ class SheetNavigator {
       }
     };
     setTimeout(() => document.addEventListener('click', closeHandler), 10);
+  }
+
+  async toggleEmployeeLightDuty(empName, setLightDuty) {
+    const empTable = this.db.getTable('employees');
+    const histTable = this.db.getTable('employee_history');
+    if (!empTable || !empTable.rows) return;
+    const emp = empTable.rows.find(e => String(e['Employee Name'] || e['Name'] || '').trim().toLowerCase() === empName.toLowerCase());
+    if (!emp) return;
+
+    let city = String(emp['Location'] || '').replace(/\s*\([^)]*\)/g, '').trim();
+    if (!city || ['unassigned', 'previous employee', 'vacation', 'light duty', 'leave', 'medical', 'weeds'].includes(city.toLowerCase())) {
+      city = 'Helena';
+    }
+
+    const newLoc = setLightDuty ? `${city} (Light Duty)` : city;
+    const newStatus = setLightDuty ? 'Light Duty' : 'Active';
+    const curJob = String(emp['Job Number'] || emp['Job #'] || '').trim();
+
+    emp['Location'] = newLoc;
+    emp['Status'] = newStatus;
+
+    const locColIdx = (empTable.headers || []).findIndex(h => /^location$/i.test(h)) + 1;
+    const statusColIdx = (empTable.headers || []).findIndex(h => /^status$/i.test(h)) + 1;
+    const rIdx = emp._rowIdx || (empTable.rows.indexOf(emp) + 2);
+    if (empTable.rawGrid && empTable.rawGrid[rIdx - 1]) {
+      if (locColIdx > 0) empTable.rawGrid[rIdx - 1][locColIdx - 1] = newLoc;
+      if (statusColIdx > 0) empTable.rawGrid[rIdx - 1][statusColIdx - 1] = newStatus;
+    }
+
+    await this.db.addMutation({
+      action: 'UPDATE_ROW',
+      sheetName: empTable.name || 'Employees',
+      tableKey: 'employees',
+      row: rIdx,
+      itemIdentifier: empName,
+      updatedFields: {
+        'Location': newLoc,
+        'Status': newStatus
+      }
+    });
+
+    if (histTable && Array.isArray(histTable.rows)) {
+      const now = new Date();
+      const todayFormatted = `${String(now.getMonth() + 1).padStart(2, '0')}/${String(now.getDate()).padStart(2, '0')}/${now.getFullYear()}`;
+      const histRow = {
+        'Date': todayFormatted,
+        'Employee Name': empName,
+        'Event Type': setLightDuty ? 'Light Duty' : 'Return to Full Duty',
+        'Location': newLoc,
+        'Job Number': curJob || newStatus,
+        'Notes': setLightDuty
+          ? `Marked Light Duty${curJob ? ` while assigned to ${curJob}` : ''}`
+          : `Cleared Light Duty — returned to full Active status${curJob ? ` on ${curJob}` : ''}`
+      };
+      histTable.rows.unshift(histRow);
+      histTable.rowCount = histTable.rows.length;
+      if (typeof this.syncRowToRawGrid === 'function') {
+        this.syncRowToRawGrid(histTable, histRow, true);
+      }
+      await this.db.addMutation({
+        action: 'ADD_ROW',
+        sheetName: histTable.name || 'Employee History',
+        tableKey: 'employee_history',
+        rowData: histRow
+      });
+    }
+
+    await this.db.persistSnapshot(this.db.snapshot);
+    this.renderCurrentSheet();
+    if (typeof window.showToast === 'function') {
+      window.showToast(
+        setLightDuty
+          ? `🩺 ${empName} marked as Light Duty (appears in both Light Duty & Crew card).`
+          : `✅ ${empName} returned to Full Duty.`
+      );
+    }
   }
 
   promptAssignSecondaryJob(empName) {

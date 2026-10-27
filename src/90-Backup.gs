@@ -93,12 +93,23 @@ function getOrCreateBackupFolder() {
 
   if (folders.hasNext()) {
     return folders.next();
-  } else {
-    // Create the folder
-    var newFolder = DriveApp.createFolder(BACKUP_FOLDER_NAME);
-    Logger.log('Created backup folder: ' + BACKUP_FOLDER_NAME);
-    return newFolder;
   }
+
+  // Migrate legacy "Glove Manager Backups" folder in place if present
+  var legacyFolders = DriveApp.getFoldersByName('Glove Manager Backups');
+  if (legacyFolders.hasNext()) {
+    var migratedFolder = legacyFolders.next();
+    try {
+      migratedFolder.setName(BACKUP_FOLDER_NAME);
+      Logger.log('Renamed legacy backup folder to: ' + BACKUP_FOLDER_NAME);
+    } catch (e) {}
+    return migratedFolder;
+  }
+
+  // Create the folder
+  var newFolder = DriveApp.createFolder(BACKUP_FOLDER_NAME);
+  Logger.log('Created backup folder: ' + BACKUP_FOLDER_NAME);
+  return newFolder;
 }
 
 /**

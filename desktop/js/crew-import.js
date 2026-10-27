@@ -1986,6 +1986,8 @@ class CrewImportEngine {
       cur.reason = 'Keep Active (Still on Current Job)';
     } else if (action === 'time_off') {
       cur.reason = 'Time Off / Vacation';
+    } else if (action === 'weeds') {
+      cur.reason = 'Rotated to Weeds (Job Attached)';
     } else {
       cur.reason = 'Missing from Roster / Departed';
     }
@@ -2006,31 +2008,32 @@ class CrewImportEngine {
     // Dynamic UI updates without full re-render
     const isKeepActive = (action === 'keep_active');
     const isTimeOff = (action === 'time_off');
+    const isWeeds = (action === 'weeds');
 
     const dateInput = document.getElementById(`date_${changeId}`);
     if (dateInput) {
       dateInput.style.display = isKeepActive ? 'none' : 'inline-block';
-      dateInput.title = isTimeOff ? 'Effective Vacation Date' : 'Last Working Day';
+      dateInput.title = isTimeOff ? 'Effective Vacation Date' : (isWeeds ? 'Effective Weeds Rotation Date' : 'Last Working Day');
     }
 
     const badge = document.getElementById(`badge_${changeId}`);
     if (badge) {
-      badge.textContent = isKeepActive ? '✅ Keep Active' : (isTimeOff ? '🏖️ Time Off' : '⚠️ Missing from Roster');
-      badge.style.background = isKeepActive ? 'rgba(16, 185, 129, 0.2)' : (isTimeOff ? 'rgba(59, 130, 246, 0.2)' : 'rgba(245, 158, 11, 0.2)');
-      badge.style.color = isKeepActive ? '#10b981' : (isTimeOff ? '#60a5fa' : '#f59e0b');
+      badge.textContent = isKeepActive ? '✅ Keep Active' : (isTimeOff ? '🏖️ Time Off' : (isWeeds ? '🌾 Weeds' : '⚠️ Missing from Roster'));
+      badge.style.background = isKeepActive ? 'rgba(16, 185, 129, 0.2)' : (isTimeOff ? 'rgba(59, 130, 246, 0.2)' : (isWeeds ? 'rgba(132, 204, 22, 0.2)' : 'rgba(245, 158, 11, 0.2)'));
+      badge.style.color = isKeepActive ? '#10b981' : (isTimeOff ? '#60a5fa' : (isWeeds ? '#a3e635' : '#f59e0b'));
     }
 
     const nameEl = document.getElementById(`name_${changeId}`);
     if (nameEl) {
       const cleanName = empName || nameEl.textContent.replace(/^[^\w\s]+\s*/, '').trim();
-      const icon = isKeepActive ? '✅' : (isTimeOff ? '🏖️' : '⚠️');
+      const icon = isKeepActive ? '✅' : (isTimeOff ? '🏖️' : (isWeeds ? '🌾' : '⚠️'));
       nameEl.textContent = `${icon} ${cleanName}`;
-      nameEl.style.color = isKeepActive ? '#10b981' : (isTimeOff ? '#60a5fa' : '#f59e0b');
+      nameEl.style.color = isKeepActive ? '#10b981' : (isTimeOff ? '#60a5fa' : (isWeeds ? '#a3e635' : '#f59e0b'));
     }
 
     const rowEl = document.getElementById(`row_${changeId}`);
     if (rowEl) {
-      rowEl.style.background = isKeepActive ? 'rgba(16, 185, 129, 0.04)' : (isTimeOff ? 'rgba(59, 130, 246, 0.04)' : 'rgba(245, 158, 11, 0.05)');
+      rowEl.style.background = isKeepActive ? 'rgba(16, 185, 129, 0.04)' : (isTimeOff ? 'rgba(59, 130, 246, 0.04)' : (isWeeds ? 'rgba(132, 204, 22, 0.05)' : 'rgba(245, 158, 11, 0.05)'));
     }
   }
 
@@ -2970,7 +2973,7 @@ class CrewImportEngine {
           }
           if (statusKey) {
             const currentStat = String(row[statusKey] || '').toLowerCase().trim();
-            if (currentStat === 'vacation' || currentStat === 'leave' || currentStat === 'light duty' || currentStat === 'medical') {
+            if (currentStat === 'vacation' || currentStat === 'leave' || currentStat === 'weeds' || currentStat === 'medical') {
               row[statusKey] = 'Active';
               updatedFields[statusKey] = 'Active';
             }
@@ -3305,6 +3308,56 @@ class CrewImportEngine {
               'Location': rawCity || 'Helena',
               'Job Number': histJob,
               'Notes': `Time Off / Not on Roster (${this.rosterDateFormatted || todayFormatted})`
+            };
+            histTable.rows.unshift(histRow);
+            histTable.rowCount = histTable.rows.length;
+            this.syncRowToRawGrid(histTable, histRow, true);
+
+            await this.db.addMutation({
+              action: 'ADD_ROW',
+              sheetName: histTable.name,
+              tableKey: 'employee_history',
+              rowData: histRow
+            });
+          }
+
+          const empRowIdx = row._rowIdx || (empTable.rows ? empTable.rows.indexOf(row) + 2 : null);
+          await this.db.addMutation({
+            action: 'UPDATE_ROW',
+            sheetName: empTable.name,
+            tableKey: 'employees',
+            employeeName: this.getEmpRowName(row) || m.name,
+            row: empRowIdx,
+            itemIdentifier: this.getEmpRowName(row) || m.name,
+            updatedFields: updatedFields
+          });
+        } else if (m.action === 'weeds') {
+          // Process as Weeds (Job Attached rotation waiting for next crew assignment)
+          const oldLoc = this.getEmpRowLocation(row);
+          const rawCity = oldLoc ? oldLoc.replace(/\s*\([^)]*\)/g, '').trim() : 'Helena';
+          const weedsLoc = `${rawCity || 'Helena'} (Weeds)`;
+          const prevJob = (m.currentJob || this.getEmpRowJobNumber(row) || '').replace(/\.\d+.*$/, '').trim();
+          const effDate = m.departureDate || this.rosterDateFormatted || todayFormatted;
+
+          const updatedFields = {};
+          if (locKey) { row[locKey] = weedsLoc; updatedFields[locKey] = weedsLoc; }
+          if (statusKey) { row[statusKey] = 'Weeds'; updatedFields[statusKey] = 'Weeds'; }
+          if (jobKey) { row[jobKey] = 'Weeds'; updatedFields[jobKey] = 'Weeds'; }
+          if (notesKey) {
+            row[notesKey] = prevJob ? `From Crew ${prevJob} (${effDate})` : `Weeds (${effDate})`;
+            updatedFields[notesKey] = row[notesKey];
+          }
+          this.syncRowToRawGrid(empTable, row);
+          appliedCount++;
+
+          if (histTable) {
+            const histRow = {
+              'Date': effDate,
+              'Employee Name': this.getEmpRowName(row) || m.name,
+              'Event Type': 'Weeds',
+              'Location': weedsLoc,
+              'Job Number': 'Weeds',
+              'Notes': prevJob ? `Rotated to Weeds from Crew ${prevJob} (${effDate})` : `Rotated to Weeds (${effDate})`
             };
             histTable.rows.unshift(histRow);
             histTable.rowCount = histTable.rows.length;
@@ -4461,13 +4514,14 @@ class CrewImportEngine {
                     const isSelected = this.isChangeSelected(m.changeId);
                     const isKeepActive = (m.action === 'keep_active');
                     const isTimeOff = (m.action === 'time_off');
+                    const isWeeds = (m.action === 'weeds');
 
-                    const badgeBg = isKeepActive ? 'rgba(16, 185, 129, 0.2)' : (isTimeOff ? 'rgba(59, 130, 246, 0.2)' : 'rgba(245, 158, 11, 0.2)');
-                    const badgeColor = isKeepActive ? '#10b981' : (isTimeOff ? '#60a5fa' : '#f59e0b');
-                    const badgeText = isKeepActive ? '✅ Keep Active' : (isTimeOff ? '🏖️ Time Off' : '⚠️ Missing from Roster');
-                    const rowBg = isKeepActive ? 'rgba(16, 185, 129, 0.04)' : (isTimeOff ? 'rgba(59, 130, 246, 0.04)' : 'rgba(245, 158, 11, 0.05)');
-                    const nameColor = isKeepActive ? '#10b981' : (isTimeOff ? '#60a5fa' : '#f59e0b');
-                    const icon = isKeepActive ? '✅' : (isTimeOff ? '🏖️' : '⚠️');
+                    const badgeBg = isKeepActive ? 'rgba(16, 185, 129, 0.2)' : (isTimeOff ? 'rgba(59, 130, 246, 0.2)' : (isWeeds ? 'rgba(132, 204, 22, 0.2)' : 'rgba(245, 158, 11, 0.2)'));
+                    const badgeColor = isKeepActive ? '#10b981' : (isTimeOff ? '#60a5fa' : (isWeeds ? '#a3e635' : '#f59e0b'));
+                    const badgeText = isKeepActive ? '✅ Keep Active' : (isTimeOff ? '🏖️ Time Off' : (isWeeds ? '🌾 Weeds' : '⚠️ Missing from Roster'));
+                    const rowBg = isKeepActive ? 'rgba(16, 185, 129, 0.04)' : (isTimeOff ? 'rgba(59, 130, 246, 0.04)' : (isWeeds ? 'rgba(132, 204, 22, 0.05)' : 'rgba(245, 158, 11, 0.05)'));
+                    const nameColor = isKeepActive ? '#10b981' : (isTimeOff ? '#60a5fa' : (isWeeds ? '#a3e635' : '#f59e0b'));
+                    const icon = isKeepActive ? '✅' : (isTimeOff ? '🏖️' : (isWeeds ? '🌾' : '⚠️'));
 
                     return `
                       <tr id="row_${m.changeId}" style="border-bottom: 1px solid var(--border-color); background: ${rowBg}; ${isSelected ? '' : 'opacity: 0.45; filter: grayscale(0.6);'}">
@@ -4490,10 +4544,11 @@ class CrewImportEngine {
                             <div style="display: flex; align-items: center; gap: 6px;">
                               <select id="action_${m.changeId}" style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); font-size: 11px; padding: 2px 6px;" onchange="window.crewImportEngine.setMissingRosterAction('${m.changeId}', this.value)">
                                 <option value="keep_active" ${isKeepActive ? 'selected' : ''}>✅ Keep Active (Still on Current Job)</option>
-                                <option value="depart" ${m.action === 'depart' ? 'selected' : ''}>🚪 Mark as Departed / Previous Employee</option>
+                                <option value="weeds" ${isWeeds ? 'selected' : ''}>🌾 Rotate to Weeds (Job Attached)</option>
                                 <option value="time_off" ${isTimeOff ? 'selected' : ''}>🏖️ Mark as Vacation / Time Off</option>
+                                <option value="depart" ${m.action === 'depart' ? 'selected' : ''}>🚪 Mark as Departed / Previous Employee</option>
                               </select>
-                              <input type="date" id="date_${m.changeId}" value="${m.departureDateIso || new Date().toISOString().split('T')[0]}" style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); font-size: 11px; padding: 2px 5px; ${isKeepActive ? 'display: none;' : ''}" onchange="window.crewImportEngine.setMissingRosterDate('${m.changeId}', this.value)" title="${isTimeOff ? 'Effective Vacation Date' : 'Last Working Day'}">
+                              <input type="date" id="date_${m.changeId}" value="${m.departureDateIso || new Date().toISOString().split('T')[0]}" style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); font-size: 11px; padding: 2px 5px; ${isKeepActive ? 'display: none;' : ''}" onchange="window.crewImportEngine.setMissingRosterDate('${m.changeId}', this.value)" title="${isTimeOff ? 'Effective Vacation Date' : (isWeeds ? 'Effective Weeds Rotation Date' : 'Last Working Day')}">
                             </div>
                           </div>
                         </td>

@@ -1411,8 +1411,14 @@ class LocalDatabase {
 
   normalizeSnapshot(snapshot) {
     if (!snapshot || !snapshot.tables) return snapshot;
+    if (!this.snapshot) this.snapshot = snapshot;
+    // Normalize employees and job_tracking first so swap/inventory healing has clean references
+    if (snapshot.tables.employees) this.normalizeTableData(snapshot.tables.employees, 'employees');
+    if (snapshot.tables.job_tracking) this.normalizeTableData(snapshot.tables.job_tracking, 'job_tracking');
     Object.keys(snapshot.tables).forEach(key => {
-      this.normalizeTableData(snapshot.tables[key], key);
+      if (key !== 'employees' && key !== 'job_tracking') {
+        this.normalizeTableData(snapshot.tables[key], key);
+      }
     });
     this.healCrossClassSwaps(snapshot);
     return snapshot;
@@ -1630,6 +1636,9 @@ class LocalDatabase {
         }
 
         // Sanitize Last Day Reason to match Google Sheets dropdown validation (Quit, Fired, Layoff, Resigned)
+        const now = new Date();
+        const todayEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 23, 59, 59, 999);
+        const statusIdx = (table.headers || []).findIndex(h => /^status$/i.test(String(h || '').trim()));
         table.rows.forEach(r => {
           const ldr = String(r['Last Day Reason'] || '').trim().toLowerCase();
           if (ldr) {
@@ -1638,6 +1647,28 @@ class LocalDatabase {
             else if (ldr.includes('layoff') || ldr.includes('laid')) r['Last Day Reason'] = 'Layoff';
             else if (ldr.includes('resign')) r['Last Day Reason'] = 'Resigned';
             else r['Last Day Reason'] = 'Quit';
+          }
+
+          // Auto-graduate Pending new hires once their Hire Date has arrived or passed
+          const statStr = String(r['Status'] || '').trim().toLowerCase();
+          const hdStr = String(r['Hire Date'] || r['HireDate'] || '').trim();
+          if (statStr === 'pending' && hdStr) {
+            const parts = hdStr.split(/[-/]/);
+            if (parts.length === 3) {
+              const y = parts[0].length === 4 ? parseInt(parts[0], 10) : parseInt(parts[2], 10);
+              const m = parts[0].length === 4 ? parseInt(parts[1], 10) - 1 : parseInt(parts[0], 10) - 1;
+              const d = parts[0].length === 4 ? parseInt(parts[2], 10) : parseInt(parts[1], 10);
+              const hDate = new Date(y, m, d, 12, 0, 0);
+              if (!isNaN(hDate.getTime()) && hDate <= todayEnd) {
+                r['Status'] = 'Active';
+                if (table.rawGrid && r._rowIdx && table.rawGrid[r._rowIdx - 1] && statusIdx !== -1) {
+                  table.rawGrid[r._rowIdx - 1][statusIdx] = 'Active';
+                }
+                if (typeof this.schedulePersistSnapshot === 'function' && this.snapshot) {
+                  this.schedulePersistSnapshot(this.snapshot, 800);
+                }
+              }
+            }
           }
         });
       }
@@ -1854,6 +1885,27 @@ class LocalDatabase {
     if (isSwapTable) {
       if ((!table.rows || table.rows.length === 0) && table.rawGrid && table.rawGrid.length > 1) {
         this.reconstructSwapRowsFromRawGrid(table, tableKey);
+      }
+      if (table.rows && table.rows.length > 0) {
+        const empRows = (this.snapshot && this.snapshot.tables && this.snapshot.tables['employees'] && this.snapshot.tables['employees'].rows) || [];
+        const jtRows = (this.snapshot && this.snapshot.tables && this.snapshot.tables['job_tracking'] && this.snapshot.tables['job_tracking'].rows) || [];
+        table.rows.forEach(r => {
+          const dl = String(r['Days Left'] || '').toUpperCase();
+          const st = String(r['Status'] || '').toLowerCase();
+          if (dl.includes('PREV') || st.includes('return to shelf')) {
+            const empName = String(r['Employee'] || '').trim().toLowerCase();
+            const empMatch = empName ? empRows.find(er => String(er['Name'] || er['Employee Name'] || er['Employee'] || Object.values(er)[0] || '').trim().toLowerCase() === empName) : null;
+            const jobNum = empMatch ? String(empMatch['Job Number'] || empMatch['Job #'] || '').trim() : '';
+            const baseJob = jobNum ? jobNum.replace(/\.\d+.*$/, '').trim() : '';
+            const jtMatch = baseJob ? jtRows.find(jr => String(jr['Job Number'] || jr['Job #'] || '').replace(/\.\d+.*$/, '').trim() === baseJob) : null;
+            const resolvedLoc = (jtMatch && String(jtMatch['Location'] || '').trim()) || 'Previous Employee';
+            const resolvedForeman = (jtMatch && String(jtMatch['Foreman'] || '').trim()) || '';
+            r._location = resolvedLoc;
+            r['Location'] = resolvedLoc;
+            r._foreman = resolvedForeman;
+            r['Foreman'] = resolvedForeman;
+          }
+        });
       }
       table._headersNormalized = true;
     }
@@ -2125,6 +2177,8 @@ class LocalDatabase {
       // Previous employee section banner
       if (/previous\s*employee/i.test(c0)) {
         inPrevEmpSection = true;
+        curLoc = 'Previous Employee';
+        curForeman = '';
         return;
       }
       // Other non-employee rows
@@ -2178,6 +2232,11 @@ class LocalDatabase {
         rowClass = '';
       }
 
+      const daysLeftVal = gr[daysLeftCol] !== undefined ? gr[daysLeftCol] : '';
+      const isPrevRow = inPrevEmpSection || String(daysLeftVal).toUpperCase().includes('PREV') || stat.toLowerCase().includes('return to shelf');
+      const rowLocVal = isPrevRow ? 'Previous Employee' : curLoc;
+      const rowForemanVal = isPrevRow ? '' : curForeman;
+
       const rowObj = {
         _rowIdx: idx + 1,
         'Employee': c0,
@@ -2187,16 +2246,16 @@ class LocalDatabase {
         'Class': rowClass,
         'Date Assigned': String(gr[dateAssignedCol] || '').trim(),
         'Change Out Date': String(gr[changeOutCol] || '').trim(),
-        'Days Left': gr[daysLeftCol] !== undefined ? gr[daysLeftCol] : '',
+        'Days Left': daysLeftVal,
         'Pick List Item #': pickItem,
         [`Pick List ${itemLabel} #`]: pickItem,
         'Status': stat || (isPicked ? 'Ready For Delivery 🚚' : 'In Stock ✅'),
         'Picked': isPicked,
         'Date Changed': dateChanged,
-        '_location': curLoc,
-        '_foreman': curForeman,
-        'Location': curLoc,
-        'Foreman': curForeman
+        '_location': rowLocVal,
+        '_foreman': rowForemanVal,
+        'Location': rowLocVal,
+        'Foreman': rowForemanVal
       };
 
       rows.push(rowObj);

@@ -102,6 +102,48 @@ if (!fs.existsSync(USER_DATA_DIR)) {
 
 const LOCAL_SNAPSHOT_PATH = path.join(USER_DATA_DIR, 'local_snapshot.json');
 const LOCAL_OUTBOX_PATH = path.join(USER_DATA_DIR, 'sync_outbox.json');
+const LOCAL_BACKUPS_DIR = path.join(USER_DATA_DIR, 'backups');
+if (!fs.existsSync(LOCAL_BACKUPS_DIR)) {
+  fs.mkdirSync(LOCAL_BACKUPS_DIR, { recursive: true });
+}
+
+let lastAutoLocalBackupMs = 0;
+
+async function writeRollingLocalBackup(snapshot, label = 'auto') {
+  try {
+    if (!snapshot || !snapshot.tables) return null;
+    const now = new Date();
+    const pad = (n) => (n < 10 ? '0' + n : String(n));
+    const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}_${pad(now.getHours())}-${pad(now.getMinutes())}-${pad(now.getSeconds())}`;
+    const filename = `SafetyAssistant_Backup_${stamp}_${label}.json`;
+    const fullPath = path.join(LOCAL_BACKUPS_DIR, filename);
+    const jsonStr = JSON.stringify(snapshot);
+    await fs.promises.writeFile(fullPath, jsonStr, 'utf8');
+
+    // Prune older local backups beyond newest 25 files
+    const entries = await fs.promises.readdir(LOCAL_BACKUPS_DIR);
+    const jsonFiles = [];
+    for (const f of entries) {
+      if (f.endsWith('.json')) {
+        const fPath = path.join(LOCAL_BACKUPS_DIR, f);
+        try {
+          const st = await fs.promises.stat(fPath);
+          jsonFiles.push({ name: f, path: fPath, mtimeMs: st.mtimeMs });
+        } catch {}
+      }
+    }
+    if (jsonFiles.length > 25) {
+      jsonFiles.sort((a, b) => b.mtimeMs - a.mtimeMs);
+      for (let i = 25; i < jsonFiles.length; i++) {
+        try { await fs.promises.unlink(jsonFiles[i].path); } catch {}
+      }
+    }
+    return { filename, path: fullPath, sizeKb: parseFloat((Buffer.byteLength(jsonStr) / 1024).toFixed(1)) };
+  } catch (err) {
+    console.warn('Error writing rolling local backup:', err);
+    return null;
+  }
+}
 
 ipcMain.handle('get-local-snapshot', async () => {
   try {
@@ -119,9 +161,69 @@ ipcMain.handle('get-local-snapshot', async () => {
 ipcMain.handle('save-local-snapshot', async (event, snapshot) => {
   try {
     await fs.promises.writeFile(LOCAL_SNAPSHOT_PATH, JSON.stringify(snapshot, null, 2), 'utf8');
+    const nowMs = Date.now();
+    if (nowMs - lastAutoLocalBackupMs > 15 * 60 * 1000) {
+      lastAutoLocalBackupMs = nowMs;
+      writeRollingLocalBackup(snapshot, 'auto');
+    }
     return { success: true };
   } catch (err) {
     console.error('Error saving local snapshot:', err);
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('create-local-backup', async (event, { snapshot, label }) => {
+  try {
+    const snapToSave = snapshot || (fs.existsSync(LOCAL_SNAPSHOT_PATH) ? JSON.parse(fs.readFileSync(LOCAL_SNAPSHOT_PATH, 'utf8')) : null);
+    const res = await writeRollingLocalBackup(snapToSave, label || 'sync');
+    lastAutoLocalBackupMs = Date.now();
+    return { success: !!res, ...(res || {}) };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('list-local-backups', async () => {
+  try {
+    if (!fs.existsSync(LOCAL_BACKUPS_DIR)) return { success: true, backups: [] };
+    const entries = await fs.promises.readdir(LOCAL_BACKUPS_DIR);
+    const list = [];
+    for (const f of entries) {
+      if (!f.endsWith('.json')) continue;
+      const fPath = path.join(LOCAL_BACKUPS_DIR, f);
+      try {
+        const st = await fs.promises.stat(fPath);
+        list.push({
+          filename: f,
+          createdAt: new Date(st.mtimeMs).toISOString(),
+          timestampMs: st.mtimeMs,
+          sizeKb: parseFloat((st.size / 1024).toFixed(1))
+        });
+      } catch {}
+    }
+    list.sort((a, b) => b.timestampMs - a.timestampMs);
+    return { success: true, backups: list, folderPath: LOCAL_BACKUPS_DIR };
+  } catch (err) {
+    return { success: false, error: err.message, backups: [] };
+  }
+});
+
+ipcMain.handle('restore-local-backup', async (event, filename) => {
+  try {
+    const safeName = path.basename(String(filename || ''));
+    const fPath = path.join(LOCAL_BACKUPS_DIR, safeName);
+    if (!fs.existsSync(fPath)) {
+      return { success: false, error: 'Local backup file not found.' };
+    }
+    const content = await fs.promises.readFile(fPath, 'utf8');
+    const snap = JSON.parse(content);
+    if (!snap || !snap.tables) {
+      return { success: false, error: 'Invalid backup file (missing tables).' };
+    }
+    await fs.promises.writeFile(LOCAL_SNAPSHOT_PATH, JSON.stringify(snap, null, 2), 'utf8');
+    return { success: true, snapshot: snap, restoredFrom: safeName };
+  } catch (err) {
     return { success: false, error: err.message };
   }
 });

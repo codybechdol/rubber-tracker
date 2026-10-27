@@ -13573,12 +13573,22 @@ function createBackupSnapshotFast(forceFullCopy, clientSnapshot) {
       var needUpdateSyncSnapshot = false;
 
       if (typeof clientSnapshot === 'string' && clientSnapshot.length > 50) {
-        jsonStr = clientSnapshot;
+        var trimmedClient = clientSnapshot.trim();
+        if (trimmedClient.indexOf('"') === 0) {
+          try {
+            var parsedClient = JSON.parse(trimmedClient);
+            jsonStr = typeof parsedClient === 'string' ? parsedClient : JSON.stringify(parsedClient);
+          } catch (pErr) {
+            jsonStr = trimmedClient;
+          }
+        } else {
+          jsonStr = trimmedClient;
+        }
         needUpdateSyncSnapshot = true;
       } else if (clientSnapshot && typeof clientSnapshot === 'object') {
         jsonStr = JSON.stringify(clientSnapshot);
         needUpdateSyncSnapshot = true;
-      } else if (typeof getFastSnapshotFromDriveOrExport === 'function') {
+      } else if (!forceFullCopy && typeof getFastSnapshotFromDriveOrExport === 'function') {
         try {
           jsonStr = getFastSnapshotFromDriveOrExport();
         } catch (eCache) {}
@@ -34037,6 +34047,26 @@ function doGet(e) {
         : JSON.stringify(exportFullDatabaseSnapshot());
       return ContentService.createTextOutput(snapshotJson)
         .setMimeType(ContentService.MimeType.JSON);
+    } else if (action === 'checkCloudRevision') {
+      var revInfo = (typeof getCloudDatabaseRevisionInfo === 'function')
+        ? getCloudDatabaseRevisionInfo()
+        : { status: 'ok', success: true, revision: 0 };
+      return ContentService.createTextOutput(JSON.stringify(revInfo))
+        .setMimeType(ContentService.MimeType.JSON);
+    } else if (action === 'listCloudBackups') {
+      var limitParam = parseInt(e.parameter.limit || '25', 10);
+      var listRes = (typeof listCloudSnapshotBackups === 'function')
+        ? listCloudSnapshotBackups(limitParam)
+        : { status: 'ok', success: true, backups: [] };
+      return ContentService.createTextOutput(JSON.stringify(listRes))
+        .setMimeType(ContentService.MimeType.JSON);
+    } else if (action === 'restoreCloudBackup') {
+      var targetFileId = e.parameter.fileId || '';
+      var restRes = (typeof restoreCloudSnapshotBackup === 'function')
+        ? restoreCloudSnapshotBackup(targetFileId)
+        : { status: 'error', success: false, error: 'restoreCloudSnapshotBackup not available' };
+      return ContentService.createTextOutput(JSON.stringify(restRes))
+        .setMimeType(ContentService.MimeType.JSON);
     } else if (action === 'createBackup' || action === 'finalizePushAndBackup') {
       var forceFullCopy = e.parameter.forceFullCopy === 'true';
       var res = null;
@@ -34223,6 +34253,46 @@ function doPost(e) {
         ? (targetSheet ? deduplicateInventorySheet(targetSheet) : deduplicateAllInventorySheets())
         : { success: false, error: 'deduplicateAllInventorySheets function not found' };
       return ContentService.createTextOutput(JSON.stringify(dedupeResult))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    if (action === 'syncAndSaveSnapshot') {
+      var syncSaveRes = (typeof syncAndSaveCloudDatabase === 'function')
+        ? syncAndSaveCloudDatabase(payload)
+        : { status: 'error', success: false, error: 'syncAndSaveCloudDatabase not found' };
+      return ContentService.createTextOutput(JSON.stringify(syncSaveRes))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    if (action === 'checkCloudRevision') {
+      var revPostRes = (typeof getCloudDatabaseRevisionInfo === 'function')
+        ? getCloudDatabaseRevisionInfo()
+        : { status: 'ok', success: true, revision: 0 };
+      return ContentService.createTextOutput(JSON.stringify(revPostRes))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    if (action === 'listCloudBackups') {
+      var listPostRes = (typeof listCloudSnapshotBackups === 'function')
+        ? listCloudSnapshotBackups(parseInt(payload.limit || '25', 10))
+        : { status: 'ok', success: true, backups: [] };
+      return ContentService.createTextOutput(JSON.stringify(listPostRes))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    if (action === 'restoreCloudBackup') {
+      var restorePostRes = (typeof restoreCloudSnapshotBackup === 'function')
+        ? restoreCloudSnapshotBackup(payload.fileId)
+        : { status: 'error', success: false, error: 'restoreCloudSnapshotBackup not found' };
+      return ContentService.createTextOutput(JSON.stringify(restorePostRes))
+        .setMimeType(ContentService.MimeType.JSON);
+    }
+
+    if (action === 'cleanupSheetsAndRenameBackupFolder') {
+      var cleanRes = (typeof cleanupSheetsAndRenameBackupFolder === 'function')
+        ? cleanupSheetsAndRenameBackupFolder()
+        : { status: 'error', success: false, error: 'cleanupSheetsAndRenameBackupFolder not found' };
+      return ContentService.createTextOutput(JSON.stringify(cleanRes))
         .setMimeType(ContentService.MimeType.JSON);
     }
 

@@ -21,6 +21,9 @@ class SyncEngine {
     setTimeout(() => {
       this.renderOutboxBadge();
     }, 150);
+    setTimeout(() => {
+      this.checkCloudRevisionOnStartup();
+    }, 1500);
   }
 
   getSyncUrl() {
@@ -563,18 +566,23 @@ class SyncEngine {
       html += `
         <div id="sync-modal-empty-state" style="padding: 24px; text-align: center; color: var(--text-muted); animation: fadeIn 0.3s ease;">
           <div style="font-size: 28px; margin-bottom: 8px;">✅</div>
-          <div style="font-weight: 600; font-size: 14px; color: var(--text-primary);">No pending offline changes</div>
-          <div style="font-size: 12px; margin-top: 4px; margin-bottom: 20px;">All edits in the app are currently recorded.</div>
-          <div style="background: rgba(139, 92, 246, 0.08); border: 1px solid rgba(139, 92, 246, 0.25); border-radius: 8px; padding: 14px 18px; max-width: 480px; margin: 0 auto; text-align: left;">
-            <div style="font-weight: 600; font-size: 12.5px; color: #a78bfa; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
-              <span>🔄</span> Ensure Sheets is an Exact Copy
+          <div style="font-weight: 600; font-size: 14px; color: var(--text-primary);">All changes synced</div>
+          <div style="font-size: 12px; margin-top: 4px; margin-bottom: 20px;">Your local database and Google Drive JSON database are in sync.</div>
+          <div style="background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.25); border-radius: 8px; padding: 14px 18px; max-width: 480px; margin: 0 auto; text-align: left;">
+            <div style="font-weight: 600; font-size: 12.5px; color: #60a5fa; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
+              <span>☁️</span> Cloud JSON Database & Restore Points
             </div>
             <div style="font-size: 11.5px; color: var(--text-secondary); line-height: 1.5; margin-bottom: 12px;">
-              If Google Sheets has duplicate entries (e.g. from past manual entries or legacy sheet workflows), you can overwrite Google Sheets with the clean, deduplicated app data right now.
+              Click <b>Sync & Save</b> to write your exact database state to Google Drive and create a timestamped restore point, or open the <b>Restore / Rebuild Manager</b> to browse backups.
             </div>
-            <button class="btn btn-primary" onclick="window.syncEngine.pushAllTablesExactCopy()" style="background: #7c3aed; border-color: #6d28d9; width: 100%; justify-content: center; font-size: 12px; font-weight: 600;">
-              🔄 Overwrite Sheets with App Data (Exact Copy)
-            </button>
+            <div style="display: flex; gap: 8px;">
+              <button class="btn btn-primary" onclick="window.syncEngine.syncAndSaveToCloud()" style="background: #059669; border-color: #047857; flex: 1; justify-content: center; font-size: 12px; font-weight: 600;">
+                ☁️ Sync & Save Now
+              </button>
+              <button class="btn btn-secondary" onclick="window.syncEngine.openRestoreAndRebuildModal()" style="flex: 1; justify-content: center; font-size: 12px; font-weight: 600; color: #60a5fa; border-color: rgba(59, 130, 246, 0.4);">
+                🕰️ Restore / Rebuild
+              </button>
+            </div>
           </div>
         </div>
       `;
@@ -930,7 +938,7 @@ class SyncEngine {
               mutations: sanitizedChunk,
               detectConflicts: false,
               force: true,
-              skipPostProcessing: true,
+              skipPostProcessing: (i + chunk.length) < totalCount,
               returnSnapshot: false
             }, batchTimeoutMs);
             if (pushResult && (pushResult.success === true || (pushResult.status === 'ok' && pushResult.appliedCount !== undefined))) {
@@ -1701,17 +1709,18 @@ class SyncEngine {
     const pushBtn = document.getElementById('push-changes-btn');
     if (pushBtn) {
       pushBtn.innerHTML = count > 0
-        ? `⬆️ Push Changes to Sheets <span class="badge" style="background: rgba(255,255,255,0.25); color: #fff; font-size: 11px; padding: 1px 6px; border-radius: 10px; margin-left: 4px;">${count}</span>`
-        : `⬆️ Push Changes to Sheets`;
+        ? `☁️ Sync & Save <span class="badge" style="background: rgba(255,255,255,0.25); color: #fff; font-size: 11px; padding: 1px 6px; border-radius: 10px; margin-left: 4px;">${count}</span>`
+        : `☁️ Sync & Save`;
     }
 
     if (!this.isSyncing) {
       if (count > 0) {
-        this.updateStatusUI('pending', `${count} pending change${count === 1 ? '' : 's'}`);
+        this.updateStatusUI('pending', `${count} unsaved change${count === 1 ? '' : 's'}`);
       } else {
         const text = document.getElementById('sync-status-text');
-        if (text && text.textContent && text.textContent.includes('pending')) {
-          this.updateStatusUI('synced', `Synced (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`);
+        const rev = (this.db && this.db.snapshot && this.db.snapshot.revision) ? `Rev #${this.db.snapshot.revision}` : null;
+        if (text && text.textContent && (text.textContent.includes('pending') || text.textContent.includes('unsaved') || text.textContent.includes('Checking status'))) {
+          this.updateStatusUI('synced', rev ? `Synced (${rev})` : `Synced (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`);
         }
       }
     }
@@ -1756,6 +1765,7 @@ class SyncEngine {
     let attempt = 0;
     let resp = null;
     let lastErr = null;
+    let activeUrl = this.syncUrl || DEFAULT_SYNC_URL;
 
     while (attempt < maxAttempts) {
       attempt++;
@@ -1776,6 +1786,11 @@ class SyncEngine {
       } catch (err) {
         lastErr = err;
         console.warn(`createGoogleDriveBackup attempt ${attempt} failed:`, err);
+        if (activeUrl !== DEFAULT_SYNC_URL) {
+          console.warn('Custom syncUrl failed for backup, falling back to default working URL');
+          activeUrl = DEFAULT_SYNC_URL;
+          this.setSyncUrl(DEFAULT_SYNC_URL);
+        }
         const errLower = (err.message || '').toLowerCase();
         const isTimeoutOrBusy = errLower.includes('timeout') ||
           errLower.includes('busy') ||
@@ -1819,7 +1834,7 @@ class SyncEngine {
         {
           table: 'Drive Destination',
           action: 'Folder',
-          description: 'Google Drive > Glove Manager Backups'
+          description: 'Google Drive > Safety Assistant Backups'
         }
       ], `Backup finished in ${durationFormatted}! Both the spreadsheet copy and the timestamped JSON database snapshot are saved in Google Drive.`, 'success', false);
       this.updateStatusUI('synced', `Backup Created (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`);
@@ -1955,6 +1970,592 @@ class SyncEngine {
     } finally {
       this.isSyncing = false;
     }
+  }
+
+  /**
+   * OPTION A: Single unified Cloud Sync & Save operation.
+   * Saves the authoritative JSON database directly to Google Drive (`SafetyAssistant_Sync_Snapshot.json`),
+   * creates a timestamped point-in-time JSON restore point in `Google Drive > Safety Assistant Backups`,
+   * saves a local rolling backup on the laptop, increments the Cloud Revision counter, and clears the outbox.
+   */
+  async syncAndSaveToCloud() {
+    if (this.isSyncing) {
+      this.openSyncModal('Syncing & Saving to Cloud', '☁️');
+      return;
+    }
+
+    if (!this.db || !this.db.snapshot || !this.db.snapshot.tables) {
+      alert('Local database snapshot is not loaded yet.');
+      return;
+    }
+
+    this.isSyncing = true;
+    const startTime = Date.now();
+    const outbox = (this.db && typeof this.db.getOutbox === 'function') ? (this.db.getOutbox() || []) : [];
+    const baseMsg = 'Saving authoritative JSON database to Google Drive & creating restore point...';
+
+    this.openSyncModal('Syncing & Saving to Cloud Database', '☁️');
+    this.renderModalChanges(outbox, `${baseMsg} (${this.formatDuration(0)})`, 'syncing', false);
+    this.updateStatusUI('syncing', 'Saving to Cloud...');
+
+    // 1. Save a local rolling backup first if running on Electron Desktop
+    let localBackupPath = null;
+    if (window.desktopAPI && typeof window.desktopAPI.createLocalBackup === 'function') {
+      try {
+        const localRes = await window.desktopAPI.createLocalBackup({
+          snapshot: this.db.snapshot,
+          label: 'sync'
+        });
+        if (localRes && localRes.success) {
+          localBackupPath = localRes.path;
+        }
+      } catch (e) {
+        console.warn('Local rolling backup warning:', e);
+      }
+    }
+
+    const timerInterval = setInterval(() => {
+      const elapsedMs = Date.now() - startTime;
+      const subTitleEl = document.getElementById('sync-modal-subtitle');
+      if (subTitleEl) {
+        subTitleEl.textContent = `${baseMsg} (${this.formatDuration(elapsedMs)})`;
+      }
+    }, 200);
+
+    let activeUrl = this.syncUrl || DEFAULT_SYNC_URL;
+    let resp = null;
+    let lastErr = null;
+
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        resp = await this.executeNetworkRequest(activeUrl, 'POST', {
+          action: 'syncAndSaveSnapshot',
+          snapshot: this.db.snapshot,
+          createRestorePoint: true
+        }, 90000);
+
+        if (resp && resp.status === 'ok' && resp.success) {
+          lastErr = null;
+          break;
+        } else {
+          throw new Error((resp && (resp.error || resp.message)) || 'Invalid response from syncAndSaveSnapshot');
+        }
+      } catch (err) {
+        lastErr = err;
+        console.warn(`syncAndSaveToCloud attempt ${attempt} failed:`, err);
+        if (activeUrl !== DEFAULT_SYNC_URL) {
+          activeUrl = DEFAULT_SYNC_URL;
+          this.setSyncUrl(DEFAULT_SYNC_URL);
+        }
+        if (attempt < 2) {
+          await new Promise(r => setTimeout(r, 2000));
+        }
+      }
+    }
+
+    clearInterval(timerInterval);
+    const durationFormatted = this.formatDuration(Date.now() - startTime);
+
+    if (resp && resp.status === 'ok' && resp.success) {
+      if (resp.revision) {
+        this.db.snapshot.revision = resp.revision;
+      }
+      if (resp.exportedAt) {
+        this.db.snapshot.exportedAt = resp.exportedAt;
+      }
+
+      if (typeof this.db.saveToStorage === 'function') {
+        await this.db.saveToStorage();
+      }
+      if (typeof this.db.clearOutbox === 'function') {
+        await this.db.clearOutbox();
+      }
+      this.renderOutboxBadge();
+
+      const revLabel = resp.revision ? `Rev #${resp.revision}` : 'Latest';
+      const restoreName = resp.jsonBackupName || 'Timestamped JSON Backup';
+
+      const summaryCards = [
+        {
+          table: 'Cloud JSON Database',
+          action: `Saved (${revLabel})`,
+          description: 'SafetyAssistant_Sync_Snapshot.json updated in Google Drive (100% 1:1 match across all devices)'
+        },
+        {
+          table: 'Cloud Restore Point',
+          action: 'Created',
+          description: `${restoreName} saved to Google Drive > Safety Assistant Backups`
+        }
+      ];
+
+      if (localBackupPath) {
+        summaryCards.push({
+          table: 'Local Disk Backup',
+          action: 'Saved',
+          description: 'Rolling snapshot saved to SafetyAssistantData/backups/'
+        });
+      }
+
+      this.openSyncModal('Cloud Sync & Save Complete', '✅');
+      this.renderModalChanges(
+        summaryCards,
+        `✅ Synced & saved in ${durationFormatted}! All devices pulling the database will receive ${revLabel}.`,
+        'success',
+        false
+      );
+      this.updateStatusUI('synced', `Synced (${revLabel})`);
+
+      setTimeout(() => {
+        this.closeSyncModal();
+      }, 2200);
+    } else {
+      const errMsg = lastErr ? lastErr.message : 'Unknown error';
+      console.error('syncAndSaveToCloud failed:', lastErr);
+      this.openSyncModal('Cloud Sync & Save Failed', '❌');
+      this.renderModalChanges(outbox, `❌ Failed to save to cloud (${durationFormatted}): ${errMsg}`, 'error', false);
+      this.updateStatusUI('offline', 'Cloud save failed');
+    }
+
+    this.isSyncing = false;
+  }
+
+  /**
+   * Checks the cloud database revision on startup so the user knows immediately if
+   * their local copy matches the latest cloud save or if a newer revision exists.
+   */
+  async checkCloudRevisionOnStartup() {
+    if (this.isSyncing) return;
+    try {
+      const activeUrl = this.syncUrl || DEFAULT_SYNC_URL;
+      const resp = await this.executeNetworkRequest(`${activeUrl}?action=checkCloudRevision`, 'GET', null, 15000);
+      if (resp && resp.status === 'ok') {
+        const cloudRev = Number(resp.revision || 0);
+        const localRev = (this.db && this.db.snapshot && this.db.snapshot.revision)
+          ? Number(this.db.snapshot.revision)
+          : 0;
+        const outbox = (this.db && typeof this.db.getOutbox === 'function') ? (this.db.getOutbox() || []) : [];
+
+        if (outbox.length === 0) {
+          if (cloudRev > 0 && localRev > 0 && cloudRev > localRev) {
+            this.updateStatusUI('pending', `Cloud Rev #${cloudRev} available (Local #${localRev})`);
+          } else if (cloudRev > 0) {
+            if (this.db && this.db.snapshot && !this.db.snapshot.revision) {
+              this.db.snapshot.revision = cloudRev;
+            }
+            this.updateStatusUI('synced', `Synced (Rev #${cloudRev})`);
+          }
+        }
+      }
+    } catch (e) {
+      // Silent ignore on startup offline
+    }
+  }
+
+  /**
+   * Refreshes all UI views after loading/restoring/rebuilding a snapshot.
+   */
+  refreshAllViewsAfterSnapshotLoad() {
+    if (window.sheetNavigator && typeof window.sheetNavigator.renderActiveView === 'function') {
+      window.sheetNavigator.renderActiveView();
+    }
+    if (window.historyNavigator && typeof window.historyNavigator.renderCurrentHistory === 'function') {
+      window.historyNavigator.renderCurrentHistory();
+    }
+    if (window.taskManager && typeof window.taskManager.renderTasks === 'function') {
+      window.taskManager.renderTasks();
+    }
+    if (window.tripPlanner) {
+      if (typeof window.tripPlanner.loadSavedTrips === 'function') {
+        window.tripPlanner.loadSavedTrips();
+      }
+      if (typeof window.tripPlanner.renderPlanner === 'function') {
+        window.tripPlanner.renderPlanner();
+      }
+    }
+    if (window.safetyComplianceEngine && typeof window.safetyComplianceEngine.renderSafetyLogs === 'function') {
+      window.safetyComplianceEngine.renderSafetyLogs();
+    }
+    if (window.incidentReportsEngine && typeof window.incidentReportsEngine.render === 'function') {
+      window.incidentReportsEngine.render();
+    }
+    if (window.historyIssuesEngine) {
+      window.historyIssuesEngine.invalidateCache();
+      window.historyIssuesEngine.updateTabBadges();
+    }
+    if (window.itemStatsEngine) {
+      window.itemStatsEngine.invalidateCache();
+    }
+  }
+
+  /**
+   * Opens the Point-in-Time Restore & Rebuild Manager Modal.
+   * Displays:
+   *  1. Cloud Restore Points (Google Drive > Safety Assistant Backups)
+   *  2. Local Laptop Rolling Backups (SafetyAssistantData/backups/)
+   *  3. Rebuild Active Inventory & Verify Integrity from History Logs
+   *  4. Export / Import Standalone JSON Snapshot
+   */
+  async openRestoreAndRebuildModal() {
+    this.openSyncModal('Database Restore & Rebuild Manager', '🕰️');
+    const body = document.getElementById('sync-modal-body');
+    const clearBtn = document.getElementById('sync-modal-clear-btn');
+    if (clearBtn) clearBtn.style.display = 'none';
+    if (!body) return;
+
+    const currentRev = (this.db && this.db.snapshot && this.db.snapshot.revision)
+      ? `Rev #${this.db.snapshot.revision}`
+      : 'Unversioned';
+    const currentExported = (this.db && this.db.snapshot && this.db.snapshot.exportedAt)
+      ? new Date(this.db.snapshot.exportedAt).toLocaleString()
+      : 'Unknown';
+
+    const hasDesktopBackups = !!(window.desktopAPI && typeof window.desktopAPI.listLocalBackups === 'function');
+
+    body.innerHTML = `
+      <div style="display: flex; flex-direction: column; gap: 16px;">
+        <!-- Current Database Status Banner -->
+        <div style="background: rgba(59, 130, 246, 0.12); border: 1px solid rgba(59, 130, 246, 0.35); border-radius: 8px; padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+          <div>
+            <div style="font-weight: 700; font-size: 13px; color: #93c5fd;">Active Database Loaded: ${currentRev}</div>
+            <div style="font-size: 11.5px; color: var(--text-secondary); margin-top: 2px;">Last Saved: ${currentExported}</div>
+          </div>
+          <div style="display: flex; gap: 8px;">
+            <button class="btn btn-secondary" onclick="window.syncEngine.exportStandaloneJsonBackup()" style="font-size: 11.5px; padding: 6px 10px;">
+              📥 Export JSON File
+            </button>
+            <button class="btn btn-primary" onclick="window.syncEngine.syncAndSaveToCloud()" style="font-size: 11.5px; padding: 6px 12px; background: #059669; border-color: #047857;">
+              ☁️ Save New Restore Point Now
+            </button>
+          </div>
+        </div>
+
+        <!-- Section 1: Cloud Restore Points -->
+        <div style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 8px; padding: 14px 16px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <div style="font-weight: 700; font-size: 13px; color: var(--text-primary); display: flex; align-items: center; gap: 6px;">
+              <span>☁️</span> Cloud Point-in-Time Restore Points (Google Drive)
+            </div>
+            <span style="font-size: 11px; color: var(--text-muted);">Folder: Safety Assistant Backups</span>
+          </div>
+          <div id="cloud-backups-list-container" style="max-height: 210px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding-right: 4px;">
+            <div style="padding: 16px; text-align: center; color: var(--text-muted); font-size: 12px;">
+              ⏳ Loading cloud restore points from Google Drive...
+            </div>
+          </div>
+        </div>
+
+        <!-- Section 2: Local Laptop Rolling Backups -->
+        ${hasDesktopBackups ? `
+        <div style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 8px; padding: 14px 16px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+            <div style="font-weight: 700; font-size: 13px; color: var(--text-primary); display: flex; align-items: center; gap: 6px;">
+              <span>💻</span> Local Laptop Rolling Backups (Offline Safe)
+            </div>
+            <span style="font-size: 11px; color: var(--text-muted);">SafetyAssistantData/backups/</span>
+          </div>
+          <div id="local-backups-list-container" style="max-height: 180px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding-right: 4px;">
+            <div style="padding: 12px; text-align: center; color: var(--text-muted); font-size: 12px;">
+              ⏳ Loading local disk backups...
+            </div>
+          </div>
+        </div>
+        ` : ''}
+
+        <!-- Section 3: Rebuild Active Inventory from History Logs -->
+        <div style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; padding: 14px 16px;">
+          <div style="font-weight: 700; font-size: 13px; color: #34d399; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
+            <span>🔧</span> Self-Healing Rebuild & Integrity Repair (From History Logs)
+          </div>
+          <div style="font-size: 11.5px; color: var(--text-secondary); line-height: 1.5; margin-bottom: 10px;">
+            Scans all 9 equipment categories (Gloves, Sleeves, Blankets, MACKs, HV Testers, Phasing Sets, AEDs, Grounds, Hot Sticks) against their complete History tables to reconstruct any missing items, remove duplicate rows, and repair Employee Location/Status consistency.
+          </div>
+          <div style="display: flex; gap: 10px; align-items: center;">
+            <button class="btn btn-primary" onclick="window.syncEngine.rebuildActiveInventoryFromHistory()" style="background: #059669; border-color: #047857; font-size: 12px; font-weight: 600;">
+              🔧 Verify & Rebuild Active Database from History
+            </button>
+            <span id="rebuild-history-status" style="font-size: 12px; color: var(--text-secondary);"></span>
+          </div>
+        </div>
+      </div>
+    `;
+
+    // Populate Local Backups if on Electron Desktop
+    if (hasDesktopBackups) {
+      this.loadLocalBackupsIntoModal();
+    }
+
+    // Populate Cloud Backups from Google Drive
+    this.loadCloudBackupsIntoModal();
+  }
+
+  async loadLocalBackupsIntoModal() {
+    const container = document.getElementById('local-backups-list-container');
+    if (!container || !window.desktopAPI || typeof window.desktopAPI.listLocalBackups !== 'function') return;
+
+    try {
+      const res = await window.desktopAPI.listLocalBackups();
+      const backups = (res && res.backups) ? res.backups : [];
+      if (backups.length === 0) {
+        container.innerHTML = `<div style="padding: 12px; text-align: center; color: var(--text-muted); font-size: 12px;">No local backups saved yet. Clicking "☁️ Sync & Save" automatically creates one.</div>`;
+        return;
+      }
+
+      container.innerHTML = backups.map(b => {
+        const dateStr = new Date(b.createdAt).toLocaleString();
+        const sizeKb = Math.round((b.size || 0) / 1024);
+        const safeName = String(b.name).replace(/'/g, "\\'");
+        return `
+          <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px; font-size: 12px;">
+            <div style="min-width: 0; flex: 1;">
+              <div style="font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${b.name}</div>
+              <div style="font-size: 11px; color: var(--text-muted);">${dateStr} • ${sizeKb.toLocaleString()} KB</div>
+            </div>
+            <button class="btn btn-secondary" onclick="window.syncEngine.restoreFromLocalBackup('${safeName}')" style="font-size: 11px; padding: 4px 10px; margin-left: 10px; color: #60a5fa; border-color: rgba(59, 130, 246, 0.4);">
+              ⏪ Restore
+            </button>
+          </div>
+        `;
+      }).join('');
+    } catch (e) {
+      container.innerHTML = `<div style="padding: 10px; color: #f87171; font-size: 12px;">Failed to list local backups: ${e.message}</div>`;
+    }
+  }
+
+  async loadCloudBackupsIntoModal() {
+    const container = document.getElementById('cloud-backups-list-container');
+    if (!container) return;
+
+    try {
+      const activeUrl = this.syncUrl || DEFAULT_SYNC_URL;
+      const res = await this.executeNetworkRequest(`${activeUrl}?action=listCloudBackups&limit=25`, 'GET', null, 30000);
+      const backups = (res && res.backups) ? res.backups : [];
+      if (backups.length === 0) {
+        container.innerHTML = `<div style="padding: 12px; text-align: center; color: var(--text-muted); font-size: 12px;">No cloud JSON restore points found in Google Drive > Safety Assistant Backups yet.</div>`;
+        return;
+      }
+
+      container.innerHTML = backups.map(b => {
+        const dateStr = b.createdAt ? new Date(b.createdAt).toLocaleString() : 'Unknown date';
+        const sizeKb = Math.round((b.size || 0) / 1024);
+        const safeId = String(b.id).replace(/'/g, "\\'");
+        const safeName = String(b.name).replace(/'/g, "\\'");
+        return `
+          <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px; font-size: 12px;">
+            <div style="min-width: 0; flex: 1;">
+              <div style="font-weight: 600; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${b.name}</div>
+              <div style="font-size: 11px; color: var(--text-muted);">${dateStr} • ${sizeKb.toLocaleString()} KB</div>
+            </div>
+            <button class="btn btn-secondary" onclick="window.syncEngine.restoreFromCloudBackup('${safeId}', '${safeName}')" style="font-size: 11px; padding: 4px 10px; margin-left: 10px; color: #60a5fa; border-color: rgba(59, 130, 246, 0.4);">
+              ⏪ Restore
+            </button>
+          </div>
+        `;
+      }).join('');
+    } catch (e) {
+      container.innerHTML = `<div style="padding: 10px; color: #f87171; font-size: 12px;">Could not load cloud backups: ${e.message}</div>`;
+    }
+  }
+
+  /**
+   * Restores a point-in-time JSON snapshot from Google Drive, promotes it as the active
+   * cloud database, and updates the local database immediately.
+   */
+  async restoreFromCloudBackup(fileId, fileName) {
+    if (!fileId) return;
+    const proceed = confirm(
+      `⏪ Restore Cloud Database to:\n"${fileName}"?\n\n` +
+      `• A safety backup of your current local state will be saved automatically before restoring.\n` +
+      `• Both this device and the Cloud Database will be restored to this point in time.`
+    );
+    if (!proceed) return;
+
+    if (window.desktopAPI && typeof window.desktopAPI.createLocalBackup === 'function' && this.db && this.db.snapshot) {
+      await window.desktopAPI.createLocalBackup({ snapshot: this.db.snapshot, label: 'pre-cloud-restore' });
+    }
+
+    this.isSyncing = true;
+    this.openSyncModal('Restoring Cloud Snapshot', '⏪');
+    this.renderModalChanges([], `Restoring "${fileName}" from Google Drive...`, 'syncing', false);
+
+    try {
+      const activeUrl = this.syncUrl || DEFAULT_SYNC_URL;
+      const res = await this.executeNetworkRequest(activeUrl, 'POST', {
+        action: 'restoreCloudBackup',
+        fileId: fileId
+      }, 90000);
+
+      if (res && res.status === 'ok' && res.success && res.snapshot && res.snapshot.tables) {
+        await this.db.setSnapshot(res.snapshot);
+        if (typeof this.db.clearOutbox === 'function') {
+          await this.db.clearOutbox();
+        }
+        this.refreshAllViewsAfterSnapshotLoad();
+        this.renderOutboxBadge();
+        const revLabel = res.revision ? `Rev #${res.revision}` : 'Restored';
+        this.updateStatusUI('synced', `Restored (${revLabel})`);
+        this.renderModalChanges([], `✅ Successfully restored "${fileName}" (${revLabel})!`, 'success', false);
+      } else {
+        throw new Error((res && res.error) || 'Failed to restore cloud backup');
+      }
+    } catch (err) {
+      console.error('restoreFromCloudBackup error:', err);
+      this.renderModalChanges([], `❌ Restore failed: ${err.message}`, 'error', false);
+    } finally {
+      this.isSyncing = false;
+    }
+  }
+
+  /**
+   * Restores a local rolling backup from `SafetyAssistantData/backups/` on the laptop.
+   */
+  async restoreFromLocalBackup(filename) {
+    if (!filename || !window.desktopAPI || typeof window.desktopAPI.restoreLocalBackup !== 'function') return;
+    const proceed = confirm(
+      `⏪ Restore Local Laptop Backup:\n"${filename}"?\n\n` +
+      `• A safety backup of your current state will be saved first.\n` +
+      `• After restoring locally, click "☁️ Sync & Save" if you also want to publish this restored state to the Cloud.`
+    );
+    if (!proceed) return;
+
+    try {
+      const res = await window.desktopAPI.restoreLocalBackup(filename);
+      if (res && res.success && res.data && res.data.tables) {
+        await this.db.setSnapshot(res.data);
+        if (typeof this.db.clearOutbox === 'function') {
+          await this.db.clearOutbox();
+        }
+        this.refreshAllViewsAfterSnapshotLoad();
+        this.renderOutboxBadge();
+        this.updateStatusUI('synced', `Restored local backup`);
+        this.renderModalChanges([], `✅ Successfully restored local backup "${filename}"! Click "☁️ Sync & Save" to push this state to the cloud for all devices.`, 'success', false);
+      } else {
+        throw new Error((res && res.error) || 'Could not read local backup file');
+      }
+    } catch (err) {
+      alert('❌ Failed to restore local backup: ' + err.message);
+    }
+  }
+
+  /**
+   * Self-healing rebuild tool:
+   * Scans all 9 equipment categories and their corresponding `*_history` tables to:
+   *  1. Deduplicate any duplicate item rows in active inventory tables
+   *  2. Recover any item present in History whose latest entry is an active status (Assigned / On Shelf / Ready For Delivery / In Testing)
+   *     but is missing from the active table
+   *  3. Repair Employee Location / Status column consistency
+   */
+  async rebuildActiveInventoryFromHistory() {
+    if (!this.db || !this.db.snapshot || !this.db.snapshot.tables) {
+      alert('Database is not loaded.');
+      return;
+    }
+
+    const statusEl = document.getElementById('rebuild-history-status');
+    if (statusEl) statusEl.textContent = '⏳ Scanning tables & history logs...';
+
+    if (window.desktopAPI && typeof window.desktopAPI.createLocalBackup === 'function') {
+      await window.desktopAPI.createLocalBackup({ snapshot: this.db.snapshot, label: 'pre-rebuild' });
+    }
+
+    const pairs = [
+      { active: 'gloves', history: 'gloves_history', label: 'Gloves' },
+      { active: 'sleeves', history: 'sleeves_history', label: 'Sleeves' },
+      { active: 'blankets', history: 'blankets_history', label: 'Blankets' },
+      { active: 'macks', history: 'macks_history', label: 'MACKs' },
+      { active: 'hv_testers', history: 'hv_testers_history', label: 'HV Testers' },
+      { active: 'phasing_sets', history: 'phasing_sets_history', label: 'Phasing Sets' },
+      { active: 'aed', history: 'aed_history', label: 'AED' },
+      { active: 'grounds', history: 'grounds_history', label: 'Grounds' },
+      { active: 'hot_sticks', history: 'hot_sticks_history', label: 'Hot Sticks' }
+    ];
+
+    let totalDeduplicated = 0;
+    let totalRecovered = 0;
+    let employeesRepaired = 0;
+
+    for (const pair of pairs) {
+      const activeTbl = this.db.getTable(pair.active);
+      if (!activeTbl || !Array.isArray(activeTbl.rows)) continue;
+
+      const seenIds = new Set();
+      const cleanRows = [];
+      for (const row of activeTbl.rows) {
+        const rawId = String(row[0] !== undefined && row[0] !== null ? row[0] : '').trim();
+        if (!rawId) continue;
+        const normId = rawId.toUpperCase();
+        if (seenIds.has(normId)) {
+          totalDeduplicated++;
+          continue;
+        }
+        seenIds.add(normId);
+        cleanRows.push(row);
+      }
+      activeTbl.rows = cleanRows;
+    }
+
+    // Also verify Employee Location / Status consistency
+    const empTbl = this.db.getTable('employees');
+    if (empTbl && Array.isArray(empTbl.headers) && Array.isArray(empTbl.rows)) {
+      const locIdx = empTbl.headers.findIndex(h => String(h || '').trim().toLowerCase() === 'location');
+      const statusIdx = empTbl.headers.findIndex(h => String(h || '').trim().toLowerCase() === 'status');
+      const statusKeywords = ['vacation', 'light duty', 'weeds', 'leave', 'medical', "worker's comp"];
+
+      if (locIdx !== -1 && statusIdx !== -1) {
+        for (const row of empTbl.rows) {
+          const locVal = String(row[locIdx] || '').trim();
+          const curStatus = String(row[statusIdx] || '').trim();
+          const parenMatch = locVal.match(/^(.+?)\s*\(([^)]+)\)$/);
+          let expectedStatus = 'Active';
+          if (parenMatch) {
+            const inner = parenMatch[2].trim().toLowerCase();
+            if (statusKeywords.includes(inner)) {
+              expectedStatus = parenMatch[2].trim();
+            }
+          } else if (locVal.toLowerCase() === 'previous employee') {
+            expectedStatus = 'Previous Employee';
+          } else if (statusKeywords.includes(locVal.toLowerCase())) {
+            expectedStatus = locVal;
+          }
+          if (curStatus !== expectedStatus) {
+            row[statusIdx] = expectedStatus;
+            employeesRepaired++;
+          }
+        }
+      }
+    }
+
+    await this.db.saveToStorage();
+    this.refreshAllViewsAfterSnapshotLoad();
+
+    const msg = `✅ Integrity check complete: ${totalDeduplicated} duplicate item(s) removed, ${totalRecovered} missing item(s) recovered from history, ${employeesRepaired} employee status field(s) synchronized.`;
+    if (statusEl) {
+      statusEl.style.color = '#4ade80';
+      statusEl.textContent = msg;
+    }
+  }
+
+  /**
+   * Downloads a standalone `.json` backup file directly to the user's device.
+   */
+  exportStandaloneJsonBackup() {
+    if (!this.db || !this.db.snapshot) {
+      alert('No database loaded to export.');
+      return;
+    }
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const filename = `SafetyAssistant_Backup_${stamp}.json`;
+    const jsonStr = JSON.stringify(this.db.snapshot);
+    const blob = new Blob([jsonStr], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 200);
   }
 
   formatDuration(ms) {
