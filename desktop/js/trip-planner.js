@@ -154,7 +154,21 @@ class TripPlannerApp {
 
   loadScheduledTrainingNeeds() {
     try {
-      return JSON.parse(localStorage.getItem('TRIP_PLANNER_SCHEDULED_TRAINING') || localStorage.getItem('sa_trip_scheduled_training') || '{}');
+      const data = JSON.parse(localStorage.getItem('TRIP_PLANNER_SCHEDULED_TRAINING') || localStorage.getItem('sa_trip_scheduled_training') || '{}');
+      if (!data || typeof data !== 'object') return {};
+
+      // Self-heal: clean up any stale, corrupted, or non-viable entries
+      const cleaned = {};
+      Object.entries(data).forEach(([k, entry]) => {
+        if (!entry) return;
+        const tr = entry.training || entry;
+        const crewId = tr.crewId || entry.crewId;
+        const topic = tr.topic || entry.topic;
+        const dateKey = typeof entry === 'object' ? entry.dateKey : entry;
+        if (!crewId || !topic || !dateKey) return;
+        cleaned[k] = entry;
+      });
+      return cleaned;
     } catch {
       return {};
     }
@@ -3883,19 +3897,32 @@ class TripPlannerApp {
       if (trainTable && trainTable.rows) {
         const sigTarget = this.getSignificantJobNumber(tr.crewId || '').toLowerCase();
         const topicTarget = String(tr.topic || '').trim().toLowerCase();
+        const mTarget = String(tr.month || '').trim().toLowerCase();
         const targetRow = trainTable.rows.find(r => {
-          if (rowId && (r._rowIdx === rowId || trainTable.rows.indexOf(r) + 2 === rowId)) return true;
-          const cSig = this.getSignificantJobNumber(r['Crew #'] || r['Crew'] || '').toLowerCase();
-          const rTopic = String(r['Topic'] || r['Training Topic'] || '').trim().toLowerCase();
-          return (sigTarget && cSig === sigTarget) && (rTopic === topicTarget || rTopic.includes(topicTarget) || topicTarget.includes(rTopic));
+          const cRaw = String(r['Crew #'] || r['Crew'] || r['Job Number'] || '').trim();
+          const cSig = this.getSignificantJobNumber(cRaw).toLowerCase();
+          const crewMatches = (sigTarget && cSig === sigTarget) || cRaw.toLowerCase() === String(tr.crewId || '').trim().toLowerCase();
+          if (!crewMatches) return false;
+
+          const rTopic = String(r['Topic'] || r['Training Topic'] || r['Training'] || '').trim().toLowerCase();
+          const topicMatches = !topicTarget || !rTopic || rTopic === topicTarget || rTopic.includes(topicTarget) || topicTarget.includes(rTopic);
+          if (!topicMatches) return false;
+
+          const rMonth = String(r['Month'] || '').trim().toLowerCase();
+          const monthMatches = !mTarget || !rMonth || rMonth.includes(mTarget) || mTarget.includes(rMonth);
+          return monthMatches;
         });
         if (targetRow && (!targetRow['Status'] || String(targetRow['Status']).toLowerCase() === 'pending')) {
           targetRow['Status'] = 'Scheduled';
           targetRow['Training Status'] = 'Scheduled';
+          targetRow['Scheduled Date'] = dateKey;
         }
       }
 
       this.saveScheduledTrainingNeeds();
+      if (this.db && typeof this.db.schedulePersistSnapshot === 'function') {
+        this.db.schedulePersistSnapshot();
+      }
       this.renderPlanner();
       this.renderTrainingNeedsList();
       this.showToast(`🎓 Scheduled Training "${tr.topic}" for Crew ${tr.crewId} on ${dateKey}`);
@@ -3920,19 +3947,32 @@ class TripPlannerApp {
         if (trainTable && trainTable.rows) {
           const sigTarget = this.getSignificantJobNumber(tr.crewId || '').toLowerCase();
           const topicTarget = String(tr.topic || '').trim().toLowerCase();
+          const mTarget = String(tr.month || '').trim().toLowerCase();
           const targetRow = trainTable.rows.find(r => {
-            if (rowId && (r._rowIdx === rowId || trainTable.rows.indexOf(r) + 2 === rowId)) return true;
-            const cSig = this.getSignificantJobNumber(r['Crew #'] || r['Crew'] || '').toLowerCase();
-            const rTopic = String(r['Topic'] || r['Training Topic'] || '').trim().toLowerCase();
-            return (sigTarget && cSig === sigTarget) && (rTopic === topicTarget || rTopic.includes(topicTarget) || topicTarget.includes(rTopic));
+            const cRaw = String(r['Crew #'] || r['Crew'] || r['Job Number'] || '').trim();
+            const cSig = this.getSignificantJobNumber(cRaw).toLowerCase();
+            const crewMatches = (sigTarget && cSig === sigTarget) || cRaw.toLowerCase() === String(tr.crewId || '').trim().toLowerCase();
+            if (!crewMatches) return false;
+
+            const rTopic = String(r['Topic'] || r['Training Topic'] || r['Training'] || '').trim().toLowerCase();
+            const topicMatches = !topicTarget || !rTopic || rTopic === topicTarget || rTopic.includes(topicTarget) || topicTarget.includes(rTopic);
+            if (!topicMatches) return false;
+
+            const rMonth = String(r['Month'] || '').trim().toLowerCase();
+            const monthMatches = !mTarget || !rMonth || rMonth.includes(mTarget) || mTarget.includes(rMonth);
+            return monthMatches;
           });
           if (targetRow && (!targetRow['Status'] || String(targetRow['Status']).toLowerCase() === 'pending')) {
             targetRow['Status'] = 'Scheduled';
             targetRow['Training Status'] = 'Scheduled';
+            targetRow['Scheduled Date'] = dateKey;
           }
         }
       });
       this.saveScheduledTrainingNeeds();
+      if (this.db && typeof this.db.schedulePersistSnapshot === 'function') {
+        this.db.schedulePersistSnapshot();
+      }
       this.renderPlanner();
       this.renderTrainingNeedsList();
       this.showToast(`🎓 Scheduled ${payload.trainings.length} training topic(s) for Crew ${payload.crewId} on ${dateKey}`);
@@ -4772,6 +4812,66 @@ class TripPlannerApp {
       if (changed) this.saveScheduledSwaps();
     }
 
+    // Un-schedule any training needs for this date (and location if specified) so they return to sidebar
+    if (this.scheduledTrainingNeeds) {
+      let trainChanged = false;
+      const trainTable = this.db ? this.db.getTable('training_tracking') : null;
+      Object.keys(this.scheduledTrainingNeeds).forEach(k => {
+        const entry = this.scheduledTrainingNeeds[k];
+        const tDate = typeof entry === 'object' ? entry.dateKey : entry;
+        const tLoc = typeof entry === 'object' ? entry.location : '';
+        if (tDate === dateKey) {
+          if (!locationToRemove || !tLoc || tLoc.toLowerCase() === locationToRemove.toLowerCase()) {
+            const tr = (entry && entry.training) ? entry.training : entry;
+            delete this.scheduledTrainingNeeds[k];
+            trainChanged = true;
+
+            if (trainTable && trainTable.rows && tr) {
+              const sigTarget = this.getSignificantJobNumber(tr.crewId || entry.crewId || '').toLowerCase();
+              const topicTarget = String(tr.topic || '').trim().toLowerCase();
+              const mTarget = String(tr.month || '').trim().toLowerCase();
+              const targetRow = trainTable.rows.find(r => {
+                const cRaw = String(r['Crew #'] || r['Crew'] || r['Job Number'] || '').trim();
+                const cSig = this.getSignificantJobNumber(cRaw).toLowerCase();
+                if (!sigTarget || cSig !== sigTarget) return false;
+                const rTopic = String(r['Topic'] || r['Training Topic'] || '').trim().toLowerCase();
+                if (topicTarget && rTopic && !rTopic.includes(topicTarget) && !topicTarget.includes(rTopic)) return false;
+                const rMonth = String(r['Month'] || '').trim().toLowerCase();
+                if (mTarget && rMonth && !rMonth.includes(mTarget) && !mTarget.includes(rMonth)) return false;
+                return true;
+              });
+              if (targetRow && String(targetRow['Status']).toLowerCase() === 'scheduled') {
+                targetRow['Status'] = 'Pending';
+                targetRow['Training Status'] = 'Pending';
+                targetRow['Scheduled Date'] = '';
+                delete targetRow['Scheduled Date'];
+              }
+            }
+          }
+        }
+      });
+      if (trainChanged) {
+        this.saveScheduledTrainingNeeds();
+      }
+    }
+
+    // Un-schedule any equipment needs for this date (and location if specified)
+    if (this.scheduledEquipmentNeeds) {
+      let eqChanged = false;
+      Object.keys(this.scheduledEquipmentNeeds).forEach(k => {
+        const entry = this.scheduledEquipmentNeeds[k];
+        const eDate = typeof entry === 'object' ? entry.dateKey : entry;
+        const eLoc = typeof entry === 'object' ? entry.location : '';
+        if (eDate === dateKey) {
+          if (!locationToRemove || !eLoc || eLoc.toLowerCase() === locationToRemove.toLowerCase()) {
+            delete this.scheduledEquipmentNeeds[k];
+            eqChanged = true;
+          }
+        }
+      });
+      if (eqChanged) this.saveScheduledEquipmentNeeds();
+    }
+
     if (this.db && typeof this.db.addMutation === 'function') {
       this.db.addMutation({
         action: 'SET_TRIP_SCHEDULE',
@@ -4781,7 +4881,13 @@ class TripPlannerApp {
       });
     }
 
+    if (this.db && typeof this.db.schedulePersistSnapshot === 'function') {
+      this.db.schedulePersistSnapshot();
+    }
+
     this.renderPlanner();
+    this.renderTrainingNeedsList();
+    this.renderEquipmentNeedsList();
   }
 
   clearWeekTrips(weekDateKey) {
@@ -4790,11 +4896,14 @@ class TripPlannerApp {
     const baseDate = this.parseDate(weekDateKey);
     if (!baseDate) return;
 
+    const trainTable = this.db ? this.db.getTable('training_tracking') : null;
+
     for (let i = 0; i < 7; i++) {
       const d = new Date(baseDate);
       d.setDate(baseDate.getDate() + i);
       const dKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
       delete this.plannedTrips[dKey];
+
       if (this.scheduledSwaps) {
         Object.keys(this.scheduledSwaps).forEach(k => {
           const entry = this.scheduledSwaps[k];
@@ -4804,10 +4913,63 @@ class TripPlannerApp {
           }
         });
       }
+
+      if (this.scheduledTrainingNeeds) {
+        Object.keys(this.scheduledTrainingNeeds).forEach(k => {
+          const entry = this.scheduledTrainingNeeds[k];
+          const tDate = typeof entry === 'object' ? entry.dateKey : entry;
+          if (tDate === dKey) {
+            const tr = (entry && entry.training) ? entry.training : entry;
+            delete this.scheduledTrainingNeeds[k];
+
+            if (trainTable && trainTable.rows && tr) {
+              const sigTarget = this.getSignificantJobNumber(tr.crewId || entry.crewId || '').toLowerCase();
+              const topicTarget = String(tr.topic || '').trim().toLowerCase();
+              const mTarget = String(tr.month || '').trim().toLowerCase();
+              const targetRow = trainTable.rows.find(r => {
+                const cRaw = String(r['Crew #'] || r['Crew'] || r['Job Number'] || '').trim();
+                const cSig = this.getSignificantJobNumber(cRaw).toLowerCase();
+                if (!sigTarget || cSig !== sigTarget) return false;
+                const rTopic = String(r['Topic'] || r['Training Topic'] || '').trim().toLowerCase();
+                if (topicTarget && rTopic && !rTopic.includes(topicTarget) && !topicTarget.includes(rTopic)) return false;
+                const rMonth = String(r['Month'] || '').trim().toLowerCase();
+                if (mTarget && rMonth && !rMonth.includes(mTarget) && !mTarget.includes(rMonth)) return false;
+                return true;
+              });
+              if (targetRow && String(targetRow['Status']).toLowerCase() === 'scheduled') {
+                targetRow['Status'] = 'Pending';
+                targetRow['Training Status'] = 'Pending';
+                targetRow['Scheduled Date'] = '';
+                delete targetRow['Scheduled Date'];
+              }
+            }
+          }
+        });
+      }
+
+      if (this.scheduledEquipmentNeeds) {
+        Object.keys(this.scheduledEquipmentNeeds).forEach(k => {
+          const entry = this.scheduledEquipmentNeeds[k];
+          const eDate = typeof entry === 'object' ? entry.dateKey : entry;
+          if (eDate === dKey) {
+            delete this.scheduledEquipmentNeeds[k];
+          }
+        });
+      }
     }
+
     if (this.scheduledSwaps) this.saveScheduledSwaps();
+    if (this.scheduledTrainingNeeds) this.saveScheduledTrainingNeeds();
+    if (this.scheduledEquipmentNeeds) this.saveScheduledEquipmentNeeds();
     this.saveTrips();
+
+    if (this.db && typeof this.db.schedulePersistSnapshot === 'function') {
+      this.db.schedulePersistSnapshot();
+    }
+
     this.renderPlanner();
+    this.renderTrainingNeedsList();
+    this.renderEquipmentNeedsList();
   }
 
   saveTrips() {
@@ -9472,43 +9634,45 @@ class TripPlannerApp {
     const directKey = `train_${crewId}_${rowIdx || 0}_${topic}`;
     if (this.scheduledTrainingNeeds[directKey]) {
       const entry = this.scheduledTrainingNeeds[directKey];
-      const dateKey = typeof entry === 'object' ? entry.dateKey : entry;
-      if (dateKey) return { dateKey, location: entry.location || '', key: directKey, entry };
+      const isDone = !!(entry && (entry.completed || entry.isCompleted || (entry.training && (entry.training.completed || entry.training.isCompleted))));
+      if (!isDone) {
+        const dateKey = typeof entry === 'object' ? entry.dateKey : entry;
+        if (dateKey) return { dateKey, location: entry.location || '', key: directKey, entry };
+      }
     }
 
     const sigTarget = this.getSignificantJobNumber(crewId || '').toLowerCase();
     const topicTarget = String(topic || '').trim().toLowerCase();
     const monthTarget = String(month || '').trim().toLowerCase();
-    const rowNum = Number(rowIdx);
 
     for (const [k, entry] of Object.entries(this.scheduledTrainingNeeds)) {
       if (!entry) continue;
       const dateKey = typeof entry === 'object' ? entry.dateKey : entry;
       if (!dateKey) continue;
 
+      const isDone = !!(entry.completed || entry.isCompleted || (entry.training && (entry.training.completed || entry.training.isCompleted)));
+      if (isDone) continue;
+
       const tr = entry.training || entry;
-      if (k === directKey || tr.id === directKey || tr._trKey === directKey) {
-        return { dateKey, location: entry.location || '', key: k, entry };
-      }
+      const cSig = this.getSignificantJobNumber(tr.crewId || entry.crewId || '').toLowerCase();
+      const rawCrew = String(tr.crewId || entry.crewId || '').toLowerCase();
+      const targetRaw = String(crewId || '').toLowerCase();
 
-      const trRow = Number(tr.rowIdx || tr._rowIdx || 0);
-      if (rowNum && trRow && rowNum === trRow) {
-        return { dateKey, location: entry.location || '', key: k, entry };
-      }
+      // Crew MUST match
+      const crewMatch = (sigTarget && cSig && sigTarget === cSig) || (rawCrew && targetRaw && rawCrew === targetRaw);
+      if (!crewMatch) continue;
 
-      if (sigTarget && topicTarget) {
-        const cSig = this.getSignificantJobNumber(tr.crewId || entry.crewId || '').toLowerCase();
-        const rTopic = String(tr.topic || '').trim().toLowerCase();
-        const rMonth = String(tr.month || '').trim().toLowerCase();
+      // Topic MUST match
+      const rTopic = String(tr.topic || '').trim().toLowerCase();
+      const topicMatch = !topicTarget || !rTopic || rTopic === topicTarget || rTopic.includes(topicTarget) || topicTarget.includes(rTopic);
+      if (!topicMatch) continue;
 
-        const crewMatch = (cSig === sigTarget) || (String(tr.crewId || entry.crewId || '').toLowerCase() === String(crewId || '').toLowerCase());
-        const topicMatch = rTopic && (rTopic === topicTarget || rTopic.includes(topicTarget) || topicTarget.includes(rTopic));
-        const monthMatch = !monthTarget || !rMonth || rMonth.includes(monthTarget) || monthTarget.includes(rMonth);
+      // Month check if provided
+      const rMonth = String(tr.month || '').trim().toLowerCase();
+      const monthMatch = !monthTarget || !rMonth || rMonth.includes(monthTarget) || monthTarget.includes(rMonth);
+      if (!monthMatch) continue;
 
-        if (crewMatch && topicMatch && monthMatch) {
-          return { dateKey, location: entry.location || '', key: k, entry };
-        }
-      }
+      return { dateKey, location: entry.location || '', key: k, entry };
     }
 
     return null;
@@ -9639,10 +9803,19 @@ class TripPlannerApp {
         let isScheduled = !!schedInfo;
         let scheduledDate = schedInfo ? schedInfo.dateKey : '';
 
-        // Also check if DB row itself is marked Scheduled
+        // If not scheduled in Trip Planner, ensure orphaned 'Scheduled' status is healed to Pending
         if (!isScheduled && status.toLowerCase() === 'scheduled') {
-          isScheduled = true;
-          scheduledDate = String(r['Scheduled Date'] || r['Date'] || '').trim();
+          const directSchedDate = String(r['Scheduled Date'] || r['Date'] || '').trim();
+          if (directSchedDate && this.getTripsForDate && this.getTripsForDate(directSchedDate).length > 0) {
+            isScheduled = true;
+            scheduledDate = directSchedDate;
+          } else {
+            r['Status'] = 'Pending';
+            r['Training Status'] = 'Pending';
+            r['Scheduled Date'] = '';
+            delete r['Scheduled Date'];
+            isScheduled = false;
+          }
         }
 
         allMonthTrainings.push({
@@ -9839,36 +10012,90 @@ class TripPlannerApp {
 
   unscheduleTrainingNeed(key) {
     if (!this.scheduledTrainingNeeds) return;
-    let targetKey = key;
-    if (!this.scheduledTrainingNeeds[targetKey]) {
+    const targetKeys = [];
+    let trInfo = null;
+
+    if (this.scheduledTrainingNeeds[key]) {
+      targetKeys.push(key);
+      trInfo = this.scheduledTrainingNeeds[key].training || this.scheduledTrainingNeeds[key];
+    } else {
       for (const [k, v] of Object.entries(this.scheduledTrainingNeeds)) {
         if (k === key || (v && v.training && (v.training.id === key || v.training._trKey === key))) {
-          targetKey = k;
-          break;
+          targetKeys.push(k);
+          if (!trInfo) trInfo = v.training || v;
         }
       }
     }
-    if (this.scheduledTrainingNeeds && this.scheduledTrainingNeeds[targetKey]) {
-      const entry = this.scheduledTrainingNeeds[targetKey];
-      const tr = (entry && entry.training) ? entry.training : entry;
-      delete this.scheduledTrainingNeeds[targetKey];
+
+    if (!trInfo && key) {
+      const kLower = String(key).toLowerCase();
+      for (const [k, v] of Object.entries(this.scheduledTrainingNeeds)) {
+        const t = (v && v.training) ? v.training : v;
+        if (t && t.crewId && t.topic) {
+          if (kLower.includes(String(t.crewId).toLowerCase()) && kLower.includes(String(t.topic).toLowerCase())) {
+            targetKeys.push(k);
+            if (!trInfo) trInfo = t;
+          }
+        }
+      }
+    }
+
+    if (trInfo) {
+      const sigTarget = this.getSignificantJobNumber(trInfo.crewId || '').toLowerCase();
+      const topicTarget = String(trInfo.topic || '').trim().toLowerCase();
+      const mTarget = String(trInfo.month || '').trim().toLowerCase();
+
+      // Find any other matching keys in scheduledTrainingNeeds for this crew and topic
+      for (const [k, v] of Object.entries(this.scheduledTrainingNeeds)) {
+        if (!targetKeys.includes(k) && v) {
+          const t = v.training || v;
+          const cSig = this.getSignificantJobNumber(t.crewId || '').toLowerCase();
+          const tTop = String(t.topic || '').trim().toLowerCase();
+          if (sigTarget && cSig === sigTarget && tTop === topicTarget) {
+            targetKeys.push(k);
+          }
+        }
+      }
+
+      // Delete all matching keys
+      targetKeys.forEach(k => delete this.scheduledTrainingNeeds[k]);
       this.saveScheduledTrainingNeeds();
 
+      // Reset DB row
       const trainTable = this.db ? this.db.getTable('training_tracking') : null;
-      if (trainTable && trainTable.rows && tr) {
-        const rowId = tr.rowIdx || tr._rowIdx;
-        const sigTarget = this.getSignificantJobNumber(tr.crewId || entry.crewId || '').toLowerCase();
-        const topicTarget = String(tr.topic || '').trim().toLowerCase();
+      if (trainTable && trainTable.rows) {
         const targetRow = trainTable.rows.find(r => {
-          if (rowId && (r._rowIdx === rowId || trainTable.rows.indexOf(r) + 2 === rowId)) return true;
-          const cSig = this.getSignificantJobNumber(r['Crew #'] || r['Crew'] || '').toLowerCase();
+          const cRaw = String(r['Crew #'] || r['Crew'] || r['Job Number'] || '').trim();
+          const cSig = this.getSignificantJobNumber(cRaw).toLowerCase();
+          if (!sigTarget || cSig !== sigTarget) return false;
           const rTopic = String(r['Topic'] || r['Training Topic'] || '').trim().toLowerCase();
-          return (sigTarget && cSig === sigTarget) && (rTopic === topicTarget || rTopic.includes(topicTarget) || topicTarget.includes(rTopic));
+          if (topicTarget && rTopic && !rTopic.includes(topicTarget) && !topicTarget.includes(rTopic)) return false;
+          const rMonth = String(r['Month'] || '').trim().toLowerCase();
+          if (mTarget && rMonth && !rMonth.includes(mTarget) && !mTarget.includes(rMonth)) return false;
+          return true;
         });
-        if (targetRow && String(targetRow['Status']).toLowerCase() === 'scheduled') {
+
+        if (targetRow) {
           targetRow['Status'] = 'Pending';
           targetRow['Training Status'] = 'Pending';
+          targetRow['Scheduled Date'] = '';
+          delete targetRow['Scheduled Date'];
+
+          const rowIdx = targetRow._rowIdx || (trainTable.rows.indexOf(targetRow) + 2);
+          if (this.db && typeof this.db.addMutation === 'function') {
+            this.db.addMutation({
+              action: 'UPDATE_CELL',
+              sheetName: 'Training Tracking',
+              row: rowIdx,
+              col: 10,
+              value: 'Pending'
+            });
+          }
         }
+      }
+
+      if (this.db && typeof this.db.schedulePersistSnapshot === 'function') {
+        this.db.schedulePersistSnapshot();
       }
 
       this.renderPlanner();
