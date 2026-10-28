@@ -130,6 +130,27 @@ class TimeBreakdownEngine {
       .trim();
   }
 
+  isPersonalTask(mt) {
+    if (!mt) return false;
+    if (mt.isPersonal === true) return true;
+    if (mt.taskCategory === 'office_task' || mt.isPersonal === false) return false;
+    if (mt.taskCategory === 'cert_class' || !!mt.certType) return false;
+
+    const title = String(mt.title || '').toLowerCase();
+    const notes = String(mt.notes || '').toLowerCase();
+    const text = `${title} ${notes}`;
+
+    if (/stock rubber|graybar|rubber ppe|assigned rubber|shop organizing|compliance report|safety audit|supply run|warehouse|inventory|trailer|dock\s+work|walter|glove|sleeve|swap|reclaim|tools?|gear|parts?/i.test(text)) {
+      return false;
+    }
+
+    if (/dentist|doctor|appointment|personal|errand|eye\s+exam|physical|haircut|mechanic|dmv|vet/i.test(text)) {
+      return true;
+    }
+
+    return mt.taskCategory === 'personal_task';
+  }
+
   cleanPhysicalLocation(loc) {
     if (!loc) return '';
     let clean = String(loc).trim();
@@ -482,6 +503,10 @@ class TimeBreakdownEngine {
         const isCert = (t.taskCategory === 'cert_class' || !!t.certType);
         if (isCert) {
           daysMap[dKey].classes.push(t);
+        } else if (this.isPersonalTask(t)) {
+          // PERSONAL TASK: Explicitly left off of the accomplishments report!
+          daysMap[dKey].personalTasks = daysMap[dKey].personalTasks || [];
+          daysMap[dKey].personalTasks.push(t);
         } else {
           daysMap[dKey].officeTasks.push(t);
         }

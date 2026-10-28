@@ -1702,16 +1702,17 @@ class TripPlannerApp {
 
   renderPersonalTaskCardHtml(mt, dateKey, taskIdx, totalTasks) {
     const isDone = mt.status === 'Complete';
+    const isPersonal = this.isPersonalTask(mt);
     const assignee = mt.assignedTo || 'Myself';
     return `
-      <div class="manual-task-card personal-task-card" style="background: var(--bg-primary); border: 1px solid ${isDone ? 'rgba(16, 185, 129, 0.3)' : 'rgba(249, 115, 22, 0.3)'}; border-left: 4px solid ${isDone ? '#10b981' : (mt.priority === 'High' ? '#ef4444' : '#f97316')}; border-radius: 6px; padding: 7px 9px; box-shadow: 0 1px 4px rgba(0,0,0,0.25); opacity: ${isDone ? '0.65' : '1'}; transition: all 0.15s ease; cursor: pointer;" onclick="window.tripPlanner.openEditManualTaskModal('${this.escapeHtml(mt.id)}')" onmouseover="this.style.borderColor='rgba(251, 146, 60, 0.7)'; this.style.transform='translateY(-1px)';" onmouseout="this.style.borderColor='${isDone ? 'rgba(16, 185, 129, 0.3)' : 'rgba(249, 115, 22, 0.3)'}'; this.style.transform='translateY(0)';" title="Click to view / edit task details">
+      <div class="manual-task-card personal-task-card" style="background: var(--bg-primary); border: 1px solid ${isDone ? 'rgba(16, 185, 129, 0.3)' : 'rgba(249, 115, 22, 0.3)'}; border-left: 4px solid ${isDone ? '#10b981' : (mt.priority === 'High' ? '#ef4444' : (isPersonal ? '#a855f7' : '#f97316'))}; border-radius: 6px; padding: 7px 9px; box-shadow: 0 1px 4px rgba(0,0,0,0.25); opacity: ${isDone ? '0.65' : '1'}; transition: all 0.15s ease; cursor: pointer;" onclick="window.tripPlanner.openEditManualTaskModal('${this.escapeHtml(mt.id)}')" onmouseover="this.style.borderColor='rgba(251, 146, 60, 0.7)'; this.style.transform='translateY(-1px)';" onmouseout="this.style.borderColor='${isDone ? 'rgba(16, 185, 129, 0.3)' : 'rgba(249, 115, 22, 0.3)'}'; this.style.transform='translateY(0)';" title="Click to view / edit task details">
         <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 6px;">
           <div style="display: flex; align-items: flex-start; gap: 7px; flex: 1; min-width: 0;">
             <input type="checkbox" ${isDone ? 'checked' : ''} onclick="event.stopPropagation()" onchange="window.tripPlanner.toggleManualTask('${this.escapeHtml(mt.id)}')" style="cursor: pointer; margin-top: 2px; accent-color: #10b981; width: 14px; height: 14px;" title="${isDone ? 'Mark Pending' : 'Mark Complete'}">
             <div style="flex: 1; min-width: 0;">
               <div style="display: flex; align-items: center; gap: 4px; margin-bottom: 3px; flex-wrap: wrap;">
-                <span class="badge" style="background: rgba(249, 115, 22, 0.15); color: #fdba74; border: 1px solid rgba(249, 115, 22, 0.3); font-size: 9px; font-weight: 800; padding: 1px 5px; border-radius: 3px;">
-                  💼 Personal / Office
+                <span class="badge" style="background: ${isPersonal ? 'rgba(168, 85, 247, 0.18)' : 'rgba(249, 115, 22, 0.15)'}; color: ${isPersonal ? '#d8b4fe' : '#fdba74'}; border: 1px solid ${isPersonal ? 'rgba(168, 85, 247, 0.35)' : 'rgba(249, 115, 22, 0.3)'}; font-size: 9px; font-weight: 800; padding: 1px 5px; border-radius: 3px;">
+                  ${isPersonal ? '👤 Personal' : '💼 Office Task'}
                 </span>
                 ${mt.priority === 'High' ? `
                   <span class="badge" style="background: rgba(239, 68, 68, 0.2); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.35); font-size: 9px; padding: 1px 4px;">
@@ -3644,6 +3645,29 @@ class TripPlannerApp {
     this.hideCertDropdown();
   }
 
+  isPersonalTask(mt) {
+    if (!mt) return false;
+    if (mt.isPersonal === true) return true;
+    if (mt.taskCategory === 'office_task' || mt.isPersonal === false) return false;
+    if (mt.taskCategory === 'cert_class' || !!mt.certType) return false;
+
+    // Check taskCategory === 'personal_task' or legacy tasks
+    const title = String(mt.title || '').toLowerCase();
+    const notes = String(mt.notes || '').toLowerCase();
+    const text = `${title} ${notes}`;
+
+    // Work / Office tasks that may have been previously tagged as personal_task:
+    if (/stock rubber|graybar|rubber ppe|assigned rubber|shop organizing|compliance report|safety audit|supply run|warehouse|inventory|trailer|dock\s+work|walter|glove|sleeve|swap|reclaim|tools?|gear|parts?/i.test(text)) {
+      return false;
+    }
+
+    if (/dentist|doctor|appointment|personal|errand|eye\s+exam|physical|haircut|mechanic|dmv|vet/i.test(text)) {
+      return true;
+    }
+
+    return mt.taskCategory === 'personal_task';
+  }
+
   switchManualTaskTab(category, autoFocus = true) {
     const activeCategoryInput = document.getElementById('manual-task-active-category');
     if (activeCategoryInput) activeCategoryInput.value = category;
@@ -3651,13 +3675,30 @@ class TripPlannerApp {
     const certFields = document.getElementById('section-cert-class-fields');
     const personalFields = document.getElementById('section-personal-task-fields');
     const tabCert = document.getElementById('tab-btn-cert-class');
+    const tabOffice = document.getElementById('tab-btn-office-task');
     const tabPersonal = document.getElementById('tab-btn-personal-task');
     const modalIcon = document.getElementById('manual-task-modal-icon');
     const saveBtn = document.getElementById('btn-save-manual-task');
     const saveBtnText = document.getElementById('btn-save-manual-task-text');
 
+    const titleLabel = document.getElementById('manual-task-title-label');
+    const categoryHint = document.getElementById('manual-task-category-hint');
+    const officeChips = document.getElementById('office-task-quick-chips');
+    const personalChips = document.getElementById('personal-task-quick-chips');
+    const personalNote = document.getElementById('personal-task-accomplishment-note');
+    const titleInput = document.getElementById('manual-task-personal-title-input');
+
     const editIdInput = document.getElementById('manual-task-edit-id');
     const isEditing = !!(editIdInput && editIdInput.value.trim());
+
+    // Reset neutral styles on tabs
+    [tabCert, tabOffice, tabPersonal].forEach(btn => {
+      if (btn) {
+        btn.style.border = '1px solid rgba(255, 255, 255, 0.1)';
+        btn.style.background = 'var(--bg-primary)';
+        btn.style.color = '#94a3b8';
+      }
+    });
 
     if (category === 'cert_class') {
       if (certFields) certFields.style.display = 'flex';
@@ -3667,11 +3708,6 @@ class TripPlannerApp {
         tabCert.style.border = '1px solid #10b981';
         tabCert.style.background = 'rgba(16, 185, 129, 0.2)';
         tabCert.style.color = '#34d399';
-      }
-      if (tabPersonal) {
-        tabPersonal.style.border = '1px solid rgba(255, 255, 255, 0.1)';
-        tabPersonal.style.background = 'var(--bg-primary)';
-        tabPersonal.style.color = '#94a3b8';
       }
       if (modalIcon) modalIcon.textContent = '🎓';
       if (saveBtn) {
@@ -3686,30 +3722,66 @@ class TripPlannerApp {
           if (certInput) certInput.focus();
         }, 50);
       }
-    } else {
+    } else if (category === 'personal_task') {
       if (certFields) certFields.style.display = 'none';
       if (personalFields) personalFields.style.display = 'flex';
 
       if (tabPersonal) {
-        tabPersonal.style.border = '1px solid #f97316';
-        tabPersonal.style.background = 'rgba(249, 115, 22, 0.2)';
-        tabPersonal.style.color = '#fdba74';
+        tabPersonal.style.border = '1px solid #a855f7';
+        tabPersonal.style.background = 'rgba(168, 85, 247, 0.2)';
+        tabPersonal.style.color = '#d8b4fe';
       }
-      if (tabCert) {
-        tabCert.style.border = '1px solid rgba(255, 255, 255, 0.1)';
-        tabCert.style.background = 'var(--bg-primary)';
-        tabCert.style.color = '#94a3b8';
+      if (modalIcon) modalIcon.textContent = '👤';
+      if (titleLabel) titleLabel.textContent = 'PERSONAL TASK / APPOINTMENT *';
+      if (categoryHint) {
+        categoryHint.textContent = 'Personal appointments & errands';
+        categoryHint.style.color = '#d8b4fe';
+      }
+      if (officeChips) officeChips.style.display = 'none';
+      if (personalChips) personalChips.style.display = 'flex';
+      if (personalNote) personalNote.style.display = 'block';
+      if (titleInput && !isEditing) titleInput.placeholder = 'e.g. Dentist, Doctor, Personal appointment, Eye exam...';
+
+      if (saveBtn) {
+        saveBtn.style.background = '#a855f7';
+        saveBtn.style.boxShadow = '0 2px 8px rgba(168, 85, 247, 0.4)';
+      }
+      if (saveBtnText) saveBtnText.textContent = isEditing ? 'Update Personal Task' : 'Save Personal Task';
+
+      if (autoFocus) {
+        setTimeout(() => {
+          if (titleInput) titleInput.focus();
+        }, 50);
+      }
+    } else {
+      // office_task (default)
+      if (certFields) certFields.style.display = 'none';
+      if (personalFields) personalFields.style.display = 'flex';
+
+      if (tabOffice) {
+        tabOffice.style.border = '1px solid #f97316';
+        tabOffice.style.background = 'rgba(249, 115, 22, 0.2)';
+        tabOffice.style.color = '#fdba74';
       }
       if (modalIcon) modalIcon.textContent = '💼';
+      if (titleLabel) titleLabel.textContent = 'OFFICE TASK / DESCRIPTION *';
+      if (categoryHint) {
+        categoryHint.textContent = 'Office & shop safety work (Included in accomplishments)';
+        categoryHint.style.color = '#fdba74';
+      }
+      if (officeChips) officeChips.style.display = 'flex';
+      if (personalChips) personalChips.style.display = 'none';
+      if (personalNote) personalNote.style.display = 'none';
+      if (titleInput && !isEditing) titleInput.placeholder = 'e.g. Check in and stock rubber, Graybar supply run, Shop organizing...';
+
       if (saveBtn) {
         saveBtn.style.background = '#f97316';
         saveBtn.style.boxShadow = '0 2px 8px rgba(249, 115, 22, 0.4)';
       }
-      if (saveBtnText) saveBtnText.textContent = isEditing ? 'Update Task' : 'Save Task';
+      if (saveBtnText) saveBtnText.textContent = isEditing ? 'Update Office Task' : 'Save Office Task';
 
       if (autoFocus) {
         setTimeout(() => {
-          const titleInput = document.getElementById('manual-task-personal-title-input');
           if (titleInput) titleInput.focus();
         }, 50);
       }
@@ -4779,7 +4851,8 @@ class TripPlannerApp {
       if (pTimeInput) pTimeInput.value = task.time || '';
       if (pNotesInput) pNotesInput.value = task.notes || '';
 
-      this.switchManualTaskTab('personal_task', false);
+      const isPersonal = this.isPersonalTask(task);
+      this.switchManualTaskTab(isPersonal ? 'personal_task' : 'office_task', false);
     }
 
     if (titleEl) {
@@ -4912,8 +4985,10 @@ class TripPlannerApp {
         return;
       }
 
+      const isPersonal = (category === 'personal_task');
       const taskData = {
-        taskCategory: 'personal_task',
+        taskCategory: isPersonal ? 'personal_task' : 'office_task',
+        isPersonal: isPersonal,
         title: title,
         assignedTo: assignedTo || 'Myself',
         dateKey: dateKey,
@@ -8694,10 +8769,12 @@ class TripPlannerApp {
           cg.tasks.training.push({ ...tr, _itemType: 'monthly_training' });
         });
 
-        // Group Personal / Office Tasks
+        // Group Personal & Office Tasks separately
         personalTasks.forEach(mt => {
           const loc = mt.location || 'Helena';
-          const cg = getCrewGroup(loc, 'Office / Personal', '');
+          const isPersonal = this.isPersonalTask(mt);
+          const groupName = isPersonal ? 'Personal Tasks' : 'Office Tasks';
+          const cg = getCrewGroup(loc, groupName, '');
           cg.tasks.office.push(mt);
         });
 

@@ -1874,13 +1874,16 @@
         <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 12px; background: rgba(0,0,0,0.2); border: none; color: white; cursor: pointer;" onclick="window.tripPlanner.closeManualTaskModal()">✕</button>
       </div>
 
-      <!-- Segmented Type Selector -->
+      <!-- Segmented Type Selector: Cert Class vs Office Task vs Personal Task -->
       <div style="display: flex; gap: 8px; padding: 14px 20px 0 20px; background: var(--bg-secondary); border-bottom: 1px solid var(--border-color);">
-        <button type="button" id="tab-btn-cert-class" class="btn" style="flex: 1; padding: 9px 12px; font-size: 12px; font-weight: 700; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid #10b981; background: rgba(16, 185, 129, 0.2); color: #34d399; transition: all 0.2s;" onclick="window.tripPlanner.switchManualTaskTab('cert_class')">
-          <span>🎓</span> Cert / Training Class
+        <button type="button" id="tab-btn-cert-class" class="btn" style="flex: 1; padding: 8px 10px; font-size: 12px; font-weight: 700; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid #10b981; background: rgba(16, 185, 129, 0.2); color: #34d399; transition: all 0.2s;" onclick="window.tripPlanner.switchManualTaskTab('cert_class')">
+          <span>🎓</span> Cert / Class
         </button>
-        <button type="button" id="tab-btn-personal-task" class="btn" style="flex: 1; padding: 9px 12px; font-size: 12px; font-weight: 700; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid rgba(255, 255, 255, 0.1); background: var(--bg-primary); color: #94a3b8; transition: all 0.2s;" onclick="window.tripPlanner.switchManualTaskTab('personal_task')">
-          <span>💼</span> Personal / Office Task
+        <button type="button" id="tab-btn-office-task" class="btn" style="flex: 1; padding: 8px 10px; font-size: 12px; font-weight: 700; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid rgba(255, 255, 255, 0.1); background: var(--bg-primary); color: #94a3b8; transition: all 0.2s;" onclick="window.tripPlanner.switchManualTaskTab('office_task')">
+          <span>💼</span> Office Task
+        </button>
+        <button type="button" id="tab-btn-personal-task" class="btn" style="flex: 1; padding: 8px 10px; font-size: 12px; font-weight: 700; border-radius: 6px; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid rgba(255, 255, 255, 0.1); background: var(--bg-primary); color: #94a3b8; transition: all 0.2s;" onclick="window.tripPlanner.switchManualTaskTab('personal_task')">
+          <span>👤</span> Personal Task
         </button>
       </div>
 
@@ -1997,20 +2000,31 @@
           </div>
         </div>
 
-        <!-- ==================== SECTION B: PERSONAL / OFFICE TASK FIELDS ==================== -->
+        <!-- ==================== SECTION B: OFFICE & PERSONAL TASK FIELDS ==================== -->
         <div id="section-personal-task-fields" style="display: none; flex-direction: column; gap: 12px;">
           <div>
             <label style="display: flex; justify-content: space-between; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 6px; letter-spacing: 0.5px;">
-              <span>TASK TITLE / DESCRIPTION *</span>
-              <span style="font-weight: 400; color: #fdba74;">Office & personal safety work</span>
+              <span id="manual-task-title-label">TASK TITLE / DESCRIPTION *</span>
+              <span id="manual-task-category-hint" style="font-weight: 400; color: #fdba74;">Office & shop safety work (Included in accomplishments)</span>
             </label>
-            <input type="text" id="manual-task-personal-title-input" class="form-control" placeholder="e.g. Submit monthly safety report, Graybar supply run, Audit truck 102..." style="width: 100%; box-sizing: border-box; font-size: 13px; font-weight: 600; padding: 8px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;" onkeydown="if(event.key==='Enter'){window.tripPlanner.saveManualTaskFromModal();}">
-            <!-- Quick Chips for common tasks -->
-            <div style="display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap;">
-              <span class="badge" style="cursor: pointer; background: rgba(249, 115, 22, 0.15); color: #fdba74; border: 1px solid rgba(249, 115, 22, 0.3); font-size: 9.5px; padding: 2px 6px;" onclick="document.getElementById('manual-task-personal-title-input').value='Graybar Supply Pickup'">Graybar Pickup</span>
+            <input type="text" id="manual-task-personal-title-input" class="form-control" placeholder="e.g. Check in and stock rubber, Graybar supply run, Shop organizing..." style="width: 100%; box-sizing: border-box; font-size: 13px; font-weight: 600; padding: 8px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;" onkeydown="if(event.key==='Enter'){window.tripPlanner.saveManualTaskFromModal();}">
+            <!-- Quick Chips for Office tasks -->
+            <div id="office-task-quick-chips" style="display: flex; gap: 4px; margin-top: 6px; flex-wrap: wrap;">
               <span class="badge" style="cursor: pointer; background: rgba(249, 115, 22, 0.15); color: #fdba74; border: 1px solid rgba(249, 115, 22, 0.3); font-size: 9.5px; padding: 2px 6px;" onclick="document.getElementById('manual-task-personal-title-input').value='Shop Organizing & Rubber Stock Count'">Shop Organizing</span>
+              <span class="badge" style="cursor: pointer; background: rgba(249, 115, 22, 0.15); color: #fdba74; border: 1px solid rgba(249, 115, 22, 0.3); font-size: 9.5px; padding: 2px 6px;" onclick="document.getElementById('manual-task-personal-title-input').value='Check in and stock rubber from delivery'">Stock Rubber</span>
+              <span class="badge" style="cursor: pointer; background: rgba(249, 115, 22, 0.15); color: #fdba74; border: 1px solid rgba(249, 115, 22, 0.3); font-size: 9.5px; padding: 2px 6px;" onclick="document.getElementById('manual-task-personal-title-input').value='Graybar Supply Pickup'">Graybar Pickup</span>
               <span class="badge" style="cursor: pointer; background: rgba(249, 115, 22, 0.15); color: #fdba74; border: 1px solid rgba(249, 115, 22, 0.3); font-size: 9.5px; padding: 2px 6px;" onclick="document.getElementById('manual-task-personal-title-input').value='Weekly Safety Compliance Report'">Weekly Report</span>
               <span class="badge" style="cursor: pointer; background: rgba(249, 115, 22, 0.15); color: #fdba74; border: 1px solid rgba(249, 115, 22, 0.3); font-size: 9.5px; padding: 2px 6px;" onclick="document.getElementById('manual-task-personal-title-input').value='Vehicle & Tool Safety Audit'">Vehicle Audit</span>
+            </div>
+            <!-- Quick Chips for Personal tasks -->
+            <div id="personal-task-quick-chips" style="display: none; gap: 4px; margin-top: 6px; flex-wrap: wrap;">
+              <span class="badge" style="cursor: pointer; background: rgba(168, 85, 247, 0.15); color: #d8b4fe; border: 1px solid rgba(168, 85, 247, 0.35); font-size: 9.5px; padding: 2px 6px;" onclick="document.getElementById('manual-task-personal-title-input').value='Dentist'">Dentist</span>
+              <span class="badge" style="cursor: pointer; background: rgba(168, 85, 247, 0.15); color: #d8b4fe; border: 1px solid rgba(168, 85, 247, 0.35); font-size: 9.5px; padding: 2px 6px;" onclick="document.getElementById('manual-task-personal-title-input').value='Doctor Appointment'">Doctor</span>
+              <span class="badge" style="cursor: pointer; background: rgba(168, 85, 247, 0.15); color: #d8b4fe; border: 1px solid rgba(168, 85, 247, 0.35); font-size: 9.5px; padding: 2px 6px;" onclick="document.getElementById('manual-task-personal-title-input').value='Eye Exam'">Eye Exam</span>
+              <span class="badge" style="cursor: pointer; background: rgba(168, 85, 247, 0.15); color: #d8b4fe; border: 1px solid rgba(168, 85, 247, 0.35); font-size: 9.5px; padding: 2px 6px;" onclick="document.getElementById('manual-task-personal-title-input').value='Personal Errand'">Personal Errand</span>
+            </div>
+            <div id="personal-task-accomplishment-note" style="display: none; margin-top: 6px; font-size: 10.5px; color: #c084fc; font-weight: 600;">
+              🔒 Personal tasks are kept private and left off of daily accomplishments.
             </div>
           </div>
 
