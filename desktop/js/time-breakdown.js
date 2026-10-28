@@ -364,39 +364,61 @@ class TimeBreakdownEngine {
       if (sKey && schedRegistry[sKey] && schedRegistry[sKey].isOfficeTask) {
         return { isOfficeTask: true, officeNote: schedRegistry[sKey].officeNote || '' };
       }
-      const empK = String(emp || '').trim().toLowerCase();
+      const rawEmpK = String(emp || '').trim().toLowerCase();
+      const normEmpK = this.normalizeEmpName(emp).toLowerCase();
       const oldK = cleanNum(oldItm);
       const newK = cleanNum(newItm);
       const typeK = String(type || '').trim().toLowerCase();
-      const candidates = [
-        `${typeK}_${empK}_${oldK}_${dKey}`,
-        `${typeK}_${empK}_${oldK}`,
-        `${empK}_${oldK}_${dKey}`,
-        `${empK}_${oldK}`,
-        `${typeK}_${empK}_${newK}`,
-        `${empK}_${newK}`
-      ];
-      for (const ck of candidates) {
-        if (swapOfficeRegistry[ck] && swapOfficeRegistry[ck].isOfficeTask) {
-          return { isOfficeTask: true, officeNote: swapOfficeRegistry[ck].officeNote || '' };
+      const empVariants = [...new Set([rawEmpK, normEmpK])].filter(Boolean);
+
+      for (const ek of empVariants) {
+        if (oldK) {
+          const candidates = [
+            `${typeK}_${ek}_${oldK}_${dKey}`,
+            `${typeK}_${ek}_${oldK}`,
+            `${ek}_${oldK}_${dKey}`,
+            `${ek}_${oldK}`
+          ];
+          for (const ck of candidates) {
+            if (swapOfficeRegistry[ck] && swapOfficeRegistry[ck].isOfficeTask) {
+              return { isOfficeTask: true, officeNote: swapOfficeRegistry[ck].officeNote || '' };
+            }
+          }
+        }
+        if (newK) {
+          const candidates = [
+            `${typeK}_${ek}_${newK}`,
+            `${ek}_${newK}`
+          ];
+          for (const ck of candidates) {
+            if (swapOfficeRegistry[ck] && swapOfficeRegistry[ck].isOfficeTask) {
+              return { isOfficeTask: true, officeNote: swapOfficeRegistry[ck].officeNote || '' };
+            }
+          }
         }
       }
+
       for (const [k, entry] of Object.entries(swapOfficeRegistry)) {
         if (entry && entry.isOfficeTask) {
-          const entryEmp = String(entry.employeeName || '').trim().toLowerCase();
+          const entryEmpRaw = String(entry.employeeName || '').trim().toLowerCase();
+          const entryEmpNorm = this.normalizeEmpName(entry.employeeName || '').toLowerCase();
           const entryOld = cleanNum(entry.currentItem || entry.oldItem);
-          if (entryEmp === empK && (!oldK || entryOld === oldK)) {
+          const empMatches = empVariants.includes(entryEmpRaw) || empVariants.includes(entryEmpNorm);
+          if (empMatches && (!oldK || entryOld === oldK)) {
             return { isOfficeTask: true, officeNote: entry.officeNote || '' };
           }
         }
       }
+
       for (const [sk, entry] of Object.entries(schedRegistry)) {
         if (entry && entry.isOfficeTask) {
           const sDate = entry.dateKey || (entry.swap && entry.swap.dateKey) || '';
           if (dKey && sDate && sDate !== dKey) continue;
-          const sEmp = String(entry.employeeName || (entry.swap && entry.swap.employeeName) || '').trim().toLowerCase();
+          const sEmpRaw = String(entry.employeeName || (entry.swap && entry.swap.employeeName) || '').trim().toLowerCase();
+          const sEmpNorm = this.normalizeEmpName(entry.employeeName || (entry.swap && entry.swap.employeeName) || '').toLowerCase();
           const sOld = cleanNum(entry.currentItem || (entry.swap && entry.swap.currentItem));
-          if (sEmp === empK && (!oldK || sOld === oldK)) {
+          const empMatches = empVariants.includes(sEmpRaw) || empVariants.includes(sEmpNorm);
+          if (empMatches && (!oldK || sOld === oldK)) {
             return { isOfficeTask: true, officeNote: entry.officeNote || '' };
           }
         }
@@ -463,7 +485,8 @@ class TimeBreakdownEngine {
           const cleanNew = (rawPick === '—' || rawPick === '-') ? '' : rawPick;
           const cleanOld = String(entry.currentItemNum || '').trim();
           const isReclaim = !cleanNew;
-          const dedupe = `${cfg.label}_${empClean}_${cleanNew}_${cleanOld}`.toLowerCase();
+          const normEmp = this.normalizeEmpName(empClean).toLowerCase();
+          const dedupe = `${cfg.label}_${normEmp}_${cleanNew}_${cleanOld}`.toLowerCase();
 
           // Prioritize scheduled trip dateKey over entry.deliveredDate if user checked box on later day
           const empKey = empClean.toLowerCase();
@@ -501,26 +524,6 @@ class TimeBreakdownEngine {
                 officeNote: officeInfo.officeNote
               };
 
-              // Try to attach to a matching field visit location on that day
-              let attached = false;
-              const dayLocKeys = Object.keys(daysMap[dKey].locations);
-              for (const lKey of dayLocKeys) {
-                const locObj = daysMap[dKey].locations[lKey];
-                const locNameClean = lKey.toLowerCase();
-                const swapLocClean = swapObj.location.toLowerCase();
-                const swapSigCrew = this.getSignificantJobNumber(swapObj.crew);
-                const locCrewsSig = (locObj.crews || []).map(c => this.getSignificantJobNumber(c));
-
-                const matchesLocation = (swapLocClean === locNameClean || swapLocClean.includes(locNameClean) || locNameClean.includes(swapLocClean));
-                const matchesCrew = Boolean(swapSigCrew && locCrewsSig.includes(swapSigCrew));
-
-                if (matchesLocation || matchesCrew) {
-                  locObj.swaps.push(swapObj);
-                  attached = true;
-                  break;
-                }
-              }
-
               const cleanSwapLoc = this.cleanPhysicalLocation(swapObj.location) || 'Helena';
               swapObj.originCity = cleanSwapLoc;
 
@@ -535,6 +538,22 @@ class TimeBreakdownEngine {
                 }
                 daysMap[dKey].locations['Helena'].swaps.push(swapObj);
               } else {
+                let attached = false;
+                const dayLocKeys = Object.keys(daysMap[dKey].locations);
+                for (const lKey of dayLocKeys) {
+                  const locObj = daysMap[dKey].locations[lKey];
+                  const locNameClean = lKey.toLowerCase();
+                  const swapLocClean = swapObj.location.toLowerCase();
+                  const swapSigCrew = this.getSignificantJobNumber(swapObj.crew);
+                  const locCrewsSig = (locObj.crews || []).map(c => this.getSignificantJobNumber(c));
+
+                  if (swapLocClean === locNameClean || swapLocClean.includes(locNameClean) || locNameClean.includes(swapLocClean) || (swapSigCrew && locCrewsSig.includes(swapSigCrew))) {
+                    locObj.swaps.push(swapObj);
+                    attached = true;
+                    break;
+                  }
+                }
+
                 if (!attached) {
                   if (cleanSwapLoc && cleanSwapLoc.toLowerCase() !== 'helena' && !this.isStatusLocation(cleanSwapLoc)) {
                     if (!daysMap[dKey].locations[cleanSwapLoc]) {
@@ -581,7 +600,8 @@ class TimeBreakdownEngine {
             const dKey = this.normalizeDateKey(rawDate);
             if (daysMap[dKey]) {
               const isReclaim = Boolean(!cleanNew || String(r['Days Left'] || '').toUpperCase().includes('PREV') || status.includes('return to shelf'));
-              const dedupe = `${cfg.label}_${empClean}_${cleanNew}_${oldItem}`.toLowerCase();
+              const normEmp = this.normalizeEmpName(empClean).toLowerCase();
+              const dedupe = `${cfg.label}_${normEmp}_${cleanNew}_${oldItem}`.toLowerCase();
               if (!seenSwapKeys.has(dedupe)) {
                 seenSwapKeys.add(dedupe);
                 const empInfo = empMap[empClean.toLowerCase()] || {};
@@ -606,21 +626,6 @@ class TimeBreakdownEngine {
                   officeNote: officeInfo.officeNote
                 };
 
-                let attached = false;
-                for (const lKey of Object.keys(daysMap[dKey].locations)) {
-                  const locObj = daysMap[dKey].locations[lKey];
-                  const locNameClean = lKey.toLowerCase();
-                  const swapLocClean = swapObj.location.toLowerCase();
-                  const swapSigCrew = this.getSignificantJobNumber(swapObj.crew);
-                  const locCrewsSig = (locObj.crews || []).map(c => this.getSignificantJobNumber(c));
-
-                  if (swapLocClean === locNameClean || swapLocClean.includes(locNameClean) || locNameClean.includes(swapLocClean) || (swapSigCrew && locCrewsSig.includes(swapSigCrew))) {
-                    locObj.swaps.push(swapObj);
-                    attached = true;
-                    break;
-                  }
-                }
-
                 const cleanSwapLoc = this.cleanPhysicalLocation(swapObj.location) || 'Helena';
                 swapObj.originCity = cleanSwapLoc;
 
@@ -635,6 +640,21 @@ class TimeBreakdownEngine {
                   }
                   daysMap[dKey].locations['Helena'].swaps.push(swapObj);
                 } else {
+                  let attached = false;
+                  for (const lKey of Object.keys(daysMap[dKey].locations)) {
+                    const locObj = daysMap[dKey].locations[lKey];
+                    const locNameClean = lKey.toLowerCase();
+                    const swapLocClean = swapObj.location.toLowerCase();
+                    const swapSigCrew = this.getSignificantJobNumber(swapObj.crew);
+                    const locCrewsSig = (locObj.crews || []).map(c => this.getSignificantJobNumber(c));
+
+                    if (swapLocClean === locNameClean || swapLocClean.includes(locNameClean) || locNameClean.includes(swapLocClean) || (swapSigCrew && locCrewsSig.includes(swapSigCrew))) {
+                      locObj.swaps.push(swapObj);
+                      attached = true;
+                      break;
+                    }
+                  }
+
                   if (!attached) {
                     if (cleanSwapLoc && cleanSwapLoc.toLowerCase() !== 'helena' && !this.isStatusLocation(cleanSwapLoc)) {
                       if (!daysMap[dKey].locations[cleanSwapLoc]) {
@@ -668,8 +688,9 @@ class TimeBreakdownEngine {
       if (!daysMap[dKey]) return;
 
       const swapData = entry.swap || entry;
-      const empClean = String(entry.employeeName || swapData.employeeName || swapData.employee || '').trim();
-      if (!empClean) return;
+      const rawEmp = String(entry.employeeName || swapData.employeeName || swapData.employee || '').trim();
+      if (!rawEmp) return;
+      const empClean = this.normalizeEmpName(rawEmp);
 
       const oldItem = String(swapData.currentItem || swapData.oldItem || entry.currentItem || '').trim();
       const rawNew = String(swapData.pickItem || swapData.newItem || entry.pickItem || '').trim();
@@ -687,13 +708,21 @@ class TimeBreakdownEngine {
         !cleanNew
       );
 
-      const dedupe = `${label}_${empClean}_${cleanNew}_${oldItem}`.toLowerCase();
+      const normEmp = empClean.toLowerCase();
+      const dedupe = `${label}_${normEmp}_${cleanNew}_${oldItem}`.toLowerCase();
       if (!seenSwapKeys.has(dedupe)) {
         seenSwapKeys.add(dedupe);
 
-        const empInfo = empMap[empClean.toLowerCase()] || {};
+        const empInfo = empMap[normEmp] || {};
         const swapLoc = entry.location || swapData.location || empInfo.loc || 'Helena';
         const swapCrew = entry.crewId || swapData.crewId || swapData.jobNum || empInfo.crew || '';
+
+        const sKey = k || `${swapData.tableKey || 'glove_swaps'}|${normEmp}|${label.toLowerCase()}|${oldItem.toLowerCase()}`;
+        const officeInfo = (entry.isOfficeTask !== undefined && entry.isOfficeTask !== null)
+          ? { isOfficeTask: !!entry.isOfficeTask, officeNote: entry.officeNote || '' }
+          : getSwapOfficeInfo(sKey, rawEmp, oldItem, cleanNew, label, dKey);
+
+        const cleanSwapLoc = this.cleanPhysicalLocation(swapLoc) || 'Helena';
 
         const swapObj = {
           type: isReclaim ? `${label} Reclaim` : `${label} Swap`,
@@ -708,38 +737,52 @@ class TimeBreakdownEngine {
           model: swapData.model || '',
           length: swapData.length || '',
           location: swapLoc,
+          originCity: cleanSwapLoc,
           crew: swapCrew,
-          status: 'Delivered'
+          status: 'Delivered',
+          isOfficeTask: officeInfo.isOfficeTask,
+          officeNote: officeInfo.officeNote
         };
 
-        let attached = false;
-        for (const lKey of Object.keys(daysMap[dKey].locations)) {
-          const locObj = daysMap[dKey].locations[lKey];
-          const locNameClean = lKey.toLowerCase();
-          const swapLocClean = swapObj.location.toLowerCase();
-          const swapSigCrew = this.getSignificantJobNumber(swapObj.crew);
-          const locCrewsSig = (locObj.crews || []).map(c => this.getSignificantJobNumber(c));
-
-          if (swapLocClean === locNameClean || swapLocClean.includes(locNameClean) || locNameClean.includes(swapLocClean) || (swapSigCrew && locCrewsSig.includes(swapSigCrew))) {
-            locObj.swaps.push(swapObj);
-            attached = true;
-            break;
+        if (swapObj.isOfficeTask) {
+          // Handled in office / shop — belongs to Helena! Does not create a field trip or travel leg!
+          if (!daysMap[dKey].locations['Helena']) {
+            daysMap[dKey].locations['Helena'] = {
+              name: 'Helena',
+              crews: [],
+              swaps: []
+            };
           }
-        }
+          daysMap[dKey].locations['Helena'].swaps.push(swapObj);
+        } else {
+          let attached = false;
+          for (const lKey of Object.keys(daysMap[dKey].locations)) {
+            const locObj = daysMap[dKey].locations[lKey];
+            const locNameClean = lKey.toLowerCase();
+            const swapLocClean = swapObj.location.toLowerCase();
+            const swapSigCrew = this.getSignificantJobNumber(swapObj.crew);
+            const locCrewsSig = (locObj.crews || []).map(c => this.getSignificantJobNumber(c));
 
-        if (!attached) {
-          const cleanSwapLoc = this.cleanPhysicalLocation(swapObj.location);
-          if (cleanSwapLoc && cleanSwapLoc.toLowerCase() !== 'helena' && !this.isStatusLocation(cleanSwapLoc)) {
-            if (!daysMap[dKey].locations[cleanSwapLoc]) {
-              daysMap[dKey].locations[cleanSwapLoc] = {
-                name: cleanSwapLoc,
-                crews: [],
-                swaps: []
-              };
+            if (swapLocClean === locNameClean || swapLocClean.includes(locNameClean) || locNameClean.includes(swapLocClean) || (swapSigCrew && locCrewsSig.includes(swapSigCrew))) {
+              locObj.swaps.push(swapObj);
+              attached = true;
+              break;
             }
-            daysMap[dKey].locations[cleanSwapLoc].swaps.push(swapObj);
-          } else {
-            daysMap[dKey].tasks.push(swapObj);
+          }
+
+          if (!attached) {
+            if (cleanSwapLoc && cleanSwapLoc.toLowerCase() !== 'helena' && !this.isStatusLocation(cleanSwapLoc)) {
+              if (!daysMap[dKey].locations[cleanSwapLoc]) {
+                daysMap[dKey].locations[cleanSwapLoc] = {
+                  name: cleanSwapLoc,
+                  crews: [],
+                  swaps: []
+                };
+              }
+              daysMap[dKey].locations[cleanSwapLoc].swaps.push(swapObj);
+            } else {
+              daysMap[dKey].tasks.push(swapObj);
+            }
           }
         }
       }
@@ -1286,16 +1329,29 @@ class TimeBreakdownEngine {
             return `${emp} (${itemDesc}${detailStr})`;
           });
 
-          const swapTypeWord = isAllGloves ? 'glove swap' :
-                               isAllSleeves ? 'sleeve swap' :
-                               isAllBlankets ? 'blanket swap' : 'equipment exchange';
+          const allReclaims = fieldSwaps.every(sw => sw.isReclaim);
+          let swapTypeWord = '';
+          let pluralWord = '';
+
+          if (allReclaims) {
+            swapTypeWord = isAllGloves ? 'glove reclaim' :
+                           isAllSleeves ? 'sleeve reclaim' :
+                           isAllBlankets ? 'blanket reclaim' : 'equipment reclaim';
+            pluralWord = isAllGloves ? 'glove reclaims' :
+                         isAllSleeves ? 'sleeve reclaims' :
+                         isAllBlankets ? 'blanket reclaims' : 'equipment reclaims';
+          } else {
+            swapTypeWord = isAllGloves ? 'glove swap' :
+                           isAllSleeves ? 'sleeve swap' :
+                           isAllBlankets ? 'blanket swap' : 'equipment exchange';
+            pluralWord = isAllGloves ? 'glove swaps' :
+                         isAllSleeves ? 'sleeve swaps' :
+                         isAllBlankets ? 'blanket swaps' : 'equipment exchanges';
+          }
 
           if (fieldSwaps.length === 1) {
             sentences.push(`Completed a ${swapTypeWord} for ${swapDescriptions[0]}.`);
           } else {
-            const pluralWord = isAllGloves ? 'glove swaps' :
-                               isAllSleeves ? 'sleeve swaps' :
-                               isAllBlankets ? 'blanket swaps' : 'equipment exchanges';
             sentences.push(`Completed ${pluralWord} for ${this.formatListNatural(swapDescriptions)}.`);
           }
         }

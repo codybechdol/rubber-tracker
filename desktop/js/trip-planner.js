@@ -235,7 +235,8 @@ class TripPlannerApp {
     if (!this.swapOfficeTasks) this.swapOfficeTasks = this.loadSwapOfficeTasks();
     if (!this.scheduledSwaps) this.scheduledSwaps = this.loadScheduledSwaps();
 
-    const emp = String((swapData && (swapData.employeeName || swapData.employee)) || '').trim();
+    const rawEmp = String((swapData && (swapData.employeeName || swapData.employee)) || '').trim();
+    const emp = this.normalizeEmpName(rawEmp);
     const oldItm = String((swapData && (swapData.currentItem || swapData.currentItemNum || swapData.oldItem)) || '').trim();
     const newItm = String((swapData && (swapData.pickItem || swapData.pickListNum || swapData.newItem)) || '').trim();
     const type = String((swapData && (swapData.type || swapData.label)) || 'Glove').trim();
@@ -246,6 +247,7 @@ class TripPlannerApp {
       officeNote: note || '',
       dateKey: dateKey || '',
       employeeName: emp,
+      rawEmployeeName: rawEmp,
       currentItem: oldItm,
       pickItem: newItm,
       type: type,
@@ -253,56 +255,71 @@ class TripPlannerApp {
     };
 
     const empK = emp.toLowerCase();
+    const rawEmpK = rawEmp.toLowerCase();
     const oldK = oldItm.toLowerCase();
     const newK = newItm.toLowerCase();
     const typeK = type.toLowerCase();
+    const empVariants = [...new Set([empK, rawEmpK])].filter(Boolean);
 
     if (isOffice) {
       if (effectiveKey) this.swapOfficeTasks[effectiveKey] = record;
-      if (empK && oldK) {
-        if (dateKey) this.swapOfficeTasks[`${typeK}_${empK}_${oldK}_${dateKey}`] = record;
-        this.swapOfficeTasks[`${typeK}_${empK}_${oldK}`] = record;
-        if (dateKey) this.swapOfficeTasks[`${empK}_${oldK}_${dateKey}`] = record;
-        this.swapOfficeTasks[`${empK}_${oldK}`] = record;
-      }
-      if (empK && newK) {
-        this.swapOfficeTasks[`${typeK}_${empK}_${newK}`] = record;
-        this.swapOfficeTasks[`${empK}_${newK}`] = record;
-      }
-
-      if (effectiveKey) {
-        if (!this.scheduledSwaps[effectiveKey]) {
-          this.scheduledSwaps[effectiveKey] = {
-            dateKey: dateKey,
-            location: (swapData && swapData.location) || 'Helena',
-            employeeName: emp,
-            crewId: (swapData && (swapData.crewId || swapData.jobNum)) || '',
-            type: type,
-            currentItem: oldItm,
-            pickItem: newItm,
-            isReclaim: !!(swapData && swapData.isReclaim),
-            isOfficeTask: true,
-            officeNote: note || '',
-            completed: !!(swapData && swapData.isCompleted),
-            completedDate: (swapData && swapData.completedDate) || dateKey
-          };
-        } else if (typeof this.scheduledSwaps[effectiveKey] === 'object') {
-          this.scheduledSwaps[effectiveKey].isOfficeTask = true;
-          this.scheduledSwaps[effectiveKey].officeNote = note || '';
+      empVariants.forEach(ek => {
+        if (oldK) {
+          if (dateKey) this.swapOfficeTasks[`${typeK}_${ek}_${oldK}_${dateKey}`] = record;
+          this.swapOfficeTasks[`${typeK}_${ek}_${oldK}`] = record;
+          if (dateKey) this.swapOfficeTasks[`${ek}_${oldK}_${dateKey}`] = record;
+          this.swapOfficeTasks[`${ek}_${oldK}`] = record;
         }
+        if (newK) {
+          this.swapOfficeTasks[`${typeK}_${ek}_${newK}`] = record;
+          this.swapOfficeTasks[`${ek}_${newK}`] = record;
+        }
+      });
+
+      if (this.scheduledSwaps) {
+        if (effectiveKey && this.scheduledSwaps[effectiveKey]) {
+          if (typeof this.scheduledSwaps[effectiveKey] === 'object') {
+            this.scheduledSwaps[effectiveKey].isOfficeTask = true;
+            this.scheduledSwaps[effectiveKey].officeNote = note || '';
+          }
+        }
+        Object.keys(this.scheduledSwaps).forEach(sk => {
+          const entry = this.scheduledSwaps[sk];
+          if (!entry || typeof entry !== 'object') return;
+          const sEmp = this.normalizeEmpName(entry.employeeName || (entry.swap && entry.swap.employeeName) || '').toLowerCase();
+          const sOld = String(entry.currentItem || (entry.swap && entry.swap.currentItem) || '').trim().toLowerCase();
+          if (empVariants.includes(sEmp) && (!oldK || sOld === oldK)) {
+            entry.isOfficeTask = true;
+            entry.officeNote = note || '';
+          }
+        });
       }
     } else {
       if (effectiveKey) delete this.swapOfficeTasks[effectiveKey];
-      if (dateKey) delete this.swapOfficeTasks[`${typeK}_${empK}_${oldK}_${dateKey}`];
-      delete this.swapOfficeTasks[`${typeK}_${empK}_${oldK}`];
-      if (dateKey) delete this.swapOfficeTasks[`${empK}_${oldK}_${dateKey}`];
-      delete this.swapOfficeTasks[`${empK}_${oldK}`];
-      delete this.swapOfficeTasks[`${typeK}_${empK}_${newK}`];
-      delete this.swapOfficeTasks[`${empK}_${newK}`];
+      empVariants.forEach(ek => {
+        if (dateKey) delete this.swapOfficeTasks[`${typeK}_${ek}_${oldK}_${dateKey}`];
+        delete this.swapOfficeTasks[`${typeK}_${ek}_${oldK}`];
+        if (dateKey) delete this.swapOfficeTasks[`${ek}_${oldK}_${dateKey}`];
+        delete this.swapOfficeTasks[`${ek}_${oldK}`];
+        delete this.swapOfficeTasks[`${typeK}_${ek}_${newK}`];
+        delete this.swapOfficeTasks[`${ek}_${newK}`];
+      });
 
-      if (effectiveKey && this.scheduledSwaps[effectiveKey] && typeof this.scheduledSwaps[effectiveKey] === 'object') {
-        delete this.scheduledSwaps[effectiveKey].isOfficeTask;
-        delete this.scheduledSwaps[effectiveKey].officeNote;
+      if (this.scheduledSwaps) {
+        if (effectiveKey && this.scheduledSwaps[effectiveKey] && typeof this.scheduledSwaps[effectiveKey] === 'object') {
+          delete this.scheduledSwaps[effectiveKey].isOfficeTask;
+          delete this.scheduledSwaps[effectiveKey].officeNote;
+        }
+        Object.keys(this.scheduledSwaps).forEach(sk => {
+          const entry = this.scheduledSwaps[sk];
+          if (!entry || typeof entry !== 'object') return;
+          const sEmp = this.normalizeEmpName(entry.employeeName || (entry.swap && entry.swap.employeeName) || '').toLowerCase();
+          const sOld = String(entry.currentItem || (entry.swap && entry.swap.currentItem) || '').trim().toLowerCase();
+          if (empVariants.includes(sEmp) && (!oldK || sOld === oldK)) {
+            delete entry.isOfficeTask;
+            delete entry.officeNote;
+          }
+        });
       }
     }
 
@@ -5834,16 +5851,34 @@ class TripPlannerApp {
       if (changed) this.saveScheduledSwaps();
     }
 
-    this.closeSwapDetailsModal();
     const chkOffice = document.getElementById('swap-is-office-task-modal');
     const inputOffice = document.getElementById('swap-office-note-input');
-    if (chkOffice) {
-      const isOffice = chkOffice.checked;
-      const note = inputOffice ? inputOffice.value.trim() : '';
-      const sKey = (typeof this.getSwapKey === 'function') ? this.getSwapKey({ tableKey, employeeName: empName, currentItem }) : '';
-      const dateKeyIso = this.normalizeDateKey(dateVal) || '';
-      this.setSwapOfficeTask(sKey, dateKeyIso, { tableKey, employeeName: empName, currentItem, isCompleted: true, completedDate: dateFormatted }, isOffice, note);
-    }
+    const isOffice = chkOffice ? chkOffice.checked : false;
+    const note = inputOffice ? inputOffice.value.trim() : '';
+    this.closeSwapDetailsModal();
+
+    const itemType = tableKey.includes('sleeve') ? 'Sleeve' :
+                     tableKey.includes('blanket') ? 'Blanket' :
+                     tableKey.includes('mack') ? 'MACK' :
+                     tableKey.includes('tester') ? 'HV Tester' :
+                     tableKey.includes('phasing') ? 'Phasing Set' :
+                     tableKey.includes('aed') ? 'AED' :
+                     tableKey.includes('ground') ? 'Ground' :
+                     tableKey.includes('hot_stick') ? 'Hot Stick' : 'Glove';
+
+    const dateKeyIso = this.normalizeDateKey(dateVal) || '';
+    const swapDataForOffice = {
+      tableKey,
+      employeeName: empName,
+      currentItem,
+      type: itemType,
+      label: itemType,
+      isCompleted: true,
+      completedDate: dateFormatted,
+      dateKey: dateKeyIso
+    };
+    const sKey = (typeof this.getSwapKey === 'function') ? this.getSwapKey(swapDataForOffice) : '';
+    this.setSwapOfficeTask(sKey, dateKeyIso, swapDataForOffice, isOffice, note);
 
         const isModalReclaim = (swRow && (swRow['Days Left'] === 'PREV EMP' || String(swRow['Days Left'] || '').includes('PREV') || String(swRow['Status'] || '').toLowerCase().includes('return to shelf'))) || !swRow || !swRow['Pick List Item #'] || swRow['Pick List Item #'] === '—';
     if (isModalReclaim) {
