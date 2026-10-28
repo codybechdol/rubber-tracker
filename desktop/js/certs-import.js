@@ -511,7 +511,43 @@ class CertsImportEngine {
 
       const norm = name.toLowerCase().replace(/\s+/g, ' ').trim();
       activeEmpLookup[norm] = e;
-      activeEmpList.push({ name: name, norm: norm, obj: e });
+
+      // Extract and index Alternate Names / Aliases (e.g. Robert McCormick <-> Bob McCormick)
+      let altNamesRaw = '';
+      for (const [k, v] of Object.entries(e)) {
+        if (/^(alt(ernat(e|ive))?(\s*names?)?|also\s*known\s*as|aka|aliases?)$/i.test(k.trim())) {
+          altNamesRaw = String(v || '').trim();
+          if (altNamesRaw) break;
+        }
+      }
+      if (!altNamesRaw) {
+        altNamesRaw = String(e['Alternate Names'] || e['Alternative names'] || e['Alternative Names'] || e['Aliases'] || e['Alt Names'] || '').trim();
+      }
+
+      const altNamesList = altNamesRaw
+        ? altNamesRaw.split(/[;,/|]+/).map(s => s.trim()).filter(Boolean)
+        : [];
+
+      altNamesList.forEach(alt => {
+        const altNorm = alt.toLowerCase().replace(/\s+/g, ' ').trim();
+        if (altNorm && !activeEmpLookup[altNorm]) {
+          activeEmpLookup[altNorm] = e;
+        }
+        if (alt.includes(',')) {
+          const parts = alt.split(',').map(p => p.trim());
+          if (parts.length >= 2) {
+            const revAlt = `${parts[1]} ${parts[0]}`.toLowerCase().replace(/\s+/g, ' ').trim();
+            if (revAlt && !activeEmpLookup[revAlt]) activeEmpLookup[revAlt] = e;
+          }
+        }
+        const altParts = altNorm.split(' ');
+        if (altParts.length >= 2) {
+          const revParts = `${altParts[altParts.length - 1]} ${altParts.slice(0, -1).join(' ')}`;
+          if (!activeEmpLookup[revParts]) activeEmpLookup[revParts] = e;
+        }
+      });
+
+      activeEmpList.push({ name: name, norm: norm, altNames: altNamesList, obj: e });
     });
 
     const certsTable = this.db ? this.db.getTable('expiring_certs') : null;
@@ -595,6 +631,61 @@ class CertsImportEngine {
       }
 
       if (!matchedEmp) {
+        // Try common first-name nickname variants (e.g. Robert <-> Bob, William <-> Bill, etc.)
+        const nameParts = normName.split(' ');
+        if (nameParts.length >= 2) {
+          const first = nameParts[0];
+          const rest = nameParts.slice(1).join(' ');
+          const nicknames = {
+            robert: ['bob', 'bobby', 'rob'],
+            bob: ['robert', 'bobby', 'rob'],
+            bobby: ['robert', 'bob'],
+            william: ['bill', 'billy', 'will'],
+            bill: ['william', 'billy'],
+            billy: ['william', 'bill'],
+            michael: ['mike'],
+            mike: ['michael'],
+            james: ['jim', 'jimmy'],
+            jim: ['james', 'jimmy'],
+            jimmy: ['james', 'jim'],
+            daniel: ['dan', 'danny'],
+            dan: ['daniel', 'danny'],
+            david: ['dave'],
+            dave: ['david'],
+            thomas: ['tom', 'tommy'],
+            tom: ['thomas', 'tommy'],
+            richard: ['rick', 'ricky', 'dick'],
+            rick: ['richard', 'ricky'],
+            anthony: ['tony'],
+            tony: ['anthony'],
+            christopher: ['chris'],
+            chris: ['christopher'],
+            matthew: ['matt'],
+            matt: ['matthew'],
+            joseph: ['joe'],
+            joe: ['joseph'],
+            edward: ['ed', 'eddie'],
+            ed: ['edward'],
+            alexander: ['alex', 'al'],
+            alex: ['alexander'],
+            stephen: ['steve'],
+            steven: ['steve'],
+            steve: ['stephen', 'steven'],
+            john: ['jack', 'johnny'],
+            jack: ['john']
+          };
+          const candidates = nicknames[first] || [];
+          for (const cand of candidates) {
+            const candName = `${cand} ${rest}`;
+            if (activeEmpLookup[candName]) {
+              matchedEmp = activeEmpLookup[candName];
+              break;
+            }
+          }
+        }
+      }
+
+      if (!matchedEmp) {
         // Fuzzy token matching (handles minor spelling differences like Aaron vs Aarron)
         matchedEmp = activeEmpList.find(e => {
           if (e.norm === normName || e.norm.includes(normName) || normName.includes(e.norm)) return true;
@@ -611,6 +702,17 @@ class CertsImportEngine {
           }
           return false;
         })?.obj;
+      }
+
+      // Fallback: Check window.employeeResolver if available
+      if (!matchedEmp && typeof window !== 'undefined' && window.employeeResolver && typeof window.employeeResolver.resolve === 'function') {
+        const resolved = window.employeeResolver.resolve(formattedName);
+        if (resolved && resolved.matched && resolved.canonicalName) {
+          const cNorm = resolved.canonicalName.toLowerCase().replace(/\s+/g, ' ').trim();
+          if (activeEmpLookup[cNorm]) {
+            matchedEmp = activeEmpLookup[cNorm];
+          }
+        }
       }
 
       // CRITICAL: If this person is NOT a current active employee on the Employees page, record discrepancy and skip
@@ -644,7 +746,17 @@ class CertsImportEngine {
         if (!dateStr) return;
 
         const lookupKey = `${finalEmpName.toLowerCase()}_${this.normalizeCertKey(certDef.key)}`;
-        const existingEntry = existingCertMap[lookupKey];
+        let existingEntry = existingCertMap[lookupKey];
+        if (!existingEntry && matchedEmp) {
+          const altNames = String(matchedEmp['Alternate Names'] || matchedEmp['Aliases'] || '').split(/[;,/|]+/).map(s => s.trim().toLowerCase()).filter(Boolean);
+          for (const alt of altNames) {
+            const altKey = `${alt}_${this.normalizeCertKey(certDef.key)}`;
+            if (existingCertMap[altKey]) {
+              existingEntry = existingCertMap[altKey];
+              break;
+            }
+          }
+        }
         const existingRow = existingEntry ? existingEntry.row : null;
 
         const currentExpDate = existingRow ? (this.formatDateStr(existingRow['Expiration Date']) || '') : '';
@@ -983,11 +1095,11 @@ class CertsImportEngine {
           <button type="button" class="btn btn-sm" onclick="window.certsImportEngine.setDiscrepancyTab('new')" style="padding: 5px 12px; font-size: 12px; font-weight: 700; border-radius: 6px; border: 1px solid ${this.activeDiscrepancyTab === 'new' ? '#10b981' : 'var(--border-color)'}; background: ${this.activeDiscrepancyTab === 'new' ? 'rgba(16, 185, 129, 0.2)' : 'transparent'}; color: ${this.activeDiscrepancyTab === 'new' ? '#6ee7b7' : 'var(--text-muted)'}; cursor: pointer;">
             ✨ New Records (${totalNewRecords})
           </button>
-          <button type="button" class="btn btn-sm" onclick="window.certsImportEngine.setDiscrepancyTab('preserved')" style="padding: 5px 12px; font-size: 12px; font-weight: 700; border-radius: 6px; border: 1px solid ${this.activeDiscrepancyTab === 'preserved' ? '#8b5cf6' : 'var(--border-color)'}; background: ${this.activeDiscrepancyTab === 'preserved' ? 'rgba(139, 92, 246, 0.2)' : 'transparent'}; color: ${this.activeDiscrepancyTab === 'preserved' ? '#c4b5fd' : 'var(--text-muted)'}; cursor: pointer;">
-            🔒 Preserved in App (${preservedCount}) ${overriddenPreservedCount > 0 ? `<span style="background: rgba(234, 179, 8, 0.35); color: #fde047; padding: 1px 6px; border-radius: 10px; font-size: 10px; margin-left: 4px; border: 1px solid rgba(234, 179, 8, 0.5);">⚡ ${overriddenPreservedCount} using Excel</span>` : ''}
-          </button>
           <button type="button" class="btn btn-sm" onclick="window.certsImportEngine.setDiscrepancyTab('unmatched')" style="padding: 5px 12px; font-size: 12px; font-weight: 700; border-radius: 6px; border: 1px solid ${this.activeDiscrepancyTab === 'unmatched' ? '#ef4444' : 'var(--border-color)'}; background: ${this.activeDiscrepancyTab === 'unmatched' ? 'rgba(239, 68, 68, 0.2)' : 'transparent'}; color: ${this.activeDiscrepancyTab === 'unmatched' ? '#fca5a5' : 'var(--text-muted)'}; cursor: pointer;">
             ❓ Unmatched in Excel (${unmatchedCount})
+          </button>
+          <button type="button" class="btn btn-sm" onclick="window.certsImportEngine.setDiscrepancyTab('preserved')" style="padding: 5px 12px; font-size: 12px; font-weight: 700; border-radius: 6px; border: 1px solid ${this.activeDiscrepancyTab === 'preserved' ? '#8b5cf6' : 'var(--border-color)'}; background: ${this.activeDiscrepancyTab === 'preserved' ? 'rgba(139, 92, 246, 0.2)' : 'transparent'}; color: ${this.activeDiscrepancyTab === 'preserved' ? '#c4b5fd' : 'var(--text-muted)'}; cursor: pointer;" title="List of employees and certs where the app date is newer and the older Excel date was ignored">
+            🔒 Older Excel Dates Ignored (${preservedCount}) ${overriddenPreservedCount > 0 ? `<span style="background: rgba(234, 179, 8, 0.35); color: #fde047; padding: 1px 6px; border-radius: 10px; font-size: 10px; margin-left: 4px; border: 1px solid rgba(234, 179, 8, 0.5);">⚡ ${overriddenPreservedCount} using Excel</span>` : ''}
           </button>
         </div>
 
@@ -1025,7 +1137,7 @@ class CertsImportEngine {
           <input type="text" placeholder="🔍 Filter by employee name, cert type, or location..." value="${this.escapeHtml(this.previewSearchTerm)}" style="width: 100%; max-width: 480px; padding: 8px 14px; font-size: 13px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary);" oninput="window.certsImportEngine.setPreviewSearch(this.value)">
           <div style="font-size: 12.5px; color: var(--text-muted);">
             ${this.activeDiscrepancyTab === 'preserved'
-              ? `Showing <strong>${filteredPreserved.length}</strong> preserved cert(s)`
+              ? `Showing <strong>${filteredPreserved.length}</strong> employee cert(s) with older Excel dates ignored`
               : (this.activeDiscrepancyTab === 'unmatched'
                 ? `Showing <strong>${filteredUnmatched.length}</strong> unmatched employee(s)`
                 : `Showing <strong>${filteredEmployees.length}</strong> employee(s) with <strong>${selectedUpdatesCount}</strong> update(s)`
@@ -1040,18 +1152,21 @@ class CertsImportEngine {
               <div style="display: flex; align-items: center; gap: 10px;">
                 <span style="font-size: 20px;">🔒</span>
                 <div>
-                  <div style="font-size: 13px; font-weight: 700; color: #c4b5fd;">Preserved Newer Dates in App (${preservedCount})</div>
+                  <div style="font-size: 13px; font-weight: 700; color: #c4b5fd;">Older Excel Dates Ignored — Newer App Dates Kept (${preservedCount})</div>
                   <div style="font-size: 11.5px; color: var(--text-secondary); margin-top: 2px;">
-                    By default, the app protects your dates when the app date is newer than the Excel date.
-                    ${overriddenPreservedCount > 0 ? `<strong style="color: #fde047; margin-left: 4px;">⚡ ${overriddenPreservedCount} selected to use Excel date instead.</strong>` : 'You can optionally choose to use the Excel date instead below.'}
+                    The app protects your database when existing cert dates are newer than the imported Excel file. These older Excel dates were automatically ignored.
+                    ${overriddenPreservedCount > 0 ? `<strong style="color: #fde047; margin-left: 4px;">⚡ ${overriddenPreservedCount} selected to use Excel date instead.</strong>` : 'If you need to force any of these to use the older Excel date, click "Use Excel Date" below.'}
                   </div>
                 </div>
               </div>
-              <div style="display: flex; gap: 8px; align-items: center;">
-                <button type="button" class="btn btn-secondary" onclick="window.certsImportEngine.setAllPreservedOverrides(true)" style="font-size: 11.5px; padding: 5px 12px; background: rgba(234, 179, 8, 0.18); color: #fde047; border: 1px solid rgba(234, 179, 8, 0.4); font-weight: 700; display: flex; align-items: center; gap: 5px;" title="Override all preserved dates to use Excel dates instead">
+              <div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+                <button type="button" class="btn btn-secondary" onclick="window.certsImportEngine.copyPreservedReport()" style="font-size: 11.5px; padding: 5px 12px; background: rgba(59, 130, 246, 0.18); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4); font-weight: 700; display: flex; align-items: center; gap: 5px; cursor: pointer;" title="Copy list of employees and ignored certs to clipboard">
+                  <span>📋</span> Copy Ignored List
+                </button>
+                <button type="button" class="btn btn-secondary" onclick="window.certsImportEngine.setAllPreservedOverrides(true)" style="font-size: 11.5px; padding: 5px 12px; background: rgba(234, 179, 8, 0.18); color: #fde047; border: 1px solid rgba(234, 179, 8, 0.4); font-weight: 700; display: flex; align-items: center; gap: 5px; cursor: pointer;" title="Override all preserved dates to use Excel dates instead">
                   <span>⚡</span> Use All Excel Dates (${preservedCount})
                 </button>
-                <button type="button" class="btn btn-secondary" onclick="window.certsImportEngine.setAllPreservedOverrides(false)" style="font-size: 11.5px; padding: 5px 12px; background: rgba(139, 92, 246, 0.18); color: #c4b5fd; border: 1px solid rgba(139, 92, 246, 0.4); font-weight: 600; display: flex; align-items: center; gap: 5px;" title="Reset all to keep newer App dates">
+                <button type="button" class="btn btn-secondary" onclick="window.certsImportEngine.setAllPreservedOverrides(false)" style="font-size: 11.5px; padding: 5px 12px; background: rgba(139, 92, 246, 0.18); color: #c4b5fd; border: 1px solid rgba(139, 92, 246, 0.4); font-weight: 600; display: flex; align-items: center; gap: 5px; cursor: pointer;" title="Reset all to keep newer App dates">
                   <span>🔒</span> Keep All App Dates
                 </button>
               </div>
@@ -1284,6 +1399,32 @@ class CertsImportEngine {
       a.click();
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
+    }
+  }
+
+  copyPreservedReport() {
+    if (!this.preservedRecords || this.preservedRecords.length === 0) {
+      alert('ℹ️ No ignored older dates found.');
+      return;
+    }
+    let text = `EMPLOYEES WITH OLDER EXCEL DATES IGNORED (${this.preservedRecords.length})\n`;
+    text += `App expiration date is newer than date in Excel file.\n`;
+    text += `========================================================\n\n`;
+    text += this.preservedRecords.map(p => {
+      const key = `${String(p.employeeName || '').toLowerCase().trim()}_${this.normalizeCertKey(p.certType)}`;
+      const isOverridden = this.overriddenPreservedKeys && this.overriddenPreservedKeys.has(key);
+      const status = isOverridden ? '⚡ Overridden to use Excel Date' : '🔒 Protected (Kept newer app date)';
+      return `• ${p.employeeName}${p.location ? ' (' + p.location + ')' : ''}: ${p.certType}\n   App Date: ${p.appDate} | Excel Date: ${p.excelDate} | Status: ${status}`;
+    }).join('\n\n');
+
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(() => {
+        alert(`📋 List of ${this.preservedRecords.length} ignored older dates copied to clipboard!`);
+      }).catch(() => {
+        prompt('Copy list:', text);
+      });
+    } else {
+      prompt('Copy list:', text);
     }
   }
 
