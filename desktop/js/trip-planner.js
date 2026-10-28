@@ -8199,6 +8199,7 @@ class TripPlannerApp {
     let clean = String(loc).trim();
     const parenMatch = clean.match(/^([^(]+)\s*\([^)]+\)$/);
     if (parenMatch) clean = parenMatch[1].trim();
+    clean = clean.replace(/,\s*(?:mt|montana)\b/gi, '').trim();
     return clean.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
   }
 
@@ -8587,14 +8588,22 @@ class TripPlannerApp {
           const lg = getLocGroup(locName);
           let cId = crewId ? String(crewId).trim() : 'Unassigned';
           if (!cId) cId = 'Unassigned';
-          if (!lg.crews[cId]) {
-            let foreman = foremanHint || '';
-            if (!foreman || foreman.toLowerCase() === 'foreman') {
-              const cInfo = this.getCrewInfo(cId, '', locName);
-              if (cInfo && cInfo.foreman && cInfo.foreman.toLowerCase() !== 'foreman') {
+          let foreman = foremanHint || '';
+
+          // Canonicalize crew ID and resolve active foreman using getCrewInfo & FY_TRANSITION_ALIAS_MAP
+          if (cId !== 'Unassigned' && cId !== 'Office / Personal' && cId !== 'DOT Drug Tests') {
+            const cInfo = this.getCrewInfo(cId, foremanHint, locName);
+            if (cInfo) {
+              if (cInfo.crewId && cInfo.crewId !== 'Unassigned') {
+                cId = cInfo.crewId;
+              }
+              if (cInfo.foreman && cInfo.foreman.toLowerCase() !== 'foreman') {
                 foreman = cInfo.foreman;
               }
             }
+          }
+
+          if (!lg.crews[cId]) {
             lg.crews[cId] = {
               crewId: cId,
               foreman: foreman || (cId === 'Unassigned' || cId === 'Office / Personal' || cId === 'DOT Drug Tests' ? '' : 'Foreman'),

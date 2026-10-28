@@ -135,6 +135,7 @@ class TimeBreakdownEngine {
     let clean = String(loc).trim();
     const parenMatch = clean.match(/^([^(]+)\s*\([^)]+\)$/);
     if (parenMatch) clean = parenMatch[1].trim();
+    clean = clean.replace(/,\s*(?:mt|montana)\b/gi, '').trim();
     if (/^(helena\s+office|helena\s+shop|office|shop)$/i.test(clean)) {
       return 'Helena';
     }
@@ -149,6 +150,159 @@ class TimeBreakdownEngine {
       "cody's truck", 'arnett / jm test', 'arnett'
     ];
     return statusValues.some(s => lower === s || lower.includes(`(${s})`));
+  }
+
+  /**
+   * Resolves crew information including active crew ID, foreman, and true physical location.
+   * Uses job_tracking, FY_TRANSITION_ALIAS_MAP, employees, and employee_history tables.
+   */
+  getCrewInfo(rawCrew, workerName, rowLoc) {
+    let rowLocation = '';
+    if (rowLoc) {
+      const cleanLoc = this.cleanPhysicalLocation(rowLoc);
+      if (cleanLoc && !this.isStatusLocation(cleanLoc)) {
+        rowLocation = cleanLoc;
+      }
+    }
+
+    const sigCrew = this.getSignificantJobNumber(rawCrew);
+    const cleanCrew = String(rawCrew || '').trim();
+    const cleanWorker = String(workerName || '').trim();
+    const cleanWorkerLower = cleanWorker.toLowerCase();
+
+    const jobTable = this.db ? (this.db.getTable('job_tracking') || this.db.getTable('Job Tracking')) : null;
+    const empTable = this.db ? (this.db.getTable('employees') || this.db.getTable('Employees')) : null;
+    const empHistTable = this.db ? (this.db.getTable('employee_history') || this.db.getTable('Employee History')) : null;
+    const aliasMap = (this.db && this.db.snapshot && this.db.snapshot.configs && this.db.snapshot.configs['FY_TRANSITION_ALIAS_MAP']) || {};
+
+    let matchedJob = null;
+    let matchedEmp = null;
+
+    if (jobTable && jobTable.rows) {
+      const candidates = new Set();
+      if (sigCrew) candidates.add(sigCrew);
+      if (cleanCrew) candidates.add(cleanCrew);
+      if (aliasMap[cleanCrew]) candidates.add(aliasMap[cleanCrew]);
+      if (aliasMap[sigCrew]) candidates.add(aliasMap[sigCrew]);
+      for (const [k, v] of Object.entries(aliasMap)) {
+        if (v === cleanCrew || v === sigCrew) candidates.add(k);
+      }
+      const rootMatch = cleanCrew.match(/^(\d{2,4})/);
+      const rootNum = rootMatch ? rootMatch[1] : '';
+
+      let bestJob = null;
+      for (const r of jobTable.rows) {
+        const jNum = String(r['Job Number'] || r['Crew'] || r['Job #'] || '').trim();
+        const jSig = this.getSignificantJobNumber(jNum);
+        if (candidates.has(jNum) || candidates.has(jSig)) {
+          const st = String(r['Status'] || '').toLowerCase();
+          if (st === 'active') {
+            bestJob = r;
+            break;
+          } else if (!bestJob) {
+            bestJob = r;
+          }
+        }
+      }
+      matchedJob = bestJob;
+
+      if (!matchedJob && rootNum) {
+        for (const r of jobTable.rows) {
+          const jNum = String(r['Job Number'] || r['Crew'] || r['Job #'] || '').trim();
+          if (jNum.startsWith(rootNum + '-')) {
+            const st = String(r['Status'] || '').toLowerCase();
+            if (st === 'active') {
+              bestJob = r;
+              break;
+            } else if (!bestJob) {
+              bestJob = r;
+            }
+          }
+        }
+        matchedJob = bestJob;
+      }
+
+      if (!matchedJob && cleanWorkerLower && cleanWorkerLower !== 'foreman' && cleanWorkerLower !== 'lead') {
+        for (const r of jobTable.rows) {
+          const fName = String(r['Foreman'] || r['Crew Lead'] || r['Lead'] || '').trim().toLowerCase();
+          if (fName && (fName === cleanWorkerLower || fName.includes(cleanWorkerLower) || cleanWorkerLower.includes(fName))) {
+            matchedJob = r;
+            break;
+          }
+        }
+      }
+    }
+
+    if (empTable && empTable.rows && cleanWorkerLower && cleanWorkerLower !== 'foreman' && cleanWorkerLower !== 'lead') {
+      for (const e of empTable.rows) {
+        const eName = String(e['Employee Name'] || e['Name'] || '').trim().toLowerCase();
+        if (eName && (eName === cleanWorkerLower || eName.includes(cleanWorkerLower) || cleanWorkerLower.includes(eName))) {
+          matchedEmp = e;
+          break;
+        }
+      }
+    }
+
+    if (!matchedEmp && empHistTable && empHistTable.rows && cleanWorkerLower && cleanWorkerLower !== 'foreman' && cleanWorkerLower !== 'lead') {
+      for (let i = empHistTable.rows.length - 1; i >= 0; i--) {
+        const h = empHistTable.rows[i];
+        const hName = String(h['Employee Name'] || h['Name'] || '').trim().toLowerCase();
+        if (hName && (hName === cleanWorkerLower || hName.includes(cleanWorkerLower) || cleanWorkerLower.includes(hName))) {
+          matchedEmp = h;
+          break;
+        }
+      }
+    }
+
+    let location = rowLocation;
+    if (!location && matchedJob) {
+      const jLoc = this.cleanPhysicalLocation(matchedJob['Location']);
+      if (jLoc && !this.isStatusLocation(jLoc)) {
+        location = jLoc;
+      }
+    }
+    if (!location && matchedEmp) {
+      const eLoc = this.cleanPhysicalLocation(matchedEmp['Location']);
+      if (eLoc && !this.isStatusLocation(eLoc)) {
+        location = eLoc;
+      }
+    }
+    if (!location) {
+      location = 'Helena';
+    }
+
+    let foreman = '';
+    if (matchedJob) {
+      const jForeman = String(matchedJob['Foreman'] || matchedJob['Crew Lead'] || matchedJob['Lead'] || '').trim();
+      if (jForeman && jForeman.toLowerCase() !== 'foreman' && jForeman.toLowerCase() !== 'lead') {
+        foreman = jForeman;
+      }
+    }
+    if (!foreman && cleanWorker && cleanWorker.toLowerCase() !== 'foreman' && cleanWorker.toLowerCase() !== 'lead') {
+      foreman = cleanWorker;
+    }
+    if (!foreman) {
+      foreman = 'Foreman';
+    }
+
+    let resolvedCrewId = sigCrew || cleanCrew;
+    if (matchedJob) {
+      const jNum = String(matchedJob['Job Number'] || matchedJob['Crew'] || matchedJob['Job #'] || '').trim();
+      const jSig = this.getSignificantJobNumber(jNum) || jNum;
+      if (jSig) resolvedCrewId = jSig;
+    } else if (aliasMap[cleanCrew]) {
+      resolvedCrewId = aliasMap[cleanCrew];
+    } else if (aliasMap[sigCrew]) {
+      resolvedCrewId = aliasMap[sigCrew];
+    }
+
+    return {
+      crewId: resolvedCrewId || 'Unassigned',
+      rawCrewId: cleanCrew,
+      foreman: foreman || 'Foreman',
+      location: location,
+      jobName: matchedJob ? String(matchedJob['Job Name'] || '').trim() : ''
+    };
   }
 
   formatTaskSentence(rawTitle, rawNotes) {
@@ -898,21 +1052,7 @@ class TimeBreakdownEngine {
       });
     }
 
-    // 7. Collect Completed Monthly Trainings from training_tracking
-    if (trainTable && trainTable.rows) {
-      trainTable.rows.forEach(tr => {
-        const status = String(tr['Status'] || tr['Training Status'] || '').toLowerCase();
-        if (status !== 'complete' && status !== 'completed' && status !== 'done') return;
-
-        const rawDate = tr['Completion Date'] || tr['Date Completed'] || tr['Date'] || tr['Date Done'];
-        const dKey = this.normalizeDateKey(rawDate);
-        if (daysMap[dKey]) {
-          daysMap[dKey].trainings.push(tr);
-        }
-      });
-    }
-
-    // 7a. Also collect completed trainings directly from Trip Planner scheduled_training
+    // 7. Collect Completed Monthly Trainings directly from Trip Planner scheduled_training first
     const schedTrainings = {};
     if (window.tripPlanner && window.tripPlanner.scheduledTrainingNeeds) {
       Object.assign(schedTrainings, window.tripPlanner.scheduledTrainingNeeds);
@@ -928,33 +1068,134 @@ class TimeBreakdownEngine {
       const isDone = !!(entry.completed || entry.isCompleted || (entry.training && (entry.training.isCompleted || entry.training.completed)));
       if (!isDone) return;
 
-      const rawDate = entry.completedDate || (entry.training && entry.training.completedDate) || entry.dateKey || entry.date;
-      const dKey = this.normalizeDateKey(rawDate);
-      if (!daysMap[dKey]) return;
-
       const trData = entry.training || entry;
       const topic = String(trData.topic || trData['Topic'] || trData['Training Topic'] || '').trim();
-      const crew = String(trData.crewId || trData['Crew #'] || '').trim();
+      const rawCrew = String(trData.crewId || trData['Crew #'] || '').trim();
+      const rawLead = trData.lead || trData['Crew Lead'] || trData['Foreman'] || '';
+
+      // Check against trainTable to see if this row was already completed on an explicit date
+      let effectiveDate = entry.completedDate || (entry.training && entry.training.completedDate);
+      if (trainTable && trainTable.rows) {
+        const sigTarget = this.getSignificantJobNumber(rawCrew).toLowerCase();
+        const topicTarget = topic.toLowerCase();
+        const targetRow = trainTable.rows.find(r => {
+          const cRaw = String(r['Crew #'] || r['Crew'] || r['Job Number'] || r['Job #'] || '').trim();
+          const cSig = this.getSignificantJobNumber(cRaw).toLowerCase();
+          const crewMatches = (sigTarget && cSig === sigTarget) || cRaw.toLowerCase() === rawCrew.toLowerCase();
+          const rTopic = String(r['Topic'] || r['Training Topic'] || r['Training'] || '').trim().toLowerCase();
+          return crewMatches && rTopic && topicTarget && (rTopic === topicTarget || rTopic.includes(topicTarget) || topicTarget.includes(rTopic));
+        });
+        if (targetRow) {
+          const dbDoneDate = targetRow['Completion Date'] || targetRow['Date Completed'] || targetRow['Date'];
+          if (dbDoneDate) {
+            effectiveDate = dbDoneDate;
+          }
+        }
+      }
+      if (!effectiveDate) {
+        effectiveDate = entry.dateKey || entry.date;
+      }
+
+      const dKey = this.normalizeDateKey(effectiveDate);
+      if (!daysMap[dKey]) return;
+
+      const cInfo = this.getCrewInfo(rawCrew, rawLead, trData.location || entry.location);
+      const resolvedLoc = (cInfo && cInfo.location) || this.cleanPhysicalLocation(trData.location || entry.location) || 'Helena';
+      const resolvedCrew = (cInfo && cInfo.crewId && cInfo.crewId !== 'Unassigned') ? cInfo.crewId : rawCrew;
+      const resolvedForeman = (cInfo && cInfo.foreman && cInfo.foreman !== 'Foreman') ? cInfo.foreman : rawLead;
 
       const already = daysMap[dKey].trainings.some(t => {
         const tTopic = String(t['Topic'] || t['Training Topic'] || t.topic || '').trim().toLowerCase();
         const tCrew = String(t['Crew #'] || t.crewId || '').trim().toLowerCase();
-        return tTopic === topic.toLowerCase() && tCrew === crew.toLowerCase();
+        return tTopic === topic.toLowerCase() && (tCrew === resolvedCrew.toLowerCase() || tCrew === rawCrew.toLowerCase());
       });
 
       if (!already) {
         daysMap[dKey].trainings.push({
           'Training Topic': topic,
           'Topic': topic,
-          'Crew #': crew,
-          'Crew Lead': trData.lead || trData['Crew Lead'] || '',
+          'Crew #': resolvedCrew,
+          'Crew Lead': resolvedForeman,
+          'Foreman': resolvedForeman,
           'Attendees': trData.attendees || '',
-          'Location': trData.location || '',
+          'Location': resolvedLoc,
+          location: resolvedLoc,
           'Status': 'Completed',
-          'Date Completed': rawDate
+          'Date Completed': effectiveDate,
+          rawCrew: rawCrew
         });
       }
     });
+
+    // 7a. Also collect completed monthly trainings from training_tracking for visited locations / scheduled activities
+    if (trainTable && trainTable.rows) {
+      trainTable.rows.forEach(tr => {
+        const status = String(tr['Status'] || tr['Training Status'] || '').toLowerCase();
+        if (status !== 'complete' && status !== 'completed' && status !== 'done') return;
+
+        const rawDate = tr['Completion Date'] || tr['Date Completed'] || tr['Date'] || tr['Date Done'];
+        const dKey = this.normalizeDateKey(rawDate);
+        if (!daysMap[dKey]) return;
+
+        const rawCrew = tr['Crew #'] || tr['Crew'] || tr['Job Number'] || tr['Job #'] || '';
+        const rawLead = tr['Crew Lead'] || tr['Foreman'] || tr['Lead'] || '';
+        const topic = String(tr['Training Topic'] || tr['Topic'] || tr['Training'] || '').trim();
+        const cInfo = this.getCrewInfo(rawCrew, rawLead, tr['Location']);
+        const resolvedLoc = (cInfo && cInfo.location) || this.cleanPhysicalLocation(tr['Location']) || 'Helena';
+        const resolvedCrew = (cInfo && cInfo.crewId && cInfo.crewId !== 'Unassigned') ? cInfo.crewId : rawCrew;
+        const resolvedForeman = (cInfo && cInfo.foreman && cInfo.foreman !== 'Foreman') ? cInfo.foreman : rawLead;
+
+        // Don't duplicate if already added from scheduled training
+        const already = daysMap[dKey].trainings.some(t => {
+          const tTopic = String(t['Topic'] || t['Training Topic'] || t.topic || '').trim().toLowerCase();
+          const tCrew = String(t['Crew #'] || t.crewId || '').trim().toLowerCase();
+          return tTopic === topic.toLowerCase() && (tCrew === resolvedCrew.toLowerCase() || tCrew === rawCrew.toLowerCase());
+        });
+        if (already) return;
+
+        // Determine if user had actual activity / trip in this city on this day
+        let isLocOnSchedule = false;
+        try {
+          const orderConfig = (window.tripPlanner && window.tripPlanner.dayOrderConfig) ||
+                              JSON.parse(localStorage.getItem('TRIP_PLANNER_DAY_ORDER') || '{}');
+          if (orderConfig[dKey] && Array.isArray(orderConfig[dKey].locations)) {
+            isLocOnSchedule = orderConfig[dKey].locations.some(l => this.cleanPhysicalLocation(l).toLowerCase() === resolvedLoc.toLowerCase());
+          }
+        } catch { /* ignore */ }
+
+        const dayTrips = trips[dKey];
+        const tripList = Array.isArray(dayTrips) ? dayTrips : (dayTrips ? [dayTrips] : []);
+        const hasPlannedTrip = tripList.some(t => t && this.cleanPhysicalLocation(t.location).toLowerCase() === resolvedLoc.toLowerCase());
+        const hasSwapAtLoc = (daysMap[dKey].tasks || []).some(t => this.cleanPhysicalLocation(t.location).toLowerCase() === resolvedLoc.toLowerCase());
+        const hasEquipAtLoc = (daysMap[dKey].equipmentDeliveries || []).some(e => this.cleanPhysicalLocation(e.location).toLowerCase() === resolvedLoc.toLowerCase());
+        const hasDrugTestAtLoc = (daysMap[dKey].drugTests || []).some(dt => {
+          const cl = resolveClinicCity(dt);
+          return cl && cl.toLowerCase() === resolvedLoc.toLowerCase();
+        });
+        const hasSchedTrainAtLoc = Object.values(schedTrainings).some(entry => {
+          if (!entry) return false;
+          const entryDate = entry.dateKey || entry.date;
+          if (entryDate !== dKey) return false;
+          const loc = entry.location || (entry.training && entry.training.location);
+          return loc && this.cleanPhysicalLocation(loc).toLowerCase() === resolvedLoc.toLowerCase();
+        });
+
+        // Exclude unvisited cities where crew self-conducted dock training without Cody (e.g. Great Falls)
+        if (!isLocOnSchedule && !hasPlannedTrip && !hasSwapAtLoc && !hasEquipAtLoc && !hasDrugTestAtLoc && !hasSchedTrainAtLoc && resolvedLoc.toLowerCase() !== 'helena') {
+          return;
+        }
+
+        daysMap[dKey].trainings.push({
+          ...tr,
+          'Crew #': resolvedCrew,
+          'Crew Lead': resolvedForeman,
+          'Foreman': resolvedForeman,
+          'Location': resolvedLoc,
+          location: resolvedLoc,
+          rawCrew: rawCrew
+        });
+      });
+    }
 
     // 7b. Collect Completed Equipment Deliveries (from scheduledEquipmentNeeds and safety_equipment_needs)
     const schedEquip = {};
@@ -978,16 +1219,23 @@ class TimeBreakdownEngine {
       const dKey = this.normalizeDateKey(rawDate);
       if (!daysMap[dKey]) return;
 
-      const dedupe = `${item.crewId}_${item.vehicleNumber}_${item.equipmentType}_${item.notes}`.toLowerCase();
+      const cInfo = this.getCrewInfo(item.crewId, item.foreman, item.location);
+      const resolvedLoc = (cInfo && cInfo.location) || this.cleanPhysicalLocation(item.location) || 'Helena';
+      const resolvedCrew = (cInfo && cInfo.crewId && cInfo.crewId !== 'Unassigned') ? cInfo.crewId : (item.crewId || '');
+      const veh = String(item.vehicleNumber || item.unitNumber || '').trim();
+      const eqType = String(item.equipmentType || 'Equipment').trim();
+      const notes = String(item.notes || item.desc || '').trim();
+
+      const dedupe = `${veh}_${eqType}_${notes}`.toLowerCase();
       if (!seenEquipDedupe.has(dedupe)) {
         seenEquipDedupe.add(dedupe);
         daysMap[dKey].equipmentDeliveries.push({
-          crewId: item.crewId || '',
-          vehicleNumber: item.vehicleNumber || '',
-          equipmentType: item.equipmentType || 'Equipment',
-          notes: item.notes || item.desc || '',
-          location: item.location || '',
-          foreman: item.foreman || ''
+          crewId: resolvedCrew,
+          vehicleNumber: veh,
+          equipmentType: eqType,
+          notes: notes,
+          location: resolvedLoc,
+          foreman: item.foreman || (cInfo && cInfo.foreman) || ''
         });
       }
     });
@@ -997,24 +1245,59 @@ class TimeBreakdownEngine {
       eqTable.rows.forEach(r => {
         const stat = String(r['Status'] || '').toLowerCase();
         if (stat !== 'resolved' && stat !== 'complete' && stat !== 'completed') return;
-        const rawDate = r['Resolved On'] || r['Date Resolved'] || r['Date'];
+        const rawDate = r['Resolved On'] || r['Date Resolved'] || r['Date'] || r['Completed Date'];
         const dKey = this.normalizeDateKey(rawDate);
         if (!daysMap[dKey]) return;
 
-        const crewId = String(r['Crew #'] || r['Crew'] || '').trim();
-        const veh = String(r['Vehicle #'] || r['Unit #'] || '').trim();
+        const rawCrew = String(r['Job Number'] || r['Crew #'] || r['Crew'] || '').trim();
+        const veh = String(r['Vehicle Number'] || r['Vehicle #'] || r['Unit #'] || '').trim();
         const eqType = String(r['Equipment Type'] || r['Type'] || 'Equipment').trim();
         const notes = String(r['Notes'] || r['Defect'] || '').trim();
-        const dedupe = `${crewId}_${veh}_${eqType}_${notes}`.toLowerCase();
+
+        const dedupe = `${veh}_${eqType}_${notes}`.toLowerCase();
         if (!seenEquipDedupe.has(dedupe)) {
           seenEquipDedupe.add(dedupe);
+          const cInfo = this.getCrewInfo(rawCrew, r['Crew Lead'] || r['Lead'] || '', r['Location']);
+          const resolvedLoc = (cInfo && cInfo.location) || this.cleanPhysicalLocation(r['Location']) || 'Helena';
+          const resolvedCrew = (cInfo && cInfo.crewId && cInfo.crewId !== 'Unassigned') ? cInfo.crewId : rawCrew;
+
+          // Only include if user visited this city or had scheduled activity in this city
+          const dayTrips = trips[dKey];
+          const tripList = Array.isArray(dayTrips) ? dayTrips : (dayTrips ? [dayTrips] : []);
+          const hasPlannedTrip = tripList.some(t => t && this.cleanPhysicalLocation(t.location).toLowerCase() === resolvedLoc.toLowerCase());
+
+          // Field swap check: only true if there are actual non-office swaps at this location
+          const locObj = daysMap[dKey].locations[resolvedLoc];
+          const hasFieldSwapAtLoc = locObj && (locObj.swaps || []).some(s => !s.isOfficeTask);
+
+          const hasDrugTestAtLoc = (daysMap[dKey].drugTests || []).some(dt => {
+            const cl = resolveClinicCity(dt);
+            return cl && cl.toLowerCase() === resolvedLoc.toLowerCase();
+          });
+          const hasSchedTrainAtLoc = (daysMap[dKey].trainings || []).some(tr => {
+            const loc = tr.location || tr['Location'];
+            return loc && this.cleanPhysicalLocation(loc).toLowerCase() === resolvedLoc.toLowerCase();
+          });
+          const hasSchedEquipAtLoc = Object.values(schedEquip).some(entry => {
+            if (!entry) return false;
+            const entryDate = entry.dateKey || entry.date;
+            if (entryDate !== dKey) return false;
+            const loc = entry.location || (entry.item && entry.item.location);
+            return loc && this.cleanPhysicalLocation(loc).toLowerCase() === resolvedLoc.toLowerCase();
+          });
+
+          // An equipment row from safety_equipment_needs must NOT create a phantom field trip to an unvisited city (e.g. Anaconda, Butte on Tuesday)
+          if (!hasPlannedTrip && !hasFieldSwapAtLoc && !hasDrugTestAtLoc && !hasSchedTrainAtLoc && !hasSchedEquipAtLoc && resolvedLoc.toLowerCase() !== 'helena') {
+            return;
+          }
+
           daysMap[dKey].equipmentDeliveries.push({
-            crewId: crewId,
+            crewId: resolvedCrew,
             vehicleNumber: veh,
             equipmentType: eqType,
             notes: notes,
-            location: r['Location'] || '',
-            foreman: r['Crew Lead'] || r['Lead'] || ''
+            location: resolvedLoc,
+            foreman: r['Crew Lead'] || r['Lead'] || (cInfo && cInfo.foreman) || ''
           });
         }
       });
@@ -1088,8 +1371,8 @@ class TimeBreakdownEngine {
     // Helper to resolve an office / manual task location
     const resolveTaskLocation = (task) => {
       const rawText = (String(task.title || '') + ' ' + String(task.notes || '')).toLowerCase();
-      // Rubber PPE Tracker records are shop prep/assignment actions done in Helena
-      if (rawText.includes('recorded from rubber ppe tracker') || (task.title && task.title.toLowerCase().startsWith('assigned rubber'))) {
+      // Rubber PPE Tracker records and shop staging/prep actions are done in Helena
+      if (rawText.includes('recorded from rubber ppe tracker') || (task.title && task.title.toLowerCase().startsWith('assigned rubber')) || rawText.includes('in the shop') || rawText.includes('staged initial') || rawText.includes('staged in the shop') || rawText.includes('assigned and staged')) {
         return 'Helena';
       }
       // Personal appointments (Dentist, etc.) are handled locally in Helena
@@ -1126,17 +1409,21 @@ class TimeBreakdownEngine {
       return 'Helena';
     };
 
-    // Helper to resolve clinic city for drug test
+    // Helper to resolve clinic city for drug test (checks Clinic City / State first)
     const resolveClinicCity = (dt) => {
-      if (dt['Location'] || dt['City']) return this.cleanPhysicalLocation(dt['Location'] || dt['City']);
+      const clinicCity = dt['Clinic City / State'] || dt['Clinic City'] || dt.clinicCity;
+      if (clinicCity) return this.cleanPhysicalLocation(clinicCity);
+      if (dt['Meeting / Collection Address']) return this.cleanPhysicalLocation(dt['Meeting / Collection Address']);
       const clinic = String(dt['Clinic Name'] || dt['Collection Type'] || '').toLowerCase();
       if (clinic.includes('drug information systems') || clinic.includes('dis') || clinic.includes('helena')) return 'Helena';
       if (clinic.includes('great falls')) return 'Great Falls';
-      if (clinic.includes('bozeman')) return 'Bozeman';
+      if (clinic.includes('bozeman') || clinic.includes('tri med')) return 'Bozeman';
       if (clinic.includes('billings')) return 'Billings';
       if (clinic.includes('missoula')) return 'Missoula';
       if (clinic.includes('butte')) return 'Butte';
       if (clinic.includes('kalispell')) return 'Kalispell';
+      if (dt['City']) return this.cleanPhysicalLocation(dt['City']);
+      if (dt['Location'] && !this.isStatusLocation(dt['Location'])) return this.cleanPhysicalLocation(dt['Location']);
       return 'Helena';
     };
 
@@ -1163,13 +1450,21 @@ class TimeBreakdownEngine {
 
     // D. Add monthly safety trainings
     (day.trainings || []).forEach(tr => {
-      const loc = tr.location || tr['Location'] || 'Helena';
+      let loc = tr.location || tr['Location'];
+      if (!loc || this.isStatusLocation(loc)) {
+        const cInfo = this.getCrewInfo(tr['Crew #'] || tr['Crew'], tr['Foreman'] || tr['Crew Lead']);
+        loc = (cInfo && cInfo.location) || 'Helena';
+      }
       getCityBucket(loc).trainings.push(tr);
     });
 
     // E. Add equipment deliveries
     (day.equipmentDeliveries || []).forEach(eq => {
-      const loc = eq.location || 'Helena';
+      let loc = eq.location;
+      if (!loc || this.isStatusLocation(loc)) {
+        const cInfo = this.getCrewInfo(eq.crewId, eq.foreman);
+        loc = (cInfo && cInfo.location) || 'Helena';
+      }
       getCityBucket(loc).deliveries.push(eq);
     });
 
@@ -1232,24 +1527,39 @@ class TimeBreakdownEngine {
       }
     });
 
-    // 2. Order the cities logically: Helena first if active (home shop), then destinations visited
+    // 2. Order the cities logically: honor TRIP_PLANNER_DAY_ORDER if available
     const allCities = Object.keys(cityMap);
     if (allCities.length === 0) {
       return 'No specific accomplishments logged for this day.';
     }
 
+    let savedOrder = [];
+    try {
+      const orderConfig = JSON.parse(localStorage.getItem('TRIP_PLANNER_DAY_ORDER') || '{}');
+      if (orderConfig[day.dateKey] && Array.isArray(orderConfig[day.dateKey].locations)) {
+        savedOrder = orderConfig[day.dateKey].locations.map(l => this.cleanPhysicalLocation(l));
+      }
+    } catch { /* ignore */ }
+
     const orderedCities = [];
-    if (cityMap['Helena']) {
-      orderedCities.push('Helena');
-    }
-    allCities.forEach(c => {
-      if (c !== 'Helena' && !orderedCities.includes(c)) {
+    // 1. If user explicitly arranged cities in Trip Planner for this day, place them in that exact order
+    savedOrder.forEach(c => {
+      if (cityMap[c] && !orderedCities.includes(c)) {
         orderedCities.push(c);
       }
     });
-    if (orderedCities.length === 0) {
-      orderedCities.push(...allCities);
+
+    // 2. Helena first if present and not already ordered
+    if (cityMap['Helena'] && !orderedCities.includes('Helena')) {
+      orderedCities.unshift('Helena');
     }
+
+    // 3. Append any remaining cities
+    allCities.forEach(c => {
+      if (!orderedCities.includes(c)) {
+        orderedCities.push(c);
+      }
+    });
 
     // 3. Generate natural text for each city
     const cityBlocks = [];
@@ -1432,15 +1742,40 @@ class TimeBreakdownEngine {
 
       // E. Monthly Safety Trainings in this city (Foreman instead of Lead)
       if (b.trainings.length > 0) {
-        const trainingSummaries = b.trainings.map(tr => {
+        const crewTrainingMap = {};
+        b.trainings.forEach(tr => {
+          const rawCrew = tr['Crew #'] || tr['Crew'] || tr['Job #'] || '';
+          const rawLead = tr['Foreman'] || tr['Crew Lead'] || tr['Lead'] || '';
+          const cInfo = this.getCrewInfo(rawCrew, rawLead, tr['Location']);
+          const crewId = (cInfo && cInfo.crewId && cInfo.crewId !== 'Unassigned') ? cInfo.crewId : (rawCrew || 'Unassigned');
+          const foreman = (cInfo && cInfo.foreman && cInfo.foreman !== 'Foreman') ? cInfo.foreman : (rawLead || 'Foreman');
           const topic = tr['Training Topic'] || tr['Topic'] || tr['Training'] || 'Safety Training';
-          const crew = tr['Crew #'] || tr['Crew'] || tr['Job #'] || '';
-          const foreman = tr['Foreman'] || tr['Crew Lead'] || tr['Lead'] || '';
-          let res = topic;
-          if (crew) res += ` with Crew ${crew}`;
-          if (foreman) res += ` (Foreman: ${foreman})`;
+
+          const cKey = `${crewId}_${foreman}`.toLowerCase();
+          if (!crewTrainingMap[cKey]) {
+            crewTrainingMap[cKey] = {
+              crewId: crewId,
+              foreman: foreman,
+              topics: []
+            };
+          }
+          if (!crewTrainingMap[cKey].topics.includes(topic)) {
+            crewTrainingMap[cKey].topics.push(topic);
+          }
+        });
+
+        const trainingSummaries = Object.values(crewTrainingMap).map(grp => {
+          const topicStr = this.formatListNatural(grp.topics);
+          let res = topicStr;
+          if (grp.crewId && grp.crewId !== 'Unassigned') {
+            res += ` with Crew ${grp.crewId}`;
+          }
+          if (grp.foreman && grp.foreman !== 'Foreman') {
+            res += ` (Foreman: ${grp.foreman})`;
+          }
           return res;
         });
+
         sentences.push(`Completed monthly safety training on ${this.formatListNatural(trainingSummaries)}.`);
       }
 
@@ -1449,7 +1784,9 @@ class TimeBreakdownEngine {
         const deliverySummaries = b.deliveries.map(eq => {
           let desc = eq.equipmentType || 'safety gear';
           if (eq.vehicleNumber) desc += ` for Unit ${eq.vehicleNumber}`;
-          if (eq.crewId) desc += ` (Crew ${this.getSignificantJobNumber(eq.crewId)})`;
+          const cInfo = this.getCrewInfo(eq.crewId, eq.foreman);
+          const activeCrew = (cInfo && cInfo.crewId && cInfo.crewId !== 'Unassigned') ? cInfo.crewId : (eq.crewId || '');
+          if (activeCrew) desc += ` (Crew ${this.getSignificantJobNumber(activeCrew)})`;
           if (eq.notes) desc += ` - ${eq.notes}`;
           return desc;
         });
