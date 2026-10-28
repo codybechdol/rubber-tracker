@@ -123,11 +123,21 @@ class TimeBreakdownEngine {
     return map[key] || key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
   }
 
+  normalizeEmpName(name) {
+    if (!name) return '';
+    return String(name)
+      .replace(/\s*\((?:prev\s*emp|previous\s*employee|former\s*worker|former\s*employee|vacation|light\s*duty|leave|medical|worker'?s\s*comp)\)/gi, '')
+      .trim();
+  }
+
   cleanPhysicalLocation(loc) {
     if (!loc) return '';
     let clean = String(loc).trim();
     const parenMatch = clean.match(/^([^(]+)\s*\([^)]+\)$/);
     if (parenMatch) clean = parenMatch[1].trim();
+    if (/^(helena\s+office|helena\s+shop|office|shop)$/i.test(clean)) {
+      return 'Helena';
+    }
     return clean.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
   }
 
@@ -1084,6 +1094,53 @@ class TimeBreakdownEngine {
     (day.officeTasks || []).forEach(ot => {
       const loc = resolveTaskLocation(ot);
       getCityBucket(loc).officeTasks.push(ot);
+    });
+
+    // Consolidate office-only cities into Helena and remove empty ghost destinations
+    Object.keys(cityMap).forEach(cityName => {
+      if (cityName === 'Helena') return;
+      const b = cityMap[cityName];
+      
+      const allSwapsOffice = b.swaps.length > 0 && b.swaps.every(sw => sw.isOfficeTask);
+      const hasOtherWork = b.classes.length > 0 || b.trainings.length > 0 || b.deliveries.length > 0 || b.drugTests.length > 0 || b.officeTasks.length > 0;
+      
+      if (allSwapsOffice && !hasOtherWork) {
+        // Entire city was handled via shop delivery/returns (e.g. Syd/JT delivered reclaims to Helena)
+        if (!cityMap['Helena']) {
+          cityMap['Helena'] = {
+            name: 'Helena',
+            swaps: [],
+            classes: [],
+            trainings: [],
+            deliveries: [],
+            drugTests: [],
+            officeTasks: [],
+            crewsVisited: new Set()
+          };
+        }
+        cityMap['Helena'].swaps.push(...b.swaps);
+        delete cityMap[cityName];
+      } else if (b.swaps.length === 0 && !hasOtherWork) {
+        // No actual field activities completed in this city
+        delete cityMap[cityName];
+      } else if (b.swaps.some(sw => sw.isOfficeTask)) {
+        // Move office swaps to Helena, keep field work in this city
+        const officeSwaps = b.swaps.filter(sw => sw.isOfficeTask);
+        b.swaps = b.swaps.filter(sw => !sw.isOfficeTask);
+        if (!cityMap['Helena']) {
+          cityMap['Helena'] = {
+            name: 'Helena',
+            swaps: [],
+            classes: [],
+            trainings: [],
+            deliveries: [],
+            drugTests: [],
+            officeTasks: [],
+            crewsVisited: new Set()
+          };
+        }
+        cityMap['Helena'].swaps.push(...officeSwaps);
+      }
     });
 
     // 2. Order the cities logically: Helena first if active (home shop), then destinations visited

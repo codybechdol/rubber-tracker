@@ -150,6 +150,13 @@ class TripPlannerApp {
     } catch { /* ignore */ }
   }
 
+  normalizeEmpName(name) {
+    if (!name) return '';
+    return String(name)
+      .replace(/\s*\((?:prev\s*emp|previous\s*employee|former\s*worker|former\s*employee|vacation|light\s*duty|leave|medical|worker'?s\s*comp)\)/gi, '')
+      .trim();
+  }
+
   getSwapOfficeTaskInfo(s, dateKey) {
     if (!this.swapOfficeTasks) this.swapOfficeTasks = this.loadSwapOfficeTasks();
     if (!s) return { isOfficeTask: false, officeNote: '' };
@@ -166,24 +173,41 @@ class TripPlannerApp {
       return { isOfficeTask: true, officeNote: this.scheduledSwaps[sKey].officeNote || '' };
     }
 
-    const emp = String(s.employeeName || s.employee || s.empName || '').trim().toLowerCase();
+    const rawEmp = String(s.employeeName || s.employee || s.empName || '').trim();
+    const emp = this.normalizeEmpName(rawEmp).toLowerCase();
+    const rawEmpK = rawEmp.toLowerCase();
     const oldItm = String(s.currentItem || s.currentItemNum || s.oldItem || '').trim().toLowerCase();
     const newItm = String(s.pickItem || s.pickListNum || s.newItem || '').trim().toLowerCase();
     const type = String(s.type || s.label || '').trim().toLowerCase();
     const dKey = dateKey || s.dateKey || '';
+    const empVariants = [...new Set([emp, rawEmpK])].filter(Boolean);
 
-    const candidates = [
-      `${type}_${emp}_${oldItm}_${dKey}`,
-      `${type}_${emp}_${oldItm}`,
-      `${emp}_${oldItm}_${dKey}`,
-      `${emp}_${oldItm}`,
-      `${type}_${emp}_${newItm}`,
-      `${emp}_${newItm}`
-    ];
+    const candidates = [];
+    empVariants.forEach(ek => {
+      if (oldItm) {
+        if (dKey) candidates.push(`${type}_${ek}_${oldItm}_${dKey}`, `${ek}_${oldItm}_${dKey}`);
+        candidates.push(`${type}_${ek}_${oldItm}`, `${ek}_${oldItm}`);
+      }
+      if (newItm) {
+        candidates.push(`${type}_${ek}_${newItm}`, `${ek}_${newItm}`);
+      }
+    });
 
     for (const ck of candidates) {
       if (this.swapOfficeTasks[ck] && this.swapOfficeTasks[ck].isOfficeTask) {
         return { isOfficeTask: true, officeNote: this.swapOfficeTasks[ck].officeNote || '' };
+      }
+    }
+
+    for (const [k, entry] of Object.entries(this.swapOfficeTasks)) {
+      if (entry && entry.isOfficeTask) {
+        const entryEmpRaw = String(entry.employeeName || '').trim().toLowerCase();
+        const entryEmpNorm = this.normalizeEmpName(entry.employeeName || '').toLowerCase();
+        const entryOld = String(entry.currentItem || entry.oldItem || '').trim().toLowerCase();
+        const empMatches = empVariants.includes(entryEmpRaw) || empVariants.includes(entryEmpNorm);
+        if (empMatches && (!oldItm || entryOld === oldItm)) {
+          return { isOfficeTask: true, officeNote: entry.officeNote || '' };
+        }
       }
     }
 
@@ -192,9 +216,11 @@ class TripPlannerApp {
         if (entry && entry.isOfficeTask) {
           const sDate = entry.dateKey || (entry.swap && entry.swap.dateKey) || '';
           if (dKey && sDate && sDate !== dKey) continue;
-          const sEmp = String(entry.employeeName || (entry.swap && entry.swap.employeeName) || '').trim().toLowerCase();
+          const sEmpRaw = String(entry.employeeName || (entry.swap && entry.swap.employeeName) || '').trim().toLowerCase();
+          const sEmpNorm = this.normalizeEmpName(entry.employeeName || (entry.swap && entry.swap.employeeName) || '').toLowerCase();
           const sOld = String(entry.currentItem || (entry.swap && entry.swap.currentItem) || '').trim().toLowerCase();
-          if (sEmp === emp && (!oldItm || sOld === oldItm)) {
+          const empMatches = empVariants.includes(sEmpRaw) || empVariants.includes(sEmpNorm);
+          if (empMatches && (!oldItm || sOld === oldItm)) {
             return { isOfficeTask: true, officeNote: entry.officeNote || '' };
           }
         }
@@ -470,7 +496,7 @@ class TripPlannerApp {
   getSwapKey(item) {
     if (!item) return '';
     const table = String(item.tableKey || 'glove_swaps').trim().toLowerCase();
-    const emp = String(item.employeeName || item.employee || '').trim().toLowerCase();
+    const emp = this.normalizeEmpName(item.employeeName || item.employee || '').toLowerCase();
     const type = String(item.type || '').trim().toLowerCase();
     const itm = String(item.currentItem || item.pickItem || item.rowIdx || '').trim().toLowerCase();
     return `${table}|${emp}|${type}|${itm}`;
@@ -5117,11 +5143,13 @@ class TripPlannerApp {
     // Update scheduledSwaps to marked completed instead of deleting
     if (this.scheduledSwaps) {
       const targetEmp = (empName || '').trim().toLowerCase();
+      const normTargetEmp = this.normalizeEmpName(empName).toLowerCase();
       const targetItm = (currentItem || '').trim().toLowerCase();
       let changed = false;
       Object.keys(this.scheduledSwaps).forEach(k => {
         const kLower = k.toLowerCase();
-        if (kLower.includes(targetEmp) && (!targetItm || kLower.includes(targetItm))) {
+        const empMatches = kLower.includes(targetEmp) || (normTargetEmp && kLower.includes(normTargetEmp));
+        if (empMatches && (!targetItm || kLower.includes(targetItm))) {
           if (typeof this.scheduledSwaps[k] === 'object') {
             this.scheduledSwaps[k].completed = true;
             this.scheduledSwaps[k].completedDate = todayStr;
