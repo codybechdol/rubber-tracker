@@ -873,6 +873,7 @@ class SyncEngine {
       let totalPushed = 0;
       let i = 0;
       let batchNum = 0;
+      let lastPushResult = null;
 
       while (i < totalCount) {
         batchNum++;
@@ -931,9 +932,10 @@ class SyncEngine {
         const maxAttempts = 3;
         const retryDelays = [1200, 2500, 5000];
 
+        const activeSyncUrl = this.syncUrl || DEFAULT_SYNC_URL;
         for (let attempt = 1; attempt <= maxAttempts; attempt++) {
           try {
-            pushResult = await this.executeNetworkRequest(this.syncUrl, 'POST', {
+            pushResult = await this.executeNetworkRequest(activeSyncUrl, 'POST', {
               action: 'applyMutations',
               mutations: sanitizedChunk,
               detectConflicts: false,
@@ -972,6 +974,8 @@ class SyncEngine {
         if (!pushResult && lastBatchErr) {
           throw lastBatchErr;
         }
+
+        lastPushResult = pushResult;
 
         // 1. Handle Edit Conflicts (fallback)
         if (pushResult && pushResult.conflict && Array.isArray(pushResult.conflicts) && pushResult.conflicts.length > 0) {
@@ -1037,7 +1041,23 @@ class SyncEngine {
 
       const finalRemaining = this.db.getOutbox() || [];
       if (finalRemaining.length === 0) {
-        this.updateStatusUI('synced', `Synced in ${durationFormatted}`);
+        if (lastPushResult && lastPushResult.revision && this.db && this.db.snapshot) {
+          this.db.snapshot.revision = lastPushResult.revision;
+          if (typeof this.db.saveToStorage === 'function') {
+            await this.db.saveToStorage();
+          }
+        }
+        if (window.desktopAPI && typeof window.desktopAPI.createLocalBackup === 'function' && this.db && this.db.snapshot) {
+          try {
+            await window.desktopAPI.createLocalBackup({
+              snapshot: this.db.snapshot,
+              label: 'sync'
+            });
+          } catch (e) {}
+        }
+
+        const revTag = (this.db && this.db.snapshot && this.db.snapshot.revision) ? ` (Rev #${this.db.snapshot.revision})` : '';
+        this.updateStatusUI('synced', `Synced in ${durationFormatted}${revTag}`);
         const subTitleEl = document.getElementById('sync-modal-subtitle');
         const countBadge = document.getElementById('sync-modal-count-badge');
         const clearBtn = document.getElementById('sync-modal-clear-btn');
@@ -1983,7 +2003,7 @@ class SyncEngine {
    * creates a timestamped point-in-time JSON restore point in `Google Drive > Safety Assistant Backups`,
    * saves a local rolling backup on the laptop, increments the Cloud Revision counter, and clears the outbox.
    */
-  async syncAndSaveToCloud() {
+  async syncAndSaveToCloud(options = {}) {
     if (this.isSyncing) {
       this.openSyncModal('Syncing & Saving to Cloud', '☁️');
       return;
@@ -1994,13 +2014,20 @@ class SyncEngine {
       return;
     }
 
+    const outbox = (this.db && typeof this.db.getOutbox === 'function') ? (this.db.getOutbox() || []) : [];
+
+    // CRITICAL: If there are pending offline changes in the outbox, push them to Google Sheets first!
+    // This updates the Google Sheets spreadsheet cells and syncs all mutations before saving restore points.
+    if (outbox.length > 0) {
+      return await this.pushChangesToGoogleSheets(options);
+    }
+
     this.isSyncing = true;
     const startTime = Date.now();
-    const outbox = (this.db && typeof this.db.getOutbox === 'function') ? (this.db.getOutbox() || []) : [];
     const baseMsg = 'Saving authoritative JSON database to Google Drive & creating restore point...';
 
     this.openSyncModal('Syncing & Saving to Cloud Database', '☁️');
-    this.renderModalChanges(outbox, `${baseMsg} (${this.formatDuration(0)})`, 'syncing', false);
+    this.renderModalChanges([], `${baseMsg} (${this.formatDuration(0)})`, 'syncing', false);
     this.updateStatusUI('syncing', 'Saving to Cloud...');
 
     // 1. Save a local rolling backup first if running on Electron Desktop
@@ -2033,11 +2060,17 @@ class SyncEngine {
 
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
-        resp = await this.executeNetworkRequest(activeUrl, 'POST', {
+        const reqPayload = {
           action: 'syncAndSaveSnapshot',
-          snapshot: this.db.snapshot,
           createRestorePoint: true
-        }, 90000);
+        };
+        // Avoid sending the entire 10+ MB snapshot over HTTP if not explicitly requested;
+        // The Apps Script server creates the restore point from the live cloud database in <2 seconds.
+        if (options && options.uploadLocalSnapshot === true) {
+          reqPayload.snapshot = this.db.snapshot;
+        }
+
+        resp = await this.executeNetworkRequest(activeUrl, 'POST', reqPayload, 180000);
 
         if (resp && resp.status === 'ok' && resp.success) {
           lastErr = null;

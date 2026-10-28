@@ -608,13 +608,34 @@ function generateAndStoreSyncSnapshot(existingSnapshot) {
 function syncAndSaveCloudDatabase(payload) {
   var startTime = new Date().getTime();
   payload = payload || {};
+  var props = PropertiesService.getScriptProperties();
   var rawSnap = payload.snapshot;
   if (!rawSnap) {
-    return { status: 'error', success: false, error: 'Missing snapshot payload in syncAndSaveCloudDatabase' };
+    // If client omitted snapshot (to prevent uploading 10+ MB over HTTP and avoid timeouts),
+    // load the live cloud database snapshot directly from Drive or export fresh from Sheets
+    var liveFileId = props.getProperty('SYNC_SNAPSHOT_FILE_ID');
+    if (liveFileId) {
+      try {
+        var existingLiveFile = DriveApp.getFileById(liveFileId);
+        if (existingLiveFile && !existingLiveFile.isTrashed()) {
+          rawSnap = existingLiveFile.getBlob().getDataAsString();
+        }
+      } catch (fErr) {}
+    }
+    if (!rawSnap) {
+      if (typeof getFastSnapshotFromDriveOrExport === 'function') {
+        rawSnap = getFastSnapshotFromDriveOrExport();
+      } else if (typeof exportFullDatabaseSnapshot === 'function') {
+        rawSnap = exportFullDatabaseSnapshot();
+      }
+    }
+  }
+
+  if (!rawSnap) {
+    return { status: 'error', success: false, error: 'Missing snapshot payload and no cloud snapshot found in syncAndSaveCloudDatabase' };
   }
 
   try {
-    var props = PropertiesService.getScriptProperties();
     var prevRev = parseInt(props.getProperty('CLOUD_DB_REVISION') || '0', 10) || 0;
     var nextRev = prevRev + 1;
     var nowIso = new Date().toISOString();
