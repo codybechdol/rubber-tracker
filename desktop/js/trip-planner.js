@@ -161,8 +161,8 @@ class TripPlannerApp {
     if (!this.swapOfficeTasks) this.swapOfficeTasks = this.loadSwapOfficeTasks();
     if (!s) return { isOfficeTask: false, officeNote: '' };
 
-    if (s.isOfficeTask !== undefined && s.isOfficeTask !== null) {
-      return { isOfficeTask: !!s.isOfficeTask, officeNote: s.officeNote || '' };
+    if (s.isOfficeTask) {
+      return { isOfficeTask: true, officeNote: s.officeNote || '' };
     }
 
     const sKey = s._sKey || (typeof this.getSwapKey === 'function' ? this.getSwapKey(s) : '');
@@ -180,17 +180,22 @@ class TripPlannerApp {
     const newItm = String(s.pickItem || s.pickListNum || s.newItem || '').trim().toLowerCase();
     const type = String(s.type || s.label || '').trim().toLowerCase();
     const dKey = dateKey || s.dateKey || '';
+    const targetDateIso = this.normalizeDateKey(dKey);
     const empVariants = [...new Set([emp, rawEmpK])].filter(Boolean);
 
     const candidates = [];
     empVariants.forEach(ek => {
       if (oldItm) {
+        if (targetDateIso) candidates.push(`${type}_${ek}_${oldItm}_${targetDateIso}`, `${ek}_${oldItm}_${targetDateIso}`);
         if (dKey) candidates.push(`${type}_${ek}_${oldItm}_${dKey}`, `${ek}_${oldItm}_${dKey}`);
         candidates.push(`${type}_${ek}_${oldItm}`, `${ek}_${oldItm}`);
       }
       if (newItm) {
         candidates.push(`${type}_${ek}_${newItm}`, `${ek}_${newItm}`);
       }
+      if (targetDateIso) candidates.push(`emp_${ek}_${targetDateIso}`);
+      if (dKey) candidates.push(`emp_${ek}_${dKey}`);
+      candidates.push(`emp_${ek}`);
     });
 
     for (const ck of candidates) {
@@ -199,6 +204,7 @@ class TripPlannerApp {
       }
     }
 
+    // Exact item match across all office task records
     for (const [k, entry] of Object.entries(this.swapOfficeTasks)) {
       if (entry && entry.isOfficeTask) {
         const entryEmpRaw = String(entry.employeeName || '').trim().toLowerCase();
@@ -215,12 +221,47 @@ class TripPlannerApp {
       for (const [sk, entry] of Object.entries(this.scheduledSwaps)) {
         if (entry && entry.isOfficeTask) {
           const sDate = entry.dateKey || (entry.swap && entry.swap.dateKey) || '';
-          if (dKey && sDate && sDate !== dKey) continue;
+          const sDateIso = this.normalizeDateKey(sDate);
+          if (targetDateIso && sDateIso && sDateIso !== targetDateIso) continue;
           const sEmpRaw = String(entry.employeeName || (entry.swap && entry.swap.employeeName) || '').trim().toLowerCase();
           const sEmpNorm = this.normalizeEmpName(entry.employeeName || (entry.swap && entry.swap.employeeName) || '').toLowerCase();
           const sOld = String(entry.currentItem || (entry.swap && entry.swap.currentItem) || '').trim().toLowerCase();
           const empMatches = empVariants.includes(sEmpRaw) || empVariants.includes(sEmpNorm);
           if (empMatches && (!oldItm || sOld === oldItm)) {
+            return { isOfficeTask: true, officeNote: entry.officeNote || '' };
+          }
+        }
+      }
+    }
+
+    // Fallback: match by employee on this date!
+    // If Joe Piazzola or Trapper Payne had items brought to the shop (e.g. Syd or JT delivered PPE),
+    // ALL swaps/reclaims for that employee on that trip date share the office task status and note.
+    for (const [k, entry] of Object.entries(this.swapOfficeTasks)) {
+      if (entry && entry.isOfficeTask) {
+        const entryEmpRaw = String(entry.employeeName || '').trim().toLowerCase();
+        const entryEmpNorm = this.normalizeEmpName(entry.employeeName || '').toLowerCase();
+        const empMatches = empVariants.includes(entryEmpRaw) || empVariants.includes(entryEmpNorm);
+        if (empMatches) {
+          const eDate = entry.dateKey || '';
+          const eDateIso = this.normalizeDateKey(eDate);
+          if (!targetDateIso || !eDateIso || eDateIso === targetDateIso) {
+            return { isOfficeTask: true, officeNote: entry.officeNote || '' };
+          }
+        }
+      }
+    }
+
+    if (this.scheduledSwaps) {
+      for (const [sk, entry] of Object.entries(this.scheduledSwaps)) {
+        if (entry && entry.isOfficeTask) {
+          const sDate = entry.dateKey || (entry.swap && entry.swap.dateKey) || '';
+          const sDateIso = this.normalizeDateKey(sDate);
+          if (targetDateIso && sDateIso && sDateIso !== targetDateIso) continue;
+          const sEmpRaw = String(entry.employeeName || (entry.swap && entry.swap.employeeName) || '').trim().toLowerCase();
+          const sEmpNorm = this.normalizeEmpName(entry.employeeName || (entry.swap && entry.swap.employeeName) || '').toLowerCase();
+          const empMatches = empVariants.includes(sEmpRaw) || empVariants.includes(sEmpNorm);
+          if (empMatches) {
             return { isOfficeTask: true, officeNote: entry.officeNote || '' };
           }
         }
@@ -241,11 +282,13 @@ class TripPlannerApp {
     const newItm = String((swapData && (swapData.pickItem || swapData.pickListNum || swapData.newItem)) || '').trim();
     const type = String((swapData && (swapData.type || swapData.label)) || 'Glove').trim();
     const effectiveKey = sKey || (swapData && swapData._sKey) || (typeof this.getSwapKey === 'function' && swapData ? this.getSwapKey(swapData) : '');
+    const dateKeyIso = this.normalizeDateKey(dateKey);
 
     const record = {
       isOfficeTask: !!isOffice,
       officeNote: note || '',
       dateKey: dateKey || '',
+      dateKeyIso: dateKeyIso || '',
       employeeName: emp,
       rawEmployeeName: rawEmp,
       currentItem: oldItm,
@@ -264,9 +307,15 @@ class TripPlannerApp {
     if (isOffice) {
       if (effectiveKey) this.swapOfficeTasks[effectiveKey] = record;
       empVariants.forEach(ek => {
+        if (dateKeyIso) this.swapOfficeTasks[`emp_${ek}_${dateKeyIso}`] = record;
+        if (dateKey) this.swapOfficeTasks[`emp_${ek}_${dateKey}`] = record;
+        this.swapOfficeTasks[`emp_${ek}`] = record;
+
         if (oldK) {
+          if (dateKeyIso) this.swapOfficeTasks[`${typeK}_${ek}_${oldK}_${dateKeyIso}`] = record;
           if (dateKey) this.swapOfficeTasks[`${typeK}_${ek}_${oldK}_${dateKey}`] = record;
           this.swapOfficeTasks[`${typeK}_${ek}_${oldK}`] = record;
+          if (dateKeyIso) this.swapOfficeTasks[`${ek}_${oldK}_${dateKeyIso}`] = record;
           if (dateKey) this.swapOfficeTasks[`${ek}_${oldK}_${dateKey}`] = record;
           this.swapOfficeTasks[`${ek}_${oldK}`] = record;
         }
@@ -287,18 +336,37 @@ class TripPlannerApp {
           const entry = this.scheduledSwaps[sk];
           if (!entry || typeof entry !== 'object') return;
           const sEmp = this.normalizeEmpName(entry.employeeName || (entry.swap && entry.swap.employeeName) || '').toLowerCase();
-          const sOld = String(entry.currentItem || (entry.swap && entry.swap.currentItem) || '').trim().toLowerCase();
-          if (empVariants.includes(sEmp) && (!oldK || sOld === oldK)) {
+          const sDate = entry.dateKey || (entry.swap && entry.swap.dateKey) || '';
+          const sDateIso = this.normalizeDateKey(sDate);
+          const sameEmp = empVariants.includes(sEmp);
+          const sameDate = !dateKey || !sDate || sDate === dateKey || (dateKeyIso && sDateIso === dateKeyIso);
+          if (sameEmp && sameDate) {
             entry.isOfficeTask = true;
             entry.officeNote = note || '';
+            const sOld = String(entry.currentItem || (entry.swap && entry.swap.currentItem) || '').trim().toLowerCase();
+            const sType = String(entry.type || (entry.swap && entry.swap.type) || '').trim().toLowerCase();
+            if (sOld) {
+              if (dateKeyIso) this.swapOfficeTasks[`${sType}_${sEmp}_${sOld}_${dateKeyIso}`] = record;
+              if (dateKey) this.swapOfficeTasks[`${sType}_${sEmp}_${sOld}_${dateKey}`] = record;
+              this.swapOfficeTasks[`${sType}_${sEmp}_${sOld}`] = record;
+              if (dateKeyIso) this.swapOfficeTasks[`${sEmp}_${sOld}_${dateKeyIso}`] = record;
+              if (dateKey) this.swapOfficeTasks[`${sEmp}_${sOld}_${dateKey}`] = record;
+              this.swapOfficeTasks[`${sEmp}_${sOld}`] = record;
+            }
           }
         });
       }
     } else {
       if (effectiveKey) delete this.swapOfficeTasks[effectiveKey];
       empVariants.forEach(ek => {
+        if (dateKeyIso) delete this.swapOfficeTasks[`emp_${ek}_${dateKeyIso}`];
+        if (dateKey) delete this.swapOfficeTasks[`emp_${ek}_${dateKey}`];
+        delete this.swapOfficeTasks[`emp_${ek}`];
+
+        if (dateKeyIso) delete this.swapOfficeTasks[`${typeK}_${ek}_${oldK}_${dateKeyIso}`];
         if (dateKey) delete this.swapOfficeTasks[`${typeK}_${ek}_${oldK}_${dateKey}`];
         delete this.swapOfficeTasks[`${typeK}_${ek}_${oldK}`];
+        if (dateKeyIso) delete this.swapOfficeTasks[`${ek}_${oldK}_${dateKeyIso}`];
         if (dateKey) delete this.swapOfficeTasks[`${ek}_${oldK}_${dateKey}`];
         delete this.swapOfficeTasks[`${ek}_${oldK}`];
         delete this.swapOfficeTasks[`${typeK}_${ek}_${newK}`];
@@ -314,8 +382,11 @@ class TripPlannerApp {
           const entry = this.scheduledSwaps[sk];
           if (!entry || typeof entry !== 'object') return;
           const sEmp = this.normalizeEmpName(entry.employeeName || (entry.swap && entry.swap.employeeName) || '').toLowerCase();
-          const sOld = String(entry.currentItem || (entry.swap && entry.swap.currentItem) || '').trim().toLowerCase();
-          if (empVariants.includes(sEmp) && (!oldK || sOld === oldK)) {
+          const sDate = entry.dateKey || (entry.swap && entry.swap.dateKey) || '';
+          const sDateIso = this.normalizeDateKey(sDate);
+          const sameEmp = empVariants.includes(sEmp);
+          const sameDate = !dateKey || !sDate || sDate === dateKey || (dateKeyIso && sDateIso === dateKeyIso);
+          if (sameEmp && sameDate && (!oldK || sOld === oldK)) {
             delete entry.isOfficeTask;
             delete entry.officeNote;
           }
@@ -460,6 +531,7 @@ class TripPlannerApp {
     this.setSwapOfficeTask(sKey, dateKey, target, isOffice, note);
     this.showToast(isOffice ? `Saved Office Task note: "${note || 'Handled in shop'}"` : 'Reverted to field task.');
     this.renderPlanner();
+    this.notifyAccomplishmentsModal();
   }
 
   loadScheduledEquipmentNeeds() {

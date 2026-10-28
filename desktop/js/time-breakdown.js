@@ -370,12 +370,15 @@ class TimeBreakdownEngine {
       const newK = cleanNum(newItm);
       const typeK = String(type || '').trim().toLowerCase();
       const empVariants = [...new Set([rawEmpK, normEmpK])].filter(Boolean);
+      const targetDateIso = this.normalizeDateKey(dKey);
 
       for (const ek of empVariants) {
         if (oldK) {
           const candidates = [
+            `${typeK}_${ek}_${oldK}_${targetDateIso}`,
             `${typeK}_${ek}_${oldK}_${dKey}`,
             `${typeK}_${ek}_${oldK}`,
+            `${ek}_${oldK}_${targetDateIso}`,
             `${ek}_${oldK}_${dKey}`,
             `${ek}_${oldK}`
           ];
@@ -396,8 +399,18 @@ class TimeBreakdownEngine {
             }
           }
         }
+        if (targetDateIso && swapOfficeRegistry[`emp_${ek}_${targetDateIso}`] && swapOfficeRegistry[`emp_${ek}_${targetDateIso}`].isOfficeTask) {
+          return { isOfficeTask: true, officeNote: swapOfficeRegistry[`emp_${ek}_${targetDateIso}`].officeNote || '' };
+        }
+        if (dKey && swapOfficeRegistry[`emp_${ek}_${dKey}`] && swapOfficeRegistry[`emp_${ek}_${dKey}`].isOfficeTask) {
+          return { isOfficeTask: true, officeNote: swapOfficeRegistry[`emp_${ek}_${dKey}`].officeNote || '' };
+        }
+        if (swapOfficeRegistry[`emp_${ek}`] && swapOfficeRegistry[`emp_${ek}`].isOfficeTask) {
+          return { isOfficeTask: true, officeNote: swapOfficeRegistry[`emp_${ek}`].officeNote || '' };
+        }
       }
 
+      // Exact item match across all office task records
       for (const [k, entry] of Object.entries(swapOfficeRegistry)) {
         if (entry && entry.isOfficeTask) {
           const entryEmpRaw = String(entry.employeeName || '').trim().toLowerCase();
@@ -413,7 +426,8 @@ class TimeBreakdownEngine {
       for (const [sk, entry] of Object.entries(schedRegistry)) {
         if (entry && entry.isOfficeTask) {
           const sDate = entry.dateKey || (entry.swap && entry.swap.dateKey) || '';
-          if (dKey && sDate && sDate !== dKey) continue;
+          const sDateIso = this.normalizeDateKey(sDate);
+          if (targetDateIso && sDateIso && sDateIso !== targetDateIso) continue;
           const sEmpRaw = String(entry.employeeName || (entry.swap && entry.swap.employeeName) || '').trim().toLowerCase();
           const sEmpNorm = this.normalizeEmpName(entry.employeeName || (entry.swap && entry.swap.employeeName) || '').toLowerCase();
           const sOld = cleanNum(entry.currentItem || (entry.swap && entry.swap.currentItem));
@@ -423,6 +437,38 @@ class TimeBreakdownEngine {
           }
         }
       }
+
+      // Fallback: match by employee on this date!
+      // If Joe Piazzola or Trapper Payne had items brought to the shop (e.g. Syd or JT delivered PPE),
+      // ALL swaps/reclaims for that employee on that trip date share the office task status and note.
+      for (const [k, entry] of Object.entries(swapOfficeRegistry)) {
+        if (entry && entry.isOfficeTask) {
+          const entryEmpRaw = String(entry.employeeName || '').trim().toLowerCase();
+          const entryEmpNorm = this.normalizeEmpName(entry.employeeName || '').toLowerCase();
+          const empMatches = empVariants.includes(entryEmpRaw) || empVariants.includes(entryEmpNorm);
+          if (empMatches) {
+            const entryDateIso = this.normalizeDateKey(entry.dateKey);
+            if (!targetDateIso || !entryDateIso || entryDateIso === targetDateIso) {
+              return { isOfficeTask: true, officeNote: entry.officeNote || '' };
+            }
+          }
+        }
+      }
+
+      for (const [sk, entry] of Object.entries(schedRegistry)) {
+        if (entry && entry.isOfficeTask) {
+          const sDate = entry.dateKey || (entry.swap && entry.swap.dateKey) || '';
+          const sDateIso = this.normalizeDateKey(sDate);
+          if (targetDateIso && sDateIso && sDateIso !== targetDateIso) continue;
+          const sEmpRaw = String(entry.employeeName || (entry.swap && entry.swap.employeeName) || '').trim().toLowerCase();
+          const sEmpNorm = this.normalizeEmpName(entry.employeeName || (entry.swap && entry.swap.employeeName) || '').toLowerCase();
+          const empMatches = empVariants.includes(sEmpRaw) || empVariants.includes(sEmpNorm);
+          if (empMatches) {
+            return { isOfficeTask: true, officeNote: entry.officeNote || '' };
+          }
+        }
+      }
+
       return { isOfficeTask: false, officeNote: '' };
     };
 
@@ -718,8 +764,8 @@ class TimeBreakdownEngine {
         const swapCrew = entry.crewId || swapData.crewId || swapData.jobNum || empInfo.crew || '';
 
         const sKey = k || `${swapData.tableKey || 'glove_swaps'}|${normEmp}|${label.toLowerCase()}|${oldItem.toLowerCase()}`;
-        const officeInfo = (entry.isOfficeTask !== undefined && entry.isOfficeTask !== null)
-          ? { isOfficeTask: !!entry.isOfficeTask, officeNote: entry.officeNote || '' }
+        const officeInfo = (entry && entry.isOfficeTask)
+          ? { isOfficeTask: true, officeNote: entry.officeNote || '' }
           : getSwapOfficeInfo(sKey, rawEmp, oldItem, cleanNew, label, dKey);
 
         const cleanSwapLoc = this.cleanPhysicalLocation(swapLoc) || 'Helena';
@@ -1289,7 +1335,11 @@ class TimeBreakdownEngine {
             return `${emp} (${origin}${this.formatListNatural(itemPhrases)}${noteStr})`;
           });
 
-          sentences.push(`Processed equipment returns brought to the shop: ${this.formatListNatural(officePhrases)}.`);
+          const allAreReclaims = officeSwaps.every(sw => Boolean(sw.isReclaim || (!sw.newItem || sw.newItem === '—' || sw.newItem === '-')));
+          const actionHeader = allAreReclaims
+            ? 'Processed equipment returns brought to the shop'
+            : 'Handled equipment exchanges / returns at the shop';
+          sentences.push(`${actionHeader}: ${this.formatListNatural(officePhrases)}.`);
         }
 
         // 2. Standard field swaps
