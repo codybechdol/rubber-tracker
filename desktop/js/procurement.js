@@ -3408,6 +3408,9 @@ class ProcurementEngine {
                         <span>🏷️</span> Enter Vendor Order #
                       </button>
                     ` : ''}
+                    <button type="button" class="btn btn-xs" onclick="window.procurementEngine.emailOrderFromKey('${orderKey}')" style="background: rgba(16, 185, 129, 0.22); border: 1px solid rgba(16, 185, 129, 0.55); color: #6ee7b7; padding: 4px 9px; font-size: 11px; border-radius: 4px; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;" title="Email this purchase order/request to ${this.escapeHtml(grp.vendor || 'vendor')}">
+                      <span>✉️</span> ${(/^REQ-/i.test(grp.vendorOrderNumber || grp.poNumber || '') || /pending/i.test(grp.vendorOrderNumber || grp.poNumber || '')) ? 'Email Request' : 'Email Order'}
+                    </button>
                     <button type="button" class="btn btn-xs" onclick="window.procurementEngine.quickMarkOrderReceivedFromKey('${orderKey}')" style="background: rgba(16, 185, 129, 0.2); border: 1px solid rgba(16, 185, 129, 0.5); color: #6ee7b7; padding: 4px 9px; font-size: 11px; border-radius: 4px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;" title="Mark this entire order as Received and clear it from Awaiting Delivery (items already added to inventory)">
                       <span>✅</span> Mark Received
                     </button>
@@ -3806,25 +3809,246 @@ class ProcurementEngine {
   * Opens default email client (mailto:) with current PO text pre-filled.
   */
   openInEmailClient() {
+    const toInput = document.getElementById('procurement-po-email-to');
+    const subjInput = document.getElementById('procurement-po-subject');
     const textarea = document.getElementById('procurement-po-textarea');
+    const to = toInput ? toInput.value.trim() : (this.selectedVendor?.email || '');
+    const subject = subjInput ? subjInput.value.trim() : `Purchase Order Request - ${this.selectedVendor?.name || 'Vendor'}`;
     const bodyText = textarea ? textarea.value : (this.generatedPOTexts?.clean || '');
-    const vendorEmail = this.selectedVendor?.email || '';
-    const poNum = this.getPurchaseOrderNumber();
-    const vendorName = this.selectedVendor?.name || 'Vendor';
 
-    const subject = `Purchase Order ${poNum} - ${vendorName}`;
-
-    if (!vendorEmail) {
+    if (!to) {
       if (textarea) {
         navigator.clipboard.writeText(bodyText).then(() => {
-          alert(`Copied Purchase Order to clipboard!\n\nNote: No email address is configured for ${vendorName}. You can paste this directly into your email.`);
+          alert('Copied Purchase Order / Request to clipboard!\n\nNote: No vendor email address was specified. You can paste this directly into your email.');
         });
       }
       return;
     }
 
-    const mailtoUrl = `mailto:${encodeURIComponent(vendorEmail)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(bodyText)}`;
-    window.open(mailtoUrl, '_blank');
+    const mailtoUrl = `mailto:${encodeURIComponent(to)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(bodyText)}`;
+    if (window.desktopAPI && typeof window.desktopAPI.openExternal === 'function') {
+      window.desktopAPI.openExternal(mailtoUrl);
+    } else {
+      window.location.href = mailtoUrl;
+    }
+  }
+
+  openInGmail() {
+    const toInput = document.getElementById('procurement-po-email-to');
+    const subjInput = document.getElementById('procurement-po-subject');
+    const textarea = document.getElementById('procurement-po-textarea');
+    const to = toInput ? toInput.value.trim() : (this.selectedVendor?.email || '');
+    const subject = subjInput ? subjInput.value.trim() : `Purchase Order Request - ${this.selectedVendor?.name || 'Vendor'}`;
+    const bodyText = textarea ? textarea.value : (this.generatedPOTexts?.clean || '');
+
+    const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(to)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(bodyText)}`;
+    if (window.desktopAPI && typeof window.desktopAPI.openExternal === 'function') {
+      window.desktopAPI.openExternal(gmailUrl);
+    } else {
+      window.open(gmailUrl, '_blank');
+    }
+  }
+
+  emailOrderFromKey(orderKey) {
+    const grp = this.orderGroupsMap ? this.orderGroupsMap.get(orderKey) : null;
+    if (!grp) return;
+
+    const targetOrderNum = String(grp.vendorOrderNumber || grp.orderNumber || grp.poNumber || 'Request').trim();
+    const isReq = /^REQ-/i.test(targetOrderNum);
+    const vendorName = grp.vendor || (this.selectedVendor?.name || 'Vendor');
+    const vendorObj = this.vendors.find(v => v.name.toLowerCase() === vendorName.toLowerCase())
+      || (this.selectedVendor?.name?.toLowerCase() === vendorName.toLowerCase() ? this.selectedVendor : null)
+      || (this.vendors.length ? this.vendors[0] : null);
+
+    const vendorEmail = vendorObj?.email || '';
+    const vendorContact = vendorObj?.contact || vendorObj?.name || vendorName;
+    const vendorPhone = vendorObj?.phone || '';
+
+    const dateStr = grp.orderDate || new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+    const shipTo = this.getShippingAddress ? this.getShippingAddress() : 'Mountain Power - Helena Base\nSafety & PPE Operations\nHelena, MT';
+
+    // 1. Build clean vendor email text
+    let cleanLines = [];
+    const poTitle = isReq ? `PURCHASE ORDER REQUEST: ${targetOrderNum}` : `PURCHASE ORDER: ${targetOrderNum}`;
+    cleanLines.push(poTitle);
+    cleanLines.push(`Date: ${dateStr}`);
+    cleanLines.push(`Vendor / Supplier: ${vendorName || (vendorObj ? vendorObj.name : 'Vendor')}`);
+    if (vendorContact) cleanLines.push(`Attn: ${vendorContact}${vendorEmail ? ` (${vendorEmail})` : ''}`);
+    if (vendorPhone) cleanLines.push(`Phone: ${vendorPhone}`);
+    cleanLines.push(`Ship To: ${shipTo}`);
+    cleanLines.push('----------------------------------------------------');
+    cleanLines.push(isReq ? 'Please process the following purchase order request:\n' : 'Please fulfill the following purchase order:\n');
+
+    let grandTotal = 0;
+    let totalUnits = 0;
+
+    // Consolidate items in this group
+    const itemsMap = new Map();
+    (grp.items || []).forEach(it => {
+      const k = `${it.itemType || it.typeLabel}|${it.size}|${it.classVal}|${it.price}`;
+      if (!itemsMap.has(k)) {
+        itemsMap.set(k, {
+          itemType: it.typeLabel || it.itemType || 'Equipment',
+          size: it.size || 'Standard',
+          classVal: it.classVal || '',
+          price: it.price || 0,
+          partNumber: it.partNumber || '',
+          quantity: 0,
+          employees: []
+        });
+      }
+      const entry = itemsMap.get(k);
+      entry.quantity += (it.quantity || 1);
+      if (it.employees && it.employees.length) {
+        entry.employees.push(...it.employees.map(e => e.name || e.label || e));
+      }
+    });
+
+    itemsMap.forEach(it => {
+      const lineCost = (it.price > 0 ? (it.price * it.quantity) : 0);
+      grandTotal += lineCost;
+      totalUnits += it.quantity;
+      const sizeDisplay = it.size || 'Standard';
+      const classDisplay = it.classVal ? ` (${it.classVal})` : '';
+      const partDisplay = it.partNumber ? ` [Part #: ${it.partNumber}]` : '';
+      const priceDisplay = it.price > 0 ? ` @ $${it.price.toFixed(2)} = $${lineCost.toFixed(2)}` : '';
+      cleanLines.push(`- (${it.quantity}) ${it.itemType}, Size: ${sizeDisplay}${classDisplay}${partDisplay}${priceDisplay}`);
+    });
+
+    // Fallback to PO table row items if itemsMap was empty
+    if (itemsMap.size === 0) {
+      const snap = (this.db && typeof this.db.getSnapshot === 'function') ? this.db.getSnapshot() : null;
+      const poTable = snap?.tables?.['purchase_orders'];
+      const pRow = poTable?.rows?.find(r => String(r['PO Number']).trim() === targetOrderNum);
+      if (pRow && pRow['Items']) {
+        cleanLines.push(pRow['Items']);
+        if (pRow['Total Price']) grandTotal = parseFloat(pRow['Total Price']) || 0;
+      }
+    }
+
+    cleanLines.push('----------------------------------------------------');
+    const finalTotal = grandTotal > 0 ? grandTotal : (grp.totalCost || 0);
+    if (finalTotal > 0) {
+      cleanLines.push(`ESTIMATED TOTAL (${totalUnits || grp.totalUnits || ''} units): $${finalTotal.toFixed(2)}\n`);
+    }
+
+    if (isReq) {
+      cleanLines.push('Please confirm receipt of this order request and reply with your official Vendor Order / Confirmation Number and estimated delivery date.\n');
+    } else {
+      cleanLines.push('Please reply with order confirmation and estimated delivery date.\n');
+    }
+    cleanLines.push('Thank you,\nSafety & PPE Operations\nMountain Power');
+
+    const cleanText = cleanLines.join('\n');
+
+    // 2. Build detailed internal breakdown text
+    let detailedLines = [cleanText, '\n====================================================', 'INTERNAL ASSIGNMENT BREAKDOWN:'];
+    itemsMap.forEach(it => {
+      const emps = it.employees.length ? it.employees.join(', ') : 'Shelf Stock';
+      detailedLines.push(`- ${it.quantity}x ${it.itemType} (${it.size}, ${it.classVal}) -> For: ${emps}`);
+    });
+    const detailedText = detailedLines.join('\n');
+
+    this.generatedPOTexts = {
+      clean: cleanText,
+      detailed: detailedText
+    };
+
+    const modal = document.getElementById('procurement-po-modal');
+    if (modal) {
+      const toInput = document.getElementById('procurement-po-email-to');
+      if (toInput) toInput.value = vendorEmail;
+      const subjInput = document.getElementById('procurement-po-subject');
+      if (subjInput) {
+        subjInput.value = isReq
+          ? `Purchase Order Request ${targetOrderNum} - Mountain Power (${vendorName})`
+          : `Purchase Order ${targetOrderNum} - Mountain Power (${vendorName})`;
+      }
+      const titleEl = document.getElementById('procurement-po-modal-title');
+      if (titleEl) {
+        titleEl.textContent = isReq ? `Email Order Request #${targetOrderNum} to Vendor` : `Email Order #${targetOrderNum} to Vendor`;
+      }
+      const textarea = document.getElementById('procurement-po-textarea');
+      if (textarea) textarea.value = cleanText;
+
+      const banner = document.getElementById('po-swaps-ordered-banner');
+      if (banner) banner.style.display = 'none';
+
+      this.setPOFormat('clean');
+      modal.style.display = 'flex';
+      modal.classList.add('active');
+    }
+  }
+
+  emailOrderFromHistory(poIndex) {
+    const po = this.poHistoryList ? this.poHistoryList[poIndex] : null;
+    if (!po) return;
+
+    const targetOrderNum = String(po.vendorOrderNum || po.poNum || 'Request').trim();
+    const isReq = /^REQ-/i.test(targetOrderNum);
+    const vendorName = po.vendor || (this.selectedVendor?.name || 'Vendor');
+    const vendorObj = this.vendors.find(v => v.name.toLowerCase() === vendorName.toLowerCase())
+      || (this.selectedVendor?.name?.toLowerCase() === vendorName.toLowerCase() ? this.selectedVendor : null)
+      || (this.vendors.length ? this.vendors[0] : null);
+
+    const vendorEmail = vendorObj?.email || '';
+    const vendorContact = vendorObj?.contact || vendorObj?.name || vendorName;
+    const vendorPhone = vendorObj?.phone || '';
+    const dateStr = po.date || new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+    const shipTo = this.getShippingAddress ? this.getShippingAddress() : 'Mountain Power - Helena Base\nSafety & PPE Operations\nHelena, MT';
+
+    let cleanLines = [];
+    const poTitle = isReq ? `PURCHASE ORDER REQUEST: ${targetOrderNum}` : `PURCHASE ORDER: ${targetOrderNum}`;
+    cleanLines.push(poTitle);
+    cleanLines.push(`Date: ${dateStr}`);
+    cleanLines.push(`Vendor / Supplier: ${vendorName || (vendorObj ? vendorObj.name : 'Vendor')}`);
+    if (vendorContact) cleanLines.push(`Attn: ${vendorContact}${vendorEmail ? ` (${vendorEmail})` : ''}`);
+    if (vendorPhone) cleanLines.push(`Phone: ${vendorPhone}`);
+    cleanLines.push(`Ship To: ${shipTo}`);
+    cleanLines.push('----------------------------------------------------');
+    cleanLines.push(isReq ? 'Please process the following purchase order request:\n' : 'Please fulfill the following purchase order:\n');
+
+    if (po.items) {
+      cleanLines.push(po.items);
+    }
+    cleanLines.push('----------------------------------------------------');
+    if (po.price > 0) {
+      cleanLines.push(`ESTIMATED TOTAL: $${po.price.toFixed(2)}\n`);
+    }
+    if (isReq) {
+      cleanLines.push('Please confirm receipt of this request and reply with your official Order Confirmation # and estimated ship date.\n');
+    } else {
+      cleanLines.push('Please reply with order confirmation and estimated delivery date.\n');
+    }
+    cleanLines.push('Thank you,\nSafety & PPE Operations\nMountain Power');
+
+    const cleanText = cleanLines.join('\n');
+    this.generatedPOTexts = { clean: cleanText, detailed: cleanText };
+
+    const modal = document.getElementById('procurement-po-modal');
+    if (modal) {
+      const toInput = document.getElementById('procurement-po-email-to');
+      if (toInput) toInput.value = vendorEmail;
+      const subjInput = document.getElementById('procurement-po-subject');
+      if (subjInput) {
+        subjInput.value = isReq
+          ? `Purchase Order Request ${targetOrderNum} - Mountain Power (${vendorName})`
+          : `Purchase Order ${targetOrderNum} - Mountain Power (${vendorName})`;
+      }
+      const titleEl = document.getElementById('procurement-po-modal-title');
+      if (titleEl) {
+        titleEl.textContent = isReq ? `Email Order Request #${targetOrderNum} to Vendor` : `Email Order #${targetOrderNum} to Vendor`;
+      }
+      const textarea = document.getElementById('procurement-po-textarea');
+      if (textarea) textarea.value = cleanText;
+
+      const banner = document.getElementById('po-swaps-ordered-banner');
+      if (banner) banner.style.display = 'none';
+
+      this.setPOFormat('clean');
+      modal.style.display = 'flex';
+      modal.classList.add('active');
+    }
   }
 
   /**
@@ -4067,6 +4291,13 @@ class ProcurementEngine {
 
     const modal = document.getElementById('procurement-po-modal');
     if (modal) {
+      const toInput = document.getElementById('procurement-po-email-to');
+      if (toInput) toInput.value = this.selectedVendor?.email || '';
+      const subjInput = document.getElementById('procurement-po-subject');
+      if (subjInput) subjInput.value = `Purchase Order ${this.getPurchaseOrderNumber()} - ${this.selectedVendor?.name || 'Vendor'}`;
+      const titleEl = document.getElementById('procurement-po-modal-title');
+      if (titleEl) titleEl.textContent = 'Email Purchase Order to Vendor';
+
       const banner = document.getElementById('po-swaps-ordered-banner');
       const bannerText = document.getElementById('po-swaps-ordered-text');
       if (banner && bannerText) {
@@ -6162,6 +6393,9 @@ class ProcurementEngine {
                     <span>🏷️</span> Vendor #
                   </button>
                 ` : ''}
+                <button class="btn btn-xs" onclick="window.procurementEngine.emailOrderFromHistory(${poHistoryIdx})" style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); color: #6ee7b7; padding: 3px 7px; font-size: 11px; border-radius: 3px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 3px;" title="Email this purchase order / request to vendor">
+                  <span>✉️</span> Email
+                </button>
                 <button class="btn btn-xs" onclick="window.procurementEngine.openEditOrderModal(${poHistoryIdx})" style="background: rgba(148, 163, 184, 0.15); border: 1px solid rgba(148, 163, 184, 0.35); color: #cbd5e1; padding: 3px 7px; font-size: 11px; border-radius: 3px; cursor: pointer; display: inline-flex; align-items: center; gap: 3px;" title="Edit Order #, Vendor, Dates, or Details">
                   <span>✏️</span> Edit
                 </button>
@@ -8049,31 +8283,27 @@ class ProcurementEngine {
       return;
     }
 
-    const consolidatedItems = this.consolidateItemsBySizeAndClass(activeItems);
+    // Check if the selected items belong to an existing order group in Ordered (Awaiting Delivery)
+    let detectedOrderKey = null;
+    for (const item of activeItems) {
+      if (item.orderKey) {
+        detectedOrderKey = item.orderKey;
+        break;
+      }
+      const ord = item.orderInfo?.vendorOrderNumber || item.orderInfo?.orderNumber || item.orderInfo?.poNumber;
+      if (ord && this.orderGroupsMap && this.orderGroupsMap.has(ord)) {
+        detectedOrderKey = ord;
+        break;
+      }
+    }
 
-    const v = this.selectedVendor;
-    const recipient = v ? v.email : '';
-    const subject = encodeURIComponent(`Purchase Order Request - PPE & Equipment (${new Date().toLocaleDateString()})`);
+    if (detectedOrderKey && this.orderGroupsMap && this.orderGroupsMap.has(detectedOrderKey)) {
+      this.emailOrderFromKey(detectedOrderKey);
+      return;
+    }
 
-    let bodyText = `Dear ${v ? (v.contact || v.name) : 'Vendor'},\n\nPlease process the following purchase order for Mountain Power:\n\n`;
-    bodyText += `========================================================\n`;
-    bodyText += `ITEM | SPEC / SIZE | PART # | QTY | UNIT | TOTAL\n`;
-    bodyText += `========================================================\n`;
-
-    let grandTotal = 0;
-    consolidatedItems.forEach(item => {
-      const lineTotal = item.price > 0 ? (item.price * item.quantity) : 0;
-      grandTotal += lineTotal;
-      const sizeDisplay = item.hasNoSize ? '⚠️ NEEDS SIZE (VERIFY)' : item.size;
-      bodyText += `${item.itemType} | Size: ${sizeDisplay} (${item.classVal}) | Part: ${item.partNumber || 'N/A'} | Qty: ${item.quantity} | Unit: $${item.price.toFixed(2)} | Total: $${lineTotal.toFixed(2)}\n`;
-    });
-
-    bodyText += `========================================================\n`;
-    bodyText += `ESTIMATED GRAND TOTAL: $${grandTotal.toFixed(2)}\n\n`;
-    bodyText += `Ship To:\nMountain Power - Helena Base\nSafety & PPE Operations\nHelena, MT\n\nThank you,\nSafety Department`;
-
-    const mailtoUrl = `mailto:${encodeURIComponent(recipient)}?subject=${subject}&body=${encodeURIComponent(bodyText)}`;
-    window.open(mailtoUrl, '_blank');
+    // If not part of an existing order group, generate PO text for selected items and open modal
+    this.generatePOText();
   }
 
   /**

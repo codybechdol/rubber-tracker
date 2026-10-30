@@ -2122,41 +2122,55 @@
 
   <!-- Generated Purchase Order Modal -->
   <div id="procurement-po-modal" class="modal-overlay">
-    <div class="modal-box" style="max-width: 680px; width: 92%; max-height: 88vh;">
-      <div class="modal-header" style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); color: white;">
+    <div class="modal-box" style="max-width: 760px; width: 92%; max-height: 90vh;">
+      <div class="modal-header" style="background: linear-gradient(135deg, #065f46 0%, #064e3b 100%); color: white;">
         <div style="display: flex; align-items: center; gap: 8px;">
-          <span style="font-size: 18px;">📝</span>
-          <span style="font-weight: 800; font-size: 15px;">Generated Purchase Order</span>
+          <span style="font-size: 18px;">✉️</span>
+          <span style="font-weight: 800; font-size: 15px;" id="procurement-po-modal-title">Email Purchase Order / Request to Vendor</span>
         </div>
         <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 12px; background: rgba(0,0,0,0.2); border: none; color: white; cursor: pointer;" onclick="document.getElementById('procurement-po-modal').style.display='none'">✕</button>
       </div>
       <div class="modal-body" style="padding: 20px;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; gap: 10px; flex-wrap: wrap;">
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 12px;">
+          <div>
+            <label style="display: block; font-size: 11.5px; font-weight: 700; color: #94a3b8; margin-bottom: 4px;">Vendor Email (To:)</label>
+            <input type="text" id="procurement-po-email-to" class="batch-delivery-input" placeholder="vendor@supplier.com" style="width: 100%; font-size: 12.5px; color: #38bdf8; font-weight: 600;">
+          </div>
+          <div>
+            <label style="display: block; font-size: 11.5px; font-weight: 700; color: #94a3b8; margin-bottom: 4px;">Email Subject</label>
+            <input type="text" id="procurement-po-subject" class="batch-delivery-input" placeholder="Purchase Order Request" style="width: 100%; font-size: 12.5px; font-weight: 600;">
+          </div>
+        </div>
+
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; gap: 10px; flex-wrap: wrap;">
           <div style="display: inline-flex; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; padding: 3px; gap: 4px;">
-            <button id="po-tab-clean" class="btn btn-secondary" style="padding: 5px 12px; font-size: 12px; font-weight: 700; border-radius: 4px; border: none; cursor: pointer; background: #2563eb; color: #ffffff;" onclick="window.procurementEngine.setPOFormat('clean')">
+            <button id="po-tab-clean" class="btn btn-secondary" style="padding: 4px 10px; font-size: 11.5px; font-weight: 700; border-radius: 4px; border: none; cursor: pointer; background: #2563eb; color: #ffffff;" onclick="window.procurementEngine.setPOFormat('clean')">
               🏷️ Vendor Order (Clean)
             </button>
-            <button id="po-tab-detailed" class="btn btn-secondary" style="padding: 5px 12px; font-size: 12px; font-weight: 700; border-radius: 4px; border: none; cursor: pointer; background: transparent; color: var(--text-secondary);" onclick="window.procurementEngine.setPOFormat('detailed')">
+            <button id="po-tab-detailed" class="btn btn-secondary" style="padding: 4px 10px; font-size: 11.5px; font-weight: 700; border-radius: 4px; border: none; cursor: pointer; background: transparent; color: var(--text-secondary);" onclick="window.procurementEngine.setPOFormat('detailed')">
               📋 Internal Summary (Detailed)
             </button>
           </div>
-          <span id="po-format-hint" style="font-size: 11.5px; color: var(--text-muted);">
-            Consolidated order ready to email to supplier (no worker names or internal section tags)
+          <span id="po-format-hint" style="font-size: 11px; color: var(--text-muted);">
+            Clean order ready to email to supplier (no worker names)
           </span>
         </div>
         <div id="po-swaps-ordered-banner" style="display: none; margin-bottom: 12px; padding: 8px 12px; border-radius: 6px; background: rgba(124, 58, 237, 0.15); border: 1px solid rgba(124, 58, 237, 0.4); color: #d8b4fe; font-size: 12px; font-weight: 600; align-items: center; gap: 8px;">
           <span>📦</span>
           <span id="po-swaps-ordered-text">Updated swap items marked as Ordered 📦</span>
         </div>
-        <textarea id="procurement-po-textarea" title="Generated Purchase Order Text" aria-label="Generated Purchase Order Text" placeholder="Purchase order details will appear here..." rows="16" style="width: 100%; font-family: monospace; font-size: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 12px; line-height: 1.5; resize: vertical;"></textarea>
+        <textarea id="procurement-po-textarea" title="Generated Purchase Order Text" aria-label="Generated Purchase Order Text" placeholder="Purchase order details will appear here..." rows="15" style="width: 100%; font-family: monospace; font-size: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 12px; line-height: 1.5; resize: vertical; user-select: text !important; -webkit-user-select: text !important;"></textarea>
       </div>
       <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap;">
         <button class="btn btn-secondary" onclick="document.getElementById('procurement-po-modal').style.display='none'">Close</button>
-        <div style="display: flex; gap: 8px;">
-          <button class="btn btn-secondary" id="btn-procurement-email-po" style="font-weight: 700; display: inline-flex; align-items: center; gap: 6px;" onclick="window.procurementEngine.openInEmailClient()">
-            <span>📧</span> Open in Email
+        <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+          <button class="btn btn-secondary" id="btn-procurement-email-gmail" style="font-weight: 700; display: inline-flex; align-items: center; gap: 6px; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); color: #f87171;" onclick="window.procurementEngine.openInGmail()" title="Compose directly in Gmail (browser)">
+            <span>🌐</span> Gmail
           </button>
-          <button class="btn btn-primary" id="btn-procurement-copy-po" style="font-weight: 700; display: inline-flex; align-items: center; gap: 6px;">
+          <button class="btn btn-secondary" id="btn-procurement-email-po" style="font-weight: 700; display: inline-flex; align-items: center; gap: 6px; background: rgba(59, 130, 246, 0.2); border: 1px solid rgba(59, 130, 246, 0.5); color: #93c5fd;" onclick="window.procurementEngine.openInEmailClient()" title="Launch Outlook or default desktop mail app">
+            <span>📧</span> Mail App
+          </button>
+          <button class="btn btn-primary" id="btn-procurement-copy-po" style="font-weight: 700; display: inline-flex; align-items: center; gap: 6px; background: #10b981; border: none; box-shadow: 0 2px 6px rgba(16, 185, 129, 0.35);" title="Copy email text to clipboard">
             <span>📋</span> Copy to Clipboard
           </button>
         </div>
@@ -3123,7 +3137,7 @@
   </script>
   <script src="js/trip-route-map.js?v=20260918_07"></script>
   <script src="js/lookup.js?v=20260901_25"></script>
-  <script src="js/procurement.js?v=20261030_02"></script>
+  <script src="js/procurement.js?v=20261030_03"></script>
   <script src="js/aging.js?v=20260901_25"></script>
   <script src="js/drug-testing.js?v=20260902_1"></script>
   <script src="js/ppe-tracking.js?v=20261019_01"></script>
