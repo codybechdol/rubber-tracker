@@ -860,10 +860,11 @@ class ProcurementEngine {
     let orderDate = '';
     let price = 0;
 
-    // Extract Order # / Vendor Order # / Invoice # (e.g. "Order #: 0819764", "Vendor Order #: WS-123", "Invoice #: 554")
+    // Extract Order # / Vendor Order # / Invoice # / Request # (e.g. "Order #: 0819764", "Vendor Order #: WS-123", "Request #: REQ-20261030-01")
     // Use word boundaries \b to prevent matching the start of "Ordered" or "Ordering"!
-    const voMatch = s.match(/\b(?:vendor\s*order|sales\s*order|invoice|inv|order)\b\s*(?:#|num(?:ber)?|:)?\s*[:#-]?\s*([A-Za-z0-9\-_.]+)/i);
-    if (voMatch && !/^(?:on|by|at|for|to|ed|ing|complete|completed|pending|placed)$/i.test(voMatch[1])) {
+    const voMatch = s.match(/\b(?:vendor\s*order|sales\s*order|order\s*request|request|req|invoice|inv|order)\b\s*(?:#|num(?:ber)?|:)\s*[:#-]?\s*([A-Za-z0-9\-_.]+)/i)
+      || s.match(/\b(?:vendor\s*order|sales\s*order|order\s*request|request|req|invoice|inv|order)\b\s*(?:#|num(?:ber)?|:)?\s*[:#-]?\s*([A-Za-z0-9\-_.]+)/i);
+    if (voMatch && !/^(?:on|by|at|for|to|ed|ing|request|req|order|details|information|complete|completed|pending|placed)$/i.test(voMatch[1])) {
       orderNumber = voMatch[1].trim();
     }
 
@@ -2810,7 +2811,7 @@ class ProcurementEngine {
       });
     } else {
       // Create an order object to edit (will auto-link/insert into purchase_orders on save)
-      const fallbackNum = targetOrderNum || '0819764';
+      const fallbackNum = targetOrderNum || this.generateNextRequestPoNumber();
       this.openEditOrderModal({
         rowIdx: null,
         poNum: fallbackNum,
@@ -3366,9 +3367,23 @@ class ProcurementEngine {
                 <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
                   <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
                     <span class="order-collapse-icon" style="font-size: 13px; color: #93c5fd; user-select: none;">${isOrderCollapsed ? '▶' : '▼'}</span>
-                    <span style="font-weight: 800; font-size: 14px; color: #f8fafc; letter-spacing: 0.3px;">
-                      📦 Order #: <span style="color: #60a5fa;">${this.escapeHtml(grp.vendorOrderNumber || grp.poNumber || 'Pending Order')}</span>
-                    </span>
+                    ${(() => {
+                      const displayNum = grp.vendorOrderNumber || grp.poNumber || 'Pending Order';
+                      const isRequestOnly = /^REQ-/i.test(displayNum) || /pending/i.test(displayNum);
+                      if (isRequestOnly) {
+                        return `
+                          <span style="font-weight: 800; font-size: 14px; color: #f8fafc; letter-spacing: 0.3px; display: inline-flex; align-items: center; gap: 6px;">
+                            📋 Request #: <span style="color: #fbbf24;">${this.escapeHtml(displayNum)}</span>
+                            <span class="badge" style="background: rgba(245, 158, 11, 0.2); color: #fcd34d; border: 1px solid rgba(245, 158, 11, 0.45); font-size: 10.5px; font-weight: 700; padding: 1px 6px; border-radius: 4px;">⏳ Awaiting Vendor Order #</span>
+                          </span>
+                        `;
+                      }
+                      return `
+                        <span style="font-weight: 800; font-size: 14px; color: #f8fafc; letter-spacing: 0.3px;">
+                          📦 Order #: <span style="color: #60a5fa;">${this.escapeHtml(displayNum)}</span>
+                        </span>
+                      `;
+                    })()}
                     ${grp.vendor ? `
                       <span style="font-weight: 600; color: #cbd5e1; font-size: 12.5px;">🏢 ${this.escapeHtml(grp.vendor)}</span>
                     ` : ''}
@@ -3387,6 +3402,11 @@ class ProcurementEngine {
                       <span style="font-weight: 700; font-family: monospace; font-size: 13px; color: #34d399; margin-right: 6px;">
                         $${grp.totalCost.toFixed(2)}
                       </span>
+                    ` : ''}
+                    ${(/^REQ-/i.test(grp.vendorOrderNumber || grp.poNumber || '') || /pending/i.test(grp.vendorOrderNumber || grp.poNumber || '')) ? `
+                      <button type="button" class="btn btn-xs" onclick="window.procurementEngine.promptUpdateVendorOrderNum('${orderKey}')" style="background: rgba(245, 158, 11, 0.22); border: 1px solid rgba(245, 158, 11, 0.55); color: #fcd34d; padding: 4px 9px; font-size: 11px; border-radius: 4px; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;" title="Update this Request with official Vendor Order # once received">
+                        <span>🏷️</span> Enter Vendor Order #
+                      </button>
                     ` : ''}
                     <button type="button" class="btn btn-xs" onclick="window.procurementEngine.quickMarkOrderReceivedFromKey('${orderKey}')" style="background: rgba(16, 185, 129, 0.2); border: 1px solid rgba(16, 185, 129, 0.5); color: #6ee7b7; padding: 4px 9px; font-size: 11px; border-radius: 4px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;" title="Mark this entire order as Received and clear it from Awaiting Delivery (items already added to inventory)">
                       <span>✅</span> Mark Received
@@ -4511,9 +4531,14 @@ class ProcurementEngine {
 
       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 14px; margin-bottom: 20px;">
         <div>
-          <label style="display: block; font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 5px;">Order # *</label>
-          <input type="text" id="mark-order-po-num" class="batch-delivery-input" placeholder="e.g. 0819764" style="font-weight: 700; color: #38bdf8;">
-          <div style="font-size: 11px; color: #64748b; margin-top: 2px;">Order number from vendor</div>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+            <label style="font-size: 12px; font-weight: 600; color: #94a3b8;">Order # / PO Request #</label>
+            <button type="button" class="btn btn-xs" onclick="window.procurementEngine.fillNextMarkOrderPoNumber()" style="padding: 1px 6px; font-size: 10px; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.35); color: #6ee7b7; cursor: pointer;" title="Auto-generate new Request #">
+              ⚡ Generate Request #
+            </button>
+          </div>
+          <input type="text" id="mark-order-po-num" class="batch-delivery-input" value="${this.escapeHtml(this.generateNextRequestPoNumber())}" placeholder="e.g. 0819764 or REQ-..." style="font-weight: 700; color: #38bdf8; pointer-events: auto !important; user-select: text !important; -webkit-user-select: text !important; cursor: text; width: 100%;">
+          <div style="font-size: 11px; color: #64748b; margin-top: 2px;">Pre-filled with Request #. Update with vendor's Order # now or anytime later.</div>
         </div>
         <div>
           <label style="display: block; font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 5px;">Vendor *</label>
@@ -4635,11 +4660,10 @@ class ProcurementEngine {
 
   async confirmMarkOrdered() {
     const poNumInput = document.getElementById('mark-order-po-num');
-    const orderNum = poNumInput ? poNumInput.value.trim() : '';
+    let orderNum = poNumInput ? poNumInput.value.trim() : '';
     if (!orderNum) {
-      alert('⚠️ Please enter an Order #.');
-      if (poNumInput) poNumInput.focus();
-      return;
+      orderNum = this.generateNextRequestPoNumber();
+      if (poNumInput) poNumInput.value = orderNum;
     }
 
     const vSelect = document.getElementById('mark-order-vendor-select');
@@ -5850,12 +5874,11 @@ class ProcurementEngine {
 
   async confirmAddPastOrder() {
     const poNumInput = document.getElementById('past-order-po-num');
-    const orderNum = poNumInput ? poNumInput.value.trim() : '';
+    let orderNum = poNumInput ? poNumInput.value.trim() : '';
 
     if (!orderNum) {
-      alert('⚠️ Please enter an Order Number.');
-      if (poNumInput) poNumInput.focus();
-      return;
+      orderNum = this.generateNextRequestPoNumber();
+      if (poNumInput) poNumInput.value = orderNum;
     }
     const poNum = orderNum;
 
@@ -6101,7 +6124,12 @@ class ProcurementEngine {
               ${this.escapeHtml(po.date)}
             </td>
             <td style="padding: 10px 12px; font-size: 13px;">
-              <div style="font-weight: 700; color: #38bdf8;">${this.escapeHtml(po.vendorOrderNum || po.poNum || '—')}</div>
+              <div style="font-weight: 700; color: #38bdf8; display: flex; align-items: center; gap: 6px;">
+                ${this.escapeHtml(po.vendorOrderNum || po.poNum || '—')}
+                ${(/^REQ-/i.test(po.vendorOrderNum || po.poNum || '') || /pending/i.test(po.vendorOrderNum || po.poNum || '')) ? `
+                  <span class="badge" style="background: rgba(245, 158, 11, 0.2); color: #fcd34d; border: 1px solid rgba(245, 158, 11, 0.45); font-size: 10px; padding: 1px 5px; border-radius: 3px;">Request</span>
+                ` : ''}
+              </div>
             </td>
             <td style="padding: 10px 12px; font-weight: 600; color: #f1f5f9;">
               ${this.escapeHtml(po.vendor || '—')}
@@ -6127,6 +6155,11 @@ class ProcurementEngine {
                   </button>
                   <button class="btn btn-xs" onclick="window.procurementEngine.quickMarkOrderReceived(${po.rowIdx}, '${this.escapeJs(po.vendorOrderNum || po.poNum)}')" style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); color: #6ee7b7; padding: 3px 7px; font-size: 11px; border-radius: 3px; cursor: pointer; display: inline-flex; align-items: center; gap: 3px;" title="Quick mark as Received and clear all matching line items from All Needs & Orders">
                     <span>✅</span> Mark Rec'd
+                  </button>
+                ` : ''}
+                ${(/^REQ-/i.test(po.vendorOrderNum || po.poNum || '') || /pending/i.test(po.vendorOrderNum || po.poNum || '')) ? `
+                  <button class="btn btn-xs" onclick="window.procurementEngine.promptUpdateVendorOrderNum('${this.escapeJs(po.vendorOrderNum || po.poNum)}')" style="background: rgba(245, 158, 11, 0.2); border: 1px solid rgba(245, 158, 11, 0.45); color: #fcd34d; padding: 3px 7px; font-size: 11px; border-radius: 3px; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 3px;" title="Update this Request with official Vendor Order # once received">
+                    <span>🏷️</span> Vendor #
                   </button>
                 ` : ''}
                 <button class="btn btn-xs" onclick="window.procurementEngine.openEditOrderModal(${poHistoryIdx})" style="background: rgba(148, 163, 184, 0.15); border: 1px solid rgba(148, 163, 184, 0.35); color: #cbd5e1; padding: 3px 7px; font-size: 11px; border-radius: 3px; cursor: pointer; display: inline-flex; align-items: center; gap: 3px;" title="Edit Order #, Vendor, Dates, or Details">
@@ -6262,25 +6295,212 @@ class ProcurementEngine {
     }
   }
 
+  generateNextRequestPoNumber() {
+    const today = new Date();
+    const yyyy = today.getFullYear();
+    const mm = String(today.getMonth() + 1).padStart(2, '0');
+    const dd = String(today.getDate()).padStart(2, '0');
+    const datePrefix = `REQ-${yyyy}${mm}${dd}-`;
+
+    const snap = (this.db && typeof this.db.getSnapshot === 'function')
+      ? this.db.getSnapshot()
+      : (window.localDB ? window.localDB.getSnapshot() : null);
+    const poTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('purchase_orders') : null) || snap?.tables?.['purchase_orders'];
+
+    let maxSeq = 0;
+    const checkString = (str) => {
+      if (!str) return;
+      const re = new RegExp(`${datePrefix}(\\d+)`, 'i');
+      const match = String(str).match(re);
+      if (match) {
+        const seq = parseInt(match[1], 10);
+        if (!isNaN(seq) && seq > maxSeq) maxSeq = seq;
+      }
+    };
+
+    if (poTable && poTable.rows) {
+      poTable.rows.forEach(r => {
+        checkString(r['PO Number']);
+        checkString(r['PO #']);
+        checkString(r['Notes']);
+      });
+    }
+
+    // Also check swap tables and equipment needs
+    ['glove_swaps', 'sleeve_swaps', 'blanket_swaps', 'mack_swaps', 'safety_equipment_needs'].forEach(sk => {
+      const tbl = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable(sk) : null) || snap?.tables?.[sk];
+      if (tbl && tbl.rows) {
+        tbl.rows.forEach(r => {
+          checkString(r['Status']);
+          checkString(r['Notes']);
+        });
+      }
+    });
+
+    const nextSeq = String(maxSeq + 1).padStart(2, '0');
+    return `${datePrefix}${nextSeq}`;
+  }
+
+  fillNextRequestPoNumber() {
+    const el = document.getElementById('edit-order-po-num');
+    if (el) {
+      el.value = this.generateNextRequestPoNumber();
+      el.focus();
+      el.select();
+    }
+  }
+
+  fillNextMarkOrderPoNumber() {
+    const el = document.getElementById('mark-order-po-num');
+    if (el) {
+      el.value = this.generateNextRequestPoNumber();
+      el.focus();
+      el.select();
+    }
+  }
+
+  async promptUpdateVendorOrderNum(orderKeyOrPoNum) {
+    let oldNum = orderKeyOrPoNum;
+    if (this.orderGroupsMap && this.orderGroupsMap.has(orderKeyOrPoNum)) {
+      const grp = this.orderGroupsMap.get(orderKeyOrPoNum);
+      oldNum = grp.vendorOrderNumber || grp.orderNumber || grp.poNumber || orderKeyOrPoNum;
+    }
+    const promptMsg = `Enter official Vendor Order # for ${oldNum}:`;
+    const newNum = prompt(promptMsg, '');
+    if (newNum === null) return;
+    const trimmed = newNum.trim();
+    if (!trimmed) {
+      alert('⚠️ Vendor Order # cannot be empty.');
+      return;
+    }
+    await this.updateOrderNumber(oldNum, trimmed);
+  }
+
+  async updateOrderNumber(oldOrderNum, newOrderNum) {
+    if (!oldOrderNum || !newOrderNum) return;
+    const oldClean = String(oldOrderNum).trim();
+    const newClean = String(newOrderNum).trim();
+    if (oldClean.toLowerCase() === newClean.toLowerCase()) return;
+
+    try {
+      const snap = (this.db && typeof this.db.getSnapshot === 'function')
+        ? this.db.getSnapshot()
+        : (window.localDB ? window.localDB.getSnapshot() : null);
+
+      // 1. Update purchase_orders table
+      const poTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('purchase_orders') : null) || snap?.tables?.['purchase_orders'];
+      if (poTable && poTable.rows) {
+        const poRow = poTable.rows.find(r => {
+          const p = String(r['PO Number'] || r['PO #'] || '').trim().toLowerCase();
+          const n = String(r['Notes'] || '').toLowerCase();
+          return p === oldClean.toLowerCase() || n.includes(oldClean.toLowerCase());
+        });
+        if (poRow) {
+          poRow['PO Number'] = newClean;
+          if (poRow['Notes']) {
+            poRow['Notes'] = poRow['Notes'].replace(new RegExp(oldClean, 'gi'), newClean);
+          }
+          this.db.syncRowToRawGrid(poTable, poRow);
+          const rIdx = poRow._rowIdx || (poTable.rows.indexOf(poRow) + 2);
+          await this.db.addMutation({
+            action: 'UPDATE_ROW',
+            sheetName: poTable.name || 'Purchase Orders',
+            tableKey: 'purchase_orders',
+            row: rIdx,
+            updates: poRow,
+            rowData: poRow
+          });
+        }
+      }
+
+      // 2. Cascade to swap sheets and safety_equipment_needs
+      const targetTables = ['glove_swaps', 'sleeve_swaps', 'blanket_swaps', 'mack_swaps', 'safety_equipment_needs'];
+      const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const oldRegex = new RegExp(`(?:Order\\s*#:\\s*|PO:\\s*)?${escapeRegex(oldClean)}`, 'gi');
+
+      for (const sk of targetTables) {
+        const sTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable(sk) : null) || snap?.tables?.[sk];
+        if (sTable && sTable.rows) {
+          for (const sr of sTable.rows) {
+            let changed = false;
+            const stat = String(sr['Status'] || '');
+            const notes = String(sr['Notes'] || '');
+
+            if (stat.toLowerCase().includes(oldClean.toLowerCase())) {
+              sr['Status'] = stat.replace(oldRegex, `Order #: ${newClean}`);
+              changed = true;
+            }
+            if (notes.toLowerCase().includes(oldClean.toLowerCase())) {
+              sr['Notes'] = notes.replace(oldRegex, `Order #: ${newClean}`);
+              changed = true;
+            }
+
+            if (changed) {
+              this.db.syncRowToRawGrid(sTable, sr);
+              const rIdx = sr._rowIdx || (sTable.rows.indexOf(sr) + 2);
+              await this.db.addMutation({
+                action: 'UPDATE_ROW',
+                sheetName: sTable.name,
+                tableKey: sk,
+                row: rIdx,
+                updates: sr,
+                rowData: sr
+              });
+              await this.db.addMutation({
+                action: 'UPDATE_CELL',
+                sheetName: sTable.name,
+                tableKey: sk,
+                row: rIdx,
+                col: 8,
+                value: sr['Status']
+              });
+              await this.db.addMutation({
+                action: 'UPDATE_CELL',
+                sheetName: sTable.name,
+                tableKey: sk,
+                row: rIdx,
+                col: 12,
+                value: sr['Notes']
+              });
+            }
+          }
+        }
+      }
+
+      await this.db.saveToDisk();
+      await this.scanPurchaseNeeds();
+      this.render();
+      if (window.showToast) {
+        window.showToast(`✅ Order updated: ${oldClean} ➔ ${newClean}`, 'success');
+      } else {
+        alert(`✅ Order updated successfully: ${oldClean} ➔ ${newClean}`);
+      }
+    } catch (err) {
+      console.error('Error updating order number:', err);
+      alert('❌ Failed to update order number: ' + (err.message || err));
+    }
+  }
+
   openCreateOrderModal() {
+    const nextReq = this.generateNextRequestPoNumber();
     this.openEditOrderModal({
       rowIdx: null,
-      poNum: '',
-      orderNum: '',
+      poNum: nextReq,
+      orderNum: nextReq,
       vendor: this.selectedVendor || (this.vendors[0] ? this.vendors[0].name : 'Wagner Smith'),
       date: new Date().toISOString().split('T')[0],
       expDeliv: '',
       status: 'Ordered',
       price: 0,
       items: '',
-      notes: ''
+      notes: `Order Request; Request #: ${nextReq}`
     });
     const title = document.getElementById('edit-order-modal-title');
-    if (title) title.textContent = 'Create New Purchase Order';
+    if (title) title.innerHTML = `<span>➕</span> Create Order Request / Requisition`;
     const deleteBtn = document.getElementById('btn-delete-order');
     if (deleteBtn) deleteBtn.style.display = 'none';
     const saveBtn = document.getElementById('btn-save-edit-order');
-    if (saveBtn) saveBtn.innerHTML = '<span>💾</span> Create Order';
+    if (saveBtn) saveBtn.innerHTML = '<span>🚀</span> Submit / Create Order Request';
   }
 
   openEditOrderModal(poIndex) {
@@ -6305,13 +6525,20 @@ class ProcurementEngine {
     if (cleanOrderNum.toLowerCase() === 'ed') cleanOrderNum = '';
 
     if (title) {
-      title.textContent = po.rowIdx ? (cleanOrderNum ? `Edit Order #${cleanOrderNum}` : 'Edit Order') : 'Create New Purchase Order';
+      if (po.rowIdx) {
+        const isReq = /^REQ-/i.test(cleanOrderNum);
+        title.innerHTML = isReq
+          ? `<span>✏️</span> Edit Order Request <span style="color: #fbbf24;">#${this.escapeHtml(cleanOrderNum)}</span>`
+          : (cleanOrderNum ? `<span>✏️</span> Edit Order <span style="color: #60a5fa;">#${this.escapeHtml(cleanOrderNum)}</span>` : '<span>✏️</span> Edit Order');
+      } else {
+        title.innerHTML = `<span>➕</span> Create Order Request / Requisition`;
+      }
     }
 
     const deleteBtn = document.getElementById('btn-delete-order');
     if (deleteBtn) deleteBtn.style.display = po.rowIdx ? 'inline-block' : 'none';
     const saveBtn = document.getElementById('btn-save-edit-order');
-    if (saveBtn) saveBtn.innerHTML = po.rowIdx ? '<span>💾</span> Save Changes' : '<span>💾</span> Create Order';
+    if (saveBtn) saveBtn.innerHTML = po.rowIdx ? '<span>💾</span> Save Changes' : '<span>🚀</span> Submit / Create Order Request';
 
     const toYmd = (dStr) => {
       if (!dStr) return '';
@@ -6477,8 +6704,16 @@ class ProcurementEngine {
 
       <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px;">
         <div>
-          <label style="display: block; font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 5px;">Order # *</label>
-          <input type="text" id="edit-order-po-num" class="batch-delivery-input" value="${this.escapeHtml(cleanOrderNum)}" placeholder="e.g. 0819764" style="font-weight: 700; color: #38bdf8;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+            <label style="font-size: 12px; font-weight: 600; color: #94a3b8;">Order # / PO Request #</label>
+            <button type="button" class="btn btn-xs" onclick="window.procurementEngine.fillNextRequestPoNumber()" style="padding: 1px 6px; font-size: 10px; background: rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.35); color: #60a5fa; cursor: pointer;" title="Auto-generate new Request #">
+              ⚡ Generate Request #
+            </button>
+          </div>
+          <input type="text" id="edit-order-po-num" class="batch-delivery-input" value="${this.escapeHtml(cleanOrderNum || this.generateNextRequestPoNumber())}" placeholder="e.g. 0819764 or REQ-..." style="font-weight: 700; color: #38bdf8; pointer-events: auto !important; user-select: text !important; -webkit-user-select: text !important; cursor: text; width: 100%;">
+          <div style="font-size: 11px; color: #64748b; margin-top: 3px;">
+            💡 Don't have a vendor order number yet? Leave as Request # or blank. You can update with the vendor's Order # at any time once received.
+          </div>
         </div>
         <div>
           <label style="display: block; font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 5px;">Vendor *</label>
@@ -6615,6 +6850,14 @@ class ProcurementEngine {
     this.renderEditOrderItemsContainer();
     this.onAddOrderItemChange();
     this.syncEditOrderSummaryFromItems();
+
+    setTimeout(() => {
+      const poInp = document.getElementById('edit-order-po-num');
+      if (poInp) {
+        poInp.focus();
+        poInp.select();
+      }
+    }, 60);
   }
 
   renderEditOrderItemsContainer() {
@@ -6887,9 +7130,8 @@ class ProcurementEngine {
     const poNumInput = document.getElementById('edit-order-po-num');
     let orderNum = poNumInput ? poNumInput.value.trim() : '';
     if (!orderNum || orderNum.toLowerCase() === 'ed') {
-      alert('⚠️ Please enter a valid Order Number (e.g. 0819764).');
-      if (poNumInput) poNumInput.focus();
-      return;
+      orderNum = this.generateNextRequestPoNumber();
+      if (poNumInput) poNumInput.value = orderNum;
     }
 
     const vSelect = document.getElementById('edit-order-vendor-select');
@@ -6929,12 +7171,14 @@ class ProcurementEngine {
       }
     }
     if (orderNum) {
-      if (finalNotes.toLowerCase().includes('order #:')) {
-        finalNotes = finalNotes.replace(/order #:\s*[^;,]+/i, `Order #: ${orderNum}`);
+      const isReq = /^REQ-/i.test(orderNum);
+      const tag = isReq ? `Request #: ${orderNum}` : `Order #: ${orderNum}`;
+      if (finalNotes.toLowerCase().includes('order #:') || finalNotes.toLowerCase().includes('request #:')) {
+        finalNotes = finalNotes.replace(/(?:order|request)\s*#:\s*[^;,]+/i, tag);
       } else if (finalNotes.toLowerCase().includes('vendor order #:')) {
-        finalNotes = finalNotes.replace(/vendor order #:\s*[^;,]+/i, `Order #: ${orderNum}`);
+        finalNotes = finalNotes.replace(/vendor order #:\s*[^;,]+/i, tag);
       } else {
-        finalNotes = finalNotes ? `${finalNotes}; Order #: ${orderNum}` : `Order #: ${orderNum}`;
+        finalNotes = finalNotes ? `${finalNotes}; ${tag}` : tag;
       }
     }
 
