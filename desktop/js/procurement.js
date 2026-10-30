@@ -3148,6 +3148,9 @@ class ProcurementEngine {
               <td style="padding: 6px 8px; text-align: center;">
                 ${item.section === 'ordered_pending' ? `
                   <div style="display: flex; align-items: center; justify-content: center; gap: 3px; flex-wrap: wrap;">
+                    <button type="button" class="btn btn-xs" onclick="window.procurementEngine.quickMarkEmployeeItemReceived('${this.escapeJs(emp.name)}', '${this.escapeJs(item.itemType)}', '${this.escapeJs(item.size)}', '${this.escapeJs(item.classVal || '')}', ${item._globalIdx})" style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.35); color: #6ee7b7; padding: 2px 5px; font-size: 10.5px; border-radius: 3px; cursor: pointer;" title="Mark received for this employee (already added to inventory)">
+                      <span>✅</span> Rec'd
+                    </button>
                     <button type="button" class="btn btn-xs" onclick="window.procurementEngine.openDeliverForEmployee('${this.escapeJs(emp.name)}', '${this.escapeJs(item.itemType)}', '${this.escapeJs(item.size)}')" style="background: rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.35); color: #93c5fd; padding: 2px 6px; font-size: 10.5px; border-radius: 3px; cursor: pointer;">
                       <span>🚚</span> Deliver
                     </button>
@@ -3265,7 +3268,10 @@ class ProcurementEngine {
           <td style="padding: 8px; text-align: center;">
             ${item.section === 'ordered_pending' ? `
               <div style="display: flex; align-items: center; justify-content: center; gap: 4px; flex-wrap: wrap;">
-                <button type="button" class="btn btn-xs" onclick="window.procurementEngine.openBatchDeliveryModal([window.procurementEngine.items[${item._globalIdx}]])" style="background: rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.4); color: #93c5fd; padding: 3px 7px; font-size: 11px; border-radius: 3px; cursor: pointer; display: inline-flex; align-items: center; gap: 3px;" title="Receive this delivered item into inventory">
+                <button type="button" class="btn btn-xs" onclick="window.procurementEngine.quickMarkItemReceived(${item._globalIdx})" style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); color: #6ee7b7; padding: 3px 7px; font-size: 11px; border-radius: 3px; cursor: pointer; display: inline-flex; align-items: center; gap: 3px;" title="Mark this line item as Received and clear it from Awaiting Delivery (already added to inventory)">
+                  <span>✅</span> Mark Rec'd
+                </button>
+                <button type="button" class="btn btn-xs" onclick="window.procurementEngine.openBatchDeliveryModal([window.procurementEngine.items[${item._globalIdx}]])" style="background: rgba(59, 130, 246, 0.15); border: 1px solid rgba(59, 130, 246, 0.4); color: #93c5fd; padding: 3px 7px; font-size: 11px; border-radius: 3px; cursor: pointer; display: inline-flex; align-items: center; gap: 3px;" title="Receive this delivered item into inventory and assign new item numbers">
                   <span>🚚</span> Deliver
                 </button>
                 <button type="button" class="btn btn-xs" onclick="window.procurementEngine.openEditPendingOrderItem(${item._globalIdx})" style="background: rgba(148, 163, 184, 0.15); border: 1px solid rgba(148, 163, 184, 0.35); color: #cbd5e1; padding: 3px 7px; font-size: 11px; border-radius: 3px; cursor: pointer; display: inline-flex; align-items: center; gap: 3px;" title="Edit Order #, Price, and Assigned Lineman">
@@ -3382,7 +3388,10 @@ class ProcurementEngine {
                         $${grp.totalCost.toFixed(2)}
                       </span>
                     ` : ''}
-                    <button type="button" class="btn btn-xs" onclick="window.procurementEngine.openBatchDeliveryModal(window.procurementEngine.getOrderItems('${orderKey}'))" style="background: rgba(59, 130, 246, 0.2); border: 1px solid rgba(59, 130, 246, 0.5); color: #93c5fd; padding: 4px 9px; font-size: 11px; border-radius: 4px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;" title="Receive all delivered items in this order into inventory">
+                    <button type="button" class="btn btn-xs" onclick="window.procurementEngine.quickMarkOrderReceivedFromKey('${orderKey}')" style="background: rgba(16, 185, 129, 0.2); border: 1px solid rgba(16, 185, 129, 0.5); color: #6ee7b7; padding: 4px 9px; font-size: 11px; border-radius: 4px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;" title="Mark this entire order as Received and clear it from Awaiting Delivery (items already added to inventory)">
+                      <span>✅</span> Mark Received
+                    </button>
+                    <button type="button" class="btn btn-xs" onclick="window.procurementEngine.openBatchDeliveryModal(window.procurementEngine.getOrderItems('${orderKey}'))" style="background: rgba(59, 130, 246, 0.2); border: 1px solid rgba(59, 130, 246, 0.5); color: #93c5fd; padding: 4px 9px; font-size: 11px; border-radius: 4px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;" title="Receive all delivered items in this order into inventory and assign new item numbers">
                       <span>🚚</span> Receive Order
                     </button>
                     <button type="button" class="btn btn-xs" onclick="window.procurementEngine.openEditOrderFromKey('${orderKey}')" style="background: rgba(148, 163, 184, 0.18); border: 1px solid rgba(148, 163, 184, 0.4); color: #e2e8f0; padding: 4px 8px; font-size: 11px; border-radius: 4px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;" title="Edit Order #, Vendor, Dates, or Details">
@@ -4855,6 +4864,101 @@ class ProcurementEngine {
     }
   }
 
+  async quickMarkOrderReceivedFromKey(orderKey) {
+    const grp = this.orderGroupsMap ? this.orderGroupsMap.get(orderKey) : null;
+    const poNum = grp ? String(grp.vendorOrderNumber || grp.orderNumber || grp.poNumber || '').trim() : '';
+
+    if (!confirm(`Mark Order #${poNum || ''} as Received and clear from Awaiting Delivery?\n\nUse this when the order has arrived and items have already been entered into inventory. It will update the tracking log to "Received" and clear all pending line items without creating duplicate inventory entries.`)) {
+      return;
+    }
+
+    try {
+      const todayStr = this.formatToMdY ? this.formatToMdY(new Date().toISOString().split('T')[0]) : new Date().toLocaleDateString();
+
+      const assignedEmps = [];
+      if (grp && grp.items) {
+        grp.items.forEach(it => {
+          (it.employees || []).forEach(e => { if (e.name) assignedEmps.push(e.name); });
+        });
+      }
+
+      await this.resolveReceivedOrderItems(poNum, {
+        assignedEmployees: assignedEmps,
+        isReadyForDelivery: false,
+        todayStr: todayStr
+      });
+
+      await this.loadData();
+      this.render();
+
+      if (window.ppeTrackingEngine && typeof window.ppeTrackingEngine.refresh === 'function') {
+        window.ppeTrackingEngine.refresh();
+      }
+
+      alert(`✅ Order #${poNum || ''} marked as Received and cleared from Awaiting Delivery!`);
+    } catch (err) {
+      console.error('Error marking order received from key:', err);
+      alert('❌ Failed to update order status: ' + (err.message || err));
+    }
+  }
+
+  async quickMarkItemReceived(globalIdx) {
+    const item = (this.items || [])[globalIdx];
+    if (!item) return;
+    const emps = (item.employees || []).map(e => e.name).filter(Boolean);
+    const poNum = item.orderInfo?.vendorOrderNumber || item.orderInfo?.orderNumber || item.orderInfo?.poNumber || '';
+    const desc = `${item.quantity || 1}x ${item.itemType} (Size ${item.size})`;
+
+    if (!confirm(`Mark ${desc} as Received?\n\nThis will update tracking status to "Received" and clear this item from Awaiting Delivery without creating duplicate inventory records.`)) {
+      return;
+    }
+
+    try {
+      const todayStr = this.formatToMdY ? this.formatToMdY(new Date().toISOString().split('T')[0]) : new Date().toLocaleDateString();
+      await this.resolveReceivedOrderItems(poNum, {
+        assignedEmployees: emps,
+        isReadyForDelivery: false,
+        todayStr: todayStr
+      });
+      await this.loadData();
+      this.render();
+      if (window.ppeTrackingEngine && typeof window.ppeTrackingEngine.refresh === 'function') {
+        window.ppeTrackingEngine.refresh();
+      }
+      alert(`✅ Marked as Received!`);
+    } catch (err) {
+      console.error('Error marking item received:', err);
+      alert('❌ Failed to mark received: ' + (err.message || err));
+    }
+  }
+
+  async quickMarkEmployeeItemReceived(empName, itemType, size, classVal, globalIdx) {
+    const item = (this.items || [])[globalIdx];
+    const poNum = item?.orderInfo?.vendorOrderNumber || item?.orderInfo?.orderNumber || item?.orderInfo?.poNumber || '';
+
+    if (!confirm(`Mark ${itemType} (Size ${size}) for ${empName} as Received?\n\nThis will clear this pending item from Awaiting Delivery.`)) {
+      return;
+    }
+
+    try {
+      const todayStr = this.formatToMdY ? this.formatToMdY(new Date().toISOString().split('T')[0]) : new Date().toLocaleDateString();
+      await this.resolveReceivedOrderItems(poNum, {
+        assignedEmployees: [empName],
+        isReadyForDelivery: false,
+        todayStr: todayStr
+      });
+      await this.loadData();
+      this.render();
+      if (window.ppeTrackingEngine && typeof window.ppeTrackingEngine.refresh === 'function') {
+        window.ppeTrackingEngine.refresh();
+      }
+      alert(`✅ Marked as Received for ${empName}!`);
+    } catch (err) {
+      console.error('Error marking employee item received:', err);
+      alert('❌ Failed to mark received: ' + (err.message || err));
+    }
+  }
+
   /**
    * Comprehensive handler to resolve and clear matching line items across All Needs & Orders
    * (safety_equipment_needs, swap sheets, and purchase_orders) when an order is received or marked delivered.
@@ -4990,47 +5094,106 @@ class ProcurementEngine {
     const swapKeys = ['glove_swaps', 'sleeve_swaps', 'blanket_swaps', 'mack_swaps'];
     for (const sk of swapKeys) {
       const sTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable(sk) : null) || snap?.tables?.[sk];
-      if (sTable && sTable.rows) {
-        for (const sr of sTable.rows) {
-          const emp = String(sr['Employee'] || sr['Employee Name'] || sr['Assigned To'] || Object.values(sr)[0] || '').trim();
-          const stat = String(sr['Status'] || '');
-          const notes = String(sr['Notes'] || '');
-          if (matchesPoOrEmp(emp, stat, notes)) {
-            // Find unit itemNum if available
-            let assignedItemNum = '';
-            if (options.units) {
-              const matchedU = options.units.find(u => this.isNameMatch(u.empName, emp));
-              if (matchedU && (matchedU.suggestedNum || matchedU.itemNum)) {
-                assignedItemNum = matchedU.suggestedNum || matchedU.itemNum;
+      if (sTable) {
+        const isMack = (sk === 'mack_swaps');
+        const statColIdx = isMack ? 9 : 7; // 0-based
+        const notesColIdx = isMack ? 11 : 11; // 0-based
+        const pickColIdx = isMack ? 8 : 6;
+        const pickedColIdx = isMack ? 10 : 8;
+
+        if (sTable.rows) {
+          for (const sr of sTable.rows) {
+            const emp = String(sr['Employee'] || sr['Employee Name'] || sr['Assigned To'] || Object.values(sr)[0] || '').trim();
+            const stat = String(sr['Status'] || '');
+            const notes = String(sr['Notes'] || '');
+            if (matchesPoOrEmp(emp, stat, notes)) {
+              // Find unit itemNum if available
+              let assignedItemNum = '';
+              if (options.units) {
+                const matchedU = options.units.find(u => this.isNameMatch(u.empName, emp));
+                if (matchedU && (matchedU.suggestedNum || matchedU.itemNum)) {
+                  assignedItemNum = matchedU.suggestedNum || matchedU.itemNum;
+                }
               }
-            }
-            if (isReadyForDelivery) {
-              sr['Status'] = 'Ready For Delivery 🚚';
+              const newStatus = isReadyForDelivery ? 'Ready For Delivery 🚚' : 'Complete';
+              sr['Status'] = newStatus;
               if (assignedItemNum) {
                 sr['Pick List Item #'] = assignedItemNum;
                 sr['Picked For'] = assignedItemNum;
               }
               sr['Picked'] = true;
-            } else {
-              sr['Status'] = 'Complete';
-              if (assignedItemNum) {
-                sr['Pick List Item #'] = assignedItemNum;
-                sr['Picked For'] = assignedItemNum;
+              this.db.syncRowToRawGrid(sTable, sr);
+              const rIdx = sr._rowIdx || (sTable.rows.indexOf(sr) + 2);
+
+              if (sTable.rawGrid && sTable.rawGrid[rIdx - 1] && Array.isArray(sTable.rawGrid[rIdx - 1])) {
+                sTable.rawGrid[rIdx - 1][statColIdx] = newStatus;
+                sTable.rawGrid[rIdx - 1][pickedColIdx] = true;
+                if (assignedItemNum) sTable.rawGrid[rIdx - 1][pickColIdx] = assignedItemNum;
               }
-              sr['Picked'] = true;
+
+              // Send cell updates for cloud sync
+              await this.db.addMutation({
+                action: 'UPDATE_CELL',
+                sheetName: sTable.name,
+                tableKey: sk,
+                row: rIdx,
+                col: statColIdx + 1,
+                value: newStatus
+              });
+              await this.db.addMutation({
+                action: 'UPDATE_CELL',
+                sheetName: sTable.name,
+                tableKey: sk,
+                row: rIdx,
+                col: pickedColIdx + 1,
+                value: true
+              });
+              if (assignedItemNum) {
+                await this.db.addMutation({
+                  action: 'UPDATE_CELL',
+                  sheetName: sTable.name,
+                  tableKey: sk,
+                  row: rIdx,
+                  col: pickColIdx + 1,
+                  value: assignedItemNum
+                });
+              }
+              if (isReadyForDelivery && assignedItemNum && typeof this.db.saveManualPick === 'function') {
+                const oldItemNum = String(sr['Current Item #'] || sr['Current Item'] || sr['Glove'] || sr['Sleeve'] || sr['Blanket'] || sr['MACK'] || '').trim();
+                this.db.saveManualPick(sk, emp, oldItemNum, assignedItemNum, 'Ready For Delivery 🚚', true);
+              }
             }
-            this.db.syncRowToRawGrid(sTable, sr);
-            const rIdx = sr._rowIdx || (sTable.rows.indexOf(sr) + 2);
-            await this.db.addMutation({
-              action: 'UPDATE_ROW',
-              sheetName: sTable.name,
-              tableKey: sk,
-              row: rIdx,
-              rowData: sr
-            });
-            if (isReadyForDelivery && assignedItemNum && typeof this.db.saveManualPick === 'function') {
-              const oldItemNum = String(sr['Current Item #'] || sr['Current Item'] || sr['Glove'] || sr['Sleeve'] || sr['Blanket'] || sr['MACK'] || '').trim();
-              this.db.saveManualPick(sk, emp, oldItemNum, assignedItemNum, 'Ready For Delivery 🚚', true);
+          }
+        }
+
+        // Also update rawGrid directly if sTable.rows was empty or detached
+        if (sTable.rawGrid && Array.isArray(sTable.rawGrid)) {
+          for (let r = 1; r < sTable.rawGrid.length; r++) {
+            const gridRow = sTable.rawGrid[r];
+            if (!Array.isArray(gridRow)) continue;
+            const emp = String(gridRow[0] || '').trim();
+            const stat = String(gridRow[statColIdx] || '').trim();
+            const notes = String(gridRow[notesColIdx] || '').trim();
+            if (emp && stat.toLowerCase().includes('order') && matchesPoOrEmp(emp, stat, notes)) {
+              const newStatus = isReadyForDelivery ? 'Ready For Delivery 🚚' : 'Complete';
+              gridRow[statColIdx] = newStatus;
+              gridRow[pickedColIdx] = true;
+              await this.db.addMutation({
+                action: 'UPDATE_CELL',
+                sheetName: sTable.name,
+                tableKey: sk,
+                row: r + 1,
+                col: statColIdx + 1,
+                value: newStatus
+              });
+              await this.db.addMutation({
+                action: 'UPDATE_CELL',
+                sheetName: sTable.name,
+                tableKey: sk,
+                row: r + 1,
+                col: pickedColIdx + 1,
+                value: true
+              });
             }
           }
         }
@@ -5764,6 +5927,15 @@ class ProcurementEngine {
 
       await this.db.addRow('purchase_orders', rowObj, 'Manual Past Order');
 
+      if (status === 'Received') {
+        const assignedEmps = parsedItems.map(it => it.employeeName).filter(Boolean);
+        await this.resolveReceivedOrderItems(poNum, {
+          assignedEmployees: assignedEmps,
+          isReadyForDelivery: false,
+          todayStr: formatToMdY(delivDate) || new Date().toLocaleDateString()
+        });
+      }
+
       this.closeAddPastOrderModal();
       await this.loadData();
       this.render();
@@ -5994,8 +6166,11 @@ class ProcurementEngine {
               Total Spend: <strong>$${totalSpend.toFixed(2)}</strong>
             </span>
           </div>
+          <button class="btn btn-primary" onclick="window.procurementEngine.openCreateOrderModal()" style="display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 6px 14px; background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%); border: none; box-shadow: 0 2px 6px rgba(59, 130, 246, 0.35); color: #fff; font-weight: 700;">
+            <span>➕</span> Create Order
+          </button>
           <button class="btn btn-secondary" onclick="window.procurementEngine.openAddPastOrderModal()" style="display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 6px 12px;">
-            <span>➕</span> Log Past Order
+            <span>📜</span> Log Past Order
           </button>
         </div>
       </div>
@@ -6087,6 +6262,27 @@ class ProcurementEngine {
     }
   }
 
+  openCreateOrderModal() {
+    this.openEditOrderModal({
+      rowIdx: null,
+      poNum: '',
+      orderNum: '',
+      vendor: this.selectedVendor || (this.vendors[0] ? this.vendors[0].name : 'Wagner Smith'),
+      date: new Date().toISOString().split('T')[0],
+      expDeliv: '',
+      status: 'Ordered',
+      price: 0,
+      items: '',
+      notes: ''
+    });
+    const title = document.getElementById('edit-order-modal-title');
+    if (title) title.textContent = 'Create New Purchase Order';
+    const deleteBtn = document.getElementById('btn-delete-order');
+    if (deleteBtn) deleteBtn.style.display = 'none';
+    const saveBtn = document.getElementById('btn-save-edit-order');
+    if (saveBtn) saveBtn.innerHTML = '<span>💾</span> Create Order';
+  }
+
   openEditOrderModal(poIndex) {
     const po = (typeof poIndex === 'object' && poIndex !== null)
       ? poIndex
@@ -6109,8 +6305,13 @@ class ProcurementEngine {
     if (cleanOrderNum.toLowerCase() === 'ed') cleanOrderNum = '';
 
     if (title) {
-      title.textContent = cleanOrderNum ? `Edit Order #${cleanOrderNum}` : 'Edit Order';
+      title.textContent = po.rowIdx ? (cleanOrderNum ? `Edit Order #${cleanOrderNum}` : 'Edit Order') : 'Create New Purchase Order';
     }
+
+    const deleteBtn = document.getElementById('btn-delete-order');
+    if (deleteBtn) deleteBtn.style.display = po.rowIdx ? 'inline-block' : 'none';
+    const saveBtn = document.getElementById('btn-save-edit-order');
+    if (saveBtn) saveBtn.innerHTML = po.rowIdx ? '<span>💾</span> Save Changes' : '<span>💾</span> Create Order';
 
     const toYmd = (dStr) => {
       if (!dStr) return '';
@@ -6334,7 +6535,12 @@ class ProcurementEngine {
                 <option value="Sleeves">🦺 Rubber Sleeves</option>
                 <option value="Blankets">🧱 Blankets</option>
                 <option value="MACKs">🧱 MACKs</option>
-                <option value="Other">📦 Other / PPE</option>
+                <option value="HV Testers">⚡ HV Testers</option>
+                <option value="Phasing Sets">⚡ Phasing Sets</option>
+                <option value="Grounds">⚡ Grounds</option>
+                <option value="Hot Sticks">🔴 Hot Sticks</option>
+                <option value="AED">🏥 AED Units / Pads</option>
+                <option value="Other">📦 Other / Equipment</option>
               </select>
             </div>
             <div>
@@ -6581,6 +6787,52 @@ class ProcurementEngine {
           <option value="15kV"></option>
           <option value="25kV"></option>
           <option value="35kV"></option>
+        `;
+      }
+    } else if (cat === 'HV Testers' || cat === 'Phasing Sets') {
+      if (classSelect) classSelect.value = 'N/A';
+      if (sizeInput) sizeInput.value = 'Standard';
+      if (datalist) {
+        datalist.innerHTML = `
+          <option value="Standard"></option>
+          <option value="15kV"></option>
+          <option value="25kV"></option>
+          <option value="40kV"></option>
+        `;
+      }
+    } else if (cat === 'Grounds') {
+      if (classSelect) classSelect.value = 'N/A';
+      if (sizeInput) sizeInput.value = 'Single';
+      if (datalist) {
+        datalist.innerHTML = `
+          <option value="Single"></option>
+          <option value="Cluster"></option>
+          <option value="4-Way"></option>
+          <option value="Overhead"></option>
+          <option value="Underground"></option>
+        `;
+      }
+    } else if (cat === 'Hot Sticks') {
+      if (classSelect) classSelect.value = 'N/A';
+      if (sizeInput) sizeInput.value = '8ft';
+      if (datalist) {
+        datalist.innerHTML = `
+          <option value="6ft"></option>
+          <option value="8ft"></option>
+          <option value="10ft"></option>
+          <option value="12ft"></option>
+          <option value="Telescopic"></option>
+        `;
+      }
+    } else if (cat === 'AED') {
+      if (classSelect) classSelect.value = 'N/A';
+      if (sizeInput) sizeInput.value = 'Unit';
+      if (datalist) {
+        datalist.innerHTML = `
+          <option value="Unit"></option>
+          <option value="Adult Pads"></option>
+          <option value="Pediatric Pads"></option>
+          <option value="Battery Pack"></option>
         `;
       }
     } else {

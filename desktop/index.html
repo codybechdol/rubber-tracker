@@ -873,6 +873,9 @@
             <button class="btn btn-secondary" id="btn-procurement-gen-po" style="display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 6px 12px;">
               <span>📝</span> View Text
             </button>
+            <button class="btn btn-primary" id="btn-procurement-create-order" onclick="window.procurementEngine.openCreateOrderModal()" style="display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 6px 14px; background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%); border: none; box-shadow: 0 2px 6px rgba(59, 130, 246, 0.35); color: #fff; font-weight: 700;" title="Create a new purchase order with custom items not prepopulated in the app">
+              <span>➕</span> Create Order
+            </button>
             <button class="btn btn-secondary" id="btn-procurement-mark-ordered" onclick="window.procurementEngine.openMarkOrderedModal()" style="display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 6px 12px; border-color: #10b981; color: #6ee7b7; background: rgba(16, 185, 129, 0.1);" title="Mark selected purchase needs as Ordered with Order #, vendor, date, and price">
               <span>📦</span> Mark Ordered
             </button>
@@ -3120,7 +3123,7 @@
   </script>
   <script src="js/trip-route-map.js?v=20260918_07"></script>
   <script src="js/lookup.js?v=20260901_25"></script>
-  <script src="js/procurement.js?v=20261015_04"></script>
+  <script src="js/procurement.js?v=20261030_01"></script>
   <script src="js/aging.js?v=20260901_25"></script>
   <script src="js/drug-testing.js?v=20260902_1"></script>
   <script src="js/ppe-tracking.js?v=20261019_01"></script>
