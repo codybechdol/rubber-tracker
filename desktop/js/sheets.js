@@ -3499,6 +3499,10 @@ class SheetNavigator {
     canvas.style.cursor = 'crosshair';
     canvas.style.boxShadow = '0 8px 30px rgba(0,0,0,0.8)';
     canvas.style.borderRadius = '4px';
+    canvas.style.touchAction = 'none';
+    canvas.style.userSelect = 'none';
+    canvas.style.webkitUserSelect = 'none';
+    container.style.touchAction = 'none';
     container.appendChild(canvas);
 
     this.cropperCanvas = canvas;
@@ -3590,10 +3594,10 @@ class SheetNavigator {
     ctx.stroke();
 
     // Corner handles
-    const handleSize = 12;
+    const handleSize = 14;
     ctx.fillStyle = '#0284c7';
     ctx.strokeStyle = '#ffffff';
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 2.5;
 
     const corners = [
       { x: box.x, y: box.y }, // nw
@@ -3611,7 +3615,7 @@ class SheetNavigator {
   }
 
   /**
-   * Sets up mouse and drag handlers for adjusting the crop box.
+   * Sets up mouse, pointer, and touch handlers for adjusting the crop box across desktop and tablet.
    */
   _setupCropperEvents() {
     const canvas = this.cropperCanvas;
@@ -3625,18 +3629,26 @@ class SheetNavigator {
 
     const getPos = (e) => {
       const rect = canvas.getBoundingClientRect();
-      const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-      const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+      let clientX = e.clientX;
+      let clientY = e.clientY;
+      if (e.touches && e.touches.length > 0) {
+        clientX = e.touches[0].clientX;
+        clientY = e.touches[0].clientY;
+      } else if (e.changedTouches && e.changedTouches.length > 0) {
+        clientX = e.changedTouches[0].clientX;
+        clientY = e.changedTouches[0].clientY;
+      }
       return {
         x: clientX - rect.left,
         y: clientY - rect.top
       };
     };
 
-    const hitTest = (pos) => {
+    const hitTest = (pos, isTouch) => {
       if (!this.cropperBox) return null;
       const b = this.cropperBox;
-      const handleRadius = 16;
+      // Generous handle radius on touch screens (iPad) so fingers easily grab corners
+      const handleRadius = isTouch ? 30 : 18;
 
       if (Math.hypot(pos.x - b.x, pos.y - b.y) <= handleRadius) return 'nw';
       if (Math.hypot(pos.x - (b.x + b.width), pos.y - b.y) <= handleRadius) return 'ne';
@@ -3649,32 +3661,41 @@ class SheetNavigator {
       return null;
     };
 
-    canvas.onmousedown = (e) => {
+    const handleStart = (e) => {
+      const isTouch = (e.type && e.type.startsWith('touch')) || (e.pointerType === 'touch') || (e.touches && e.touches.length > 0);
       const pos = getPos(e);
-      dragMode = hitTest(pos);
+      dragMode = hitTest(pos, isTouch);
       if (dragMode) {
         isDragging = true;
         startX = pos.x;
         startY = pos.y;
         initialBox = { ...this.cropperBox };
+        if (e.cancelable) e.preventDefault();
+        if (e.target && typeof e.target.setPointerCapture === 'function' && e.pointerId !== undefined) {
+          try { e.target.setPointerCapture(e.pointerId); } catch (err) {}
+        }
       }
     };
 
-    canvas.onmousemove = (e) => {
+    const handleMove = (e) => {
+      const isTouch = (e.type && e.type.startsWith('touch')) || (e.pointerType === 'touch') || (e.touches && e.touches.length > 0);
       const pos = getPos(e);
+
       if (!isDragging) {
-        const mode = hitTest(pos);
+        const mode = hitTest(pos, isTouch);
         if (mode === 'nw' || mode === 'se') canvas.style.cursor = 'nwse-resize';
         else if (mode === 'ne' || mode === 'sw') canvas.style.cursor = 'nesw-resize';
         else if (mode === 'move') canvas.style.cursor = 'move';
-        else canvas.style.cursor = 'default';
+        else canvas.style.cursor = 'crosshair';
         return;
       }
+
+      if (e.cancelable) e.preventDefault();
 
       const dx = pos.x - startX;
       const dy = pos.y - startY;
       const b = { ...initialBox };
-      const minSize = 40;
+      const minSize = 35;
 
       if (dragMode === 'move') {
         b.x = Math.max(0, Math.min(canvas.width - b.width, b.x + dx));
@@ -3705,10 +3726,34 @@ class SheetNavigator {
       this._drawCropper(false);
     };
 
-    window.addEventListener('mouseup', () => {
-      isDragging = false;
-      dragMode = null;
-    });
+    const handleEnd = (e) => {
+      if (isDragging) {
+        if (e && e.target && typeof e.target.releasePointerCapture === 'function' && e.pointerId !== undefined) {
+          try { e.target.releasePointerCapture(e.pointerId); } catch (err) {}
+        }
+        isDragging = false;
+        dragMode = null;
+      }
+    };
+
+    // Pointer events (modern desktop & tablet browsers)
+    canvas.addEventListener('pointerdown', handleStart);
+    canvas.addEventListener('pointermove', handleMove);
+    canvas.addEventListener('pointerup', handleEnd);
+    canvas.addEventListener('pointercancel', handleEnd);
+
+    // Touch events (iOS Safari & touch devices - passive: false allows e.preventDefault())
+    canvas.addEventListener('touchstart', handleStart, { passive: false });
+    canvas.addEventListener('touchmove', handleMove, { passive: false });
+    canvas.addEventListener('touchend', handleEnd, { passive: false });
+    canvas.addEventListener('touchcancel', handleEnd, { passive: false });
+
+    // Standard mouse events fallback
+    canvas.addEventListener('mousedown', handleStart);
+    canvas.addEventListener('mousemove', handleMove);
+    window.addEventListener('mouseup', handleEnd);
+    window.addEventListener('touchend', handleEnd);
+    window.addEventListener('pointerup', handleEnd);
   }
 
   /**
