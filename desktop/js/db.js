@@ -774,6 +774,14 @@ class LocalDatabase {
     } else if (window.desktopAPI && typeof window.desktopAPI.saveLocalSnapshot === 'function') {
       await window.desktopAPI.saveLocalSnapshot(this.snapshot);
     }
+
+    if (typeof this.addMutation === 'function') {
+      await this.addMutation({
+        action: 'SAVE_CERT_PHOTOS',
+        cert_photos: this.snapshot.configs.cert_photos
+      });
+    }
+
     return this.snapshot.configs.cert_photos[key];
   }
 
@@ -792,6 +800,12 @@ class LocalDatabase {
         await this.saveLocalSnapshot();
       } else if (window.desktopAPI && typeof window.desktopAPI.saveLocalSnapshot === 'function') {
         await window.desktopAPI.saveLocalSnapshot(this.snapshot);
+      }
+      if (typeof this.addMutation === 'function') {
+        await this.addMutation({
+          action: 'SAVE_CERT_PHOTOS',
+          cert_photos: this.snapshot.configs.cert_photos
+        });
       }
       return true;
     }
@@ -4018,8 +4032,8 @@ class LocalDatabase {
       }
     }
 
-    // Coalesce config mutations (SAVE_PLANNED_TRIPS, SAVE_MANUAL_TASKS, SET_HOLIDAYS, SET_TRIP_SCHEDULE)
-    if (mutation.action === 'SAVE_PLANNED_TRIPS' || mutation.action === 'SAVE_MANUAL_TASKS' || mutation.action === 'SET_HOLIDAYS' || mutation.action === 'SET_TRIP_SCHEDULE') {
+    // Coalesce config mutations (SAVE_PLANNED_TRIPS, SAVE_MANUAL_TASKS, SET_HOLIDAYS, SET_TRIP_SCHEDULE, SAVE_CERT_PHOTOS)
+    if (mutation.action === 'SAVE_PLANNED_TRIPS' || mutation.action === 'SAVE_MANUAL_TASKS' || mutation.action === 'SET_HOLIDAYS' || mutation.action === 'SET_TRIP_SCHEDULE' || mutation.action === 'SAVE_CERT_PHOTOS') {
       const existingIdx = this.outbox.findIndex(m => m.action === mutation.action);
       if (existingIdx !== -1) {
         this.outbox[existingIdx] = {
@@ -4073,6 +4087,11 @@ class LocalDatabase {
     if (mut.action === 'SAVE_MANUAL_TASKS') {
       if (!this.snapshot.configs) this.snapshot.configs = {};
       this.snapshot.configs.manual_tasks = mut.manual_tasks;
+      return;
+    }
+    if (mut.action === 'SAVE_CERT_PHOTOS') {
+      if (!this.snapshot.configs) this.snapshot.configs = {};
+      this.snapshot.configs.cert_photos = mut.cert_photos;
       return;
     }
     if (mut.action === 'SAVE_SCHEDULED_SWAPS') {

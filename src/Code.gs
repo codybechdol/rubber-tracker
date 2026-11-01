@@ -4976,8 +4976,8 @@ function sortExpiringCertsSheet(sheet) {
           var calcExp = calculateCertExpirationDate(rowCert, parsedAcq);
           if (calcExp) {
             var parsedExp = (expVal instanceof Date) ? expVal : (expVal && String(expVal).trim() !== 'N/A' ? parseDateNoon(String(expVal)) : null);
-            // Update expiration date if missing, N/A, or if calculated expiration date is greater than current exp date
-            if (!parsedExp || isNaN(parsedExp.getTime()) || calcExp > parsedExp) {
+            // Only auto-populate expiration date if missing, blank, or 'N/A' (never overwrite an explicit valid date)
+            if (!parsedExp || isNaN(parsedExp.getTime())) {
               values[v][3] = Utilities.formatDate(calcExp, Session.getScriptTimeZone(), 'yyyy-MM-dd');
             }
           }
@@ -31870,7 +31870,9 @@ function handleExpiringCertDateChange(ss, sheet, editedRow, editedCol) {
       // If Date Acquired (Col 3) was edited, auto-calculate Expiration Date (Col 4)
       if (editedCol === 3) {
         var acqVal = acqDateCell.getValue();
-        if (acqVal) {
+        var curExp = expDateCell.getValue();
+        // Only auto-calculate expiration date if expiration date is currently blank or 'N/A'
+        if (acqVal && (!curExp || curExp === 'N/A')) {
           var calcExp = calculateCertExpirationDate(certType, acqVal);
           if (calcExp) {
             try { safeSetNumberFormat(expDateCell, 'yyyy-MM-dd'); } catch(fmtErr) {}

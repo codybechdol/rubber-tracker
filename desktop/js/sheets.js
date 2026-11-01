@@ -1372,20 +1372,35 @@ class SheetNavigator {
       return;
     }
 
-    // 2. If photo exists on disk for active slot
+    // 2. If photo exists for active slot (local disk or cloud/Gmail)
     if (hasSavedPhoto) {
       let photoDataUrl = '';
-      let fileExists = true;
+      let fileExists = false;
       if (window.desktopAPI && typeof window.desktopAPI.getCertPhoto === 'function') {
         const res = await window.desktopAPI.getCertPhoto({ fileName: photoRecord.fileName, fullPath: photoRecord.fullPath });
-        if (res && res.exists) {
+        if (res && res.exists && res.base64Data) {
           photoDataUrl = res.base64Data;
-        } else {
-          fileExists = false;
+          fileExists = true;
+        }
+      }
+      // Web / Tablet / Cloud fallback: if not on local disk, fetch directly from Gmail attachment via backend
+      if (!fileExists && photoRecord.emailMessageId && window.syncEngine) {
+        try {
+          const syncUrl = window.syncEngine.getSyncUrl();
+          const attRes = await window.syncEngine.executeNetworkRequest(
+            `${syncUrl}?action=getCertEmailAttachment&messageId=${encodeURIComponent(photoRecord.emailMessageId)}&attIdx=${photoRecord.emailAttIdx !== undefined ? photoRecord.emailAttIdx : 0}`,
+            'GET'
+          );
+          if (attRes && attRes.success && attRes.base64Data) {
+            photoDataUrl = attRes.base64Data;
+            fileExists = true;
+          }
+        } catch (fetchErr) {
+          console.warn('Could not fetch cert photo attachment from Gmail:', fetchErr);
         }
       }
 
-      const isPdf = photoRecord.fileName.toLowerCase().endsWith('.pdf');
+      const isPdf = photoRecord.fileName ? photoRecord.fileName.toLowerCase().endsWith('.pdf') : false;
 
       body.innerHTML = `
         ${metaCardHtml}

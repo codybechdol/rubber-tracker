@@ -439,6 +439,7 @@ function exportFullDatabaseSnapshot(tableKeysFilter) {
   var plannedTrips = {};
   var scheduledSwaps = {};
   var manualTasks = [];
+  var certPhotos = {};
 
   if (!filterSet) {
     try {
@@ -485,6 +486,15 @@ function exportFullDatabaseSnapshot(tableKeysFilter) {
     } catch (e) {
       Logger.log('exportFullDatabaseSnapshot: Error reading scheduledSwaps: ' + e);
     }
+
+    try {
+      var rawCertPhotos = (typeof getChunkedScriptProperty === 'function') ? getChunkedScriptProperty('CERT_PHOTOS') : PropertiesService.getScriptProperties().getProperty('CERT_PHOTOS');
+      if (rawCertPhotos) {
+        certPhotos = typeof rawCertPhotos === 'string' ? JSON.parse(rawCertPhotos) : rawCertPhotos;
+      }
+    } catch (e) {
+      Logger.log('exportFullDatabaseSnapshot: Error reading certPhotos: ' + e);
+    }
   }
 
   var cloudRev = 0;
@@ -506,7 +516,8 @@ function exportFullDatabaseSnapshot(tableKeysFilter) {
       driveTimeMap: driveTimeMap,
       plannedTrips: plannedTrips,
       scheduled_swaps: scheduledSwaps,
-      manual_tasks: manualTasks
+      manual_tasks: manualTasks,
+      cert_photos: certPhotos
     },
     tables: tables
   };
@@ -1196,6 +1207,10 @@ function patchSyncSnapshotInDrive(sheetsModified, configsModified) {
       try {
         if (typeof getWorkSchedule === 'function') snap.configs.workSchedule = getWorkSchedule();
       } catch (eW) {}
+      try {
+        var rawCertPhotosPatch = (typeof getChunkedScriptProperty === 'function') ? getChunkedScriptProperty('CERT_PHOTOS') : PropertiesService.getScriptProperties().getProperty('CERT_PHOTOS');
+        if (rawCertPhotosPatch) snap.configs.cert_photos = typeof rawCertPhotosPatch === 'string' ? JSON.parse(rawCertPhotosPatch) : rawCertPhotosPatch;
+      } catch (eW) {}
       patchedAny = true;
       Logger.log('patchSyncSnapshotInDrive: Patched plannedTrips, scheduled_swaps & manual_tasks in Drive snapshot cache');
     }
@@ -1600,6 +1615,7 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
         'SAVE_PLANNED_TRIPS',
         'SAVE_SCHEDULED_SWAPS',
         'SAVE_MANUAL_TASKS',
+        'SAVE_CERT_PHOTOS',
         'SAVE_TASK',
         'ADD_LOCATION_OVERRIDE',
         'IMPORT_HISTORY_LOG',
@@ -2608,6 +2624,19 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
               setChunkedScriptProperty('MANUAL_TASKS', tasksStr);
             } else {
               PropertiesService.getScriptProperties().setProperty('MANUAL_TASKS', tasksStr);
+            }
+            appliedCount++;
+            configsModified = true;
+          }
+          break;
+
+        case 'SAVE_CERT_PHOTOS':
+          if (mut.cert_photos) {
+            var certPhotosStr = typeof mut.cert_photos === 'string' ? mut.cert_photos : JSON.stringify(mut.cert_photos);
+            if (typeof setChunkedScriptProperty === 'function') {
+              setChunkedScriptProperty('CERT_PHOTOS', certPhotosStr);
+            } else {
+              PropertiesService.getScriptProperties().setProperty('CERT_PHOTOS', certPhotosStr);
             }
             appliedCount++;
             configsModified = true;
