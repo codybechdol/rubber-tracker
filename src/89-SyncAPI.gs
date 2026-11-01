@@ -989,12 +989,22 @@ function patchSyncSnapshotInDrive(sheetsModified, configsModified) {
     var hasSheets = sheetsModified && Object.keys(sheetsModified).length > 0;
     if (!hasSheets && !configsModified) return false;
     var fileId = PropertiesService.getScriptProperties().getProperty('SYNC_SNAPSHOT_FILE_ID');
-    if (!fileId) return false;
     var file = null;
-    try {
-      file = DriveApp.getFileById(fileId);
-      if (file && file.isTrashed()) file = null;
-    } catch (fErr) { file = null; }
+    if (fileId) {
+      try {
+        file = DriveApp.getFileById(fileId);
+        if (file && file.isTrashed()) file = null;
+      } catch (fErr) { file = null; }
+    }
+    if (!file) {
+      try {
+        var files = DriveApp.getFilesByName(SYNC_SNAPSHOT_FILENAME);
+        if (files.hasNext()) {
+          file = files.next();
+          PropertiesService.getScriptProperties().setProperty('SYNC_SNAPSHOT_FILE_ID', file.getId());
+        }
+      } catch (fFind) {}
+    }
     if (!file) return false;
 
     var content = file.getBlob().getDataAsString();
@@ -1191,9 +1201,13 @@ function patchSyncSnapshotInDrive(sheetsModified, configsModified) {
     }
 
     if (patchedAny) {
+      var nextRev = (parseInt(PropertiesService.getScriptProperties().getProperty('CLOUD_DB_REVISION') || '0', 10) || 0) + 1;
+      snap.revision = nextRev;
       snap.timestamp = new Date().toISOString();
+      snap.exportedAt = snap.timestamp;
       file.setContent(JSON.stringify(snap));
-      PropertiesService.getScriptProperties().setProperty('SYNC_SNAPSHOT_UPDATED', String(new Date().getTime()));
+      PropertiesService.getScriptProperties().setProperty('CLOUD_DB_REVISION', String(nextRev));
+      PropertiesService.getScriptProperties().setProperty('SYNC_SNAPSHOT_UPDATED', snap.timestamp);
     }
     return true;
   } catch (patchErr) {
@@ -3540,7 +3554,7 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
     }
   }
 
-  // Generate fresh snapshot ONCE (if requested for single-round-trip push OR on final batch of mutations)
+  // Generate fresh snapshot ONCE (if requested for single-round-trip push)
   var snapshot = null;
   if (returnSnapshot) {
     try {
@@ -3550,16 +3564,6 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
       }
     } catch (expErr) {
       Logger.log('applyBatchSyncMutations snapshot export error: ' + expErr);
-    }
-  } else if (!skipPostProcessing && (appliedCount > 0 || configsModified)) {
-    // Final batch of mutations without returnSnapshot: ensure Drive snapshot file is fully updated
-    try {
-      var freshSnapshot = exportFullDatabaseSnapshot();
-      if (freshSnapshot && typeof generateAndStoreSyncSnapshot === 'function') {
-        generateAndStoreSyncSnapshot(freshSnapshot);
-      }
-    } catch (snapErr) {
-      Logger.log('applyBatchSyncMutations auto generateAndStoreSyncSnapshot error: ' + snapErr);
     }
   }
 
