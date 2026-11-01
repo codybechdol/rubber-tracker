@@ -2784,17 +2784,29 @@ class LocalDatabase {
     const location = String(cleanLoc || itemRow['Location'] || 'Helena').trim();
     let notes = reasonNote || itemRow['Notes'] || '';
 
+    const isNum = /^\d+$/.test(itemNum);
+    const parsedNum = isNum ? parseInt(itemNum, 10) : null;
+    const itemHistRows = (histTable.rows && histTable.rows.length > 0) ? histTable.rows.filter(r => {
+      const rNum = String(r['Item #'] || (r['HVT #'] || r['Phasing Set'] || r['PS #'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['MACK'] || (histTableKey.includes('grounds') ? r['Serial #'] : '') || Object.values(r)[1] || Object.values(r)[0]) || '').trim();
+      if (rNum.toLowerCase() === itemNum.toLowerCase()) return true;
+      if (isNum && /^\d+$/.test(rNum) && parseInt(rNum, 10) === parsedNum) return true;
+      return false;
+    }) : [];
+    const hasPriorHistory = itemHistRows.length > 0;
+
     // Recognize New Purchase origin for history:
-    // When a new item is added with New Purchase, history should read "On Shelf (New Purchase)" in Assigned To, and "New" in Notes
+    // When a new item is added with New Purchase, history should read "On Shelf (New Purchase)" in Assigned To, and "New" in Notes.
+    // If the item already has prior history records (e.g. was in field/lab), it can NEVER be a New Purchase!
     const rowNotesLower = String(itemRow['Notes'] || '').trim().toLowerCase();
-    const isNewPurchase = originReason === 'New Purchase' ||
+    const isNewPurchase = !hasPriorHistory && (
+                          originReason === 'New Purchase' ||
                           reasonNote === 'New Purchase' ||
                           assignedTo.toLowerCase() === 'on shelf (new purchase)' ||
                           assignedTo.toLowerCase() === 'brand new (on shelf)' ||
                           assignedTo.toLowerCase() === 'brand new' ||
                           assignedTo.toLowerCase().includes('brand new') ||
                           assignedTo.toLowerCase().includes('new purchase') ||
-                          (assignedTo.toLowerCase() === 'on shelf' && (rowNotesLower === 'new' || rowNotesLower.startsWith('new,') || rowNotesLower.startsWith('new -')));
+                          (assignedTo.toLowerCase() === 'on shelf' && (rowNotesLower === 'new' || rowNotesLower.startsWith('new,') || rowNotesLower.startsWith('new -'))));
 
     if (isNewPurchase) {
       assignedTo = 'On Shelf (New Purchase)';
@@ -3781,10 +3793,21 @@ class LocalDatabase {
           const curRank = getRank(curAssigned);
 
           const isSameHolder = this.areSameEmployee(curAssigned, prevAssigned);
-          const isBothShelf = prevRank === 2 && curRank === 2;
+          const isBothShelf = (prevRank === 1 || prevRank === 2) && (curRank === 1 || curRank === 2);
 
           if (isSameHolder || isBothShelf) {
             removedCount++;
+            // If both are shelf and prior entry was tagged 'new purchase' but item had earlier milestones (g > 0), correct it to On Shelf
+            if (isBothShelf && (prevAssigned.includes('new purchase') || prevAssigned.includes('brand new')) && g > 0) {
+              prev[assignedColName] = 'On Shelf';
+              if (prev['Assigned To']) prev['Assigned To'] = 'On Shelf';
+              const pN = String(prev[notesColName] || prev['Notes'] || '').trim().toLowerCase();
+              if (pN === 'new' || pN === 'initial purchase (on shelf)') {
+                prev[notesColName] = 'Returned to Shelf';
+                if (prev['Notes']) prev['Notes'] = 'Returned to Shelf';
+              }
+            }
+
             // Update prev to the later date and merge notes & location
             const curDate = cur[dateColName] || cur['Date Assigned'] || '';
             if (curDate) {
@@ -3861,6 +3884,16 @@ class LocalDatabase {
 
       await this.saveTable(tableKey, table);
       this._invalidateHistoryEngines(tableKey);
+
+      // Queue REPLACE_TABLE_DATA mutation so Google Sheets receives the deduplicated table on Sync & Save
+      await this.addMutation({
+        action: 'REPLACE_TABLE_DATA',
+        sheetName: table.name || this.getSheetNameForTableKey(tableKey) || tableKey,
+        tableKey: tableKey,
+        headers: [...table.headers],
+        rows: table.rows.map(r => ({ ...r })),
+        rawGrid: table.rawGrid
+      });
     }
 
     return { removedCount, totalRemaining: table.rows.length, tableKey };

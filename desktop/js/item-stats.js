@@ -563,6 +563,15 @@ class ItemStatsEngine {
           icon: '✨',
           isPurchaseEntry: true
         };
+      } else if (i > 0 && state.key === 'NEW_PURCHASE') {
+        // Items that already have prior history / testing can never revert to Brand New On Shelf
+        state = {
+          key: 'SHELF',
+          label: 'On Shelf',
+          badgeClass: 'badge-shelf',
+          color: '#f59e0b',
+          icon: '📦'
+        };
       }
 
       let endDate;

@@ -12007,7 +12007,21 @@ function saveHistoryFast(silent, targetSheets) {
           };
         }
 
+        function isShelfHolder(holder) {
+          var h = String(holder || '').toLowerCase().trim();
+          return h === 'on shelf' || h === 'shelf' || h === 'in stock' || h === 'storage' ||
+                 h === 'unassigned' || h === 'on shelf (new purchase)' || h === 'brand new (on shelf)' ||
+                 h === 'brand new' || h === 'new purchase' || h.indexOf('shelf') !== -1 ||
+                 h === 'new';
+        }
+
         // Record this entry in historyKeys set to prevent any duplicate re-addition
+        if (isShelfHolder(rowAssignedTo)) {
+          lookup[itemNum].historyKeys[rowDateStr + '|shelf'] = true;
+          if (rowTimestamp) {
+            lookup[itemNum].historyKeys[rowTimestamp + '|shelf'] = true;
+          }
+        }
         lookup[itemNum].historyKeys[rowDateStr + '|' + rowAssignedTo] = true;
         if (rowTimestamp) {
           lookup[itemNum].historyKeys[rowTimestamp + '|' + rowAssignedTo] = true;
@@ -12063,6 +12077,31 @@ function saveHistoryFast(silent, targetSheets) {
       var curDateParsed = parseDateStringFlex(dateAssigned);
       var curTimestamp = curDateParsed ? curDateParsed.getTime() : 0;
       var curDateStr = curDateParsed ? (curDateParsed.getMonth() + 1) + '/' + curDateParsed.getDate() + '/' + curDateParsed.getFullYear() : String(dateAssigned).trim();
+
+      function isShelfHolder(holder) {
+        var h = String(holder || '').toLowerCase().trim();
+        return h === 'on shelf' || h === 'shelf' || h === 'in stock' || h === 'storage' ||
+               h === 'unassigned' || h === 'on shelf (new purchase)' || h === 'brand new (on shelf)' ||
+               h === 'brand new' || h === 'new purchase' || h.indexOf('shelf') !== -1 ||
+               h === 'new';
+      }
+
+      // Shelf-to-shelf transition is NEVER a new holder change or reassignment
+      if (isShelfHolder(newAssignedTo) && isShelfHolder(lastEntry.assignedTo)) {
+        return { isDuplicate: true, note: '' };
+      }
+
+      // If active date is older than latest history timestamp, never append an older event
+      if (curTimestamp && lastEntry.timestamp && curTimestamp < lastEntry.timestamp) {
+        return { isDuplicate: true, note: '' };
+      }
+
+      // If new holder is shelf and shelf was already recorded on this date, skip
+      if (isShelfHolder(newAssignedTo)) {
+        if (lastEntry.historyKeys && (lastEntry.historyKeys[curDateStr + '|shelf'] || (curTimestamp && lastEntry.historyKeys[curTimestamp + '|shelf']))) {
+          return { isDuplicate: true, note: '' };
+        }
+      }
 
       // 1. Check if this exact date + holder record already exists anywhere in history
       if (lastEntry.historyKeys) {
@@ -13746,7 +13785,11 @@ function menuCleanupLocatedItems() {
  */
 function cleanAndRepairHistorySheets(silent) {
   silent = silent || false;
-  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var ss = typeof getActiveSpreadsheetSafe === 'function' ? getActiveSpreadsheetSafe() : SpreadsheetApp.getActiveSpreadsheet();
+  if (!ss) {
+    Logger.log('cleanAndRepairHistorySheets: No active spreadsheet');
+    return { repaired: 0, removed: 0 };
+  }
   var ui = null;
   try {
     ui = SpreadsheetApp.getUi();
@@ -14299,8 +14342,13 @@ function cleanAndRepairHistorySheets(silent) {
 
         if (prevEntry) {
           var prevAssignedLower = String(prevEntry.assignedTo || '').toLowerCase().trim();
-          var isBothShelf = (curAssignedLower === 'on shelf' || curAssignedLower === 'storage') &&
-                            (prevAssignedLower === 'on shelf' || prevAssignedLower === 'storage');
+          var isShelfStatus = function(val) {
+            var s = String(val || '').toLowerCase().trim();
+            return s === 'on shelf' || s === 'storage' || s === 'in stock' || s === 'shelf' ||
+                   s === 'unassigned' || s === 'on shelf (new purchase)' || s === 'brand new (on shelf)' ||
+                   s === 'brand new' || s === 'new purchase' || s.indexOf('shelf') !== -1;
+          };
+          var isBothShelf = isShelfStatus(curAssignedLower) && isShelfStatus(prevAssignedLower);
 
           var curCan = aliasToCanonical[curAssignedLower] || curAssignedLower;
           var prevCan = aliasToCanonical[prevAssignedLower] || prevAssignedLower;
@@ -14309,6 +14357,12 @@ function cleanAndRepairHistorySheets(silent) {
           // If identical assigned to (or aliases of same employee), consecutive shelf entries, or redundant same-day New entry
           if (isSameHolder || isBothShelf || (curAssignedLower === 'new' && entry.timestamp <= prevEntry.timestamp)) {
             removedCount++;
+            if (isBothShelf && prevAssignedLower.indexOf('new purchase') !== -1 && g > 0) {
+              prevEntry.assignedTo = 'On Shelf';
+              if (prevEntry.notes && prevEntry.notes.toLowerCase() === 'new') {
+                prevEntry.notes = 'Returned from in testing';
+              }
+            }
             if (entry.location && entry.location.toLowerCase() !== 'unknown') {
               prevEntry.location = entry.location;
             }
@@ -14417,8 +14471,17 @@ function cleanAndRepairHistorySheets(silent) {
     } catch (eAlert) {}
   }
 
+  if (typeof patchSyncSnapshotInDrive === 'function') {
+    try {
+      var touchedHist = sheetConfigs.map(function(c) { return c.name; });
+      patchSyncSnapshotInDrive(touchedHist);
+    } catch (pErr) {
+      Logger.log('cleanAndRepairHistorySheets patchSyncSnapshotInDrive error: ' + pErr);
+    }
+  }
+
   Logger.log('cleanAndRepairHistorySheets: ' + reportSummary.join(' | '));
-  return { repaired: totalRepaired, removed: totalRemoved };
+  return { repaired: totalRepaired, removed: totalRemoved, summary: reportSummary };
 }
 
 /**
@@ -34034,6 +34097,13 @@ function doGet(e) {
         statuses: statusRes,
         currentStatus: statusRes[filterKey.toLowerCase()] || statusRes.all || 'IDLE',
         result: parsedResult
+      })).setMimeType(ContentService.MimeType.JSON);
+    } else if (action === 'cleanAndRepairHistorySheets') {
+      var crRes = cleanAndRepairHistorySheets(true);
+      return ContentService.createTextOutput(JSON.stringify({
+        status: 'ok',
+        success: true,
+        result: crRes
       })).setMimeType(ContentService.MimeType.JSON);
     } else if (action === 'reconcileInventoryFromHistory') {
       var recRes = reconcileInventoryFromHistory(true);
