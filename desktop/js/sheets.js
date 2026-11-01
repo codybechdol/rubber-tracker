@@ -117,9 +117,25 @@ class SheetNavigator {
       });
       if (serialH) return serialH;
     }
+    if (sheetKey === 'hv_testers') {
+      const hvtH = headers.find(h => {
+        const hl = String(h || '').trim().toLowerCase();
+        return hl === 'hvt #' || hl === 'hvt' || hl === 'hv tester #' || hl === 'hv tester' || hl === 'item #' || hl === 'item';
+      });
+      if (hvtH) return hvtH;
+    }
+    if (sheetKey === 'phasing_sets') {
+      const psH = headers.find(h => {
+        const hl = String(h || '').trim().toLowerCase();
+        return hl === 'phasing set' || hl === 'phasing set #' || hl === 'ps #' || hl === 'ps' || hl === 'item #' || hl === 'item';
+      });
+      if (psH) return psH;
+    }
     const candidates = [
-      'item #', 'item', 'serial #', 'serial', 'hv tester', 'hvt #', 'hvt',
-      'phasing set', 'ps #', 'aed', 'aed #', 'hot stick', 'blanket', 'mack',
+      'hvt #', 'hvt', 'hv tester #', 'hv tester',
+      'phasing set #', 'phasing set', 'ps #', 'ps',
+      'aed #', 'aed', 'hot stick #', 'hot stick',
+      'item #', 'item', 'blanket', 'mack',
       'glove', 'sleeve', 'esl id'
     ];
     for (const c of candidates) {
@@ -629,9 +645,9 @@ class SheetNavigator {
 
     if (type === 'itemNum') {
       const col = this.getPrimaryItemCol(this.currentSheetKey, headers) || findCol([
-        'item #', 'item', 'serial #', 'serial', 'hv tester', 'hvt #', 'hvt',
+        'hvt #', 'hvt', 'hv tester',
         'phasing set', 'ps #', 'aed', 'aed #', 'hot stick', 'blanket', 'mack',
-        'glove', 'sleeve', 'ground #', 'ground', 'esl id'
+        'glove', 'sleeve', 'item #', 'item', 'ground #', 'ground', 'esl id'
       ]);
       if (this.sortCol === col) {
         this.sortDir = this.sortDir === 'asc' ? 'desc' : 'asc';
@@ -10315,7 +10331,13 @@ class SheetNavigator {
     if (isEquipmentSheet) {
       const seenIds = new Set();
       (tableData.rows || []).forEach(r => {
-        const rawVal = r[primaryCol] || r['Item #'] || r['HV Tester'] || r['HVT #'] || r['Phasing Set'] || r['PS #'] || r['AED'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['MACK'] || r['Serial #'] || r['Hot Stick'] || '';
+        let rawVal = primaryCol ? r[primaryCol] : '';
+        if (!rawVal) {
+          if (this.currentSheetKey === 'hv_testers') rawVal = r['HVT #'] || r['HV Tester'] || r['Item #'] || '';
+          else if (this.currentSheetKey === 'phasing_sets') rawVal = r['Phasing Set'] || r['PS #'] || r['Item #'] || '';
+          else if (this.currentSheetKey === 'grounds') rawVal = r['Serial #'] || r['Ground #'] || '';
+          else rawVal = r['Item #'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['MACK'] || r['AED'] || r['Hot Stick'] || '';
+        }
         const idVal = this.normalizeEquipmentIdentifier(rawVal);
         if (idVal) {
           if (seenIds.has(idVal)) {
@@ -10983,7 +11005,7 @@ class SheetNavigator {
               const curTable = this.db.getTable(this.currentSheetKey);
               if (curTable && curTable.rows) {
                 const dup = curTable.rows.find(r => {
-                  const rNum = String(r['Item #'] || r['HV Tester'] || r['Phasing Set'] || r['AED'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['MACK'] || r['Serial #'] || Object.values(r)[0] || '').trim().toLowerCase();
+                  const rNum = String(r['HVT #'] || r['HV Tester'] || r['Phasing Set'] || r['PS #'] || r['Item #'] || r['AED'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['MACK'] || (this.currentSheetKey === 'grounds' ? r['Serial #'] : '') || Object.values(r)[0] || '').trim().toLowerCase();
                   return rNum === newItemNum.toLowerCase() && r._rowIdx !== targetRow;
                 });
                 if (dup) {
@@ -11802,7 +11824,7 @@ class SheetNavigator {
             if (tableData && tableData.rows) {
               const dup = tableData.rows.find(r => {
                 if (r._rowIdx === actualRowIdx) return false;
-                const rNum = this.normalizeEquipmentIdentifier(r['Item #'] || r['HV Tester'] || r['HVT #'] || r['Phasing Set'] || r['PS #'] || r['AED'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['MACK'] || r['Serial #'] || r['Hot Stick'] || Object.values(r)[0] || '');
+                const rNum = this.normalizeEquipmentIdentifier(r['HVT #'] || r['HV Tester'] || r['Phasing Set'] || r['PS #'] || r['Item #'] || r['AED'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['MACK'] || (this.currentSheetKey === 'grounds' ? r['Serial #'] : '') || r['Hot Stick'] || Object.values(r)[0] || '');
                 return rNum && rNum === normNew;
               });
               if (dup) {
@@ -12295,7 +12317,7 @@ class SheetNavigator {
               const normNew = this.normalizeEquipmentIdentifier(newItemNum);
               const dup = curTable.rows.find(r => {
                 if (r._rowIdx === targetRow) return false;
-                const rNum = this.normalizeEquipmentIdentifier(r['Item #'] || r['HV Tester'] || r['HVT #'] || r['Phasing Set'] || r['PS #'] || r['AED'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['MACK'] || r['Serial #'] || r['Hot Stick'] || Object.values(r)[0] || '');
+                const rNum = this.normalizeEquipmentIdentifier(r['HVT #'] || r['HV Tester'] || r['Phasing Set'] || r['PS #'] || r['Item #'] || r['AED'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['MACK'] || (this.currentSheetKey === 'grounds' ? r['Serial #'] : '') || r['Hot Stick'] || Object.values(r)[0] || '');
                 return rNum && rNum === normNew;
               });
               if (dup) {

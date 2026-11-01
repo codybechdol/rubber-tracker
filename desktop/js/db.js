@@ -1699,7 +1699,7 @@ class LocalDatabase {
           histByItem = new Map();
           for (let i = 0; i < histTable.rows.length; i++) {
             const hr = histTable.rows[i];
-            const hn = String(hr['Item #'] || hr['Model'] || hr['Serial #'] || hr['Glove'] || hr['Sleeve'] || Object.values(hr)[1] || Object.values(hr)[0] || '').trim().toLowerCase();
+            const hn = String(hr['Item #'] || hr['HVT #'] || hr['Phasing Set'] || hr['PS #'] || hr['Glove'] || hr['Sleeve'] || hr['Blanket'] || hr['MACK'] || (tableKey === 'grounds' ? hr['Serial #'] : '') || Object.values(hr)[1] || Object.values(hr)[0] || '').trim().toLowerCase();
             if (!hn) continue;
             let list = histByItem.get(hn);
             if (!list) {
@@ -1738,7 +1738,7 @@ class LocalDatabase {
           const currentYear = new Date().getFullYear();
           let itemYear = null;
           let isNewPurchaseThisYear = false;
-          const itemNum = String(r['Serial #'] || r['Item #'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['MACK'] || r['Model'] || Object.values(r)[0] || '').trim();
+          const itemNum = String((tableKey === 'grounds' ? r['Serial #'] : '') || r['HVT #'] || r['HV Tester'] || r['Phasing Set'] || r['PS #'] || r['Item #'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['MACK'] || r['AED #'] || r['Hot Stick'] || Object.values(r)[0] || '').trim();
 
           const hRows = (histByItem && itemNum) ? (histByItem.get(itemNum.toLowerCase()) || []) : [];
           if (hRows.length > 0) {
@@ -2001,7 +2001,7 @@ class LocalDatabase {
         table.rows.forEach(r => {
           const curVal = r[firstH];
           if (curVal === undefined || curVal === null || String(curVal).trim() === '') {
-            let aliasVal = r['Item #'] || r['HV Tester'] || r['HVT #'] || r['HVT'] || r['Phasing Set'] || r['PS #'] || r['AED'] || r['AED #'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['MACK'] || r['Serial #'] || '';
+            let aliasVal = r['Item #'] || r['HV Tester'] || r['HVT #'] || r['HVT'] || r['Phasing Set'] || r['PS #'] || r['AED'] || r['AED #'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['MACK'] || (tableKey === 'grounds' ? r['Serial #'] : '') || '';
             // Specifically restore 2038-D&T for the user's High Voltage tester (Serial # C403-1140)
             if ((!aliasVal || aliasVal === 'C403-1140') && (tableKey === 'hv_testers' || table.name === 'HV Testers') && String(r['Serial #'] || '').trim() === 'C403-1140') {
               aliasVal = '2038-D&T';
@@ -2768,10 +2768,14 @@ class LocalDatabase {
 
     const todayStr = new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
     let itemNum = '';
-    if (sNameLower.includes('hv') || sNameLower.includes('tester') || sNameLower.includes('phasing')) {
-      itemNum = String(itemRow['Model'] || itemRow['HVT #'] || itemRow['PS #'] || itemRow['Serial #'] || itemRow['Item #'] || Object.values(itemRow)[0] || '').trim();
+    if (sNameLower.includes('hv') || sNameLower.includes('tester')) {
+      itemNum = String(itemRow['HVT #'] || itemRow['HV Tester'] || itemRow['Item #'] || Object.values(itemRow)[0] || '').trim();
+    } else if (sNameLower.includes('phasing')) {
+      itemNum = String(itemRow['Phasing Set'] || itemRow['PS #'] || itemRow['Phasing Set #'] || itemRow['Item #'] || Object.values(itemRow)[0] || '').trim();
+    } else if (sNameLower.includes('ground')) {
+      itemNum = String(itemRow['Serial #'] || itemRow['Ground #'] || itemRow['Item #'] || Object.values(itemRow)[0] || '').trim();
     } else {
-      itemNum = String(itemRow['Item #'] || itemRow['Glove'] || itemRow['Sleeve'] || itemRow['Blanket'] || itemRow['MACK'] || itemRow['Serial #'] || Object.values(itemRow)[0] || '').trim();
+      itemNum = String(itemRow['Item #'] || itemRow['Glove'] || itemRow['Sleeve'] || itemRow['Blanket'] || itemRow['MACK'] || itemRow['AED #'] || itemRow['Hot Stick'] || Object.values(itemRow)[0] || '').trim();
     }
     if (!itemNum) return;
 
@@ -2815,7 +2819,7 @@ class LocalDatabase {
       const isNum = /^\d+$/.test(itemNum);
       const parsedNum = isNum ? parseInt(itemNum, 10) : null;
       const itemHistRows = histTable.rows.filter(r => {
-        const rNum = String(r['Item #'] || r['Model'] || r['Serial #'] || Object.values(r)[1] || Object.values(r)[0] || '').trim();
+        const rNum = String(r['Item #'] || (r['HVT #'] || r['Phasing Set'] || r['PS #'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['MACK'] || (histTableKey.includes('grounds') ? r['Serial #'] : '') || Object.values(r)[1] || Object.values(r)[0]) || '').trim();
         if (rNum.toLowerCase() === itemNum.toLowerCase()) return true;
         if (isNum && /^\d+$/.test(rNum) && parseInt(rNum, 10) === parsedNum) return true;
         return false;
@@ -4341,7 +4345,7 @@ class LocalDatabase {
           const idClean = String(mut.itemIdentifier).trim().toLowerCase();
           // Priority 1: Exact match on primary item identifier keys
           row = table.rows.find(r => {
-            const pk = String(r['Glove'] || r['Sleeve'] || r['Blanket'] || r['MACK'] || r['HVT #'] || r['Phasing Set #'] || r['AED #'] || r['Serial #'] || r['Item #'] || r['Item'] || r['Employee Name'] || r['Name'] || r['Job Number'] || Object.values(r)[0] || '').trim().toLowerCase();
+            const pk = String(r['HVT #'] || r['HV Tester'] || r['Phasing Set'] || r['Phasing Set #'] || r['PS #'] || r['AED #'] || r['Glove'] || r['Sleeve'] || r['Blanket'] || r['MACK'] || r['Item #'] || r['Item'] || (sheetNameLower.includes('ground') ? r['Serial #'] : '') || r['Employee Name'] || r['Name'] || r['Job Number'] || Object.values(r)[0] || '').trim().toLowerCase();
             return pk === idClean;
           });
           // Priority 2: Secondary item/serial fields
@@ -4349,7 +4353,8 @@ class LocalDatabase {
             row = table.rows.find(r => {
               for (const k in r) {
                 const kl = k.toLowerCase();
-                if (kl.includes('item') || kl.includes('serial') || kl.includes('glove') || kl.includes('sleeve') || kl.includes('blanket') || kl.includes('mack') || kl.includes('employee') || kl.includes('name')) {
+                const isNonGroundsSerial = !sheetNameLower.includes('ground') && kl.includes('serial');
+                if (!isNonGroundsSerial && (kl.includes('item') || kl.includes('serial') || kl.includes('glove') || kl.includes('sleeve') || kl.includes('blanket') || kl.includes('mack') || kl.includes('employee') || kl.includes('name'))) {
                   if (String(r[k] || '').trim().toLowerCase() === idClean) return true;
                 }
               }

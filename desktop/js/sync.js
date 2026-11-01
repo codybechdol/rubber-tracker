@@ -1526,19 +1526,19 @@ class SyncEngine {
       let activeUrl = this.syncUrl || DEFAULT_SYNC_URL;
       let freshSnapshot = null;
       try {
-        freshSnapshot = await this.executeNetworkRequest(`${activeUrl}?action=getSnapshot`, 'GET', null, 120000);
+        freshSnapshot = await this.executeNetworkRequest(`${activeUrl}?action=getSnapshot&force=true`, 'GET', null, 120000);
       } catch (getErr) {
         console.warn('GET getSnapshot failed, attempting POST fallback:', getErr);
         try {
-          freshSnapshot = await this.executeNetworkRequest(activeUrl, 'POST', { action: 'getSnapshot' }, 120000);
+          freshSnapshot = await this.executeNetworkRequest(activeUrl, 'POST', { action: 'getSnapshot', force: true }, 120000);
         } catch (postErr) {
           if (activeUrl !== DEFAULT_SYNC_URL) {
             console.warn('Custom syncUrl failed, falling back to default working URL:', postErr);
             this.setSyncUrl(DEFAULT_SYNC_URL);
             try {
-              freshSnapshot = await this.executeNetworkRequest(`${DEFAULT_SYNC_URL}?action=getSnapshot`, 'GET', null, 120000);
+              freshSnapshot = await this.executeNetworkRequest(`${DEFAULT_SYNC_URL}?action=getSnapshot&force=true`, 'GET', null, 120000);
             } catch {
-              freshSnapshot = await this.executeNetworkRequest(DEFAULT_SYNC_URL, 'POST', { action: 'getSnapshot' }, 120000);
+              freshSnapshot = await this.executeNetworkRequest(DEFAULT_SYNC_URL, 'POST', { action: 'getSnapshot', force: true }, 120000);
             }
           } else {
             throw postErr;
@@ -1586,6 +1586,15 @@ class SyncEngine {
           window.ppeTrackingEngine.excludedEmployeeMap = window.ppeTrackingEngine.loadExcludedEmployeeMap();
           window.ppeTrackingEngine.compileAuditData();
           window.ppeTrackingEngine.updateToolbarBadge();
+        }
+        if (window.cprRosterEngine && typeof window.cprRosterEngine.render === 'function') {
+          window.cprRosterEngine.render();
+        }
+        if (window.drugTestingEngine && typeof window.drugTestingEngine.render === 'function') {
+          window.drugTestingEngine.render();
+        }
+        if (window.procurementEngine && typeof window.procurementEngine.buildPurchaseNeeds === 'function') {
+          window.procurementEngine.buildPurchaseNeeds();
         }
 
         this.updateStatusUI('synced', `Synced in ${durationFormatted}`);
@@ -2019,7 +2028,10 @@ class SyncEngine {
     // CRITICAL: If there are pending offline changes in the outbox, push them to Google Sheets first!
     // This updates the Google Sheets spreadsheet cells and syncs all mutations before saving restore points.
     if (outbox.length > 0) {
-      return await this.pushChangesToGoogleSheets(options);
+      const pushRes = await this.pushChangesToGoogleSheets(options);
+      if (!pushRes || !pushRes.success) {
+        return pushRes;
+      }
     }
 
     this.isSyncing = true;

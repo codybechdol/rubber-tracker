@@ -1809,10 +1809,10 @@ class ItemStatsEngine {
     if (!this._histIndexCache[histKey] && histTable && histTable.rows) {
       const idx = new Map();
       const headers = histTable.headers || [];
-      const itemH = headers.find(h => /^(item|serial|glove|sleeve|blanket|mack|model|esl)/i.test(h)) || 'Item #';
+      const itemH = headers.find(h => /^(item|hvt|phasing|aed|hot\s*stick|glove|sleeve|blanket|mack)/i.test(h)) || (histKey.includes('grounds') ? headers.find(h => /^serial/i.test(h)) : null) || headers[1] || headers[0];
       for (let i = 0; i < histTable.rows.length; i++) {
         const r = histTable.rows[i];
-        const val = String(r[itemH] || r['Item #'] || r['Serial #'] || Object.values(r)[0] || '').trim();
+        const val = String(r[itemH] || r['Item #'] || (histKey.includes('grounds') ? r['Serial #'] : '') || Object.values(r)[1] || Object.values(r)[0] || '').trim();
         if (val) {
           const norm = val.toLowerCase();
           if (!idx.has(norm)) idx.set(norm, []);
@@ -1836,11 +1836,15 @@ class ItemStatsEngine {
           const kl = k.toLowerCase();
           if (
             kl.includes('item') ||
+            kl.includes('hvt') ||
+            kl.includes('phasing') ||
+            kl.includes('aed') ||
+            kl.includes('stick') ||
             kl.includes('glove') ||
             kl.includes('sleeve') ||
             kl.includes('blanket') ||
             kl.includes('mack') ||
-            kl.includes('serial') ||
+            (histKey.includes('grounds') && (kl.includes('serial') || kl.includes('ground'))) ||
             kl.includes('esl') ||
             kl === 'id'
           ) {
@@ -1862,10 +1866,10 @@ class ItemStatsEngine {
     if (!this._activeMapCache[activeKey] && activeTable && activeTable.rows) {
       const actIdx = new Map();
       const actHeaders = activeTable.headers || [];
-      const actItemH = actHeaders.find(h => /^(item|serial|glove|sleeve|blanket|mack|model|esl)/i.test(h)) || 'Item #';
+      const actItemH = actHeaders.find(h => /^(item|hvt|phasing|aed|hot\s*stick|glove|sleeve|blanket|mack)/i.test(h)) || (activeKey === 'grounds' ? actHeaders.find(h => /^serial/i.test(h)) : null) || actHeaders[0];
       for (let i = 0; i < activeTable.rows.length; i++) {
         const r = activeTable.rows[i];
-        const val = String(r[actItemH] || r['Item #'] || r['Serial #'] || Object.values(r)[0] || '').trim();
+        const val = String(r[actItemH] || r['HVT #'] || r['Phasing Set'] || r['PS #'] || r['Item #'] || r['AED #'] || (activeKey === 'grounds' ? r['Serial #'] : '') || Object.values(r)[0] || '').trim();
         if (val) {
           actIdx.set(val.toLowerCase(), r);
         }
@@ -1884,11 +1888,15 @@ class ItemStatsEngine {
           const kl = k.toLowerCase();
           if (
             kl.includes('item') ||
+            kl.includes('hvt') ||
+            kl.includes('phasing') ||
+            kl.includes('aed') ||
+            kl.includes('stick') ||
             kl.includes('glove') ||
             kl.includes('sleeve') ||
             kl.includes('blanket') ||
             kl.includes('mack') ||
-            kl.includes('serial') ||
+            (activeKey === 'grounds' && (kl.includes('serial') || kl.includes('ground'))) ||
             kl.includes('esl')
           ) {
             const val = String(r[k] || '').trim();
@@ -1953,6 +1961,35 @@ class ItemStatsEngine {
           'Assigned To': foundActive['Assigned To'] || foundActive['Status'] || 'On Shelf',
           'Status': foundActive['Status'] || 'On Shelf',
           'Notes': activeNotes || 'Current Active Inventory Status',
+          _isSynthesized: true
+        });
+      }
+    } else if (foundActive && groupRows.length > 0) {
+      const activeAssigned = String(foundActive['Assigned To'] || foundActive['Status'] || '').trim();
+      const nonEmpHolders = [
+        'on shelf', 'in testing', 'packed for testing', 'packed for delivery',
+        'failed rubber', 'failed', 'lost', 'destroyed', 'new', 'unassigned',
+        'n/a', '—', '-', 'brand new', 'brand new (on shelf)', 'on shelf (new purchase)',
+        'new purchase', 'storage'
+      ];
+      const hasActiveHolderInHistory = groupRows.some(r => {
+        const hAssigned = String(r['Assigned To'] || r['Employee Name'] || '').trim();
+        return this.areSameEmployee(hAssigned, activeAssigned);
+      });
+      if (activeAssigned && !nonEmpHolders.includes(activeAssigned.toLowerCase()) && !hasActiveHolderInHistory) {
+        const activeDateAssigned = String(foundActive['Date Assigned'] || foundActive['Date'] || '').trim() || new Date().toISOString().split('T')[0];
+        groupRows.push({
+          'Date Assigned': activeDateAssigned,
+          'Item #': cleanItemKey,
+          'Model': foundActive['Model'] || '',
+          'KV': foundActive['KV'] || '',
+          'Serial #': foundActive['Serial #'] || '',
+          'Size': foundActive['Size'] || '',
+          'Class': foundActive['Class'] || '',
+          'Location': foundActive['Location'] || 'Helena',
+          'Assigned To': activeAssigned,
+          'Status': foundActive['Status'] || 'Assigned',
+          'Notes': foundActive['Notes'] || `Assigned to ${activeAssigned}`,
           _isSynthesized: true
         });
       }
@@ -3288,7 +3325,7 @@ class ItemStatsEngine {
     const row = table.rows.find(r => {
       for (const k in r) {
         const kl = k.toLowerCase();
-        if (kl.includes('item') || kl.includes('glove') || kl.includes('sleeve') || kl.includes('blanket') || kl.includes('mack') || kl.includes('serial') || kl.includes('esl')) {
+        if (kl.includes('item') || kl.includes('hvt') || kl.includes('phasing') || kl.includes('aed') || kl.includes('stick') || kl.includes('glove') || kl.includes('sleeve') || kl.includes('blanket') || kl.includes('mack') || (activeSheetKey === 'grounds' && (kl.includes('serial') || kl.includes('ground'))) || kl.includes('esl')) {
           const val = String(r[k] || '').trim();
           if (val.toLowerCase() === cleanItemKey.toLowerCase()) return true;
           if (isPureNumKey && parseInt(val, 10) === numKey) return true;

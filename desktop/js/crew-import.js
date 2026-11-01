@@ -3929,9 +3929,18 @@ class CrewImportEngine {
         const assigned = String(row['Assigned To'] || row['Assigned'] || '').toLowerCase().trim();
         if (assigned === oldLower) {
           let itemIdentifier = '';
-          const candidateKeys = ['Item #', 'Item#', 'Blanket', 'MACK', 'Glove', 'Sleeve', 'Serial #', 'HVT #', 'Phasing Set #', 'AED #', 'ESL ID'];
+          const candidateKeys = [];
           if (table.headers && table.headers.length > 0) {
             candidateKeys.push(table.headers[0]);
+          }
+          if (itemDef.key === 'hv_testers') {
+            candidateKeys.push('HVT #', 'HV Tester #', 'HV Tester', 'Item #', 'Item#');
+          } else if (itemDef.key === 'phasing_sets') {
+            candidateKeys.push('Phasing Set', 'Phasing Set #', 'PS #', 'Item #', 'Item#');
+          } else if (itemDef.key === 'grounds') {
+            candidateKeys.push('Serial #', 'Ground #', 'Ground');
+          } else {
+            candidateKeys.push('Item #', 'Item#', 'Blanket', 'MACK', 'Glove', 'Sleeve', 'AED #', 'ESL ID');
           }
           for (const k of candidateKeys) {
             if (row[k] !== undefined && row[k] !== null && String(row[k]).trim() !== '') {

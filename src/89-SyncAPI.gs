@@ -487,8 +487,14 @@ function exportFullDatabaseSnapshot(tableKeysFilter) {
     }
   }
 
+  var cloudRev = 0;
+  try {
+    cloudRev = parseInt(PropertiesService.getScriptProperties().getProperty('CLOUD_DB_REVISION') || '0', 10) || 0;
+  } catch (rErr) {}
+
   return {
     version: '2026.1.0',
+    revision: cloudRev,
     spreadsheetId: ss.getId(),
     spreadsheetName: ss.getName(),
     exportedAt: timestamp.toISOString(),
@@ -583,8 +589,16 @@ function generateAndStoreSyncSnapshot(existingSnapshot) {
         file = folder.createFile(SYNC_SNAPSHOT_FILENAME, jsonStr, MimeType.PLAIN_TEXT);
       }
       if (file) {
-        try { props.setProperty('SYNC_SNAPSHOT_FILE_ID', file.getId()); } catch (pErr) {}
+        try {
+          props.setProperty('SYNC_SNAPSHOT_FILE_ID', file.getId());
+        } catch (pErr) {}
       }
+    }
+
+    if (file) {
+      try {
+        props.setProperty('SYNC_SNAPSHOT_UPDATED', new Date().toISOString());
+      } catch (uErr) {}
     }
 
     var elapsed = new Date().getTime() - startTime;
@@ -612,27 +626,14 @@ function syncAndSaveCloudDatabase(payload) {
   var rawSnap = payload.snapshot;
   if (!rawSnap) {
     // If client omitted snapshot (to prevent uploading 10+ MB over HTTP and avoid timeouts),
-    // load the live cloud database snapshot directly from Drive or export fresh from Sheets
-    var liveFileId = props.getProperty('SYNC_SNAPSHOT_FILE_ID');
-    if (liveFileId) {
-      try {
-        var existingLiveFile = DriveApp.getFileById(liveFileId);
-        if (existingLiveFile && !existingLiveFile.isTrashed()) {
-          rawSnap = existingLiveFile.getBlob().getDataAsString();
-        }
-      } catch (fErr) {}
-    }
-    if (!rawSnap) {
-      if (typeof getFastSnapshotFromDriveOrExport === 'function') {
-        rawSnap = getFastSnapshotFromDriveOrExport();
-      } else if (typeof exportFullDatabaseSnapshot === 'function') {
-        rawSnap = exportFullDatabaseSnapshot();
-      }
+    // always export fresh from the live Google Sheets so changes just pushed are captured!
+    if (typeof exportFullDatabaseSnapshot === 'function') {
+      rawSnap = exportFullDatabaseSnapshot();
     }
   }
 
   if (!rawSnap) {
-    return { status: 'error', success: false, error: 'Missing snapshot payload and no cloud snapshot found in syncAndSaveCloudDatabase' };
+    return { status: 'error', success: false, error: 'Missing snapshot payload and failed to export full database snapshot in syncAndSaveCloudDatabase' };
   }
 
   try {
@@ -1203,59 +1204,68 @@ function patchSyncSnapshotInDrive(sheetsModified, configsModified) {
 
 /**
  * Fast snapshot retrieval from pre-generated Google Drive JSON snapshot file in Glove Manager Backups folder,
- * avoiding expensive 42-sheet scans during web/mobile download calls.
- * Automatically searches the Google Drive backup folder for the newest .JSON / .txt snapshot.
+ * avoiding expensive sheet scans during web/mobile download calls.
+ * Automatically checks whether the cached file in Drive is stale compared to recent spreadsheet modifications.
  *
+ * @param {boolean} [forceFresh] - When true, forces a full live export from Sheets and updates the Drive file
  * @return {string} JSON string of snapshot
  */
-function getFastSnapshotFromDriveOrExport() {
+function getFastSnapshotFromDriveOrExport(forceFresh) {
   try {
     var props = PropertiesService.getScriptProperties();
-    var fileId = props.getProperty('SYNC_SNAPSHOT_FILE_ID');
-    var file = null;
-    if (fileId) {
-      try {
-        file = DriveApp.getFileById(fileId);
-        if (file && file.isTrashed()) file = null;
-      } catch (fErr) { file = null; }
-    }
+    var lastMod = props.getProperty('SYNC_SPREADSHEET_MODIFIED');
+    var snapUpd = props.getProperty('SYNC_SNAPSHOT_UPDATED');
+    var isStale = !!(lastMod && snapUpd && (new Date(lastMod).getTime() > new Date(snapUpd).getTime()));
 
-    // 1. Fast direct indexed lookup by exact filename across Drive (no slow folder scans)
-    if (!file) {
-      try {
-        var files = DriveApp.getFilesByName(SYNC_SNAPSHOT_FILENAME);
-        if (files.hasNext()) {
-          file = files.next();
-          props.setProperty('SYNC_SNAPSHOT_FILE_ID', file.getId());
-          Logger.log('getFastSnapshotFromDriveOrExport: Found snapshot by filename in Drive: ' + file.getId());
-        }
-      } catch (findErr) {
-        Logger.log('getFastSnapshotFromDriveOrExport: Drive search error: ' + findErr);
+    if (!forceFresh && !isStale) {
+      var fileId = props.getProperty('SYNC_SNAPSHOT_FILE_ID');
+      var file = null;
+      if (fileId) {
+        try {
+          file = DriveApp.getFileById(fileId);
+          if (file && file.isTrashed()) file = null;
+        } catch (fErr) { file = null; }
       }
-    }
 
-    // 2. Fast direct lookup in backup folder
-    if (!file) {
-      try {
-        var folder = getOrCreateBackupFolder();
-        if (folder) {
-          var folderFiles = folder.getFilesByName(SYNC_SNAPSHOT_FILENAME);
-          if (folderFiles.hasNext()) {
-            file = folderFiles.next();
+      // 1. Fast direct indexed lookup by exact filename across Drive (no slow folder scans)
+      if (!file) {
+        try {
+          var files = DriveApp.getFilesByName(SYNC_SNAPSHOT_FILENAME);
+          if (files.hasNext()) {
+            file = files.next();
             props.setProperty('SYNC_SNAPSHOT_FILE_ID', file.getId());
+            Logger.log('getFastSnapshotFromDriveOrExport: Found snapshot by filename in Drive: ' + file.getId());
           }
+        } catch (findErr) {
+          Logger.log('getFastSnapshotFromDriveOrExport: Drive search error: ' + findErr);
         }
-      } catch (foldErr) {
-        Logger.log('getFastSnapshotFromDriveOrExport: Backup folder error: ' + foldErr);
       }
-    }
 
-    if (file && !file.isTrashed()) {
-      var content = file.getBlob().getDataAsString();
-      if (content && content.length > 50 && (content.indexOf('{') === 0 || content.indexOf('[') === 0)) {
-        Logger.log('getFastSnapshotFromDriveOrExport: Served from Drive cache ' + file.getName() + ' (' + (content.length / 1024).toFixed(1) + ' KB)');
-        return content;
+      // 2. Fast direct lookup in backup folder
+      if (!file) {
+        try {
+          var folder = getOrCreateBackupFolder();
+          if (folder) {
+            var folderFiles = folder.getFilesByName(SYNC_SNAPSHOT_FILENAME);
+            if (folderFiles.hasNext()) {
+              file = folderFiles.next();
+              props.setProperty('SYNC_SNAPSHOT_FILE_ID', file.getId());
+            }
+          }
+        } catch (foldErr) {
+          Logger.log('getFastSnapshotFromDriveOrExport: Backup folder error: ' + foldErr);
+        }
       }
+
+      if (file && !file.isTrashed()) {
+        var content = file.getBlob().getDataAsString();
+        if (content && content.length > 50 && (content.indexOf('{') === 0 || content.indexOf('[') === 0)) {
+          Logger.log('getFastSnapshotFromDriveOrExport: Served from Drive cache ' + file.getName() + ' (' + (content.length / 1024).toFixed(1) + ' KB)');
+          return content;
+        }
+      }
+    } else if (isStale) {
+      Logger.log('getFastSnapshotFromDriveOrExport: Drive snapshot is stale (Spreadsheet modified ' + lastMod + ' > snapshot ' + snapUpd + '), exporting fresh...');
     }
   } catch (driveErr) {
     Logger.log('getFastSnapshotFromDriveOrExport: Drive read error: ' + driveErr);
@@ -1331,6 +1341,7 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
   // with safeSetCellWithValidationFallback handling any legacy validation rule overrides.
   try {
     ensureEmployeeStatusColumn(ss);
+    PropertiesService.getScriptProperties().setProperty('SYNC_SPREADSHEET_MODIFIED', new Date().toISOString());
   } catch (eStat) {
     Logger.log('ensureEmployeeStatusColumn error: ' + eStat);
   }
@@ -1431,7 +1442,8 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
           if (esl) {
             invItemIndexCache[sName][esl] = r + 1;
           }
-          if (ser) {
+          // Only index serial number as unique row identifier for Grounds (where Col 0 is serial)
+          if (ser && sLower.indexOf('ground') !== -1) {
             invItemIndexCache[sName][ser] = r + 1;
             var serClean = ser.replace(/^[#\-_]+/, '').trim();
             if (serClean && !invItemIndexCache[sName][serClean]) invItemIndexCache[sName][serClean] = r + 1;
@@ -3528,7 +3540,7 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
     }
   }
 
-  // Generate fresh snapshot ONCE (if requested for single-round-trip push)
+  // Generate fresh snapshot ONCE (if requested for single-round-trip push OR on final batch of mutations)
   var snapshot = null;
   if (returnSnapshot) {
     try {
@@ -3538,6 +3550,16 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
       }
     } catch (expErr) {
       Logger.log('applyBatchSyncMutations snapshot export error: ' + expErr);
+    }
+  } else if (!skipPostProcessing && (appliedCount > 0 || configsModified)) {
+    // Final batch of mutations without returnSnapshot: ensure Drive snapshot file is fully updated
+    try {
+      var freshSnapshot = exportFullDatabaseSnapshot();
+      if (freshSnapshot && typeof generateAndStoreSyncSnapshot === 'function') {
+        generateAndStoreSyncSnapshot(freshSnapshot);
+      }
+    } catch (snapErr) {
+      Logger.log('applyBatchSyncMutations auto generateAndStoreSyncSnapshot error: ' + snapErr);
     }
   }
 
@@ -3565,13 +3587,15 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
     Logger.log('Error saving push telemetry: ' + propErr);
   }
 
+  var currentRev = parseInt(PropertiesService.getScriptProperties().getProperty('CLOUD_DB_REVISION') || '0', 10) || 0;
   return {
     status: errors.length === 0 ? 'ok' : 'error',
     success: errors.length === 0,
     appliedCount: appliedCount,
     errors: errors,
     telemetry: telemetryData,
-    snapshot: snapshot
+    snapshot: snapshot,
+    revision: currentRev
   };
 }
 

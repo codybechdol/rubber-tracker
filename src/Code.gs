@@ -34044,8 +34044,9 @@ function doGet(e) {
       return ContentService.createTextOutput(JSON.stringify(flatRes))
         .setMimeType(ContentService.MimeType.JSON);
     } else if (action === 'getSnapshot') {
+      var force = e && e.parameter && (e.parameter.force === 'true' || e.parameter.fresh === 'true');
       var snapshotJson = (typeof getFastSnapshotFromDriveOrExport === 'function')
-        ? getFastSnapshotFromDriveOrExport()
+        ? getFastSnapshotFromDriveOrExport(force)
         : JSON.stringify(exportFullDatabaseSnapshot());
       return ContentService.createTextOutput(snapshotJson)
         .setMimeType(ContentService.MimeType.JSON);
@@ -34336,8 +34337,9 @@ function doPost(e) {
     }
 
     if (action === 'getSnapshot') {
+      var force = payload.force === true || payload.fresh === true || (e && e.parameter && (e.parameter.force === 'true' || e.parameter.fresh === 'true'));
       var snapshotJson = (typeof getFastSnapshotFromDriveOrExport === 'function')
-        ? getFastSnapshotFromDriveOrExport()
+        ? getFastSnapshotFromDriveOrExport(force)
         : JSON.stringify(exportFullDatabaseSnapshot());
       return ContentService.createTextOutput(snapshotJson)
         .setMimeType(ContentService.MimeType.JSON);
