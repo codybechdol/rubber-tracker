@@ -659,10 +659,10 @@ class SheetNavigator {
     if (this._hasRunVacationRepair) return;
     this._hasRunVacationRepair = true;
     try {
-      if (localStorage.getItem('sa_vacation_repair_done_v2')) return;
+      if (localStorage.getItem('sa_vacation_repair_done_v3')) return;
       if (window.crewImportEngine && typeof window.crewImportEngine.repairVacationAndLeaveJobNumbers === 'function') {
         const res = await window.crewImportEngine.repairVacationAndLeaveJobNumbers();
-        localStorage.setItem('sa_vacation_repair_done_v2', 'true');
+        localStorage.setItem('sa_vacation_repair_done_v3', 'true');
         if (res && res.repairedCount > 0) {
           console.log(`[VacationRepair] Repaired ${res.repairedCount} employee record(s). Refreshing sheets.`);
           this.renderCurrentSheet();
@@ -9258,15 +9258,16 @@ class SheetNavigator {
       }
     }
 
-    // Update Crew Size in Job Tracking if different
+    // Update Crew Size in Job Tracking if different (active field members only, excluding Vacation/Leave/Light Duty)
     if (jt) {
       const curSize = parseInt(jt['Crew Size'], 10);
-      if (curSize !== members.length) {
-        jt['Crew Size'] = members.length;
+      const activeMembers = members.filter(m => !this.isStatusEmployee(m));
+      if (curSize !== activeMembers.length) {
+        jt['Crew Size'] = activeMembers.length;
         const jtColIdx = (jtTable.headers || []).findIndex(h => /^crew\s*size$/i.test(h)) + 1;
         const jtRowIdx = jt._rowIdx || (jtTable.rows.indexOf(jt) + 2);
         if (jtTable.rawGrid && jtTable.rawGrid[jtRowIdx - 1] && jtColIdx > 0) {
-          jtTable.rawGrid[jtRowIdx - 1][jtColIdx - 1] = members.length;
+          jtTable.rawGrid[jtRowIdx - 1][jtColIdx - 1] = activeMembers.length;
         }
         await this.db.addMutation({
           action: 'UPDATE_CELL',
@@ -9276,7 +9277,7 @@ class SheetNavigator {
           col: jtColIdx > 0 ? jtColIdx : 4,
           header: 'Crew Size',
           itemIdentifier: baseJob,
-          value: members.length
+          value: activeMembers.length
         });
       }
     }

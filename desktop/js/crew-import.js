@@ -2788,7 +2788,30 @@ class CrewImportEngine {
       const job = String(row[jobKey] || '').trim();
       const empName = this.getEmpRowName(row) || '';
 
-      if (locLower.includes('(vacation)')) {
+      const statLower = String(this.getEmpRowStatus(row) || '').toLowerCase();
+      const isVacation = locLower.includes('(vacation)') || statLower === 'vacation';
+
+      if (isVacation) {
+        // If Status is Vacation but Location missing (Vacation) label, normalize it
+        if (!locLower.includes('(vacation)')) {
+          const cleanCity = loc.replace(/\s*\([^)]*\)/g, '').trim() || 'Helena';
+          const normalizedLoc = `${cleanCity} (Vacation)`;
+          row[locKey] = normalizedLoc;
+          this.syncRowToRawGrid(empTable, row);
+          const empRowIdx = row._rowIdx || (empTable.rows.indexOf(row) + 2);
+          await this.db.addMutation({
+            action: 'UPDATE_ROW',
+            sheetName: empTable.name,
+            tableKey: 'employees',
+            employeeName: empName,
+            row: empRowIdx,
+            itemIdentifier: empName,
+            updatedFields: { [locKey]: normalizedLoc }
+          });
+          repairedCount++;
+          console.log(`[AutoRepair] Normalized vacation location for ${empName}: ${normalizedLoc}`);
+        }
+
         if (!job) {
           // Recover base job from employee_history
           let baseJob = '';
@@ -3301,6 +3324,7 @@ class CrewImportEngine {
           const assignedJob = this.allocateVacationJobNumber(row, baseJob, empTable, histTable, (missingFromRoster || []).filter(x => x.action === 'time_off'));
 
           const updatedFields = {};
+          if (statusKey) { row[statusKey] = 'Vacation'; updatedFields[statusKey] = 'Vacation'; }
           if (locKey) { row[locKey] = absenceLoc; updatedFields[locKey] = absenceLoc; }
           if (jobKey && assignedJob) { row[jobKey] = assignedJob; updatedFields[jobKey] = assignedJob; }
           if (notesKey) {
@@ -3488,7 +3512,7 @@ class CrewImportEngine {
               updatedFields[statusKey] = statusSuffix;
             }
             if (locKey) {
-              const finalLoc = statusKey ? (rawCity || 'Helena') : absenceLoc;
+              const finalLoc = absenceLoc;
               row[locKey] = finalLoc;
               updatedFields[locKey] = finalLoc;
             }
@@ -3903,7 +3927,8 @@ class CrewImportEngine {
     const oldEmp = empRows.find(e => String(e['Employee Name'] || e['Name'] || Object.values(e)[0] || '').toLowerCase().trim() === oldLower);
     if (oldEmp) {
       const loc = String(oldEmp['Location'] || '').toLowerCase();
-      if (loc.includes('vacation')) {
+      const stat = String(oldEmp['Status'] || oldEmp['Employee Status'] || '').toLowerCase();
+      if (loc.includes('vacation') || stat === 'vacation') {
         console.log(`[Equipment Transfer] Skipping transfer for ${oldForeman} (temporary vacation: ${oldEmp['Location']})`);
         return 0;
       }
