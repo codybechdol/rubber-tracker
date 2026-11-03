@@ -755,9 +755,9 @@ function syncAndSaveCloudDatabase(payload) {
   }
 
   var rawSnap = payload.snapshot;
-  if (!rawSnap && payload.activeTables && typeof payload.activeTables === 'object') {
-    // Fast path (~0.5s): Load existing SafetyAssistant_Sync_Snapshot.json from Drive so we keep
-    // the large history/log tables without scanning 45 Google Sheets tabs, then overwrite activeTables!
+  if (!rawSnap) {
+    // Fast path (~0.5s): Always load existing SafetyAssistant_Sync_Snapshot.json from Drive first
+    // so Google Sheets NEVER overwrites the authoritative JSON snapshot in Drive!
     try {
       var cachedSnapFileId = props.getProperty('SYNC_SNAPSHOT_FILE_ID');
       var cachedSnapFile = null;
@@ -775,6 +775,18 @@ function syncAndSaveCloudDatabase(payload) {
             props.setProperty('SYNC_SNAPSHOT_FILE_ID', cachedSnapFile.getId());
           }
         } catch (eFind) {}
+      }
+      if (!cachedSnapFile) {
+        try {
+          var bFolder = getFastBackupFolder();
+          if (bFolder) {
+            var bFiles = bFolder.getFilesByName(SYNC_SNAPSHOT_FILENAME);
+            if (bFiles.hasNext()) {
+              cachedSnapFile = bFiles.next();
+              props.setProperty('SYNC_SNAPSHOT_FILE_ID', cachedSnapFile.getId());
+            }
+          }
+        } catch (eBFold) {}
       }
       if (cachedSnapFile) {
         var existingContent = cachedSnapFile.getBlob().getDataAsString();
@@ -824,6 +836,38 @@ function syncAndSaveCloudDatabase(payload) {
         if (Object.prototype.hasOwnProperty.call(payload.activeTables, atk) && payload.activeTables[atk]) {
           snapObj.tables[atk] = payload.activeTables[atk];
         }
+      }
+      // Keep Google Sheets Employees & Job Tracking tabs 100% aligned with authoritative desktop activeTables
+      try {
+        var sheetSyncMuts = [];
+        if (payload.activeTables.employees && payload.activeTables.employees.rows) {
+          sheetSyncMuts.push({
+            action: 'REPLACE_TABLE_DATA',
+            sheetName: 'Employees',
+            tableKey: 'employees',
+            headers: payload.activeTables.employees.headers,
+            rows: payload.activeTables.employees.rows
+          });
+        }
+        if (payload.activeTables.job_tracking && payload.activeTables.job_tracking.rows) {
+          sheetSyncMuts.push({
+            action: 'REPLACE_TABLE_DATA',
+            sheetName: 'Job Tracking',
+            tableKey: 'job_tracking',
+            headers: payload.activeTables.job_tracking.headers,
+            rows: payload.activeTables.job_tracking.rows
+          });
+        }
+        if (sheetSyncMuts.length > 0 && typeof applyBatchSyncMutations === 'function') {
+          applyBatchSyncMutations(sheetSyncMuts, false, {
+            detectConflicts: false,
+            force: true,
+            skipPostProcessing: true,
+            skipSnapshotPatch: true
+          });
+        }
+      } catch (eShSync) {
+        Logger.log('syncAndSaveCloudDatabase sheet alignment warning: ' + eShSync);
       }
     }
 
@@ -1449,11 +1493,10 @@ function patchSyncSnapshotInDrive(sheetsModified, configsModified, extraConfigs,
 function getFastSnapshotFromDriveOrExport(forceFresh) {
   try {
     var props = PropertiesService.getScriptProperties();
-    var lastMod = props.getProperty('SYNC_SPREADSHEET_MODIFIED');
-    var snapUpd = props.getProperty('SYNC_SNAPSHOT_UPDATED');
-    var isStale = !!(lastMod && snapUpd && (new Date(lastMod).getTime() > new Date(snapUpd).getTime()));
 
-    if (!forceFresh && !isStale) {
+    // Always serve SafetyAssistant_Sync_Snapshot.json directly from Google Drive unless forceFresh === true.
+    // Google Sheets is a secondary mirror and must NEVER overwrite the authoritative JSON snapshot in Drive!
+    if (!forceFresh) {
       var fileId = props.getProperty('SYNC_SNAPSHOT_FILE_ID');
       var file = null;
       if (fileId) {
@@ -1500,8 +1543,6 @@ function getFastSnapshotFromDriveOrExport(forceFresh) {
           return content;
         }
       }
-    } else if (isStale) {
-      Logger.log('getFastSnapshotFromDriveOrExport: Drive snapshot is stale (Spreadsheet modified ' + lastMod + ' > snapshot ' + snapUpd + '), exporting fresh...');
     }
   } catch (driveErr) {
     Logger.log('getFastSnapshotFromDriveOrExport: Drive read error: ' + driveErr);
@@ -3796,7 +3837,7 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
   }
 
   // Always patch the .JSON snapshot in Google Drive whenever mutations or configs were applied
-  if (appliedCount > 0 || configsModified) {
+  if ((appliedCount > 0 || configsModified) && !(options && options.skipSnapshotPatch === true)) {
     try {
       if (typeof patchSyncSnapshotInDrive === 'function') {
         patchSyncSnapshotInDrive(sheetsModified, configsModified, options ? options.configs : null, options ? options.manualPicks : null);

@@ -1533,19 +1533,19 @@ class SyncEngine {
       let freshSnapshot = null;
       const cacheBuster = Date.now();
       try {
-        freshSnapshot = await this.executeNetworkRequest(`${activeUrl}?action=getSnapshot&_t=${cacheBuster}`, 'GET', null, 120000);
+        freshSnapshot = await this.executeNetworkRequest(`${activeUrl}?action=getSnapshot&_t=${cacheBuster}`, 'GET', null, 180000);
       } catch (getErr) {
         console.warn('GET getSnapshot failed, attempting POST fallback:', getErr);
         try {
-          freshSnapshot = await this.executeNetworkRequest(activeUrl, 'POST', { action: 'getSnapshot', _t: cacheBuster }, 120000);
+          freshSnapshot = await this.executeNetworkRequest(activeUrl, 'POST', { action: 'getSnapshot', _t: cacheBuster }, 180000);
         } catch (postErr) {
           if (activeUrl !== DEFAULT_SYNC_URL) {
             console.warn('Custom syncUrl failed, falling back to default working URL:', postErr);
             this.setSyncUrl(DEFAULT_SYNC_URL);
             try {
-              freshSnapshot = await this.executeNetworkRequest(`${DEFAULT_SYNC_URL}?action=getSnapshot&_t=${cacheBuster}`, 'GET', null, 120000);
+              freshSnapshot = await this.executeNetworkRequest(`${DEFAULT_SYNC_URL}?action=getSnapshot&_t=${cacheBuster}`, 'GET', null, 180000);
             } catch {
-              freshSnapshot = await this.executeNetworkRequest(DEFAULT_SYNC_URL, 'POST', { action: 'getSnapshot', _t: cacheBuster }, 120000);
+              freshSnapshot = await this.executeNetworkRequest(DEFAULT_SYNC_URL, 'POST', { action: 'getSnapshot', _t: cacheBuster }, 180000);
             }
           } else {
             throw postErr;

@@ -281,6 +281,7 @@ ipcMain.handle('select-snapshot-file', async () => {
 
 // Native HTTPS Sync Bridge (bypasses browser CORS & redirects seamlessly)
 const https = require('https');
+const zlib = require('zlib');
 
 function makeGoogleAppsScriptRequest(targetUrl, method = 'GET', data = null, timeoutMs = 60000) {
   return new Promise((resolve, reject) => {
@@ -304,7 +305,8 @@ function makeGoogleAppsScriptRequest(targetUrl, method = 'GET', data = null, tim
         family: 4,
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) SafetyAssistant/2026.1 Chrome/120.0.0.0 Safari/537.36',
-          'Accept': 'application/json, text/plain, */*'
+          'Accept': 'application/json, text/plain, */*',
+          'Accept-Encoding': 'gzip, deflate'
         }
       };
 
@@ -349,11 +351,10 @@ function makeGoogleAppsScriptRequest(targetUrl, method = 'GET', data = null, tim
 
         resetInactivity();
 
-        let responseBody = '';
-        res.setEncoding('utf8');
+        const rawChunks = [];
         res.on('data', (chunk) => {
           resetInactivity();
-          responseBody += chunk;
+          rawChunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
         });
         res.on('end', () => {
           if (inactivityTimer) clearTimeout(inactivityTimer);
@@ -364,6 +365,21 @@ function makeGoogleAppsScriptRequest(targetUrl, method = 'GET', data = null, tim
               requestWithRedirect(currentUrl, 'GET', null, redirectCount + 1);
             }, 1200);
             return;
+          }
+
+          let responseBody = '';
+          try {
+            const fullBuffer = Buffer.concat(rawChunks);
+            const enc = (res.headers['content-encoding'] || '').toLowerCase();
+            if (enc === 'gzip') {
+              responseBody = zlib.gunzipSync(fullBuffer).toString('utf8');
+            } else if (enc === 'deflate') {
+              responseBody = zlib.inflateSync(fullBuffer).toString('utf8');
+            } else {
+              responseBody = fullBuffer.toString('utf8');
+            }
+          } catch (decompErr) {
+            responseBody = Buffer.concat(rawChunks).toString('utf8');
           }
 
           try {

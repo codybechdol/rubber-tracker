@@ -3159,8 +3159,8 @@
   <!-- SheetJS for client-side Excel Parsing -->
   <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
 
-  <script src="js/db.js?v=20261103_01"></script>
-  <script src="js/sync.js?v=20261103_01"></script>
+  <script src="js/db.js?v=20261103_02"></script>
+  <script src="js/sync.js?v=20261103_02"></script>
   <script src="js/window-manager.js?v=20261027_01"></script>
   <script src="js/gps.js?v=20261027_01"></script>
   <script src="js/scanner.js?v=20261027_01"></script>
@@ -3402,7 +3402,13 @@
     window.toggleAutoScanStartup = toggleAutoScanStartup;
 
     function triggerStartupBackgroundScans() {
-      const autoScanEnabled = localStorage.getItem('sa_auto_scan_on_startup') !== 'false';
+      // Never auto-run heavy Gmail scans on web/tablet clients or in View Only mode
+      if (!window.desktopAPI || window.currentRoleMode === 'view_only') {
+        console.log('[Startup Scans] Skipping automated startup email scans on tablet/web or View Only mode.');
+        return;
+      }
+
+      const autoScanEnabled = localStorage.getItem('sa_auto_scan_on_startup') === 'true';
       if (!autoScanEnabled) {
         console.log('[Startup Scans] Automated startup email scans are disabled in Settings.');
         return;
@@ -3416,6 +3422,7 @@
 
       // 2.2-second delay allows the local UI to render smoothly and initial revision check to finish
       setTimeout(async () => {
+        if (window.syncEngine && window.syncEngine.isSyncing) return;
         try {
           console.log('🚀 [Startup Scans] Initiating automated background email scans...');
 
@@ -3618,7 +3625,7 @@
 
         const autoScanCheckbox = document.getElementById('setting-auto-scan-startup');
         if (autoScanCheckbox) {
-          autoScanCheckbox.checked = localStorage.getItem('sa_auto_scan_on_startup') !== 'false';
+          autoScanCheckbox.checked = localStorage.getItem('sa_auto_scan_on_startup') === 'true';
         }
 
         window._appInitialized = true;

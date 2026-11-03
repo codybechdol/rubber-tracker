@@ -13629,9 +13629,9 @@ function createBackupSnapshotFast(forceFullCopy, clientSnapshot) {
       } else if (clientSnapshot && typeof clientSnapshot === 'object') {
         jsonStr = JSON.stringify(clientSnapshot);
         needUpdateSyncSnapshot = true;
-      } else if (!forceFullCopy && typeof getFastSnapshotFromDriveOrExport === 'function') {
+      } else if (typeof getFastSnapshotFromDriveOrExport === 'function') {
         try {
-          jsonStr = getFastSnapshotFromDriveOrExport();
+          jsonStr = getFastSnapshotFromDriveOrExport(false);
         } catch (eCache) {}
       }
 
