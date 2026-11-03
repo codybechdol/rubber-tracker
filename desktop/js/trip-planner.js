@@ -8480,6 +8480,7 @@ class TripPlannerApp {
         const manualOfficePersonalTasks = allManualTasks
           .filter(m => m.taskCategory !== 'cert_class' && !m.certType)
           .sort((a, b) => this.compareTasksByTime(a, b));
+        const personalTasks = manualOfficePersonalTasks;
 
         // Gather scheduled trainings from Training Needs sidebar
         const dayScheduledTrainings = [];
@@ -9044,9 +9045,9 @@ class TripPlannerApp {
                   🎓 ${pendingTrainingsCount}
                 </span>
               ` : ''}
-              ${personalTasks.length > 0 ? `
-                <span class="badge" style="background: rgba(249, 115, 22, 0.2); color: #fdba74; border: 1px solid rgba(249, 115, 22, 0.35); font-size: 9px; padding: 1px 4px; border-radius: 3px;" title="${personalTasks.length} Office Task(s)">
-                  💼 ${personalTasks.filter(t => t.status !== 'Complete').length}
+              ${manualOfficePersonalTasks.length > 0 ? `
+                <span class="badge" style="background: rgba(249, 115, 22, 0.2); color: #fdba74; border: 1px solid rgba(249, 115, 22, 0.35); font-size: 9px; padding: 1px 4px; border-radius: 3px;" title="${manualOfficePersonalTasks.length} Office / Personal Task(s)">
+                  💼 ${manualOfficePersonalTasks.filter(t => t.status !== 'Complete').length}
                 </span>
               ` : ''}
               ${dayPickedCount > 0 ? `
