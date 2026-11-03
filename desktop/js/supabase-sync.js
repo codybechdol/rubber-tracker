@@ -39,8 +39,20 @@ class SupabaseSyncEngine {
     this.wsHeartbeatTimer = null;
     this.pollTimer = null;
     this.isApplyingRemote = false;
+    this.isFlushingQueue = false;
     this._tablePushTimers = new Map();
     this._modifiedTables = new Set();
+    this._cellHistory = new Map(); // cellKey -> { timestamp, value, deviceName, mutId }
+    this.pendingQueue = this._loadPendingQueue();
+    this.activeConflicts = [];
+
+    if (typeof window !== 'undefined') {
+      window.addEventListener('online', () => {
+        if (this.isActive()) {
+          this._pollMissedMutations().then(() => this._flushPendingOfflineQueue());
+        }
+      });
+    }
 
     // Hook into db.addMutation non-intrusively so local edits stream live when configured
     this._installMutationHook();
@@ -465,13 +477,113 @@ class SupabaseSyncEngine {
     this.db.addMutation = async (mutation) => {
       const result = await origAddMutation(mutation);
       if (this.isActive() && !this.isApplyingRemote && window.currentRoleMode !== 'view_only') {
-        this._broadcastLocalMutation(result || mutation).catch(err => {
-          console.warn('[SupabaseSync] Background mutation broadcast warning:', err.message);
-        });
+        const mutRecord = result || mutation;
+        const cellKey = this._getCellKey(mutRecord);
+        if (cellKey) {
+          this._cellHistory.set(cellKey, {
+            timestamp: mutRecord.timestamp || new Date().toISOString(),
+            value: mutRecord.value,
+            oldValue: mutRecord.oldValue,
+            deviceName: this.deviceName,
+            mutId: mutRecord.id
+          });
+        }
+        this._enqueueOrBroadcastMutation(mutRecord);
       }
       return result;
     };
     this.db._supabaseHookInstalled = true;
+  }
+
+  _loadPendingQueue() {
+    try {
+      const raw = localStorage.getItem('sa_supabase_pending_queue');
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  _savePendingQueue() {
+    try {
+      localStorage.setItem('sa_supabase_pending_queue', JSON.stringify(this.pendingQueue || []));
+    } catch { /* ignore */ }
+  }
+
+  _getCellKey(mut) {
+    if (!mut || mut.action !== 'UPDATE_CELL') return null;
+    const tableKey = (mut.tableKey || (mut.sheetName && this.db && this.db.getTableKeyForSheet ? this.db.getTableKeyForSheet(mut.sheetName) : mut.sheetName) || '').toLowerCase();
+    const rowId = String(mut.itemIdentifier || mut.row || '').trim().toLowerCase();
+    const colId = String(mut.header || mut.col || '').trim().toLowerCase();
+    if (!tableKey || !rowId || !colId) return null;
+    return `${tableKey}::${rowId}::${colId}`;
+  }
+
+  async _enqueueOrBroadcastMutation(mutRecord) {
+    if (!mutRecord) return;
+    const enriched = {
+      ...mutRecord,
+      id: mutRecord.id || ('mut_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7)),
+      timestamp: mutRecord.timestamp || new Date().toISOString(),
+      deviceName: this.deviceName
+    };
+
+    // If browser reports offline, queue immediately for reconnection flush
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+      this._queueOfflineMutation(enriched);
+      return;
+    }
+
+    try {
+      await this._broadcastLocalMutation(enriched);
+    } catch (err) {
+      console.warn('[SupabaseSync] Offline or network drop detected — queuing edit for automatic sync on reconnect:', err.message);
+      this._queueOfflineMutation(enriched);
+    }
+  }
+
+  _queueOfflineMutation(mutRecord) {
+    const cellKey = this._getCellKey(mutRecord);
+    if (cellKey) {
+      const existingIdx = this.pendingQueue.findIndex(m => this._getCellKey(m) === cellKey);
+      if (existingIdx !== -1) {
+        mutRecord.oldValue = this.pendingQueue[existingIdx].oldValue;
+        this.pendingQueue[existingIdx] = mutRecord;
+        this._savePendingQueue();
+        return;
+      }
+    }
+    this.pendingQueue.push(mutRecord);
+    this._savePendingQueue();
+  }
+
+  async _flushPendingOfflineQueue() {
+    if (!this.isActive() || this.isFlushingQueue || !this.pendingQueue || this.pendingQueue.length === 0) return;
+    if (typeof navigator !== 'undefined' && navigator.onLine === false) return;
+
+    this.isFlushingQueue = true;
+    try {
+      // 1. Always pull any remote mutations that occurred while this device was offline FIRST
+      await this._pollMissedMutations();
+
+      // 2. Push remaining non-conflicting queued mutations in chronological order
+      const remaining = [];
+      for (const mut of this.pendingQueue) {
+        if (mut._conflictHold) {
+          remaining.push(mut);
+          continue;
+        }
+        try {
+          await this._broadcastLocalMutation(mut);
+        } catch {
+          remaining.push(mut);
+        }
+      }
+      this.pendingQueue = remaining;
+      this._savePendingQueue();
+    } finally {
+      this.isFlushingQueue = false;
+    }
   }
 
   async _broadcastLocalMutation(mutRecord) {
@@ -633,9 +745,12 @@ class SupabaseSyncEngine {
 
     await this._pollMissedMutations();
 
-    // 1. Lightweight 5-second delta poll (catches any mutations across cellular/Wi-Fi drops)
-    this.pollTimer = setInterval(() => {
-      this._pollMissedMutations();
+    // 1. Lightweight 5-second delta poll (catches any mutations across cellular/Wi-Fi drops and flushes offline queue)
+    this.pollTimer = setInterval(async () => {
+      await this._pollMissedMutations();
+      if (this.pendingQueue && this.pendingQueue.length > 0) {
+        await this._flushPendingOfflineQueue();
+      }
     }, 5000);
 
     // 2. Live Supabase Realtime WebSocket for instant <200ms push notifications
@@ -740,9 +855,71 @@ class SupabaseSyncEngine {
     const mut = record.mutation;
     if (!mut || !this.db) return;
 
+    const cellKey = this._getCellKey(mut);
+    const remoteTime = new Date(mut.timestamp || record.created_at || Date.now()).getTime();
+    const remoteDevice = record.device_name || mut.deviceName || 'Another Device';
+
+    // Check 1: Does this incoming remote mutation collide with an unsent offline edit in our pendingQueue?
+    if (cellKey && this.pendingQueue && this.pendingQueue.length > 0) {
+      const pendingMatch = this.pendingQueue.find(pm => this._getCellKey(pm) === cellKey);
+      if (pendingMatch && String(pendingMatch.value ?? '') !== String(mut.value ?? '')) {
+        pendingMatch._conflictHold = true;
+        this._savePendingQueue();
+        this._promptCellConflict({
+          cellKey,
+          sheetName: mut.sheetName || pendingMatch.sheetName || record.table_key,
+          itemIdentifier: mut.itemIdentifier || pendingMatch.itemIdentifier || `Row ${mut.row}`,
+          header: mut.header || pendingMatch.header || `Col ${mut.col}`,
+          localMutation: pendingMatch,
+          localValue: pendingMatch.value,
+          localTime: pendingMatch.timestamp,
+          localDevice: this.deviceName,
+          remoteMutation: mut,
+          remoteValue: mut.value,
+          remoteTime: mut.timestamp || record.created_at,
+          remoteDevice: remoteDevice
+        });
+        return;
+      }
+    }
+
+    // Check 2: Two offline devices reconnecting at different times — did a late-reconnecting device send an OLDER edit
+    // for the exact same cell that we or another device edited MORE RECENTLY?
+    if (cellKey && this._cellHistory.has(cellKey)) {
+      const currentCell = this._cellHistory.get(cellKey);
+      const currentTime = new Date(currentCell.timestamp || 0).getTime();
+      if (String(currentCell.value ?? '') !== String(mut.value ?? '') && remoteTime < currentTime) {
+        // Remote edit was made BEFORE our current edit (e.g. a late-reconnecting offline device):
+        // Do NOT silently overwrite the newer edit — open conflict modal so the user can review both!
+        this._promptCellConflict({
+          cellKey,
+          sheetName: mut.sheetName || record.table_key,
+          itemIdentifier: mut.itemIdentifier || `Row ${mut.row}`,
+          header: mut.header || `Col ${mut.col}`,
+          localMutation: { ...mut, value: currentCell.value, timestamp: currentCell.timestamp },
+          localValue: currentCell.value,
+          localTime: currentCell.timestamp,
+          localDevice: currentCell.deviceName || this.deviceName,
+          remoteMutation: mut,
+          remoteValue: mut.value,
+          remoteTime: mut.timestamp || record.created_at,
+          remoteDevice: remoteDevice
+        });
+        return;
+      }
+    }
+
     try {
       this.isApplyingRemote = true;
       await this.db.applyLocalMutation(mut);
+      if (cellKey) {
+        this._cellHistory.set(cellKey, {
+          timestamp: mut.timestamp || record.created_at || new Date().toISOString(),
+          value: mut.value,
+          deviceName: remoteDevice,
+          mutId: record.mut_id
+        });
+      }
       this.db.schedulePersistSnapshot(this.db.snapshot, 400);
       this.db.notify();
 
@@ -751,12 +928,144 @@ class SupabaseSyncEngine {
       }
       if (typeof window.showToast === 'function') {
         const label = record.sheet_name || record.table_key || mut.action || 'Database';
-        window.showToast(`⚡ Live update from ${record.device_name || 'Teammate'}: ${label}`);
+        window.showToast(`⚡ Live update from ${remoteDevice}: ${label}`);
       }
     } catch (err) {
       console.warn('[SupabaseSync] Error applying remote mutation:', err);
     } finally {
       this.isApplyingRemote = false;
+    }
+  }
+
+  _promptCellConflict(conflict) {
+    // Deduplicate by cellKey
+    const existingIdx = this.activeConflicts.findIndex(c => c.cellKey === conflict.cellKey);
+    if (existingIdx !== -1) {
+      this.activeConflicts[existingIdx] = conflict;
+    } else {
+      this.activeConflicts.push(conflict);
+    }
+    this._renderConflictModal();
+  }
+
+  _renderConflictModal() {
+    const modal = document.getElementById('conflict-resolution-modal');
+    const body = document.getElementById('conflict-modal-body');
+    const applyBtn = document.getElementById('conflict-apply-btn');
+    if (!modal || !body || this.activeConflicts.length === 0) return;
+
+    const fmtTime = (iso) => {
+      if (!iso) return 'Unknown time';
+      const d = new Date(iso);
+      return isNaN(d.getTime()) ? String(iso) : d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    };
+
+    let html = `
+      <div style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 6px; padding: 12px 14px; font-size: 12px; color: #fca5a5; line-height: 1.5;">
+        <strong>⚠️ Same-Field Offline / Simultaneous Edit Detected:</strong> Two devices edited the exact same field before syncing. Choose which value to keep below (the newer timestamp is pre-selected by default).
+      </div>
+      <div style="display: flex; flex-direction: column; gap: 12px;">
+    `;
+
+    this.activeConflicts.forEach((conf, idx) => {
+      const lMs = new Date(conf.localTime || 0).getTime();
+      const rMs = new Date(conf.remoteTime || 0).getTime();
+      const localIsNewer = lMs >= rMs;
+
+      html += `
+        <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 14px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <div>
+              <span class="brand-badge" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.3); font-size: 11px;">
+                ${conf.sheetName}
+              </span>
+              <strong style="font-size: 13px; color: #f8fafc; margin-left: 6px;">${conf.itemIdentifier}</strong>
+              <span style="font-size: 12px; color: #60a5fa; margin-left: 8px;">Field: ${conf.header}</span>
+            </div>
+          </div>
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+            <label style="cursor: pointer; display: flex; flex-direction: column; gap: 6px; background: rgba(16, 185, 129, 0.08); border: 1.5px solid rgba(16, 185, 129, 0.35); border-radius: 6px; padding: 10px 12px;">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="font-size: 11px; font-weight: 700; color: #34d399;">
+                  🟢 ${conf.localDevice} (${fmtTime(conf.localTime)}) ${localIsNewer ? '★ Newer' : ''}
+                </span>
+                <input type="radio" name="sb_conflict_choice_${idx}" value="local" ${localIsNewer ? 'checked' : ''} style="accent-color: #10b981; cursor: pointer;">
+              </div>
+              <div style="font-size: 14px; font-weight: 700; color: #f8fafc;">${conf.localValue || '(empty)'}</div>
+            </label>
+            <label style="cursor: pointer; display: flex; flex-direction: column; gap: 6px; background: rgba(59, 130, 246, 0.08); border: 1.5px solid rgba(59, 130, 246, 0.35); border-radius: 6px; padding: 10px 12px;">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="font-size: 11px; font-weight: 700; color: #60a5fa;">
+                  🔵 ${conf.remoteDevice} (${fmtTime(conf.remoteTime)}) ${!localIsNewer ? '★ Newer' : ''}
+                </span>
+                <input type="radio" name="sb_conflict_choice_${idx}" value="remote" ${!localIsNewer ? 'checked' : ''} style="accent-color: #3b82f6; cursor: pointer;">
+              </div>
+              <div style="font-size: 14px; font-weight: 700; color: #f8fafc;">${conf.remoteValue || '(empty)'}</div>
+            </label>
+          </div>
+        </div>
+      `;
+    });
+
+    html += `</div>`;
+    body.innerHTML = html;
+
+    if (applyBtn) {
+      applyBtn.onclick = () => this.resolveActiveConflicts();
+    }
+
+    modal.style.display = 'flex';
+    modal.classList.add('active');
+  }
+
+  async resolveActiveConflicts() {
+    const conflicts = [...this.activeConflicts];
+    this.activeConflicts = [];
+
+    const modal = document.getElementById('conflict-resolution-modal');
+    if (modal) {
+      modal.classList.remove('active');
+      modal.style.display = 'none';
+    }
+
+    for (let idx = 0; idx < conflicts.length; idx++) {
+      const conf = conflicts[idx];
+      const radios = document.getElementsByName(`sb_conflict_choice_${idx}`);
+      let choice = 'local';
+      for (const r of radios) {
+        if (r.checked) choice = r.value;
+      }
+
+      const winningMut = choice === 'local' ? conf.localMutation : conf.remoteMutation;
+      winningMut.timestamp = new Date().toISOString();
+      winningMut.id = 'mut_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+
+      // Remove any held conflict entry from pendingQueue
+      this.pendingQueue = (this.pendingQueue || []).filter(pm => this._getCellKey(pm) !== conf.cellKey);
+      this._savePendingQueue();
+
+      this.isApplyingRemote = true;
+      await this.db.applyLocalMutation(winningMut);
+      this.isApplyingRemote = false;
+
+      this._cellHistory.set(conf.cellKey, {
+        timestamp: winningMut.timestamp,
+        value: winningMut.value,
+        deviceName: this.deviceName,
+        mutId: winningMut.id
+      });
+
+      // Broadcast winning resolution to all devices
+      await this._enqueueOrBroadcastMutation(winningMut);
+    }
+
+    this.db.schedulePersistSnapshot(this.db.snapshot, 300);
+    this.db.notify();
+    if (this.googleSync && typeof this.googleSync.refreshAllViewsAfterSnapshotLoad === 'function') {
+      this.googleSync.refreshAllViewsAfterSnapshotLoad();
+    }
+    if (typeof window.showToast === 'function') {
+      window.showToast('✅ Conflict resolved and synchronized across all devices!');
     }
   }
 
