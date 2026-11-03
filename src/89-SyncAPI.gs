@@ -834,7 +834,35 @@ function syncAndSaveCloudDatabase(payload) {
     if (payload.activeTables && typeof payload.activeTables === 'object') {
       for (var atk in payload.activeTables) {
         if (Object.prototype.hasOwnProperty.call(payload.activeTables, atk) && payload.activeTables[atk]) {
-          snapObj.tables[atk] = payload.activeTables[atk];
+          var inTbl = payload.activeTables[atk];
+          if (inTbl.compactRows && Array.isArray(inTbl.compactRows) && Array.isArray(inTbl.headers)) {
+            var cHeaders = inTbl.headers;
+            var expandedRows = [];
+            var expandedGrid = [cHeaders];
+            for (var crIdx = 0; crIdx < inTbl.compactRows.length; crIdx++) {
+              var cArr = inTbl.compactRows[crIdx] || [];
+              expandedGrid.push(cArr);
+              var rowObj = {};
+              for (var chIdx = 0; chIdx < cHeaders.length; chIdx++) {
+                var hKey = cHeaders[chIdx];
+                if (hKey !== undefined && hKey !== '') {
+                  rowObj[hKey] = cArr[chIdx] !== undefined && cArr[chIdx] !== null ? cArr[chIdx] : '';
+                }
+              }
+              expandedRows.push(rowObj);
+            }
+            snapObj.tables[atk] = {
+              name: inTbl.name || atk,
+              headers: cHeaders,
+              rows: expandedRows,
+              rawGrid: expandedGrid,
+              rowCount: expandedRows.length,
+              maxRows: expandedGrid.length,
+              maxCols: cHeaders.length
+            };
+          } else {
+            snapObj.tables[atk] = inTbl;
+          }
         }
       }
       // Keep Google Sheets Employees & Job Tracking tabs 100% aligned with authoritative desktop activeTables

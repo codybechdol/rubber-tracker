@@ -101,7 +101,19 @@ async function triggerBackup() {
       if (clientSnapshot && clientSnapshot.tables) {
         activeTables = {};
         for (const [k, v] of Object.entries(clientSnapshot.tables)) {
-          if (!heavyArchiveTables.has(k) && v) activeTables[k] = v;
+          if (!v) continue;
+          if (!heavyArchiveTables.has(k)) {
+            activeTables[k] = v;
+          } else {
+            const headers = Array.isArray(v.headers) ? v.headers : [];
+            const rows = Array.isArray(v.rows) ? v.rows : [];
+            activeTables[k] = {
+              name: v.name || k,
+              headers: headers,
+              compactRows: rows.map(r => headers.map(h => (r && r[h] !== undefined && r[h] !== null) ? r[h] : '')),
+              rowCount: rows.length
+            };
+          }
         }
       }
       clientConfigs = (clientSnapshot && clientSnapshot.configs) || null;

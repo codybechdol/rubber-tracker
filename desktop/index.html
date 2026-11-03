@@ -1043,11 +1043,60 @@
       </section>
 
       <!-- View 5: Sync Settings -->
-      <section id="settings-view" class="view-container">
+      <section id="settings-view" class="view-container" style="overflow-y: auto;">
         <div class="sheet-toolbar">
           <h2 style="font-size: 16px;">⚙️ Sync & Database Settings</h2>
         </div>
-        <div style="padding: 24px; max-width: 600px;">
+        <div style="padding: 24px; max-width: 680px;">
+          <!-- Supabase Multi-User Real-Time Sync Card -->
+          <div style="background: linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, rgba(15, 23, 42, 0.9) 100%); border: 1px solid rgba(16, 185, 129, 0.45); border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; flex-wrap: wrap; gap: 8px;">
+              <h3 style="font-size: 14px; margin: 0; display: flex; align-items: center; gap: 8px; color: #f8fafc;">
+                <span>⚡</span> Multi-User Real-Time Sync (Supabase)
+              </h3>
+              <span id="supabase-status-badge" class="badge" style="background: rgba(148, 163, 184, 0.15); color: #94a3b8; border: 1px solid rgba(148, 163, 184, 0.35); font-size: 10.5px; font-weight: 700; padding: 3px 8px; border-radius: 4px;">
+                Not Configured (Using Google Drive)
+              </span>
+            </div>
+            <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 14px; line-height: 1.5;">
+              Optional high-speed PostgreSQL + Realtime WebSocket layer for multiple laptops & tablets editing simultaneously (~1s downloads, instant row-level merges). Leave blank to use standard Google Drive sync only.
+            </p>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 10px;">
+              <div>
+                <label style="font-size: 11px; font-weight: 600; color: var(--text-secondary); display: block; margin-bottom: 4px;">Supabase Project URL</label>
+                <input type="text" id="supabase-url-input" class="sheet-search" style="width: 100%;" placeholder="https://xxxxxxxxxxxx.supabase.co">
+              </div>
+              <div>
+                <label style="font-size: 11px; font-weight: 600; color: var(--text-secondary); display: block; margin-bottom: 4px;">Device Name (Shown on Live Edits)</label>
+                <input type="text" id="supabase-device-input" class="sheet-search" style="width: 100%;" placeholder="e.g. Cody's Laptop or Field Tablet 1">
+              </div>
+            </div>
+            <div style="margin-bottom: 12px;">
+              <label style="font-size: 11px; font-weight: 600; color: var(--text-secondary); display: block; margin-bottom: 4px;">Supabase Anon / Public API Key</label>
+              <input type="password" id="supabase-key-input" class="sheet-search" style="width: 100%;" placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...">
+            </div>
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; flex-wrap: wrap; gap: 10px;">
+              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 12px; font-weight: 600; color: #6ee7b7;">
+                <input type="checkbox" id="supabase-enabled-checkbox" checked style="accent-color: #10b981; cursor: pointer; width: 16px; height: 16px;">
+                <span>Enable Live Multi-User Sync when configured</span>
+              </label>
+              <button class="btn btn-secondary" style="font-size: 11.5px; padding: 5px 10px; border-color: rgba(52, 211, 153, 0.4); color: #6ee7b7;" onclick="window.supabaseSync && window.supabaseSync.copySqlSetupScript()">
+                📋 Copy 1-Time SQL Setup Script
+              </button>
+            </div>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <button class="btn btn-primary" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); border: none; font-weight: 700;" onclick="saveSupabaseSettings()">
+                💾 Save & Test Supabase
+              </button>
+              <button class="btn btn-secondary" style="border-color: #3b82f6; color: #93c5fd; font-weight: 600;" onclick="window.supabaseSync && window.supabaseSync.pushFullSnapshotToSupabase({ showModal: true })">
+                🚀 Push Full Database to Supabase
+              </button>
+              <button class="btn btn-secondary" style="border-color: #10b981; color: #34d399; font-weight: 600;" onclick="window.supabaseSync && window.supabaseSync.downloadSnapshotFromSupabase({ showModal: true })">
+                ⚡ Download from Supabase
+              </button>
+            </div>
+          </div>
+
           <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 20px; margin-bottom: 20px;">
             <h3 style="font-size: 14px; margin-bottom: 12px;">Google Sheets Sync Endpoint</h3>
             <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 16px;">
@@ -3147,9 +3196,9 @@
       <span class="mobile-nav-icon">📜</span>
       <span class="mobile-nav-label">Certs</span>
     </div>
-    <div class="mobile-nav-btn" onclick="window.syncEngine.pushChangesToGoogleSheets()" title="Push offline changes to Google Sheets">
-      <span class="mobile-nav-icon" id="mobile-bottom-sync-icon">⬆️</span>
-      <span class="mobile-nav-label">Push Sync</span>
+    <div class="mobile-nav-btn admin-only-control" onclick="window.syncEngine.syncAndSaveToCloud()" title="Sync & Save database to cloud">
+      <span class="mobile-nav-icon" id="mobile-bottom-sync-icon">☁️</span>
+      <span class="mobile-nav-label">Sync & Save</span>
     </div>
   </nav>
 
@@ -3160,7 +3209,8 @@
   <script src="https://cdn.sheetjs.com/xlsx-0.20.1/package/dist/xlsx.full.min.js"></script>
 
   <script src="js/db.js?v=20261103_02"></script>
-  <script src="js/sync.js?v=20261103_02"></script>
+  <script src="js/sync.js?v=20261103_05"></script>
+  <script src="js/supabase-sync.js?v=20261103_02"></script>
   <script src="js/window-manager.js?v=20261027_01"></script>
   <script src="js/gps.js?v=20261027_01"></script>
   <script src="js/scanner.js?v=20261027_01"></script>
@@ -3379,6 +3429,27 @@
       }
     }
 
+    async function saveSupabaseSettings() {
+      if (!window.supabaseSync) return;
+      const url = document.getElementById('supabase-url-input')?.value || '';
+      const anonKey = document.getElementById('supabase-key-input')?.value || '';
+      const deviceName = document.getElementById('supabase-device-input')?.value || '';
+      const enabled = document.getElementById('supabase-enabled-checkbox')?.checked !== false;
+
+      window.supabaseSync.saveSettings({ url, anonKey, deviceName, enabled });
+      if (!url || !anonKey) {
+        alert('ℹ️ Supabase settings cleared/paused. The app will continue using standard Google Drive sync.');
+        return;
+      }
+      const res = await window.supabaseSync.testConnection();
+      if (res.success) {
+        alert('✅ ' + res.message);
+      } else {
+        alert('⚠️ ' + res.message);
+      }
+    }
+    window.saveSupabaseSettings = saveSupabaseSettings;
+
     function saveSyncSettings() {
       const syncInput = document.getElementById('sync-url-input');
       const url = syncInput ? syncInput.value : '';
@@ -3562,6 +3633,18 @@
         }
 
         const snapshot = await window.localDB.init();
+        if (window.SupabaseSyncEngine) {
+          window.supabaseSync = new SupabaseSyncEngine(window.localDB, window.syncEngine);
+          const sbUrlEl = document.getElementById('supabase-url-input');
+          const sbKeyEl = document.getElementById('supabase-key-input');
+          const sbDevEl = document.getElementById('supabase-device-input');
+          const sbEnEl = document.getElementById('supabase-enabled-checkbox');
+          if (sbUrlEl) sbUrlEl.value = window.supabaseSync.url || '';
+          if (sbKeyEl) sbKeyEl.value = window.supabaseSync.anonKey || '';
+          if (sbDevEl) sbDevEl.value = window.supabaseSync.deviceName || '';
+          if (sbEnEl) sbEnEl.checked = window.supabaseSync.enabled;
+          window.supabaseSync.updateSettingsBadge();
+        }
         if (window.windowManager) window.windowManager.init();
         window.employeeResolver = new EmployeeNameResolver(window.localDB);
 

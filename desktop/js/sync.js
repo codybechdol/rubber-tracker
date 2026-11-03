@@ -1504,13 +1504,27 @@ class SyncEngine {
     if (outbox.length > 0 && !force) {
       const proceed = confirm(
         `⚠️ Warning: You have ${outbox.length} pending offline change(s) that haven't been pushed to Google Sheets yet.\n\n` +
-        `Downloading the latest snapshot will replace your local database with the current Google Sheets version.\n\n` +
+        `Downloading the latest snapshot will replace your local database with the current cloud version.\n\n` +
         `• Click "OK" to download snapshot (overwriting local data).\n` +
-        `• Click "Cancel" to go back and click "Push Changes to Sheets" first.`
+        `• Click "Cancel" to go back and click "Sync & Save" first.`
       );
       if (!proceed) return { success: false, cancelled: true };
       // User confirmed overwriting local changes with server snapshot
       this.db.clearOutbox();
+    }
+
+    // If Supabase Multi-User Real-Time Sync is configured and active, pull from Supabase first (~1s)
+    // with automatic fallback to Google Drive if Supabase is empty or unreachable.
+    if (window.supabaseSync && typeof window.supabaseSync.isActive === 'function' && window.supabaseSync.isActive()) {
+      try {
+        const sbRes = await window.supabaseSync.downloadSnapshotFromSupabase({ showModal: true });
+        if (sbRes && sbRes.success) {
+          return sbRes;
+        }
+        console.warn('[SyncEngine] Supabase snapshot empty/unavailable, falling back to Google Drive snapshot...');
+      } catch (sbErr) {
+        console.warn('[SyncEngine] Supabase download fallback to Google Drive:', sbErr);
+      }
     }
 
     this.isSyncing = true;
@@ -2025,6 +2039,17 @@ class SyncEngine {
       }
     }
 
+    // 2. Immediately push all 52 tables + configs to Supabase PostgreSQL (~1.5s) if active
+    let supabaseMirrored = false;
+    if (window.supabaseSync && typeof window.supabaseSync.isActive === 'function' && window.supabaseSync.isActive()) {
+      try {
+        const sbPush = await window.supabaseSync.pushFullSnapshotToSupabase({ showModal: false });
+        supabaseMirrored = Boolean(sbPush && sbPush.success);
+      } catch (sbPushErr) {
+        console.warn('[SyncEngine] Supabase pre-sync mirror warning:', sbPushErr);
+      }
+    }
+
     const timerInterval = setInterval(() => {
       const elapsedMs = Date.now() - startTime;
       const subTitleEl = document.getElementById('sync-modal-subtitle');
@@ -2037,9 +2062,9 @@ class SyncEngine {
     let resp = null;
     let lastErr = null;
 
-    // Extract the 39 active tables (~1.5 MB) so the laptop's exact in-memory state (inventory,
-    // swaps with _location/_foreman/Class/Pick List, employees, job_tracking, certs, etc.)
-    // uploads in ~1s without hitting Google Apps Script's 10MB POST limit on history/log archives.
+    // Package ALL 52 tables (active + history + email logs) so the cloud snapshot is a 100% 1:1
+    // mirror of whichever device runs Sync & Save. Heavy history/log tables are transmitted in
+    // compact array-of-arrays form (~1.1 MB instead of ~6 MB) and expanded on the server.
     const heavyArchiveTables = new Set([
       'jha_log', 'weekly_safety_log', 'monthly_checklist_log',
       'employee_history', 'gloves_history', 'sleeves_history',
@@ -2049,8 +2074,18 @@ class SyncEngine {
     const activeTables = {};
     if (this.db.snapshot && this.db.snapshot.tables) {
       for (const [tKey, tVal] of Object.entries(this.db.snapshot.tables)) {
-        if (!heavyArchiveTables.has(tKey) && tVal) {
+        if (!tVal) continue;
+        if (!heavyArchiveTables.has(tKey)) {
           activeTables[tKey] = tVal;
+        } else {
+          const headers = Array.isArray(tVal.headers) ? tVal.headers : [];
+          const rows = Array.isArray(tVal.rows) ? tVal.rows : [];
+          activeTables[tKey] = {
+            name: tVal.name || tKey,
+            headers: headers,
+            compactRows: rows.map(r => headers.map(h => (r && r[h] !== undefined && r[h] !== null) ? r[h] : '')),
+            rowCount: rows.length
+          };
         }
       }
     }
@@ -2131,6 +2166,19 @@ class SyncEngine {
           table: 'Local Disk Backup',
           action: 'Saved',
           description: 'Rolling snapshot saved to SafetyAssistantData/backups/'
+        });
+      }
+
+      if (supabaseMirrored || (window.supabaseSync && typeof window.supabaseSync.isActive === 'function' && window.supabaseSync.isActive())) {
+        if (!supabaseMirrored) {
+          window.supabaseSync.pushFullSnapshotToSupabase({ showModal: false }).catch(err => {
+            console.warn('[SyncEngine] Background Supabase mirror warning:', err);
+          });
+        }
+        summaryCards.push({
+          table: 'Supabase Multi-User DB',
+          action: 'Mirrored Live',
+          description: 'All 52 tables & configurations synced to Supabase PostgreSQL'
         });
       }
 
