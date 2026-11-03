@@ -313,9 +313,19 @@ function makeGoogleAppsScriptRequest(targetUrl, method = 'GET', data = null, tim
         options.headers['Content-Length'] = Buffer.byteLength(postBody);
       }
 
-      const req = https.request(options, (res) => {
+      let inactivityTimer = null;
+      let req = null;
+      const resetInactivity = () => {
+        if (inactivityTimer) clearTimeout(inactivityTimer);
+        inactivityTimer = setTimeout(() => {
+          if (req) req.destroy(new Error(`Sync network request timed out: no response data received for 60 seconds.`));
+        }, Math.max(60000, timeoutMs || 60000));
+      };
+
+      req = https.request(options, (res) => {
         // Automatically follow Google Apps Script 302/307 redirects to echo URL
         if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          if (inactivityTimer) clearTimeout(inactivityTimer);
           let redirectUrl = res.headers.location;
           if (!redirectUrl.startsWith('http')) {
             redirectUrl = new URL(redirectUrl, currentUrl).href;
@@ -337,10 +347,16 @@ function makeGoogleAppsScriptRequest(targetUrl, method = 'GET', data = null, tim
           return requestWithRedirect(redirectUrl, 'GET', null, redirectCount + 1);
         }
 
+        resetInactivity();
+
         let responseBody = '';
         res.setEncoding('utf8');
-        res.on('data', (chunk) => { responseBody += chunk; });
+        res.on('data', (chunk) => {
+          resetInactivity();
+          responseBody += chunk;
+        });
         res.on('end', () => {
+          if (inactivityTimer) clearTimeout(inactivityTimer);
           // If Google's usercontent echo server returned transient 404, retry after a short delay
           if (res.statusCode === 404 && currentUrl.includes('googleusercontent.com') && redirectCount < 4) {
             console.warn(`[DesktopBridge] Google echo server returned transient 404 on ${currentUrl.substring(0, 60)}..., retrying in 1.2s (attempt ${redirectCount + 1})...`);
@@ -371,12 +387,14 @@ function makeGoogleAppsScriptRequest(targetUrl, method = 'GET', data = null, tim
         });
       });
 
-      const effectiveTimeout = timeoutMs || 60000;
+      const effectiveTimeout = Math.max(timeoutMs || 60000, 300000);
       req.setTimeout(effectiveTimeout, () => {
+        if (inactivityTimer) clearTimeout(inactivityTimer);
         req.destroy(new Error(`Sync network request timed out after ${effectiveTimeout / 1000} seconds.`));
       });
 
       req.on('error', (err) => {
+        if (inactivityTimer) clearTimeout(inactivityTimer);
         reject(err);
       });
 
@@ -472,6 +490,157 @@ const CERT_PHOTOS_DIR = path.join(USER_DATA_DIR, 'cert_photos');
 if (!fs.existsSync(CERT_PHOTOS_DIR)) {
   fs.mkdirSync(CERT_PHOTOS_DIR, { recursive: true });
 }
+
+const CERT_SCAN_CACHE_DIR = path.join(USER_DATA_DIR, 'cert_scanner_cache');
+if (!fs.existsSync(CERT_SCAN_CACHE_DIR)) {
+  fs.mkdirSync(CERT_SCAN_CACHE_DIR, { recursive: true });
+}
+
+ipcMain.handle('get-cached-cert-attachment', async (event, { messageId, attIdx }) => {
+  try {
+    const cacheFilePath = path.join(CERT_SCAN_CACHE_DIR, `cert_${messageId}_${attIdx}.json`);
+    if (fs.existsSync(cacheFilePath)) {
+      const content = await fs.promises.readFile(cacheFilePath, 'utf8');
+      const data = JSON.parse(content);
+      return { exists: true, ...data };
+    }
+    return { exists: false };
+  } catch (err) {
+    return { exists: false, error: err.message };
+  }
+});
+
+ipcMain.handle('save-cached-cert-attachment', async (event, { messageId, attIdx, data }) => {
+  try {
+    const cacheFilePath = path.join(CERT_SCAN_CACHE_DIR, `cert_${messageId}_${attIdx}.json`);
+    await fs.promises.writeFile(cacheFilePath, JSON.stringify(data));
+    return { success: true };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+});
+
+ipcMain.handle('download-cert-attachment', async (event, { url, messageId, attIdx, expectedSize }) => {
+  const cacheFilePath = path.join(CERT_SCAN_CACHE_DIR, `cert_${messageId}_${attIdx}.json`);
+  if (fs.existsSync(cacheFilePath)) {
+    try {
+      const content = await fs.promises.readFile(cacheFilePath, 'utf8');
+      const data = JSON.parse(content);
+      return { success: true, ...data, fromCache: true };
+    } catch (e) {
+      console.warn('Cache read error, re-fetching:', e);
+    }
+  }
+
+  return new Promise((resolve) => {
+    const startTime = Date.now();
+    let inactivityTimer = null;
+    let totalBytesReceived = 0;
+
+    function resetInactivity(reqObj) {
+      if (inactivityTimer) clearTimeout(inactivityTimer);
+      inactivityTimer = setTimeout(() => {
+        reqObj.destroy(new Error(`Download stalled: no data received for 60 seconds.`));
+      }, 60000);
+    }
+
+    function doRequest(curUrl, m, bodyData, redirectCount = 0) {
+      if (redirectCount > 5) {
+        if (inactivityTimer) clearTimeout(inactivityTimer);
+        return resolve({ success: false, error: 'Too many redirects.' });
+      }
+
+      const parsed = new URL(curUrl);
+      const isPost = m === 'POST';
+      const postBody = bodyData ? (typeof bodyData === 'string' ? bodyData : JSON.stringify(bodyData)) : null;
+
+      const opt = {
+        hostname: parsed.hostname,
+        path: parsed.pathname + parsed.search,
+        method: m,
+        family: 4,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) SafetyAssistant/2026.1',
+          'Accept': 'application/json, text/plain, */*'
+        }
+      };
+
+      if (isPost && postBody) {
+        opt.headers['Content-Type'] = 'text/plain;charset=utf-8';
+        opt.headers['Content-Length'] = Buffer.byteLength(postBody);
+      }
+
+      const req = https.request(opt, (res) => {
+        if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          if (inactivityTimer) clearTimeout(inactivityTimer);
+          let red = res.headers.location;
+          if (!red.startsWith('http')) red = new URL(red, curUrl).href;
+          res.resume();
+          return doRequest(red, 'GET', null, redirectCount + 1);
+        }
+
+        resetInactivity(req);
+        let data = '';
+        const targetTotal = expectedSize || (res.headers['content-length'] ? parseInt(res.headers['content-length'], 10) : 0);
+
+        res.on('data', (chunk) => {
+          resetInactivity(req);
+          totalBytesReceived += chunk.length;
+          data += chunk;
+
+          const elapsedSec = (Date.now() - startTime) / 1000;
+          const speedKbps = elapsedSec > 0 ? (totalBytesReceived / 1024 / elapsedSec).toFixed(1) : '0';
+          let pct = 0;
+          if (targetTotal > 0) {
+            const estPayloadSize = targetTotal * 1.35;
+            pct = Math.min(99, Math.round((totalBytesReceived / estPayloadSize) * 100));
+          }
+
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            mainWindow.webContents.send('cert-attachment-download-progress', {
+              messageId,
+              attIdx,
+              bytesReceived: totalBytesReceived,
+              totalBytes: targetTotal,
+              speedKbps,
+              pct
+            });
+          }
+        });
+
+        res.on('end', () => {
+          if (inactivityTimer) clearTimeout(inactivityTimer);
+          try {
+            const json = JSON.parse(data);
+            if (json.success && json.base64Data) {
+              fs.promises.writeFile(cacheFilePath, JSON.stringify(json)).catch(err => {
+                console.warn('Failed to write cert attachment cache:', err);
+              });
+              resolve({ success: true, ...json, fromCache: false });
+            } else {
+              resolve({ success: false, error: json.error || 'Invalid response from server' });
+            }
+          } catch (e) {
+            resolve({ success: false, error: 'Failed to parse JSON response: ' + e.message });
+          }
+        });
+      });
+
+      req.on('error', (err) => {
+        if (inactivityTimer) clearTimeout(inactivityTimer);
+        resolve({ success: false, error: err.message });
+      });
+
+      resetInactivity(req);
+      if (isPost && postBody) {
+        req.write(postBody);
+      }
+      req.end();
+    }
+
+    doRequest(url, 'POST', { action: 'getCertEmailAttachment', messageId, attIdx });
+  });
+});
 
 ipcMain.handle('select-cert-photo-file', async () => {
   try {
@@ -611,17 +780,28 @@ ipcMain.handle('delete-cert-photo', async (event, { fileName, fullPath }) => {
 
 // Optical Character Recognition (OCR) via Tesseract.js
 let ocrWorker = null;
+let ocrWorkerPromise = null;
 async function getOcrWorkerInstance() {
-  if (!ocrWorker) {
+  if (ocrWorker) return ocrWorker;
+  if (!ocrWorkerPromise) {
     const { createWorker } = require('tesseract.js');
-    ocrWorker = await createWorker('eng');
+    ocrWorkerPromise = createWorker('eng').then(w => {
+      ocrWorker = w;
+      return w;
+    }).catch(err => {
+      ocrWorkerPromise = null;
+      throw err;
+    });
   }
-  return ocrWorker;
+  return ocrWorkerPromise;
 }
 
+let ocrQueue = Promise.resolve();
+
 /**
- * Preprocesses an image buffer using nativeImage to enhance contrast, upscale,
- * and binarize security backgrounds so faint text on state driver's licenses is crystal clear.
+ * Preprocesses an image buffer using nativeImage to enhance contrast,
+ * normalize dimensions, and binarize security backgrounds so faint text on state driver's licenses is crystal clear.
+ * Caps maximum dimensions to 1600px to prevent multi-megabyte camera photos from stalling CPU/memory.
  */
 function preprocessImageBuffer(buffer) {
   try {
@@ -631,23 +811,35 @@ function preprocessImageBuffer(buffer) {
     const size = nImg.getSize();
     if (!size.width || !size.height) return buffer;
 
-    // Scale up 1.35x for clearer font stroke recognition
-    const targetW = Math.round(size.width * 1.35);
-    const targetH = Math.round(size.height * 1.35);
-    nImg = nImg.resize({ width: targetW, height: targetH, quality: 'best' });
+    // For OCR, ideal image dimensions are around 1200-1600px.
+    // If image is huge (e.g. 4032x3024 smartphone camera photo), DOWNSIZE it to prevent CPU/memory choking.
+    const maxDimension = 1600;
+    let targetW = size.width;
+    let targetH = size.height;
+
+    if (targetW > maxDimension || targetH > maxDimension) {
+      const scale = maxDimension / Math.max(targetW, targetH);
+      targetW = Math.round(targetW * scale);
+      targetH = Math.round(targetH * scale);
+      nImg = nImg.resize({ width: targetW, height: targetH, quality: 'good' });
+    } else if (targetW < 800 && targetH < 800) {
+      // Upscale tiny images for clearer font strokes
+      const scale = Math.min(2.0, 1200 / Math.max(targetW, targetH));
+      targetW = Math.round(targetW * scale);
+      targetH = Math.round(targetH * scale);
+      nImg = nImg.resize({ width: targetW, height: targetH, quality: 'better' });
+    }
 
     const rawBitmap = nImg.toBitmap();
     const processed = Buffer.from(rawBitmap);
-
-    // Calculate average luminance
-    let totalLum = 0;
     const totalPixels = targetW * targetH;
+
+    // Fast luminance calculation
+    let totalLum = 0;
     for (let i = 0; i < processed.length; i += 4) {
-      const lum = 0.299 * processed[i] + 0.587 * processed[i + 1] + 0.114 * processed[i + 2];
-      totalLum += lum;
+      totalLum += 0.299 * processed[i] + 0.587 * processed[i + 1] + 0.114 * processed[i + 2];
     }
     const avgLum = totalLum / totalPixels;
-    // Threshold to drop background patterns (mountains, watermarks, colored backgrounds)
     const threshold = avgLum * 0.75;
 
     for (let i = 0; i < processed.length; i += 4) {
@@ -659,7 +851,7 @@ function preprocessImageBuffer(buffer) {
     }
 
     const enhancedImg = nativeImage.createFromBitmap(processed, { width: targetW, height: targetH });
-    return enhancedImg.toJPEG(95);
+    return enhancedImg.toJPEG(90);
   } catch (err) {
     console.warn('[Preprocessing Warning]', err);
     return buffer;
@@ -679,25 +871,37 @@ ipcMain.handle('extract-text-from-photo', async (event, { base64Data }) => {
 
     const rawB64 = base64Data.includes('base64,') ? base64Data.split('base64,')[1] : base64Data;
     const originalBuffer = Buffer.from(rawB64, 'base64');
-    const worker = await getOcrWorkerInstance();
 
-    // Pass 1: Enhanced / Binarized image (strips background patterns on driver's licenses)
-    const enhancedBuffer = preprocessImageBuffer(originalBuffer);
-    const retEnhanced = await worker.recognize(enhancedBuffer);
-    const textEnhanced = retEnhanced.data ? (retEnhanced.data.text || '') : '';
+    const runRecognition = async () => {
+      const worker = await getOcrWorkerInstance();
 
-    // Pass 2: Also recognize original buffer to combine any details missed by thresholding
-    let combinedText = textEnhanced;
-    if (!/exp|date|driver|cpr|crane|license|name/i.test(textEnhanced) || textEnhanced.length < 30) {
-      const retOriginal = await worker.recognize(originalBuffer);
-      const textOriginal = retOriginal.data ? (retOriginal.data.text || '') : '';
-      combinedText = `${textEnhanced}\n${textOriginal}`;
-    }
+      // Pass 1: Enhanced / Binarized image (strips background patterns on driver's licenses)
+      const enhancedBuffer = preprocessImageBuffer(originalBuffer);
+      const retEnhanced = await worker.recognize(enhancedBuffer);
+      const textEnhanced = retEnhanced.data ? (retEnhanced.data.text || '') : '';
 
-    return {
-      success: true,
-      text: combinedText
+      // Pass 2: Only recognize original buffer if enhanced pass yielded very little text
+      let combinedText = textEnhanced;
+      if (!/exp|date|driver|cpr|crane|license|name|first aid/i.test(textEnhanced) && textEnhanced.length < 30) {
+        const retOriginal = await worker.recognize(originalBuffer);
+        const textOriginal = retOriginal.data ? (retOriginal.data.text || '') : '';
+        combinedText = `${textEnhanced}\n${textOriginal}`;
+      }
+
+      return {
+        success: true,
+        text: combinedText
+      };
     };
+
+    // Serialize OCR tasks through queue with a 15-second hard safety timeout
+    const currentTask = ocrQueue.then(runRecognition, runRecognition);
+    ocrQueue = currentTask.catch(() => {});
+
+    return await Promise.race([
+      currentTask,
+      new Promise(resolve => setTimeout(() => resolve({ success: false, error: 'OCR processing timed out (15s limit)' }), 15000))
+    ]);
   } catch (err) {
     console.warn('[OCR Error]', err);
     return { success: false, error: err.message };

@@ -870,49 +870,59 @@ class SafetyEmailsEngine {
     if (modal) modal.style.display = 'none';
   }
 
-  async runProcessEmails() {
+  async runProcessEmails(options = {}) {
     if (this.isProcessing) {
-      this.restoreProcessEmailsModal();
+      if (!options || !options.runInBackground) {
+        this.restoreProcessEmailsModal();
+      }
       return;
     }
 
-    const syncUrl = window.syncEngine.getSyncUrl();
+    const syncUrl = window.syncEngine ? window.syncEngine.getSyncUrl() : '';
     if (!syncUrl) {
-      alert('⚠️ Please configure your Google Apps Script Web App sync URL first in Settings.');
+      if (!options || !options.silent) {
+        alert('⚠️ Please configure your Google Apps Script Web App sync URL first in Settings.');
+      }
       return;
     }
+
+    const isBackground = !!(options && options.runInBackground);
 
     const typeRadio = document.querySelector('input[name="proc-report-type"]:checked');
-    const reportTypeFilter = typeRadio ? typeRadio.value : 'ALL';
+    const reportTypeFilter = (options && options.reportTypeFilter) || (typeRadio ? typeRadio.value : 'ALL');
 
     const scopeRadio = document.querySelector('input[name="proc-date-scope"]:checked');
     const scopeVal = scopeRadio ? scopeRadio.value : 'new';
 
-    let daysBack = 7;
-    let newOnlyMode = true;
-    let startDate = null;
-    let endDate = null;
+    let daysBack = (options && options.daysBack !== undefined) ? options.daysBack : 7;
+    let newOnlyMode = (options && options.newOnlyMode !== undefined) ? options.newOnlyMode : true;
+    let startDate = (options && options.startDate) || null;
+    let endDate = (options && options.endDate) || null;
 
-    if (scopeVal === 'new') {
-      newOnlyMode = true;
-      daysBack = 7;
-    } else if (scopeVal === 'custom') {
-      newOnlyMode = false;
-      startDate = document.getElementById('proc-start-date')?.value || null;
-      endDate = document.getElementById('proc-end-date')?.value || null;
-      if (startDate) {
-        const startD = new Date(startDate);
-        const nowD = new Date();
-        const diffDays = Math.max(1, Math.ceil((nowD - startD) / (1000 * 60 * 60 * 24)));
-        daysBack = diffDays;
+    if (!options || (options.newOnlyMode === undefined && options.daysBack === undefined)) {
+      if (scopeVal === 'new') {
+        newOnlyMode = true;
+        daysBack = 7;
+      } else if (scopeVal === 'custom') {
+        newOnlyMode = false;
+        startDate = document.getElementById('proc-start-date')?.value || null;
+        endDate = document.getElementById('proc-end-date')?.value || null;
+        if (startDate) {
+          const startD = new Date(startDate);
+          const nowD = new Date();
+          const diffDays = Math.max(1, Math.ceil((nowD - startD) / (1000 * 60 * 60 * 24)));
+          daysBack = diffDays;
+        }
+      } else {
+        newOnlyMode = false;
+        daysBack = parseInt(scopeVal, 10) || 7;
       }
-    } else {
-      newOnlyMode = false;
-      daysBack = parseInt(scopeVal, 10) || 7;
     }
 
     const speedRadio = document.querySelector('input[name="proc-speed-mode"]:checked');
-    let skipPdfExtraction = speedRadio ? (speedRadio.value === 'fast') : true;
+    let skipPdfExtraction = (options && options.skipPdfExtraction !== undefined)
+      ? options.skipPdfExtraction
+      : (speedRadio ? (speedRadio.value === 'fast') : true);
 
     // Deep Scan uses Google Drive OCR (~15-30s per PDF) which exceeds Google's synchronous 25s Web App HTTP proxy timeout.
     // Automatically route Deep Scan to the Cloud Background Worker where it executes with a full 6-minute quota and zero proxy timeouts!
@@ -922,8 +932,22 @@ class SafetyEmailsEngine {
     }
 
     this.isProcessing = true;
-    this.isMinimized = false;
+    this.isMinimized = isBackground;
     this.cancelRequested = false;
+
+    const modal = document.getElementById('process-safety-emails-modal');
+    if (modal) {
+      if (isBackground) {
+        modal.style.display = 'none';
+      } else {
+        modal.style.display = 'flex';
+      }
+    }
+
+    const widget = document.getElementById('safety-emails-bg-widget');
+    if (widget && isBackground) {
+      widget.style.display = 'flex';
+    }
 
     const minBtn = document.getElementById('btn-minimize-process-emails');
     if (minBtn) minBtn.style.display = 'inline-flex';
@@ -1278,7 +1302,16 @@ class SafetyEmailsEngine {
           pct: 100,
           status: 'completed'
         });
-        this.showToast(`🎉 Safety email processing complete! <strong>${totalLogs} emails logged</strong>, ${totalIssues} equipment issues. <a href="javascript:void(0)" onclick="window.safetyComplianceEngine.restoreProcessEmailsModal()" style="color: #fef08a; text-decoration: underline; margin-left: 6px; font-weight: 700;">View Report</a>`);
+        if (!options.silent) {
+          this.showToast(`🎉 Safety email processing complete! <strong>${totalLogs} emails logged</strong>, ${totalIssues} equipment issues. <a href="javascript:void(0)" onclick="window.safetyComplianceEngine.restoreProcessEmailsModal()" style="color: #fef08a; text-decoration: underline; margin-left: 6px; font-weight: 700;">View Report</a>`);
+        }
+        // Auto-dismiss completed widget after 12 seconds if not manually dismissed
+        setTimeout(() => {
+          const w = document.getElementById('safety-emails-bg-widget');
+          if (w && w.classList.contains('completed')) {
+            this.dismissBackgroundWidget();
+          }
+        }, 12000);
       }
 
     } catch (err) {
@@ -1317,7 +1350,9 @@ class SafetyEmailsEngine {
           sub: `${displayError.substring(0, 45)}... Click to view`,
           status: 'error'
         });
-        this.showToast(`⚠️ Error processing safety emails: ${this.escapeHtml(displayError.substring(0, 80))}. <a href="javascript:void(0)" onclick="window.safetyComplianceEngine.restoreProcessEmailsModal()" style="color: #fef08a; text-decoration: underline; margin-left: 6px; font-weight: 700;">View Details</a>`, true);
+        if (!options.silent) {
+          this.showToast(`⚠️ Error processing safety emails: ${this.escapeHtml(displayError.substring(0, 80))}. <a href="javascript:void(0)" onclick="window.safetyComplianceEngine.restoreProcessEmailsModal()" style="color: #fef08a; text-decoration: underline; margin-left: 6px; font-weight: 700;">View Details</a>`, true);
+        }
       }
     } finally {
       this.isProcessing = false;

@@ -31,6 +31,24 @@ class SheetNavigator {
     } catch { /* ignore */ }
     this.employeeViewMode = savedEmpView;
     this.editingCrewBaseJob = null;
+
+    let savedCertsView = 'cards';
+    try {
+      const stored = localStorage.getItem('safety_assistant_certs_view_mode');
+      if (stored === 'cards' || stored === 'table') savedCertsView = stored;
+    } catch { /* ignore */ }
+    this.certsViewMode = savedCertsView;
+    this.certsCardFilter = 'all';
+    this.certsCardSort = 'urgent';
+
+    let savedComplianceView = 'cards';
+    try {
+      const stored = localStorage.getItem('safety_assistant_compliance_view_mode');
+      if (stored === 'cards' || stored === 'table') savedComplianceView = stored;
+    } catch { /* ignore */ }
+    this.complianceViewMode = savedComplianceView;
+    this.selectedComplianceWeek = null;
+    this.complianceCardFilter = 'all';
     this.sheetList = [
       { key: 'employees', label: '👥 Employees', icon: '👤', isSwap: false },
       { key: 'job_tracking', label: '📋 Job Tracking', icon: '📋', isSwap: false },
@@ -288,6 +306,8 @@ class SheetNavigator {
     this.renderTabsBar();
     this.setupSearch();
     this.setupEmployeeViewToggle();
+    this.updateCertsViewToggleUI();
+    this.updateComplianceViewToggleUI();
     this.renderCurrentSheet();
     this.runOneTimeVacationRepair();
     this.autoActivatePendingEmployees();
@@ -567,6 +587,72 @@ class SheetNavigator {
 
   setupEmployeeViewToggle() {
     this.updateEmployeeViewToggleUI();
+  }
+
+  setCertsViewMode(mode) {
+    this.certsViewMode = mode;
+    try {
+      localStorage.setItem('safety_assistant_certs_view_mode', mode);
+    } catch { /* ignore */ }
+    this.updateCertsViewToggleUI();
+    this.renderExpiringCerts();
+  }
+
+  updateCertsViewToggleUI() {
+    const btnCards = document.getElementById('btn-certs-cards-view');
+    const btnTable = document.getElementById('btn-certs-table-view');
+    if (btnCards && btnTable) {
+      if (this.certsViewMode === 'cards') {
+        btnCards.classList.add('active');
+        btnTable.classList.remove('active');
+      } else {
+        btnTable.classList.add('active');
+        btnCards.classList.remove('active');
+      }
+    }
+  }
+
+  setCertsCardFilter(filter) {
+    this.certsCardFilter = filter;
+    this.renderExpiringCerts();
+  }
+
+  setCertsCardSort(sort) {
+    this.certsCardSort = sort;
+    this.renderExpiringCerts();
+  }
+
+  setComplianceViewMode(mode) {
+    this.complianceViewMode = mode;
+    try {
+      localStorage.setItem('safety_assistant_compliance_view_mode', mode);
+    } catch { /* ignore */ }
+    this.updateComplianceViewToggleUI();
+    this.renderSafetyCompliance();
+  }
+
+  updateComplianceViewToggleUI() {
+    const btnCards = document.getElementById('btn-compliance-cards-view');
+    const btnTable = document.getElementById('btn-compliance-table-view');
+    if (btnCards && btnTable) {
+      if (this.complianceViewMode === 'cards') {
+        btnCards.classList.add('active');
+        btnTable.classList.remove('active');
+      } else {
+        btnTable.classList.add('active');
+        btnCards.classList.remove('active');
+      }
+    }
+  }
+
+  setComplianceWeek(weekStr) {
+    this.selectedComplianceWeek = weekStr;
+    this.renderSafetyCompliance();
+  }
+
+  setComplianceCardFilter(filter) {
+    this.complianceCardFilter = filter;
+    this.renderSafetyCompliance();
   }
 
   async runOneTimeVacationRepair() {
@@ -881,7 +967,12 @@ class SheetNavigator {
     }
 
     const tableData = this.db.getTable(this.currentSheetKey);
-    this.renderStandardTable(container, countBadge, tableData);
+    this.updateComplianceViewToggleUI();
+    if (this.complianceViewMode === 'cards') {
+      this.renderSafetyComplianceCardsView(container, countBadge, tableData);
+    } else {
+      this.renderStandardTable(container, countBadge, tableData);
+    }
   }
 
   async renderExpiringCerts() {
@@ -922,7 +1013,12 @@ class SheetNavigator {
       }
 
       const tableData = (this.db ? (this.db.getTable(this.currentSheetKey) || this.db.getTable('Expiring Certs')) : null) || { headers: [], rows: [] };
-      this.renderStandardTable(container, countBadge, tableData);
+      this.updateCertsViewToggleUI();
+      if (this.certsViewMode === 'cards') {
+        this.renderExpiringCertsCardsView(container, countBadge, tableData);
+      } else {
+        this.renderStandardTable(container, countBadge, tableData);
+      }
     } catch (err) {
       console.error('Error rendering expiring certs:', err);
       container.innerHTML = `
@@ -938,6 +1034,751 @@ class SheetNavigator {
         </div>
       `;
     }
+  }
+
+  /**
+   * Renders the interactive Employee Cards View for Expiring Certifications.
+   * Groups rows per employee, highlights actionable deadlines, and provides quick photo/SMS/edit actions.
+   */
+  renderExpiringCertsCardsView(container, countBadge, tableData) {
+    if (!container) return;
+    if (!tableData) {
+      tableData = (this.db ? (this.db.getTable('expiring_certs') || this.db.getTable('Expiring Certs')) : null) || { headers: [], rows: [] };
+    }
+
+    const prevEmpNames = this.getPreviousEmployeeNamesSet();
+    const empTable = this.db ? this.db.getTable('employees') : null;
+    const empMapMeta = new Map();
+    if (empTable && empTable.rows) {
+      empTable.rows.forEach(er => {
+        const en = String(er['Employee Name'] || er['Name'] || '').trim().toLowerCase();
+        if (en) {
+          empMapMeta.set(en, {
+            phone: er['Phone Number'] || er['Phone'] || '',
+            classification: er['Job Classification'] || er['Classification'] || er['Role'] || '',
+            hireDate: er['Hire Date'] || er['HireDate'] || ''
+          });
+        }
+      });
+    }
+
+    // Group rows by Employee Name
+    const employeesMap = new Map();
+    (tableData.rows || []).forEach((row, rowIdx) => {
+      let sheetRowIdx = row._rowIdx;
+      if (!sheetRowIdx) sheetRowIdx = rowIdx + 2;
+      row._rowIdx = sheetRowIdx;
+
+      const empName = String(row['Employee Name'] || row['Employee'] || row['Name'] || '').trim();
+      if (!empName) return;
+      if (prevEmpNames.has(empName.toLowerCase())) return;
+
+      if (!employeesMap.has(empName.toLowerCase())) {
+        const meta = empMapMeta.get(empName.toLowerCase()) || {};
+        employeesMap.set(empName.toLowerCase(), {
+          name: empName,
+          location: String(row['Location'] || '').trim(),
+          jobNumber: String(row['Job #'] || row['Job Number'] || '').trim(),
+          classification: meta.classification || '',
+          phone: meta.phone || '',
+          certs: []
+        });
+      }
+
+      const empObj = employeesMap.get(empName.toLowerCase());
+      if (!empObj.location && row['Location']) empObj.location = String(row['Location']).trim();
+      if (!empObj.jobNumber && (row['Job #'] || row['Job Number'])) empObj.jobNumber = String(row['Job #'] || row['Job Number']).trim();
+
+      const itemType = String(row['Item Type'] || row['Cert Type'] || row['Certification'] || '').trim();
+      const expDate = String(row['Expiration Date'] || row['Expiration'] || '').trim();
+      const acqDate = String(row['Date Acquired'] || row['Acquired'] || '').trim();
+      const daysVal = row['Days Until Expiration'];
+      let daysNum = null;
+      if (daysVal !== undefined && daysVal !== null && daysVal !== '' && daysVal !== 'N/A' && daysVal !== 'No Date Set') {
+        const parsed = parseFloat(daysVal);
+        if (!isNaN(parsed)) daysNum = parsed;
+      }
+      const status = String(row['Status'] || '').trim().toUpperCase();
+      const smsVal = String(row['SMS'] || '').trim();
+
+      empObj.certs.push({
+        itemType,
+        expDate,
+        acqDate,
+        daysNum,
+        daysText: String(daysVal !== undefined ? daysVal : ''),
+        status,
+        smsVal,
+        sheetRowIdx,
+        row
+      });
+    });
+
+    let employeeCards = Array.from(employeesMap.values());
+
+    // Calculate urgency and counts for each employee
+    employeeCards.forEach(emp => {
+      emp.expiredCount = 0;
+      emp.criticalCount = 0;
+      emp.warningCount = 0;
+      emp.missingCount = 0;
+      emp.okCount = 0;
+      emp.minDays = 999999;
+
+      emp.certs.forEach(c => {
+        if (c.daysNum !== null) {
+          if (c.daysNum < emp.minDays) emp.minDays = c.daysNum;
+        }
+
+        if (c.status === 'EXPIRED' || (c.daysNum !== null && c.daysNum <= 0)) {
+          emp.expiredCount++;
+        } else if (c.status === 'CRITICAL' || (c.daysNum !== null && c.daysNum <= 30)) {
+          emp.criticalCount++;
+        } else if (c.status === 'WARNING' || (c.daysNum !== null && c.daysNum <= 60)) {
+          emp.warningCount++;
+        } else if (c.status === 'MISSING') {
+          emp.missingCount++;
+        } else if (c.status === 'OK') {
+          emp.okCount++;
+        }
+      });
+
+      if (emp.expiredCount > 0) emp.severity = 5;
+      else if (emp.criticalCount > 0) emp.severity = 4;
+      else if (emp.warningCount > 0) emp.severity = 3;
+      else if (emp.missingCount > 0) emp.severity = 2;
+      else emp.severity = 1;
+    });
+
+    const totalCount = employeeCards.length;
+    const hasExpiredCount = employeeCards.filter(e => e.expiredCount > 0).length;
+    const hasCriticalCount = employeeCards.filter(e => e.criticalCount > 0).length;
+    const hasWarningCount = employeeCards.filter(e => e.warningCount > 0).length;
+    const hasMissingCount = employeeCards.filter(e => e.missingCount > 0).length;
+    const allValidCount = employeeCards.filter(e => e.expiredCount === 0 && e.criticalCount === 0 && e.warningCount === 0 && e.missingCount === 0).length;
+
+    // Filter by filter chip
+    let filtered = employeeCards;
+    const curFilter = this.certsCardFilter || 'all';
+    if (curFilter === 'expired') filtered = filtered.filter(e => e.expiredCount > 0);
+    else if (curFilter === 'critical') filtered = filtered.filter(e => e.criticalCount > 0);
+    else if (curFilter === 'warning') filtered = filtered.filter(e => e.warningCount > 0);
+    else if (curFilter === 'missing') filtered = filtered.filter(e => e.missingCount > 0);
+    else if (curFilter === 'uptodate') filtered = filtered.filter(e => e.expiredCount === 0 && e.criticalCount === 0 && e.warningCount === 0 && e.missingCount === 0);
+
+    // Filter by live search term
+    const sTerm = (this.searchTerm || '').toLowerCase().trim();
+    if (sTerm) {
+      filtered = filtered.filter(e => {
+        if (e.name.toLowerCase().includes(sTerm)) return true;
+        if (e.location.toLowerCase().includes(sTerm)) return true;
+        if (e.jobNumber.toLowerCase().includes(sTerm)) return true;
+        if (e.classification.toLowerCase().includes(sTerm)) return true;
+        return e.certs.some(c => c.itemType.toLowerCase().includes(sTerm) || c.expDate.toLowerCase().includes(sTerm) || c.acqDate.toLowerCase().includes(sTerm) || (c.smsVal && c.smsVal.toLowerCase().includes(sTerm)));
+      });
+    }
+
+    // Sort cards
+    const sortMode = this.certsCardSort || 'urgent';
+    filtered.sort((a, b) => {
+      if (sortMode === 'urgent') {
+        if (b.severity !== a.severity) return b.severity - a.severity;
+        if (a.minDays !== b.minDays) return a.minDays - b.minDays;
+        return a.name.localeCompare(b.name);
+      } else if (sortMode === 'name') {
+        return a.name.localeCompare(b.name);
+      } else if (sortMode === 'location') {
+        const lComp = a.location.localeCompare(b.location);
+        if (lComp !== 0) return lComp;
+        return a.name.localeCompare(b.name);
+      } else if (sortMode === 'job') {
+        const jComp = a.jobNumber.localeCompare(b.jobNumber);
+        if (jComp !== 0) return jComp;
+        return a.name.localeCompare(b.name);
+      }
+      return 0;
+    });
+
+    if (countBadge) {
+      countBadge.textContent = `${filtered.length} employees (${filtered.reduce((acc, e) => acc + e.certs.length, 0)} records)`;
+    }
+
+    let html = `
+      <div class="cards-view-container">
+        <!-- Filter Toolbar -->
+        <div class="cards-filter-toolbar">
+          <div class="cards-filter-chips">
+            <div class="cards-filter-chip ${curFilter === 'all' ? 'active' : ''}" onclick="window.sheetNavigator.setCertsCardFilter('all')">
+              All Employees (${totalCount})
+            </div>
+            ${hasExpiredCount > 0 ? `
+              <div class="cards-filter-chip ${curFilter === 'expired' ? 'active' : ''}" style="color: #f87171;" onclick="window.sheetNavigator.setCertsCardFilter('expired')">
+                🔴 Expired (${hasExpiredCount})
+              </div>
+            ` : ''}
+            ${hasCriticalCount > 0 ? `
+              <div class="cards-filter-chip ${curFilter === 'critical' ? 'active' : ''}" style="color: #fb923c;" onclick="window.sheetNavigator.setCertsCardFilter('critical')">
+                🟠 Critical ≤30d (${hasCriticalCount})
+              </div>
+            ` : ''}
+            ${hasWarningCount > 0 ? `
+              <div class="cards-filter-chip ${curFilter === 'warning' ? 'active' : ''}" style="color: #facc15;" onclick="window.sheetNavigator.setCertsCardFilter('warning')">
+                🟡 Warning ≤60d (${hasWarningCount})
+              </div>
+            ` : ''}
+            ${hasMissingCount > 0 ? `
+              <div class="cards-filter-chip ${curFilter === 'missing' ? 'active' : ''}" style="color: #fca5a5;" onclick="window.sheetNavigator.setCertsCardFilter('missing')">
+                ❌ Missing (${hasMissingCount})
+              </div>
+            ` : ''}
+            <div class="cards-filter-chip ${curFilter === 'uptodate' ? 'active' : ''}" style="color: #4ade80;" onclick="window.sheetNavigator.setCertsCardFilter('uptodate')">
+              🟢 Up to Date (${allValidCount})
+            </div>
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <label style="font-size: 11px; font-weight: 700; color: var(--text-muted);">Sort Cards:</label>
+            <select class="filter-select" style="font-size: 11.5px; padding: 4px 8px; background: var(--bg-primary); border: 1px solid var(--border-color); color: var(--text-primary); border-radius: 6px;" onchange="window.sheetNavigator.setCertsCardSort(this.value)">
+              <option value="urgent" ${sortMode === 'urgent' ? 'selected' : ''}>⚠️ Most Urgent First</option>
+              <option value="name" ${sortMode === 'name' ? 'selected' : ''}>👤 Employee Name (A-Z)</option>
+              <option value="location" ${sortMode === 'location' ? 'selected' : ''}>📍 Location</option>
+              <option value="job" ${sortMode === 'job' ? 'selected' : ''}>📋 Job Number</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- Cards Grid -->
+        <div class="cards-grid-layout">
+          ${filtered.length === 0 ? `
+            <div style="grid-column: 1 / -1; padding: 40px 20px; text-align: center; color: var(--text-muted);">
+              <div style="font-size: 32px; margin-bottom: 8px;">🔍</div>
+              <div style="font-size: 14px; font-weight: 600; color: var(--text-primary);">No employees match the current filter</div>
+            </div>
+          ` : filtered.map(emp => this._renderEmployeeCertCard(emp)).join('')}
+        </div>
+      </div>
+    `;
+
+    container.innerHTML = html;
+  }
+
+  /**
+   * Helper that renders an individual Employee Certification Card.
+   */
+  _renderEmployeeCertCard(emp) {
+    let statusClass = 'status-ok';
+    let summaryBadge = `<span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.35); font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 4px;">🟢 All Valid</span>`;
+
+    if (emp.expiredCount > 0) {
+      statusClass = 'status-expired';
+      summaryBadge = `<span class="badge" style="background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4); font-size: 10px; font-weight: 800; padding: 2px 7px; border-radius: 4px;">🔴 ${emp.expiredCount} Expired</span>`;
+    } else if (emp.criticalCount > 0) {
+      statusClass = 'status-critical';
+      summaryBadge = `<span class="badge" style="background: rgba(249, 115, 22, 0.15); color: #fb923c; border: 1px solid rgba(249, 115, 22, 0.4); font-size: 10px; font-weight: 800; padding: 2px 7px; border-radius: 4px;">🟠 ${emp.criticalCount} Critical</span>`;
+    } else if (emp.warningCount > 0) {
+      statusClass = 'status-warning';
+      summaryBadge = `<span class="badge" style="background: rgba(234, 179, 8, 0.15); color: #facc15; border: 1px solid rgba(234, 179, 8, 0.4); font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 4px;">🟡 ${emp.warningCount} Warning</span>`;
+    } else if (emp.missingCount > 0) {
+      statusClass = 'status-missing';
+      summaryBadge = `<span class="badge" style="background: rgba(220, 38, 38, 0.15); color: #fca5a5; border: 1px solid rgba(220, 38, 38, 0.35); font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 4px;">❌ ${emp.missingCount} Missing</span>`;
+    }
+
+    const sortedCerts = emp.certs.slice().sort((a, b) => {
+      const getUrgencyWeight = (c) => {
+        if (c.status === 'EXPIRED' || (c.daysNum !== null && c.daysNum <= 0)) return 4;
+        if (c.status === 'CRITICAL' || (c.daysNum !== null && c.daysNum <= 30)) return 3;
+        if (c.status === 'WARNING' || (c.daysNum !== null && c.daysNum <= 60)) return 2;
+        if (c.status === 'MISSING') return 1;
+        return 0;
+      };
+      const wDiff = getUrgencyWeight(b) - getUrgencyWeight(a);
+      if (wDiff !== 0) return wDiff;
+      if (a.daysNum !== null && b.daysNum !== null) return a.daysNum - b.daysNum;
+      return a.itemType.localeCompare(b.itemType);
+    });
+
+    return `
+      <div class="cert-emp-card ${statusClass}">
+        <!-- Header -->
+        <div class="cert-card-header">
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+            <div style="flex: 1; min-width: 0;">
+              <div style="display: flex; align-items: center; gap: 7px; flex-wrap: wrap;">
+                <span style="font-size: 14.5px; font-weight: 800; color: #60a5fa; cursor: pointer; text-decoration: underline dotted;"
+                      title="Click to view full employee profile"
+                      onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(emp.name)}');}">
+                  👤 ${this.escapeHtml(emp.name)}
+                </span>
+                ${emp.classification ? `
+                  <span class="badge" style="background: rgba(148, 163, 184, 0.15); color: #94a3b8; font-size: 10px; padding: 1px 6px; border-radius: 4px; font-weight: 600;">
+                    ${this.escapeHtml(emp.classification)}
+                  </span>
+                ` : ''}
+              </div>
+              <div style="display: flex; align-items: center; gap: 8px; margin-top: 4px; font-size: 11px; color: var(--text-muted); flex-wrap: wrap;">
+                ${emp.location ? `<span>📍 ${this.escapeHtml(emp.location)}</span>` : ''}
+                ${emp.jobNumber ? `<span style="font-family: monospace; color: #93c5fd; font-weight: 700;">#${this.escapeHtml(emp.jobNumber)}</span>` : ''}
+                <span>${emp.certs.length} certifications</span>
+                ${(() => {
+                  const notifCount = emp.certs.filter(c => {
+                    const s = String((c.row && c.row['SMS']) || c.smsVal || '').trim();
+                    return s && !s.toLowerCase().includes('send sms') && (s.includes('Sent') || s.includes('Notified') || s.includes('Instruction') || s.includes('Registered'));
+                  }).length;
+                  return notifCount > 0 ? `<span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.35); font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 4px;">📱 ${notifCount} Notified</span>` : '';
+                })()}
+              </div>
+            </div>
+            <div>
+              ${summaryBadge}
+            </div>
+          </div>
+        </div>
+
+        <!-- Body Certs List -->
+        <div class="cert-card-body">
+          ${sortedCerts.map(cert => {
+            let rowUrgencyClass = '';
+            let dateColor = '#4ade80';
+
+            const cleanExp = String(cert.expDate || '').trim();
+            const cleanAcq = String(cert.acqDate || '').trim();
+            const hasExp = cleanExp && cleanExp.toUpperCase() !== 'N/A' && cleanExp.toLowerCase() !== 'no date set';
+            const hasAcq = cleanAcq && cleanAcq.toUpperCase() !== 'N/A' && cleanAcq.toLowerCase() !== 'no date set';
+
+            let dateLabel = '';
+            if (hasExp) {
+              dateLabel = `${cleanExp}${cert.daysNum !== null ? ` (${cert.daysNum}d)` : ''}`;
+            } else if (hasAcq) {
+              dateLabel = `Acquired: ${cleanAcq}`;
+            } else {
+              dateLabel = cleanExp || 'No Date Set';
+            }
+
+            if (cert.status === 'EXPIRED' || (cert.daysNum !== null && cert.daysNum <= 0)) {
+              rowUrgencyClass = 'urgency-expired';
+              dateColor = '#ef4444';
+              dateLabel = hasExp ? `Expired ${cleanExp} (${cert.daysNum}d)` : 'Expired';
+            } else if (cert.status === 'CRITICAL' || (cert.daysNum !== null && cert.daysNum <= 30)) {
+              rowUrgencyClass = 'urgency-critical';
+              dateColor = '#f97316';
+            } else if (cert.status === 'WARNING' || (cert.daysNum !== null && cert.daysNum <= 60)) {
+              rowUrgencyClass = 'urgency-warning';
+              dateColor = '#eab308';
+            } else if (cert.status === 'MISSING') {
+              rowUrgencyClass = 'urgency-missing';
+              dateColor = '#dc2626';
+              dateLabel = 'Missing Record';
+            } else if (cert.daysNum === null) {
+              if (hasAcq && !hasExp) {
+                // Non-expiring / lifetime certification with recorded Date Acquired
+                dateColor = cert.status === 'OK' ? '#34d399' : '#94a3b8';
+                dateLabel = `Acquired: ${cleanAcq}`;
+              } else {
+                dateColor = '#94a3b8';
+                dateLabel = hasExp ? cleanExp : (hasAcq ? `Acquired: ${cleanAcq}` : (cleanExp || 'No Date Set'));
+              }
+            }
+
+            const photoSummary = this.db && typeof this.db.getCertPhotoStatusSummary === 'function'
+              ? this.db.getCertPhotoStatusSummary(emp.name, cert.itemType)
+              : { hasAll: false, hasAny: false, isMultiSlot: false, count: 0, total: 1 };
+
+            let proofBtnHtml = '';
+            if (photoSummary.hasAll) {
+              proofBtnHtml = `<button class="btn btn-secondary" style="padding: 1px 6px; font-size: 10px; color: #34d399; border-color: rgba(52, 211, 153, 0.4); background: rgba(52, 211, 153, 0.1); cursor: pointer; font-weight: 700;" onclick="window.sheetNavigator.openCertPhotoModal('${this.escapeJs(emp.name)}', '${this.escapeJs(cert.itemType)}', ${cert.sheetRowIdx})" title="View attached renewal proof / 1-Click Email to HR">🖼️ Proof</button>`;
+            } else if (photoSummary.hasAny) {
+              proofBtnHtml = `<button class="btn btn-secondary" style="padding: 1px 6px; font-size: 10px; color: #fbbf24; border-color: rgba(251, 191, 36, 0.4); background: rgba(251, 191, 36, 0.1); cursor: pointer; font-weight: 700;" onclick="window.sheetNavigator.openCertPhotoModal('${this.escapeJs(emp.name)}', '${this.escapeJs(cert.itemType)}', ${cert.sheetRowIdx})" title="Partial renewal proof (${photoSummary.count}/${photoSummary.total})">📷 ${photoSummary.count}/${photoSummary.total}</button>`;
+            } else {
+              proofBtnHtml = `<button class="btn btn-secondary" style="padding: 1px 6px; font-size: 10px; color: #94a3b8; border-color: rgba(148, 163, 184, 0.25); background: rgba(148, 163, 184, 0.05); cursor: pointer;" onclick="window.sheetNavigator.openCertPhotoModal('${this.escapeJs(emp.name)}', '${this.escapeJs(cert.itemType)}', ${cert.sheetRowIdx})" title="Attach cert renewal proof photo">📷 Attach</button>`;
+            }
+
+            const ctLower = cert.itemType.toLowerCase();
+            const isClassCert = ctLower.includes('cpr') || ctLower.includes('1st aid') || ctLower.includes('first aid');
+
+            // Detect SMS notification status
+            const smsRaw = String((cert.row && cert.row['SMS']) || cert.smsVal || '').trim();
+            const hasSmsNotif = smsRaw && !smsRaw.toLowerCase().includes('send sms') &&
+              (smsRaw.includes('Sent') || smsRaw.includes('Notified') || smsRaw.includes('Instruction') || smsRaw.includes('Registered'));
+
+            let smsDateStr = '';
+            let isInstructionsSent = false;
+            if (hasSmsNotif) {
+              isInstructionsSent = smsRaw.toLowerCase().includes('instruction') || smsRaw.toLowerCase().includes('registered');
+              smsDateStr = smsRaw.replace(/^instructions?\s*sent\s*:?\s*/i, '')
+                                 .replace(/^sent\s*/i, '')
+                                 .replace(/^notified\s*:?\s*/i, '')
+                                 .replace(/^registered\s*:?\s*/i, '')
+                                 .replace(/^sms\s*:?\s*/i, '')
+                                 .trim();
+            }
+
+            return `
+              <div class="cert-item-row ${rowUrgencyClass}">
+                <div style="flex: 1; min-width: 0; padding-right: 6px;">
+                  <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+                    <span style="font-weight: 700; color: #e2e8f0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${this.escapeHtml(cert.itemType)}">
+                      ${this.escapeHtml(cert.itemType)}
+                    </span>
+                    ${hasSmsNotif ? `
+                      <span class="badge" style="background: rgba(16, 185, 129, 0.16); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.35); font-size: 9px; font-weight: 800; padding: 1px 5px; border-radius: 3px; display: inline-flex; align-items: center; gap: 3px;" title="Notification logged: ${this.escapeHtml(smsRaw)}">
+                        ${isInstructionsSent ? '📋 Instructions' : '📱 SMS Sent'}${smsDateStr ? ` ${this.escapeHtml(smsDateStr)}` : ''}
+                      </span>
+                    ` : ''}
+                  </div>
+                  <div style="font-size: 10.5px; color: ${dateColor}; font-weight: 600;">
+                    ${dateLabel}
+                  </div>
+                </div>
+
+                <div style="display: flex; align-items: center; gap: 4px; flex-shrink: 0;">
+                  ${proofBtnHtml}
+                  <button class="btn btn-secondary" style="padding: 1px 5px; font-size: 10px; color: #60a5fa; border-color: rgba(96, 165, 250, 0.35); background: rgba(96, 165, 250, 0.08); cursor: pointer;" onclick="window.sheetNavigator.openCertEditModal(${cert.sheetRowIdx})" title="Edit certification dates">✏️</button>
+                  ${hasSmsNotif ? `
+                    <button class="btn btn-secondary" style="padding: 1px 6px; font-size: 10px; color: #34d399; border-color: rgba(52, 211, 153, 0.4); background: rgba(52, 211, 153, 0.12); cursor: pointer; font-weight: 700; display: inline-flex; align-items: center; gap: 3px;" onclick="if(window.smsDialogEngine){window.smsDialogEngine.openCertSms('${this.escapeJs(emp.name)}', '${this.escapeJs(cert.itemType)}', '${this.escapeJs(cert.expDate || '')}', ${cert.sheetRowIdx}, 9);}" title="SMS notification logged (${this.escapeHtml(smsRaw)}). Click to resend reminder.">
+                      💬 Resend
+                    </button>
+                  ` : `
+                    <button class="btn btn-secondary" style="padding: 1px 5px; font-size: 10px; color: #fbbf24; border-color: rgba(251, 191, 36, 0.35); background: rgba(251, 191, 36, 0.08); cursor: pointer;" onclick="if(window.smsDialogEngine){window.smsDialogEngine.openCertSms('${this.escapeJs(emp.name)}', '${this.escapeJs(cert.itemType)}', '${this.escapeJs(cert.expDate || '')}', ${cert.sheetRowIdx}, 9);}" title="Send renewal SMS">💬</button>
+                  `}
+                  ${isClassCert ? `
+                    <button class="btn btn-secondary" style="padding: 1px 5px; font-size: 10px; color: #34d399; border-color: rgba(16, 185, 129, 0.35); background: rgba(16, 185, 129, 0.08); cursor: pointer;" onclick="if(window.smsDialogEngine){window.smsDialogEngine.openClassInstructionsSms('${this.escapeJs(emp.name)}', '${this.escapeJs(cert.itemType)}', '${this.escapeJs(cert.expDate || '')}', ${cert.sheetRowIdx}, 9);}" title="Send CPR class registration instructions">📅 Class</button>
+                  ` : ''}
+                </div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      </div>
+    `;
+  }
+
+  /**
+   * Renders the interactive Crew Cards View for Safety Compliance.
+   * Scoped per week with week navigation, summary metrics, filter chips, and one-click PDF document view.
+   */
+  renderSafetyComplianceCardsView(container, countBadge, tableData) {
+    if (!container) return;
+    if (!tableData) {
+      tableData = this.db.getTable('safety_compliance') || { headers: [], rows: [] };
+    }
+
+    const allWeeksSet = new Set();
+    (tableData.rows || []).forEach(r => {
+      const w = String(r['Week Start'] || r['Week'] || '').trim();
+      if (w) allWeeksSet.add(w);
+    });
+
+    const weeks = Array.from(allWeeksSet).sort((a, b) => {
+      const da = new Date(a).getTime();
+      const db = new Date(b).getTime();
+      if (!isNaN(da) && !isNaN(db)) return db - da;
+      return b.localeCompare(a);
+    });
+
+    if (weeks.length === 0) {
+      container.innerHTML = `
+        <div style="padding: 40px 20px; text-align: center; color: var(--text-muted);">
+          <div style="font-size: 32px; margin-bottom: 8px;">🛡️</div>
+          <div style="font-size: 15px; font-weight: 600; color: var(--text-primary);">No safety compliance records found</div>
+        </div>
+      `;
+      return;
+    }
+
+    if (!this.selectedComplianceWeek || !weeks.includes(this.selectedComplianceWeek)) {
+      this.selectedComplianceWeek = weeks[0];
+    }
+
+    const currentWeekIdx = weeks.indexOf(this.selectedComplianceWeek);
+    const hasPrevWeek = currentWeekIdx < weeks.length - 1;
+    const hasNextWeek = currentWeekIdx > 0;
+
+    const weekRows = (tableData.rows || []).filter(r => String(r['Week Start'] || r['Week'] || '').trim() === this.selectedComplianceWeek);
+
+    const jtTable = this.db ? this.db.getTable('job_tracking') : null;
+    const jobLocMap = new Map();
+    if (jtTable && jtTable.rows) {
+      jtTable.rows.forEach(jr => {
+        const jn = String(jr['Job Number'] || jr['Job #'] || '').trim();
+        const loc = String(jr['Location'] || '').trim();
+        const discipline = String(jr['Discipline'] || jr['Crew Type'] || 'Electric').trim();
+        if (jn) jobLocMap.set(jn, { loc, discipline });
+      });
+    }
+
+    const totalCrews = weekRows.length;
+    const compCount = weekRows.filter(r => String(r['Status'] || '').toLowerCase() === 'complete').length;
+    const missingCount = weekRows.filter(r => String(r['Status'] || '').toLowerCase().includes('missing')).length;
+    const pendingCount = weekRows.filter(r => String(r['Status'] || '').toLowerCase() === 'pending').length;
+    const pct = totalCrews > 0 ? Math.round((compCount / totalCrews) * 100) : 0;
+
+    const sTerm = (this.searchTerm || '').toLowerCase().trim();
+    let filteredCrews = weekRows;
+    if (sTerm) {
+      filteredCrews = filteredCrews.filter(r => {
+        const jn = String(r['Job Number'] || r['Crew'] || '').toLowerCase();
+        const fm = String(r['Foreman'] || '').toLowerCase();
+        const st = String(r['Status'] || '').toLowerCase();
+        const meta = jobLocMap.get(String(r['Job Number'] || r['Crew'] || '').trim()) || {};
+        const lc = (meta.loc || '').toLowerCase();
+        return jn.includes(sTerm) || fm.includes(sTerm) || st.includes(sTerm) || lc.includes(sTerm);
+      });
+    }
+
+    const curFilter = this.complianceCardFilter || 'all';
+    if (curFilter === 'missing_daily') {
+      filteredCrews = filteredCrews.filter(r => {
+        return ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].some(d => {
+          const v = String(r[d] || '');
+          return v.startsWith('❌') || v.includes('⏳');
+        });
+      });
+    } else if (curFilter === 'missing_mtg') {
+      filteredCrews = filteredCrews.filter(r => {
+        const v = String(r['Weekly Meeting'] || '');
+        return v.startsWith('❌') || v.includes('⏳');
+      });
+    } else if (curFilter === 'missing_chk') {
+      filteredCrews = filteredCrews.filter(r => {
+        const v = String(r['Monthly Checklist'] || '');
+        return v.startsWith('❌') || v.includes('⏳');
+      });
+    } else if (curFilter === 'compliant') {
+      filteredCrews = filteredCrews.filter(r => String(r['Status'] || '').toLowerCase() === 'complete');
+    }
+
+    if (countBadge) {
+      countBadge.textContent = `${filteredCrews.length} crews (${this.selectedComplianceWeek})`;
+    }
+
+    let html = `
+      <div class="cards-view-container">
+        <!-- Week Navigator Banner -->
+        <div class="cards-filter-toolbar" style="background: linear-gradient(90deg, #1e293b 0%, #0f172a 100%);">
+          <!-- Week Selector Controls -->
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <button class="btn btn-secondary" style="font-size: 11px; padding: 4px 9px;" ${hasPrevWeek ? `onclick="window.sheetNavigator.setComplianceWeek('${this.escapeJs(weeks[currentWeekIdx + 1])}')"` : 'disabled style="opacity: 0.5;"'}>
+              ◀ Older
+            </button>
+            <div style="display: flex; align-items: center; gap: 6px;">
+              <span style="font-size: 13px;">📅</span>
+              <select class="filter-select" style="font-size: 12px; font-weight: 700; padding: 4px 10px; background: #0f172a; border: 1px solid #3b82f6; color: #93c5fd; border-radius: 6px; cursor: pointer;" onchange="window.sheetNavigator.setComplianceWeek(this.value)">
+                ${weeks.map(w => `<option value="${w}" ${w === this.selectedComplianceWeek ? 'selected' : ''}>Week of ${w}${w === weeks[0] ? ' (Latest)' : ''}</option>`).join('')}
+              </select>
+            </div>
+            <button class="btn btn-secondary" style="font-size: 11px; padding: 4px 9px;" ${hasNextWeek ? `onclick="window.sheetNavigator.setComplianceWeek('${this.escapeJs(weeks[currentWeekIdx - 1])}')"` : 'disabled style="opacity: 0.5;"'}>
+              Newer ▶
+            </button>
+          </div>
+
+          <!-- Week Compliance Stats -->
+          <div style="display: flex; align-items: center; gap: 10px; font-size: 11.5px; flex-wrap: wrap;">
+            <span style="color: #4ade80; font-weight: 700;">✅ ${compCount} Compliant</span>
+            ${missingCount > 0 ? `<span style="color: #f87171; font-weight: 700;">❌ ${missingCount} Missing</span>` : ''}
+            ${pendingCount > 0 ? `<span style="color: #facc15; font-weight: 700;">⏳ ${pendingCount} Pending</span>` : ''}
+            <span class="badge" style="background: ${pct >= 100 ? '#15803d' : (pct >= 80 ? '#0369a1' : '#b91c1c')}; color: #fff; padding: 3px 9px; border-radius: 4px; font-weight: 800; font-size: 11px;">
+              ${pct}% Compliant
+            </span>
+          </div>
+
+          <!-- Filter Chips -->
+          <div class="cards-filter-chips" style="width: 100%; margin-top: 4px; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 8px;">
+            <div class="cards-filter-chip ${curFilter === 'all' ? 'active' : ''}" onclick="window.sheetNavigator.setComplianceCardFilter('all')">
+              All Crews (${totalCrews})
+            </div>
+            <div class="cards-filter-chip ${curFilter === 'missing_daily' ? 'active' : ''}" style="color: #f87171;" onclick="window.sheetNavigator.setComplianceCardFilter('missing_daily')">
+              ❌ Missing Daily JHA
+            </div>
+            <div class="cards-filter-chip ${curFilter === 'missing_mtg' ? 'active' : ''}" style="color: #fb923c;" onclick="window.sheetNavigator.setComplianceCardFilter('missing_mtg')">
+              📋 Missing Weekly Meeting
+            </div>
+            <div class="cards-filter-chip ${curFilter === 'missing_chk' ? 'active' : ''}" style="color: #facc15;" onclick="window.sheetNavigator.setComplianceCardFilter('missing_chk')">
+              📝 Missing Monthly Checklist
+            </div>
+            <div class="cards-filter-chip ${curFilter === 'compliant' ? 'active' : ''}" style="color: #4ade80;" onclick="window.sheetNavigator.setComplianceCardFilter('compliant')">
+              ✅ 100% Compliant (${compCount})
+            </div>
+          </div>
+        </div>
+
+        <!-- Cards Grid -->
+        <div class="cards-grid-layout">
+          ${filteredCrews.length === 0 ? `
+            <div style="grid-column: 1 / -1; padding: 40px 20px; text-align: center; color: var(--text-muted);">
+              <div style="font-size: 32px; margin-bottom: 8px;">🔍</div>
+              <div style="font-size: 14px; font-weight: 600; color: var(--text-primary);">No crews match the current filter for this week</div>
+            </div>
+          ` : filteredCrews.map(crewRow => this._renderComplianceCrewCard(crewRow, jobLocMap)).join('')}
+        </div>
+      </div>
+    `;
+
+    container.innerHTML = html;
+  }
+
+  /**
+   * Helper that renders an individual Safety Compliance Crew Card.
+   */
+  _renderComplianceCrewCard(crewRow, jobLocMap) {
+    const jobNum = String(crewRow['Job Number'] || crewRow['Job #'] || crewRow['Crew'] || '').trim();
+    const foreman = String(crewRow['Foreman'] || '').trim();
+    const status = String(crewRow['Status'] || '').trim();
+    const weekVal = String(crewRow['Week Start'] || crewRow['Week'] || this.selectedComplianceWeek).trim();
+    const updated = String(crewRow['Updated'] || '').trim();
+
+    const meta = jobLocMap.get(jobNum) || {};
+    const location = meta.loc || '';
+    const discipline = meta.discipline || 'Electric';
+
+    let cardBorderClass = 'status-pending';
+    let statusBadge = `<span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #facc15; border: 1px solid rgba(245, 158, 11, 0.35); font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 4px;">⏳ Pending</span>`;
+
+    if (status === 'Complete') {
+      cardBorderClass = 'status-complete';
+      statusBadge = `<span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.35); font-size: 10px; font-weight: 800; padding: 2px 7px; border-radius: 4px;">✅ Complete</span>`;
+    } else if (status.includes('Missing')) {
+      cardBorderClass = 'status-missing';
+      statusBadge = `<span class="badge" style="background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.35); font-size: 10px; font-weight: 800; padding: 2px 7px; border-radius: 4px;">❌ Missing Reports</span>`;
+    } else if (status === 'Resolved') {
+      cardBorderClass = 'status-complete';
+      statusBadge = `<span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.35); font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 4px;">🔵 Resolved</span>`;
+    }
+
+    const days = [
+      { key: 'Sun', label: 'Su' },
+      { key: 'Mon', label: 'M' },
+      { key: 'Tue', label: 'Tu' },
+      { key: 'Wed', label: 'W' },
+      { key: 'Thu', label: 'Th' },
+      { key: 'Fri', label: 'F' },
+      { key: 'Sat', label: 'Sa' }
+    ];
+
+    const renderPill = (dayKey, label) => {
+      const v = String(crewRow[dayKey] || '').trim();
+      let pillClass = 'pill-na';
+      let icon = '—';
+      let title = `${dayKey}: Not Applicable / Scheduled Off`;
+      let canClickPdf = false;
+
+      if (v === '✅' || v === '✅L' || v.startsWith('✅')) {
+        const isLate = v.includes('L');
+        pillClass = isLate ? 'pill-late' : 'pill-ok';
+        icon = isLate ? '✓<span style="font-size: 8px; font-weight: 800; color: #f59e0b;">L</span>' : '✓';
+        title = `${dayKey}: Submitted on time · Click to view PDF document`;
+        canClickPdf = true;
+      } else if (v === '❌' || v.startsWith('❌')) {
+        pillClass = 'pill-missing';
+        const letter = v.replace('❌', '').trim();
+        icon = letter ? `✗<span style="font-size: 8px; font-weight: 800;">${letter}</span>` : '✗';
+        title = `${dayKey}: Missing Report`;
+      } else if (v === '⏳' || v.includes('⏳')) {
+        pillClass = 'pill-pending';
+        icon = '⏳';
+        title = `${dayKey}: Pending / Not yet submitted`;
+      } else if (v === 'N/A' || v === 'n/a') {
+        pillClass = 'pill-na';
+        icon = '—';
+      }
+
+      return `
+        <div class="comp-day-pill ${pillClass}" title="${title}" ${canClickPdf ? `onclick="if(window.safetyComplianceEngine){window.safetyComplianceEngine.openPdfForComplianceCell('${this.escapeJs(jobNum)}', '${this.escapeJs(dayKey)}', '${this.escapeJs(weekVal)}');}"` : ''}>
+          <span style="font-size: 9px; color: var(--text-muted); margin-bottom: 1px;">${label}</span>
+          <span style="font-size: 13px; font-weight: 800; display: flex; align-items: center; justify-content: center; gap: 1px;">${icon}</span>
+        </div>
+      `;
+    };
+
+    const renderMeetingPill = (colKey, titleLabel) => {
+      const v = String(crewRow[colKey] || '').trim();
+      let badgeStyle = 'background: rgba(100, 116, 139, 0.15); color: #94a3b8; border: 1px solid rgba(100, 116, 139, 0.3);';
+      let icon = '—';
+      let canClickPdf = false;
+
+      if (v === '✅' || v === '✅L' || v.startsWith('✅')) {
+        badgeStyle = 'background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); cursor: pointer;';
+        icon = '✅ Received';
+        canClickPdf = true;
+      } else if (v === '❌' || v.startsWith('❌')) {
+        badgeStyle = 'background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4);';
+        icon = '❌ Missing';
+      } else if (v === '⏳' || v.includes('⏳')) {
+        badgeStyle = 'background: rgba(245, 158, 11, 0.15); color: #facc15; border: 1px solid rgba(245, 158, 11, 0.4);';
+        icon = '⏳ Pending';
+      } else if (v === 'N/A' || v === 'n/a') {
+        badgeStyle = 'background: rgba(100, 116, 139, 0.1); color: #64748b; border: 1px solid rgba(100, 116, 139, 0.2);';
+        icon = 'N/A (Skipped)';
+      }
+
+      return `
+        <div style="flex: 1; padding: 6px 8px; border-radius: 6px; font-size: 11px; display: flex; align-items: center; justify-content: space-between; ${badgeStyle}"
+             title="${titleLabel}: ${icon}${canClickPdf ? ' (Click to view PDF)' : ''}"
+             ${canClickPdf ? `onclick="if(window.safetyComplianceEngine){window.safetyComplianceEngine.openPdfForComplianceCell('${this.escapeJs(jobNum)}', '${this.escapeJs(colKey)}', '${this.escapeJs(weekVal)}');}"` : ''}>
+          <span style="font-weight: 600;">${titleLabel}</span>
+          <span style="font-weight: 700;">${icon}</span>
+        </div>
+      `;
+    };
+
+    return `
+      <div class="compliance-crew-card ${cardBorderClass}">
+        <!-- Header -->
+        <div style="padding: 12px 14px 10px 14px; border-bottom: 1px solid rgba(255, 255, 255, 0.06); background: rgba(255, 255, 255, 0.02); display: flex; justify-content: space-between; align-items: flex-start; gap: 8px;">
+          <div style="flex: 1; min-width: 0;">
+            <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+              <span style="font-weight: 800; font-size: 13.5px; color: #f472b6; cursor: pointer; text-decoration: underline dotted; display: inline-flex; align-items: center; gap: 4px;"
+                    onclick="if(window.employeeProfileEngine && '${this.escapeJs(foreman)}'){window.employeeProfileEngine.openProfileModal('${this.escapeJs(foreman)}');}"
+                    title="Open Profile for Foreman ${this.escapeHtml(foreman || 'Unassigned')}">
+                👑 ${this.escapeHtml(foreman || 'Unassigned')}
+              </span>
+              <span style="font-family: monospace; font-weight: 800; font-size: 12.5px; color: #60a5fa; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; padding: 1px 6px;">
+                ${this.escapeHtml(jobNum)}
+              </span>
+              <span class="badge" style="background: rgba(14, 165, 233, 0.15); color: #38bdf8; border: 1px solid rgba(14, 165, 233, 0.35); font-size: 9.5px; font-weight: 700; padding: 1px 5px; border-radius: 4px;">
+                ⚡ ${this.escapeHtml(discipline)}
+              </span>
+            </div>
+            ${location ? `
+              <div style="margin-top: 5px; font-size: 11.5px; color: var(--text-secondary); display: flex; align-items: center; gap: 4px;">
+                <span style="color: var(--text-muted); font-weight: 600;">Location:</span>
+                <span style="font-weight: 700; color: var(--text-primary);">
+                  📍 ${this.escapeHtml(location)}
+                </span>
+              </div>
+            ` : ''}
+          </div>
+          <div>
+            ${statusBadge}
+          </div>
+        </div>
+
+        <!-- Body -->
+        <div style="padding: 12px 14px; display: flex; flex-direction: column; gap: 10px;">
+          <!-- Daily JHAs -->
+          <div>
+            <div style="font-size: 10.5px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px;">
+              Daily JHAs (Sun – Sat)
+            </div>
+            <div style="display: flex; gap: 4px; justify-content: space-between;">
+              ${days.map(d => renderPill(d.key, d.label)).join('')}
+            </div>
+          </div>
+
+          <!-- Weekly Meeting & Monthly Checklist -->
+          <div style="display: flex; gap: 8px;">
+            ${renderMeetingPill('Weekly Meeting', 'Weekly Meeting')}
+            ${renderMeetingPill('Monthly Checklist', 'Monthly Checklist')}
+          </div>
+
+          <!-- Card Footer -->
+          ${updated ? `
+            <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid rgba(255,255,255,0.04); padding-top: 6px; font-size: 10px; color: var(--text-muted);">
+              <span>🕒 Updated: ${this.escapeHtml(updated)}</span>
+            </div>
+          ` : ''}
+        </div>
+      </div>
+    `;
   }
 
   /**
@@ -2275,6 +3116,15 @@ class SheetNavigator {
   }
 
   /**
+   * Dynamically handles date input changes (expiration date or date acquired) on a scanned card.
+   */
+  handleScannedCardDateChange(itemId, field, value) {
+    const item = this.scannedCertItems ? this.scannedCertItems.find(x => x.id === itemId) : null;
+    if (!item) return;
+    item[field] = (value || '').trim();
+  }
+
+  /**
    * Renders cards for all scanned cert items for user review, cropping, and import.
    * Bound by unique item.id to prevent index-shift and reloading bugs.
    */
@@ -2563,11 +3413,11 @@ class SheetNavigator {
             <div style="display: flex; gap: 8px;">
               <div style="flex: 1;">
                 <label style="display: block; font-size: 11px; color: #38bdf8; font-weight: 700; margin-bottom: 3px;">⏳ Expiration Date</label>
-                <input type="text" id="scanned-exp-date-${item.id}" placeholder="MM/DD/YYYY" value="${this.escapeHtml(item.expDate || '')}" style="width: 100%; background: #090d16; color: #f8fafc; border: 1px solid rgba(56, 189, 248, 0.4); border-radius: 6px; padding: 5px 8px; font-size: 11.5px; font-weight: 600;">
+                <input type="text" id="scanned-exp-date-${item.id}" placeholder="MM/DD/YYYY" value="${this.escapeHtml(item.expDate || '')}" oninput="window.sheetNavigator.handleScannedCardDateChange('${this.escapeJs(item.id)}', 'expDate', this.value)" style="width: 100%; background: #090d16; color: #f8fafc; border: 1px solid rgba(56, 189, 248, 0.4); border-radius: 6px; padding: 5px 8px; font-size: 11.5px; font-weight: 600;">
               </div>
               <div style="flex: 1;">
                 <label style="display: block; font-size: 11px; color: #94a3b8; font-weight: 600; margin-bottom: 3px;">📅 Date Acquired</label>
-                <input type="text" id="scanned-acq-date-${item.id}" placeholder="MM/DD/YYYY" value="${this.escapeHtml(item.acqDate || '')}" style="width: 100%; background: #0f172a; color: #cbd5e1; border: 1px solid rgba(255,255,255,0.12); border-radius: 6px; padding: 5px 8px; font-size: 11.5px;">
+                <input type="text" id="scanned-acq-date-${item.id}" placeholder="MM/DD/YYYY" value="${this.escapeHtml(item.acqDate || '')}" oninput="window.sheetNavigator.handleScannedCardDateChange('${this.escapeJs(item.id)}', 'acqDate', this.value)" style="width: 100%; background: #0f172a; color: #cbd5e1; border: 1px solid rgba(255,255,255,0.12); border-radius: 6px; padding: 5px 8px; font-size: 11.5px;">
               </div>
             </div>
 
@@ -2584,6 +3434,7 @@ class SheetNavigator {
 
     html += `</div>`;
     body.innerHTML = html;
+    this.checkAndLoadCachedCertItems();
   }
 
   /**
@@ -2600,7 +3451,6 @@ class SheetNavigator {
 
     let vaultedCount = 0;
     this.scannedCertItems.forEach(item => {
-      item.alreadyInVault = this.isScannedCertAlreadyAdded(item);
       if (item.alreadyInVault) vaultedCount++;
     });
 
@@ -2736,7 +3586,119 @@ class SheetNavigator {
   }
 
   /**
+   * Applies downloaded or cached base64 attachment data to a card model and updates DOM preview.
+   */
+  async _applyScannedCertData(item, b64, meta = {}) {
+    if (!item) return null;
+    if (item.isHeic || meta.isHeic || (item.fileName && item.fileName.toLowerCase().endsWith('.heic'))) {
+      try {
+        b64 = await this.convertHeicDataUrlToJpeg(b64);
+        item.contentType = 'image/jpeg';
+        item.fileName = item.fileName.replace(/\.heic$/i, '.jpg').replace(/\.heif$/i, '.jpg');
+      } catch (cErr) {
+        console.warn('HEIC preview conversion error:', cErr);
+      }
+    }
+    item.base64Data = b64;
+    item.isLoading = false;
+
+    if (item.isPdf) {
+      try {
+        const rawB64 = b64.includes('base64,') ? b64.split('base64,')[1] : b64;
+        const byteChars = atob(rawB64);
+        const byteNumbers = new Uint8Array(byteChars.length);
+        for (let i = 0; i < byteChars.length; i++) {
+          byteNumbers[i] = byteChars.charCodeAt(i);
+        }
+        const blob = new Blob([byteNumbers], { type: 'application/pdf' });
+        item.blobUrl = URL.createObjectURL(blob);
+      } catch (bErr) {
+        console.warn('PDF blob creation error:', bErr);
+      }
+
+      const containerEl = document.getElementById(`scanned-card-preview-container-${item.id}`);
+      if (containerEl) {
+        containerEl.style.cursor = 'pointer';
+        containerEl.onclick = () => this.openPdfViewerModal(item.id);
+        containerEl.title = 'Click to view full PDF';
+        containerEl.innerHTML = `
+          <object data="${item.blobUrl || b64}#toolbar=0&navpanes=0&scrollbar=0&view=FitH" type="application/pdf" style="width: 100%; height: 100%; pointer-events: none; border: none; background: #090d16;"></object>
+          <div style="position: absolute; inset: 0; background: rgba(0,0,0,0.02); pointer-events: none;"></div>
+        `;
+      }
+    } else {
+      const curLoadingEl = document.getElementById(`scanned-card-loading-${item.id}`);
+      const imgEl = document.getElementById(`scanned-card-preview-${item.id}`);
+      if (curLoadingEl) curLoadingEl.style.display = 'none';
+      if (imgEl) {
+        imgEl.src = b64;
+        imgEl.style.display = 'block';
+      }
+
+      // Only auto-scan lightweight photos if the employee name is completely unknown and hasn't been scanned yet.
+      // Cards with known employees (e.g. from email subject) do NOT run automatic background OCR, preventing CPU lag.
+      if (!item.isPdf && !item.employeeName && !item._ocrAttempted && (item.fileSize || 0) < 2.5 * 1024 * 1024) {
+        item._ocrAttempted = true;
+        this.extractCertInfoFromImage(item, false).catch(err => {
+          console.warn(`Background OCR note for card ${item.id}:`, err);
+        });
+      }
+    }
+    return b64;
+  }
+
+  /**
+   * Ensures the IPC progress listener for cert attachment downloads is registered once.
+   */
+  _ensureCertProgressListener() {
+    if (this._certProgressRegistered) return;
+    if (window.desktopAPI && typeof window.desktopAPI.onCertDownloadProgress === 'function') {
+      this._certProgressRegistered = true;
+      window.desktopAPI.onCertDownloadProgress((data) => {
+        if (!this.scannedCertItems) return;
+        const targetItem = this.scannedCertItems.find(x => x.messageId === data.messageId && x.attIdx === data.attIdx);
+        if (!targetItem) return;
+
+        const barEl = document.getElementById(`scanned-card-bar-${targetItem.id}`);
+        const bytesEl = document.getElementById(`scanned-card-bytes-${targetItem.id}`);
+        const pctEl = document.getElementById(`scanned-card-pct-${targetItem.id}`);
+
+        const receivedMb = (data.bytesReceived / 1024 / 1024).toFixed(1);
+        const totalMb = data.totalBytes > 0 ? (data.totalBytes / 1024 / 1024).toFixed(1) : (targetItem.fileSize ? (targetItem.fileSize / 1024 / 1024).toFixed(1) : '');
+        const pct = Math.max(5, Math.min(99, data.pct || 0));
+
+        if (barEl) barEl.style.width = `${pct}%`;
+        if (pctEl) pctEl.textContent = `${pct}%${data.speedKbps ? ' • ' + data.speedKbps + ' KB/s' : ''}`;
+        if (bytesEl) bytesEl.textContent = totalMb ? `${receivedMb} / ${totalMb} MB` : `${receivedMb} MB`;
+      });
+    }
+  }
+
+  /**
+   * Scans local disk cache for all unrendered cert cards and applies previews instantly.
+   */
+  async checkAndLoadCachedCertItems() {
+    if (!this.scannedCertItems || !window.desktopAPI || typeof window.desktopAPI.getCachedCertAttachment !== 'function') return;
+    for (const item of this.scannedCertItems) {
+      if (!item.base64Data) {
+        try {
+          const cached = await window.desktopAPI.getCachedCertAttachment({
+            messageId: item.messageId,
+            attIdx: item.attIdx
+          });
+          if (cached && cached.exists && cached.base64Data) {
+            await this._applyScannedCertData(item, cached.base64Data, cached);
+          }
+        } catch (e) {
+          // Ignore cache check errors
+        }
+      }
+    }
+  }
+
+  /**
    * Asynchronously fetches the full image or document bytes for a single scanned card by unique ID.
+   * Checks local SSD disk cache first; falls back to single-concurrency download queue with live progress.
    */
   async loadScannedCertAttachment(itemId) {
     if (!this.scannedCertItems) return null;
@@ -2745,36 +3707,99 @@ class SheetNavigator {
     if (item.base64Data) return item.base64Data;
     if (item.isLoading) return null;
 
+    // Check disk cache first (instant!)
+    if (window.desktopAPI && typeof window.desktopAPI.getCachedCertAttachment === 'function') {
+      try {
+        const cached = await window.desktopAPI.getCachedCertAttachment({
+          messageId: item.messageId,
+          attIdx: item.attIdx
+        });
+        if (cached && cached.exists && cached.base64Data) {
+          return await this._applyScannedCertData(item, cached.base64Data, cached);
+        }
+      } catch (cacheErr) {
+        console.warn('Cache lookup warning:', cacheErr);
+      }
+    }
+
+    // Single-concurrency download queue to prevent network choking
+    this._certDownloadQueue = this._certDownloadQueue || [];
+    if (this._isCertDownloading) {
+      item.isLoading = true;
+      const loadingEl = document.getElementById(`scanned-card-loading-${item.id}`);
+      if (loadingEl) {
+        loadingEl.innerHTML = `
+          <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; padding: 12px; text-align: center;">
+            <div class="cert-scan-card-spinner" style="width: 20px; height: 20px; border: 2px solid rgba(148, 163, 184, 0.25); border-top-color: #94a3b8; border-radius: 50%; animation: spin 1s linear infinite;"></div>
+            <span style="font-size: 11px; color: #94a3b8; font-weight: 600;">⏳ Queued for download...</span>
+            <span style="font-size: 9.5px; color: #64748b;">Will download next</span>
+          </div>
+        `;
+      }
+      return new Promise((resolve) => {
+        this._certDownloadQueue.push({ itemId, resolve });
+      });
+    }
+
+    this._isCertDownloading = true;
     item.isLoading = true;
 
-    // Immediately update UI to show active downloading state
+    try {
+      return await this._executeDownloadCertAttachment(item);
+    } finally {
+      this._isCertDownloading = false;
+      item.isLoading = false;
+      if (this._certDownloadQueue.length > 0) {
+        const next = this._certDownloadQueue.shift();
+        this.loadScannedCertAttachment(next.itemId).then(next.resolve);
+      }
+    }
+  }
+
+  /**
+   * Internal worker that executes the actual network fetch for a cert attachment.
+   */
+  async _executeDownloadCertAttachment(item) {
+    this._ensureCertProgressListener();
+
     const loadingEl = document.getElementById(`scanned-card-loading-${item.id}`);
+    const fMb = item.fileSize ? ` (${(item.fileSize / 1024 / 1024).toFixed(1)} MB)` : '';
     if (loadingEl) {
-      const fMb = item.fileSize ? ` (${(item.fileSize / 1024 / 1024).toFixed(1)} MB)` : '';
       loadingEl.innerHTML = `
-        <div class="cert-scan-card-spinner" style="width: 24px; height: 24px; border: 2.5px solid ${item.isPdf ? 'rgba(248, 113, 113, 0.2)' : 'rgba(56, 189, 248, 0.2)'}; border-top-color: ${item.isPdf ? '#f87171' : '#38bdf8'}; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
-        <span style="font-size: 11px; color: #cbd5e1;">Loading ${item.isPdf ? 'PDF' : 'photo'}${fMb}...</span>
+        <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; padding: 12px 16px; text-align: center; width: 100%;">
+          <div style="display: flex; align-items: center; gap: 7px;">
+            <div class="cert-scan-card-spinner" style="width: 18px; height: 18px; border: 2px solid ${item.isPdf ? 'rgba(248, 113, 113, 0.25)' : 'rgba(56, 189, 248, 0.25)'}; border-top-color: ${item.isPdf ? '#f87171' : '#38bdf8'}; border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
+            <span id="scanned-card-status-${item.id}" style="font-size: 11px; font-weight: 700; color: ${item.isPdf ? '#fca5a5' : '#38bdf8'};">
+              📥 Downloading ${item.isPdf ? 'PDF' : 'Photo'}${fMb}...
+            </span>
+          </div>
+          <div style="width: 100%; max-width: 200px; height: 5px; background: rgba(255, 255, 255, 0.1); border-radius: 999px; overflow: hidden;">
+            <div id="scanned-card-bar-${item.id}" style="width: 5%; height: 100%; background: ${item.isPdf ? 'linear-gradient(90deg, #ef4444, #f87171)' : 'linear-gradient(90deg, #0284c7, #38bdf8)'}; border-radius: 999px; transition: width 0.3s ease;"></div>
+          </div>
+          <div style="font-size: 9.5px; color: #94a3b8; display: flex; justify-content: space-between; width: 100%; max-width: 200px;">
+            <span id="scanned-card-bytes-${item.id}">Connecting...</span>
+            <span id="scanned-card-pct-${item.id}">0%</span>
+          </div>
+        </div>
       `;
     }
 
     try {
       const syncUrl = window.syncEngine ? window.syncEngine.getSyncUrl() : '';
-      if (!syncUrl) return null;
-
-      const payload = {
-        action: 'getCertEmailAttachment',
-        messageId: item.messageId,
-        attIdx: item.attIdx
-      };
-
-      // Calculate dynamic timeout based on file size: Google's echo server streams at ~20-30 KB/s.
-      // Give plenty of buffer so 2MB-3MB files never get prematurely terminated.
-      const fSize = item.fileSize || (1024 * 1024);
-      const timeoutMs = Math.max(60000, Math.min(240000, Math.round((fSize / 15000) * 1000) + 30000));
+      if (!syncUrl) throw new Error('No sync URL configured');
 
       let res = null;
-      let lastErr = null;
-      try {
+      if (window.desktopAPI && typeof window.desktopAPI.downloadCertAttachment === 'function') {
+        res = await window.desktopAPI.downloadCertAttachment({
+          url: syncUrl,
+          messageId: item.messageId,
+          attIdx: item.attIdx,
+          expectedSize: item.fileSize || 0
+        });
+      } else {
+        const payload = { action: 'getCertEmailAttachment', messageId: item.messageId, attIdx: item.attIdx };
+        const fSize = item.fileSize || (1024 * 1024);
+        const timeoutMs = Math.max(120000, Math.min(900000, Math.round((fSize / 8000) * 1000) + 90000));
         if (window.syncEngine && typeof window.syncEngine.executeNetworkRequest === 'function') {
           res = await window.syncEngine.executeNetworkRequest(syncUrl, 'POST', payload, timeoutMs);
         } else {
@@ -2789,83 +3814,26 @@ class SheetNavigator {
           clearTimeout(tId);
           res = await resp.json();
         }
-      } catch (fetchErr) {
-        lastErr = fetchErr;
       }
 
       if (res && res.success && res.base64Data) {
-        let b64 = res.base64Data;
-        if (item.isHeic || res.isHeic || (item.fileName && item.fileName.toLowerCase().endsWith('.heic'))) {
-          try {
-            b64 = await this.convertHeicDataUrlToJpeg(b64);
-            item.contentType = 'image/jpeg';
-            item.fileName = item.fileName.replace(/\.heic$/i, '.jpg').replace(/\.heif$/i, '.jpg');
-          } catch (cErr) {
-            console.warn('HEIC preview conversion error:', cErr);
-          }
-        }
-        item.base64Data = b64;
-
-        if (item.isPdf) {
-          try {
-            const rawB64 = b64.includes('base64,') ? b64.split('base64,')[1] : b64;
-            const byteChars = atob(rawB64);
-            const byteNumbers = new Uint8Array(byteChars.length);
-            for (let i = 0; i < byteChars.length; i++) {
-              byteNumbers[i] = byteChars.charCodeAt(i);
-            }
-            const blob = new Blob([byteNumbers], { type: 'application/pdf' });
-            item.blobUrl = URL.createObjectURL(blob);
-          } catch (bErr) {
-            console.warn('PDF blob creation error:', bErr);
-          }
-
-          const containerEl = document.getElementById(`scanned-card-preview-container-${item.id}`);
-          if (containerEl) {
-            containerEl.style.cursor = 'pointer';
-            containerEl.onclick = () => this.openPdfViewerModal(item.id);
-            containerEl.title = 'Click to view full PDF';
-            containerEl.innerHTML = `
-              <object data="${item.blobUrl || b64}#toolbar=0&navpanes=0&scrollbar=0&view=FitH" type="application/pdf" style="width: 100%; height: 100%; pointer-events: none; border: none; background: #090d16;"></object>
-              <div style="position: absolute; inset: 0; background: rgba(0,0,0,0.02); pointer-events: none;"></div>
-            `;
-          }
-        } else {
-          // Update DOM elements if present
-          const curLoadingEl = document.getElementById(`scanned-card-loading-${item.id}`);
-          const imgEl = document.getElementById(`scanned-card-preview-${item.id}`);
-          if (curLoadingEl) curLoadingEl.style.display = 'none';
-          if (imgEl) {
-            imgEl.src = b64;
-            imgEl.style.display = 'block';
-          }
-
-          // If employee name, expiration date, or cert type is not yet known/specialized, auto-pull it off the picture asynchronously in the background!
-          if (!item.isPdf && (!item.employeeName || !item.expDate || !item.certType || item.certType === 'Other Cert')) {
-            this.extractCertInfoFromImage(item, false).catch(err => {
-              console.warn(`Background OCR note for card ${item.id}:`, err);
-            });
-          }
-        }
-        return b64;
+        return await this._applyScannedCertData(item, res.base64Data, res);
       } else {
-        throw (lastErr || new Error((res && res.error) || 'Failed to download attachment'));
+        throw new Error((res && res.error) || 'Failed to download attachment');
       }
     } catch (err) {
       console.warn(`Failed to load attachment for card ${item.id}:`, err);
       const curLoadingEl = document.getElementById(`scanned-card-loading-${item.id}`);
       if (curLoadingEl) {
         curLoadingEl.innerHTML = `
-          <div style="display: flex; flex-direction: column; align-items: center; gap: 4px;">
+          <div style="display: flex; flex-direction: column; align-items: center; gap: 4px; padding: 10px;">
             <span style="font-size: 10px; color: #f87171;">⚠️ Failed to load</span>
             <button type="button" class="btn btn-secondary" style="font-size: 10px; padding: 2px 8px; border-color: rgba(56, 189, 248, 0.45); color: #38bdf8; background: rgba(56, 189, 248, 0.1); border-radius: 4px; cursor: pointer;" onclick="window.sheetNavigator.retryLoadScannedCert('${this.escapeJs(item.id)}')">🔄 Retry</button>
           </div>
         `;
       }
-    } finally {
-      item.isLoading = false;
+      return null;
     }
-    return null;
   }
 
   /**
@@ -2954,10 +3922,21 @@ class SheetNavigator {
       return;
     }
 
+    const saveBtn = document.querySelector(`#scanned-cert-card-${itemId} button.btn-primary`);
+    if (saveBtn) {
+      if (saveBtn.disabled) return;
+      saveBtn.disabled = true;
+      saveBtn.innerHTML = `<span>⏳</span> Saving...`;
+    }
+
     // Ensure document payload is loaded before saving
     if (!item.base64Data) {
       const b64 = await this.loadScannedCertAttachment(itemId);
       if (!b64) {
+        if (saveBtn) {
+          saveBtn.disabled = false;
+          saveBtn.innerHTML = `<span>📥</span> Save to Vault`;
+        }
         alert('Could not download certificate proof from Gmail. Please click Retry on the card or check your connection.');
         return;
       }
@@ -3022,11 +4001,23 @@ class SheetNavigator {
         if (typeof window.showToast === 'function') {
           window.showToast(`✅ Saved proof ${expDate ? `& updated exp date (${expDate}) ` : ''}for ${empName} (${certType})!`, 'success');
         }
-        this.renderCurrentSheet();
+        if (typeof this.renderActiveView === 'function') {
+          this.renderActiveView();
+        } else {
+          this.renderCurrentSheet();
+        }
       } else {
+        if (saveBtn) {
+          saveBtn.disabled = false;
+          saveBtn.innerHTML = `<span>📥</span> Save to Vault`;
+        }
         alert(`Failed to save cert photo: ${(saveRes && saveRes.error) || 'Unknown error'}`);
       }
     } catch (err) {
+      if (saveBtn) {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = `<span>📥</span> Save to Vault`;
+      }
       console.error('importSingleScannedCert error:', err);
       alert(`Error saving cert photo: ${err.message || err}`);
     }
@@ -4813,12 +5804,13 @@ class SheetNavigator {
   isStatusEmployee(r) {
     if (!r) return false;
     const loc = String(r['Location'] || '').toLowerCase().trim();
-    return loc.includes('(vacation)') || loc === 'vacation' ||
-           loc.includes('(leave)') || loc === 'leave' ||
-           loc.includes('(light duty)') || loc === 'light duty' ||
-           loc.includes('(weeds)') || loc === 'weeds' ||
-           loc.includes('(medical)') || loc === 'medical' ||
-           loc.includes("worker's comp") || loc.includes('fmla') ||
+    const stat = String(r['Status'] || '').toLowerCase().trim();
+    return loc.includes('(vacation)') || loc === 'vacation' || stat === 'vacation' ||
+           loc.includes('(leave)') || loc === 'leave' || stat === 'leave' ||
+           loc.includes('(light duty)') || loc === 'light duty' || stat === 'light duty' ||
+           loc.includes('(weeds)') || loc === 'weeds' || stat === 'weeds' ||
+           loc.includes('(medical)') || loc === 'medical' || stat === 'medical' ||
+           loc.includes("worker's comp") || loc.includes('fmla') || stat.includes("worker's comp") ||
            loc.includes('military');
   }
 
@@ -6309,8 +7301,11 @@ class SheetNavigator {
         }
       }
 
-      const isWeeds = locLower.includes('(weeds)') || locLower === 'weeds' || statLower === 'weeds' || jobLower === 'weeds';
-      const isLightDuty = !isWeeds && (locLower.includes('(light duty)') || locLower === 'light duty' || statLower === 'light duty' || jobLower === 'light duty');
+      const isVacation = statLower === 'vacation' || locLower.includes('(vacation)') || locLower === 'vacation' || jobLower === 'vacation';
+      const isLeave = !isVacation && (statLower === 'leave' || locLower.includes('(leave)') || locLower === 'leave' || locLower.includes('fmla') || locLower.includes('military') || statLower.includes('fmla') || statLower.includes('military') || jobLower === 'leave');
+      const isWeeds = !isVacation && !isLeave && (locLower.includes('(weeds)') || locLower === 'weeds' || statLower === 'weeds' || jobLower === 'weeds');
+      const isLightDuty = !isVacation && !isLeave && !isWeeds && (locLower.includes('(light duty)') || locLower === 'light duty' || statLower === 'light duty' || jobLower === 'light duty');
+      const isMedical = !isVacation && !isLeave && !isWeeds && !isLightDuty && (statLower === 'medical' || locLower.includes('(medical)') || locLower === 'medical' || locLower.includes("worker's comp") || locLower.includes('(injury)') || statLower.includes("worker's comp") || statLower.includes('injury') || jobLower === 'medical');
 
       const empObj = {
         raw: r,
@@ -6330,9 +7325,9 @@ class SheetNavigator {
         isLightDuty
       };
 
-      if (locLower.includes('(vacation)') || locLower === 'vacation' || (!locLower && statLower === 'vacation')) {
+      if (isVacation) {
         vacationList.push(empObj);
-      } else if (locLower.includes('(leave)') || locLower === 'leave' || locLower.includes('fmla') || locLower.includes('military') || (!locLower && statLower === 'leave')) {
+      } else if (isLeave) {
         leaveList.push(empObj);
       } else if (isWeeds) {
         weedsList.push(empObj);
@@ -6343,7 +7338,7 @@ class SheetNavigator {
         if (job && !['light duty', 'weeds', 'unassigned', 'vacation', 'leave', 'medical', 'previous employee'].includes(jobLower)) {
           fieldCrewMembers.push(empObj);
         }
-      } else if (locLower.includes('(medical)') || locLower === 'medical' || locLower.includes("worker's comp") || locLower.includes('(injury)') || (!locLower && statLower === 'medical')) {
+      } else if (isMedical) {
         medicalList.push(empObj);
       } else {
         fieldCrewMembers.push(empObj);

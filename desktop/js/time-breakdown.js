@@ -132,23 +132,31 @@ class TimeBreakdownEngine {
 
   isPersonalTask(mt) {
     if (!mt) return false;
-    if (mt.isPersonal === true) return true;
+    // 1. Explicit office or training class markers
     if (mt.taskCategory === 'office_task' || mt.isPersonal === false) return false;
     if (mt.taskCategory === 'cert_class' || !!mt.certType) return false;
 
+    // 2. Recognized work, safety, and office keywords (handles legacy records)
     const title = String(mt.title || '').toLowerCase();
     const notes = String(mt.notes || '').toLowerCase();
     const text = `${title} ${notes}`;
 
-    if (/stock rubber|graybar|rubber ppe|assigned rubber|shop organizing|compliance report|safety audit|supply run|warehouse|inventory|trailer|dock\s+work|walter|glove|sleeve|swap|reclaim|tools?|gear|parts?/i.test(text)) {
+    if (/stock rubber|graybar|rubber ppe|assigned rubber|shop organizing|compliance report|safety audit|supply run|warehouse|inventory|trailer|dock\s+work|walter|glove|sleeve|swap|reclaim|tools?|gear|parts?|new\s*hire|safety\s*meeting|weekly\s*safety|timesheet|accomplishment|onboarding|safety\s*audit|safety\s*inspection/i.test(text)) {
       return false;
     }
 
+    // 3. Explicit personal markers
+    if (mt.isPersonal === true) return true;
+    if (mt.taskCategory === 'personal_task') {
+      return true;
+    }
+
+    // 4. Default heuristic check on text
     if (/dentist|doctor|appointment|personal|errand|eye\s+exam|physical|haircut|mechanic|dmv|vet/i.test(text)) {
       return true;
     }
 
-    return mt.taskCategory === 'personal_task';
+    return false;
   }
 
   cleanPhysicalLocation(loc) {
@@ -335,6 +343,11 @@ class TimeBreakdownEngine {
 
     // Convert leading imperative verbs to natural past tense
     const verbMap = [
+      [/^write\s*(?:and|&)\s*submit\b/i, 'Wrote and submitted'],
+      [/^write\b/i, 'Wrote'],
+      [/^submit\b/i, 'Submitted'],
+      [/^prepare\b/i, 'Prepared'],
+      [/^conduct\b/i, 'Conducted'],
       [/^deliver\b/i, 'Delivered'],
       [/^drop off\b/i, 'Dropped off'],
       [/^pick up\b/i, 'Picked up'],

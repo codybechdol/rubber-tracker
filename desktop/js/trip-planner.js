@@ -2393,6 +2393,14 @@ class TripPlannerApp {
           modified = true;
         }
       }
+      if (t.taskCategory === 'personal_task' && (t.isPersonal === undefined || t.isPersonal === true)) {
+        const text = `${t.title || ''} ${t.notes || ''}`.toLowerCase();
+        if (/stock rubber|graybar|rubber ppe|assigned rubber|shop organizing|compliance report|safety audit|supply run|warehouse|inventory|trailer|dock\s+work|walter|glove|sleeve|swap|reclaim|tools?|gear|parts?|new\s*hire|safety\s*meeting|weekly\s*safety|timesheet|accomplishment|onboarding|safety\s*audit|safety\s*inspection/i.test(text)) {
+          t.taskCategory = 'office_task';
+          t.isPersonal = false;
+          modified = true;
+        }
+      }
     });
     if (modified) {
       this.db.saveManualTasks(tasks);
@@ -2565,7 +2573,7 @@ class TripPlannerApp {
 
     // Get all tasks for this date and category sorted by current display order
     const dateTasks = this.manualTasks
-      .filter(t => (t.dateKey === dateKey || t.date === dateKey) && (isCert ? (t.taskCategory === 'cert_class' || !!t.certType) : (t.taskCategory === 'personal_task' && !t.certType)))
+      .filter(t => (t.dateKey === dateKey || t.date === dateKey) && (isCert ? (t.taskCategory === 'cert_class' || !!t.certType) : (t.taskCategory !== 'cert_class' && !t.certType)))
       .sort((a, b) => this.compareTasksByTime(a, b));
 
     const currentIdx = dateTasks.findIndex(t => t.id === taskId);
@@ -3647,25 +3655,31 @@ class TripPlannerApp {
 
   isPersonalTask(mt) {
     if (!mt) return false;
-    if (mt.isPersonal === true) return true;
+    // 1. Explicit office or training class markers
     if (mt.taskCategory === 'office_task' || mt.isPersonal === false) return false;
     if (mt.taskCategory === 'cert_class' || !!mt.certType) return false;
 
-    // Check taskCategory === 'personal_task' or legacy tasks
+    // 2. Recognized work, safety, and office keywords (handles legacy records)
     const title = String(mt.title || '').toLowerCase();
     const notes = String(mt.notes || '').toLowerCase();
     const text = `${title} ${notes}`;
 
-    // Work / Office tasks that may have been previously tagged as personal_task:
-    if (/stock rubber|graybar|rubber ppe|assigned rubber|shop organizing|compliance report|safety audit|supply run|warehouse|inventory|trailer|dock\s+work|walter|glove|sleeve|swap|reclaim|tools?|gear|parts?/i.test(text)) {
+    if (/stock rubber|graybar|rubber ppe|assigned rubber|shop organizing|compliance report|safety audit|supply run|warehouse|inventory|trailer|dock\s+work|walter|glove|sleeve|swap|reclaim|tools?|gear|parts?|new\s*hire|safety\s*meeting|weekly\s*safety|timesheet|accomplishment|onboarding|safety\s*audit|safety\s*inspection/i.test(text)) {
       return false;
     }
 
+    // 3. Explicit personal markers
+    if (mt.isPersonal === true) return true;
+    if (mt.taskCategory === 'personal_task') {
+      return true;
+    }
+
+    // 4. Default heuristic check on text
     if (/dentist|doctor|appointment|personal|errand|eye\s+exam|physical|haircut|mechanic|dmv|vet/i.test(text)) {
       return true;
     }
 
-    return mt.taskCategory === 'personal_task';
+    return false;
   }
 
   switchManualTaskTab(category, autoFocus = true) {
@@ -3800,9 +3814,13 @@ class TripPlannerApp {
     const isCert = (taskData.taskCategory === 'cert_class' || !!taskData.certType);
     const certTypeVal = (taskData.certType || '').trim();
 
+    const isPersonal = !isCert && (taskData.taskCategory === 'personal_task' || taskData.isPersonal === true);
+    const category = isCert ? 'cert_class' : (isPersonal ? 'personal_task' : 'office_task');
+
     const newTask = {
       id: 'mt_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
-      taskCategory: isCert ? 'cert_class' : 'personal_task',
+      taskCategory: category,
+      isPersonal: isPersonal,
       title: String(taskData.title || (isCert ? certTypeVal : '')).trim(),
       certType: certTypeVal,
       crewIds: Array.isArray(taskData.crewIds) ? [...taskData.crewIds] : [],
@@ -3839,9 +3857,23 @@ class TripPlannerApp {
     const dateVal = taskData.dateKey || taskData.date || existing.dateKey || existing.date;
     const certTypeVal = (taskData.certType !== undefined ? String(taskData.certType) : existing.certType || '').trim();
 
+    let isPersonal;
+    let category;
+    if (isCert) {
+      isPersonal = false;
+      category = 'cert_class';
+    } else if (taskData.taskCategory !== undefined || taskData.isPersonal !== undefined) {
+      isPersonal = (taskData.taskCategory === 'personal_task' || taskData.isPersonal === true);
+      category = isPersonal ? 'personal_task' : 'office_task';
+    } else {
+      isPersonal = existing.isPersonal === true || existing.taskCategory === 'personal_task';
+      category = isPersonal ? 'personal_task' : 'office_task';
+    }
+
     this.manualTasks[idx] = {
       ...existing,
-      taskCategory: isCert ? 'cert_class' : 'personal_task',
+      taskCategory: category,
+      isPersonal: isPersonal,
       title: String(taskData.title !== undefined ? taskData.title : (isCert ? certTypeVal : existing.title || '')).trim(),
       certType: certTypeVal,
       crewIds: (taskData.crewIds !== undefined ? [...taskData.crewIds] : (existing.crewIds ? [...existing.crewIds] : [])),
@@ -3860,6 +3892,7 @@ class TripPlannerApp {
 
     this.saveManualTasks(this.manualTasks);
     this.renderPlanner();
+    this.notifyAccomplishmentsModal();
     return this.manualTasks[idx];
   }
 
@@ -4710,7 +4743,7 @@ class TripPlannerApp {
     this.renderPlanner();
   }
 
-  openAddManualTaskModal(dateKey = '', displayDate = '', defaultCategory = 'cert_class') {
+  openAddManualTaskModal(dateKey = '', displayDate = '', defaultCategory = 'office_task') {
     if (window.currentRoleMode === 'view_only') return;
     const modal = document.getElementById('manual-task-modal');
     if (!modal) return;
@@ -8444,8 +8477,8 @@ class TripPlannerApp {
         const trainingClasses = allManualTasks
           .filter(m => m.taskCategory === 'cert_class' || !!m.certType)
           .sort((a, b) => this.compareTasksByTime(a, b));
-        const personalTasks = allManualTasks
-          .filter(m => m.taskCategory === 'personal_task' && !m.certType)
+        const manualOfficePersonalTasks = allManualTasks
+          .filter(m => m.taskCategory !== 'cert_class' && !m.certType)
           .sort((a, b) => this.compareTasksByTime(a, b));
 
         // Gather scheduled trainings from Training Needs sidebar
@@ -8666,7 +8699,7 @@ class TripPlannerApp {
           let foreman = foremanHint || '';
 
           // Canonicalize crew ID and resolve active foreman using getCrewInfo & FY_TRANSITION_ALIAS_MAP
-          if (cId !== 'Unassigned' && cId !== 'Office / Personal' && cId !== 'DOT Drug Tests') {
+          if (cId !== 'Unassigned' && cId !== 'Office / Personal' && cId !== 'DOT Drug Tests' && cId !== 'Personal Tasks' && cId !== 'Office Tasks') {
             const cInfo = this.getCrewInfo(cId, foremanHint, locName);
             if (cInfo) {
               if (cInfo.crewId && cInfo.crewId !== 'Unassigned') {
@@ -8681,7 +8714,7 @@ class TripPlannerApp {
           if (!lg.crews[cId]) {
             lg.crews[cId] = {
               crewId: cId,
-              foreman: foreman || (cId === 'Unassigned' || cId === 'Office / Personal' || cId === 'DOT Drug Tests' ? '' : 'Foreman'),
+              foreman: foreman || (cId === 'Unassigned' || cId === 'Office / Personal' || cId === 'DOT Drug Tests' || cId === 'Personal Tasks' || cId === 'Office Tasks' ? '' : 'Foreman'),
               tasks: {
                 cities: [],
                 swaps: [],
@@ -8770,7 +8803,7 @@ class TripPlannerApp {
         });
 
         // Group Personal & Office Tasks separately
-        personalTasks.forEach(mt => {
+        manualOfficePersonalTasks.forEach(mt => {
           const loc = mt.location || 'Helena';
           const isPersonal = this.isPersonalTask(mt);
           const groupName = isPersonal ? 'Personal Tasks' : 'Office Tasks';
@@ -8895,7 +8928,11 @@ class TripPlannerApp {
               let crewTitle = `Crew ${this.escapeHtml(cId)}`;
               if (cId === 'Unassigned') crewTitle = 'Unassigned Items';
               else if (cId === 'Office / Personal') crewTitle = 'Office / Personal Tasks';
+              else if (cId === 'Office Tasks') crewTitle = 'Office Tasks';
+              else if (cId === 'Personal Tasks') crewTitle = 'Personal Tasks';
               else if (cId === 'DOT Drug Tests') crewTitle = 'DOT Drug Tests';
+
+              const sectionIcon = cId === 'Office Tasks' ? '💼' : (cId === 'Personal Tasks' ? '👤' : '👷');
 
               return `
                 <div class="day-section-collapsible crew-day-section" data-crew="${this.escapeHtml(cId)}" style="margin-bottom: 6px; background: rgba(15, 23, 42, 0.45); border-radius: 6px; padding: 4px; border: 1px solid rgba(255, 255, 255, 0.06);">
@@ -8908,7 +8945,7 @@ class TripPlannerApp {
                        title="Click to collapse / expand ${this.escapeHtml(crewTitle)}. Drag or use arrows to reorder.">
                     <span style="display: flex; align-items: center; gap: 5px; min-width: 0; flex-wrap: wrap;">
                       <span id="section-chevron-${dateKey}-${crewSectionKey}" style="font-size: 8px; width: 9px; display: inline-block;">${isCrewCollapsed ? '▶' : '▼'}</span>
-                      <span style="font-weight: 800; color: #f8fafc;">👷 ${crewTitle}</span>
+                      <span style="font-weight: 800; color: #f8fafc;">${sectionIcon} ${crewTitle}</span>
                       ${cg.foreman ? `<span style="color: #94a3b8; font-size: 9.5px;">(${this.escapeHtml(cg.foreman)})</span>` : ''}
                       <span class="badge" style="background: rgba(59, 130, 246, 0.25); color: #bfdbfe; font-size: 8.5px; padding: 1px 4px; border-radius: 3px; font-weight: 800;">
                         ${crewTotalTasks} ${crewTotalTasks === 1 ? 'task' : 'tasks'}
@@ -9032,7 +9069,7 @@ class TripPlannerApp {
               <button class="btn btn-secondary admin-only-control" style="padding: 1px 5px; font-size: 9px; line-height: 1.2; background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 3px; cursor: pointer;" onclick="window.tripPlanner.openAddManualTaskModal('${dateKey}', '${this.escapeJs(day.dayName)}, ${this.escapeJs(day.formattedDate)}', 'cert_class')" title="Schedule Training Class on ${day.dayName}">
                 🎓 + Class
               </button>
-              <button class="btn btn-secondary admin-only-control" style="padding: 1px 5px; font-size: 9px; line-height: 1.2; background: rgba(249, 115, 22, 0.15); color: #fdba74; border: 1px solid rgba(249, 115, 22, 0.3); border-radius: 3px; cursor: pointer;" onclick="window.tripPlanner.openAddManualTaskModal('${dateKey}', '${this.escapeJs(day.dayName)}, ${this.escapeJs(day.formattedDate)}', 'personal_task')" title="Add Personal / Office Task on ${day.dayName}">
+              <button class="btn btn-secondary admin-only-control" style="padding: 1px 5px; font-size: 9px; line-height: 1.2; background: rgba(249, 115, 22, 0.15); color: #fdba74; border: 1px solid rgba(249, 115, 22, 0.3); border-radius: 3px; cursor: pointer;" onclick="window.tripPlanner.openAddManualTaskModal('${dateKey}', '${this.escapeJs(day.dayName)}, ${this.escapeJs(day.formattedDate)}', 'office_task')" title="Add Personal / Office Task on ${day.dayName}">
                 💼 + Task
               </button>
               <span class="badge" style="background: ${isHoliday ? '#ca8a04' : (day.isWorkDay ? '#0284c7' : '#475569')}; color: #fff; font-size: 9.5px; padding: 2px 5px; border-radius: 4px;">

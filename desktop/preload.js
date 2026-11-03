@@ -21,5 +21,13 @@ contextBridge.exposeInMainWorld('desktopAPI', {
   openCertPhotoExternally: (params) => ipcRenderer.invoke('open-cert-photo-externally', params),
   showCertPhotoInFolder: (params) => ipcRenderer.invoke('show-cert-photo-in-folder', params),
   deleteCertPhoto: (params) => ipcRenderer.invoke('delete-cert-photo', params),
-  extractTextFromPhoto: (params) => ipcRenderer.invoke('extract-text-from-photo', params)
+  extractTextFromPhoto: (params) => ipcRenderer.invoke('extract-text-from-photo', params),
+  getCachedCertAttachment: (params) => ipcRenderer.invoke('get-cached-cert-attachment', params),
+  saveCachedCertAttachment: (params) => ipcRenderer.invoke('save-cached-cert-attachment', params),
+  downloadCertAttachment: (params) => ipcRenderer.invoke('download-cert-attachment', params),
+  onCertDownloadProgress: (callback) => {
+    const handler = (event, data) => callback(data);
+    ipcRenderer.on('cert-attachment-download-progress', handler);
+    return () => ipcRenderer.removeListener('cert-attachment-download-progress', handler);
+  }
 });

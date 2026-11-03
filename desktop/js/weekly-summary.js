@@ -2046,7 +2046,7 @@ class WeeklySummaryEngine {
 
   openAddTaskModal(dateKey) {
     if (window.tripPlanner && typeof window.tripPlanner.openAddManualTaskModal === 'function') {
-      window.tripPlanner.openAddManualTaskModal(dateKey || '', '', 'personal_task');
+      window.tripPlanner.openAddManualTaskModal(dateKey || '', '', 'office_task');
     } else if (window.navigateToView) {
       window.navigateToView('trip-planner-view');
     }

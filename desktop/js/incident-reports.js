@@ -849,9 +849,17 @@ class IncidentReportsEngine {
 
   /**
    * Scans Gmail for new incident reports from mptablets@mountainpower.com
+   * Supports background mode with floating progress pill widget.
    */
-  async scanEmails(forceFullRescan = false) {
-    if (this.isScanning) return;
+  async scanEmails(forceFullRescan = false, options = {}) {
+    if (this.isScanning) {
+      if (!options || !options.silent) {
+        if (typeof window.showToast === 'function') {
+          window.showToast('Incident reports scan is already running in the background.', 'info');
+        }
+      }
+      return;
+    }
     this.isScanning = true;
 
     const scanBtn = document.getElementById('btn-scan-incident-emails');
@@ -860,9 +868,41 @@ class IncidentReportsEngine {
       scanBtn.innerHTML = `<span>⏳</span> Scanning Gmail...`;
     }
 
-    if (typeof window.showToast === 'function') {
+    const widget = document.getElementById('incident-emails-bg-widget');
+    if (widget) widget.style.display = 'flex';
+
+    this.updateBackgroundWidget({
+      title: '🚨 Scanning Incident Reports',
+      sub: 'Connecting to Gmail (mptablets@mountainpower.com)...',
+      pct: 12,
+      status: 'scanning'
+    });
+
+    if (!options.silent && typeof window.showToast === 'function') {
       window.showToast('Scanning Gmail for incident reports from mptablets@mountainpower.com...', 'info');
     }
+
+    // Dynamic progress ticker while server query executes
+    let progressPct = 12;
+    const progressTimer = setInterval(() => {
+      if (!this.isScanning) {
+        clearInterval(progressTimer);
+        return;
+      }
+      if (progressPct < 85) {
+        progressPct += 15;
+        let subText = 'Searching inbox for incident reports...';
+        if (progressPct >= 40 && progressPct < 70) {
+          subText = 'Parsing attached report forms & details...';
+        } else if (progressPct >= 70) {
+          subText = 'Finalizing incident logs & database...';
+        }
+        this.updateBackgroundWidget({
+          pct: progressPct,
+          sub: subText
+        });
+      }
+    }, 1400);
 
     try {
       const syncUrl = window.syncEngine ? window.syncEngine.getSyncUrl() : '';
@@ -872,7 +912,7 @@ class IncidentReportsEngine {
 
       const payload = {
         action: 'scanIncidentEmails',
-        daysBack: 365,
+        daysBack: (options && options.daysBack) || 365,
         rescan: !!forceFullRescan
       };
 
@@ -888,6 +928,8 @@ class IncidentReportsEngine {
         result = await resp.json();
       }
 
+      clearInterval(progressTimer);
+
       if (result && result.success) {
         const count = result.newCount || 0;
         const total = result.totalInSheet || 0;
@@ -902,17 +944,44 @@ class IncidentReportsEngine {
           }
         }
 
-        if (typeof window.showToast === 'function') {
-          window.showToast(count > 0 ? `Successfully logged ${count} new incident report${count === 1 ? '' : 's'} (${total} total in database)!` : `Scan complete. ${total} total incident report${total === 1 ? '' : 's'} up to date.`, 'success');
+        const successMsg = count > 0
+          ? `Successfully logged ${count} new incident report${count === 1 ? '' : 's'} (${total} total in database)!`
+          : `Scan complete. ${total} total incident report${total === 1 ? '' : 's'} up to date.`;
+
+        if (!options.silent && typeof window.showToast === 'function') {
+          window.showToast(successMsg, 'success');
         }
+
+        this.updateBackgroundWidget({
+          title: count > 0 ? `🚨 ${count} New Incident${count === 1 ? '' : 's'} Logged` : '✅ Incident Reports Up to Date',
+          sub: count > 0 ? `${count} new report${count === 1 ? '' : 's'} logged (${total} total) • Click to view` : `Scan complete. All ${total} incident reports up to date.`,
+          pct: 100,
+          status: 'completed'
+        });
+
+        // Auto-dismiss completed widget after 12 seconds if not manually dismissed
+        setTimeout(() => {
+          const w = document.getElementById('incident-emails-bg-widget');
+          if (w && w.classList.contains('completed')) {
+            this.dismissBackgroundWidget();
+          }
+        }, 12000);
+
       } else {
         throw new Error((result && result.error) || 'Failed to scan incident emails.');
       }
     } catch (err) {
+      clearInterval(progressTimer);
       console.error('scanEmails error:', err);
-      if (typeof window.showToast === 'function') {
-        window.showToast(`Error scanning emails: ${err.message}`, 'error');
+      const errMsg = err.message || 'Error scanning emails';
+      if (!options.silent && typeof window.showToast === 'function') {
+        window.showToast(`Error scanning emails: ${errMsg}`, 'error');
       }
+      this.updateBackgroundWidget({
+        title: '❌ Incident Scan Error',
+        sub: errMsg.length > 50 ? errMsg.substring(0, 47) + '...' : errMsg,
+        status: 'error'
+      });
     } finally {
       this.isScanning = false;
       if (scanBtn) {
@@ -920,6 +989,77 @@ class IncidentReportsEngine {
         scanBtn.innerHTML = `<span>📬</span> Scan Gmail for Incidents`;
       }
       this.render();
+    }
+  }
+
+  dismissBackgroundWidget() {
+    const widget = document.getElementById('incident-emails-bg-widget');
+    if (widget) widget.style.display = 'none';
+  }
+
+  updateBackgroundWidget(opts = {}) {
+    const widget = document.getElementById('incident-emails-bg-widget');
+    if (!widget) return;
+
+    if (opts.pct !== undefined) {
+      const pctEl = document.getElementById('incident-bg-pct');
+      if (pctEl) pctEl.textContent = `${opts.pct}%`;
+      const barEl = document.getElementById('incident-bg-bar');
+      if (barEl) barEl.style.width = `${Math.max(5, opts.pct)}%`;
+    }
+
+    if (opts.title) {
+      const titleEl = document.getElementById('incident-bg-title-text');
+      if (titleEl) titleEl.textContent = opts.title;
+    }
+
+    if (opts.sub) {
+      const subEl = document.getElementById('incident-bg-sub');
+      if (subEl) subEl.textContent = opts.sub;
+    }
+
+    if (opts.status === 'completed') {
+      widget.classList.add('completed');
+      widget.classList.remove('error');
+      const spinner = document.getElementById('incident-bg-spinner');
+      if (spinner) {
+        spinner.style.animation = 'none';
+        spinner.style.border = 'none';
+        spinner.textContent = '✅';
+        spinner.style.fontSize = '18px';
+      }
+      const dismissBtn = document.getElementById('incident-bg-dismiss-btn');
+      if (dismissBtn) dismissBtn.style.display = 'flex';
+    } else if (opts.status === 'error') {
+      widget.classList.add('error');
+      widget.classList.remove('completed');
+      const spinner = document.getElementById('incident-bg-spinner');
+      if (spinner) {
+        spinner.style.animation = 'none';
+        spinner.style.border = 'none';
+        spinner.textContent = '❌';
+        spinner.style.fontSize = '18px';
+      }
+      const dismissBtn = document.getElementById('incident-bg-dismiss-btn');
+      if (dismissBtn) dismissBtn.style.display = 'flex';
+    } else {
+      widget.classList.remove('completed', 'error');
+      const spinner = document.getElementById('incident-bg-spinner');
+      if (spinner) {
+        spinner.textContent = '';
+        spinner.style.fontSize = '';
+        spinner.style.border = '2.5px solid rgba(239, 68, 68, 0.25)';
+        spinner.style.borderTopColor = '#f87171';
+        spinner.style.animation = 'spin 0.85s linear infinite';
+      }
+      const dismissBtn = document.getElementById('incident-bg-dismiss-btn');
+      if (dismissBtn) dismissBtn.style.display = 'none';
+    }
+  }
+
+  openIncidentsViewFromWidget() {
+    if (typeof window.navigateToView === 'function') {
+      window.navigateToView('incident-reports-view');
     }
   }
 

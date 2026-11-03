@@ -1678,6 +1678,17 @@ class CrewImportEngine {
     return '';
   }
 
+  getEmpRowStatus(row) {
+    if (!row) return '';
+    for (const key of Object.keys(row)) {
+      const k = key.toLowerCase().trim();
+      if (k === 'status' || k.startsWith('status') || k.startsWith('emp status') || k.startsWith('employee status')) {
+        return String(row[key] || '').trim();
+      }
+    }
+    return '';
+  }
+
   cleanNameForMatch(name) {
     if (!name) return '';
     let str = String(name).trim();
@@ -2718,7 +2729,8 @@ class CrewImportEngine {
       const rName = this.getEmpRowName(r) || '';
       if (!rName || seenNames.has(rName.toLowerCase())) continue;
       const rLoc = String(this.getEmpRowLocation(r) || '').toLowerCase();
-      if (!rLoc.includes('vacation')) continue;
+      const rStat = String(this.getEmpRowStatus(r) || '').toLowerCase();
+      if (!rLoc.includes('vacation') && rStat !== 'vacation') continue;
       let rJob = String(this.getEmpRowJobNumber(r) || '').replace(/\.\d+.*$/, '').trim();
       if (rJob === cleanBase) {
         seenNames.add(rName.toLowerCase());

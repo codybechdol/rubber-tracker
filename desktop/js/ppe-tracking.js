@@ -2800,7 +2800,8 @@ class RubberPpeTrackingEngine {
     } else {
       const newTask = {
         id: 'mt_ppe_' + Date.now() + '_' + Math.random().toString(36).substr(2, 5),
-        taskCategory: 'personal_task',
+        taskCategory: 'office_task',
+        isPersonal: false,
         title: `Assigned ${itemSingular}: ${empName} (#${itemIdentifier})`,
         certType: '',
         crewIds: empJob ? [empJob] : [],

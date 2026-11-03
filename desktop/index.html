@@ -307,6 +307,15 @@
             <button class="btn btn-secondary" id="btn-tailgate-sheets" style="font-size: 12px; font-weight: 700; border-color: #f59e0b; color: #fbbf24; display: flex; align-items: center; gap: 6px;" onclick="if(window.navigateToView){window.navigateToView('tailgate-generator-view');}else if(window.weeklySummaryEngine){window.weeklySummaryEngine.openTailgateModal();}" title="Open Foreman Tailgate Sheets Generator with compliance, swaps, and attendance sign-off">
               <span>👷</span> Tailgate Packets
             </button>
+            <!-- Safety Compliance View Mode Switcher (Crew Cards vs Table View) -->
+            <div id="compliance-view-toggle" style="display: inline-flex; align-items: center; gap: 3px; background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: 6px; padding: 2px 4px;">
+              <button class="btn btn-secondary active" id="btn-compliance-cards-view" style="font-size: 11px; padding: 3px 8px; border-radius: 4px;" onclick="window.sheetNavigator.setComplianceViewMode('cards')">
+                🗂️ Crew Cards
+              </button>
+              <button class="btn btn-secondary" id="btn-compliance-table-view" style="font-size: 11px; padding: 3px 8px; border-radius: 4px;" onclick="window.sheetNavigator.setComplianceViewMode('table')">
+                📊 Table View
+              </button>
+            </div>
             <input type="text" id="safety-compliance-search-input" class="sheet-search" placeholder="Filter crews, weeks, or status...">
           </div>
         </div>
@@ -418,6 +427,15 @@
             <button class="btn btn-primary" id="btn-import-certs" style="font-size: 12px; font-weight: 700; background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%); border: none; display: flex; align-items: center; gap: 6px; box-shadow: 0 2px 6px rgba(59, 130, 246, 0.3);" onclick="window.certsImportEngine.openImportModal()" title="Import or update certifications matrix from Excel/CSV">
               <span>📥</span> Import Certs
             </button>
+            <!-- Expiring Certs View Mode Switcher (Employee Cards vs Table View) -->
+            <div id="certs-view-toggle" style="display: inline-flex; align-items: center; gap: 3px; background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: 6px; padding: 2px 4px;">
+              <button class="btn btn-secondary active" id="btn-certs-cards-view" style="font-size: 11px; padding: 3px 8px; border-radius: 4px;" onclick="window.sheetNavigator.setCertsViewMode('cards')">
+                🗂️ Employee Cards
+              </button>
+              <button class="btn btn-secondary" id="btn-certs-table-view" style="font-size: 11px; padding: 3px 8px; border-radius: 4px;" onclick="window.sheetNavigator.setCertsViewMode('table')">
+                📊 Table View
+              </button>
+            </div>
             <input type="text" id="expiring-certs-search-input" class="sheet-search" placeholder="Filter employees, cert types, job #...">
           </div>
         </div>
@@ -1037,6 +1055,21 @@
             </p>
             <input type="text" id="sync-url-input" class="sheet-search" style="width: 100%; margin-bottom: 12px;" placeholder="https://script.google.com/macros/s/.../exec">
             <button class="btn btn-primary" onclick="saveSyncSettings()">💾 Save & Connect</button>
+          </div>
+
+          <div style="background-color: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;">
+              <h3 style="font-size: 14px; margin: 0; display: flex; align-items: center; gap: 8px;">
+                <span>📬</span> Automated Startup Email Scans
+              </h3>
+              <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 12px; font-weight: 600; color: #6ee7b7;">
+                <input type="checkbox" id="setting-auto-scan-startup" onchange="toggleAutoScanStartup(this.checked)" checked style="accent-color: #10b981; cursor: pointer; width: 18px; height: 18px;">
+                <span>Enabled</span>
+              </label>
+            </div>
+            <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 0; line-height: 1.5;">
+              Automatically scan Gmail in the background when the app is opened for new Incident Reports and Safety Emails (JHAs, Safety Meetings, Monthly Checklists). You can track live progress from the floating notification pill and continue working without interruption.
+            </p>
           </div>
 
           <div style="background-color: var(--bg-secondary); border: 1px solid rgba(168, 85, 247, 0.4); border-radius: 8px; padding: 20px; margin-bottom: 20px;">
@@ -2402,22 +2435,44 @@
     </div>
   </div>
 
-  <!-- Floating Background Safety Emails Scanner Widget -->
-  <div id="safety-emails-bg-widget" class="safety-bg-pill" style="display: none;" onclick="window.safetyComplianceEngine.restoreProcessEmailsModal()">
-    <div class="safety-bg-spinner" id="safety-bg-spinner"></div>
-    <div class="safety-bg-info">
-      <div class="safety-bg-title">
-        <span id="safety-bg-title-text">📬 Scanning Emails</span>
-        <span id="safety-bg-pct" style="color: #6ee7b7; font-weight: 800; margin-left: 4px;">0%</span>
+  <!-- Floating Background Tasks Container (Stacks bottom-right notifications) -->
+  <div id="safety-bg-container" class="safety-bg-container">
+    <!-- Floating Background Safety Emails Scanner Widget -->
+    <div id="safety-emails-bg-widget" class="safety-bg-pill" style="display: none;" onclick="window.safetyComplianceEngine.restoreProcessEmailsModal()">
+      <div class="safety-bg-spinner" id="safety-bg-spinner"></div>
+      <div class="safety-bg-info">
+        <div class="safety-bg-title">
+          <span id="safety-bg-title-text">📬 Scanning Emails</span>
+          <span id="safety-bg-pct" style="color: #6ee7b7; font-weight: 800; margin-left: 4px;">0%</span>
+        </div>
+        <div class="safety-bg-sub" id="safety-bg-sub">Connecting to Gmail...</div>
+        <div class="safety-bg-bar-track">
+          <div id="safety-bg-bar" class="safety-bg-bar" style="width: 5%;"></div>
+        </div>
       </div>
-      <div class="safety-bg-sub" id="safety-bg-sub">Connecting to Gmail...</div>
-      <div class="safety-bg-bar-track">
-        <div id="safety-bg-bar" class="safety-bg-bar" style="width: 5%;"></div>
+      <div class="safety-bg-actions">
+        <button class="safety-bg-expand-btn" title="Open Full Progress Modal" onclick="event.stopPropagation(); window.safetyComplianceEngine.restoreProcessEmailsModal();">↗️</button>
+        <button class="safety-bg-dismiss-btn" id="safety-bg-dismiss-btn" title="Dismiss" style="display: none;" onclick="event.stopPropagation(); window.safetyComplianceEngine.dismissBackgroundWidget();">✕</button>
       </div>
     </div>
-    <div class="safety-bg-actions">
-      <button class="safety-bg-expand-btn" title="Open Full Progress Modal" onclick="event.stopPropagation(); window.safetyComplianceEngine.restoreProcessEmailsModal();">↗️</button>
-      <button class="safety-bg-dismiss-btn" id="safety-bg-dismiss-btn" title="Dismiss" style="display: none;" onclick="event.stopPropagation(); window.safetyComplianceEngine.dismissBackgroundWidget();">✕</button>
+
+    <!-- Floating Background Incident Reports Scanner Widget -->
+    <div id="incident-emails-bg-widget" class="safety-bg-pill incident-bg-pill" style="display: none;" onclick="window.incidentReportsEngine.openIncidentsViewFromWidget()">
+      <div class="safety-bg-spinner" id="incident-bg-spinner"></div>
+      <div class="safety-bg-info">
+        <div class="safety-bg-title">
+          <span id="incident-bg-title-text">🚨 Scanning Incident Reports</span>
+          <span id="incident-bg-pct" style="color: #fca5a5; font-weight: 800; margin-left: 4px;">0%</span>
+        </div>
+        <div class="safety-bg-sub" id="incident-bg-sub">Connecting to Gmail...</div>
+        <div class="safety-bg-bar-track">
+          <div id="incident-bg-bar" class="safety-bg-bar" style="width: 5%;"></div>
+        </div>
+      </div>
+      <div class="safety-bg-actions">
+        <button class="safety-bg-expand-btn" title="Open Incident Reports Workspace" onclick="event.stopPropagation(); window.incidentReportsEngine.openIncidentsViewFromWidget();">↗️</button>
+        <button class="safety-bg-dismiss-btn" id="incident-bg-dismiss-btn" title="Dismiss" style="display: none;" onclick="event.stopPropagation(); window.incidentReportsEngine.dismissBackgroundWidget();">✕</button>
+      </div>
     </div>
   </div>
 
@@ -3338,6 +3393,68 @@
       });
     }
 
+    function toggleAutoScanStartup(enabled) {
+      localStorage.setItem('sa_auto_scan_on_startup', enabled ? 'true' : 'false');
+      if (typeof window.showToast === 'function') {
+        window.showToast(enabled ? '✅ Automated startup email scans enabled.' : '⚠️ Automated startup email scans disabled.', 'info');
+      }
+    }
+    window.toggleAutoScanStartup = toggleAutoScanStartup;
+
+    function triggerStartupBackgroundScans() {
+      const autoScanEnabled = localStorage.getItem('sa_auto_scan_on_startup') !== 'false';
+      if (!autoScanEnabled) {
+        console.log('[Startup Scans] Automated startup email scans are disabled in Settings.');
+        return;
+      }
+
+      const syncUrl = window.syncEngine ? window.syncEngine.getSyncUrl() : '';
+      if (!syncUrl) {
+        console.log('[Startup Scans] No sync URL configured; skipping startup background scans.');
+        return;
+      }
+
+      // 2.2-second delay allows the local UI to render smoothly and initial revision check to finish
+      setTimeout(async () => {
+        try {
+          console.log('🚀 [Startup Scans] Initiating automated background email scans...');
+
+          // 1. Scan for new Incident Reports
+          if (window.incidentReportsEngine && typeof window.incidentReportsEngine.scanEmails === 'function') {
+            try {
+              console.log('[Startup Scans] Starting Incident Reports scan in background...');
+              await window.incidentReportsEngine.scanEmails(false, { runInBackground: true, silent: true });
+            } catch (incErr) {
+              console.warn('[Startup Scans] Incident email scan error:', incErr);
+            }
+          }
+
+          // Polite pause between scans to avoid Google Apps Script lock/quota contention
+          await new Promise(r => setTimeout(r, 1200));
+
+          // 2. Scan for new Safety Documentation Emails (JHAs, Weekly Safety Meetings, Monthly Checklists)
+          if (window.safetyComplianceEngine && typeof window.safetyComplianceEngine.runProcessEmails === 'function') {
+            try {
+              console.log('[Startup Scans] Starting Safety Emails scan in background...');
+              await window.safetyComplianceEngine.runProcessEmails({
+                runInBackground: true,
+                silent: true,
+                reportTypeFilter: 'ALL',
+                daysBack: 7,
+                newOnlyMode: true,
+                skipPdfExtraction: true
+              });
+            } catch (safetyErr) {
+              console.warn('[Startup Scans] Safety email scan error:', safetyErr);
+            }
+          }
+        } catch (err) {
+          console.warn('[Startup Scans] Error during automated scans:', err);
+        }
+      }, 2200);
+    }
+    window.triggerStartupBackgroundScans = triggerStartupBackgroundScans;
+
     // Global Focus & Caret Recovery Guard:
     // Prevents Chromium/Electron from dropping text caret or keyboard focus after alerts, modals, or window blurs
     (function initFocusRecoveryGuard() {
@@ -3499,7 +3616,15 @@
           window.syncEngine.updateStatusUI('offline', 'No data loaded (Import or Sync)');
         }
 
+        const autoScanCheckbox = document.getElementById('setting-auto-scan-startup');
+        if (autoScanCheckbox) {
+          autoScanCheckbox.checked = localStorage.getItem('sa_auto_scan_on_startup') !== 'false';
+        }
+
         window._appInitialized = true;
+
+        // Automatically trigger background email scans on app startup
+        triggerStartupBackgroundScans();
       } catch (fatalErr) {
         console.error('Fatal initialization error:', fatalErr);
         if (window.syncEngine && typeof window.syncEngine.updateStatusUI === 'function') {
