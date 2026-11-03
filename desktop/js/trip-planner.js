@@ -138,6 +138,10 @@ class TripPlannerApp {
 
   loadSwapOfficeTasks() {
     try {
+      const snap = this.db && typeof this.db.getSnapshot === 'function' ? this.db.getSnapshot() : null;
+      if (snap && snap.configs && snap.configs.swap_office_tasks && typeof snap.configs.swap_office_tasks === 'object') {
+        return snap.configs.swap_office_tasks;
+      }
       return JSON.parse(localStorage.getItem('TRIP_PLANNER_SWAP_OFFICE_TASKS') || '{}');
     } catch {
       return {};
@@ -147,6 +151,14 @@ class TripPlannerApp {
   saveSwapOfficeTasks() {
     try {
       localStorage.setItem('TRIP_PLANNER_SWAP_OFFICE_TASKS', JSON.stringify(this.swapOfficeTasks || {}));
+      const snap = this.db && typeof this.db.getSnapshot === 'function' ? this.db.getSnapshot() : null;
+      if (snap) {
+        if (!snap.configs) snap.configs = {};
+        snap.configs.swap_office_tasks = this.swapOfficeTasks || {};
+        if (typeof this.db.schedulePersistSnapshot === 'function') {
+          this.db.schedulePersistSnapshot(snap);
+        }
+      }
     } catch { /* ignore */ }
   }
 
@@ -536,6 +548,10 @@ class TripPlannerApp {
 
   loadScheduledEquipmentNeeds() {
     try {
+      const snap = this.db && typeof this.db.getSnapshot === 'function' ? this.db.getSnapshot() : null;
+      if (snap && snap.configs && snap.configs.scheduled_equipment && typeof snap.configs.scheduled_equipment === 'object') {
+        return snap.configs.scheduled_equipment;
+      }
       return JSON.parse(localStorage.getItem('TRIP_PLANNER_SCHEDULED_EQUIPMENT') || localStorage.getItem('sa_trip_scheduled_equipment') || '{}');
     } catch {
       return {};
@@ -546,6 +562,14 @@ class TripPlannerApp {
     try {
       localStorage.setItem('TRIP_PLANNER_SCHEDULED_EQUIPMENT', JSON.stringify(this.scheduledEquipmentNeeds || {}));
       localStorage.setItem('sa_trip_scheduled_equipment', JSON.stringify(this.scheduledEquipmentNeeds || {}));
+      const snap = this.db && typeof this.db.getSnapshot === 'function' ? this.db.getSnapshot() : null;
+      if (snap) {
+        if (!snap.configs) snap.configs = {};
+        snap.configs.scheduled_equipment = this.scheduledEquipmentNeeds || {};
+        if (typeof this.db.schedulePersistSnapshot === 'function') {
+          this.db.schedulePersistSnapshot(snap);
+        }
+      }
     } catch (e) {
       console.warn('Failed to save scheduled equipment needs:', e);
     }
@@ -553,7 +577,11 @@ class TripPlannerApp {
 
   loadScheduledTrainingNeeds() {
     try {
-      const data = JSON.parse(localStorage.getItem('TRIP_PLANNER_SCHEDULED_TRAINING') || localStorage.getItem('sa_trip_scheduled_training') || '{}');
+      const snap = this.db && typeof this.db.getSnapshot === 'function' ? this.db.getSnapshot() : null;
+      const rawCfg = (snap && snap.configs && snap.configs.scheduled_training && typeof snap.configs.scheduled_training === 'object')
+        ? snap.configs.scheduled_training
+        : null;
+      const data = rawCfg || JSON.parse(localStorage.getItem('TRIP_PLANNER_SCHEDULED_TRAINING') || localStorage.getItem('sa_trip_scheduled_training') || '{}');
       if (!data || typeof data !== 'object') return {};
 
       // Self-heal: clean up any stale, corrupted, or non-viable entries
@@ -577,6 +605,14 @@ class TripPlannerApp {
     try {
       localStorage.setItem('TRIP_PLANNER_SCHEDULED_TRAINING', JSON.stringify(this.scheduledTrainingNeeds || {}));
       localStorage.setItem('sa_trip_scheduled_training', JSON.stringify(this.scheduledTrainingNeeds || {}));
+      const snap = this.db && typeof this.db.getSnapshot === 'function' ? this.db.getSnapshot() : null;
+      if (snap) {
+        if (!snap.configs) snap.configs = {};
+        snap.configs.scheduled_training = this.scheduledTrainingNeeds || {};
+        if (typeof this.db.schedulePersistSnapshot === 'function') {
+          this.db.schedulePersistSnapshot(snap);
+        }
+      }
     } catch (e) {
       console.warn('Failed to save scheduled training needs:', e);
     }
@@ -652,6 +688,10 @@ class TripPlannerApp {
 
   loadDismissedSwaps() {
     try {
+      const snap = this.db && typeof this.db.getSnapshot === 'function' ? this.db.getSnapshot() : null;
+      if (snap && snap.configs && snap.configs.dismissed_swaps && typeof snap.configs.dismissed_swaps === 'object') {
+        return snap.configs.dismissed_swaps;
+      }
       return JSON.parse(localStorage.getItem('TRIP_PLANNER_DISMISSED_SWAPS') || '{}');
     } catch {
       return {};
@@ -661,6 +701,14 @@ class TripPlannerApp {
   saveDismissedSwaps() {
     try {
       localStorage.setItem('TRIP_PLANNER_DISMISSED_SWAPS', JSON.stringify(this.dismissedSwaps || {}));
+      const snap = this.db && typeof this.db.getSnapshot === 'function' ? this.db.getSnapshot() : null;
+      if (snap) {
+        if (!snap.configs) snap.configs = {};
+        snap.configs.dismissed_swaps = this.dismissedSwaps || {};
+        if (typeof this.db.schedulePersistSnapshot === 'function') {
+          this.db.schedulePersistSnapshot(snap);
+        }
+      }
     } catch (e) {
       console.warn('Failed to save dismissed swaps:', e);
     }
@@ -1109,6 +1157,10 @@ class TripPlannerApp {
 
   loadDismissedMonthlyTrainings() {
     try {
+      const snap = this.db && typeof this.db.getSnapshot === 'function' ? this.db.getSnapshot() : null;
+      if (snap && snap.configs && snap.configs.dismissed_trainings && typeof snap.configs.dismissed_trainings === 'object') {
+        return snap.configs.dismissed_trainings;
+      }
       return JSON.parse(localStorage.getItem('TRIP_PLANNER_DISMISSED_TRAININGS') || '{}');
     } catch {
       return {};
@@ -1122,6 +1174,14 @@ class TripPlannerApp {
   saveDismissedMonthlyTrainings() {
     try {
       localStorage.setItem('TRIP_PLANNER_DISMISSED_TRAININGS', JSON.stringify(this.dismissedMonthlyTrainings || {}));
+      const snap = this.db && typeof this.db.getSnapshot === 'function' ? this.db.getSnapshot() : null;
+      if (snap) {
+        if (!snap.configs) snap.configs = {};
+        snap.configs.dismissed_trainings = this.dismissedMonthlyTrainings || {};
+        if (typeof this.db.schedulePersistSnapshot === 'function') {
+          this.db.schedulePersistSnapshot(snap);
+        }
+      }
     } catch { /* ignore */ }
   }
 
@@ -1211,6 +1271,10 @@ class TripPlannerApp {
 
   loadDayOrderConfig() {
     try {
+      const snap = this.db && typeof this.db.getSnapshot === 'function' ? this.db.getSnapshot() : null;
+      if (snap && snap.configs && snap.configs.day_order_config && typeof snap.configs.day_order_config === 'object') {
+        return snap.configs.day_order_config;
+      }
       const raw = localStorage.getItem('TRIP_PLANNER_DAY_ORDER');
       return raw ? JSON.parse(raw) : {};
     } catch {
@@ -1221,6 +1285,14 @@ class TripPlannerApp {
   saveDayOrderConfig() {
     try {
       localStorage.setItem('TRIP_PLANNER_DAY_ORDER', JSON.stringify(this.dayOrderConfig || {}));
+      const snap = this.db && typeof this.db.getSnapshot === 'function' ? this.db.getSnapshot() : null;
+      if (snap) {
+        if (!snap.configs) snap.configs = {};
+        snap.configs.day_order_config = this.dayOrderConfig || {};
+        if (typeof this.db.schedulePersistSnapshot === 'function') {
+          this.db.schedulePersistSnapshot(snap);
+        }
+      }
     } catch { /* ignore */ }
   }
 
@@ -2199,20 +2271,10 @@ class TripPlannerApp {
     this.scheduledSwaps = this.loadScheduledSwaps();
     this.scheduledEquipmentNeeds = this.loadScheduledEquipmentNeeds();
     this.scheduledTrainingNeeds = this.loadScheduledTrainingNeeds();
+    this.swapOfficeTasks = this.loadSwapOfficeTasks();
     this.dismissedSwaps = this.loadDismissedSwaps();
     this.dismissedMonthlyTrainings = this.loadDismissedMonthlyTrainings();
-    // Clean up duplicate location trip on 2026-10-26 where only a Picked Swap was scheduled for Ennis
-    if (this.plannedTrips['2026-10-26'] && Array.isArray(this.plannedTrips['2026-10-26'])) {
-      const filtered = this.plannedTrips['2026-10-26'].filter(t => String(t.location || '').toLowerCase() !== 'ennis');
-      if (filtered.length !== this.plannedTrips['2026-10-26'].length) {
-        if (filtered.length === 0) {
-          delete this.plannedTrips['2026-10-26'];
-        } else {
-          this.plannedTrips['2026-10-26'] = filtered;
-        }
-        this.saveTrips();
-      }
-    }
+    this.dayOrderConfig = this.loadDayOrderConfig();
     this.holidaysMap = this.loadHolidays();
     this.manualTasks = this.loadManualTasks();
     try {
@@ -2244,9 +2306,11 @@ class TripPlannerApp {
 
   loadHolidays() {
     try {
+      const snap = this.db && typeof this.db.getSnapshot === 'function' ? this.db.getSnapshot() : null;
+      const rawCfg = (snap && snap.configs && snap.configs.holidays) ? snap.configs.holidays : null;
       const raw = localStorage.getItem('sa_holidays');
-      if (raw) {
-        const parsed = JSON.parse(raw);
+      const parsed = rawCfg || (raw ? JSON.parse(raw) : null);
+      if (parsed) {
         if (Array.isArray(parsed) && parsed.length > 0) {
           const map = {};
           parsed.forEach(h => {
@@ -2263,11 +2327,10 @@ class TripPlannerApp {
       }
     } catch { /* ignore */ }
 
-    // Default US / Company holidays (auto-seeded when missing or cleared)
+    // Default US / Company holidays (auto-seeded locally without queuing an outbox mutation on startup)
     const defaults = this.getDefaultHolidays();
     try {
       localStorage.setItem('sa_holidays', JSON.stringify(defaults));
-      this.saveHolidays(defaults);
     } catch { /* ignore */ }
     return defaults;
   }
@@ -2403,7 +2466,14 @@ class TripPlannerApp {
       }
     });
     if (modified) {
-      this.db.saveManualTasks(tasks);
+      try {
+        localStorage.setItem('sa_trip_manual_tasks', JSON.stringify(tasks));
+        const snap = this.db && typeof this.db.getSnapshot === 'function' ? this.db.getSnapshot() : null;
+        if (snap) {
+          if (!snap.configs) snap.configs = {};
+          snap.configs.manual_tasks = tasks;
+        }
+      } catch { /* ignore */ }
     }
     return tasks;
   }

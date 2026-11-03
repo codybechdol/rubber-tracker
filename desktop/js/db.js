@@ -371,77 +371,172 @@ class LocalDatabase {
           }
         });
       }
+      this.snapshot = snapshot;
+      this._invalidateIndices();
+      this.unpackSnapshotToLocalState(snapshot);
       this.normalizeSnapshot(snapshot);
     }
     this.snapshot = snapshot;
-
-    // Sync manual picks from incoming snapshot if present, or clear stale picks
-    if (snapshot && snapshot.manualPicks && typeof snapshot.manualPicks === 'object') {
-      try {
-        localStorage.setItem('sa_manual_picks', JSON.stringify(snapshot.manualPicks));
-      } catch { /* ignore */ }
-    }
-
-    // Keep localStorage config caches in sync with fresh snapshot
-    if (snapshot && snapshot.configs) {
-      if (snapshot.configs.plannedTrips !== undefined) {
-        try {
-          localStorage.setItem('sa_planned_trips', JSON.stringify(snapshot.configs.plannedTrips || {}));
-        } catch { /* ignore */ }
-      }
-      if (snapshot.configs.manual_tasks !== undefined) {
-        try {
-          localStorage.setItem('sa_trip_manual_tasks', JSON.stringify(snapshot.configs.manual_tasks || []));
-        } catch { /* ignore */ }
-      }
-      if (snapshot.configs.scheduled_swaps !== undefined) {
-        try {
-          localStorage.setItem('sa_trip_scheduled_swaps', JSON.stringify(snapshot.configs.scheduled_swaps || {}));
-          localStorage.setItem('TRIP_PLANNER_SCHEDULED_SWAPS', JSON.stringify(snapshot.configs.scheduled_swaps || {}));
-        } catch { /* ignore */ }
-      }
-      if (snapshot.configs.scheduled_equipment !== undefined) {
-        try {
-          localStorage.setItem('sa_trip_scheduled_equipment', JSON.stringify(snapshot.configs.scheduled_equipment || {}));
-          localStorage.setItem('TRIP_PLANNER_SCHEDULED_EQUIPMENT', JSON.stringify(snapshot.configs.scheduled_equipment || {}));
-        } catch { /* ignore */ }
-      }
-      if (snapshot.configs.scheduled_training !== undefined) {
-        try {
-          localStorage.setItem('sa_trip_scheduled_training', JSON.stringify(snapshot.configs.scheduled_training || {}));
-          localStorage.setItem('TRIP_PLANNER_SCHEDULED_TRAINING', JSON.stringify(snapshot.configs.scheduled_training || {}));
-        } catch { /* ignore */ }
-      }
-      if (snapshot.configs.workSchedule) {
-        try {
-          localStorage.setItem('sa_work_schedule', snapshot.configs.workSchedule);
-        } catch { /* ignore */ }
-      }
-      if (snapshot.configs.holidays) {
-        try {
-          localStorage.setItem('sa_holidays', JSON.stringify(snapshot.configs.holidays));
-        } catch { /* ignore */ }
-      }
-      if (Array.isArray(snapshot.configs.ppe_excluded_employees)) {
-        try {
-          localStorage.setItem('sa_ppe_excluded_employees', JSON.stringify(snapshot.configs.ppe_excluded_employees));
-        } catch { /* ignore */ }
-      }
-      if (Array.isArray(snapshot.configs.CREW_IMPORT_ORDER)) {
-        try {
-          localStorage.setItem('CREW_IMPORT_ORDER', JSON.stringify(snapshot.configs.CREW_IMPORT_ORDER));
-        } catch { /* ignore */ }
-        window._crewImportOrder = snapshot.configs.CREW_IMPORT_ORDER;
-      }
-    }
+    this.unpackSnapshotToLocalState(snapshot);
 
     await this.persistSnapshot(snapshot);
     this._invalidateIndices();
     this.notify();
   }
 
+  /**
+   * Bundles all local app state (Trip Planner state, manual picks, dismissed tasks,
+   * resolved equipment needs, aging rules, cert configs, crew import prefs, etc.)
+   * into `snapshot.configs` and `snapshot.manualPicks` so Sync & Save and local persistence
+   * capture 100% of the laptop's state.
+   */
+  bundleLocalStateIntoSnapshot(snapshot = this.snapshot) {
+    if (!snapshot) return snapshot;
+    if (!snapshot.configs) snapshot.configs = {};
+
+    const readJsonKey = (lsKey) => {
+      try {
+        const raw = localStorage.getItem(lsKey);
+        if (raw !== null && raw !== undefined && raw !== '') {
+          return JSON.parse(raw);
+        }
+      } catch { /* ignore */ }
+      return undefined;
+    };
+
+    try {
+      const manualPicks = readJsonKey('sa_manual_picks');
+      if (manualPicks && typeof manualPicks === 'object') {
+        snapshot.manualPicks = Object.assign({}, snapshot.manualPicks || {}, manualPicks);
+      } else if (!snapshot.manualPicks) {
+        snapshot.manualPicks = {};
+      }
+    } catch { /* ignore */ }
+
+    const configMappings = [
+      { cfgKey: 'plannedTrips', lsKeys: ['sa_planned_trips'] },
+      { cfgKey: 'manual_tasks', lsKeys: ['sa_trip_manual_tasks'] },
+      { cfgKey: 'scheduled_swaps', lsKeys: ['sa_trip_scheduled_swaps', 'TRIP_PLANNER_SCHEDULED_SWAPS'] },
+      { cfgKey: 'scheduled_equipment', lsKeys: ['sa_trip_scheduled_equipment', 'TRIP_PLANNER_SCHEDULED_EQUIPMENT'] },
+      { cfgKey: 'scheduled_training', lsKeys: ['sa_trip_scheduled_training', 'TRIP_PLANNER_SCHEDULED_TRAINING'] },
+      { cfgKey: 'swap_office_tasks', lsKeys: ['TRIP_PLANNER_SWAP_OFFICE_TASKS'] },
+      { cfgKey: 'dismissed_swaps', lsKeys: ['TRIP_PLANNER_DISMISSED_SWAPS'] },
+      { cfgKey: 'dismissed_trainings', lsKeys: ['TRIP_PLANNER_DISMISSED_TRAININGS'] },
+      { cfgKey: 'day_order_config', lsKeys: ['TRIP_PLANNER_DAY_ORDER'] },
+      { cfgKey: 'holidays', lsKeys: ['sa_holidays'] },
+      { cfgKey: 'resolved_equip_needs', lsKeys: ['sa_resolved_equip_needs'] },
+      { cfgKey: 'dismissed_tasks', lsKeys: ['sa_dismissed_tasks'] },
+      { cfgKey: 'emp_preferred_classes', lsKeys: ['sa_emp_preferred_classes'] },
+      { cfgKey: 'ppe_excluded_employees', lsKeys: ['sa_ppe_excluded_employees'] },
+      { cfgKey: 'aging_rules_config', lsKeys: ['sa_aging_rules_config'] },
+      { cfgKey: 'EXPIRING_CERTS_CONFIG', lsKeys: ['EXPIRING_CERTS_CONFIG'] },
+      { cfgKey: 'EXPIRING_CERTS_DELETED_KEYS', lsKeys: ['EXPIRING_CERTS_DELETED_KEYS'] },
+      { cfgKey: 'CREW_IMPORT_ORDER', lsKeys: ['CREW_IMPORT_ORDER'] },
+      { cfgKey: 'CREW_IMPORT_LEAD_SELECTIONS', lsKeys: ['CREW_IMPORT_LEAD_SELECTIONS'] },
+      { cfgKey: 'CREW_IMPORT_MISSING_ROSTER_ACTIONS', lsKeys: ['CREW_IMPORT_MISSING_ROSTER_ACTIONS'] },
+      { cfgKey: 'CREW_IMPORT_PRIMARY_JOB_SELECTIONS', lsKeys: ['CREW_IMPORT_PRIMARY_JOB_SELECTIONS'] },
+      { cfgKey: 'FY_TRANSITION_ALIAS_MAP', lsKeys: ['FY_TRANSITION_ALIAS_MAP'] }
+    ];
+
+    configMappings.forEach(({ cfgKey, lsKeys }) => {
+      for (const lsKey of lsKeys) {
+        const val = readJsonKey(lsKey);
+        if (val !== undefined) {
+          snapshot.configs[cfgKey] = val;
+          break;
+        }
+      }
+    });
+
+    try {
+      const ws = localStorage.getItem('sa_work_schedule');
+      if (ws) snapshot.configs.workSchedule = ws;
+    } catch { /* ignore */ }
+
+    // Also pull live in-memory TripPlanner state if initialized
+    if (typeof window !== 'undefined' && window.tripPlanner) {
+      const tp = window.tripPlanner;
+      if (tp.savedTrips && typeof tp.savedTrips === 'object') snapshot.configs.plannedTrips = tp.savedTrips;
+      if (Array.isArray(tp.manualTasks)) snapshot.configs.manual_tasks = tp.manualTasks;
+      if (tp.scheduledSwaps && typeof tp.scheduledSwaps === 'object') snapshot.configs.scheduled_swaps = tp.scheduledSwaps;
+      if (tp.scheduledEquipmentNeeds && typeof tp.scheduledEquipmentNeeds === 'object') snapshot.configs.scheduled_equipment = tp.scheduledEquipmentNeeds;
+      if (tp.scheduledTrainingNeeds && typeof tp.scheduledTrainingNeeds === 'object') snapshot.configs.scheduled_training = tp.scheduledTrainingNeeds;
+      if (tp.swapOfficeTasks && typeof tp.swapOfficeTasks === 'object') snapshot.configs.swap_office_tasks = tp.swapOfficeTasks;
+      if (tp.dismissedSwaps && typeof tp.dismissedSwaps === 'object') snapshot.configs.dismissed_swaps = tp.dismissedSwaps;
+      if (tp.dismissedMonthlyTrainings && typeof tp.dismissedMonthlyTrainings === 'object') snapshot.configs.dismissed_trainings = tp.dismissedMonthlyTrainings;
+      if (tp.dayOrderConfig && typeof tp.dayOrderConfig === 'object') snapshot.configs.day_order_config = tp.dayOrderConfig;
+      if (Array.isArray(tp.holidays)) snapshot.configs.holidays = tp.holidays;
+      if (tp.workSchedule) snapshot.configs.workSchedule = tp.workSchedule;
+    }
+
+    return snapshot;
+  }
+
+  /**
+   * Unpacks `snapshot.configs` and `snapshot.manualPicks` into `localStorage` and
+   * in-memory `LocalDatabase` fields so a downloaded snapshot hydrates 100% of local state.
+   */
+  unpackSnapshotToLocalState(snapshot) {
+    if (!snapshot) return;
+
+    if (snapshot.manualPicks && typeof snapshot.manualPicks === 'object') {
+      try {
+        localStorage.setItem('sa_manual_picks', JSON.stringify(snapshot.manualPicks));
+      } catch { /* ignore */ }
+    }
+
+    if (!snapshot.configs) return;
+    const cfg = snapshot.configs;
+
+    const writeJsonKeys = (val, lsKeys) => {
+      if (val === undefined) return;
+      const serialized = JSON.stringify(val);
+      lsKeys.forEach(k => {
+        try { localStorage.setItem(k, serialized); } catch { /* ignore */ }
+      });
+    };
+
+    writeJsonKeys(cfg.plannedTrips, ['sa_planned_trips']);
+    writeJsonKeys(cfg.manual_tasks, ['sa_trip_manual_tasks']);
+    writeJsonKeys(cfg.scheduled_swaps, ['sa_trip_scheduled_swaps', 'TRIP_PLANNER_SCHEDULED_SWAPS']);
+    writeJsonKeys(cfg.scheduled_equipment, ['sa_trip_scheduled_equipment', 'TRIP_PLANNER_SCHEDULED_EQUIPMENT']);
+    writeJsonKeys(cfg.scheduled_training, ['sa_trip_scheduled_training', 'TRIP_PLANNER_SCHEDULED_TRAINING']);
+    writeJsonKeys(cfg.swap_office_tasks, ['TRIP_PLANNER_SWAP_OFFICE_TASKS']);
+    writeJsonKeys(cfg.dismissed_swaps, ['TRIP_PLANNER_DISMISSED_SWAPS']);
+    writeJsonKeys(cfg.dismissed_trainings, ['TRIP_PLANNER_DISMISSED_TRAININGS']);
+    writeJsonKeys(cfg.day_order_config, ['TRIP_PLANNER_DAY_ORDER']);
+    writeJsonKeys(cfg.holidays, ['sa_holidays']);
+    writeJsonKeys(cfg.resolved_equip_needs, ['sa_resolved_equip_needs']);
+    writeJsonKeys(cfg.dismissed_tasks, ['sa_dismissed_tasks']);
+    writeJsonKeys(cfg.emp_preferred_classes, ['sa_emp_preferred_classes']);
+    writeJsonKeys(cfg.ppe_excluded_employees, ['sa_ppe_excluded_employees']);
+    writeJsonKeys(cfg.aging_rules_config, ['sa_aging_rules_config']);
+    writeJsonKeys(cfg.EXPIRING_CERTS_CONFIG, ['EXPIRING_CERTS_CONFIG']);
+    writeJsonKeys(cfg.EXPIRING_CERTS_DELETED_KEYS, ['EXPIRING_CERTS_DELETED_KEYS']);
+    writeJsonKeys(cfg.CREW_IMPORT_ORDER, ['CREW_IMPORT_ORDER']);
+    writeJsonKeys(cfg.CREW_IMPORT_LEAD_SELECTIONS, ['CREW_IMPORT_LEAD_SELECTIONS']);
+    writeJsonKeys(cfg.CREW_IMPORT_MISSING_ROSTER_ACTIONS, ['CREW_IMPORT_MISSING_ROSTER_ACTIONS']);
+    writeJsonKeys(cfg.CREW_IMPORT_PRIMARY_JOB_SELECTIONS, ['CREW_IMPORT_PRIMARY_JOB_SELECTIONS']);
+    writeJsonKeys(cfg.FY_TRANSITION_ALIAS_MAP, ['FY_TRANSITION_ALIAS_MAP']);
+
+    if (cfg.workSchedule) {
+      try {
+        localStorage.setItem('sa_work_schedule', cfg.workSchedule);
+      } catch { /* ignore */ }
+    }
+    if (Array.isArray(cfg.CREW_IMPORT_ORDER)) {
+      window._crewImportOrder = cfg.CREW_IMPORT_ORDER;
+    }
+    if (Array.isArray(cfg.dismissed_tasks)) {
+      this.dismissedTaskIds = new Set(cfg.dismissed_tasks);
+    }
+  }
+
   async persistSnapshot(snapshot = this.snapshot) {
     if (!snapshot) return;
+    if (snapshot === this.snapshot) {
+      this.bundleLocalStateIntoSnapshot(snapshot);
+    }
     if (this._persistTimer) {
       clearTimeout(this._persistTimer);
       this._persistTimer = null;
@@ -1420,7 +1515,8 @@ class LocalDatabase {
 
   normalizeSnapshot(snapshot) {
     if (!snapshot || !snapshot.tables) return snapshot;
-    if (!this.snapshot) this.snapshot = snapshot;
+    this.snapshot = snapshot;
+    this._invalidateIndices();
     // Normalize employees and job_tracking first so swap/inventory healing has clean references
     if (snapshot.tables.employees) this.normalizeTableData(snapshot.tables.employees, 'employees');
     if (snapshot.tables.job_tracking) this.normalizeTableData(snapshot.tables.job_tracking, 'job_tracking');
@@ -1892,7 +1988,8 @@ class LocalDatabase {
     // 3. Header finding logic & Swap Table Row Reconstruction
     const isSwapTable = tableKey && (tableKey.endsWith('_swaps') || tableKey.includes('swap'));
     if (isSwapTable) {
-      if ((!table.rows || table.rows.length === 0) && table.rawGrid && table.rawGrid.length > 1) {
+      const needsSwapReconstruct = !table.rows || table.rows.length === 0 || table.rows.some(r => r && r._location === undefined);
+      if (needsSwapReconstruct && table.rawGrid && table.rawGrid.length > 1) {
         this.reconstructSwapRowsFromRawGrid(table, tableKey);
       }
       if (table.rows && table.rows.length > 0) {

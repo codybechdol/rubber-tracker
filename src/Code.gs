@@ -34116,9 +34116,9 @@ function doGet(e) {
       return ContentService.createTextOutput(JSON.stringify(flatRes))
         .setMimeType(ContentService.MimeType.JSON);
     } else if (action === 'getSnapshot') {
-      var force = e && e.parameter && (e.parameter.force === 'true' || e.parameter.fresh === 'true');
+      var rebuildFromSheets = Boolean(e && e.parameter && e.parameter.rebuildFromSheets === 'true');
       var snapshotJson = (typeof getFastSnapshotFromDriveOrExport === 'function')
-        ? getFastSnapshotFromDriveOrExport(force)
+        ? getFastSnapshotFromDriveOrExport(rebuildFromSheets)
         : JSON.stringify(exportFullDatabaseSnapshot());
       return ContentService.createTextOutput(snapshotJson)
         .setMimeType(ContentService.MimeType.JSON);
@@ -34192,7 +34192,9 @@ function doPost(e) {
         detectConflicts: payload.detectConflicts !== false,
         checkConflictsOnly: payload.checkConflictsOnly === true || action === 'checkConflicts',
         force: payload.force === true,
-        skipPostProcessing: payload.skipPostProcessing === true
+        skipPostProcessing: payload.skipPostProcessing === true,
+        configs: payload.configs || null,
+        manualPicks: payload.manualPicks || null
       };
       var result = applyBatchSyncMutations(payload.mutations || [], returnSnap, options);
       return ContentService.createTextOutput(JSON.stringify(result))
@@ -34409,9 +34411,9 @@ function doPost(e) {
     }
 
     if (action === 'getSnapshot') {
-      var force = payload.force === true || payload.fresh === true || (e && e.parameter && (e.parameter.force === 'true' || e.parameter.fresh === 'true'));
+      var rebuildFromSheetsPost = Boolean(payload.rebuildFromSheets === true || (e && e.parameter && e.parameter.rebuildFromSheets === 'true'));
       var snapshotJson = (typeof getFastSnapshotFromDriveOrExport === 'function')
-        ? getFastSnapshotFromDriveOrExport(force)
+        ? getFastSnapshotFromDriveOrExport(rebuildFromSheetsPost)
         : JSON.stringify(exportFullDatabaseSnapshot());
       return ContentService.createTextOutput(snapshotJson)
         .setMimeType(ContentService.MimeType.JSON);

@@ -497,10 +497,54 @@ function exportFullDatabaseSnapshot(tableKeysFilter) {
     }
   }
 
+  var extendedConfigs = {};
+  var manualPicks = {};
+  if (!filterSet) {
+    try {
+      var rawExt = (typeof getChunkedScriptProperty === 'function') ? getChunkedScriptProperty('EXTENDED_CONFIGS') : PropertiesService.getScriptProperties().getProperty('EXTENDED_CONFIGS');
+      if (rawExt) {
+        extendedConfigs = typeof rawExt === 'string' ? JSON.parse(rawExt) : rawExt;
+      }
+    } catch (eExt) {
+      Logger.log('exportFullDatabaseSnapshot: Error reading extendedConfigs: ' + eExt);
+    }
+
+    try {
+      var rawMp = (typeof getChunkedScriptProperty === 'function') ? getChunkedScriptProperty('MANUAL_PICKS') : PropertiesService.getScriptProperties().getProperty('MANUAL_PICKS');
+      if (rawMp) {
+        manualPicks = typeof rawMp === 'string' ? JSON.parse(rawMp) : rawMp;
+      }
+    } catch (eMp) {
+      Logger.log('exportFullDatabaseSnapshot: Error reading manualPicks: ' + eMp);
+    }
+  }
+
   var cloudRev = 0;
   try {
     cloudRev = parseInt(PropertiesService.getScriptProperties().getProperty('CLOUD_DB_REVISION') || '0', 10) || 0;
   } catch (rErr) {}
+
+  var finalConfigs = null;
+  if (!filterSet) {
+    finalConfigs = {};
+    if (extendedConfigs && typeof extendedConfigs === 'object') {
+      for (var ek in extendedConfigs) {
+        if (Object.prototype.hasOwnProperty.call(extendedConfigs, ek)) {
+          finalConfigs[ek] = extendedConfigs[ek];
+        }
+      }
+    }
+    finalConfigs.holidays = holidays;
+    finalConfigs.workSchedule = workSchedule;
+    finalConfigs.driveTimeMap = driveTimeMap;
+    finalConfigs.plannedTrips = plannedTrips;
+    finalConfigs.scheduled_swaps = scheduledSwaps;
+    finalConfigs.manual_tasks = manualTasks;
+    finalConfigs.cert_photos = certPhotos;
+    if (manualPicks && typeof manualPicks === 'object' && Object.keys(manualPicks).length > 0) {
+      finalConfigs.manual_picks = manualPicks;
+    }
+  }
 
   return {
     version: '2026.1.0',
@@ -510,17 +554,88 @@ function exportFullDatabaseSnapshot(tableKeysFilter) {
     exportedAt: timestamp.toISOString(),
     timezone: ss.getSpreadsheetTimeZone(),
     isPartial: !!filterSet,
-    configs: filterSet ? null : {
-      holidays: holidays,
-      workSchedule: workSchedule,
-      driveTimeMap: driveTimeMap,
-      plannedTrips: plannedTrips,
-      scheduled_swaps: scheduledSwaps,
-      manual_tasks: manualTasks,
-      cert_photos: certPhotos
-    },
+    manualPicks: filterSet ? undefined : manualPicks,
+    configs: finalConfigs,
     tables: tables
   };
+}
+
+/**
+ * Persists client snapshot configs and manualPicks to chunked ScriptProperties so they
+ * survive any server-side export or Drive snapshot patch.
+ */
+function persistSnapshotConfigsToProperties(configs, manualPicks) {
+  try {
+    var props = PropertiesService.getScriptProperties();
+    var writeProp = function(key, valObj) {
+      if (valObj === undefined || valObj === null) return;
+      var str = typeof valObj === 'string' ? valObj : JSON.stringify(valObj);
+      if (typeof setChunkedScriptProperty === 'function') {
+        setChunkedScriptProperty(key, str);
+      } else {
+        props.setProperty(key, str);
+      }
+    };
+
+    if (manualPicks && typeof manualPicks === 'object') {
+      writeProp('MANUAL_PICKS', manualPicks);
+    }
+
+    if (configs && typeof configs === 'object') {
+      if (configs.plannedTrips !== undefined) writeProp('PLANNED_TRIPS', configs.plannedTrips);
+      if (configs.manual_tasks !== undefined) writeProp('MANUAL_TASKS', configs.manual_tasks);
+      if (configs.scheduled_swaps !== undefined) writeProp('SCHEDULED_SWAPS', configs.scheduled_swaps);
+      if (configs.cert_photos !== undefined) writeProp('CERT_PHOTOS', configs.cert_photos);
+      if (configs.manual_picks !== undefined && (!manualPicks || Object.keys(manualPicks).length === 0)) {
+        writeProp('MANUAL_PICKS', configs.manual_picks);
+      }
+      if (configs.workSchedule && typeof setWorkSchedule === 'function') {
+        try { setWorkSchedule(configs.workSchedule); } catch (wErr) {}
+      }
+      if (configs.holidays && typeof saveHolidays === 'function') {
+        try {
+          var hArr = [];
+          if (Array.isArray(configs.holidays)) {
+            hArr = configs.holidays;
+          } else if (typeof configs.holidays === 'object') {
+            for (var hk in configs.holidays) {
+              if (/^\d{4}-\d{2}-\d{2}$/.test(hk)) {
+                hArr.push({ date: hk, name: configs.holidays[hk] || 'Holiday' });
+              }
+            }
+          }
+          if (hArr.length > 0) saveHolidays(hArr);
+        } catch (hErr) {}
+      }
+
+      var coreKeys = {
+        holidays: true,
+        workSchedule: true,
+        driveTimeMap: true,
+        plannedTrips: true,
+        scheduled_swaps: true,
+        manual_tasks: true,
+        cert_photos: true
+      };
+      var extObj = {};
+      try {
+        var existingExt = (typeof getChunkedScriptProperty === 'function') ? getChunkedScriptProperty('EXTENDED_CONFIGS') : props.getProperty('EXTENDED_CONFIGS');
+        if (existingExt) {
+          extObj = typeof existingExt === 'string' ? JSON.parse(existingExt) : existingExt;
+        }
+      } catch (eOld) {
+        extObj = {};
+      }
+      for (var ck in configs) {
+        if (Object.prototype.hasOwnProperty.call(configs, ck) && !coreKeys[ck]) {
+          extObj[ck] = configs[ck];
+        }
+      }
+      writeProp('EXTENDED_CONFIGS', extObj);
+    }
+  } catch (err) {
+    Logger.log('persistSnapshotConfigsToProperties warning: ' + err);
+  }
 }
 
 /**
@@ -634,10 +749,45 @@ function syncAndSaveCloudDatabase(payload) {
   var startTime = new Date().getTime();
   payload = payload || {};
   var props = PropertiesService.getScriptProperties();
+
+  if (payload.configs || payload.manualPicks) {
+    persistSnapshotConfigsToProperties(payload.configs, payload.manualPicks);
+  }
+
   var rawSnap = payload.snapshot;
+  if (!rawSnap && payload.activeTables && typeof payload.activeTables === 'object') {
+    // Fast path (~0.5s): Load existing SafetyAssistant_Sync_Snapshot.json from Drive so we keep
+    // the large history/log tables without scanning 45 Google Sheets tabs, then overwrite activeTables!
+    try {
+      var cachedSnapFileId = props.getProperty('SYNC_SNAPSHOT_FILE_ID');
+      var cachedSnapFile = null;
+      if (cachedSnapFileId) {
+        try {
+          cachedSnapFile = DriveApp.getFileById(cachedSnapFileId);
+          if (cachedSnapFile && cachedSnapFile.isTrashed()) cachedSnapFile = null;
+        } catch (eFid) { cachedSnapFile = null; }
+      }
+      if (!cachedSnapFile) {
+        try {
+          var foundFiles = DriveApp.getFilesByName(SYNC_SNAPSHOT_FILENAME);
+          if (foundFiles.hasNext()) {
+            cachedSnapFile = foundFiles.next();
+            props.setProperty('SYNC_SNAPSHOT_FILE_ID', cachedSnapFile.getId());
+          }
+        } catch (eFind) {}
+      }
+      if (cachedSnapFile) {
+        var existingContent = cachedSnapFile.getBlob().getDataAsString();
+        if (existingContent && existingContent.length > 50) {
+          rawSnap = JSON.parse(existingContent);
+        }
+      }
+    } catch (eFastLoad) {
+      Logger.log('syncAndSaveCloudDatabase fast Drive load fallback: ' + eFastLoad);
+    }
+  }
   if (!rawSnap) {
-    // If client omitted snapshot (to prevent uploading 10+ MB over HTTP and avoid timeouts),
-    // always export fresh from the live Google Sheets so changes just pushed are captured!
+    // Fallback if no snapshot exists in Drive yet
     if (typeof exportFullDatabaseSnapshot === 'function') {
       rawSnap = exportFullDatabaseSnapshot();
     }
@@ -668,6 +818,28 @@ function syncAndSaveCloudDatabase(payload) {
     if (!snapObj || !snapObj.tables) {
       return { status: 'error', success: false, error: 'Invalid snapshot object (missing tables).' };
     }
+
+    if (payload.activeTables && typeof payload.activeTables === 'object') {
+      for (var atk in payload.activeTables) {
+        if (Object.prototype.hasOwnProperty.call(payload.activeTables, atk) && payload.activeTables[atk]) {
+          snapObj.tables[atk] = payload.activeTables[atk];
+        }
+      }
+    }
+
+    if (payload.configs && typeof payload.configs === 'object') {
+      if (!snapObj.configs) snapObj.configs = {};
+      for (var pck in payload.configs) {
+        if (Object.prototype.hasOwnProperty.call(payload.configs, pck)) {
+          snapObj.configs[pck] = payload.configs[pck];
+        }
+      }
+    }
+    if (payload.manualPicks && typeof payload.manualPicks === 'object') {
+      snapObj.manualPicks = payload.manualPicks;
+    }
+
+    persistSnapshotConfigsToProperties(snapObj.configs, snapObj.manualPicks);
 
     snapObj.revision = nextRev;
     snapObj.version = (snapObj && snapObj.version) || '2026.1.0';
@@ -731,6 +903,7 @@ function syncAndSaveCloudDatabase(payload) {
     try {
       props.setProperty('CLOUD_DB_REVISION', String(nextRev));
       props.setProperty('SYNC_SNAPSHOT_UPDATED', nowIso);
+      props.setProperty('SYNC_SPREADSHEET_MODIFIED', nowIso);
       if (jsonBackupName) {
         props.setProperty('LAST_CLOUD_BACKUP_NAME', jsonBackupName);
       }
@@ -993,12 +1166,15 @@ function cleanupSheetsAndRenameBackupFolder() {
  *
  * @param {Object} sheetsModified - Map of sheet names that were modified during the push
  * @param {boolean} [configsModified] - True if planned trips, manual tasks, or schedules changed
+ * @param {Object} [extraConfigs] - Optional configs object from desktop client to merge
+ * @param {Object} [extraManualPicks] - Optional manualPicks map from desktop client to merge
  * @return {boolean} True if patched successfully
  */
-function patchSyncSnapshotInDrive(sheetsModified, configsModified) {
+function patchSyncSnapshotInDrive(sheetsModified, configsModified, extraConfigs, extraManualPicks) {
   try {
     var hasSheets = sheetsModified && Object.keys(sheetsModified).length > 0;
-    if (!hasSheets && !configsModified) return false;
+    var hasExtra = (extraConfigs && typeof extraConfigs === 'object') || (extraManualPicks && typeof extraManualPicks === 'object');
+    if (!hasSheets && !configsModified && !hasExtra) return false;
     var fileId = PropertiesService.getScriptProperties().getProperty('SYNC_SNAPSHOT_FILE_ID');
     var file = null;
     if (fileId) {
@@ -1090,7 +1266,7 @@ function patchSyncSnapshotInDrive(sheetsModified, configsModified) {
     }
 
     var patchedAny = false;
-    var modifiedNames = Object.keys(sheetsModified);
+    var modifiedNames = sheetsModified ? Object.keys(sheetsModified) : [];
 
     for (var i = 0; i < modifiedNames.length; i++) {
       var sheetName = modifiedNames[i];
@@ -1186,8 +1362,8 @@ function patchSyncSnapshotInDrive(sheetsModified, configsModified) {
       Logger.log('patchSyncSnapshotInDrive: Patched ' + sheetName + ' (' + rows.length + ' rows) in Drive snapshot cache');
     }
 
-    // If configs modified (planned trips, manual tasks, holidays, schedule), refresh configs in snapshot
-    if (configsModified) {
+    // If configs modified (planned trips, manual tasks, holidays, schedule, extended configs), refresh configs in snapshot
+    if (configsModified || hasExtra) {
       if (!snap.configs) snap.configs = {};
       try {
         var rawTrips = (typeof getChunkedScriptProperty === 'function') ? getChunkedScriptProperty('PLANNED_TRIPS') : PropertiesService.getScriptProperties().getProperty('PLANNED_TRIPS');
@@ -1211,8 +1387,38 @@ function patchSyncSnapshotInDrive(sheetsModified, configsModified) {
         var rawCertPhotosPatch = (typeof getChunkedScriptProperty === 'function') ? getChunkedScriptProperty('CERT_PHOTOS') : PropertiesService.getScriptProperties().getProperty('CERT_PHOTOS');
         if (rawCertPhotosPatch) snap.configs.cert_photos = typeof rawCertPhotosPatch === 'string' ? JSON.parse(rawCertPhotosPatch) : rawCertPhotosPatch;
       } catch (eW) {}
+      try {
+        var rawExtCfgPatch = (typeof getChunkedScriptProperty === 'function') ? getChunkedScriptProperty('EXTENDED_CONFIGS') : PropertiesService.getScriptProperties().getProperty('EXTENDED_CONFIGS');
+        if (rawExtCfgPatch) {
+          var extCfgObjPatch = typeof rawExtCfgPatch === 'string' ? JSON.parse(rawExtCfgPatch) : rawExtCfgPatch;
+          if (extCfgObjPatch && typeof extCfgObjPatch === 'object') {
+            var extKeysPatch = Object.keys(extCfgObjPatch);
+            for (var ekp = 0; ekp < extKeysPatch.length; ekp++) {
+              var kp = extKeysPatch[ekp];
+              if (extCfgObjPatch[kp] !== undefined && extCfgObjPatch[kp] !== null) {
+                snap.configs[kp] = extCfgObjPatch[kp];
+              }
+            }
+          }
+        }
+      } catch (eExtP) {}
+      try {
+        var rawPicksPatch = (typeof getChunkedScriptProperty === 'function') ? getChunkedScriptProperty('MANUAL_PICKS') : PropertiesService.getScriptProperties().getProperty('MANUAL_PICKS');
+        if (rawPicksPatch) {
+          var picksObjPatch = typeof rawPicksPatch === 'string' ? JSON.parse(rawPicksPatch) : rawPicksPatch;
+          if (picksObjPatch && typeof picksObjPatch === 'object') {
+            snap.manualPicks = Object.assign({}, snap.manualPicks || {}, picksObjPatch);
+          }
+        }
+      } catch (eMpP) {}
+      if (extraConfigs && typeof extraConfigs === 'object') {
+        snap.configs = Object.assign({}, snap.configs, extraConfigs);
+      }
+      if (extraManualPicks && typeof extraManualPicks === 'object') {
+        snap.manualPicks = Object.assign({}, snap.manualPicks || {}, extraManualPicks);
+      }
       patchedAny = true;
-      Logger.log('patchSyncSnapshotInDrive: Patched plannedTrips, scheduled_swaps & manual_tasks in Drive snapshot cache');
+      Logger.log('patchSyncSnapshotInDrive: Patched configs & manualPicks in Drive snapshot cache');
     }
 
     if (patchedAny) {
@@ -1223,6 +1429,7 @@ function patchSyncSnapshotInDrive(sheetsModified, configsModified) {
       file.setContent(JSON.stringify(snap));
       PropertiesService.getScriptProperties().setProperty('CLOUD_DB_REVISION', String(nextRev));
       PropertiesService.getScriptProperties().setProperty('SYNC_SNAPSHOT_UPDATED', snap.timestamp);
+      PropertiesService.getScriptProperties().setProperty('SYNC_SPREADSHEET_MODIFIED', snap.timestamp);
     }
     return true;
   } catch (patchErr) {
@@ -1370,7 +1577,6 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
   // with safeSetCellWithValidationFallback handling any legacy validation rule overrides.
   try {
     ensureEmployeeStatusColumn(ss);
-    PropertiesService.getScriptProperties().setProperty('SYNC_SPREADSHEET_MODIFIED', new Date().toISOString());
   } catch (eStat) {
     Logger.log('ensureEmployeeStatusColumn error: ' + eStat);
   }
@@ -1574,11 +1780,26 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
     }
   }
 
+  try {
+    PropertiesService.getScriptProperties().setProperty('SYNC_SPREADSHEET_MODIFIED', new Date().toISOString());
+  } catch (eMod) {}
+
   var appliedCount = 0;
   var errors = [];
   var sheetsModified = {};
   var configsModified = false;
   var activeSheetData = {};
+
+  if ((options && options.configs && typeof options.configs === 'object') || (options && options.manualPicks && typeof options.manualPicks === 'object')) {
+    try {
+      if (typeof persistSnapshotConfigsToProperties === 'function') {
+        persistSnapshotConfigsToProperties(options.configs || null, options.manualPicks || null);
+        configsModified = true;
+      }
+    } catch (eCfgOpt) {
+      Logger.log('applyBatchSyncMutations persistSnapshotConfigsToProperties error: ' + eCfgOpt);
+    }
+  }
 
   // Proactively clear data validations on every sheet touched by this mutation batch.
   // Google Sheets is a passive cloud repository — no validation rules should block writes.
@@ -3562,15 +3783,6 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
       }
     }
 
-    // 2. Fast sub-second patch of the .JSON snapshot in Google Drive for modified sheets or configs
-    try {
-      if (typeof patchSyncSnapshotInDrive === 'function') {
-        patchSyncSnapshotInDrive(sheetsModified, configsModified);
-      }
-    } catch (bkErr) {
-      Logger.log('applyBatchSyncMutations auto patchSyncSnapshotInDrive error: ' + bkErr);
-    }
-
     // 3. Refresh backup (only if explicitly requested to prevent HTTP timeout on Google Apps Script)
     if (options && options.forceBackup === true) {
       try {
@@ -3580,6 +3792,17 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
       } catch (bkErr) {
         Logger.log('applyBatchSyncMutations auto createBackupSnapshotFast error: ' + bkErr);
       }
+    }
+  }
+
+  // Always patch the .JSON snapshot in Google Drive whenever mutations or configs were applied
+  if (appliedCount > 0 || configsModified) {
+    try {
+      if (typeof patchSyncSnapshotInDrive === 'function') {
+        patchSyncSnapshotInDrive(sheetsModified, configsModified, options ? options.configs : null, options ? options.manualPicks : null);
+      }
+    } catch (bkErr) {
+      Logger.log('applyBatchSyncMutations auto patchSyncSnapshotInDrive error: ' + bkErr);
     }
   }
 

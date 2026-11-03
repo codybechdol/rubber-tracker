@@ -45,6 +45,7 @@ function requestWithRedirects(targetUrl, method, postData, redirectCount = 0) {
     }, (res) => {
       // Follow HTTP 301, 302, 303, 307 redirects
       if ([301, 302, 303, 307].includes(res.statusCode) && res.headers.location) {
+        res.resume();
         const nextUrl = new URL(res.headers.location, targetUrl).toString();
         // Redirects from Apps Script Web App to script.googleusercontent.com are handled via GET
         return resolve(requestWithRedirects(nextUrl, 'GET', null, redirectCount + 1));
@@ -84,11 +85,27 @@ async function triggerBackup() {
   console.log('----------------------------------------');
 
   const startTime = Date.now();
-  let clientSnapshot = null;
+  let activeTables = null;
+  let clientConfigs = null;
+  let clientManualPicks = null;
   try {
     const localSnapPath = path.join(os.homedir(), 'AppData', 'Roaming', 'safety-assistant-desktop', 'SafetyAssistantData', 'local_snapshot.json');
     if (fs.existsSync(localSnapPath)) {
-      clientSnapshot = JSON.parse(fs.readFileSync(localSnapPath, 'utf8'));
+      const clientSnapshot = JSON.parse(fs.readFileSync(localSnapPath, 'utf8'));
+      const heavyArchiveTables = new Set([
+        'jha_log', 'weekly_safety_log', 'monthly_checklist_log',
+        'employee_history', 'gloves_history', 'sleeves_history',
+        'blankets_history', 'macks_history', 'hv_testers_history',
+        'phasing_sets_history', 'aed_history', 'grounds_history', 'hot_sticks_history'
+      ]);
+      if (clientSnapshot && clientSnapshot.tables) {
+        activeTables = {};
+        for (const [k, v] of Object.entries(clientSnapshot.tables)) {
+          if (!heavyArchiveTables.has(k) && v) activeTables[k] = v;
+        }
+      }
+      clientConfigs = (clientSnapshot && clientSnapshot.configs) || null;
+      clientManualPicks = (clientSnapshot && clientSnapshot.manualPicks) || null;
       console.log('Loaded authoritative desktop local_snapshot.json for Drive sync cache.');
     }
   } catch (snapErr) {
@@ -98,7 +115,9 @@ async function triggerBackup() {
   const payload = JSON.stringify({
     action: 'syncAndSaveSnapshot',
     createRestorePoint: true,
-    snapshot: clientSnapshot
+    activeTables: activeTables,
+    configs: clientConfigs,
+    manualPicks: clientManualPicks
   });
 
   try {

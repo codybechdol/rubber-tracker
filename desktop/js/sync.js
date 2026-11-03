@@ -933,6 +933,10 @@ class SyncEngine {
         const retryDelays = [1200, 2500, 5000];
 
         const activeSyncUrl = this.syncUrl || DEFAULT_SYNC_URL;
+        const isLastBatch = (i + chunk.length) >= totalCount;
+        if (isLastBatch && this.db && typeof this.db.bundleLocalStateIntoSnapshot === 'function') {
+          this.db.bundleLocalStateIntoSnapshot(this.db.snapshot);
+        }
         for (let attempt = 1; attempt <= maxAttempts; attempt++) {
           try {
             pushResult = await this.executeNetworkRequest(activeSyncUrl, 'POST', {
@@ -940,8 +944,10 @@ class SyncEngine {
               mutations: sanitizedChunk,
               detectConflicts: false,
               force: true,
-              skipPostProcessing: (i + chunk.length) < totalCount,
-              returnSnapshot: false
+              skipPostProcessing: !isLastBatch,
+              returnSnapshot: false,
+              configs: (isLastBatch && this.db && this.db.snapshot) ? (this.db.snapshot.configs || null) : null,
+              manualPicks: (isLastBatch && this.db && this.db.snapshot) ? (this.db.snapshot.manualPicks || null) : null
             }, batchTimeoutMs);
             if (pushResult && (pushResult.success === true || (pushResult.status === 'ok' && pushResult.appliedCount !== undefined))) {
               break;
@@ -1525,20 +1531,21 @@ class SyncEngine {
     try {
       let activeUrl = this.syncUrl || DEFAULT_SYNC_URL;
       let freshSnapshot = null;
+      const cacheBuster = Date.now();
       try {
-        freshSnapshot = await this.executeNetworkRequest(`${activeUrl}?action=getSnapshot&force=true`, 'GET', null, 120000);
+        freshSnapshot = await this.executeNetworkRequest(`${activeUrl}?action=getSnapshot&_t=${cacheBuster}`, 'GET', null, 120000);
       } catch (getErr) {
         console.warn('GET getSnapshot failed, attempting POST fallback:', getErr);
         try {
-          freshSnapshot = await this.executeNetworkRequest(activeUrl, 'POST', { action: 'getSnapshot', force: true }, 120000);
+          freshSnapshot = await this.executeNetworkRequest(activeUrl, 'POST', { action: 'getSnapshot', _t: cacheBuster }, 120000);
         } catch (postErr) {
           if (activeUrl !== DEFAULT_SYNC_URL) {
             console.warn('Custom syncUrl failed, falling back to default working URL:', postErr);
             this.setSyncUrl(DEFAULT_SYNC_URL);
             try {
-              freshSnapshot = await this.executeNetworkRequest(`${DEFAULT_SYNC_URL}?action=getSnapshot&force=true`, 'GET', null, 120000);
+              freshSnapshot = await this.executeNetworkRequest(`${DEFAULT_SYNC_URL}?action=getSnapshot&_t=${cacheBuster}`, 'GET', null, 120000);
             } catch {
-              freshSnapshot = await this.executeNetworkRequest(DEFAULT_SYNC_URL, 'POST', { action: 'getSnapshot', force: true }, 120000);
+              freshSnapshot = await this.executeNetworkRequest(DEFAULT_SYNC_URL, 'POST', { action: 'getSnapshot', _t: cacheBuster }, 120000);
             }
           } else {
             throw postErr;
@@ -1552,53 +1559,15 @@ class SyncEngine {
 
       if (freshSnapshot && freshSnapshot.tables) {
         await this.db.setSnapshot(freshSnapshot);
-        if (window.sheetNavigator && typeof window.sheetNavigator.renderActiveView === 'function') {
-          window.sheetNavigator.renderActiveView();
+        if (typeof this.db.clearOutbox === 'function') {
+          await this.db.clearOutbox();
         }
-        if (window.historyNavigator && typeof window.historyNavigator.renderCurrentHistory === 'function') {
-          window.historyNavigator.renderCurrentHistory();
-        }
-        if (window.taskManager && typeof window.taskManager.renderTasks === 'function') {
-          window.taskManager.renderTasks();
-        }
-        if (window.tripPlanner) {
-          if (typeof window.tripPlanner.loadSavedTrips === 'function') {
-            window.tripPlanner.loadSavedTrips();
-          }
-          if (typeof window.tripPlanner.renderPlanner === 'function') {
-            window.tripPlanner.renderPlanner();
-          }
-        }
-        if (window.safetyComplianceEngine && typeof window.safetyComplianceEngine.renderSafetyLogs === 'function') {
-          window.safetyComplianceEngine.renderSafetyLogs();
-        }
-        if (window.incidentReportsEngine && typeof window.incidentReportsEngine.render === 'function') {
-          window.incidentReportsEngine.render();
-        }
-        if (window.historyIssuesEngine) {
-          window.historyIssuesEngine.invalidateCache();
-          window.historyIssuesEngine.updateTabBadges();
-        }
-        if (window.itemStatsEngine) {
-          window.itemStatsEngine.invalidateCache();
-        }
-        if (window.ppeTrackingEngine) {
-          window.ppeTrackingEngine.excludedEmployeeMap = window.ppeTrackingEngine.loadExcludedEmployeeMap();
-          window.ppeTrackingEngine.compileAuditData();
-          window.ppeTrackingEngine.updateToolbarBadge();
-        }
-        if (window.cprRosterEngine && typeof window.cprRosterEngine.render === 'function') {
-          window.cprRosterEngine.render();
-        }
-        if (window.drugTestingEngine && typeof window.drugTestingEngine.render === 'function') {
-          window.drugTestingEngine.render();
-        }
-        if (window.procurementEngine && typeof window.procurementEngine.buildPurchaseNeeds === 'function') {
-          window.procurementEngine.buildPurchaseNeeds();
-        }
+        this.renderOutboxBadge();
+        this.refreshAllViewsAfterSnapshotLoad();
 
-        this.updateStatusUI('synced', `Synced in ${durationFormatted}`);
-        this.renderModalChanges([], `✅ Latest database snapshot successfully downloaded and loaded in ${durationFormatted}!`, 'success', false);
+        const revLabel = freshSnapshot.revision ? ` (Rev #${freshSnapshot.revision})` : '';
+        this.updateStatusUI('synced', `Synced in ${durationFormatted}${revLabel}`);
+        this.renderModalChanges([], `✅ Latest database snapshot${revLabel} successfully downloaded and loaded in ${durationFormatted}!`, 'success', false);
         setTimeout(() => {
           this.closeSyncModal();
         }, 1500);
@@ -1637,10 +1606,7 @@ class SyncEngine {
       const data = await window.desktopAPI.selectSnapshotFile();
       if (data && data.tables) {
         await this.db.setSnapshot(data);
-        if (window.sheetNavigator) window.sheetNavigator.renderActiveView();
-        if (window.historyNavigator) window.historyNavigator.renderCurrentHistory();
-        if (window.tripPlanner) window.tripPlanner.renderPlanner();
-        if (window.taskManager) window.taskManager.renderTasks();
+        this.refreshAllViewsAfterSnapshotLoad();
         this.updateStatusUI('synced', 'Loaded local snapshot');
         return { success: true };
       } else if (data && data.error) {
@@ -1692,17 +1658,7 @@ class SyncEngine {
           const data = JSON.parse(text);
           if (data && data.tables) {
             await this.db.setSnapshot(data);
-            if (window.sheetNavigator) window.sheetNavigator.renderActiveView();
-            if (window.historyNavigator) window.historyNavigator.renderCurrentHistory();
-            if (window.historyIssuesEngine) {
-              window.historyIssuesEngine.invalidateCache();
-              window.historyIssuesEngine.updateTabBadges();
-            }
-            if (window.itemStatsEngine) {
-              window.itemStatsEngine.invalidateCache();
-            }
-            if (window.tripPlanner) window.tripPlanner.renderPlanner();
-            if (window.taskManager) window.taskManager.renderTasks();
+            this.refreshAllViewsAfterSnapshotLoad();
             this.updateStatusUI('synced', `Loaded ${file.name}`);
             alert(`✅ Successfully loaded snapshot from "${file.name}"!`);
             resolve({ success: true, data });
@@ -2023,6 +1979,17 @@ class SyncEngine {
       return;
     }
 
+    // Flush any pending debounced snapshot writes and bundle all local state into snapshot.configs & snapshot.manualPicks
+    if (typeof this.db.flushPersist === 'function') {
+      await this.db.flushPersist();
+    }
+    if (typeof this.db.bundleLocalStateIntoSnapshot === 'function') {
+      this.db.bundleLocalStateIntoSnapshot(this.db.snapshot);
+    }
+    if (typeof this.db.persistSnapshot === 'function') {
+      await this.db.persistSnapshot(this.db.snapshot);
+    }
+
     const outbox = (this.db && typeof this.db.getOutbox === 'function') ? (this.db.getOutbox() || []) : [];
 
     // CRITICAL: If there are pending offline changes in the outbox, push them to Google Sheets first!
@@ -2070,16 +2037,34 @@ class SyncEngine {
     let resp = null;
     let lastErr = null;
 
+    // Extract the 39 active tables (~1.5 MB) so the laptop's exact in-memory state (inventory,
+    // swaps with _location/_foreman/Class/Pick List, employees, job_tracking, certs, etc.)
+    // uploads in ~1s without hitting Google Apps Script's 10MB POST limit on history/log archives.
+    const heavyArchiveTables = new Set([
+      'jha_log', 'weekly_safety_log', 'monthly_checklist_log',
+      'employee_history', 'gloves_history', 'sleeves_history',
+      'blankets_history', 'macks_history', 'hv_testers_history',
+      'phasing_sets_history', 'aed_history', 'grounds_history', 'hot_sticks_history'
+    ]);
+    const activeTables = {};
+    if (this.db.snapshot && this.db.snapshot.tables) {
+      for (const [tKey, tVal] of Object.entries(this.db.snapshot.tables)) {
+        if (!heavyArchiveTables.has(tKey) && tVal) {
+          activeTables[tKey] = tVal;
+        }
+      }
+    }
+
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
         const reqPayload = {
           action: 'syncAndSaveSnapshot',
-          createRestorePoint: true
+          createRestorePoint: true,
+          configs: this.db.snapshot.configs || {},
+          manualPicks: this.db.snapshot.manualPicks || {}
         };
-        // Avoid sending the entire 10+ MB snapshot over HTTP if not explicitly requested;
-        // The Apps Script server creates the restore point from the live cloud database in <2 seconds.
-        if (options && options.uploadLocalSnapshot === true) {
-          reqPayload.snapshot = this.db.snapshot;
+        if (options.uploadLocalSnapshot !== false && attempt === 1) {
+          reqPayload.activeTables = activeTables;
         }
 
         resp = await this.executeNetworkRequest(activeUrl, 'POST', reqPayload, 180000);
@@ -2112,9 +2097,12 @@ class SyncEngine {
       }
       if (resp.exportedAt) {
         this.db.snapshot.exportedAt = resp.exportedAt;
+        this.db.snapshot.timestamp = resp.exportedAt;
       }
 
-      if (typeof this.db.saveToStorage === 'function') {
+      if (typeof this.db.persistSnapshot === 'function') {
+        await this.db.persistSnapshot(this.db.snapshot);
+      } else if (typeof this.db.saveToStorage === 'function') {
         await this.db.saveToStorage();
       }
       if (typeof this.db.clearOutbox === 'function') {
@@ -2205,6 +2193,42 @@ class SyncEngine {
    * Refreshes all UI views after loading/restoring/rebuilding a snapshot.
    */
   refreshAllViewsAfterSnapshotLoad() {
+    if (window.tripPlanner) {
+      if (typeof window.tripPlanner.loadSavedTrips === 'function') {
+        window.tripPlanner.loadSavedTrips();
+      }
+      if (typeof window.tripPlanner.renderPlanner === 'function') {
+        window.tripPlanner.renderPlanner();
+      }
+    }
+    if (window.certsConfigEngine && typeof window.certsConfigEngine.loadConfig === 'function') {
+      window.certsConfigEngine.config = window.certsConfigEngine.loadConfig();
+    }
+    if (window.certsImportEngine && typeof window.certsImportEngine.loadDeletedCertsKeys === 'function') {
+      window.certsImportEngine.deletedKeys = window.certsImportEngine.loadDeletedCertsKeys();
+    }
+    const agingEng = window.inventoryAging || window.inventoryAgingEngine;
+    if (agingEng) {
+      if (typeof agingEng.loadCustomRules === 'function') {
+        agingEng.loadCustomRules();
+      }
+      if (typeof agingEng.loadData === 'function') {
+        agingEng.loadData();
+      } else if (typeof agingEng.render === 'function') {
+        agingEng.render();
+      }
+    }
+    if (window.ppeTrackingEngine) {
+      if (typeof window.ppeTrackingEngine.loadExcludedEmployeeMap === 'function') {
+        window.ppeTrackingEngine.excludedEmployeeMap = window.ppeTrackingEngine.loadExcludedEmployeeMap();
+      }
+      if (typeof window.ppeTrackingEngine.compileAuditData === 'function') {
+        window.ppeTrackingEngine.compileAuditData();
+      }
+      if (typeof window.ppeTrackingEngine.updateToolbarBadge === 'function') {
+        window.ppeTrackingEngine.updateToolbarBadge();
+      }
+    }
     if (window.sheetNavigator && typeof window.sheetNavigator.renderActiveView === 'function') {
       window.sheetNavigator.renderActiveView();
     }
@@ -2213,14 +2237,6 @@ class SyncEngine {
     }
     if (window.taskManager && typeof window.taskManager.renderTasks === 'function') {
       window.taskManager.renderTasks();
-    }
-    if (window.tripPlanner) {
-      if (typeof window.tripPlanner.loadSavedTrips === 'function') {
-        window.tripPlanner.loadSavedTrips();
-      }
-      if (typeof window.tripPlanner.renderPlanner === 'function') {
-        window.tripPlanner.renderPlanner();
-      }
     }
     if (window.safetyComplianceEngine && typeof window.safetyComplianceEngine.renderSafetyLogs === 'function') {
       window.safetyComplianceEngine.renderSafetyLogs();
@@ -2234,6 +2250,15 @@ class SyncEngine {
     }
     if (window.itemStatsEngine) {
       window.itemStatsEngine.invalidateCache();
+    }
+    if (window.cprRosterEngine && typeof window.cprRosterEngine.render === 'function') {
+      window.cprRosterEngine.render();
+    }
+    if (window.drugTestingEngine && typeof window.drugTestingEngine.render === 'function') {
+      window.drugTestingEngine.render();
+    }
+    if (window.procurementEngine && typeof window.procurementEngine.buildPurchaseNeeds === 'function') {
+      window.procurementEngine.buildPurchaseNeeds();
     }
   }
 
