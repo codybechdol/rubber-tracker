@@ -25,6 +25,11 @@
     </div>
 
     <div class="header-actions">
+      <!-- Active User & Device Identity Switcher -->
+      <button class="btn btn-secondary" id="btn-active-user-identity" onclick="window.supabaseSync && window.supabaseSync.openUserIdentityModal()" style="font-size: 11.5px; font-weight: 700; background: rgba(16, 185, 129, 0.12); color: #6ee7b7; border: 1px solid rgba(16, 185, 129, 0.35); display: flex; align-items: center; gap: 5px;" title="Click to set who is using this device (shown on live edits & conflict alerts)">
+        <span>👤</span> <span>Cody Bechdol</span>
+      </button>
+
       <!-- Role Switcher (Admin vs View Only) -->
       <button class="btn btn-secondary" id="btn-role-mode-toggle" onclick="window.toggleAppRoleMode()" style="font-size: 11.5px; font-weight: 700; background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4); display: flex; align-items: center; gap: 4px;" title="Click to toggle between Admin and View Only modes">
         <span>👑</span> Admin Mode
@@ -3210,7 +3215,7 @@
 
   <script src="js/db.js?v=20261103_02"></script>
   <script src="js/sync.js?v=20261103_05"></script>
-  <script src="js/supabase-sync.js?v=20261103_03"></script>
+  <script src="js/supabase-sync.js?v=20261103_04"></script>
   <script src="js/window-manager.js?v=20261027_01"></script>
   <script src="js/gps.js?v=20261027_01"></script>
   <script src="js/scanner.js?v=20261027_01"></script>

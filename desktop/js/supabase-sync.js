@@ -30,7 +30,10 @@ class SupabaseSyncEngine {
     this.url = savedUrl;
     this.anonKey = savedKey;
     this.enabled = localStorage.getItem('sa_supabase_enabled') !== 'false';
-    this.deviceName = (localStorage.getItem('sa_supabase_device_name') || '').trim() || this._defaultDeviceName();
+    this.userName = (localStorage.getItem('sa_active_user_name') || 'Cody Bechdol').trim();
+    this.deviceType = (localStorage.getItem('sa_active_device_type') || this._defaultDeviceType()).trim();
+    this.userPhone = (localStorage.getItem('sa_active_user_phone') || '').trim();
+    this.deviceName = this._composeDeviceLabel();
     this.deviceId = this._getOrCreateDeviceId();
 
     this.lastSeq = Number(localStorage.getItem('sa_supabase_last_seq') || 0);
@@ -59,14 +62,163 @@ class SupabaseSyncEngine {
 
     if (this.isConfigured() && this.enabled) {
       setTimeout(() => {
+        this.updateUserHeaderButton();
         this.startRealtimeSync();
       }, 1800);
+    } else {
+      setTimeout(() => this.updateUserHeaderButton(), 500);
     }
   }
 
-  _defaultDeviceName() {
+  _defaultDeviceType() {
     const isDesktop = typeof window !== 'undefined' && !!window.desktopAPI;
     return isDesktop ? 'Office Laptop' : 'Field Tablet';
+  }
+
+  _defaultDeviceName() {
+    return `${this.userName || 'Cody Bechdol'} (${this.deviceType || this._defaultDeviceType()})`;
+  }
+
+  _composeDeviceLabel() {
+    const savedCustom = (localStorage.getItem('sa_supabase_device_name') || '').trim();
+    const uName = (this.userName || 'Cody Bechdol').trim();
+    const dType = (this.deviceType || this._defaultDeviceType()).trim();
+    if (savedCustom && savedCustom.includes('(')) {
+      return savedCustom;
+    }
+    const label = `${uName} (${dType})`;
+    try { localStorage.setItem('sa_supabase_device_name', label); } catch { /* ignore */ }
+    return label;
+  }
+
+  _lookupEmployeePhone(personName) {
+    if (!personName || !this.db || !this.db.snapshot || !this.db.snapshot.tables) return '';
+    const cleanName = String(personName).replace(/\s*\([^)]*\)\s*$/, '').trim().toLowerCase();
+    const empTable = this.db.snapshot.tables.employees;
+    if (!empTable || !Array.isArray(empTable.rows)) return '';
+    const match = empTable.rows.find(r => {
+      const n = String(r['Employee Name'] || r['Name'] || r['Employee'] || Object.values(r)[0] || '').trim().toLowerCase();
+      return n === cleanName;
+    });
+    if (!match) return '';
+    return String(match['Phone Number'] || match['Phone'] || match['Cell'] || '').trim();
+  }
+
+  setUserIdentity({ userName, deviceType, userPhone }) {
+    if (userName !== undefined) {
+      this.userName = String(userName || '').trim() || 'Cody Bechdol';
+      localStorage.setItem('sa_active_user_name', this.userName);
+    }
+    if (deviceType !== undefined) {
+      this.deviceType = String(deviceType || '').trim() || this._defaultDeviceType();
+      localStorage.setItem('sa_active_device_type', this.deviceType);
+    }
+    if (userPhone !== undefined) {
+      this.userPhone = String(userPhone || '').trim();
+      localStorage.setItem('sa_active_user_phone', this.userPhone);
+    }
+    if (!this.userPhone) {
+      const autoPhone = this._lookupEmployeePhone(this.userName);
+      if (autoPhone) {
+        this.userPhone = autoPhone;
+        localStorage.setItem('sa_active_user_phone', this.userPhone);
+      }
+    }
+    this.deviceName = `${this.userName} (${this.deviceType})`;
+    localStorage.setItem('sa_supabase_device_name', this.deviceName);
+    const sbDevEl = document.getElementById('supabase-device-input');
+    if (sbDevEl) sbDevEl.value = this.deviceName;
+    this.updateUserHeaderButton();
+  }
+
+  updateUserHeaderButton() {
+    const btn = document.getElementById('btn-active-user-identity');
+    if (!btn) return;
+    const icon = (this.deviceType || '').toLowerCase().includes('tablet') ? '📱' : '💻';
+    btn.innerHTML = `<span>👤</span> <span>${this.userName}</span> <span style="opacity:0.75;font-size:10.5px;">(${icon} ${this.deviceType})</span>`;
+    btn.title = `Logged in as: ${this.deviceName}${this.userPhone ? ' • ' + this.userPhone : ''}. Click to switch user or device label.`;
+  }
+
+  openUserIdentityModal() {
+    let modal = document.getElementById('user-identity-modal');
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.id = 'user-identity-modal';
+      modal.className = 'modal-overlay';
+      document.body.appendChild(modal);
+    }
+
+    const empTable = (this.db && this.db.snapshot && this.db.snapshot.tables && this.db.snapshot.tables.employees) || null;
+    const empNames = [];
+    if (empTable && Array.isArray(empTable.rows)) {
+      empTable.rows.forEach(r => {
+        const n = String(r['Employee Name'] || r['Name'] || r['Employee'] || Object.values(r)[0] || '').trim();
+        if (n && !empNames.includes(n)) empNames.push(n);
+      });
+    }
+    if (!empNames.includes('Cody Bechdol')) empNames.unshift('Cody Bechdol');
+    if (!empNames.includes('Sid Wade')) empNames.push('Sid Wade');
+    empNames.sort((a, b) => a.localeCompare(b));
+
+    const curPhone = this.userPhone || this._lookupEmployeePhone(this.userName) || '';
+
+    modal.innerHTML = `
+      <div class="modal-box" style="max-width: 460px; width: 92%;">
+        <div class="modal-header" style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); border-bottom: 1px solid rgba(59, 130, 246, 0.35);">
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <span style="font-size: 18px;">👤</span>
+            <span style="font-weight: 700; font-size: 15px;">Active User & Device Identity</span>
+          </div>
+          <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 12px;" onclick="document.getElementById('user-identity-modal').style.display='none'">✕</button>
+        </div>
+        <div class="modal-body" style="padding: 18px; display: flex; flex-direction: column; gap: 14px;">
+          <p style="font-size: 12px; color: var(--text-secondary); margin: 0; line-height: 1.5;">
+            Identifies who is using this device so live edits and conflict alerts show the exact person's name, device, and phone number to call.
+          </p>
+          <div>
+            <label style="display: block; font-size: 11.5px; font-weight: 700; color: var(--text-secondary); margin-bottom: 4px;">USER FULL NAME</label>
+            <input type="text" id="identity-user-name-input" list="identity-employees-datalist" class="sheet-search" style="width: 100%; font-size: 13px;" value="${this.userName}" placeholder="e.g. Cody Bechdol or Sid Wade" oninput="const p = window.supabaseSync._lookupEmployeePhone(this.value); if(p) document.getElementById('identity-user-phone-input').value = p;">
+            <datalist id="identity-employees-datalist">
+              ${empNames.map(n => `<option value="${n.replace(/"/g, '&quot;')}"></option>`).join('')}
+            </datalist>
+          </div>
+          <div>
+            <label style="display: block; font-size: 11.5px; font-weight: 700; color: var(--text-secondary); margin-bottom: 4px;">DEVICE TYPE</label>
+            <select id="identity-device-type-select" class="sheet-search" style="width: 100%; font-size: 13px;">
+              <option value="Office Laptop" ${this.deviceType === 'Office Laptop' ? 'selected' : ''}>💻 Office Laptop</option>
+              <option value="Field Tablet" ${this.deviceType === 'Field Tablet' ? 'selected' : ''}>📱 Field Tablet</option>
+              <option value="Field Laptop" ${this.deviceType === 'Field Laptop' ? 'selected' : ''}>💻 Field Laptop</option>
+              <option value="Mobile Phone" ${this.deviceType === 'Mobile Phone' ? 'selected' : ''}>📲 Mobile Phone</option>
+            </select>
+          </div>
+          <div>
+            <label style="display: block; font-size: 11.5px; font-weight: 700; color: var(--text-secondary); margin-bottom: 4px;">CONTACT PHONE NUMBER (FOR CONFLICT CALLS)</label>
+            <input type="text" id="identity-user-phone-input" class="sheet-search" style="width: 100%; font-size: 13px;" value="${curPhone}" placeholder="Auto-filled from Employees sheet or enter number">
+          </div>
+        </div>
+        <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: 8px;">
+          <button class="btn btn-secondary" onclick="document.getElementById('user-identity-modal').style.display='none'">Cancel</button>
+          <button class="btn btn-primary" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); border: none; font-weight: 700;" onclick="window.supabaseSync.saveUserIdentityFromModal()">💾 Save Identity</button>
+        </div>
+      </div>
+    `;
+    modal.style.display = 'flex';
+    modal.classList.add('active');
+  }
+
+  saveUserIdentityFromModal() {
+    const userName = document.getElementById('identity-user-name-input')?.value || 'Cody Bechdol';
+    const deviceType = document.getElementById('identity-device-type-select')?.value || this._defaultDeviceType();
+    const userPhone = document.getElementById('identity-user-phone-input')?.value || '';
+    this.setUserIdentity({ userName, deviceType, userPhone });
+    const modal = document.getElementById('user-identity-modal');
+    if (modal) {
+      modal.classList.remove('active');
+      modal.style.display = 'none';
+    }
+    if (typeof window.showToast === 'function') {
+      window.showToast(`👤 Active identity set to: ${this.deviceName}`);
+    }
   }
 
   _getOrCreateDeviceId() {
@@ -525,7 +677,10 @@ class SupabaseSyncEngine {
       ...mutRecord,
       id: mutRecord.id || ('mut_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7)),
       timestamp: mutRecord.timestamp || new Date().toISOString(),
-      deviceName: this.deviceName
+      deviceName: this.deviceName,
+      userName: this.userName,
+      deviceType: this.deviceType,
+      userPhone: this.userPhone || this._lookupEmployeePhone(this.userName)
     };
 
     // If browser reports offline, queue immediately for reconnection flush
@@ -971,6 +1126,8 @@ class SupabaseSyncEngine {
       const lMs = new Date(conf.localTime || 0).getTime();
       const rMs = new Date(conf.remoteTime || 0).getTime();
       const localIsNewer = lMs >= rMs;
+      const localPhone = (conf.localMutation && conf.localMutation.userPhone) || this.userPhone || this._lookupEmployeePhone(conf.localDevice) || '';
+      const remotePhone = (conf.remoteMutation && conf.remoteMutation.userPhone) || this._lookupEmployeePhone(conf.remoteDevice) || '';
 
       html += `
         <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 8px; padding: 14px;">
@@ -987,20 +1144,22 @@ class SupabaseSyncEngine {
             <label style="cursor: pointer; display: flex; flex-direction: column; gap: 6px; background: rgba(16, 185, 129, 0.08); border: 1.5px solid rgba(16, 185, 129, 0.35); border-radius: 6px; padding: 10px 12px;">
               <div style="display: flex; justify-content: space-between; align-items: center;">
                 <span style="font-size: 11px; font-weight: 700; color: #34d399;">
-                  🟢 ${conf.localDevice} (${fmtTime(conf.localTime)}) ${localIsNewer ? '★ Newer' : ''}
+                  🟢 ${conf.localDevice} • ${fmtTime(conf.localTime)} ${localIsNewer ? '★ Newer' : ''}
                 </span>
                 <input type="radio" name="sb_conflict_choice_${idx}" value="local" ${localIsNewer ? 'checked' : ''} style="accent-color: #10b981; cursor: pointer;">
               </div>
               <div style="font-size: 14px; font-weight: 700; color: #f8fafc;">${conf.localValue || '(empty)'}</div>
+              ${localPhone ? `<div style="font-size: 11px; color: #a7f3d0;">📞 Contact: ${localPhone}</div>` : ''}
             </label>
             <label style="cursor: pointer; display: flex; flex-direction: column; gap: 6px; background: rgba(59, 130, 246, 0.08); border: 1.5px solid rgba(59, 130, 246, 0.35); border-radius: 6px; padding: 10px 12px;">
               <div style="display: flex; justify-content: space-between; align-items: center;">
                 <span style="font-size: 11px; font-weight: 700; color: #60a5fa;">
-                  🔵 ${conf.remoteDevice} (${fmtTime(conf.remoteTime)}) ${!localIsNewer ? '★ Newer' : ''}
+                  🔵 ${conf.remoteDevice} • ${fmtTime(conf.remoteTime)} ${!localIsNewer ? '★ Newer' : ''}
                 </span>
                 <input type="radio" name="sb_conflict_choice_${idx}" value="remote" ${!localIsNewer ? 'checked' : ''} style="accent-color: #3b82f6; cursor: pointer;">
               </div>
               <div style="font-size: 14px; font-weight: 700; color: #f8fafc;">${conf.remoteValue || '(empty)'}</div>
+              ${remotePhone ? `<div style="font-size: 11px; color: #93c5fd;">📞 Call to verify: <a href="tel:${remotePhone}" style="color: #60a5fa; text-decoration: underline;">${remotePhone}</a></div>` : ''}
             </label>
           </div>
         </div>
