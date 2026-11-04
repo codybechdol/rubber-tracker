@@ -3215,7 +3215,7 @@
 
   <script src="js/db.js?v=20261103_02"></script>
   <script src="js/sync.js?v=20261103_05"></script>
-  <script src="js/supabase-sync.js?v=20261103_04"></script>
+  <script src="js/supabase-sync.js?v=20261103_05"></script>
   <script src="js/window-manager.js?v=20261027_01"></script>
   <script src="js/gps.js?v=20261027_01"></script>
   <script src="js/scanner.js?v=20261027_01"></script>
@@ -3416,6 +3416,19 @@
 
     function toggleAppRoleMode() {
       const nextMode = window.currentRoleMode === 'view_only' ? 'admin' : 'view_only';
+      if (nextMode === 'admin' && window.supabaseSync) {
+        const curAcc = window.supabaseSync.getAccountForUser(window.supabaseSync.userName);
+        if (curAcc && curAcc.role === 'view_only') {
+          const pin = window.prompt('🔒 This account is set to View Only.\nEnter an Admin or Master Admin PIN to unlock Admin Mode:');
+          if (pin === null) return;
+          const accounts = window.supabaseSync.getUserAccounts();
+          const validAdmin = accounts.some(a => (a.role === 'master_admin' || a.role === 'admin') && String(a.pin || '').trim() === String(pin || '').trim());
+          if (!validAdmin) {
+            window.showToast('🔒 Invalid Admin PIN. Staying in View Only mode.', true);
+            return;
+          }
+        }
+      }
       setAppRoleMode(nextMode);
     }
 

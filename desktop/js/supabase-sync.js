@@ -104,6 +104,96 @@ class SupabaseSyncEngine {
     return String(match['Phone Number'] || match['Phone'] || match['Cell'] || '').trim();
   }
 
+  _defaultUserAccounts() {
+    return [
+      {
+        name: 'Cody Bechdol',
+        role: 'master_admin',
+        pin: '1234',
+        phone: this._lookupEmployeePhone('Cody Bechdol') || ''
+      },
+      {
+        name: 'Sid Wade',
+        role: 'admin',
+        pin: '2468',
+        phone: this._lookupEmployeePhone('Sid Wade') || ''
+      }
+    ];
+  }
+
+  getUserAccounts() {
+    let accounts = [];
+    // Check shared snapshot configs first if available
+    const cfgAccounts = this.db && this.db.snapshot && this.db.snapshot.configs && this.db.snapshot.configs.userAccounts;
+    if (Array.isArray(cfgAccounts) && cfgAccounts.length > 0) {
+      accounts = cfgAccounts;
+    } else {
+      try {
+        const raw = localStorage.getItem('sa_user_accounts');
+        if (raw) accounts = JSON.parse(raw);
+      } catch { /* ignore */ }
+    }
+    if (!Array.isArray(accounts) || accounts.length === 0) {
+      accounts = this._defaultUserAccounts();
+    }
+    // Always guarantee Cody Bechdol is Master Admin
+    let cody = accounts.find(a => String(a.name || '').trim().toLowerCase() === 'cody bechdol');
+    if (!cody) {
+      cody = { name: 'Cody Bechdol', role: 'master_admin', pin: '1234', phone: this._lookupEmployeePhone('Cody Bechdol') || '' };
+      accounts.unshift(cody);
+    } else {
+      cody.role = 'master_admin';
+      if (!cody.pin) cody.pin = '1234';
+      if (!cody.phone) cody.phone = this._lookupEmployeePhone('Cody Bechdol') || '';
+    }
+    return accounts;
+  }
+
+  saveUserAccounts(accounts) {
+    if (!Array.isArray(accounts)) return;
+    try {
+      localStorage.setItem('sa_user_accounts', JSON.stringify(accounts));
+    } catch { /* ignore */ }
+    if (this.db && this.db.snapshot) {
+      if (!this.db.snapshot.configs) this.db.snapshot.configs = {};
+      this.db.snapshot.configs.userAccounts = accounts;
+      if (typeof this.db.saveSnapshot === 'function') {
+        this.db.saveSnapshot(this.db.snapshot).catch(() => {});
+      }
+      if (this.isActive()) {
+        this._scheduleTableSnapshotPush('__configs__');
+      }
+    }
+  }
+
+  getAccountForUser(userName) {
+    const clean = String(userName || this.userName || 'Cody Bechdol').trim().toLowerCase();
+    const accounts = this.getUserAccounts();
+    return accounts.find(a => String(a.name || '').trim().toLowerCase() === clean) || null;
+  }
+
+  isMasterAdmin(userName) {
+    const target = String(userName || this.userName || '').trim().toLowerCase();
+    if (target === 'cody bechdol') return true;
+    const acc = this.getAccountForUser(target);
+    return Boolean(acc && acc.role === 'master_admin');
+  }
+
+  verifyUserOrMasterPin(targetUserName, enteredPin) {
+    const pin = String(enteredPin || '').trim();
+    if (!pin) return false;
+    const accounts = this.getUserAccounts();
+    const master = accounts.find(a => a.role === 'master_admin' || String(a.name || '').toLowerCase() === 'cody bechdol');
+    if (master && String(master.pin || '1234').trim() === pin) {
+      return true; // Master Admin PIN unlocks all accounts and all info
+    }
+    const targetAcc = this.getAccountForUser(targetUserName);
+    if (targetAcc && String(targetAcc.pin || '').trim() === pin) {
+      return true;
+    }
+    return false;
+  }
+
   setUserIdentity({ userName, deviceType, userPhone }) {
     if (userName !== undefined) {
       this.userName = String(userName || '').trim() || 'Cody Bechdol';
@@ -118,7 +208,8 @@ class SupabaseSyncEngine {
       localStorage.setItem('sa_active_user_phone', this.userPhone);
     }
     if (!this.userPhone) {
-      const autoPhone = this._lookupEmployeePhone(this.userName);
+      const acc = this.getAccountForUser(this.userName);
+      const autoPhone = (acc && acc.phone) || this._lookupEmployeePhone(this.userName);
       if (autoPhone) {
         this.userPhone = autoPhone;
         localStorage.setItem('sa_active_user_phone', this.userPhone);
@@ -128,6 +219,17 @@ class SupabaseSyncEngine {
     localStorage.setItem('sa_supabase_device_name', this.deviceName);
     const sbDevEl = document.getElementById('supabase-device-input');
     if (sbDevEl) sbDevEl.value = this.deviceName;
+
+    // Sync App Role Mode with account permissions (Master Admin & Admin -> admin mode; View Only -> view_only mode)
+    const acc = this.getAccountForUser(this.userName);
+    if (acc && typeof window.setAppRoleMode === 'function') {
+      if (acc.role === 'view_only') {
+        window.setAppRoleMode('view_only');
+      } else {
+        window.setAppRoleMode('admin');
+      }
+    }
+
     this.updateUserHeaderButton();
   }
 
@@ -135,11 +237,13 @@ class SupabaseSyncEngine {
     const btn = document.getElementById('btn-active-user-identity');
     if (!btn) return;
     const icon = (this.deviceType || '').toLowerCase().includes('tablet') ? '📱' : '💻';
-    btn.innerHTML = `<span>👤</span> <span>${this.userName}</span> <span style="opacity:0.75;font-size:10.5px;">(${icon} ${this.deviceType})</span>`;
-    btn.title = `Logged in as: ${this.deviceName}${this.userPhone ? ' • ' + this.userPhone : ''}. Click to switch user or device label.`;
+    const isMaster = this.isMasterAdmin(this.userName);
+    const badge = isMaster ? '👑' : '👤';
+    btn.innerHTML = `<span>${badge}</span> <span>${this.userName}</span> <span style="opacity:0.75;font-size:10.5px;">(${icon} ${this.deviceType})</span>`;
+    btn.title = `Logged in as: ${this.deviceName}${isMaster ? ' [Master Admin]' : ''}${this.userPhone ? ' • ' + this.userPhone : ''}. Click to switch user or manage accounts.`;
   }
 
-  openUserIdentityModal() {
+  openUserIdentityModal(adminUnlocked = false) {
     let modal = document.getElementById('user-identity-modal');
     if (!modal) {
       modal = document.createElement('div');
@@ -148,57 +252,107 @@ class SupabaseSyncEngine {
       document.body.appendChild(modal);
     }
 
-    const empTable = (this.db && this.db.snapshot && this.db.snapshot.tables && this.db.snapshot.tables.employees) || null;
-    const empNames = [];
-    if (empTable && Array.isArray(empTable.rows)) {
-      empTable.rows.forEach(r => {
-        const n = String(r['Employee Name'] || r['Name'] || r['Employee'] || Object.values(r)[0] || '').trim();
-        if (n && !empNames.includes(n)) empNames.push(n);
-      });
-    }
-    if (!empNames.includes('Cody Bechdol')) empNames.unshift('Cody Bechdol');
-    if (!empNames.includes('Sid Wade')) empNames.push('Sid Wade');
-    empNames.sort((a, b) => a.localeCompare(b));
-
+    const accounts = this.getUserAccounts();
+    const isCurrentMaster = this.isMasterAdmin(this.userName) || adminUnlocked;
     const curPhone = this.userPhone || this._lookupEmployeePhone(this.userName) || '';
 
+    const roleLabel = (role) => {
+      if (role === 'master_admin') return '👑 Master Admin (Full Access)';
+      if (role === 'admin') return '🔧 Admin (Can Edit)';
+      return '👁️ View Only';
+    };
+
     modal.innerHTML = `
-      <div class="modal-box" style="max-width: 460px; width: 92%;">
+      <div class="modal-box" style="max-width: 540px; width: 94%; max-height: 90vh; overflow-y: auto;">
         <div class="modal-header" style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); border-bottom: 1px solid rgba(59, 130, 246, 0.35);">
           <div style="display: flex; align-items: center; gap: 8px;">
-            <span style="font-size: 18px;">👤</span>
-            <span style="font-weight: 700; font-size: 15px;">Active User & Device Identity</span>
+            <span style="font-size: 18px;">${isCurrentMaster ? '👑' : '🔒'}</span>
+            <span style="font-weight: 700; font-size: 15px;">User Account & PIN Protection</span>
           </div>
           <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 12px;" onclick="document.getElementById('user-identity-modal').style.display='none'">✕</button>
         </div>
         <div class="modal-body" style="padding: 18px; display: flex; flex-direction: column; gap: 14px;">
-          <p style="font-size: 12px; color: var(--text-secondary); margin: 0; line-height: 1.5;">
-            Identifies who is using this device so live edits and conflict alerts show the exact person's name, device, and phone number to call.
-          </p>
-          <div>
-            <label style="display: block; font-size: 11.5px; font-weight: 700; color: var(--text-secondary); margin-bottom: 4px;">USER FULL NAME</label>
-            <input type="text" id="identity-user-name-input" list="identity-employees-datalist" class="sheet-search" style="width: 100%; font-size: 13px;" value="${this.userName}" placeholder="e.g. Cody Bechdol or Sid Wade" oninput="const p = window.supabaseSync._lookupEmployeePhone(this.value); if(p) document.getElementById('identity-user-phone-input').value = p;">
-            <datalist id="identity-employees-datalist">
-              ${empNames.map(n => `<option value="${n.replace(/"/g, '&quot;')}"></option>`).join('')}
-            </datalist>
+          <div style="background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 8px; padding: 10px 12px; font-size: 12px; display: flex; justify-content: space-between; align-items: center;">
+            <div>
+              <div style="color: var(--text-secondary); font-size: 11px;">CURRENTLY SIGNED IN AS</div>
+              <div style="font-weight: 700; font-size: 14px; color: #f8fafc; margin-top: 2px;">
+                ${this.isMasterAdmin(this.userName) ? '👑 ' : '👤 '}${this.userName}
+                <span style="font-weight: 500; font-size: 11.5px; color: #93c5fd; margin-left: 6px;">(${roleLabel((this.getAccountForUser(this.userName) || {}).role || 'admin')})</span>
+              </div>
+            </div>
           </div>
+
           <div>
-            <label style="display: block; font-size: 11.5px; font-weight: 700; color: var(--text-secondary); margin-bottom: 4px;">DEVICE TYPE</label>
-            <select id="identity-device-type-select" class="sheet-search" style="width: 100%; font-size: 13px;">
-              <option value="Office Laptop" ${this.deviceType === 'Office Laptop' ? 'selected' : ''}>💻 Office Laptop</option>
-              <option value="Field Tablet" ${this.deviceType === 'Field Tablet' ? 'selected' : ''}>📱 Field Tablet</option>
-              <option value="Field Laptop" ${this.deviceType === 'Field Laptop' ? 'selected' : ''}>💻 Field Laptop</option>
-              <option value="Mobile Phone" ${this.deviceType === 'Mobile Phone' ? 'selected' : ''}>📲 Mobile Phone</option>
+            <label style="display: block; font-size: 11.5px; font-weight: 700; color: var(--text-secondary); margin-bottom: 4px;">SELECT USER ACCOUNT</label>
+            <select id="identity-user-name-input" class="sheet-search" style="width: 100%; font-size: 13px;" onchange="window.supabaseSync._onModalAccountSelectChange()">
+              ${accounts.map(a => `<option value="${a.name.replace(/"/g, '&quot;')}" ${a.name === this.userName ? 'selected' : ''}>${a.role === 'master_admin' ? '👑 ' : '👤 '}${a.name} — ${roleLabel(a.role)}</option>`).join('')}
             </select>
           </div>
-          <div>
-            <label style="display: block; font-size: 11.5px; font-weight: 700; color: var(--text-secondary); margin-bottom: 4px;">CONTACT PHONE NUMBER (FOR CONFLICT CALLS)</label>
-            <input type="text" id="identity-user-phone-input" class="sheet-search" style="width: 100%; font-size: 13px;" value="${curPhone}" placeholder="Auto-filled from Employees sheet or enter number">
+
+          <div id="identity-pin-prompt-container" style="display: none; background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.4); border-radius: 8px; padding: 12px;">
+            <label style="display: block; font-size: 11.5px; font-weight: 700; color: #fbbf24; margin-bottom: 4px;">🔒 ENTER 4-DIGIT PIN TO SWITCH ACCOUNT</label>
+            <input type="password" id="identity-user-pin-input" maxlength="8" inputmode="numeric" class="sheet-search" style="width: 100%; font-size: 15px; letter-spacing: 4px; font-weight: 700;" placeholder="•••• (User PIN or Master Admin PIN)">
+            <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">
+              Prevents accidental account switching. Cody Bechdol's Master Admin PIN unlocks all accounts.
+            </div>
           </div>
+
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+            <div>
+              <label style="display: block; font-size: 11.5px; font-weight: 700; color: var(--text-secondary); margin-bottom: 4px;">THIS DEVICE TYPE</label>
+              <select id="identity-device-type-select" class="sheet-search" style="width: 100%; font-size: 13px;">
+                <option value="Office Laptop" ${this.deviceType === 'Office Laptop' ? 'selected' : ''}>💻 Office Laptop</option>
+                <option value="Field Tablet" ${this.deviceType === 'Field Tablet' ? 'selected' : ''}>📱 Field Tablet</option>
+                <option value="Field Laptop" ${this.deviceType === 'Field Laptop' ? 'selected' : ''}>💻 Field Laptop</option>
+                <option value="Mobile Phone" ${this.deviceType === 'Mobile Phone' ? 'selected' : ''}>📲 Mobile Phone</option>
+              </select>
+            </div>
+            <div>
+              <label style="display: block; font-size: 11.5px; font-weight: 700; color: var(--text-secondary); margin-bottom: 4px;">CONTACT PHONE #</label>
+              <input type="text" id="identity-user-phone-input" class="sheet-search" style="width: 100%; font-size: 13px;" value="${curPhone}" placeholder="Auto-filled or enter #">
+            </div>
+          </div>
+
+          ${isCurrentMaster ? `
+            <div style="margin-top: 6px; border-top: 1px solid rgba(148, 163, 184, 0.2); padding-top: 12px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <span style="font-size: 12px; font-weight: 700; color: #fbbf24;">👑 MASTER ADMIN: MANAGE ALL ACCOUNTS & PINS</span>
+                <span style="font-size: 11px; color: var(--text-secondary);">Full Access</span>
+              </div>
+              <div style="display: flex; flex-direction: column; gap: 6px; max-height: 185px; overflow-y: auto; padding-right: 4px;">
+                ${accounts.map((acc, idx) => `
+                  <div style="display: grid; grid-template-columns: 1.4fr 1.1fr 75px auto; gap: 6px; align-items: center; background: rgba(15, 23, 42, 0.6); padding: 6px 8px; border-radius: 6px; border: 1px solid rgba(148, 163, 184, 0.15);">
+                    <span style="font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${acc.role === 'master_admin' ? '👑 ' : ''}${acc.name}</span>
+                    <select class="sheet-search" style="font-size: 11px; padding: 3px 6px;" ${acc.role === 'master_admin' ? 'disabled' : ''} onchange="window.supabaseSync._updateAccountField(${idx}, 'role', this.value)">
+                      <option value="master_admin" ${acc.role === 'master_admin' ? 'selected' : ''}>👑 Master Admin</option>
+                      <option value="admin" ${acc.role === 'admin' ? 'selected' : ''}>🔧 Admin (Edit)</option>
+                      <option value="view_only" ${acc.role === 'view_only' ? 'selected' : ''}>👁️ View Only</option>
+                    </select>
+                    <input type="text" class="sheet-search" style="font-size: 11.5px; padding: 3px 6px; text-align: center; font-family: monospace;" value="${acc.pin || '0000'}" title="4-Digit PIN" onchange="window.supabaseSync._updateAccountField(${idx}, 'pin', this.value)">
+                    ${acc.role === 'master_admin' ? `<span style="font-size: 10px; color: #94a3b8; padding: 0 4px;">Master</span>` : `<button class="btn btn-secondary" style="padding: 2px 6px; font-size: 11px; color: #f87171;" title="Remove Account" onclick="window.supabaseSync._removeUserAccount(${idx})">✕</button>`}
+                  </div>
+                `).join('')}
+              </div>
+              <div style="display: grid; grid-template-columns: 1.3fr 1fr 75px auto; gap: 6px; margin-top: 8px; align-items: center;">
+                <input type="text" id="new-account-name-input" class="sheet-search" style="font-size: 12px; padding: 5px 8px;" placeholder="New User Full Name">
+                <select id="new-account-role-select" class="sheet-search" style="font-size: 11.5px; padding: 5px 6px;">
+                  <option value="admin">🔧 Admin (Edit)</option>
+                  <option value="view_only">👁️ View Only</option>
+                </select>
+                <input type="text" id="new-account-pin-input" class="sheet-search" style="font-size: 12px; padding: 5px 6px; text-align: center; font-family: monospace;" placeholder="PIN (4d)" maxlength="8">
+                <button class="btn btn-secondary" style="padding: 5px 10px; font-size: 11.5px; font-weight: 700; color: #34d399; border-color: rgba(16,185,129,0.4);" onclick="window.supabaseSync._addNewUserAccount()">+ Add</button>
+              </div>
+            </div>
+          ` : `
+            <div style="border-top: 1px solid rgba(148, 163, 184, 0.2); padding-top: 10px; display: flex; justify-content: space-between; align-items: center;">
+              <span style="font-size: 11.5px; color: var(--text-secondary);">Need to manage users or reset a PIN?</span>
+              <button class="btn btn-secondary" style="padding: 4px 10px; font-size: 11.5px; color: #fbbf24;" onclick="window.supabaseSync._promptMasterAdminUnlock()">👑 Master Admin Unlock</button>
+            </div>
+          `}
         </div>
         <div class="modal-footer" style="display: flex; justify-content: flex-end; gap: 8px;">
           <button class="btn btn-secondary" onclick="document.getElementById('user-identity-modal').style.display='none'">Cancel</button>
-          <button class="btn btn-primary" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); border: none; font-weight: 700;" onclick="window.supabaseSync.saveUserIdentityFromModal()">💾 Save Identity</button>
+          <button class="btn btn-primary" style="background: linear-gradient(135deg, #10b981 0%, #059669 100%); border: none; font-weight: 700;" onclick="window.supabaseSync.saveUserIdentityFromModal(${isCurrentMaster ? 'true' : 'false'})">💾 Switch / Save Identity</button>
         </div>
       </div>
     `;
@@ -206,10 +360,115 @@ class SupabaseSyncEngine {
     modal.classList.add('active');
   }
 
-  saveUserIdentityFromModal() {
+  _onModalAccountSelectChange() {
+    const selectedName = document.getElementById('identity-user-name-input')?.value || '';
+    const acc = this.getAccountForUser(selectedName);
+    const phoneInput = document.getElementById('identity-user-phone-input');
+    if (phoneInput) {
+      phoneInput.value = (acc && acc.phone) || this._lookupEmployeePhone(selectedName) || '';
+    }
+    const pinContainer = document.getElementById('identity-pin-prompt-container');
+    if (pinContainer) {
+      // Master Admin (Cody Bechdol) can switch into any account without needing their PIN.
+      // Any other user switching to a different account must enter that user's PIN (or Master Admin PIN).
+      const requiresPin = !this.isMasterAdmin(this.userName) && selectedName.trim().toLowerCase() !== this.userName.trim().toLowerCase();
+      pinContainer.style.display = requiresPin ? 'block' : 'none';
+      if (requiresPin) {
+        setTimeout(() => document.getElementById('identity-user-pin-input')?.focus(), 50);
+      }
+    }
+  }
+
+  _promptMasterAdminUnlock() {
+    const pin = window.prompt('👑 Enter Cody Bechdol\'s Master Admin PIN to manage all accounts:');
+    if (pin === null) return;
+    if (this.verifyUserOrMasterPin('Cody Bechdol', pin)) {
+      this.openUserIdentityModal(true);
+    } else if (typeof window.showToast === 'function') {
+      window.showToast('❌ Incorrect Master Admin PIN.', 'error');
+    }
+  }
+
+  _updateAccountField(idx, field, value) {
+    const accounts = this.getUserAccounts();
+    if (!accounts[idx]) return;
+    accounts[idx][field] = String(value || '').trim();
+    this.saveUserAccounts(accounts);
+    if (typeof window.showToast === 'function') {
+      window.showToast(`✅ Updated ${accounts[idx].name}'s ${field}`);
+    }
+  }
+
+  _addNewUserAccount() {
+    const nameEl = document.getElementById('new-account-name-input');
+    const roleEl = document.getElementById('new-account-role-select');
+    const pinEl = document.getElementById('new-account-pin-input');
+    const name = String(nameEl?.value || '').trim();
+    const role = String(roleEl?.value || 'admin').trim();
+    const pin = String(pinEl?.value || '').trim() || '0000';
+    if (!name) {
+      if (typeof window.showToast === 'function') window.showToast('⚠️ Enter a user name first.', 'error');
+      return;
+    }
+    const accounts = this.getUserAccounts();
+    if (accounts.some(a => a.name.toLowerCase() === name.toLowerCase())) {
+      if (typeof window.showToast === 'function') window.showToast('⚠️ Account already exists.', 'error');
+      return;
+    }
+    accounts.push({
+      name,
+      role,
+      pin,
+      phone: this._lookupEmployeePhone(name) || ''
+    });
+    this.saveUserAccounts(accounts);
+    this.openUserIdentityModal(true);
+    if (typeof window.showToast === 'function') {
+      window.showToast(`✅ Added account for ${name} (PIN: ${pin})`);
+    }
+  }
+
+  _removeUserAccount(idx) {
+    const accounts = this.getUserAccounts();
+    const target = accounts[idx];
+    if (!target || target.role === 'master_admin') return;
+    accounts.splice(idx, 1);
+    this.saveUserAccounts(accounts);
+    this.openUserIdentityModal(true);
+    if (typeof window.showToast === 'function') {
+      window.showToast(`🗑️ Removed account ${target.name}`);
+    }
+  }
+
+  saveUserIdentityFromModal(adminUnlocked = false) {
     const userName = document.getElementById('identity-user-name-input')?.value || 'Cody Bechdol';
     const deviceType = document.getElementById('identity-device-type-select')?.value || this._defaultDeviceType();
     const userPhone = document.getElementById('identity-user-phone-input')?.value || '';
+
+    const isSwitchingUser = userName.trim().toLowerCase() !== this.userName.trim().toLowerCase();
+    const isCurrentMaster = this.isMasterAdmin(this.userName) || adminUnlocked;
+
+    if (isSwitchingUser && !isCurrentMaster) {
+      const enteredPin = document.getElementById('identity-user-pin-input')?.value || '';
+      if (!this.verifyUserOrMasterPin(userName, enteredPin)) {
+        if (typeof window.showToast === 'function') {
+          window.showToast(`🔒 Incorrect PIN for ${userName}. Enter ${userName}'s PIN or Cody's Master Admin PIN.`, 'error');
+        }
+        const pinContainer = document.getElementById('identity-pin-prompt-container');
+        if (pinContainer) pinContainer.style.display = 'block';
+        document.getElementById('identity-user-pin-input')?.focus();
+        return;
+      }
+    }
+
+    // Save phone number back to the account record as well
+    const accounts = this.getUserAccounts();
+    const acc = accounts.find(a => a.name.toLowerCase() === userName.trim().toLowerCase());
+    if (acc && userPhone) {
+      acc.phone = userPhone.trim();
+      this.saveUserAccounts(accounts);
+    }
+
     this.setUserIdentity({ userName, deviceType, userPhone });
     const modal = document.getElementById('user-identity-modal');
     if (modal) {
@@ -217,7 +476,7 @@ class SupabaseSyncEngine {
       modal.style.display = 'none';
     }
     if (typeof window.showToast === 'function') {
-      window.showToast(`👤 Active identity set to: ${this.deviceName}`);
+      window.showToast(`👤 Signed in as: ${this.deviceName}`);
     }
   }
 
