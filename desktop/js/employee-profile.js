@@ -1703,6 +1703,7 @@ class EmployeeProfileEngine {
 
     const curStatus = String(data.status || (data.isPending ? 'Pending' : 'Active')).trim();
     const statusOptions = ['Active', 'Weeds', 'Light Duty', 'Vacation', 'Leave', 'Medical', 'Pending'];
+    const isMasterAdmin = Boolean(window.supabaseSync && window.supabaseSync.isMasterAdmin());
 
     return `
       <div style="background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 8px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.2);">
@@ -1712,7 +1713,7 @@ class EmployeeProfileEngine {
               <span>👤</span> Edit Employee Information: <span style="color: #60a5fa;">${this.escapeHtml(data.displayName)}</span>
             </h4>
             <div style="font-size: 11.5px; color: var(--text-muted); margin-top: 3px;">
-              All updates are saved directly to the Employees table and synchronized to Google Sheets.
+              All updates are saved directly to the Employees table and synchronized to Google Sheets & Supabase.
             </div>
           </div>
           <button type="button" class="btn btn-primary" style="padding: 7px 18px; font-size: 12.5px; font-weight: 700; display: flex; align-items: center; gap: 6px;" onclick="window.employeeProfileEngine.saveEmployeeDetails('${this.escapeJs(data.displayName)}')">
@@ -1743,8 +1744,23 @@ class EmployeeProfileEngine {
             </div>
 
             <div>
-              <label style="display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); margin-bottom: 4px;">Notification Emails (comma separated)</label>
-              <input type="text" id="edit-emp-notif-email" class="form-control" style="width: 100%; font-size: 12px; padding: 6px 10px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary);" value="${this.escapeHtml(data.notifEmail)}" placeholder="alert1@email.com, alert2@email.com">
+              <label style="display: flex; justify-content: space-between; align-items: center; font-size: 11px; font-weight: 700; color: ${isMasterAdmin ? '#fbbf24' : 'var(--text-muted)'}; margin-bottom: 4px;">
+                <span>Notification Email (App Invite)</span>
+                <span style="font-size: 10px; background: rgba(245, 158, 11, 0.15); color: #fbbf24; padding: 1px 6px; border-radius: 4px; border: 1px solid rgba(245, 158, 11, 0.35);">
+                  ${isMasterAdmin ? '👑 Master Admin Editable' : '🔒 Master Admin Only'}
+                </span>
+              </label>
+              <input type="text" id="edit-emp-notif-email" class="form-control"
+                ${isMasterAdmin ? `oninput="window.employeeProfileEngine.onNotifEmailInput(this.value)"` : 'disabled'}
+                style="width: 100%; font-size: 12px; padding: 6px 10px; background: var(--bg-primary); border: 1px solid ${isMasterAdmin ? 'rgba(245, 158, 11, 0.5)' : 'var(--border-color)'}; border-radius: 4px; color: var(--text-primary); ${isMasterAdmin ? '' : 'opacity: 0.6; cursor: not-allowed;'}"
+                value="${this.escapeHtml(data.notifEmail)}"
+                placeholder="${isMasterAdmin ? 'Enter email to invite to Safety Assistant app...' : 'Locked (Master Admin only)'}"
+                title="${isMasterAdmin ? 'Enter Notification Email to invite this employee to the app and assign Page & Tab permissions below' : 'Only the Master Admin (Cody Bechdol) can edit Notification Emails'}">
+              ${isMasterAdmin ? `
+                <div style="font-size: 10.5px; color: #94a3b8; margin-top: 4px;">
+                  💡 Entering an email here invites this employee to use the app and enables their Page & Tab permissions below.
+                </div>
+              ` : ''}
             </div>
           </div>
 
@@ -1817,6 +1833,8 @@ class EmployeeProfileEngine {
           </div>
         </div>
 
+        ${isMasterAdmin ? this.renderMasterAdminPermissionsSection(data) : ''}
+
         <div style="margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border-color); display: flex; justify-content: flex-end;">
           <button type="button" class="btn btn-primary" style="padding: 7px 20px; font-size: 13px; font-weight: 700; display: flex; align-items: center; gap: 6px;" onclick="window.employeeProfileEngine.saveEmployeeDetails('${this.escapeJs(data.displayName)}')">
             <span>💾</span> Save Changes
@@ -1824,6 +1842,292 @@ class EmployeeProfileEngine {
         </div>
       </div>
     `;
+  }
+
+  renderMasterAdminPermissionsSection(data) {
+    if (!window.supabaseSync) return '';
+    const isTargetMaster = data.displayName.trim().toLowerCase() === 'cody bechdol';
+    const existingAcc = window.supabaseSync.getAccountForUser(data.displayName);
+    const hasNotifEmail = Boolean(data.notifEmail && data.notifEmail.trim());
+    const isEnabled = Boolean(existingAcc || hasNotifEmail);
+
+    // Default PIN: existing PIN, or last 4 digits of phone number, or '2468'
+    const phoneDigits = String(data.phone || '').replace(/\D/g, '');
+    const defaultPin = (existingAcc && existingAcc.pin) || (phoneDigits.length >= 4 ? phoneDigits.slice(-4) : '2468');
+    const perms = (existingAcc && existingAcc.permissions) || window.supabaseSync.buildPresetPermissions('view_all');
+    const schema = window.supabaseSync.constructor.APP_PERMISSION_PAGES || [];
+
+    return `
+      <div id="emp-app-permissions-card" style="margin-top: 18px; background: rgba(15, 23, 42, 0.75); border: 1px solid rgba(245, 158, 11, 0.45); border-radius: 8px; padding: 16px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; border-bottom: 1px solid rgba(148, 163, 184, 0.2); padding-bottom: 12px; margin-bottom: 14px;">
+          <div>
+            <div style="font-size: 14px; font-weight: 800; color: #fbbf24; display: flex; align-items: center; gap: 8px;">
+              <span>👑</span> App Invitation & User Permissions (Master Admin Only)
+            </div>
+            <div style="font-size: 11.5px; color: #94a3b8; margin-top: 2px;">
+              1. Check which <strong>Pages</strong> and <strong>Tabs</strong> ${this.escapeHtml(data.displayName)} can <strong>👁️ See</strong> &nbsp;→&nbsp; 2. Of those they can see, check which ones they can <strong>✏️ Edit</strong>.
+            </div>
+          </div>
+          <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+            <label style="display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px; font-weight: 700; color: #34d399; cursor: pointer; background: rgba(16, 185, 129, 0.12); padding: 5px 10px; border-radius: 6px; border: 1px solid rgba(16, 185, 129, 0.35);">
+              <input type="checkbox" id="emp-perm-account-enabled" ${isEnabled ? 'checked' : ''} ${isTargetMaster ? 'disabled' : ''} onchange="window.employeeProfileEngine.togglePermissionsMatrixVisibility(this.checked)">
+              <span>✅ Enable App Login Account</span>
+            </label>
+            <div style="display: inline-flex; align-items: center; gap: 6px; background: rgba(30, 41, 59, 0.9); padding: 4px 10px; border-radius: 6px; border: 1px solid var(--border-color);">
+              <span style="font-size: 11px; font-weight: 700; color: #cbd5e1;">🔒 4-Digit PIN:</span>
+              <input type="text" id="emp-perm-pin-input" maxlength="8" value="${this.escapeHtml(defaultPin)}" style="width: 64px; font-size: 12.5px; font-weight: 800; font-family: monospace; text-align: center; background: var(--bg-primary); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); border-radius: 4px; padding: 2px 6px;">
+            </div>
+            <button type="button" class="btn btn-secondary" style="font-size: 11.5px; padding: 5px 10px; color: #60a5fa; border-color: rgba(59, 130, 246, 0.4);" onclick="window.employeeProfileEngine.sendOrCopyAppInvite('${this.escapeJs(data.displayName)}')">
+              📧 Send / Copy Invite
+            </button>
+          </div>
+        </div>
+
+        <div id="emp-perm-matrix-wrapper" style="display: ${isEnabled ? 'block' : 'none'};">
+          ${isTargetMaster ? `
+            <div style="padding: 10px 12px; background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 6px; font-size: 12px; color: #fde68a;">
+              👑 <strong>Cody Bechdol</strong> is the Master Admin and automatically has full <strong>See & Edit</strong> access to all pages, tabs, and accounts.
+            </div>
+          ` : `
+            <!-- Quick Preset Bar -->
+            <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; background: rgba(30, 41, 59, 0.6); padding: 8px 12px; border-radius: 6px; border: 1px solid rgba(148, 163, 184, 0.15);">
+              <span style="font-size: 11.5px; font-weight: 700; color: #cbd5e1;">⚡ Quick Permission Presets:</span>
+              <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                <button type="button" class="btn btn-secondary" style="font-size: 11px; padding: 3px 9px; color: #60a5fa;" onclick="window.employeeProfileEngine.applyPermissionPresetUI('view_all')">👁️ See All (View Only)</button>
+                <button type="button" class="btn btn-secondary" style="font-size: 11px; padding: 3px 9px; color: #34d399;" onclick="window.employeeProfileEngine.applyPermissionPresetUI('full_edit')">✏️ See & Edit All</button>
+                <button type="button" class="btn btn-secondary" style="font-size: 11px; padding: 3px 9px; color: #fbbf24;" onclick="window.employeeProfileEngine.applyPermissionPresetUI('foreman')">👷 Foreman Preset</button>
+                <button type="button" class="btn btn-secondary" style="font-size: 11px; padding: 3px 9px; color: #c084fc;" onclick="window.employeeProfileEngine.applyPermissionPresetUI('ppe_tech')">🧤 PPE & Swaps Preset</button>
+                <button type="button" class="btn btn-secondary" style="font-size: 11px; padding: 3px 9px; color: #f87171;" onclick="window.employeeProfileEngine.applyPermissionPresetUI('none')">🚫 Uncheck All</button>
+              </div>
+            </div>
+
+            <!-- Pages & Nested Tabs Checkbox List -->
+            <div style="display: flex; flex-direction: column; gap: 8px; max-height: 440px; overflow-y: auto; padding-right: 4px;">
+              ${schema.map(page => {
+                const pState = (perms.pages && perms.pages[page.key]) || { view: true, edit: false };
+                const canSeePage = Boolean(pState.view);
+                const canEditPage = canSeePage && Boolean(pState.edit);
+                const hasTabs = Array.isArray(page.tabs) && page.tabs.length > 0;
+
+                return `
+                  <div class="perm-page-block" style="background: rgba(30, 41, 59, 0.75); border: 1px solid ${canSeePage ? 'rgba(59, 130, 246, 0.35)' : 'rgba(148, 163, 184, 0.15)'}; border-radius: 6px; padding: 10px 12px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px;">
+                      <div style="display: flex; align-items: center; gap: 8px;">
+                        <span style="font-size: 13px; font-weight: 700; color: #f8fafc;">${page.label}</span>
+                        ${hasTabs ? `<span style="font-size: 10.5px; background: rgba(59, 130, 246, 0.15); color: #93c5fd; padding: 1px 7px; border-radius: 10px;">${page.tabs.length} Tabs</span>` : ''}
+                      </div>
+                      <div style="display: flex; align-items: center; gap: 16px;">
+                        <label style="display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 700; color: #93c5fd; cursor: pointer;">
+                          <input type="checkbox" class="perm-page-view-cb" data-page-key="${page.key}" ${canSeePage ? 'checked' : ''} onchange="window.employeeProfileEngine.onPermPageViewToggle('${page.key}', this.checked)">
+                          <span>👁️ Can See Page</span>
+                        </label>
+                        <label id="perm-page-edit-label-${page.key}" style="display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 700; color: #34d399; cursor: ${canSeePage ? 'pointer' : 'not-allowed'}; opacity: ${canSeePage ? '1' : '0.35'};">
+                          <input type="checkbox" class="perm-page-edit-cb" id="perm-page-edit-cb-${page.key}" data-page-key="${page.key}" ${canEditPage ? 'checked' : ''} ${canSeePage ? '' : 'disabled'} onchange="window.employeeProfileEngine.onPermPageEditToggle('${page.key}', this.checked)">
+                          <span>✏️ Can Edit Page</span>
+                        </label>
+                      </div>
+                    </div>
+
+                    ${hasTabs ? `
+                      <div id="perm-tabs-container-${page.key}" style="margin-top: 10px; padding-top: 10px; border-top: 1px dashed rgba(148, 163, 184, 0.25); display: ${canSeePage ? 'block' : 'none'};">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px; flex-wrap: wrap; gap: 6px;">
+                          <span style="font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">↳ Tabs inside ${page.label} (Select which tabs they can See, then which of those they can Edit):</span>
+                          <div style="display: flex; gap: 6px;">
+                            <button type="button" class="btn btn-secondary" style="font-size: 10.5px; padding: 2px 7px; color: #93c5fd;" onclick="window.employeeProfileEngine.setAllTabsForPage('${page.key}', true, false)">👁️ See All Tabs</button>
+                            <button type="button" class="btn btn-secondary" style="font-size: 10.5px; padding: 2px 7px; color: #34d399;" onclick="window.employeeProfileEngine.setAllTabsForPage('${page.key}', true, true)">✏️ See & Edit All Tabs</button>
+                            <button type="button" class="btn btn-secondary" style="font-size: 10.5px; padding: 2px 7px; color: #f87171;" onclick="window.employeeProfileEngine.setAllTabsForPage('${page.key}', false, false)">🚫 Clear Tabs</button>
+                          </div>
+                        </div>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(235px, 1fr)); gap: 6px;">
+                          ${page.tabs.map(tab => {
+                            const tState = (perms.tabs && perms.tabs[tab.key]) || { view: canSeePage, edit: canEditPage };
+                            const canSeeTab = canSeePage && Boolean(tState.view);
+                            const canEditTab = canSeeTab && Boolean(tState.edit);
+                            return `
+                              <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(148, 163, 184, 0.18); border-radius: 5px; padding: 5px 8px;">
+                                <span style="font-size: 11.5px; font-weight: 600; color: #e2e8f0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-right: 6px;" title="${tab.label}">${tab.label}</span>
+                                <div style="display: flex; align-items: center; gap: 8px; flex-shrink: 0;">
+                                  <label style="display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: #93c5fd; cursor: pointer;" title="Can See ${tab.label}">
+                                    <input type="checkbox" class="perm-tab-view-cb" data-parent-page="${page.key}" data-tab-key="${tab.key}" ${canSeeTab ? 'checked' : ''} onchange="window.employeeProfileEngine.onPermTabViewToggle('${page.key}', '${tab.key}', this.checked)">
+                                    <span>👁️</span>
+                                  </label>
+                                  <label id="perm-tab-edit-label-${tab.key}" style="display: inline-flex; align-items: center; gap: 3px; font-size: 11px; color: #34d399; cursor: ${canSeeTab ? 'pointer' : 'not-allowed'}; opacity: ${canSeeTab ? '1' : '0.35'};" title="Can Edit ${tab.label} (Requires See)">
+                                    <input type="checkbox" class="perm-tab-edit-cb" id="perm-tab-edit-cb-${tab.key}" data-parent-page="${page.key}" data-tab-key="${tab.key}" ${canEditTab ? 'checked' : ''} ${canSeeTab ? '' : 'disabled'} onchange="window.employeeProfileEngine.onPermTabEditToggle('${page.key}', '${tab.key}', this.checked)">
+                                    <span>✏️</span>
+                                  </label>
+                                </div>
+                              </div>
+                            `;
+                          }).join('')}
+                        </div>
+                      </div>
+                    ` : ''}
+                  </div>
+                `;
+              }).join('')}
+            </div>
+          `}
+        </div>
+      </div>
+    `;
+  }
+
+  onNotifEmailInput(val) {
+    const hasEmail = Boolean(val && val.trim());
+    const enableCb = document.getElementById('emp-perm-account-enabled');
+    if (enableCb && hasEmail && !enableCb.checked) {
+      enableCb.checked = true;
+      this.togglePermissionsMatrixVisibility(true);
+    }
+  }
+
+  togglePermissionsMatrixVisibility(isVisible) {
+    const wrapper = document.getElementById('emp-perm-matrix-wrapper');
+    if (wrapper) {
+      wrapper.style.display = isVisible ? 'block' : 'none';
+    }
+  }
+
+  onPermPageViewToggle(pageKey, canSee) {
+    const editCb = document.getElementById(`perm-page-edit-cb-${pageKey}`);
+    const editLabel = document.getElementById(`perm-page-edit-label-${pageKey}`);
+    if (editCb) {
+      if (!canSee) editCb.checked = false;
+      editCb.disabled = !canSee;
+    }
+    if (editLabel) {
+      editLabel.style.opacity = canSee ? '1' : '0.35';
+      editLabel.style.cursor = canSee ? 'pointer' : 'not-allowed';
+    }
+    const tabsContainer = document.getElementById(`perm-tabs-container-${pageKey}`);
+    if (tabsContainer) {
+      tabsContainer.style.display = canSee ? 'block' : 'none';
+      if (!canSee) {
+        this.setAllTabsForPage(pageKey, false, false);
+      }
+    }
+  }
+
+  onPermPageEditToggle(pageKey, canEdit) {
+    if (canEdit) {
+      const viewCb = document.querySelector(`.perm-page-view-cb[data-page-key="${pageKey}"]`);
+      if (viewCb && !viewCb.checked) {
+        viewCb.checked = true;
+        this.onPermPageViewToggle(pageKey, true);
+      }
+    } else {
+      // Unchecking page edit also unchecks tab edits under that page
+      document.querySelectorAll(`.perm-tab-edit-cb[data-parent-page="${pageKey}"]`).forEach(cb => {
+        cb.checked = false;
+      });
+    }
+  }
+
+  onPermTabViewToggle(pageKey, tabKey, canSeeTab) {
+    const editCb = document.getElementById(`perm-tab-edit-cb-${tabKey}`);
+    const editLabel = document.getElementById(`perm-tab-edit-label-${tabKey}`);
+    if (editCb) {
+      if (!canSeeTab) editCb.checked = false;
+      editCb.disabled = !canSeeTab;
+    }
+    if (editLabel) {
+      editLabel.style.opacity = canSeeTab ? '1' : '0.35';
+      editLabel.style.cursor = canSeeTab ? 'pointer' : 'not-allowed';
+    }
+  }
+
+  onPermTabEditToggle(pageKey, tabKey, canEditTab) {
+    if (canEditTab) {
+      // Ensure tab view and parent page view+edit are enabled
+      const tabViewCb = document.querySelector(`.perm-tab-view-cb[data-tab-key="${tabKey}"]`);
+      if (tabViewCb && !tabViewCb.checked) {
+        tabViewCb.checked = true;
+        this.onPermTabViewToggle(pageKey, tabKey, true);
+      }
+      const pageEditCb = document.getElementById(`perm-page-edit-cb-${pageKey}`);
+      if (pageEditCb && !pageEditCb.checked) {
+        pageEditCb.checked = true;
+      }
+    }
+  }
+
+  setAllTabsForPage(pageKey, canSee, canEdit) {
+    document.querySelectorAll(`.perm-tab-view-cb[data-parent-page="${pageKey}"]`).forEach(cb => {
+      cb.checked = canSee;
+      const tabKey = cb.dataset.tabKey;
+      this.onPermTabViewToggle(pageKey, tabKey, canSee);
+    });
+    document.querySelectorAll(`.perm-tab-edit-cb[data-parent-page="${pageKey}"]`).forEach(cb => {
+      cb.checked = Boolean(canSee && canEdit);
+    });
+    if (canEdit) {
+      const pageEditCb = document.getElementById(`perm-page-edit-cb-${pageKey}`);
+      if (pageEditCb) pageEditCb.checked = true;
+    }
+  }
+
+  applyPermissionPresetUI(preset) {
+    if (!window.supabaseSync) return;
+    const perms = window.supabaseSync.buildPresetPermissions(preset);
+    document.querySelectorAll('.perm-page-view-cb').forEach(cb => {
+      const pk = cb.dataset.pageKey;
+      const st = (perms.pages && perms.pages[pk]) || { view: false, edit: false };
+      cb.checked = Boolean(st.view);
+      this.onPermPageViewToggle(pk, Boolean(st.view));
+      const editCb = document.getElementById(`perm-page-edit-cb-${pk}`);
+      if (editCb) editCb.checked = Boolean(st.view && st.edit);
+    });
+    document.querySelectorAll('.perm-tab-view-cb').forEach(cb => {
+      const tk = cb.dataset.tabKey;
+      const pk = cb.dataset.parentPage;
+      const st = (perms.tabs && perms.tabs[tk]) || { view: false, edit: false };
+      cb.checked = Boolean(st.view);
+      this.onPermTabViewToggle(pk, tk, Boolean(st.view));
+      const editCb = document.getElementById(`perm-tab-edit-cb-${tk}`);
+      if (editCb) editCb.checked = Boolean(st.view && st.edit);
+    });
+  }
+
+  collectPermissionsFromDOM() {
+    const pages = {};
+    const tabs = {};
+    document.querySelectorAll('.perm-page-view-cb').forEach(cb => {
+      const pk = cb.dataset.pageKey;
+      const view = Boolean(cb.checked);
+      const editCb = document.getElementById(`perm-page-edit-cb-${pk}`);
+      const edit = view && Boolean(editCb && editCb.checked);
+      pages[pk] = { view, edit };
+    });
+    document.querySelectorAll('.perm-tab-view-cb').forEach(cb => {
+      const tk = cb.dataset.tabKey;
+      const view = Boolean(cb.checked);
+      const editCb = document.getElementById(`perm-tab-edit-cb-${tk}`);
+      const edit = view && Boolean(editCb && editCb.checked);
+      tabs[tk] = { view, edit };
+    });
+    return { pages, tabs };
+  }
+
+  sendOrCopyAppInvite(displayName) {
+    const email = (document.getElementById('edit-emp-notif-email')?.value || '').trim();
+    const pin = (document.getElementById('emp-perm-pin-input')?.value || '2468').trim();
+    if (!email) {
+      if (typeof window.showToast === 'function') {
+        window.showToast('⚠️ Enter a Notification Email first to invite this employee.', true);
+      }
+      document.getElementById('edit-emp-notif-email')?.focus();
+      return;
+    }
+    const appUrl = 'https://codybechdol.github.io/rubber-tracker/desktop/';
+    const subject = encodeURIComponent(`Safety Assistant App Invitation — ${displayName}`);
+    const bodyText = `Hi ${displayName},\n\nYou have been invited to access the Safety Assistant App.\n\n1. Open the App: ${appUrl}\n2. Click the User Account button in the top bar and select: ${displayName}\n3. Enter your 4-Digit Access PIN: ${pin}\n\n— Cody Bechdol`;
+    try {
+      navigator.clipboard.writeText(bodyText);
+      if (typeof window.showToast === 'function') {
+        window.showToast(`📋 Invite copied & opening email to ${email} (PIN: ${pin})`);
+      }
+    } catch { /* ignore */ }
+    window.open(`mailto:${encodeURIComponent(email.split(',')[0].trim())}?subject=${subject}&body=${encodeURIComponent(bodyText)}`, '_blank');
   }
 
   async saveEmployeeDetails(displayName) {
@@ -1891,17 +2195,38 @@ class EmployeeProfileEngine {
     const statusKey = getFieldKey('Status');
     const locKey = getFieldKey('Location');
 
+    const isMasterAdmin = Boolean(window.supabaseSync && window.supabaseSync.isMasterAdmin());
+
     const updatedFields = {
       [phoneKey]: newPhone,
       [emailKey]: newEmail,
       [mpEmailKey]: newMpEmail,
-      [notifEmailKey]: newNotifEmail,
       [gloveKey]: newGlove,
       [sleeveKey]: newSleeve,
       [classKey]: newClass,
       [secJobKey]: newSecJob,
       [altKey]: newAltNames
     };
+
+    // Only Master Admin (Cody Bechdol) can edit Notification Emails and configure App Invite & Permissions
+    if (isMasterAdmin) {
+      updatedFields[notifEmailKey] = newNotifEmail;
+      if (window.supabaseSync && typeof window.supabaseSync.upsertAccountFromEmployeeProfile === 'function') {
+        const enabledEl = document.getElementById('emp-perm-account-enabled');
+        const pinEl = document.getElementById('emp-perm-pin-input');
+        const accEnabled = enabledEl ? Boolean(enabledEl.checked) : Boolean(newNotifEmail);
+        const accPin = pinEl ? pinEl.value.trim() : '2468';
+        const perms = this.collectPermissionsFromDOM();
+        window.supabaseSync.upsertAccountFromEmployeeProfile({
+          name: displayName,
+          email: newNotifEmail,
+          phone: newPhone,
+          pin: accPin,
+          enabled: accEnabled,
+          permissions: perms
+        });
+      }
+    }
 
     if (newStatus) {
       if (statusKey) {

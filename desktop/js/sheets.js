@@ -459,8 +459,10 @@ class SheetNavigator {
     const bar = document.getElementById('sheet-tabs-bar');
     if (!bar) return;
 
+    const visibleSheets = this.sheetList.filter(s => !window.supabaseSync || window.supabaseSync.canViewTab(s.key, 'sheets-view'));
+
     // Fast-path: If buttons are already built, just update active states and badges without destroying DOM
-    if (!force && bar.children.length === this.sheetList.length) {
+    if (!force && bar.children.length === visibleSheets.length) {
       for (let i = 0; i < bar.children.length; i++) {
         const btn = bar.children[i];
         const sheetKey = btn.dataset.sheetKey;
@@ -492,7 +494,7 @@ class SheetNavigator {
 
     bar.innerHTML = '';
 
-    this.sheetList.forEach(sheet => {
+    visibleSheets.forEach(sheet => {
       const btn = document.createElement('button');
       btn.className = 'sheet-tab-btn' + (sheet.key === this.currentSheetKey ? ' active' : '');
       btn.dataset.sheetKey = sheet.key;
@@ -538,6 +540,9 @@ class SheetNavigator {
           this.multiSort = null;
         }
         this.sortDir = 'asc';
+        if (window.supabaseSync) {
+          window.supabaseSync.syncEditModeForCurrentContext('sheets-view');
+        }
         this.renderTabsBar();
         this.renderCurrentSheet();
       };

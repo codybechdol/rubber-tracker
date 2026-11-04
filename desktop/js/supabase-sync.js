@@ -63,10 +63,14 @@ class SupabaseSyncEngine {
     if (this.isConfigured() && this.enabled) {
       setTimeout(() => {
         this.updateUserHeaderButton();
+        this.applyActiveUserPermissions();
         this.startRealtimeSync();
       }, 1800);
     } else {
-      setTimeout(() => this.updateUserHeaderButton(), 500);
+      setTimeout(() => {
+        this.updateUserHeaderButton();
+        this.applyActiveUserPermissions();
+      }, 500);
     }
   }
 
@@ -104,19 +108,151 @@ class SupabaseSyncEngine {
     return String(match['Phone Number'] || match['Phone'] || match['Cell'] || '').trim();
   }
 
+  static get APP_PERMISSION_PAGES() {
+    return [
+      {
+        key: 'sheets-view',
+        label: '📦 Active Inventory & Swaps',
+        tabs: [
+          { key: 'employees', label: '👥 Employees' },
+          { key: 'job_tracking', label: '📋 Job Tracking' },
+          { key: 'locations', label: '📍 Locations & Approvals' },
+          { key: 'gloves', label: '🧤 Gloves' },
+          { key: 'glove_swaps', label: '🔄 Glove Swaps' },
+          { key: 'sleeves', label: '🦺 Sleeves' },
+          { key: 'sleeve_swaps', label: '🔄 Sleeve Swaps' },
+          { key: 'blankets', label: '🧱 Blankets' },
+          { key: 'blanket_swaps', label: '🔄 Blanket Swaps' },
+          { key: 'macks', label: '🧱 MACKs' },
+          { key: 'mack_swaps', label: '🔄 MACK Swaps' },
+          { key: 'hv_testers', label: '⚡ HV Testers' },
+          { key: 'hv_tester_swaps', label: '🔄 HV Tester Swaps' },
+          { key: 'phasing_sets', label: '⚡ Phasing Sets' },
+          { key: 'phasing_set_swaps', label: '🔄 Phasing Set Swaps' },
+          { key: 'aed', label: '🏥 AED' },
+          { key: 'aed_swaps', label: '🔄 AED Swaps' },
+          { key: 'grounds', label: '⚡ Grounds' },
+          { key: 'ground_swaps', label: '🔄 Ground Swaps' },
+          { key: 'hot_sticks', label: '🔴 Hot Sticks' },
+          { key: 'hot_stick_swaps', label: '🔄 Hot Stick Swaps' },
+          { key: 'dot_drug_tests', label: '🧪 DOT Drug Tests' },
+          { key: 'drug_test_clinics', label: '🏥 Drug Test Clinics' },
+          { key: 'retired_equipment', label: '🗄️ Retired Equipment' },
+          { key: 'trip_schedule', label: '📅 Trip Schedule' },
+          { key: 'test_batches', label: '🔬 Test Batches' },
+          { key: 'field_gps_log', label: '📍 Field GPS Log' },
+          { key: 'daily_accomplishments', label: '⏱️ Daily Accomplishments' },
+          { key: 'system_config', label: '⚙️ System Config' }
+        ]
+      },
+      { key: 'weekly-summary-view', label: '📊 Weekly Summary & Briefing', tabs: [] },
+      { key: 'tailgate-generator-view', label: '👷 Foreman Tailgates', tabs: [] },
+      { key: 'crew-import-view', label: '👥 Crew Import (Excel)', tabs: [] },
+      { key: 'safety-compliance-view', label: '🛡️ Safety Compliance', tabs: [] },
+      { key: 'incident-reports-view', label: '⚠️ Incident Reports', tabs: [] },
+      { key: 'expiring-certs-view', label: '📜 Expiring Certs', tabs: [] },
+      { key: 'training-view', label: '🎓 Training', tabs: [] },
+      { key: 'drug-testing-view', label: '🧪 DOT Drug Testing', tabs: [] },
+      { key: 'previous-employees-view', label: '👥 Previous Employees', tabs: [] },
+      {
+        key: 'history-view',
+        label: '📜 History Records',
+        tabs: [
+          { key: 'gloves_history', label: '🧤 Gloves History' },
+          { key: 'sleeves_history', label: '🦺 Sleeves History' },
+          { key: 'blankets_history', label: '🧱 Blankets History' },
+          { key: 'macks_history', label: '🧱 MACKs History' },
+          { key: 'hv_testers_history', label: '⚡ HV Testers History' },
+          { key: 'phasing_sets_history', label: '⚡ Phasing Sets History' },
+          { key: 'aed_history', label: '🏥 AED History' },
+          { key: 'grounds_history', label: '⚡ Grounds History' },
+          { key: 'hot_sticks_history', label: '🔴 Hot Sticks History' },
+          { key: 'employee_history', label: '👥 Employee History' }
+        ]
+      },
+      { key: 'trip-planner-view', label: '🗺️ Trip Planner', tabs: [] },
+      { key: 'tasks-view', label: '📋 Tasks & Calendar', tabs: [] },
+      { key: 'lookup-view', label: '🔍 Lookup & Search', tabs: [] },
+      { key: 'procurement-view', label: '🛒 Purchase Needs & Orders', tabs: [] },
+      { key: 'aging-view', label: '📊 Fleet Aging & EOL', tabs: [] },
+      { key: 'jm-test-view', label: '⚡ JM Test Systems', tabs: [] },
+      { key: 'nwe-fire-view', label: '🔥 NWE Fire Info', tabs: [] },
+      { key: 'open-ppe-tracker', label: '🧤 Rubber PPE Tracker (Popup)', tabs: [] },
+      { key: 'open-location-approvals', label: '📍 Location Approvals (Popup)', tabs: [] },
+      { key: 'open-fiscal-year-transition', label: '📅 FY Transition (Popup)', tabs: [] },
+      { key: 'ai-copilot', label: '✨ AI Copilot', tabs: [] },
+      { key: 'settings-view', label: '⚙️ Sync Settings', tabs: [] }
+    ];
+  }
+
+  buildPresetPermissions(preset = 'view_all') {
+    const pages = {};
+    const tabs = {};
+    const schema = SupabaseSyncEngine.APP_PERMISSION_PAGES;
+
+    const foremanViewPages = new Set([
+      'sheets-view', 'tailgate-generator-view', 'safety-compliance-view',
+      'expiring-certs-view', 'training-view', 'lookup-view', 'nwe-fire-view'
+    ]);
+    const foremanEditPages = new Set(['tailgate-generator-view']);
+    const foremanViewTabs = new Set([
+      'employees', 'job_tracking', 'gloves', 'glove_swaps', 'sleeves', 'sleeve_swaps',
+      'blankets', 'blanket_swaps', 'macks', 'mack_swaps', 'grounds', 'ground_swaps', 'hot_sticks', 'hot_stick_swaps'
+    ]);
+
+    const ppeTechEditPages = new Set([
+      'sheets-view', 'history-view', 'trip-planner-view', 'tasks-view',
+      'lookup-view', 'procurement-view', 'aging-view', 'jm-test-view', 'open-ppe-tracker'
+    ]);
+
+    schema.forEach(p => {
+      let v = false;
+      let e = false;
+      if (preset === 'full_edit') {
+        v = true; e = true;
+      } else if (preset === 'view_all') {
+        v = true; e = false;
+      } else if (preset === 'foreman') {
+        v = foremanViewPages.has(p.key);
+        e = foremanEditPages.has(p.key);
+      } else if (preset === 'ppe_tech') {
+        v = true;
+        e = ppeTechEditPages.has(p.key);
+      } else if (preset === 'none') {
+        v = false; e = false;
+      }
+      pages[p.key] = { view: v, edit: v && e };
+      (p.tabs || []).forEach(t => {
+        let tv = v;
+        let te = v && e;
+        if (preset === 'foreman' && p.key === 'sheets-view') {
+          tv = foremanViewTabs.has(t.key);
+          te = false;
+        }
+        tabs[t.key] = { view: tv, edit: tv && te };
+      });
+    });
+
+    return { pages, tabs };
+  }
+
   _defaultUserAccounts() {
     return [
       {
         name: 'Cody Bechdol',
+        email: '',
         role: 'master_admin',
         pin: '1234',
-        phone: this._lookupEmployeePhone('Cody Bechdol') || ''
+        phone: this._lookupEmployeePhone('Cody Bechdol') || '',
+        permissions: this.buildPresetPermissions('full_edit')
       },
       {
         name: 'Sid Wade',
+        email: '',
         role: 'admin',
         pin: '2468',
-        phone: this._lookupEmployeePhone('Sid Wade') || ''
+        phone: this._lookupEmployeePhone('Sid Wade') || '',
+        permissions: this.buildPresetPermissions('full_edit')
       }
     ];
   }
@@ -139,13 +275,27 @@ class SupabaseSyncEngine {
     // Always guarantee Cody Bechdol is Master Admin
     let cody = accounts.find(a => String(a.name || '').trim().toLowerCase() === 'cody bechdol');
     if (!cody) {
-      cody = { name: 'Cody Bechdol', role: 'master_admin', pin: '1234', phone: this._lookupEmployeePhone('Cody Bechdol') || '' };
+      cody = {
+        name: 'Cody Bechdol',
+        email: '',
+        role: 'master_admin',
+        pin: '1234',
+        phone: this._lookupEmployeePhone('Cody Bechdol') || '',
+        permissions: this.buildPresetPermissions('full_edit')
+      };
       accounts.unshift(cody);
     } else {
       cody.role = 'master_admin';
       if (!cody.pin) cody.pin = '1234';
       if (!cody.phone) cody.phone = this._lookupEmployeePhone('Cody Bechdol') || '';
     }
+    // Ensure every account has a normalized permissions object
+    accounts.forEach(acc => {
+      if (!acc.permissions || !acc.permissions.pages || !acc.permissions.tabs) {
+        const preset = (acc.role === 'master_admin' || acc.role === 'admin') ? 'full_edit' : 'view_all';
+        acc.permissions = this.buildPresetPermissions(preset);
+      }
+    });
     return accounts;
   }
 
@@ -164,6 +314,7 @@ class SupabaseSyncEngine {
         this._scheduleTableSnapshotPush('__configs__');
       }
     }
+    this.applyActiveUserPermissions();
   }
 
   getAccountForUser(userName) {
@@ -177,6 +328,144 @@ class SupabaseSyncEngine {
     if (target === 'cody bechdol') return true;
     const acc = this.getAccountForUser(target);
     return Boolean(acc && acc.role === 'master_admin');
+  }
+
+  canViewPage(pageKey, userName) {
+    if (this.isMasterAdmin(userName)) return true;
+    const acc = this.getAccountForUser(userName);
+    if (!acc) return true;
+    if (acc.permissions && acc.permissions.pages && acc.permissions.pages[pageKey]) {
+      return Boolean(acc.permissions.pages[pageKey].view);
+    }
+    return true;
+  }
+
+  canEditPage(pageKey, userName) {
+    if (this.isMasterAdmin(userName)) return true;
+    if (!this.canViewPage(pageKey, userName)) return false;
+    const acc = this.getAccountForUser(userName);
+    if (!acc) return false;
+    if (acc.role === 'view_only') return false;
+    if (acc.permissions && acc.permissions.pages && acc.permissions.pages[pageKey]) {
+      return Boolean(acc.permissions.pages[pageKey].edit);
+    }
+    return acc.role === 'admin';
+  }
+
+  canViewTab(tabKey, parentPageKey = 'sheets-view', userName) {
+    if (this.isMasterAdmin(userName)) return true;
+    if (!this.canViewPage(parentPageKey, userName)) return false;
+    const acc = this.getAccountForUser(userName);
+    if (!acc) return true;
+    if (acc.permissions && acc.permissions.tabs && acc.permissions.tabs[tabKey]) {
+      return Boolean(acc.permissions.tabs[tabKey].view);
+    }
+    return true;
+  }
+
+  canEditTab(tabKey, parentPageKey = 'sheets-view', userName) {
+    if (this.isMasterAdmin(userName)) return true;
+    if (!this.canViewTab(tabKey, parentPageKey, userName)) return false;
+    if (!this.canEditPage(parentPageKey, userName)) return false;
+    const acc = this.getAccountForUser(userName);
+    if (!acc) return false;
+    if (acc.role === 'view_only') return false;
+    if (acc.permissions && acc.permissions.tabs && acc.permissions.tabs[tabKey]) {
+      return Boolean(acc.permissions.tabs[tabKey].edit);
+    }
+    return acc.role === 'admin';
+  }
+
+  canEditCurrentContext(viewIdOverride) {
+    if (this.isMasterAdmin()) return true;
+    const activeViewEl = document.querySelector('.view-container.active');
+    const viewId = viewIdOverride || (activeViewEl ? activeViewEl.id : 'sheets-view');
+    if (viewId === 'sheets-view' && window.sheetNavigator) {
+      return this.canEditTab(window.sheetNavigator.currentSheetKey, 'sheets-view');
+    }
+    if (viewId === 'history-view' && window.historyNavigator) {
+      return this.canEditTab(window.historyNavigator.currentSheetKey, 'history-view');
+    }
+    return this.canEditPage(viewId);
+  }
+
+  syncEditModeForCurrentContext(viewIdOverride) {
+    if (typeof window.setAppRoleMode !== 'function') return;
+    if (this.isMasterAdmin()) {
+      // Master Admin keeps full control; do not force-revert if Cody manually toggled View Only for testing
+      return;
+    }
+    const canEdit = this.canEditCurrentContext(viewIdOverride);
+    window.setAppRoleMode(canEdit ? 'admin' : 'view_only');
+  }
+
+  applyActiveUserPermissions() {
+    if (typeof document === 'undefined') return;
+    const isMaster = this.isMasterAdmin();
+
+    // 1. Sidebar items with data-view
+    document.querySelectorAll('.nav-item[data-view], .mobile-nav-btn[data-view]').forEach(el => {
+      const viewKey = el.dataset.view;
+      if (!viewKey) return;
+      const allowed = isMaster || this.canViewPage(viewKey);
+      el.style.display = allowed ? '' : 'none';
+    });
+
+    // 2. Sidebar items with data-action or AI copilot
+    document.querySelectorAll('.nav-item[data-action]').forEach(el => {
+      const actKey = el.dataset.action;
+      if (!actKey) return;
+      const allowed = isMaster || this.canViewPage(actKey);
+      el.style.display = allowed ? '' : 'none';
+    });
+    const aiNav = document.getElementById('nav-item-ai-copilot');
+    const aiBtn = document.getElementById('btn-ai-copilot');
+    const aiAllowed = isMaster || this.canViewPage('ai-copilot');
+    if (aiNav) aiNav.style.display = aiAllowed ? '' : 'none';
+    if (aiBtn) aiBtn.style.display = aiAllowed ? 'flex' : 'none';
+
+    // 3. Re-render Sheet & History Tab Bars so hidden tabs are filtered out
+    if (window.sheetNavigator && typeof window.sheetNavigator.renderTabsBar === 'function') {
+      if (!isMaster && !this.canViewTab(window.sheetNavigator.currentSheetKey, 'sheets-view')) {
+        const firstAllowed = window.sheetNavigator.sheetList.find(s => this.canViewTab(s.key, 'sheets-view'));
+        if (firstAllowed) {
+          window.sheetNavigator.currentSheetKey = firstAllowed.key;
+        }
+      }
+      window.sheetNavigator.renderTabsBar(true);
+      if (document.getElementById('sheets-view')?.classList.contains('active')) {
+        window.sheetNavigator.renderCurrentSheet();
+      }
+    }
+
+    if (window.historyNavigator && typeof window.historyNavigator.renderTabsBar === 'function') {
+      if (!isMaster && !this.canViewTab(window.historyNavigator.currentSheetKey, 'history-view')) {
+        const firstAllowed = window.historyNavigator.sheetList.find(s => this.canViewTab(s.key, 'history-view'));
+        if (firstAllowed) {
+          window.historyNavigator.currentSheetKey = firstAllowed.key;
+        }
+      }
+      window.historyNavigator.renderTabsBar(true);
+      if (document.getElementById('history-view')?.classList.contains('active')) {
+        window.historyNavigator.renderCurrentHistory();
+      }
+    }
+
+    // 4. Redirect away if current active view is hidden
+    const activeViewEl = document.querySelector('.view-container.active');
+    if (activeViewEl && !isMaster && !this.canViewPage(activeViewEl.id)) {
+      const firstPage = SupabaseSyncEngine.APP_PERMISSION_PAGES.find(p => p.key.endsWith('-view') && this.canViewPage(p.key));
+      if (firstPage && typeof window.navigateToView === 'function') {
+        window.navigateToView(firstPage.key);
+      }
+    }
+
+    // 5. Enforce Edit vs View-Only mode for the active page/tab
+    if (isMaster) {
+      if (typeof window.setAppRoleMode === 'function') window.setAppRoleMode('admin');
+    } else {
+      this.syncEditModeForCurrentContext();
+    }
   }
 
   verifyUserOrMasterPin(targetUserName, enteredPin) {
@@ -220,17 +509,8 @@ class SupabaseSyncEngine {
     const sbDevEl = document.getElementById('supabase-device-input');
     if (sbDevEl) sbDevEl.value = this.deviceName;
 
-    // Sync App Role Mode with account permissions (Master Admin & Admin -> admin mode; View Only -> view_only mode)
-    const acc = this.getAccountForUser(this.userName);
-    if (acc && typeof window.setAppRoleMode === 'function') {
-      if (acc.role === 'view_only') {
-        window.setAppRoleMode('view_only');
-      } else {
-        window.setAppRoleMode('admin');
-      }
-    }
-
     this.updateUserHeaderButton();
+    this.applyActiveUserPermissions();
   }
 
   updateUserHeaderButton() {
@@ -259,11 +539,12 @@ class SupabaseSyncEngine {
     const roleLabel = (role) => {
       if (role === 'master_admin') return '👑 Master Admin (Full Access)';
       if (role === 'admin') return '🔧 Admin (Can Edit)';
+      if (role === 'custom') return '🔑 Custom Page/Tab Permissions';
       return '👁️ View Only';
     };
 
     modal.innerHTML = `
-      <div class="modal-box" style="max-width: 540px; width: 94%; max-height: 90vh; overflow-y: auto;">
+      <div class="modal-box" style="max-width: 560px; width: 94%; max-height: 90vh; overflow-y: auto;">
         <div class="modal-header" style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); border-bottom: 1px solid rgba(59, 130, 246, 0.35);">
           <div style="display: flex; align-items: center; gap: 8px;">
             <span style="font-size: 18px;">${isCurrentMaster ? '👑' : '🔒'}</span>
@@ -285,7 +566,7 @@ class SupabaseSyncEngine {
           <div>
             <label style="display: block; font-size: 11.5px; font-weight: 700; color: var(--text-secondary); margin-bottom: 4px;">SELECT USER ACCOUNT</label>
             <select id="identity-user-name-input" class="sheet-search" style="width: 100%; font-size: 13px;" onchange="window.supabaseSync._onModalAccountSelectChange()">
-              ${accounts.map(a => `<option value="${a.name.replace(/"/g, '&quot;')}" ${a.name === this.userName ? 'selected' : ''}>${a.role === 'master_admin' ? '👑 ' : '👤 '}${a.name} — ${roleLabel(a.role)}</option>`).join('')}
+              ${accounts.map(a => `<option value="${a.name.replace(/"/g, '&quot;')}" ${a.name === this.userName ? 'selected' : ''}>${a.role === 'master_admin' ? '👑 ' : '👤 '}${a.name}${a.email ? ' (' + a.email + ')' : ''} — ${roleLabel(a.role)}</option>`).join('')}
             </select>
           </div>
 
@@ -317,25 +598,33 @@ class SupabaseSyncEngine {
             <div style="margin-top: 6px; border-top: 1px solid rgba(148, 163, 184, 0.2); padding-top: 12px;">
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                 <span style="font-size: 12px; font-weight: 700; color: #fbbf24;">👑 MASTER ADMIN: MANAGE ALL ACCOUNTS & PINS</span>
-                <span style="font-size: 11px; color: var(--text-secondary);">Full Access</span>
+                <span style="font-size: 11px; color: var(--text-secondary);">Invite via Employee Profile → Notification Email</span>
               </div>
-              <div style="display: flex; flex-direction: column; gap: 6px; max-height: 185px; overflow-y: auto; padding-right: 4px;">
+              <div style="display: flex; flex-direction: column; gap: 6px; max-height: 200px; overflow-y: auto; padding-right: 4px;">
                 ${accounts.map((acc, idx) => `
-                  <div style="display: grid; grid-template-columns: 1.4fr 1.1fr 75px auto; gap: 6px; align-items: center; background: rgba(15, 23, 42, 0.6); padding: 6px 8px; border-radius: 6px; border: 1px solid rgba(148, 163, 184, 0.15);">
-                    <span style="font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${acc.role === 'master_admin' ? '👑 ' : ''}${acc.name}</span>
+                  <div style="display: grid; grid-template-columns: 1.3fr 1fr 70px auto auto; gap: 6px; align-items: center; background: rgba(15, 23, 42, 0.6); padding: 6px 8px; border-radius: 6px; border: 1px solid rgba(148, 163, 184, 0.15);">
+                    <div style="overflow: hidden;">
+                      <div style="font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${acc.role === 'master_admin' ? '👑 ' : ''}${acc.name}</div>
+                      ${acc.email ? `<div style="font-size: 10px; color: #93c5fd; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">✉️ ${acc.email}</div>` : ''}
+                    </div>
                     <select class="sheet-search" style="font-size: 11px; padding: 3px 6px;" ${acc.role === 'master_admin' ? 'disabled' : ''} onchange="window.supabaseSync._updateAccountField(${idx}, 'role', this.value)">
                       <option value="master_admin" ${acc.role === 'master_admin' ? 'selected' : ''}>👑 Master Admin</option>
                       <option value="admin" ${acc.role === 'admin' ? 'selected' : ''}>🔧 Admin (Edit)</option>
+                      <option value="custom" ${acc.role === 'custom' ? 'selected' : ''}>🔑 Custom</option>
                       <option value="view_only" ${acc.role === 'view_only' ? 'selected' : ''}>👁️ View Only</option>
                     </select>
                     <input type="text" class="sheet-search" style="font-size: 11.5px; padding: 3px 6px; text-align: center; font-family: monospace;" value="${acc.pin || '0000'}" title="4-Digit PIN" onchange="window.supabaseSync._updateAccountField(${idx}, 'pin', this.value)">
-                    ${acc.role === 'master_admin' ? `<span style="font-size: 10px; color: #94a3b8; padding: 0 4px;">Master</span>` : `<button class="btn btn-secondary" style="padding: 2px 6px; font-size: 11px; color: #f87171;" title="Remove Account" onclick="window.supabaseSync._removeUserAccount(${idx})">✕</button>`}
+                    ${acc.role === 'master_admin' ? `<span style="font-size: 10px; color: #94a3b8; padding: 0 4px;">Master</span>` : `
+                      <button class="btn btn-secondary" style="padding: 2px 6px; font-size: 11px; color: #60a5fa;" title="Configure Page & Tab Permissions in Employee Profile" onclick="document.getElementById('user-identity-modal').style.display='none'; if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${acc.name.replace(/'/g, "\\'")}', 'details');}">⚙️ Perms</button>
+                      <button class="btn btn-secondary" style="padding: 2px 6px; font-size: 11px; color: #f87171;" title="Remove Account" onclick="window.supabaseSync._removeUserAccount(${idx})">✕</button>
+                    `}
                   </div>
                 `).join('')}
               </div>
               <div style="display: grid; grid-template-columns: 1.3fr 1fr 75px auto; gap: 6px; margin-top: 8px; align-items: center;">
                 <input type="text" id="new-account-name-input" class="sheet-search" style="font-size: 12px; padding: 5px 8px;" placeholder="New User Full Name">
                 <select id="new-account-role-select" class="sheet-search" style="font-size: 11.5px; padding: 5px 6px;">
+                  <option value="custom">🔑 Custom</option>
                   <option value="admin">🔧 Admin (Edit)</option>
                   <option value="view_only">👁️ View Only</option>
                 </select>
@@ -393,10 +682,61 @@ class SupabaseSyncEngine {
     const accounts = this.getUserAccounts();
     if (!accounts[idx]) return;
     accounts[idx][field] = String(value || '').trim();
+    if (field === 'role') {
+      if (value === 'admin' || value === 'master_admin') {
+        accounts[idx].permissions = this.buildPresetPermissions('full_edit');
+      } else if (value === 'view_only') {
+        accounts[idx].permissions = this.buildPresetPermissions('view_all');
+      }
+    }
     this.saveUserAccounts(accounts);
     if (typeof window.showToast === 'function') {
       window.showToast(`✅ Updated ${accounts[idx].name}'s ${field}`);
     }
+  }
+
+  upsertAccountFromEmployeeProfile({ name, email, phone, pin, enabled, permissions }) {
+    if (!this.isMasterAdmin()) return;
+    const cleanName = String(name || '').trim();
+    if (!cleanName) return;
+
+    const accounts = this.getUserAccounts();
+    const idx = accounts.findIndex(a => String(a.name || '').trim().toLowerCase() === cleanName.toLowerCase());
+
+    if (!enabled) {
+      if (idx !== -1 && accounts[idx].role !== 'master_admin') {
+        accounts.splice(idx, 1);
+        this.saveUserAccounts(accounts);
+      }
+      return;
+    }
+
+    const isCody = cleanName.toLowerCase() === 'cody bechdol';
+    const record = idx !== -1 ? accounts[idx] : {
+      name: cleanName,
+      role: isCody ? 'master_admin' : 'custom',
+      pin: pin || '0000',
+      phone: phone || this._lookupEmployeePhone(cleanName) || '',
+      email: email || '',
+      permissions: permissions || this.buildPresetPermissions('view_all')
+    };
+
+    record.email = String(email || '').trim();
+    if (phone !== undefined) record.phone = String(phone || '').trim();
+    if (pin) record.pin = String(pin).trim();
+    if (!isCody) {
+      record.role = 'custom';
+      if (permissions) record.permissions = permissions;
+    } else {
+      record.role = 'master_admin';
+    }
+
+    if (idx === -1) {
+      accounts.push(record);
+    } else {
+      accounts[idx] = record;
+    }
+    this.saveUserAccounts(accounts);
   }
 
   _addNewUserAccount() {
@@ -404,7 +744,7 @@ class SupabaseSyncEngine {
     const roleEl = document.getElementById('new-account-role-select');
     const pinEl = document.getElementById('new-account-pin-input');
     const name = String(nameEl?.value || '').trim();
-    const role = String(roleEl?.value || 'admin').trim();
+    const role = String(roleEl?.value || 'custom').trim();
     const pin = String(pinEl?.value || '').trim() || '0000';
     if (!name) {
       if (typeof window.showToast === 'function') window.showToast('⚠️ Enter a user name first.', 'error');
@@ -415,11 +755,14 @@ class SupabaseSyncEngine {
       if (typeof window.showToast === 'function') window.showToast('⚠️ Account already exists.', 'error');
       return;
     }
+    const preset = (role === 'admin' || role === 'master_admin') ? 'full_edit' : 'view_all';
     accounts.push({
       name,
+      email: '',
       role,
       pin,
-      phone: this._lookupEmployeePhone(name) || ''
+      phone: this._lookupEmployeePhone(name) || '',
+      permissions: this.buildPresetPermissions(preset)
     });
     this.saveUserAccounts(accounts);
     this.openUserIdentityModal(true);
