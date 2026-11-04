@@ -2109,26 +2109,29 @@ class EmployeeProfileEngine {
   }
 
   buildWelcomeLetterData(displayName) {
-    const emailEl = document.getElementById('edit-emp-notif-email');
-    const pinEl = document.getElementById('emp-perm-pin-input');
+    const activeModalName = document.getElementById('edit-emp-name')?.value || '';
+    const isSameProfileOpen = Boolean(activeModalName && this.isNameMatch(activeModalName, displayName));
+
+    const emailEl = isSameProfileOpen ? document.getElementById('edit-emp-notif-email') : null;
+    const pinEl = isSameProfileOpen ? document.getElementById('emp-perm-pin-input') : null;
 
     const empTable = this.db?.getTable('employees');
     const row = empTable?.rows?.find(r => this.isNameMatch(r['Employee Name'] || r['Name'] || '', displayName));
 
-    const email = (emailEl ? emailEl.value : (row?.['Notification Emails'] || row?.['Email Address'] || '')).trim();
+    const accounts = window.supabaseSync ? window.supabaseSync.getUserAccounts() : [];
+    const acc = accounts.find(a => String(a.name || '').trim().toLowerCase() === String(displayName || '').trim().toLowerCase());
+
+    const email = (emailEl && emailEl.value.trim()) ? emailEl.value.trim() : ((acc && acc.email) || row?.['Notification Emails'] || row?.['Email Address'] || '').trim();
     const phone = (row?.['Phone Number'] || '').trim();
     const role = (row?.['Job Classification'] || row?.['Role'] || 'Team Member').trim();
     const location = (row?.['Location'] || 'Helena').trim();
 
-    const accounts = window.supabaseSync ? window.supabaseSync.getUserAccounts() : [];
-    const acc = accounts.find(a => String(a.name || '').trim().toLowerCase() === String(displayName || '').trim().toLowerCase());
-
     const phoneDigits = phone.replace(/\D/g, '');
     const pin = (pinEl?.value || acc?.pin || (phoneDigits.length >= 4 ? phoneDigits.slice(-4) : '2468')).trim();
 
-    const perms = (document.getElementById('emp-perm-matrix-wrapper') && typeof this.collectPermissionsFromDOM === 'function')
+    const perms = (isSameProfileOpen && document.getElementById('emp-perm-matrix-wrapper') && typeof this.collectPermissionsFromDOM === 'function')
       ? this.collectPermissionsFromDOM()
-      : (acc?.permissions || (window.supabaseSync ? window.supabaseSync.buildPresetPermissions('view_all') : { pages: {}, tabs: {} }));
+      : (acc?.permissions || (window.supabaseSync ? window.supabaseSync.buildPresetPermissions(acc?.role === 'admin' ? 'admin' : (acc?.role === 'master_admin' ? 'master_admin' : 'view_all')) : { pages: {}, tabs: {} }));
 
     const isMaster = displayName.trim().toLowerCase() === 'cody bechdol';
     const pPages = perms.pages || {};
@@ -2388,6 +2391,10 @@ class EmployeeProfileEngine {
       document.body.appendChild(modal);
     }
 
+    modal.style.zIndex = '13000';
+    modal.style.background = 'rgba(0, 0, 0, 0.75)';
+    modal.style.pointerEvents = 'auto';
+
     const data = this.buildWelcomeLetterData(displayName);
 
     modal.innerHTML = `
@@ -2406,7 +2413,7 @@ class EmployeeProfileEngine {
               </div>
             </div>
           </div>
-          <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 13px;" onclick="document.getElementById('welcome-letter-modal').style.display='none'">✕</button>
+          <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 13px;" onclick="const m=document.getElementById('welcome-letter-modal'); if(m){m.style.display='none'; m.classList.remove('active');}">✕</button>
         </div>
 
         <!-- Recipient & Credentials Summary Bar -->
@@ -2573,7 +2580,7 @@ class EmployeeProfileEngine {
             <button class="btn btn-primary" style="font-size: 12px; font-weight: 700; background: linear-gradient(135deg, #10b981 0%, #059669 100%); border: none; display: inline-flex; align-items: center; gap: 6px;" onclick="window.employeeProfileEngine.openWelcomeLetterInEmail('mailto', '${this.escapeJs(data.displayName)}')">
               <span>📧</span> Open in Email Client
             </button>
-            <button class="btn btn-secondary" style="font-size: 12px;" onclick="document.getElementById('welcome-letter-modal').style.display='none'">
+            <button class="btn btn-secondary" style="font-size: 12px;" onclick="const m=document.getElementById('welcome-letter-modal'); if(m){m.style.display='none'; m.classList.remove('active');}">
               Close
             </button>
           </div>

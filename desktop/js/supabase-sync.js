@@ -544,7 +544,7 @@ class SupabaseSyncEngine {
     };
 
     modal.innerHTML = `
-      <div class="modal-box" style="max-width: 560px; width: 94%; max-height: 90vh; overflow-y: auto;">
+      <div class="modal-box" style="max-width: 640px; width: 95%; max-height: 90vh; overflow-y: auto; overflow-x: hidden;">
         <div class="modal-header" style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); border-bottom: 1px solid rgba(59, 130, 246, 0.35);">
           <div style="display: flex; align-items: center; gap: 8px;">
             <span style="font-size: 18px;">${isCurrentMaster ? '👑' : '🔒'}</span>
@@ -564,7 +564,12 @@ class SupabaseSyncEngine {
           </div>
 
           <div>
-            <label style="display: block; font-size: 11.5px; font-weight: 700; color: var(--text-secondary); margin-bottom: 4px;">SELECT USER ACCOUNT</label>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+              <label style="font-size: 11.5px; font-weight: 700; color: var(--text-secondary);">SELECT USER ACCOUNT</label>
+              <button type="button" class="btn btn-secondary" style="padding: 2px 8px; font-size: 11px; color: #fbbf24; border-color: rgba(245, 158, 11, 0.4); font-weight: 600; display: inline-flex; align-items: center; gap: 4px;" onclick="const selName = document.getElementById('identity-user-name-input')?.value; if(selName && window.employeeProfileEngine){ window.employeeProfileEngine.openWelcomeLetterModal(selName); }">
+                <span>✉️</span> View / Resend Welcome Letter
+              </button>
+            </div>
             <select id="identity-user-name-input" class="sheet-search" style="width: 100%; font-size: 13px;" onchange="window.supabaseSync._onModalAccountSelectChange()">
               ${accounts.map(a => `<option value="${a.name.replace(/"/g, '&quot;')}" ${a.name === this.userName ? 'selected' : ''}>${a.role === 'master_admin' ? '👑 ' : '👤 '}${a.name}${a.email ? ' (' + a.email + ')' : ''} — ${roleLabel(a.role)}</option>`).join('')}
             </select>
@@ -600,36 +605,37 @@ class SupabaseSyncEngine {
                 <span style="font-size: 12px; font-weight: 700; color: #fbbf24;">👑 MASTER ADMIN: MANAGE ALL ACCOUNTS & PINS</span>
                 <span style="font-size: 11px; color: var(--text-secondary);">Invite via Employee Profile → Notification Email</span>
               </div>
-              <div style="display: flex; flex-direction: column; gap: 6px; max-height: 200px; overflow-y: auto; padding-right: 4px;">
+              <div style="display: flex; flex-direction: column; gap: 6px; max-height: 240px; overflow-y: auto; overflow-x: hidden; padding-right: 2px;">
                 ${accounts.map((acc, idx) => `
-                  <div style="display: grid; grid-template-columns: 1.3fr 1fr 70px auto auto; gap: 6px; align-items: center; background: rgba(15, 23, 42, 0.6); padding: 6px 8px; border-radius: 6px; border: 1px solid rgba(148, 163, 184, 0.15);">
-                    <div style="overflow: hidden;">
+                  <div style="display: flex; gap: 6px; align-items: center; background: rgba(15, 23, 42, 0.6); padding: 6px 8px; border-radius: 6px; border: 1px solid rgba(148, 163, 184, 0.15);">
+                    <div style="flex: 1; min-width: 0;">
                       <div style="font-size: 12px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${acc.role === 'master_admin' ? '👑 ' : ''}${acc.name}</div>
                       ${acc.email ? `<div style="font-size: 10px; color: #93c5fd; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">✉️ ${acc.email}</div>` : ''}
                     </div>
-                    <select class="sheet-search" style="font-size: 11px; padding: 3px 6px;" ${acc.role === 'master_admin' ? 'disabled' : ''} onchange="window.supabaseSync._updateAccountField(${idx}, 'role', this.value)">
+                    <select class="sheet-search" style="width: 110px; font-size: 11px; padding: 3px 4px;" ${acc.role === 'master_admin' ? 'disabled' : ''} onchange="window.supabaseSync._updateAccountField(${idx}, 'role', this.value)">
                       <option value="master_admin" ${acc.role === 'master_admin' ? 'selected' : ''}>👑 Master Admin</option>
                       <option value="admin" ${acc.role === 'admin' ? 'selected' : ''}>🔧 Admin (Edit)</option>
                       <option value="custom" ${acc.role === 'custom' ? 'selected' : ''}>🔑 Custom</option>
                       <option value="view_only" ${acc.role === 'view_only' ? 'selected' : ''}>👁️ View Only</option>
                     </select>
-                    <input type="text" class="sheet-search" style="font-size: 11.5px; padding: 3px 6px; text-align: center; font-family: monospace;" value="${acc.pin || '0000'}" title="4-Digit PIN" onchange="window.supabaseSync._updateAccountField(${idx}, 'pin', this.value)">
-                    ${acc.role === 'master_admin' ? `<span style="font-size: 10px; color: #94a3b8; padding: 0 4px;">Master</span>` : `
-                      <button class="btn btn-secondary" style="padding: 2px 6px; font-size: 11px; color: #60a5fa;" title="Configure Page & Tab Permissions in Employee Profile" onclick="document.getElementById('user-identity-modal').style.display='none'; if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${acc.name.replace(/'/g, "\\'")}', 'details');}">⚙️ Perms</button>
-                      <button class="btn btn-secondary" style="padding: 2px 6px; font-size: 11px; color: #f87171;" title="Remove Account" onclick="window.supabaseSync._removeUserAccount(${idx})">✕</button>
+                    <input type="text" class="sheet-search" style="width: 58px; font-size: 11.5px; padding: 3px 2px; text-align: center; font-family: monospace;" value="${acc.pin || '0000'}" title="4-Digit PIN" onchange="window.supabaseSync._updateAccountField(${idx}, 'pin', this.value)">
+                    <button type="button" class="btn btn-secondary" style="padding: 2px 7px; font-size: 11px; color: #fbbf24; border-color: rgba(245, 158, 11, 0.4); white-space: nowrap;" title="View, Print or Resend Welcome Letter & Field Guide" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openWelcomeLetterModal('${acc.name.replace(/'/g, "\\'")}');}">✉️ Letter</button>
+                    ${acc.role === 'master_admin' ? `<span style="font-size: 10px; color: #94a3b8; padding: 0 4px; white-space: nowrap;">Master</span>` : `
+                      <button type="button" class="btn btn-secondary" style="padding: 2px 6px; font-size: 11px; color: #60a5fa; white-space: nowrap;" title="Configure Page & Tab Permissions in Employee Profile" onclick="document.getElementById('user-identity-modal').style.display='none'; if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${acc.name.replace(/'/g, "\\'")}', 'details');}">⚙️ Perms</button>
+                      <button type="button" class="btn btn-secondary" style="padding: 2px 6px; font-size: 11px; color: #f87171; white-space: nowrap;" title="Remove Account" onclick="window.supabaseSync._removeUserAccount(${idx})">✕</button>
                     `}
                   </div>
                 `).join('')}
               </div>
-              <div style="display: grid; grid-template-columns: 1.3fr 1fr 75px auto; gap: 6px; margin-top: 8px; align-items: center;">
-                <input type="text" id="new-account-name-input" class="sheet-search" style="font-size: 12px; padding: 5px 8px;" placeholder="New User Full Name">
-                <select id="new-account-role-select" class="sheet-search" style="font-size: 11.5px; padding: 5px 6px;">
+              <div style="display: flex; gap: 6px; margin-top: 8px; align-items: center;">
+                <input type="text" id="new-account-name-input" class="sheet-search" style="flex: 1; min-width: 0; font-size: 12px; padding: 5px 8px;" placeholder="New User Full Name">
+                <select id="new-account-role-select" class="sheet-search" style="width: 110px; font-size: 11.5px; padding: 5px 4px;">
                   <option value="custom">🔑 Custom</option>
                   <option value="admin">🔧 Admin (Edit)</option>
                   <option value="view_only">👁️ View Only</option>
                 </select>
-                <input type="text" id="new-account-pin-input" class="sheet-search" style="font-size: 12px; padding: 5px 6px; text-align: center; font-family: monospace;" placeholder="PIN (4d)" maxlength="8">
-                <button class="btn btn-secondary" style="padding: 5px 10px; font-size: 11.5px; font-weight: 700; color: #34d399; border-color: rgba(16,185,129,0.4);" onclick="window.supabaseSync._addNewUserAccount()">+ Add</button>
+                <input type="text" id="new-account-pin-input" class="sheet-search" style="width: 65px; font-size: 12px; padding: 5px 4px; text-align: center; font-family: monospace;" placeholder="PIN (4d)" maxlength="8">
+                <button type="button" class="btn btn-secondary" style="padding: 5px 10px; font-size: 11.5px; font-weight: 700; color: #34d399; border-color: rgba(16,185,129,0.4); white-space: nowrap;" onclick="window.supabaseSync._addNewUserAccount()">+ Add</button>
               </div>
             </div>
           ` : `
