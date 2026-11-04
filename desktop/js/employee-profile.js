@@ -1877,8 +1877,8 @@ class EmployeeProfileEngine {
               <span style="font-size: 11px; font-weight: 700; color: #cbd5e1;">🔒 4-Digit PIN:</span>
               <input type="text" id="emp-perm-pin-input" maxlength="8" value="${this.escapeHtml(defaultPin)}" style="width: 64px; font-size: 12.5px; font-weight: 800; font-family: monospace; text-align: center; background: var(--bg-primary); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); border-radius: 4px; padding: 2px 6px;">
             </div>
-            <button type="button" class="btn btn-secondary" style="font-size: 11.5px; padding: 5px 10px; color: #60a5fa; border-color: rgba(59, 130, 246, 0.4);" onclick="window.employeeProfileEngine.sendOrCopyAppInvite('${this.escapeJs(data.displayName)}')">
-              📧 Send / Copy Invite
+            <button type="button" class="btn btn-secondary" style="font-size: 11.5px; padding: 5px 12px; color: #fbbf24; border-color: rgba(245, 158, 11, 0.5); font-weight: 700; background: rgba(245, 158, 11, 0.1); display: inline-flex; align-items: center; gap: 5px;" onclick="window.employeeProfileEngine.openWelcomeLetterModal('${this.escapeJs(data.displayName)}')">
+              <span>📧</span> Welcome Letter & Guide
             </button>
           </div>
         </div>
@@ -2108,26 +2108,587 @@ class EmployeeProfileEngine {
     return { pages, tabs };
   }
 
+  buildWelcomeLetterData(displayName) {
+    const emailEl = document.getElementById('edit-emp-notif-email');
+    const pinEl = document.getElementById('emp-perm-pin-input');
+
+    const empTable = this.db?.getTable('employees');
+    const row = empTable?.rows?.find(r => this.isNameMatch(r['Employee Name'] || r['Name'] || '', displayName));
+
+    const email = (emailEl ? emailEl.value : (row?.['Notification Emails'] || row?.['Email Address'] || '')).trim();
+    const phone = (row?.['Phone Number'] || '').trim();
+    const role = (row?.['Job Classification'] || row?.['Role'] || 'Team Member').trim();
+    const location = (row?.['Location'] || 'Helena').trim();
+
+    const accounts = window.supabaseSync ? window.supabaseSync.getUserAccounts() : [];
+    const acc = accounts.find(a => String(a.name || '').trim().toLowerCase() === String(displayName || '').trim().toLowerCase());
+
+    const phoneDigits = phone.replace(/\D/g, '');
+    const pin = (pinEl?.value || acc?.pin || (phoneDigits.length >= 4 ? phoneDigits.slice(-4) : '2468')).trim();
+
+    const perms = (document.getElementById('emp-perm-matrix-wrapper') && typeof this.collectPermissionsFromDOM === 'function')
+      ? this.collectPermissionsFromDOM()
+      : (acc?.permissions || (window.supabaseSync ? window.supabaseSync.buildPresetPermissions('view_all') : { pages: {}, tabs: {} }));
+
+    const isMaster = displayName.trim().toLowerCase() === 'cody bechdol';
+    const pPages = perms.pages || {};
+    const pTabs = perms.tabs || {};
+
+    const canSee = (k) => isMaster || Boolean(pPages[k]?.view);
+    const canEdit = (k) => isMaster || Boolean(pPages[k]?.view && pPages[k]?.edit);
+    const canSeeTab = (tk) => isMaster || Boolean(pTabs[tk]?.view);
+    const canEditTab = (tk) => isMaster || Boolean(pTabs[tk]?.view && pTabs[tk]?.edit);
+
+    const functions = [];
+
+    // 1. Foreman Tailgates
+    if (canSee('tailgate-generator-view')) {
+      functions.push({
+        icon: '👷',
+        title: 'Foreman Tailgates & Attendance Packets',
+        mode: canEdit('tailgate-generator-view') ? 'Full Access & Generation' : 'View Only',
+        desc: 'Generate tailored weekly Tailgate Briefing Packets for your crew. Summarizes your crew\'s safety compliance status, upcoming rubber equipment change-outs, expiring certifications, and an automated attendance sign-off sheet for Monday meetings.'
+      });
+    }
+
+    // 2. Safety Compliance Tracker
+    if (canSee('safety-compliance-view')) {
+      functions.push({
+        icon: '🛡️',
+        title: 'Safety Compliance Tracker',
+        mode: canEdit('safety-compliance-view') ? 'Can Recalculate & Edit' : 'View Only',
+        desc: 'Check live compliance tracking across all crews for daily JHA submissions, weekly safety meeting attendance, and monthly truck inspection checklists.'
+      });
+    }
+
+    // 3. Active Inventory & Equipment Swaps
+    if (canSee('sheets-view')) {
+      const allowedTabs = [];
+      if (canSeeTab('gloves') || canSeeTab('glove_swaps') || canSeeTab('sleeves') || canSeeTab('sleeve_swaps')) {
+        const canEditGloves = canEditTab('gloves') || canEditTab('glove_swaps') || canEditTab('sleeves') || canEditTab('sleeve_swaps');
+        allowedTabs.push({
+          name: '🧤 Rubber Gloves & Sleeves',
+          mode: canEditGloves ? 'Can Log Field Swaps' : 'View Only',
+          detail: 'Check active assignments, dielectric test dates, and 90-day/6-month swap deadlines.'
+        });
+      }
+      if (canSeeTab('blankets') || canSeeTab('blanket_swaps') || canSeeTab('macks') || canSeeTab('mack_swaps')) {
+        const canEditBlankets = canEditTab('blankets') || canEditTab('blanket_swaps') || canEditTab('macks') || canEditTab('mack_swaps');
+        allowedTabs.push({
+          name: '🧱 Blankets & MACKs',
+          mode: canEditBlankets ? 'Can Log Field Swaps' : 'View Only',
+          detail: 'Track truck cover-up blankets and MACK grounding jumpers with annual testing cycles.'
+        });
+      }
+      if (canSeeTab('grounds') || canSeeTab('ground_swaps') || canSeeTab('hot_sticks') || canSeeTab('hot_stick_swaps')) {
+        const canEditTools = canEditTab('grounds') || canEditTab('ground_swaps') || canEditTab('hot_sticks') || canEditTab('hot_stick_swaps');
+        allowedTabs.push({
+          name: '⚡ Grounds & Hot Sticks',
+          mode: canEditTools ? 'Can Log Field Swaps' : 'View Only',
+          detail: 'Monitor OSHA grounding cable sets (12-mo) and fiberglass hot sticks (24-mo).'
+        });
+      }
+      if (canSeeTab('hv_testers') || canSeeTab('hv_tester_swaps') || canSeeTab('phasing_sets') || canSeeTab('phasing_set_swaps') || canSeeTab('aed') || canSeeTab('aed_swaps')) {
+        const canEditTesters = canEditTab('hv_testers') || canEditTab('hv_tester_swaps') || canEditTab('phasing_sets') || canEditTab('phasing_set_swaps') || canEditTab('aed') || canEditTab('aed_swaps');
+        allowedTabs.push({
+          name: '⚡ HV Testers, Phasing Sets & AEDs',
+          mode: canEditTesters ? 'Can Log Field Swaps' : 'View Only',
+          detail: 'Track calibration cycles for proximity testers, phasing sets, and AED battery/pad dates.'
+        });
+      }
+      if (canSeeTab('employees') || canSeeTab('job_tracking') || canSeeTab('locations')) {
+        const canEditCrew = canEditTab('employees') || canEditTab('job_tracking') || canEditTab('locations');
+        allowedTabs.push({
+          name: '👥 Crew & Job Tracking',
+          mode: canEditCrew ? 'Can Update Records' : 'View Only',
+          detail: 'View crew assignments, foreman hierarchies, site locations, and approved rubber classes.'
+        });
+      }
+      if (allowedTabs.length > 0) {
+        functions.push({
+          icon: '📦',
+          title: 'Active Inventory & Equipment Swaps',
+          mode: allowedTabs.some(t => t.mode.includes('Can Log')) ? 'Equipped with Field Edit Rights' : 'View Only',
+          desc: 'Monitor equipment inventories and swap schedules:',
+          subItems: allowedTabs
+        });
+      }
+    }
+
+    // 4. Expiring Certs
+    if (canSee('expiring-certs-view')) {
+      functions.push({
+        icon: '📜',
+        title: 'Expiring Certifications Forecast',
+        mode: canEdit('expiring-certs-view') ? 'Can Log Renewals' : 'View Only',
+        desc: 'Forecast certification renewals (First Aid/CPR, OSHA 10/30, Crane, Digging, Medical Cards) 30, 60, and 90 days out to prevent lapsed qualifications.'
+      });
+    }
+
+    // 5. Training Tracker
+    if (canSee('training-view')) {
+      functions.push({
+        icon: '🎓',
+        title: 'Safety Training Tracker',
+        mode: canEdit('training-view') ? 'Can Log Attendance' : 'View Only',
+        desc: 'View scheduled monthly safety training modules, class agendas, attendee rosters, and completion records.'
+      });
+    }
+
+    // 6. DOT Drug Testing
+    if (canSee('drug-testing-view')) {
+      functions.push({
+        icon: '🧪',
+        title: 'DOT Drug Testing & Clinic Directory',
+        mode: canEdit('drug-testing-view') ? 'Can Manage Appointments' : 'View Only',
+        desc: 'Access the directory of 36 regional collection clinics across Montana, mobile collector site addresses, and testing rosters.'
+      });
+    }
+
+    // 7. Trip Planner
+    if (canSee('trip-planner-view')) {
+      functions.push({
+        icon: '🗺️',
+        title: 'Trip Planner & Field Itinerary',
+        mode: canEdit('trip-planner-view') ? 'Can Plan Trips' : 'View Only',
+        desc: 'View scheduled safety coordinator visits, swap delivery itineraries, and driving route optimization.'
+      });
+    }
+
+    // 8. Tasks & Calendar
+    if (canSee('tasks-view')) {
+      functions.push({
+        icon: '📋',
+        title: 'Tasks & Field Calendar',
+        mode: canEdit('tasks-view') ? 'Can Complete Tasks' : 'View Only',
+        desc: 'Review scheduled equipment swap tasks, visit milestones, and action item reminders.'
+      });
+    }
+
+    // 9. Lookup & Search
+    if (canSee('lookup-view')) {
+      functions.push({
+        icon: '🔍',
+        title: 'Equipment & Employee Lookup',
+        mode: 'Search Tool',
+        desc: 'Instantly lookup any piece of gear by serial number, ESL barcode, or inspect an employee assignment history.'
+      });
+    }
+
+    // 10. Incident Reports
+    if (canSee('incident-reports-view')) {
+      functions.push({
+        icon: '⚠️',
+        title: 'Incident & Observation Reports',
+        mode: canEdit('incident-reports-view') ? 'Can File Reports' : 'View Only',
+        desc: 'Review safety incident reports, near-miss observations, root cause analyses, and action plans.'
+      });
+    }
+
+    // 11. Procurement & POs
+    if (canSee('procurement-view')) {
+      functions.push({
+        icon: '🛒',
+        title: 'Purchase Needs & Orders',
+        mode: canEdit('procurement-view') ? 'Can Manage Orders' : 'View Only',
+        desc: 'Review equipment replenishment needs, vendor catalog orders, and glove/sleeve requisitions.'
+      });
+    }
+
+    // 12. Weekly Summary Briefing
+    if (canSee('weekly-summary-view')) {
+      functions.push({
+        icon: '📊',
+        title: 'Weekly Executive Briefing Workspace',
+        mode: 'View Briefing',
+        desc: 'Access executive safety compliance summaries, compliance charts, and Monday morning company briefings.'
+      });
+    }
+
+    // 13. Camera Scanner (Universal Helper)
+    functions.push({
+      icon: '📷',
+      title: 'ESL Barcode & QR Camera Scanner',
+      mode: 'Field Camera Tool',
+      desc: 'Use your phone or tablet camera directly in the app to scan rubber glove tags or equipment barcodes to instantly pull up records.'
+    });
+
+    const appUrl = 'https://codybechdol.github.io/rubber-tracker/desktop/';
+    const subject = `🛡️ Safety Assistant Access & Welcome Guide — ${displayName}`;
+
+    // Generate Plain Text
+    let plainText = `SAFETY ASSISTANT — WELCOME & FIELD ACCESS GUIDE\n`;
+    plainText += `Mountain Power Safety Department\n`;
+    plainText += `======================================================\n\n`;
+    plainText += `Hi ${displayName},\n\n`;
+    plainText += `You have been granted access to the Mountain Power Safety Assistant App. This application provides real-time access to our safety compliance system, rubber PPE & equipment tracking, certifications, and scheduling.\n\n`;
+    plainText += `------------------------------------------------------\n`;
+    plainText += `1. YOUR APP ACCESS & LOGIN CREDENTIALS\n`;
+    plainText += `------------------------------------------------------\n`;
+    plainText += `• Web / App Link: ${appUrl}\n`;
+    plainText += `• Your Account Name: ${displayName}\n`;
+    plainText += `• Your 4-Digit Security PIN: ${pin}\n`;
+    if (email) plainText += `• Registered Notification Email: ${email}\n`;
+    plainText += `\nHOW TO LOG IN (3 EASY STEPS):\n`;
+    plainText += `1. Open the app link in Chrome, Safari, or Edge on your phone, tablet, or laptop.\n`;
+    plainText += `2. In the top navigation bar, click on the User Account button (showing 👤 or 👑).\n`;
+    plainText += `3. Select your name "${displayName}" from the dropdown and enter your 4-digit PIN: ${pin}.\n\n`;
+    plainText += `------------------------------------------------------\n`;
+    plainText += `2. 100% OFFLINE CAPABLE (WORKS IN THE FIELD)\n`;
+    plainText += `------------------------------------------------------\n`;
+    plainText += `The Safety Assistant is an offline-first app. Once loaded, you can bookmark the page or add it to your home screen. When working in remote Montana locations without cellular service, all permitted data and tools remain fully functional on your device. Any changes you make offline automatically synchronize the moment your device reconnects to Wi-Fi or cellular service.\n\n`;
+    plainText += `------------------------------------------------------\n`;
+    plainText += `3. YOUR PERMITTED FUNCTIONS & QUICK-START GUIDE\n`;
+    plainText += `------------------------------------------------------\n`;
+    plainText += `Based on your role (${role}) and account configuration, you have access to the following tools:\n\n`;
+
+    functions.forEach(f => {
+      plainText += `• ${f.title} [${f.mode}]\n`;
+      plainText += `  ${f.desc}\n`;
+      if (Array.isArray(f.subItems) && f.subItems.length > 0) {
+        f.subItems.forEach(s => {
+          plainText += `    - ${s.name} [${s.mode}]: ${s.detail}\n`;
+        });
+      }
+      plainText += `\n`;
+    });
+
+    plainText += `------------------------------------------------------\n`;
+    plainText += `4. AUTOMATIC WEEKLY SAFETY REPORT INCLUSION\n`;
+    plainText += `------------------------------------------------------\n`;
+    plainText += `Because your notification email (${email || 'your email'}) is registered, you are automatically included in the Safety Assistant Monday Morning Briefing distribution list. Every Monday morning, you will receive our company safety compliance summary, upcoming equipment change-outs, and important field updates directly in your inbox.\n\n`;
+    plainText += `------------------------------------------------------\n`;
+    plainText += `QUESTIONS OR NEED ASSISTANCE?\n`;
+    plainText += `------------------------------------------------------\n`;
+    plainText += `If you have any questions, need to adjust your permissions, or need help setting up your phone or tablet, please contact me directly.\n\n`;
+    plainText += `Stay safe,\n`;
+    plainText += `Cody Bechdol\n`;
+    plainText += `Master Admin / Safety Coordinator\n`;
+    plainText += `Mountain Power\n`;
+
+    return {
+      displayName,
+      email,
+      pin,
+      role,
+      location,
+      appUrl,
+      subject,
+      functions,
+      plainText
+    };
+  }
+
+  openWelcomeLetterModal(displayName) {
+    let modal = document.getElementById('welcome-letter-modal');
+    if (!modal) {
+      modal = document.createElement('div');
+      modal.id = 'welcome-letter-modal';
+      modal.className = 'modal-overlay';
+      document.body.appendChild(modal);
+    }
+
+    const data = this.buildWelcomeLetterData(displayName);
+
+    modal.innerHTML = `
+      <div class="modal-box" style="max-width: 780px; width: 95%; max-height: 92vh; display: flex; flex-direction: column; overflow: hidden; background: #0f172a; border: 1px solid rgba(245, 158, 11, 0.4); border-radius: 12px; box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.75);">
+        
+        <!-- Modal Header -->
+        <div class="modal-header" style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); border-bottom: 1px solid rgba(245, 158, 11, 0.35); padding: 14px 20px; display: flex; justify-content: space-between; align-items: center;">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span style="font-size: 20px;">✉️</span>
+            <div>
+              <div style="font-weight: 800; font-size: 16px; color: #f8fafc;">
+                Welcome Letter & Field Access Guide
+              </div>
+              <div style="font-size: 11.5px; color: #94a3b8;">
+                Personalized for <strong style="color: #60a5fa;">${this.escapeHtml(data.displayName)}</strong> (${this.escapeHtml(data.role)})
+              </div>
+            </div>
+          </div>
+          <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 13px;" onclick="document.getElementById('welcome-letter-modal').style.display='none'">✕</button>
+        </div>
+
+        <!-- Recipient & Credentials Summary Bar -->
+        <div style="background: rgba(30, 41, 59, 0.75); border-bottom: 1px solid rgba(148, 163, 184, 0.2); padding: 12px 20px; display: grid; grid-template-columns: 1.5fr 1fr 100px; gap: 12px; align-items: center;">
+          <div>
+            <label style="display: block; font-size: 10.5px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">TO (NOTIFICATION EMAIL)</label>
+            <input type="email" id="wl-recipient-email-input" class="sheet-search" style="width: 100%; font-size: 12.5px; padding: 4px 8px; color: #93c5fd;" value="${this.escapeHtml(data.email)}" placeholder="Enter employee email...">
+          </div>
+          <div>
+            <label style="display: block; font-size: 10.5px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">SUBJECT</label>
+            <input type="text" id="wl-subject-input" class="sheet-search" style="width: 100%; font-size: 12px; padding: 4px 8px; color: #f8fafc;" value="${this.escapeHtml(data.subject)}">
+          </div>
+          <div>
+            <label style="display: block; font-size: 10.5px; font-weight: 700; color: #fbbf24; text-transform: uppercase; text-align: center;">ACCESS PIN</label>
+            <input type="text" id="wl-pin-input" class="sheet-search" maxlength="8" style="width: 100%; font-size: 14px; font-weight: 800; font-family: monospace; text-align: center; color: #fbbf24; padding: 4px 6px;" value="${this.escapeHtml(data.pin)}">
+          </div>
+        </div>
+
+        <!-- Scrollable Letter Preview Area -->
+        <div class="modal-body" style="padding: 20px; overflow-y: auto; flex: 1; display: flex; flex-direction: column; gap: 16px;">
+          
+          <div id="wl-letter-container" style="background: var(--bg-card, #1e293b); border: 1px solid var(--border-color, #334155); border-radius: 10px; padding: 22px; font-family: system-ui, -apple-system, sans-serif; line-height: 1.6; color: #f8fafc;">
+            
+            <!-- Letter Branded Header -->
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; border-bottom: 2px solid rgba(59, 130, 246, 0.35); padding-bottom: 14px; margin-bottom: 18px; flex-wrap: wrap; gap: 12px;">
+              <div>
+                <div style="font-size: 18px; font-weight: 800; color: #60a5fa; display: flex; align-items: center; gap: 8px;">
+                  <span>🛡️</span> MOUNTAIN POWER SAFETY ASSISTANT
+                </div>
+                <div style="font-size: 12px; color: #94a3b8; margin-top: 2px;">
+                  Field & Office Safety Management System · Montana
+                </div>
+              </div>
+              <div style="text-align: right; font-size: 11px; color: #94a3b8;">
+                <div><strong>Issued By:</strong> Cody Bechdol (Master Admin)</div>
+                <div><strong>Date:</strong> ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' })}</div>
+              </div>
+            </div>
+
+            <div style="font-size: 14px; color: #e2e8f0; margin-bottom: 14px;">
+              Hi <strong>${this.escapeHtml(data.displayName)}</strong>,
+            </div>
+
+            <p style="font-size: 13px; color: #cbd5e1; margin: 0 0 16px 0;">
+              You have been granted access to the <strong>Mountain Power Safety Assistant</strong>. This application provides real-time access to our safety compliance tracking, rubber PPE & line tool testing schedules, certifications, and crew planning.
+            </p>
+
+            <!-- Credentials Box -->
+            <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(59, 130, 246, 0.4); border-radius: 8px; padding: 14px 16px; margin-bottom: 18px; display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px;">
+              <div>
+                <div style="font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">APP WEB LINK</div>
+                <div style="font-size: 13px; font-weight: 700; color: #38bdf8; margin-top: 2px; word-break: break-all;">
+                  <a href="${data.appUrl}" target="_blank" style="color: #38bdf8; text-decoration: underline;">Open Safety Assistant</a>
+                </div>
+              </div>
+              <div>
+                <div style="font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase;">YOUR USER ACCOUNT</div>
+                <div style="font-size: 14px; font-weight: 800; color: #f8fafc; margin-top: 2px;">
+                  👤 ${this.escapeHtml(data.displayName)}
+                </div>
+              </div>
+              <div>
+                <div style="font-size: 11px; font-weight: 700; color: #fbbf24; text-transform: uppercase;">YOUR 4-DIGIT PIN</div>
+                <div style="font-size: 16px; font-weight: 900; font-family: monospace; color: #fbbf24; margin-top: 2px; letter-spacing: 2px;">
+                  🔒 ${this.escapeHtml(data.pin)}
+                </div>
+              </div>
+            </div>
+
+            <!-- Login Instructions -->
+            <div style="background: rgba(30, 41, 59, 0.5); border-left: 3px solid #3b82f6; border-radius: 4px; padding: 10px 14px; margin-bottom: 20px;">
+              <div style="font-size: 12px; font-weight: 800; color: #93c5fd; margin-bottom: 4px;">
+                📲 HOW TO LOG IN (3 EASY STEPS):
+              </div>
+              <ol style="margin: 0; padding-left: 18px; font-size: 12.5px; color: #cbd5e1; line-height: 1.6;">
+                <li>Open the web link in Chrome, Safari, or Edge on your phone, tablet, or laptop.</li>
+                <li>In the top bar, click the User Account button (showing 👤 or 👑).</li>
+                <li>Select your name <strong>"${this.escapeHtml(data.displayName)}"</strong> and enter your 4-digit PIN: <strong>${this.escapeHtml(data.pin)}</strong>.</li>
+              </ol>
+            </div>
+
+            <!-- 100% Offline Support Box -->
+            <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 8px; padding: 12px 14px; margin-bottom: 20px;">
+              <div style="font-size: 12.5px; font-weight: 800; color: #34d399; display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
+                <span>📶</span> 100% OFFLINE CAPABLE (WORKS IN THE FIELD)
+              </div>
+              <div style="font-size: 12px; color: #a7f3d0; line-height: 1.5;">
+                The Safety Assistant is an offline-first app. Bookmark the page on your phone or tablet. When you are out in remote areas without cellular service, you can still open the app, inspect your permitted tools, and enter records. All changes will automatically synchronize the moment your device reconnects to Wi-Fi or cell service.
+              </div>
+            </div>
+
+            <!-- Permitted Functions Header -->
+            <div style="font-size: 13.5px; font-weight: 800; color: #f8fafc; border-bottom: 1px solid rgba(148, 163, 184, 0.25); padding-bottom: 6px; margin-bottom: 12px; display: flex; align-items: center; justify-content: space-between;">
+              <span>🛠️ YOUR PERMITTED TOOLS & QUICK-START GUIDE</span>
+              <span style="font-size: 11px; color: #94a3b8;">${data.functions.length} Workspaces Activated</span>
+            </div>
+
+            <!-- Functions Grid / Cards -->
+            <div style="display: flex; flex-direction: column; gap: 10px; margin-bottom: 20px;">
+              ${data.functions.map(f => `
+                <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 6px; padding: 10px 14px;">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px; flex-wrap: wrap; gap: 6px;">
+                    <div style="font-size: 13px; font-weight: 700; color: #f8fafc; display: flex; align-items: center; gap: 6px;">
+                      <span>${f.icon}</span> <span>${this.escapeHtml(f.title)}</span>
+                    </div>
+                    <span class="badge" style="background: ${f.mode.toLowerCase().includes('edit') || f.mode.toLowerCase().includes('generation') ? 'rgba(16, 185, 129, 0.2)' : 'rgba(59, 130, 246, 0.2)'}; color: ${f.mode.toLowerCase().includes('edit') || f.mode.toLowerCase().includes('generation') ? '#6ee7b7' : '#93c5fd'}; border: 1px solid currentColor; font-size: 10.5px; font-weight: 700; padding: 1px 7px; border-radius: 4px;">
+                      ${this.escapeHtml(f.mode)}
+                    </span>
+                  </div>
+                  <div style="font-size: 12px; color: #cbd5e1; line-height: 1.45;">
+                    ${this.escapeHtml(f.desc)}
+                  </div>
+                  ${Array.isArray(f.subItems) && f.subItems.length > 0 ? `
+                    <div style="margin-top: 8px; display: flex; flex-direction: column; gap: 4px; padding-left: 10px; border-left: 2px solid rgba(59, 130, 246, 0.3);">
+                      ${f.subItems.map(s => `
+                        <div style="font-size: 11.5px; color: #94a3b8;">
+                          <strong style="color: #cbd5e1;">${this.escapeHtml(s.name)}</strong> (${this.escapeHtml(s.mode)}): ${this.escapeHtml(s.detail)}
+                        </div>
+                      `).join('')}
+                    </div>
+                  ` : ''}
+                </div>
+              `).join('')}
+            </div>
+
+            <!-- Weekly Safety Report Inclusion Banner -->
+            <div style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 8px; padding: 12px 14px; margin-bottom: 20px;">
+              <div style="font-size: 12.5px; font-weight: 800; color: #fbbf24; display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
+                <span>📬</span> AUTOMATIC WEEKLY SAFETY REPORT INCLUSION
+              </div>
+              <div style="font-size: 12px; color: #fde68a; line-height: 1.5;">
+                Because your notification email (${this.escapeHtml(data.email || 'your email')}) is registered, you are automatically enrolled in the <strong>Safety Assistant Monday Morning Briefing</strong> distribution list. Every Monday, you will receive our company safety compliance summary, upcoming equipment change-out notices, and important field updates directly in your inbox.
+              </div>
+            </div>
+
+            <!-- Sign-off -->
+            <div style="margin-top: 18px; border-top: 1px solid rgba(148, 163, 184, 0.2); padding-top: 14px; font-size: 12.5px; color: #cbd5e1;">
+              <div>If you have any questions, need to adjust your permissions, or need help setting up your device, please reach out directly.</div>
+              <div style="margin-top: 10px; font-weight: 700; color: #f8fafc;">
+                Stay safe,<br>
+                <span style="color: #60a5fa;">Cody Bechdol</span><br>
+                <span style="font-size: 11px; font-weight: 500; color: #94a3b8;">Master Admin / Safety Coordinator · Mountain Power</span>
+              </div>
+            </div>
+
+          </div>
+
+        </div>
+
+        <!-- Modal Footer Actions -->
+        <div class="modal-footer" style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); border-top: 1px solid rgba(148, 163, 184, 0.2); padding: 12px 20px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+          <div style="display: flex; gap: 8px;">
+            <button class="btn btn-secondary" style="font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; gap: 6px;" onclick="window.employeeProfileEngine.copyWelcomeLetterText('${this.escapeJs(data.displayName)}')">
+              <span>📋</span> Copy Plain Text
+            </button>
+            <button class="btn btn-secondary" style="font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; gap: 6px;" onclick="window.employeeProfileEngine.printWelcomeLetter('${this.escapeJs(data.displayName)}')">
+              <span>🖨️</span> Print / Save PDF
+            </button>
+          </div>
+          <div style="display: flex; gap: 8px;">
+            <button class="btn btn-secondary" style="font-size: 12px; font-weight: 700; color: #60a5fa; border-color: rgba(59, 130, 246, 0.4); display: inline-flex; align-items: center; gap: 6px;" onclick="window.employeeProfileEngine.openWelcomeLetterInEmail('gmail', '${this.escapeJs(data.displayName)}')">
+              <span>🌐</span> Open in Gmail
+            </button>
+            <button class="btn btn-primary" style="font-size: 12px; font-weight: 700; background: linear-gradient(135deg, #10b981 0%, #059669 100%); border: none; display: inline-flex; align-items: center; gap: 6px;" onclick="window.employeeProfileEngine.openWelcomeLetterInEmail('mailto', '${this.escapeJs(data.displayName)}')">
+              <span>📧</span> Open in Email Client
+            </button>
+            <button class="btn btn-secondary" style="font-size: 12px;" onclick="document.getElementById('welcome-letter-modal').style.display='none'">
+              Close
+            </button>
+          </div>
+        </div>
+
+      </div>
+    `;
+
+    modal.style.display = 'flex';
+    modal.classList.add('active');
+  }
+
   sendOrCopyAppInvite(displayName) {
-    const email = (document.getElementById('edit-emp-notif-email')?.value || '').trim();
-    const pin = (document.getElementById('emp-perm-pin-input')?.value || '2468').trim();
+    this.openWelcomeLetterModal(displayName);
+  }
+
+  copyWelcomeLetterText(displayName) {
+    const data = this.buildWelcomeLetterData(displayName);
+    const plainText = data.plainText;
+    try {
+      navigator.clipboard.writeText(plainText);
+      if (typeof window.showToast === 'function') {
+        window.showToast(`📋 Welcome letter & guide copied to clipboard!`);
+      } else {
+        alert('📋 Welcome letter copied to clipboard!');
+      }
+    } catch {
+      alert('Could not copy to clipboard automatically.');
+    }
+  }
+
+  openWelcomeLetterInEmail(client = 'mailto', displayName) {
+    const data = this.buildWelcomeLetterData(displayName);
+    const emailInput = document.getElementById('wl-recipient-email-input');
+    const subjectInput = document.getElementById('wl-subject-input');
+
+    const email = (emailInput ? emailInput.value : data.email).trim();
+    const subject = (subjectInput ? subjectInput.value : data.subject).trim();
+    const body = data.plainText;
+
     if (!email) {
       if (typeof window.showToast === 'function') {
-        window.showToast('⚠️ Enter a Notification Email first to invite this employee.', true);
+        window.showToast('⚠️ Please enter a recipient email address.', true);
       }
-      document.getElementById('edit-emp-notif-email')?.focus();
+      emailInput?.focus();
       return;
     }
-    const appUrl = 'https://codybechdol.github.io/rubber-tracker/desktop/';
-    const subject = encodeURIComponent(`Safety Assistant App Invitation — ${displayName}`);
-    const bodyText = `Hi ${displayName},\n\nYou have been invited to access the Safety Assistant App.\n\n1. Open the App: ${appUrl}\n2. Click the User Account button in the top bar and select: ${displayName}\n3. Enter your 4-Digit Access PIN: ${pin}\n\n— Cody Bechdol`;
+
     try {
-      navigator.clipboard.writeText(bodyText);
+      navigator.clipboard.writeText(body);
       if (typeof window.showToast === 'function') {
-        window.showToast(`📋 Invite copied & opening email to ${email} (PIN: ${pin})`);
+        window.showToast(`📋 Letter copied & opening email client for ${email}...`);
       }
     } catch { /* ignore */ }
-    window.open(`mailto:${encodeURIComponent(email.split(',')[0].trim())}?subject=${subject}&body=${encodeURIComponent(bodyText)}`, '_blank');
+
+    if (client === 'gmail') {
+      const gmailUrl = `https://mail.google.com/mail/?view=cm&fs=1&to=${encodeURIComponent(email)}&su=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+      window.open(gmailUrl, '_blank');
+    } else {
+      const mailtoUrl = `mailto:${encodeURIComponent(email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+      window.open(mailtoUrl, '_blank');
+    }
+  }
+
+  printWelcomeLetter(displayName) {
+    const container = document.getElementById('wl-letter-container');
+    if (!container) return;
+
+    const printWin = window.open('', '_blank', 'width=900,height=800');
+    if (!printWin) {
+      alert('⚠️ Popup blocked. Please allow popups to print the welcome letter.');
+      return;
+    }
+
+    printWin.document.open();
+    printWin.document.write(`
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <title>Safety Assistant Welcome & Field Access Guide — ${this.escapeHtml(displayName)}</title>
+        <style>
+          body {
+            font-family: system-ui, -apple-system, sans-serif;
+            background: #ffffff;
+            color: #0f172a;
+            padding: 24px;
+            margin: 0;
+            line-height: 1.5;
+          }
+          div, p, span, strong {
+            color: #0f172a !important;
+          }
+          div[style*="background: rgba"] {
+            background: #f8fafc !important;
+            border: 1px solid #cbd5e1 !important;
+          }
+          a {
+            color: #0284c7 !important;
+          }
+          @media print {
+            body { padding: 0; }
+          }
+        </style>
+      </head>
+      <body>
+        ${container.innerHTML}
+        <script>
+          window.onload = function() {
+            window.print();
+          };
+        </script>
+      </body>
+      </html>
+    `);
+    printWin.document.close();
   }
 
   async saveEmployeeDetails(displayName) {
@@ -2195,6 +2756,7 @@ class EmployeeProfileEngine {
     const statusKey = getFieldKey('Status');
     const locKey = getFieldKey('Location');
 
+    const prevNotifEmail = String(row[notifEmailKey] || row['Notification Emails'] || '').trim();
     const isMasterAdmin = Boolean(window.supabaseSync && window.supabaseSync.isMasterAdmin());
 
     const updatedFields = {
@@ -2304,6 +2866,14 @@ class EmployeeProfileEngine {
 
     if (window.sheetNavigator) {
       window.sheetNavigator.renderCurrentSheet();
+    }
+
+    if (isMasterAdmin && newNotifEmail && newNotifEmail !== prevNotifEmail) {
+      setTimeout(() => {
+        if (confirm(`✉️ Notification Email saved for ${displayName} (${newNotifEmail}).\n\nWould you like to preview and send their Welcome Letter & Field Access Guide now?`)) {
+          this.openWelcomeLetterModal(displayName);
+        }
+      }, 350);
     }
   }
 
