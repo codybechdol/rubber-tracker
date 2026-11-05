@@ -136,13 +136,8 @@ class SupabaseSyncEngine {
           { key: 'hot_sticks', label: '🔴 Hot Sticks' },
           { key: 'hot_stick_swaps', label: '🔄 Hot Stick Swaps' },
           { key: 'dot_drug_tests', label: '🧪 DOT Drug Tests' },
-          { key: 'drug_test_clinics', label: '🏥 Drug Test Clinics' },
           { key: 'retired_equipment', label: '🗄️ Retired Equipment' },
-          { key: 'trip_schedule', label: '📅 Trip Schedule' },
-          { key: 'test_batches', label: '🔬 Test Batches' },
-          { key: 'field_gps_log', label: '📍 Field GPS Log' },
-          { key: 'daily_accomplishments', label: '⏱️ Daily Accomplishments' },
-          { key: 'system_config', label: '⚙️ System Config' }
+          { key: 'test_batches', label: '🔬 Test Batches' }
         ]
       },
       { key: 'weekly-summary-view', label: '📊 Weekly Summary & Briefing', tabs: [] },
@@ -152,7 +147,14 @@ class SupabaseSyncEngine {
       { key: 'incident-reports-view', label: '⚠️ Incident Reports', tabs: [] },
       { key: 'expiring-certs-view', label: '📜 Expiring Certs', tabs: [] },
       { key: 'training-view', label: '🎓 Training', tabs: [] },
-      { key: 'drug-testing-view', label: '🧪 DOT Drug Testing', tabs: [] },
+      { 
+        key: 'drug-testing-view', 
+        label: '🧪 DOT Drug Testing', 
+        tabs: [
+          { key: 'dot_drug_tests', label: '🧪 Quarterly Test Pool' },
+          { key: 'drug_test_clinics', label: '🏥 Drug Test Clinics' }
+        ] 
+      },
       { key: 'previous-employees-view', label: '👥 Previous Employees', tabs: [] },
       {
         key: 'history-view',
@@ -170,7 +172,17 @@ class SupabaseSyncEngine {
           { key: 'employee_history', label: '👥 Employee History' }
         ]
       },
-      { key: 'trip-planner-view', label: '🗺️ Trip Planner', tabs: [] },
+      { 
+        key: 'trip-planner-view', 
+        label: '🗺️ Trip Planner', 
+        tabs: [
+          { key: 'board', label: '📅 Schedule Board' },
+          { key: 'map', label: '🗺️ Route Map & Stops' },
+          { key: 'trip_schedule', label: '📋 Trip Schedule' },
+          { key: 'field_gps_log', label: '📍 Field GPS Log' },
+          { key: 'daily_accomplishments', label: '⏱️ Daily Accomplishments' }
+        ] 
+      },
       { key: 'tasks-view', label: '📋 Tasks & Calendar', tabs: [] },
       { key: 'lookup-view', label: '🔍 Lookup & Search', tabs: [] },
       { key: 'procurement-view', label: '🛒 Purchase Needs & Orders', tabs: [] },
@@ -181,7 +193,14 @@ class SupabaseSyncEngine {
       { key: 'open-location-approvals', label: '📍 Location Approvals (Popup)', tabs: [] },
       { key: 'open-fiscal-year-transition', label: '📅 FY Transition (Popup)', tabs: [] },
       { key: 'ai-copilot', label: '✨ AI Copilot', tabs: [] },
-      { key: 'settings-view', label: '⚙️ Sync Settings', tabs: [] }
+      { 
+        key: 'settings-view', 
+        label: '⚙️ Sync Settings', 
+        tabs: [
+          { key: 'sync_setup', label: '⚡ Sync & Database Controls' },
+          { key: 'system_config', label: '⚙️ System Config Table' }
+        ] 
+      }
     ];
   }
 

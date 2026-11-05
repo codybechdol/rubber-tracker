@@ -10,7 +10,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="stylesheet" href="css/leaflet.css">
-  <link rel="stylesheet" href="css/app.css?v=20261027_02">
+  <link rel="stylesheet" href="css/app.css?v=20261104_07">
 </head>
 <body>
 
@@ -184,12 +184,12 @@
       <!-- View 1: Sheet Tabs Grid (Active Inventory & Swaps) -->
       <section id="sheets-view" class="view-container active">
         <div class="sheet-tabs-bar" id="sheet-tabs-bar"></div>
-        <div class="sheet-toolbar">
+        <div class="sheet-toolbar" style="flex-wrap: wrap; gap: 8px; padding: 8px 16px;">
           <div style="display: flex; align-items: center; gap: 10px;">
             <h2 id="current-sheet-title" style="font-size: 16px;">👥 Employees</h2>
             <span class="brand-badge" id="sheet-row-count">0 rows</span>
           </div>
-          <div style="display: flex; align-items: center; gap: 8px; margin-left: auto;">
+          <div style="display: flex; align-items: center; gap: 8px; margin-left: auto; flex-wrap: wrap;">
             <button class="btn admin-only-control" id="btn-import-crews" style="display: none; background: linear-gradient(135deg, #10b981, #059669); color: white; padding: 6px 14px; font-size: 12px; font-weight: 700;" onclick="window.sheetNavigator.openCrewImport()">
               👥 Import Crews
             </button>
@@ -227,7 +227,7 @@
               <span>🧤</span> Rubber PPE Tracker
               <span id="ppe-missing-badge" class="badge" style="background: #ef4444; color: #fff; font-size: 10px; font-weight: 800; padding: 1px 6px; border-radius: 10px; display: none;">0</span>
             </button>
-            <button class="btn btn-secondary" id="btn-location-approvals-top" style="padding: 6px 12px; font-size: 12px; align-items: center; gap: 5px; border-color: #8b5cf6; color: #c084fc; background: rgba(139, 92, 246, 0.1); display: inline-flex;" onclick="window.locationApprovalsEngine.openModal()" title="View and adjust high voltage rubber class requirements (CL2, CL3, Both) for each location">
+            <button class="btn btn-secondary" id="btn-location-approvals-top" style="display: none; padding: 6px 12px; font-size: 12px; align-items: center; gap: 5px; border-color: #8b5cf6; color: #c084fc; background: rgba(139, 92, 246, 0.1);" onclick="window.locationApprovalsEngine.openModal()" title="View and adjust high voltage rubber class requirements (CL2, CL3, Both) for each location">
               <span>📍</span> Location Approvals
             </button>
             <button class="btn btn-secondary" id="btn-toggle-sheet-visuals" style="display: none; padding: 6px 12px; font-size: 12px; align-items: center; gap: 5px; border-color: #3b82f6; color: #93c5fd;" onclick="window.sheetNavigator.toggleVisualsDashboard()" title="Toggle Visual Analytics & Lifecycle Metrics Dashboard">
@@ -236,17 +236,35 @@
             <button class="btn btn-secondary admin-only-control" id="btn-push-clean-sheet" style="display: none; padding: 6px 12px; font-size: 12px;" onclick="window.syncEngine.pushFullCleanTable(window.sheetNavigator.currentSheetKey)" title="Push this full clean table directly to Google Sheets">
               📤 Sync Sheet to Google
             </button>
-            <!-- Employee Page View Mode Switcher (Crew Cards vs Table View) -->
-            <div id="emp-view-toggle" style="display: none; align-items: center; gap: 3px; background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: 6px; padding: 2px 4px;">
-              <button class="btn btn-secondary active" id="btn-emp-cards-view" style="font-size: 11px; padding: 3px 8px; border-radius: 4px;" onclick="window.sheetNavigator.setEmployeeViewMode('cards')">
-                🗂️ Crew Cards
+            <!-- Employee Week Navigator (Current, Past & Future Planning Weeks) -->
+            <div id="emp-week-nav" style="display: none; align-items: center; gap: 6px; flex-shrink: 0;">
+              <button class="btn btn-secondary" id="btn-emp-week-older" style="font-size: 11px; padding: 4px 8px;" onclick="window.sheetNavigator.navigateEmployeeWeek(-1)" title="Go to older week">
+                ◀ Older
               </button>
-              <button class="btn btn-secondary" id="btn-emp-table-view" style="font-size: 11px; padding: 3px 8px; border-radius: 4px;" onclick="window.sheetNavigator.setEmployeeViewMode('table')">
-                📊 Table View
+              <div style="display: flex; align-items: center; gap: 5px;">
+                <span style="font-size: 13px;">📅</span>
+                <select id="emp-week-select" class="filter-select" style="font-size: 11.5px; font-weight: 700; padding: 4px 8px; background: #0f172a; border: 1px solid #3b82f6; color: #93c5fd; border-radius: 6px; cursor: pointer;" onchange="window.sheetNavigator.selectEmployeeWeek(this.value)">
+                </select>
+              </div>
+              <button class="btn btn-secondary" id="btn-emp-week-newer" style="font-size: 11px; padding: 4px 8px;" onclick="window.sheetNavigator.navigateEmployeeWeek(1)" title="Go to newer week">
+                Newer ▶
               </button>
             </div>
 
-            <input type="text" id="sheet-search-input" class="sheet-search" placeholder="Filter rows in this sheet...">
+            <!-- Employee Page View Mode Switcher (Crew Cards vs Table View vs Crew Planning) -->
+            <div id="emp-view-toggle" style="display: none; align-items: center; gap: 3px; background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-radius: 6px; padding: 2px 4px; flex-shrink: 0;">
+              <button class="btn btn-secondary active" id="btn-emp-cards-view" style="font-size: 11px; padding: 4px 8px; border-radius: 4px; white-space: nowrap; font-weight: 700; display: inline-flex; align-items: center; gap: 4px;" onclick="window.sheetNavigator.setEmployeeViewMode('cards')">
+                <span>🗂️</span> Cards
+              </button>
+              <button class="btn btn-secondary" id="btn-emp-table-view" style="font-size: 11px; padding: 4px 8px; border-radius: 4px; white-space: nowrap; font-weight: 700; display: inline-flex; align-items: center; gap: 4px;" onclick="window.sheetNavigator.setEmployeeViewMode('table')">
+                <span>📊</span> Table
+              </button>
+              <button class="btn btn-secondary" id="btn-emp-planning-view" style="font-size: 11px; padding: 4px 10px; border-radius: 4px; white-space: nowrap; font-weight: 700; display: inline-flex; align-items: center; gap: 4px; border-color: rgba(245, 158, 11, 0.4); color: #fbbf24; background: rgba(245, 158, 11, 0.12);" onclick="window.sheetNavigator.setEmployeeViewMode('planning')" title="Open Crew Structure Planning for the upcoming 2-3 weeks with side pane & publish">
+                <span>🏗️</span> Crew Planning
+              </button>
+            </div>
+
+            <input type="text" id="sheet-search-input" class="sheet-search" placeholder="Filter rows..." style="max-width: 170px; flex-shrink: 1;">
           </div>
         </div>
         <!-- Dynamic Filter Bar for Inventory Drilldown & Multi-Criteria Filtering -->
@@ -498,17 +516,26 @@
           <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
             <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
               <h2 style="font-size: 16px; margin: 0;">🗺️ Trip Planner & Route Scheduler</h2>
-              <!-- Sub-tabs: Board vs Route Map -->
-              <div style="display: flex; align-items: center; gap: 3px; background: var(--bg-primary); padding: 2px 4px; border-radius: 6px; border: 1px solid var(--border-color);">
+              <!-- Sub-tabs: Board vs Route Map vs Trip Schedule vs Field GPS vs Daily Accomplishments -->
+              <div style="display: flex; align-items: center; gap: 3px; background: var(--bg-primary); padding: 2px 4px; border-radius: 6px; border: 1px solid var(--border-color); flex-wrap: wrap;">
                 <button class="btn btn-secondary active" id="btn-tp-tab-board" style="padding: 2px 8px; font-size: 11px; font-weight: 700;" onclick="window.tripPlanner.switchTab('board')" title="Multi-week schedule calendar board">
                   <span>📅</span> Schedule Board
                 </button>
                 <button class="btn btn-secondary" id="btn-tp-tab-map" style="padding: 2px 8px; font-size: 11px; font-weight: 700;" onclick="window.tripPlanner.switchTab('map')" title="Interactive route map with stops and live GPS tracking">
                   <span>🗺️</span> Route Map & Stops
                 </button>
+                <button class="btn btn-secondary" id="btn-tp-tab-schedule" style="padding: 2px 8px; font-size: 11px; font-weight: 700;" onclick="window.tripPlanner.switchTab('trip_schedule')" title="Tabular log of all scheduled trips and multi-week visits">
+                  <span>📋</span> Trip Schedule
+                </button>
+                <button class="btn btn-secondary" id="btn-tp-tab-gps" style="padding: 2px 8px; font-size: 11px; font-weight: 700;" onclick="window.tripPlanner.switchTab('field_gps_log')" title="Audit trail of field GPS check-ins and crew safety visits">
+                  <span>📍</span> Field GPS Log
+                </button>
+                <button class="btn btn-secondary" id="btn-tp-tab-accomplishments" style="padding: 2px 8px; font-size: 11px; font-weight: 700;" onclick="window.tripPlanner.switchTab('daily_accomplishments')" title="Daily accomplishment logs and timesheet summaries">
+                  <span>⏱️</span> Daily Accomplishments
+                </button>
               </div>
               <!-- Week Span Selector -->
-              <div style="display: flex; align-items: center; gap: 3px; background: var(--bg-primary); padding: 2px 4px; border-radius: 6px; border: 1px solid var(--border-color);">
+              <div id="trip-planner-view-span-controls" style="display: flex; align-items: center; gap: 3px; background: var(--bg-primary); padding: 2px 4px; border-radius: 6px; border: 1px solid var(--border-color);">
                 <span style="font-size: 10.5px; color: var(--text-muted); font-weight: 700; margin: 0 4px;">VIEW:</span>
                 <button class="btn btn-secondary" id="btn-span-1w" style="padding: 2px 6px; font-size: 10.5px;" onclick="window.tripPlanner.setWeeksToShow(1)">1 Wk</button>
                 <button class="btn btn-secondary" id="btn-span-2w" style="padding: 2px 6px; font-size: 10.5px;" onclick="window.tripPlanner.setWeeksToShow(2)">2 Wks</button>
@@ -519,7 +546,7 @@
               </div>
             </div>
 
-            <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+            <div id="trip-planner-board-controls" style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
               <!-- Navigation Controls -->
               <div style="display: flex; align-items: center; gap: 4px;">
                 <button class="btn btn-secondary" style="padding: 3px 8px; font-size: 11px;" onclick="window.tripPlanner.jumpWeeks(-4)" title="Jump 4 Weeks Backward">◀◀ -4 Wks</button>
@@ -759,6 +786,9 @@
             <div id="trip-route-map" style="display: none; width: 100%; flex: 1; height: 100%;"></div>
           </div>
         </div>
+
+        <!-- Subtab 3: Trip Planner Table Container (Trip Schedule, Field GPS Log, Daily Accomplishments) -->
+        <div id="trip-planner-table-container" style="display: none; flex: 1; flex-direction: column; overflow: hidden; background: var(--bg-primary);"></div>
       </section>
 
       <!-- View 3: Tasks & Calendar -->
@@ -1043,11 +1073,38 @@
       </section>
 
       <!-- View 5: Sync Settings -->
-      <section id="settings-view" class="view-container" style="overflow-y: auto;">
-        <div class="sheet-toolbar">
-          <h2 style="font-size: 16px;">⚙️ Sync & Database Settings</h2>
+      <section id="settings-view" class="view-container" style="overflow-y: auto; display: none; flex-direction: column;">
+        <!-- Top Level Tabs Bar (Standard App Navigation) -->
+        <div class="sheet-tabs-bar" style="margin-bottom: 0; background: var(--bg-secondary); border-bottom: 1px solid var(--border-color); padding: 0 16px; display: flex; gap: 6px; overflow-x: auto; flex-shrink: 0;">
+          <button class="sheet-tab active" id="btn-settings-tab-sync" 
+                  onclick="switchSettingsTab('sync')"
+                  style="display: inline-flex; align-items: center; gap: 8px; padding: 10px 18px; border: none; background: rgba(56, 189, 248, 0.12); color: #38bdf8; font-weight: 700; font-size: 13px; cursor: pointer; border-bottom: 2px solid #38bdf8; transition: all 0.15s ease;">
+            <span>⚡</span> Sync &amp; Database Controls
+          </button>
+          <button class="sheet-tab" id="btn-settings-tab-config" 
+                  onclick="switchSettingsTab('config')"
+                  style="display: inline-flex; align-items: center; gap: 8px; padding: 10px 18px; border: none; background: transparent; color: var(--text-muted); font-weight: 700; font-size: 13px; cursor: pointer; border-bottom: 2px solid transparent; transition: all 0.15s ease;">
+            <span>⚙️</span> System Config Table
+            <span class="badge" id="settings-config-badge" style="background: rgba(56, 189, 248, 0.2); color: #93c5fd; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 10px; margin-left: 4px;">0</span>
+          </button>
         </div>
-        <div style="padding: 24px; max-width: 680px;">
+
+        <!-- Tab 1: Sync Controls Panel -->
+        <div id="settings-sync-panel" style="padding: 24px; max-width: 680px; width: 100%; box-sizing: border-box; overflow-y: auto;">
+          <!-- Quick link card to System Config -->
+          <div style="background-color: var(--bg-secondary); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 8px; padding: 14px 18px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+            <div>
+              <div style="font-size: 13px; font-weight: 700; color: #f8fafc; display: flex; align-items: center; gap: 6px;">
+                <span>⚙️</span> System Configuration Key-Value Store
+              </div>
+              <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">
+                Inspect, add, and manage cloud configuration keys, work schedules, holidays, and aging thresholds.
+              </div>
+            </div>
+            <button class="btn btn-secondary" style="font-size: 11.5px; font-weight: 700; border-color: #38bdf8; color: #38bdf8; display: inline-flex; align-items: center; gap: 5px;" onclick="switchSettingsTab('config')">
+              <span>📋</span> View System Config Table
+            </button>
+          </div>
           <!-- Supabase Multi-User Real-Time Sync Card -->
           <div style="background: linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, rgba(15, 23, 42, 0.9) 100%); border: 1px solid rgba(16, 185, 129, 0.45); border-radius: 8px; padding: 20px; margin-bottom: 20px;">
             <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; flex-wrap: wrap; gap: 8px;">
@@ -1150,6 +1207,11 @@
               <button class="btn btn-secondary" onclick="window.localDB.clear().then(() => location.reload());">🗑️ Clear Offline Cache</button>
             </div>
           </div>
+        </div>
+
+        <!-- Tab 2: System Config Table Panel -->
+        <div id="settings-config-panel" style="display: none; flex: 1; flex-direction: column; overflow: hidden; background: var(--bg-primary); width: 100%;">
+          <!-- Injected dynamically by renderSystemConfigTable() -->
         </div>
       </section>
 
@@ -1688,7 +1750,7 @@
       <div class="modal-footer" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
         <button class="btn btn-secondary" onclick="window.smsDialogEngine.closeSmsModal()">Cancel</button>
         <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-          <button class="btn btn-success" onclick="window.smsDialogEngine.recordSmsNotification()" style="background-color: #10b981; border: 1px solid #059669; color: #fff; display: inline-flex; align-items: center; gap: 6px; font-weight: 700; cursor: pointer; padding: 6px 14px; border-radius: 6px;" title="Mark this employee as notified without opening messaging app">
+          <button class="btn btn-success" onclick="window.smsDialogEngine.recordSmsNotification('notified')" style="background-color: #10b981; border: 1px solid #059669; color: #fff; display: inline-flex; align-items: center; gap: 6px; font-weight: 700; cursor: pointer; padding: 6px 14px; border-radius: 6px;" title="Mark this employee as notified without opening messaging app">
             <span>✅</span> Mark as Notified
           </button>
           <button class="btn btn-secondary" onclick="window.smsDialogEngine.copyMessageToClipboard()" style="display: inline-flex; align-items: center; gap: 6px;">
@@ -3218,6 +3280,7 @@
   <script src="js/inventory.js?v=20261027_01"></script>
   <script src="js/swaps.js?v=20261027_01"></script>
   <script src="js/crew-import.js?v=20261027_01"></script>
+  <script src="js/crew-planning.js?v=20261104_07"></script>
   <script src="js/item-stats.js?v=20261027_01"></script>
   <script src="js/sms-dialog.js?v=20261027_01"></script>
   <script src="js/employee-profile.js?v=20261104_01"></script>
@@ -3226,7 +3289,7 @@
   <script src="js/cpr-roster.js?v=20261027_01"></script>
   <script src="js/certs-import.js?v=20261027_01"></script>
   <script src="js/time-breakdown.js?v=20261027_01"></script>
-  <script src="js/sheets.js?v=20261103_01"></script>
+  <script src="js/sheets.js?v=20261104_02"></script>
   <script src="js/history.js?v=20261103_01"></script>
   <script src="js/history-issues.js?v=20261027_01"></script>
   <script src="js/previous-employees.js?v=20261027_01"></script>
@@ -3343,6 +3406,12 @@
       if (viewId === 'incident-reports-view' && window.incidentReportsEngine) window.incidentReportsEngine.render();
       if (viewId === 'weekly-summary-view' && window.weeklySummaryEngine) window.weeklySummaryEngine.render();
       if (viewId === 'tailgate-generator-view' && window.weeklySummaryEngine) window.weeklySummaryEngine.renderTailgateWorkspace();
+      if (viewId === 'settings-view') {
+        if (typeof window.updateSettingsConfigBadge === 'function') window.updateSettingsConfigBadge();
+        if (window.activeSettingsTab === 'config' && typeof window.renderSystemConfigTable === 'function') {
+          window.renderSystemConfigTable();
+        }
+      }
     }
 
     document.querySelectorAll('.nav-item').forEach(item => {
@@ -3490,14 +3559,280 @@
     }
     window.toggleAutoScanStartup = toggleAutoScanStartup;
 
+    // Settings Tabs Navigation & System Config Workspace
+    window.activeSettingsTab = 'sync';
+    window.systemConfigSearchTerm = '';
+    window.systemConfigSortCol = null;
+    window.systemConfigSortDir = 'asc';
+
+    function switchSettingsTab(tab) {
+      window.activeSettingsTab = tab || 'sync';
+      const syncPanel = document.getElementById('settings-sync-panel');
+      const configPanel = document.getElementById('settings-config-panel');
+      const btnSync = document.getElementById('btn-settings-tab-sync');
+      const btnConfig = document.getElementById('btn-settings-tab-config');
+
+      if (tab === 'config') {
+        if (syncPanel) syncPanel.style.display = 'none';
+        if (configPanel) configPanel.style.display = 'flex';
+        if (btnSync) {
+          btnSync.style.background = 'transparent';
+          btnSync.style.color = 'var(--text-muted)';
+          btnSync.style.borderBottomColor = 'transparent';
+        }
+        if (btnConfig) {
+          btnConfig.style.background = 'rgba(56, 189, 248, 0.12)';
+          btnConfig.style.color = '#38bdf8';
+          btnConfig.style.borderBottomColor = '#38bdf8';
+        }
+        renderSystemConfigTable();
+      } else {
+        if (configPanel) configPanel.style.display = 'none';
+        if (syncPanel) syncPanel.style.display = 'block';
+        if (btnConfig) {
+          btnConfig.style.background = 'transparent';
+          btnConfig.style.color = 'var(--text-muted)';
+          btnConfig.style.borderBottomColor = 'transparent';
+        }
+        if (btnSync) {
+          btnSync.style.background = 'rgba(56, 189, 248, 0.12)';
+          btnSync.style.color = '#38bdf8';
+          btnSync.style.borderBottomColor = '#38bdf8';
+        }
+      }
+      updateSettingsConfigBadge();
+    }
+    window.switchSettingsTab = switchSettingsTab;
+
+    function updateSettingsConfigBadge() {
+      const badge = document.getElementById('settings-config-badge');
+      if (badge && window.localDB) {
+        const count = (window.localDB.snapshot?.tables?.system_config?.rows || []).length;
+        badge.textContent = count;
+      }
+    }
+    window.updateSettingsConfigBadge = updateSettingsConfigBadge;
+
+    function renderSystemConfigTable() {
+      const container = document.getElementById('settings-config-panel');
+      if (!container || !window.localDB) return;
+      updateSettingsConfigBadge();
+
+      const t = window.localDB.getTable('system_config') || {
+        name: 'System Config',
+        headers: ['Config Key', 'Config Value', 'Description', 'Last Updated'],
+        rows: []
+      };
+      const headers = t.headers || ['Config Key', 'Config Value', 'Description', 'Last Updated'];
+      let rows = [...(t.rows || [])];
+      const totalCount = rows.length;
+
+      if (window.systemConfigSearchTerm) {
+        const q = window.systemConfigSearchTerm.toLowerCase();
+        rows = rows.filter(r => Object.values(r).some(v => String(v || '').toLowerCase().includes(q)));
+      }
+
+      if (window.systemConfigSortCol) {
+        const col = window.systemConfigSortCol;
+        const dir = window.systemConfigSortDir === 'asc' ? 1 : -1;
+        rows.sort((a, b) => {
+          const va = a[col] ?? '';
+          const vb = b[col] ?? '';
+          return String(va).localeCompare(String(vb), undefined, { numeric: true }) * dir;
+        });
+      }
+
+      const esc = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+
+      let rowsHtml = '';
+      if (rows.length === 0) {
+        rowsHtml = `
+          <div style="background: #1e293b; border-radius: 8px; border: 1px solid var(--border-color); padding: 50px 20px; text-align: center; color: var(--text-muted);">
+            <div style="font-size: 36px; margin-bottom: 10px;">⚙️</div>
+            <div style="font-size: 15px; font-weight: 700; color: #f8fafc;">No Configuration Keys Found</div>
+            <div style="font-size: 12px; margin-top: 5px; color: var(--text-muted);">${window.systemConfigSearchTerm ? 'No entries match your search.' : 'There are currently no configuration keys defined.'}</div>
+            <button class="btn btn-primary" style="margin-top: 14px; font-size: 11.5px;" onclick="promptAddSystemConfig()">➕ Add First Config Key</button>
+          </div>
+        `;
+      } else {
+        const trs = rows.map(row => {
+          const k = esc(row['Config Key'] || '');
+          const val = esc(row['Config Value'] || '');
+          const desc = esc(row['Description'] || '');
+          const updated = esc(row['Last Updated'] || '—');
+          return `
+            <tr style="border-bottom: 1px solid rgba(255,255,255,0.05);">
+              <td style="padding: 8px 12px; font-family: monospace; font-weight: 700; color: #93c5fd; white-space: nowrap;">${k}</td>
+              <td class="editable" contenteditable="true" data-key="${k}" data-field="Config Value" style="padding: 8px 12px; font-family: monospace; background: rgba(0,0,0,0.2); border-radius: 4px; max-width: 380px; overflow-wrap: break-word;">${val}</td>
+              <td class="editable" contenteditable="true" data-key="${k}" data-field="Description" style="padding: 8px 12px; color: #cbd5e1; max-width: 320px;">${desc}</td>
+              <td style="padding: 8px 12px; color: #94a3b8; font-size: 11px; white-space: nowrap;">${updated}</td>
+              <td style="padding: 8px 12px; text-align: center;">
+                <button class="btn btn-secondary" style="padding: 2px 7px; font-size: 11px; color: #f87171; border-color: rgba(239, 68, 68, 0.4);" onclick="deleteSystemConfigKey('${k}')" title="Delete key">🗑️</button>
+              </td>
+            </tr>
+          `;
+        }).join('');
+
+        const ths = headers.map(h => {
+          const arrow = window.systemConfigSortCol === h ? (window.systemConfigSortDir === 'asc' ? '▲' : '▼') : '';
+          return `
+            <th style="padding: 10px 12px; font-weight: 700; color: #93c5fd; white-space: nowrap; cursor: pointer; user-select: none;" onclick="window.systemConfigSortCol = '${esc(h)}'; window.systemConfigSortDir = (window.systemConfigSortDir === 'asc' ? 'desc' : 'asc'); renderSystemConfigTable();">
+              ${esc(h)} ${arrow}
+            </th>
+          `;
+        }).join('');
+
+        rowsHtml = `
+          <div style="background: #1e293b; border-radius: 8px; border: 1px solid var(--border-color); overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.25);">
+            <table class="data-table" style="width: 100%; border-collapse: collapse; font-size: 12px; color: #f8fafc; text-align: left;">
+              <thead>
+                <tr style="background: rgba(15, 23, 42, 0.85); border-bottom: 2px solid var(--border-color); position: sticky; top: 0; z-index: 10;">
+                  ${ths}
+                  <th style="padding: 10px 12px; text-align: center; width: 70px;">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${trs}
+              </tbody>
+            </table>
+          </div>
+        `;
+      }
+
+      const countBadge = `${rows.length}${rows.length !== totalCount ? ' of ' + totalCount : ''} keys`;
+      const searchBoxVal = esc(window.systemConfigSearchTerm || '');
+      const clearBtn = window.systemConfigSearchTerm ? '<button class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px;" onclick="window.systemConfigSearchTerm = \'\'; renderSystemConfigTable();">Clear</button>' : '';
+
+      container.innerHTML = `
+        <div style="padding: 12px 20px; background: #1e293b; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <span style="font-size: 24px;">⚙️</span>
+            <div>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <h2 style="font-size: 16px; margin: 0; font-weight: 800; color: #f8fafc;">System Configuration (Cloud Key-Value Store)</h2>
+                <span class="badge" style="background: rgba(56, 189, 248, 0.2); color: #93c5fd; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 10px;">${countBadge}</span>
+              </div>
+              <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">Application runtime variables, work schedule defaults, aging rules, and sync parameters</div>
+            </div>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+            <button class="btn btn-secondary" style="font-size: 11.5px; font-weight: 700; color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.4); display: inline-flex; align-items: center; gap: 5px;" onclick="promptAddSystemConfig()">
+              <span>➕</span> Add New Config Key
+            </button>
+            <button class="btn btn-primary" style="font-size: 11.5px; font-weight: 700; background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); border: none; display: inline-flex; align-items: center; gap: 5px;" onclick="syncSystemConfigToSheets()">
+              <span>⬆️</span> Sync Config to Sheets
+            </button>
+          </div>
+        </div>
+
+        <div style="padding: 8px 20px; background: rgba(15, 23, 42, 0.4); border-bottom: 1px solid var(--border-color); display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+          <div style="display: flex; align-items: center; gap: 8px; flex: 1; max-width: 480px;">
+            <input type="text" id="sys-config-search-input" value="${searchBoxVal}" placeholder="🔍 Search Config Key, Value, Description..." style="width: 100%; box-sizing: border-box; padding: 5px 12px; font-size: 12px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;" oninput="window.systemConfigSearchTerm = this.value; renderSystemConfigTable();">
+            ${clearBtn}
+          </div>
+          <div style="font-size: 11.5px; color: var(--text-muted);">
+            <span>💡 Config values can be plain text, numbers, or JSON strings. Double-click cell to edit.</span>
+          </div>
+        </div>
+
+        <div style="flex: 1; overflow: auto; padding: 12px 20px;">
+          ${rowsHtml}
+        </div>
+      `;
+
+      container.querySelectorAll('td.editable').forEach(td => {
+        let orig = '';
+        td.addEventListener('focus', () => { orig = td.textContent.trim(); });
+        td.addEventListener('blur', async () => {
+          const val = td.textContent.trim();
+          if (val === orig) return;
+          const k = td.dataset.key;
+          const f = td.dataset.field;
+          const row = t.rows.find(r => r['Config Key'] === k);
+          if (row) {
+            row[f] = val;
+            row['Last Updated'] = new Date().toLocaleString('en-US', { timeZone: 'America/Denver' });
+            await window.localDB.addMutation({
+              action: 'UPDATE_SYSTEM_CONFIG',
+              key: k,
+              value: row['Config Value'],
+              description: row['Description']
+            });
+            if (typeof window.localDB.schedulePersistSnapshot === 'function') {
+              window.localDB.schedulePersistSnapshot(window.localDB.snapshot, 300);
+            }
+          }
+          td.style.backgroundColor = 'rgba(34, 197, 94, 0.2)';
+          setTimeout(() => { td.style.backgroundColor = ''; }, 400);
+        });
+      });
+    }
+    window.renderSystemConfigTable = renderSystemConfigTable;
+
+    async function promptAddSystemConfig() {
+      const key = prompt('Enter Configuration Key (e.g. WORK_SCHEDULE, HOLIDAYS, AGING_WARNING_DAYS):', '');
+      if (!key) return;
+      const val = prompt('Enter Configuration Value (text or JSON string):', '') || '';
+      const desc = prompt('Enter Description (optional):', '') || '';
+      await window.localDB.setSystemConfig(key, val, desc);
+      renderSystemConfigTable();
+      alert(`✅ Configuration key "\${key.toUpperCase()}" added!`);
+    }
+    window.promptAddSystemConfig = promptAddSystemConfig;
+
+    async function deleteSystemConfigKey(key) {
+      if (!confirm(`Are you sure you want to delete configuration key "\${key}"?`)) return;
+      const t = window.localDB.getTable('system_config');
+      if (t && t.rows) {
+        t.rows = t.rows.filter(r => r['Config Key'] !== key);
+        t.rowCount = t.rows.length;
+        await window.localDB.persistSnapshot(window.localDB.snapshot);
+        await window.localDB.addMutation({
+          action: 'REPLACE_TABLE_DATA',
+          sheetName: 'System Config',
+          tableKey: 'system_config',
+          headers: t.headers,
+          rows: t.rows
+        });
+      }
+      renderSystemConfigTable();
+      alert(`🗑️ Deleted "\${key}".`);
+    }
+    window.deleteSystemConfigKey = deleteSystemConfigKey;
+
+    async function syncSystemConfigToSheets() {
+      const t = window.localDB.getTable('system_config');
+      if (!t || !t.rows || t.rows.length === 0) {
+        alert('No system configuration records to push.');
+        return;
+      }
+      await window.localDB.addMutation({
+        action: 'REPLACE_TABLE_DATA',
+        sheetName: 'System Config',
+        tableKey: 'system_config',
+        headers: t.headers,
+        rows: t.rows
+      });
+      if (window.syncEngine && typeof window.syncEngine.pushChangesToGoogleSheets === 'function') {
+        window.syncEngine.renderOutboxBadge();
+        await window.syncEngine.pushChangesToGoogleSheets();
+        alert('✅ Successfully pushed System Config table to Google Sheets!');
+      } else {
+        alert('Changes queued in outbox.');
+      }
+    }
+    window.syncSystemConfigToSheets = syncSystemConfigToSheets;
+
     function triggerStartupBackgroundScans() {
-      // Never auto-run heavy Gmail scans on web/tablet clients or in View Only mode
-      if (!window.desktopAPI || window.currentRoleMode === 'view_only') {
-        console.log('[Startup Scans] Skipping automated startup email scans on tablet/web or View Only mode.');
+      // Never auto-run heavy Gmail scans in View Only mode
+      if (window.currentRoleMode === 'view_only') {
+        console.log('[Startup Scans] Skipping automated startup email scans in View Only mode.');
         return;
       }
 
-      const autoScanEnabled = localStorage.getItem('sa_auto_scan_on_startup') === 'true';
+      // Default to true if not explicitly set to 'false'
+      const autoScanSetting = localStorage.getItem('sa_auto_scan_on_startup');
+      const autoScanEnabled = autoScanSetting !== 'false';
       if (!autoScanEnabled) {
         console.log('[Startup Scans] Automated startup email scans are disabled in Settings.');
         return;
@@ -3509,45 +3844,60 @@
         return;
       }
 
-      // 2.2-second delay allows the local UI to render smoothly and initial revision check to finish
+      // 1.5-second initial delay allows UI to render smoothly, then wait for any active sync/revision check to clear
       setTimeout(async () => {
-        if (window.syncEngine && window.syncEngine.isSyncing) return;
+        let waitCount = 0;
+        while (window.syncEngine && window.syncEngine.isSyncing && waitCount < 10) {
+          waitCount++;
+          await new Promise(r => setTimeout(r, 1000));
+        }
+
         try {
           console.log('🚀 [Startup Scans] Initiating automated background email scans...');
-
-          // 1. Scan for new Incident Reports
-          if (window.incidentReportsEngine && typeof window.incidentReportsEngine.scanEmails === 'function') {
-            try {
-              console.log('[Startup Scans] Starting Incident Reports scan in background...');
-              await window.incidentReportsEngine.scanEmails(false, { runInBackground: true, silent: true });
-            } catch (incErr) {
-              console.warn('[Startup Scans] Incident email scan error:', incErr);
-            }
+          if (typeof window.showToast === 'function') {
+            window.showToast('🚀 Scanning Gmail for Safety Emails & Incident Reports in background...', 'info');
           }
 
-          // Polite pause between scans to avoid Google Apps Script lock/quota contention
-          await new Promise(r => setTimeout(r, 1200));
-
-          // 2. Scan for new Safety Documentation Emails (JHAs, Weekly Safety Meetings, Monthly Checklists)
+          // 1. Start Process Safety Emails (JHAs, Weekly Safety Meetings, Monthly Checklists)
           if (window.safetyComplianceEngine && typeof window.safetyComplianceEngine.runProcessEmails === 'function') {
             try {
-              console.log('[Startup Scans] Starting Safety Emails scan in background...');
-              await window.safetyComplianceEngine.runProcessEmails({
+              console.log('[Startup Scans] Starting Process Safety Emails in background...');
+              window.safetyComplianceEngine.runProcessEmails({
                 runInBackground: true,
-                silent: true,
+                silent: false,
                 reportTypeFilter: 'ALL',
                 daysBack: 7,
                 newOnlyMode: true,
                 skipPdfExtraction: true
+              }).catch(safetyErr => {
+                console.warn('[Startup Scans] Safety email scan error:', safetyErr);
               });
             } catch (safetyErr) {
               console.warn('[Startup Scans] Safety email scan error:', safetyErr);
             }
           }
+
+          // Polite 500ms stagger so both floating notification pills animate in cleanly
+          await new Promise(r => setTimeout(r, 500));
+
+          // 2. Start Scan Gmail For Incident Reports
+          if (window.incidentReportsEngine && typeof window.incidentReportsEngine.scanEmails === 'function') {
+            try {
+              console.log('[Startup Scans] Starting Incident Reports scan in background...');
+              window.incidentReportsEngine.scanEmails(false, {
+                runInBackground: true,
+                silent: false
+              }).catch(incErr => {
+                console.warn('[Startup Scans] Incident email scan error:', incErr);
+              });
+            } catch (incErr) {
+              console.warn('[Startup Scans] Incident email scan error:', incErr);
+            }
+          }
         } catch (err) {
           console.warn('[Startup Scans] Error during automated scans:', err);
         }
-      }, 2200);
+      }, 1500);
     }
     window.triggerStartupBackgroundScans = triggerStartupBackgroundScans;
 
@@ -3726,7 +4076,7 @@
 
         const autoScanCheckbox = document.getElementById('setting-auto-scan-startup');
         if (autoScanCheckbox) {
-          autoScanCheckbox.checked = localStorage.getItem('sa_auto_scan_on_startup') === 'true';
+          autoScanCheckbox.checked = localStorage.getItem('sa_auto_scan_on_startup') !== 'false';
         }
 
         window._appInitialized = true;

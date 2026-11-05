@@ -83,21 +83,48 @@ class TripPlannerApp {
     this.dismissedSwaps = this.loadDismissedSwaps();
     this.scheduledSwaps = this.loadScheduledSwaps();
     this.swapOfficeTasks = this.loadSwapOfficeTasks();
-    this.activeTab = 'board'; // 'board' or 'map'
+    this.activeTab = 'board'; // 'board', 'map', 'trip_schedule', 'field_gps_log', 'daily_accomplishments'
+    this.tableSearchTerm = '';
+    this.tableSortCol = null;
+    this.tableSortDir = 'asc';
   }
 
   switchTab(tab) {
     this.activeTab = tab || 'board';
     const boardContainer = document.getElementById('trip-planner-board-container');
     const mapContainer = document.getElementById('trip-planner-map-container');
+    const tableContainer = document.getElementById('trip-planner-table-container');
+    const boardControls = document.getElementById('trip-planner-board-controls');
+    const viewSpanControls = document.getElementById('trip-planner-view-span-controls');
+
     const btnBoard = document.getElementById('btn-tp-tab-board');
     const btnMap = document.getElementById('btn-tp-tab-map');
+    const btnSchedule = document.getElementById('btn-tp-tab-schedule');
+    const btnGps = document.getElementById('btn-tp-tab-gps');
+    const btnAccomplishments = document.getElementById('btn-tp-tab-accomplishments');
 
-    if (this.activeTab === 'map') {
+    if (btnBoard) btnBoard.classList.toggle('active', this.activeTab === 'board');
+    if (btnMap) btnMap.classList.toggle('active', this.activeTab === 'map');
+    if (btnSchedule) btnSchedule.classList.toggle('active', this.activeTab === 'trip_schedule');
+    if (btnGps) btnGps.classList.toggle('active', this.activeTab === 'field_gps_log');
+    if (btnAccomplishments) btnAccomplishments.classList.toggle('active', this.activeTab === 'daily_accomplishments');
+
+    const isTableTab = ['trip_schedule', 'field_gps_log', 'daily_accomplishments'].includes(this.activeTab);
+
+    if (isTableTab) {
+      if (boardContainer) boardContainer.style.display = 'none';
+      if (mapContainer) mapContainer.style.display = 'none';
+      if (tableContainer) tableContainer.style.display = 'flex';
+      if (boardControls) boardControls.style.display = 'none';
+      if (viewSpanControls) viewSpanControls.style.display = 'none';
+
+      this.renderTableTab(this.activeTab);
+    } else if (this.activeTab === 'map') {
       if (boardContainer) boardContainer.style.display = 'none';
       if (mapContainer) mapContainer.style.display = 'flex';
-      if (btnBoard) btnBoard.classList.remove('active');
-      if (btnMap) btnMap.classList.add('active');
+      if (tableContainer) tableContainer.style.display = 'none';
+      if (boardControls) boardControls.style.display = 'flex';
+      if (viewSpanControls) viewSpanControls.style.display = 'flex';
 
       if (window.tripRouteMap) {
         window.tripRouteMap.activeWeekMonday = this.getMondayForDate(this.currentDate);
@@ -105,9 +132,11 @@ class TripPlannerApp {
       }
     } else {
       if (mapContainer) mapContainer.style.display = 'none';
+      if (tableContainer) tableContainer.style.display = 'none';
       if (boardContainer) boardContainer.style.display = 'flex';
-      if (btnMap) btnMap.classList.remove('active');
-      if (btnBoard) btnBoard.classList.add('active');
+      if (boardControls) boardControls.style.display = 'flex';
+      if (viewSpanControls) viewSpanControls.style.display = 'flex';
+
       this.renderPlanner();
     }
   }
@@ -8271,15 +8300,22 @@ class TripPlannerApp {
         matchedJob = bestJob;
       }
 
-      // 3. Match by worker / foreman name in jobTable
+      // 3. Match by worker / foreman name in jobTable (prefer Active status)
       if (!matchedJob && cleanWorkerLower && cleanWorkerLower !== 'foreman' && cleanWorkerLower !== 'lead') {
+        let bestJobByForeman = null;
         for (const r of jobTable.rows) {
           const fName = String(r['Foreman'] || r['Crew Lead'] || r['Lead'] || '').trim().toLowerCase();
           if (fName && (fName === cleanWorkerLower || fName.includes(cleanWorkerLower) || cleanWorkerLower.includes(fName))) {
-            matchedJob = r;
-            break;
+            const st = String(r['Status'] || '').toLowerCase();
+            if (st === 'active') {
+              bestJobByForeman = r;
+              break;
+            } else if (!bestJobByForeman) {
+              bestJobByForeman = r;
+            }
           }
         }
+        matchedJob = bestJobByForeman;
       }
     }
 
@@ -8306,8 +8342,18 @@ class TripPlannerApp {
       }
     }
 
-    // Resolve location
-    let location = rowLocation;
+    // Resolve location: Active job from Job Tracking takes priority over stale rowLocation
+    let location = '';
+    if (matchedJob) {
+      const st = String(matchedJob['Status'] || '').toLowerCase();
+      const jLoc = this.cleanPhysicalLocation(matchedJob['Location']);
+      if (st === 'active' && jLoc && !this.isStatusLocation(jLoc)) {
+        location = jLoc;
+      }
+    }
+    if (!location && rowLocation) {
+      location = rowLocation;
+    }
     if (!location && matchedJob) {
       const jLoc = this.cleanPhysicalLocation(matchedJob['Location']);
       if (jLoc && !this.isStatusLocation(jLoc)) {
@@ -8445,6 +8491,10 @@ class TripPlannerApp {
   }
 
   renderPlanner() {
+    if (['trip_schedule', 'field_gps_log', 'daily_accomplishments'].includes(this.activeTab)) {
+      this.renderTableTab(this.activeTab);
+      return;
+    }
     this.loadSavedTrips();
     if (this.activeTab === 'map' && window.tripRouteMap) {
       window.tripRouteMap.activeWeekMonday = this.getMondayForDate(this.currentDate);
@@ -8624,11 +8674,16 @@ class TripPlannerApp {
               let currentAttendees = trItem.attendees;
 
               if (!isCompleted) {
-                const liveInfo = this.getCrewInfo(trItem.crewId, trItem.lead, trItem.location);
+                const liveInfo = this.getCrewInfo(trItem.crewId, trItem.lead, '');
                 if (liveInfo && liveInfo.foreman && liveInfo.foreman !== 'Foreman') {
                   currentLead = liveInfo.foreman;
                 }
                 if (liveInfo && liveInfo.location) {
+                  if (trItem.location !== liveInfo.location || (entry && entry.location !== liveInfo.location)) {
+                    trItem.location = liveInfo.location;
+                    if (entry) entry.location = liveInfo.location;
+                    needsTrainSave = true;
+                  }
                   currentLoc = liveInfo.location;
                 }
                 const liveMembers = this.getCrewMembers(trItem.crewId);
@@ -12211,6 +12266,378 @@ class TripPlannerApp {
     }
 
     return days;
+  }
+
+  // --- Trip Planner Embedded Table Tabs (Trip Schedule, Field GPS Log, Daily Accomplishments) ---
+
+  renderTableTab(tableKey) {
+    const container = document.getElementById('trip-planner-table-container');
+    if (!container) return;
+
+    let t = null;
+    let meta = {
+      icon: '📋',
+      title: 'Trip Schedule',
+      subtitle: 'Tabular log of all scheduled multi-week trips, task visits, and training classes',
+      actionsHtml: `
+        <button class="btn btn-secondary" style="font-size: 11.5px; font-weight: 700; color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4); display: inline-flex; align-items: center; gap: 5px;" onclick="window.tripPlanner.reSyncTripScheduleFromBoard()" title="Re-sync table from all cards on the calendar board">
+          <span>🔄</span> Re-Sync from Board
+        </button>
+        <button class="btn btn-primary" style="font-size: 11.5px; font-weight: 700; background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); border: none; display: inline-flex; align-items: center; gap: 5px;" onclick="window.tripPlanner.syncTableToSheets('trip_schedule')" title="Push Trip Schedule directly to Google Sheets">
+          <span>⬆️</span> Sync Sheet to Google
+        </button>
+      `
+    };
+
+    if (tableKey === 'trip_schedule') {
+      if (!this.db?.snapshot?.tables?.trip_schedule || !this.db.snapshot.tables.trip_schedule.rows?.length) {
+        if (typeof this.db.syncTripScheduleTable === 'function') {
+          this.db.syncTripScheduleTable();
+        }
+      }
+      t = this.db.getTable('trip_schedule') || {
+        name: 'Trip Schedule',
+        headers: ['Trip ID', 'Date', 'Week Monday', 'Destination', 'Job Number', 'Crew / Lead', 'Task Type', 'Swaps Count', 'Status', 'Completed Date', 'Notes'],
+        rows: []
+      };
+    } else if (tableKey === 'field_gps_log') {
+      t = this.db.getTable('field_gps_log') || {
+        name: 'Field GPS Log',
+        headers: ['Check-In ID', 'Timestamp', 'Job Number', 'Job / Crew Name', 'Nearest Montana Base', 'Distance (mi)', 'GPS Coordinates', 'Accuracy (m)', 'User / Inspector', 'Activity', 'Notes'],
+        rows: []
+      };
+      meta = {
+        icon: '📍',
+        title: 'Field GPS Log',
+        subtitle: 'Audit trail of field crew visits, safety checks, and mobile GPS check-ins',
+        actionsHtml: `
+          <button class="btn btn-secondary" style="font-size: 11.5px; font-weight: 700; color: #4ade80; border: 1px solid rgba(34, 197, 94, 0.4); display: inline-flex; align-items: center; gap: 5px;" onclick="window.tripPlanner.promptLogFieldCheckIn()" title="Log a new GPS check-in using your device's current location">
+            <span>📍</span> Check In Here (Live GPS)
+          </button>
+          <button class="btn btn-secondary" style="font-size: 11.5px; font-weight: 700; color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4); display: inline-flex; align-items: center; gap: 5px;" onclick="window.tripPlanner.switchTab('map')" title="View route and waypoints on Route Map">
+            <span>🗺️</span> View Route Map
+          </button>
+          <button class="btn btn-primary" style="font-size: 11.5px; font-weight: 700; background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); border: none; display: inline-flex; align-items: center; gap: 5px;" onclick="window.tripPlanner.syncTableToSheets('field_gps_log')" title="Push Field GPS Log directly to Google Sheets">
+            <span>⬆️</span> Sync Sheet to Google
+          </button>
+        `
+      };
+    } else if (tableKey === 'daily_accomplishments') {
+      t = this.db.getTable('daily_accomplishments') || {
+        name: 'Daily Accomplishments',
+        headers: ['Date', 'User / Coordinator', 'Crews Visited', 'Route / Cities', 'Drive Time', 'Swaps Completed', 'Trainings Conducted', 'Summary Text', 'Logged At'],
+        rows: []
+      };
+      meta = {
+        icon: '⏱️',
+        title: 'Daily Accomplishments Log',
+        subtitle: 'Daily timesheet breakdown records, drive times, completed swaps, and trip narrative logs',
+        actionsHtml: `
+          <button class="btn btn-secondary" style="font-size: 11.5px; font-weight: 700; color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); display: inline-flex; align-items: center; gap: 5px;" onclick="window.timeBreakdownEngine.openModal()" title="Open Daily Accomplishments timesheet generator">
+            <span>📝</span> Generate Accomplishments
+          </button>
+          <button class="btn btn-secondary" style="font-size: 11.5px; font-weight: 700; color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); display: inline-flex; align-items: center; gap: 5px;" onclick="window.tripPlanner.promptAddAccomplishment()" title="Manually add an accomplishment log entry">
+            <span>➕</span> Add Log Entry
+          </button>
+          <button class="btn btn-primary" style="font-size: 11.5px; font-weight: 700; background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); border: none; display: inline-flex; align-items: center; gap: 5px;" onclick="window.tripPlanner.syncTableToSheets('daily_accomplishments')" title="Push Daily Accomplishments directly to Google Sheets">
+            <span>⬆️</span> Sync Sheet to Google
+          </button>
+        `
+      };
+    }
+
+    const headers = t.headers || [];
+    let rows = [...(t.rows || [])];
+    const totalCount = rows.length;
+
+    // Search filter
+    if (this.tableSearchTerm) {
+      const q = this.tableSearchTerm.toLowerCase();
+      rows = rows.filter(r => Object.values(r).some(v => String(v || '').toLowerCase().includes(q)));
+    }
+
+    // Sort
+    if (this.tableSortCol) {
+      const col = this.tableSortCol;
+      const dir = this.tableSortDir === 'asc' ? 1 : -1;
+      rows.sort((a, b) => {
+        const va = a[col] ?? '';
+        const vb = b[col] ?? '';
+        if (typeof va === 'number' && typeof vb === 'number') return (va - vb) * dir;
+        return String(va).localeCompare(String(vb), undefined, { numeric: true }) * dir;
+      });
+    }
+
+    const sortArrow = (colName) => {
+      if (this.tableSortCol !== colName) return '';
+      return this.tableSortDir === 'asc' ? ' ▲' : ' ▼';
+    };
+
+    container.innerHTML = `
+      <!-- Toolbar Header -->
+      <div style="padding: 12px 20px; background: #1e293b; border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <span style="font-size: 24px;">${meta.icon}</span>
+          <div>
+            <div style="display: flex; align-items: center; gap: 8px;">
+              <h2 style="font-size: 16px; margin: 0; font-weight: 800; color: #f8fafc;">${meta.title}</h2>
+              <span class="badge" style="background: rgba(56, 189, 248, 0.2); color: #93c5fd; font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 10px;">${rows.length}${rows.length !== totalCount ? ` of ${totalCount}` : ''} records</span>
+            </div>
+            <div style="font-size: 11px; color: var(--text-muted); margin-top: 2px;">${meta.subtitle}</div>
+          </div>
+        </div>
+
+        <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+          ${meta.actionsHtml}
+        </div>
+      </div>
+
+      <!-- Search & Controls Sub-bar -->
+      <div style="padding: 8px 20px; background: rgba(15, 23, 42, 0.4); border-bottom: 1px solid var(--border-color); display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+        <div style="display: flex; align-items: center; gap: 8px; flex: 1; max-width: 480px;">
+          <input type="text" id="tp-table-search-input" value="${this.escapeHtml(this.tableSearchTerm || '')}" placeholder="🔍 Search ${meta.title}..." style="width: 100%; box-sizing: border-box; padding: 5px 12px; font-size: 12px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff;" oninput="window.tripPlanner.setTableSearch(this.value)">
+          ${this.tableSearchTerm ? `<button class="btn btn-secondary" style="padding: 4px 8px; font-size: 11px;" onclick="window.tripPlanner.setTableSearch('')">Clear</button>` : ''}
+        </div>
+
+        <div style="font-size: 11.5px; color: var(--text-muted);">
+          <span>💡 Click column headers to sort. Double-click cells to edit.</span>
+        </div>
+      </div>
+
+      <!-- Table Scrollable Area -->
+      <div style="flex: 1; overflow: auto; padding: 12px 20px;">
+        ${rows.length === 0 ? `
+          <div style="background: #1e293b; border-radius: 8px; border: 1px solid var(--border-color); padding: 50px 20px; text-align: center; color: var(--text-muted);">
+            <div style="font-size: 36px; margin-bottom: 10px;">${meta.icon}</div>
+            <div style="font-size: 15px; font-weight: 700; color: #f8fafc;">No Records Found</div>
+            <div style="font-size: 12px; margin-top: 5px; color: var(--text-muted);">${this.tableSearchTerm ? 'No entries match your search criteria.' : 'There are currently no records logged in this table.'}</div>
+            ${this.tableSearchTerm ? `<button class="btn btn-secondary" style="margin-top: 14px; font-size: 11.5px; color: #38bdf8;" onclick="window.tripPlanner.setTableSearch('')">Clear Search</button>` : ''}
+          </div>
+        ` : `
+          <div style="background: #1e293b; border-radius: 8px; border: 1px solid var(--border-color); overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.25);">
+            <table class="data-table" style="width: 100%; border-collapse: collapse; font-size: 12px; color: #f8fafc; text-align: left;">
+              <thead>
+                <tr style="background: rgba(15, 23, 42, 0.85); border-bottom: 2px solid var(--border-color); position: sticky; top: 0; z-index: 10;">
+                  ${headers.map(h => `
+                    <th style="padding: 10px 12px; font-weight: 700; color: #93c5fd; white-space: nowrap; cursor: pointer; user-select: none;" onclick="window.tripPlanner.setTableSort('${this.escapeHtml(h)}')" title="Click to sort by ${this.escapeHtml(h)}">
+                      <div style="display: flex; align-items: center; justify-content: space-between; gap: 4px;">
+                        <span>${this.escapeHtml(h)}</span>
+                        <span style="color: #60a5fa; font-weight: 800;">${sortArrow(h)}</span>
+                      </div>
+                    </th>
+                  `).join('')}
+                </tr>
+              </thead>
+              <tbody>
+                ${rows.map((row, rIdx) => `
+                  <tr style="border-bottom: 1px solid rgba(255,255,255,0.05); transition: background 0.15s ease;" onmouseover="this.style.background='rgba(59, 130, 246, 0.08)'" onmouseout="this.style.background='transparent'">
+                    ${headers.map((h, cIdx) => {
+                      const val = row[h];
+                      let cellHtml = this.escapeHtml(val !== undefined && val !== null ? String(val) : '—');
+
+                      // Custom cell formatters
+                      if (tableKey === 'trip_schedule') {
+                        if (h === 'Status') {
+                          const s = String(val || '').toLowerCase();
+                          const isDone = s === 'completed';
+                          cellHtml = `<span class="badge" style="background: ${isDone ? 'rgba(34, 197, 94, 0.2)' : 'rgba(59, 130, 246, 0.2)'}; color: ${isDone ? '#4ade80' : '#60a5fa'}; font-weight: 700; padding: 2px 6px; border-radius: 4px;">${isDone ? '✅ Completed' : '🗓️ Scheduled'}</span>`;
+                        } else if (h === 'Task Type') {
+                          const tStr = String(val || '');
+                          let bg = 'rgba(59, 130, 246, 0.15)';
+                          let col = '#93c5fd';
+                          if (tStr.includes('Training')) { bg = 'rgba(34, 197, 94, 0.15)'; col = '#86efac'; }
+                          else if (tStr.includes('Office')) { bg = 'rgba(234, 179, 8, 0.15)'; col = '#fde047'; }
+                          cellHtml = `<span class="badge" style="background: ${bg}; color: ${col}; font-weight: 700; padding: 2px 6px; border-radius: 4px;">${this.escapeHtml(tStr)}</span>`;
+                        } else if (h === 'Trip ID') {
+                          cellHtml = `<span style="font-family: monospace; color: #60a5fa; font-weight: 700;">${this.escapeHtml(val || '—')}</span>`;
+                        } else if (h === 'Date' || h === 'Week Monday') {
+                          cellHtml = `<span style="font-family: monospace; color: #e2e8f0;">${this.escapeHtml(val || '—')}</span>`;
+                        }
+                      } else if (tableKey === 'field_gps_log') {
+                        if (h === 'GPS Coordinates' && val && String(val).includes(',')) {
+                          cellHtml = `<a href="https://www.google.com/maps?q=${encodeURIComponent(val)}" target="_blank" style="color: #60a5fa; text-decoration: underline; font-family: monospace;" title="Open in Google Maps">📍 ${this.escapeHtml(val)}</a>`;
+                        } else if (h === 'Activity') {
+                          cellHtml = `<span class="badge" style="background: rgba(168, 85, 247, 0.2); color: #c084fc; font-weight: 700; padding: 2px 6px; border-radius: 4px;">${this.escapeHtml(val || 'Check-In')}</span>`;
+                        } else if (h === 'Check-In ID') {
+                          cellHtml = `<span style="font-family: monospace; color: #a78bfa; font-weight: 700;">${this.escapeHtml(val || '—')}</span>`;
+                        }
+                      } else if (tableKey === 'daily_accomplishments') {
+                        if (h === 'Summary Text' && val) {
+                          cellHtml = `
+                            <div style="display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+                              <span style="font-size: 11.5px; color: #e2e8f0;">${this.escapeHtml(val)}</span>
+                              <button class="btn btn-secondary" style="padding: 1px 5px; font-size: 10px; flex-shrink: 0;" onclick="navigator.clipboard.writeText('${this.escapeJs(String(val))}'); alert('📋 Copied summary text to clipboard!');" title="Copy summary text">📋 Copy</button>
+                            </div>
+                          `;
+                        } else if (h === 'Drive Time') {
+                          cellHtml = `<span class="badge" style="background: rgba(56, 189, 248, 0.15); color: #38bdf8; font-weight: 700; padding: 2px 6px; border-radius: 4px;">🚗 ${this.escapeHtml(val || '—')}</span>`;
+                        } else if (h === 'Swaps Completed') {
+                          cellHtml = `<span class="badge" style="background: rgba(34, 197, 94, 0.15); color: #4ade80; font-weight: 700; padding: 2px 6px; border-radius: 4px;">🧤 ${this.escapeHtml(val || '0')}</span>`;
+                        }
+                      }
+
+                      return `
+                        <td class="editable" 
+                            contenteditable="true" 
+                            data-table="${tableKey}" 
+                            data-row="${rIdx}" 
+                            data-col="${cIdx + 1}" 
+                            data-header="${this.escapeHtml(h)}"
+                            style="padding: 8px 12px; vertical-align: middle;">
+                          ${cellHtml}
+                        </td>
+                      `;
+                    }).join('')}
+                  </tr>
+                `).join('')}
+              </tbody>
+            </table>
+          </div>
+        `}
+      </div>
+    `;
+
+    // Attach editable blur handlers
+    container.querySelectorAll('td.editable').forEach(td => {
+      let initialVal = '';
+      td.addEventListener('focus', () => {
+        initialVal = (td.textContent || '').trim();
+      });
+      td.addEventListener('blur', async () => {
+        const newVal = (td.textContent || '').trim();
+        if (newVal === initialVal) return;
+        const rIdx = parseInt(td.dataset.row, 10);
+        const colIdx = parseInt(td.dataset.col, 10);
+        const header = td.dataset.header;
+        if (rows[rIdx]) {
+          rows[rIdx][header] = newVal;
+        }
+        await this.db.addMutation({
+          action: 'UPDATE_CELL',
+          sheetName: t.name || tableKey,
+          tableKey: tableKey,
+          row: rIdx + 2,
+          col: colIdx,
+          header: header,
+          value: newVal
+        });
+        if (typeof this.db.schedulePersistSnapshot === 'function') {
+          this.db.schedulePersistSnapshot(this.db.snapshot, 300);
+        }
+        td.style.backgroundColor = 'rgba(34, 197, 94, 0.2)';
+        setTimeout(() => { td.style.backgroundColor = ''; }, 400);
+      });
+    });
+  }
+
+  setTableSearch(val) {
+    this.tableSearchTerm = (val || '').trim();
+    this.renderTableTab(this.activeTab);
+  }
+
+  setTableSort(col) {
+    if (this.tableSortCol === col) {
+      this.tableSortDir = this.tableSortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      this.tableSortCol = col;
+      this.tableSortDir = 'asc';
+    }
+    this.renderTableTab(this.activeTab);
+  }
+
+  async reSyncTripScheduleFromBoard() {
+    if (this.db && typeof this.db.syncTripScheduleTable === 'function') {
+      this.db.syncTripScheduleTable();
+      if (typeof this.db.schedulePersistSnapshot === 'function') {
+        this.db.schedulePersistSnapshot(this.db.snapshot, 300);
+      }
+      this.renderTableTab('trip_schedule');
+      const count = (this.db.snapshot.tables.trip_schedule?.rows || []).length;
+      alert(`✅ Synchronized ${count} trip/task record(s) from the calendar board into Trip Schedule!`);
+    }
+  }
+
+  async promptLogFieldCheckIn() {
+    const job = prompt('Enter Job Number / Crew Name for check-in:', '');
+    if (!job) return;
+    const activity = prompt('Enter Activity (Glove Swap, Safety Audit, Tailgate, Field Visit):', 'Field Visit') || 'Field Visit';
+    const notes = prompt('Enter any check-in notes (optional):', '') || '';
+
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(async (pos) => {
+        const coords = `${pos.coords.latitude.toFixed(5)}, ${pos.coords.longitude.toFixed(5)}`;
+        const acc = Math.round(pos.coords.accuracy);
+        if (this.db && typeof this.db.logFieldCheckIn === 'function') {
+          await this.db.logFieldCheckIn({
+            jobId: job,
+            jobName: job,
+            activity: activity,
+            notes: notes,
+            gpsCoordinates: coords,
+            accuracyMeters: acc
+          });
+          this.renderTableTab('field_gps_log');
+          alert(`📍 Successfully logged field check-in at ${coords} (±${acc}m)!`);
+        }
+      }, async (err) => {
+        console.warn('Geolocation error:', err);
+        if (this.db && typeof this.db.logFieldCheckIn === 'function') {
+          await this.db.logFieldCheckIn({
+            jobId: job,
+            jobName: job,
+            activity: activity,
+            notes: notes,
+            gpsCoordinates: 'Manual Standby'
+          });
+          this.renderTableTab('field_gps_log');
+          alert('📍 Field check-in recorded.');
+        }
+      });
+    }
+  }
+
+  async promptAddAccomplishment() {
+    const date = prompt('Date (YYYY-MM-DD):', new Date().toISOString().slice(0, 10)) || new Date().toISOString().slice(0, 10);
+    const crews = prompt('Crews Visited:', '') || '';
+    const route = prompt('Route / Cities Visited:', '') || '';
+    const driveTime = prompt('Drive Time (e.g. 3h 15m):', '') || '';
+    const summary = prompt('Accomplishment Summary Text:', '') || '';
+
+    if (this.db && typeof this.db.saveDailyAccomplishment === 'function') {
+      await this.db.saveDailyAccomplishment({
+        date: date,
+        crews: crews,
+        route: route,
+        driveTime: driveTime,
+        summary: summary,
+        swapsCount: 0,
+        trainingsCount: 0
+      });
+      this.renderTableTab('daily_accomplishments');
+      alert('⏱️ Added daily accomplishment log entry!');
+    }
+  }
+
+  async syncTableToSheets(tableKey) {
+    const t = this.db.getTable(tableKey);
+    if (!t || !t.rows || t.rows.length === 0) {
+      alert('No records to push for ' + tableKey);
+      return;
+    }
+    await this.db.addMutation({
+      action: 'REPLACE_TABLE_DATA',
+      sheetName: t.name || tableKey,
+      tableKey: tableKey,
+      headers: t.headers,
+      rows: t.rows
+    });
+    if (window.syncEngine && typeof window.syncEngine.pushChangesToGoogleSheets === 'function') {
+      window.syncEngine.renderOutboxBadge();
+      await window.syncEngine.pushChangesToGoogleSheets();
+      alert(`✅ Successfully synced "${t.name}" to Google Sheets!`);
+    } else {
+      alert('Changes queued in outbox.');
+    }
   }
 
   parseDate(str) {

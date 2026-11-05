@@ -574,8 +574,12 @@ body {
 #cert-email-scanner-modal,
 #cert-photo-cropper-modal,
 #safety-pdf-modal,
-#edit-log-entry-modal {
-  z-index: 13500 !important;
+#edit-log-entry-modal,
+#modal-crew-duplicate-member,
+#modal-crew-unconfirmed-purple,
+#modal-crew-publish-confirm,
+#modal-crew-quit-departure {
+  z-index: 15000 !important;
   pointer-events: auto !important;
 }
 
@@ -590,7 +594,11 @@ body {
 #cert-email-scanner-modal.active,
 #cert-photo-cropper-modal.active,
 #safety-pdf-modal.active,
-#edit-log-entry-modal.active {
+#edit-log-entry-modal.active,
+#modal-crew-duplicate-member.active,
+#modal-crew-unconfirmed-purple.active,
+#modal-crew-publish-confirm.active,
+#modal-crew-quit-departure.active {
   display: flex !important;
 }
 
@@ -606,10 +614,32 @@ body {
 #cert-email-scanner-modal .modal-box,
 #cert-photo-cropper-modal .modal-box,
 #safety-pdf-modal .modal-box,
-#edit-log-entry-modal .modal-box {
+#edit-log-entry-modal .modal-box,
+#modal-crew-duplicate-member .modal-box,
+#modal-crew-unconfirmed-purple .modal-box,
+#modal-crew-publish-confirm .modal-box,
+#modal-crew-quit-departure .modal-box {
   pointer-events: auto !important;
   position: relative;
-  z-index: 13501 !important;
+  z-index: 15001 !important;
+}
+
+/* Crew Planner Member Row Drag Reordering */
+.planned-member-row.drag-over-top {
+  border-top: 3px solid #3b82f6 !important;
+  box-shadow: 0 -3px 8px rgba(59, 130, 246, 0.45);
+}
+.planned-member-row.drag-over-bottom {
+  border-bottom: 3px solid #3b82f6 !important;
+  box-shadow: 0 3px 8px rgba(59, 130, 246, 0.45);
+}
+.planned-member-row.drag-over-top-copy {
+  border-top: 3px solid #c084fc !important;
+  box-shadow: 0 -3px 8px rgba(168, 85, 247, 0.45);
+}
+.planned-member-row.drag-over-bottom-copy {
+  border-bottom: 3px solid #c084fc !important;
+  box-shadow: 0 3px 8px rgba(168, 85, 247, 0.45);
 }
 
 #edit-order-modal input,
@@ -3498,3 +3528,32 @@ body.view-only-mode .card-drop-zone {
   color: #64748b;
   cursor: default;
 }
+
+/* Job Tracking Collapsible Sections */
+.jt-collapsed-col-th,
+.jt-expanded-col-th {
+  transition: background 0.15s ease, filter 0.15s ease;
+}
+.jt-collapsed-col-th:hover,
+.jt-expanded-col-th:hover {
+  background: rgba(59, 130, 246, 0.32) !important;
+  filter: brightness(1.25);
+}
+.jt-collapsed-col-td,
+.jt-expanded-col-td {
+  transition: background 0.15s ease;
+}
+.jt-collapsed-col-td:hover,
+.jt-expanded-col-td:hover {
+  background: rgba(59, 130, 246, 0.18) !important;
+}
+.jt-collapsed-col-td:hover span,
+.jt-expanded-col-td:hover span {
+  opacity: 0.9 !important;
+  transform: scale(1.2);
+}
+.jt-section-pill:hover {
+  filter: brightness(1.15);
+  transform: translateY(-1px);
+}
+

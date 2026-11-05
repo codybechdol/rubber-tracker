@@ -49,6 +49,28 @@ class SheetNavigator {
     this.complianceViewMode = savedComplianceView;
     this.selectedComplianceWeek = null;
     this.complianceCardFilter = 'all';
+
+    // Job Tracking Collapsible Sections State (default to collapsed for clean view)
+    let savedJtDates = true;
+    let savedJtSched = true;
+    let savedJtHist = true;
+    try {
+      if (localStorage.getItem('sa_jt_dates_collapsed') !== null) {
+        savedJtDates = localStorage.getItem('sa_jt_dates_collapsed') === 'true';
+      }
+      if (localStorage.getItem('sa_jt_schedule_collapsed') !== null) {
+        savedJtSched = localStorage.getItem('sa_jt_schedule_collapsed') === 'true';
+      }
+      if (localStorage.getItem('sa_jt_history_collapsed') !== null) {
+        savedJtHist = localStorage.getItem('sa_jt_history_collapsed') === 'true';
+      }
+    } catch { /* ignore */ }
+    this.jtSections = {
+      dates: savedJtDates,
+      schedule: savedJtSched,
+      history: savedJtHist
+    };
+
     this.sheetList = [
       { key: 'employees', label: '👥 Employees', icon: '👤', isSwap: false },
       { key: 'job_tracking', label: '📋 Job Tracking', icon: '📋', isSwap: false },
@@ -72,13 +94,8 @@ class SheetNavigator {
       { key: 'hot_sticks', label: '🔴 Hot Sticks', icon: '🔴', isSwap: false },
       { key: 'hot_stick_swaps', label: '🔄 Hot Stick Swaps', icon: '🔄', isSwap: true },
       { key: 'dot_drug_tests', label: '🧪 DOT Drug Tests', icon: '🧪', isSwap: false },
-      { key: 'drug_test_clinics', label: '🏥 Drug Test Clinics', icon: '🏥', isSwap: false },
       { key: 'retired_equipment', label: '🗄️ Retired Equipment', icon: '🗄️', isSwap: false },
-      { key: 'trip_schedule', label: '📅 Trip Schedule', icon: '📅', isSwap: false },
-      { key: 'test_batches', label: '🔬 Test Batches', icon: '🔬', isSwap: false },
-      { key: 'field_gps_log', label: '📍 Field GPS Log', icon: '📍', isSwap: false },
-      { key: 'daily_accomplishments', label: '⏱️ Daily Accomplishments', icon: '⏱️', isSwap: false },
-      { key: 'system_config', label: '⚙️ System Config', icon: '⚙️', isSwap: false }
+      { key: 'test_batches', label: '🔬 Test Batches', icon: '🔬', isSwap: false }
     ];
   }
 
@@ -564,7 +581,27 @@ class SheetNavigator {
     try {
       localStorage.setItem('safety_assistant_emp_view_mode', mode);
     } catch { /* ignore */ }
+
+    const engine = window.crewPlanningEngine;
+    if (mode === 'planning') {
+      if (engine) {
+        const curWeek = engine.getCurrentWeekSundayStr();
+        if (!this.selectedEmployeeWeek || this.selectedEmployeeWeek === curWeek || (engine.parseDate(this.selectedEmployeeWeek)?.getTime() <= engine.parseDate(curWeek)?.getTime())) {
+          this.selectedEmployeeWeek = engine.getPlanningWeeks()[0].weekStr;
+        }
+      }
+    } else if (mode === 'cards' || mode === 'table') {
+      if (engine) {
+        const curWeek = engine.getCurrentWeekSundayStr();
+        if (engine.parseDate(this.selectedEmployeeWeek)?.getTime() > engine.parseDate(curWeek)?.getTime()) {
+          this.selectedEmployeeWeek = curWeek;
+        }
+      }
+    }
+
     this.updateEmployeeViewToggleUI();
+    this.updateEmployeeWeekNavUI();
+    this.updateEmployeeWeekNavUI();
     this.renderCurrentSheet();
   }
 
@@ -572,17 +609,25 @@ class SheetNavigator {
     const toggle = document.getElementById('emp-view-toggle');
     const btnCards = document.getElementById('btn-emp-cards-view');
     const btnTable = document.getElementById('btn-emp-table-view');
+    const btnPlanning = document.getElementById('btn-emp-planning-view');
     if (!toggle) return;
 
     if (this.currentSheetKey === 'employees') {
       toggle.style.display = 'inline-flex';
-      if (btnCards && btnTable) {
-        if (this.employeeViewMode === 'cards') {
-          btnCards.classList.add('active');
-          btnTable.classList.remove('active');
+      if (btnCards) btnCards.classList.toggle('active', this.employeeViewMode === 'cards');
+      if (btnTable) btnTable.classList.toggle('active', this.employeeViewMode === 'table');
+      if (btnPlanning) {
+        btnPlanning.classList.toggle('active', this.employeeViewMode === 'planning');
+        if (this.employeeViewMode === 'planning') {
+          btnPlanning.style.background = '#f59e0b';
+          btnPlanning.style.color = '#000';
+          btnPlanning.style.fontWeight = '800';
+          btnPlanning.style.borderColor = '#f59e0b';
         } else {
-          btnTable.classList.add('active');
-          btnCards.classList.remove('active');
+          btnPlanning.style.background = 'rgba(245, 158, 11, 0.12)';
+          btnPlanning.style.color = '#fbbf24';
+          btnPlanning.style.fontWeight = '700';
+          btnPlanning.style.borderColor = 'rgba(245, 158, 11, 0.4)';
         }
       }
     } else {
@@ -590,8 +635,86 @@ class SheetNavigator {
     }
   }
 
+  updateEmployeeWeekNavUI() {
+    const nav = document.getElementById('emp-week-nav');
+    const select = document.getElementById('emp-week-select');
+    const btnOlder = document.getElementById('btn-emp-week-older');
+    const btnNewer = document.getElementById('btn-emp-week-newer');
+    if (!nav || !select) return;
+
+    if (this.currentSheetKey !== 'employees') {
+      nav.style.display = 'none';
+      return;
+    }
+
+    nav.style.display = 'inline-flex';
+
+    const engine = window.crewPlanningEngine;
+    if (!engine) return;
+
+    const allWeeks = engine.getAllNavigableWeeks();
+    const currentWeekStr = engine.getCurrentWeekSundayStr();
+
+    if (!this.selectedEmployeeWeek) {
+      this.selectedEmployeeWeek = currentWeekStr;
+    }
+
+    select.innerHTML = allWeeks.map(w => {
+      let style = '';
+      if (w.type === 'planning') style = 'color: #fbbf24; font-weight: 700;';
+      else if (w.type === 'current') style = 'color: #34d399; font-weight: 800;';
+      else style = 'color: #93c5fd;';
+      return `<option value="${w.weekStr}" ${w.weekStr === this.selectedEmployeeWeek ? 'selected' : ''} style="${style}">${w.label}</option>`;
+    }).join('');
+
+    const currentIdx = allWeeks.findIndex(w => w.weekStr === this.selectedEmployeeWeek);
+    if (btnOlder) {
+      const hasOlder = currentIdx < allWeeks.length - 1;
+      btnOlder.disabled = !hasOlder;
+      btnOlder.style.opacity = hasOlder ? '1' : '0.5';
+    }
+    if (btnNewer) {
+      const hasNewer = currentIdx > 0;
+      btnNewer.disabled = !hasNewer;
+      btnNewer.style.opacity = hasNewer ? '1' : '0.5';
+    }
+  }
+
+  selectEmployeeWeek(weekStr) {
+    this.selectedEmployeeWeek = weekStr;
+    const engine = window.crewPlanningEngine;
+    if (engine) {
+      const currentWeekStr = engine.getCurrentWeekSundayStr();
+      const dt = engine.parseDate(weekStr);
+      const curDt = engine.parseDate(currentWeekStr);
+      if (dt && curDt && dt.getTime() > curDt.getTime()) {
+        this.employeeViewMode = 'planning';
+      } else if (this.employeeViewMode === 'planning' && dt && curDt && dt.getTime() <= curDt.getTime()) {
+        this.employeeViewMode = 'cards';
+      }
+    }
+    this.updateEmployeeViewToggleUI();
+    this.updateEmployeeWeekNavUI();
+    this.updateEmployeeWeekNavUI();
+    this.renderCurrentSheet();
+  }
+
+  navigateEmployeeWeek(direction) {
+    const engine = window.crewPlanningEngine;
+    if (!engine) return;
+    const allWeeks = engine.getAllNavigableWeeks();
+    const currentIdx = allWeeks.findIndex(w => w.weekStr === this.selectedEmployeeWeek);
+    if (currentIdx === -1) return;
+    const nextIdx = currentIdx - direction;
+    if (nextIdx >= 0 && nextIdx < allWeeks.length) {
+      this.selectEmployeeWeek(allWeeks[nextIdx].weekStr);
+    }
+  }
+
   setupEmployeeViewToggle() {
     this.updateEmployeeViewToggleUI();
+    this.updateEmployeeWeekNavUI();
+    this.updateEmployeeWeekNavUI();
   }
 
   setCertsViewMode(mode) {
@@ -685,10 +808,13 @@ class SheetNavigator {
     }
   }
 
-  openDrugTestingWorkspace() {
+  openDrugTestingWorkspace(tab = 'pool') {
     const navItem = document.querySelector('.nav-item[data-view="drug-testing-view"]');
     if (navItem) {
       navItem.click();
+      if (window.drugTestingEngine && tab) {
+        window.drugTestingEngine.switchTab(tab);
+      }
     }
   }
 
@@ -1289,12 +1415,20 @@ class SheetNavigator {
     }
 
     const sortedCerts = emp.certs.slice().sort((a, b) => {
+      const isCertMissing = (c) => {
+        const stat = String(c.status || '').toUpperCase().trim();
+        const exp = String(c.expDate || '').toLowerCase().trim();
+        return stat === 'MISSING' || stat === 'NEED COPY' || exp === 'missing' || exp.includes('missing record');
+      };
+
       const getUrgencyWeight = (c) => {
-        if (c.status === 'EXPIRED' || (c.daysNum !== null && c.daysNum <= 0)) return 4;
-        if (c.status === 'CRITICAL' || (c.daysNum !== null && c.daysNum <= 30)) return 3;
-        if (c.status === 'WARNING' || (c.daysNum !== null && c.daysNum <= 60)) return 2;
-        if (c.status === 'MISSING') return 1;
-        return 0;
+        if (isCertMissing(c)) return -1; // Missing certs placed at the bottom of the list
+        if (c.status === 'EXPIRED' || (c.daysNum !== null && c.daysNum <= 0)) return 5;
+        if (c.status === 'CRITICAL' || (c.daysNum !== null && c.daysNum <= 30)) return 4;
+        if (c.status === 'WARNING' || (c.daysNum !== null && c.daysNum <= 60)) return 3;
+        if (c.daysNum !== null) return 2; // Active upcoming certs with valid expiration date
+        if (c.status === 'OK' || (c.acqDate && (!c.expDate || c.expDate === 'N/A'))) return 1; // Lifetime / non-expiring OK
+        return 0; // N/A, No Date Set
       };
       const wDiff = getUrgencyWeight(b) - getUrgencyWeight(a);
       if (wDiff !== 0) return wDiff;
@@ -1329,7 +1463,7 @@ class SheetNavigator {
                     const s = String((c.row && c.row['SMS']) || c.smsVal || '').trim();
                     return s && !s.toLowerCase().includes('send sms') && (s.includes('Sent') || s.includes('Notified') || s.includes('Instruction') || s.includes('Registered'));
                   }).length;
-                  return notifCount > 0 ? `<span class="badge" style="background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.35); font-size: 10px; font-weight: 700; padding: 1px 6px; border-radius: 4px;">📱 ${notifCount} Notified</span>` : '';
+                  return notifCount > 0 ? `<span class="badge" style="background: rgba(16, 185, 129, 0.18); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 10px; font-weight: 800; padding: 1px 6px; border-radius: 4px;">✅ ${notifCount} Notified</span>` : '';
                 })()}
               </div>
             </div>
@@ -1407,14 +1541,23 @@ class SheetNavigator {
 
             let smsDateStr = '';
             let isInstructionsSent = false;
+            let isNotifiedOnly = false;
             if (hasSmsNotif) {
               isInstructionsSent = smsRaw.toLowerCase().includes('instruction') || smsRaw.toLowerCase().includes('registered');
+              isNotifiedOnly = smsRaw.toLowerCase().includes('notified');
               smsDateStr = smsRaw.replace(/^instructions?\s*sent\s*:?\s*/i, '')
                                  .replace(/^sent\s*/i, '')
                                  .replace(/^notified\s*:?\s*/i, '')
                                  .replace(/^registered\s*:?\s*/i, '')
                                  .replace(/^sms\s*:?\s*/i, '')
                                  .trim();
+            }
+
+            const notifBadgeIcon = isInstructionsSent ? '📋' : (isNotifiedOnly ? '✅' : '📱');
+            const notifBadgeText = isInstructionsSent ? 'Instructions' : (isNotifiedOnly ? 'Notified' : 'SMS Sent');
+            let dateLabelWithNotif = dateLabel;
+            if (hasSmsNotif) {
+              dateLabelWithNotif += ` • ${notifBadgeIcon} ${notifBadgeText}${smsDateStr ? ` ${smsDateStr}` : ''}`;
             }
 
             return `
@@ -1425,13 +1568,14 @@ class SheetNavigator {
                       ${this.escapeHtml(cert.itemType)}
                     </span>
                     ${hasSmsNotif ? `
-                      <span class="badge" style="background: rgba(16, 185, 129, 0.16); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.35); font-size: 9px; font-weight: 800; padding: 1px 5px; border-radius: 3px; display: inline-flex; align-items: center; gap: 3px;" title="Notification logged: ${this.escapeHtml(smsRaw)}">
-                        ${isInstructionsSent ? '📋 Instructions' : '📱 SMS Sent'}${smsDateStr ? ` ${this.escapeHtml(smsDateStr)}` : ''}
+                      <span class="badge" style="background: rgba(16, 185, 129, 0.18); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 9.5px; font-weight: 800; padding: 2px 6px; border-radius: 4px; display: inline-flex; align-items: center; gap: 4px;" title="Notification logged: ${this.escapeHtml(smsRaw)}">
+                        <span>${notifBadgeIcon}</span>
+                        <span>${notifBadgeText}${smsDateStr ? ` ${this.escapeHtml(smsDateStr)}` : ''}</span>
                       </span>
                     ` : ''}
                   </div>
                   <div style="font-size: 10.5px; color: ${dateColor}; font-weight: 600;">
-                    ${dateLabel}
+                    ${dateLabelWithNotif}
                   </div>
                 </div>
 
@@ -1439,11 +1583,11 @@ class SheetNavigator {
                   ${proofBtnHtml}
                   <button class="btn btn-secondary" style="padding: 1px 5px; font-size: 10px; color: #60a5fa; border-color: rgba(96, 165, 250, 0.35); background: rgba(96, 165, 250, 0.08); cursor: pointer;" onclick="window.sheetNavigator.openCertEditModal(${cert.sheetRowIdx})" title="Edit certification dates">✏️</button>
                   ${hasSmsNotif ? `
-                    <button class="btn btn-secondary" style="padding: 1px 6px; font-size: 10px; color: #34d399; border-color: rgba(52, 211, 153, 0.4); background: rgba(52, 211, 153, 0.12); cursor: pointer; font-weight: 700; display: inline-flex; align-items: center; gap: 3px;" onclick="if(window.smsDialogEngine){window.smsDialogEngine.openCertSms('${this.escapeJs(emp.name)}', '${this.escapeJs(cert.itemType)}', '${this.escapeJs(cert.expDate || '')}', ${cert.sheetRowIdx}, 9);}" title="SMS notification logged (${this.escapeHtml(smsRaw)}). Click to resend reminder.">
+                    <button class="btn btn-secondary" style="padding: 1px 6px; font-size: 10px; color: #34d399; border-color: rgba(52, 211, 153, 0.4); background: rgba(52, 211, 153, 0.12); cursor: pointer; font-weight: 700; display: inline-flex; align-items: center; gap: 3px;" onclick="if(window.smsDialogEngine){window.smsDialogEngine.openCertSms('${this.escapeJs(emp.name)}', '${this.escapeJs(cert.itemType)}', '${this.escapeJs(cert.expDate || '')}', ${cert.sheetRowIdx}, 9);}" title="Notification logged: ${this.escapeHtml(smsRaw)}. Click to resend reminder or update status.">
                       💬 Resend
                     </button>
                   ` : `
-                    <button class="btn btn-secondary" style="padding: 1px 5px; font-size: 10px; color: #fbbf24; border-color: rgba(251, 191, 36, 0.35); background: rgba(251, 191, 36, 0.08); cursor: pointer;" onclick="if(window.smsDialogEngine){window.smsDialogEngine.openCertSms('${this.escapeJs(emp.name)}', '${this.escapeJs(cert.itemType)}', '${this.escapeJs(cert.expDate || '')}', ${cert.sheetRowIdx}, 9);}" title="Send renewal SMS">💬</button>
+                    <button class="btn btn-secondary" style="padding: 1px 5px; font-size: 10px; color: #fbbf24; border-color: rgba(251, 191, 36, 0.35); background: rgba(251, 191, 36, 0.08); cursor: pointer;" onclick="if(window.smsDialogEngine){window.smsDialogEngine.openCertSms('${this.escapeJs(emp.name)}', '${this.escapeJs(cert.itemType)}', '${this.escapeJs(cert.expDate || '')}', ${cert.sheetRowIdx}, 9);}" title="Send renewal SMS / Mark Notified">💬</button>
                   `}
                   ${isClassCert ? `
                     <button class="btn btn-secondary" style="padding: 1px 5px; font-size: 10px; color: #34d399; border-color: rgba(16, 185, 129, 0.35); background: rgba(16, 185, 129, 0.08); cursor: pointer;" onclick="if(window.smsDialogEngine){window.smsDialogEngine.openClassInstructionsSms('${this.escapeJs(emp.name)}', '${this.escapeJs(cert.itemType)}', '${this.escapeJs(cert.expDate || '')}', ${cert.sheetRowIdx}, 9);}" title="Send CPR class registration instructions">📅 Class</button>
@@ -4922,6 +5066,25 @@ class SheetNavigator {
   }
 
   /**
+   * Checks whether an employee was a confirmed moved employee in a published Crew Structure Plan.
+   * If so, they carry yellow conditional highlighting on the live crew cards.
+   */
+  isEmployeeConfirmedYellowMove(empName, weekStr = null) {
+    if (!empName) return false;
+    const norm = String(empName).trim().toLowerCase();
+    const configs = this.db?.snapshot?.configs || window.localDB?.snapshot?.configs;
+    if (!configs) return false;
+
+    const movesMap = configs.confirmed_yellow_moves || {};
+    const listForWeek = weekStr ? movesMap[weekStr] : null;
+    const latestList = configs.latest_published_yellow_moves || [];
+    const targetList = listForWeek || latestList;
+
+    if (!Array.isArray(targetList)) return false;
+    return targetList.some(n => String(n).trim().toLowerCase() === norm);
+  }
+
+  /**
    * Returns a sorted list of names of currently employed workers (excluding previous/terminated).
    */
   getActiveEmployeeNamesList() {
@@ -6398,7 +6561,29 @@ class SheetNavigator {
     const sheetMeta = this.sheetList.find(s => s.key === this.currentSheetKey);
     if (title && sheetMeta) title.textContent = sheetMeta.label;
 
+    if (countBadge) {
+      if (this.currentSheetKey === 'employees') {
+        countBadge.style.display = 'none';
+      } else {
+        countBadge.style.display = 'inline-block';
+      }
+    }
+
+    if (searchInput) {
+      if (this.currentSheetKey === 'employees') {
+        searchInput.style.maxWidth = '170px';
+      } else {
+        searchInput.style.maxWidth = '';
+      }
+    }
+
+    const btnLocationApprovals = document.getElementById('btn-location-approvals-top');
+    if (btnLocationApprovals) {
+      btnLocationApprovals.style.display = (this.currentSheetKey === 'gloves' || this.currentSheetKey === 'sleeves') ? 'inline-flex' : 'none';
+    }
+
     this.updateEmployeeViewToggleUI();
+    this.updateEmployeeWeekNavUI();
 
     // Toggle Action Buttons in Toolbar
     const btnNewItem = document.getElementById('btn-new-item');
@@ -6547,10 +6732,29 @@ class SheetNavigator {
       return;
     }
 
-    // Render Employee Crew Cards View (Default view for Employees sheet)
-    if (this.currentSheetKey === 'employees' && this.employeeViewMode === 'cards') {
-      this.renderEmployeeCardsView(container, countBadge, tableData);
-      return;
+    // Handle Employees sheet custom views: Crew Planning, Historical Reference, or Live Active
+    if (this.currentSheetKey === 'employees') {
+      const engine = window.crewPlanningEngine;
+      const currentWeekStr = engine ? engine.getCurrentWeekSundayStr() : '';
+      if (!this.selectedEmployeeWeek) this.selectedEmployeeWeek = currentWeekStr;
+
+      const isFutureWeek = Boolean(engine && engine.parseDate(this.selectedEmployeeWeek) && engine.parseDate(currentWeekStr) && (engine.parseDate(this.selectedEmployeeWeek).getTime() > engine.parseDate(currentWeekStr).getTime()));
+      const isPastWeek = Boolean(engine && engine.parseDate(this.selectedEmployeeWeek) && engine.parseDate(currentWeekStr) && (engine.parseDate(this.selectedEmployeeWeek).getTime() < engine.parseDate(currentWeekStr).getTime()));
+
+      if (this.employeeViewMode === 'planning' || isFutureWeek) {
+        if (engine && typeof engine.renderPlanningWorkspace === 'function') {
+          engine.renderPlanningWorkspace(container, countBadge, this.selectedEmployeeWeek);
+          return;
+        }
+      } else if (isPastWeek && this.employeeViewMode !== 'table') {
+        if (engine && typeof engine.renderHistoricalWorkspace === 'function') {
+          engine.renderHistoricalWorkspace(container, countBadge, this.selectedEmployeeWeek);
+          return;
+        }
+      } else if (this.employeeViewMode === 'cards') {
+        this.renderEmployeeCardsView(container, countBadge, tableData);
+        return;
+      }
     }
 
     // Standard tabular grid renderer (Employees, Gloves, Job Tracking, etc.)
@@ -7618,12 +7822,9 @@ class SheetNavigator {
       return a.baseJob.localeCompare(b.baseJob, undefined, { numeric: true });
     });
 
-    // Update row count badge in toolbar (use activeRows.length so Light Duty crew members aren't double-counted)
-    const totalMatching = activeRows.length;
+    // Keep toolbar count pill hidden on employees cards view to avoid redundancy with the summary banner below
     if (countBadge) {
-      countBadge.textContent = searchTerm
-        ? `${totalMatching} of ${totalActiveCount} employees (${crewCards.length} crews)`
-        : `${totalActiveCount} employees (${crewCards.length} field crews)`;
+      countBadge.style.display = 'none';
     }
 
     // List of all active employees for dropdowns (e.g. foreman selection)
@@ -7632,8 +7833,32 @@ class SheetNavigator {
       classification: String(r['Job Classification'] || r['Classification'] || r['Role'] || '').trim()
     })).filter(a => a.name);
 
+    // Helper to determine status of any crew/job from job_tracking
+    const getCrewStatus = (jobNum) => {
+      if (!jobNum) return 'Active';
+      const firstJob = String(jobNum).split(',')[0].trim();
+      const clean = firstJob.replace(/\.\d+\s*$/, '').trim().toLowerCase();
+      if (!clean) return 'Active';
+      const match = jtRows.find(j => {
+        const jn = String(j['Job Number'] || j['Job #'] || '').replace(/\.\d+\s*$/, '').trim().toLowerCase();
+        return jn === clean;
+      });
+      return String(match?.['Status'] || 'Active').trim();
+    };
+
+    const isPendingOrOnHold = (st) => {
+      const s = String(st || '').toLowerCase().trim();
+      return s === 'pending start' || s === 'pending' || s === 'on hold';
+    };
+
     // Helper for rendering a single employee row inside a card
     const renderMemberRow = (e, isLead = false, baseJob = '') => {
+      // Check if employee was a confirmed moved employee in a published plan (carries yellow highlighting)
+      const isYellowConfirmedMove = Boolean(this.isEmployeeConfirmedYellowMove(e.name, this.selectedEmployeeWeek));
+      const yellowMoveBadge = isYellowConfirmedMove
+        ? `<span class="badge" style="background: rgba(234, 179, 8, 0.2); color: #fde047; border: 1px solid rgba(234, 179, 8, 0.45); font-size: 9.5px; font-weight: 800; padding: 1px 5px; border-radius: 3px;" title="Confirmed crew move from Crew Structure Planning">🟡 Moved</span>`
+        : '';
+
       let pendingBadge = '';
       if (e.isPending) {
         let shortDate = '';
@@ -7651,8 +7876,58 @@ class SheetNavigator {
         ? `<span class="badge" style="background: rgba(52, 211, 153, 0.16); color: #34d399; border: 1px solid rgba(52, 211, 153, 0.4); font-size: 9.5px; font-weight: 700; padding: 1px 5px; border-radius: 3px;" title="On Light Duty — Also listed in the Light Duty status section">🩺 Light Duty</span>`
         : '';
 
+      const rowBg = isYellowConfirmedMove ? 'background: rgba(234, 179, 8, 0.12);' : '';
+      const rowBorder = isYellowConfirmedMove
+        ? 'border: 1px solid rgba(234, 179, 8, 0.35); border-left: 3.5px solid #facc15;'
+        : 'border-bottom: 1px dashed rgba(255,255,255,0.06);';
+
+      // Secondary / Primary job badge logic:
+      // If one crew is Active and the other is Pending Start / On Hold, the Active crew is always the 1st (working) job,
+      // and the Pending Start crew is the 2nd (upcoming) job.
+      let secondJobPill = '';
+      if ((e.isSecondaryMember && e.primaryJobNumber) || e.secondaryJob) {
+        const otherJobNum = e.isSecondaryMember ? e.primaryJobNumber : e.secondaryJob;
+        const currentJobNum = baseJob || e.jobNumber;
+
+        const currentStatus = getCrewStatus(currentJobNum);
+        const otherStatus = getCrewStatus(otherJobNum);
+
+        const isCurrentPending = isPendingOrOnHold(currentStatus);
+        const isOtherPending = isPendingOrOnHold(otherStatus);
+
+        let pillType = '';
+        let pillTitle = '';
+
+        if (isCurrentPending && !isOtherPending) {
+          // Current crew is Pending Start / On Hold, so the other (Active) crew is their actual working 1st job!
+          pillType = '1st';
+          pillTitle = `Primary Job (Active): ${otherJobNum}`;
+        } else if (!isCurrentPending && isOtherPending) {
+          // Current crew is Active, so the other (Pending Start) crew is their upcoming 2nd job!
+          pillType = '2nd';
+          pillTitle = `Secondary Job (Pending Start): ${otherJobNum}`;
+        } else if (e.isSecondaryMember) {
+          pillType = '1st';
+          pillTitle = `Primary Job: ${otherJobNum}`;
+        } else {
+          pillType = '2nd';
+          pillTitle = `Secondary Job: ${otherJobNum}`;
+        }
+
+        secondJobPill = `
+          <span class="badge second-job-pill" 
+                onclick="event.stopPropagation(); window.sheetNavigator.promptEditSecondJob('${this.escapeJs(e.name)}', '${this.escapeJs(baseJob)}', ${Boolean(e.isSecondaryMember)})"
+                style="background: rgba(245, 158, 11, 0.18); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.45); font-size: 9.5px; font-weight: 700; padding: 1px 6px; border-radius: 3px; cursor: pointer; transition: all 0.15s ease; display: inline-flex; align-items: center; gap: 3px;"
+                onmouseover="this.style.background='rgba(245, 158, 11, 0.35)'; this.style.borderColor='#f59e0b';"
+                onmouseout="this.style.background='rgba(245, 158, 11, 0.18)'; this.style.borderColor='rgba(245, 158, 11, 0.45)';"
+                title="${this.escapeHtml(pillTitle)} — Click to edit, swap, or remove 1st/2nd job">
+            ⚡ ${pillType}: ${this.escapeHtml(otherJobNum)} <span style="font-size: 8.5px; opacity: 0.85;">✏️</span>
+          </span>
+        `;
+      }
+
       return `
-        <div class="crew-member-row"
+        <div class="crew-member-row ${isYellowConfirmedMove ? 'member-row-yellow' : ''}"
              draggable="true"
              data-emp-name="${this.escapeHtml(e.name)}"
              data-job-number="${this.escapeHtml(e.jobNumber || '')}"
@@ -7660,11 +7935,11 @@ class SheetNavigator {
              data-is-secondary="${e.isSecondaryMember ? 'true' : 'false'}"
              data-primary-job="${this.escapeHtml(e.primaryJobNumber || e.jobNumber || '')}"
              data-location="${this.escapeHtml(e.location || '')}"
-             style="display: flex; justify-content: space-between; align-items: center; padding: 5px 4px; border-bottom: 1px dashed rgba(255,255,255,0.06); gap: 6px; border-radius: 4px; transition: background 0.15s ease; cursor: grab;"
-             onmouseover="this.style.background='rgba(255,255,255,0.04)';"
-             onmouseout="this.style.background='transparent';">
+             style="display: flex; justify-content: space-between; align-items: center; padding: 5px 6px; ${rowBorder} ${rowBg} gap: 6px; border-radius: 4px; transition: background 0.15s ease; cursor: grab;"
+             onmouseover="this.style.background='${isYellowConfirmedMove ? 'rgba(234, 179, 8, 0.22)' : 'rgba(255,255,255,0.04)'}';"
+             onmouseout="this.style.background='${isYellowConfirmedMove ? 'rgba(234, 179, 8, 0.12)' : 'transparent'}';">
           <div style="display: flex; align-items: center; gap: 5px; flex-wrap: wrap; flex: 1; min-width: 0;">
-            <span class="drag-handle" style="cursor: grab; color: var(--text-muted); font-size: 13px; user-select: none; padding: 0 2px;" title="Drag to move this employee to another crew">
+            <span class="drag-handle" style="cursor: grab; color: var(--text-muted); font-size: 13px; user-select: none; padding: 0 2px;" title="Drag to move this employee to another crew • Hold Alt/Ctrl+Drag to duplicate">
               ⠿
             </span>
             <span style="color: var(--text-muted); font-size: 11px; font-family: monospace; min-width: 44px; cursor: pointer; padding: 1px 3px; border-radius: 3px;"
@@ -7682,18 +7957,11 @@ class SheetNavigator {
               ${isLead ? '<span title="Crew Foreman / Lead" style="margin-right: 2px;">👑</span>' : ''}
               <span>${this.escapeHtml(e.name)}</span>
             </a>
+            ${yellowMoveBadge}
             ${lightDutyBadge}
             ${pendingBadge}
             ${window.ppeTrackingEngine ? window.ppeTrackingEngine.getMemberRowBadge(e.name, e.classification) : ''}
-            ${e.isSecondaryMember && e.primaryJobNumber ? `
-              <span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); font-size: 9.5px; font-weight: 700; padding: 1px 5px; border-radius: 3px;" title="Primary Job: ${this.escapeHtml(e.primaryJobNumber)}">
-                ⚡ 1st: ${this.escapeHtml(e.primaryJobNumber)}
-              </span>
-            ` : e.secondaryJob ? `
-              <span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.3); font-size: 9.5px; font-weight: 700; padding: 1px 5px; border-radius: 3px;" title="Secondary Job: ${this.escapeHtml(e.secondaryJob)}">
-                ⚡ 2nd: ${this.escapeHtml(e.secondaryJob)}
-              </span>
-            ` : ''}
+            ${secondJobPill}
             ${e.alternateNames ? `
               <span class="badge" style="background: rgba(147, 197, 253, 0.12); color: #93c5fd; border: 1px solid rgba(147, 197, 253, 0.25); font-size: 9.5px; padding: 1px 4px; border-radius: 3px;" title="AKA: ${this.escapeHtml(e.alternateNames)}">
                 AKA
@@ -7708,6 +7976,12 @@ class SheetNavigator {
                   title="Click to change classification">
               ${this.escapeHtml(e.classification || '—')}
             </span>
+            <button class="btn btn-xs"
+                    onclick="event.stopPropagation(); window.sheetNavigator.promptDuplicateMember('${this.escapeJs(e.name)}', '${this.escapeJs(baseJob)}')"
+                    style="background: transparent; border: 1px solid rgba(168, 85, 247, 0.3); color: #c084fc; font-size: 10px; padding: 1px 5px; border-radius: 3px; cursor: pointer;"
+                    title="Duplicate this employee to another crew (e.g. pending start job)">
+              👯
+            </button>
             <button class="btn btn-xs" style="background: transparent; border: none; color: var(--text-muted); cursor: pointer; padding: 1px 4px; font-size: 12px; border-radius: 3px;"
                     onclick="window.sheetNavigator.openMemberRowActions(event, '${this.escapeJs(e.name)}', '${this.escapeJs(baseJob)}', ${isLead}, ${Boolean(e.isSecondaryMember)})"
                     title="Employee options">
@@ -8240,16 +8514,18 @@ class SheetNavigator {
     // 1. Drag source setup on all member rows
     container.querySelectorAll('.crew-member-row[draggable="true"]').forEach(row => {
       row.addEventListener('dragstart', (e) => {
+        const isCopy = e.altKey || e.ctrlKey;
         const dragData = {
           empName: row.dataset.empName,
           fromSlot: row.dataset.jobNumber,
           fromBaseJob: row.dataset.baseJob,
           isSecondary: row.dataset.isSecondary === 'true',
           primaryJob: row.dataset.primaryJob,
-          sourceLoc: row.dataset.location
+          sourceLoc: row.dataset.location,
+          isCopy: isCopy
         };
         e.dataTransfer.setData('application/json', JSON.stringify(dragData));
-        e.dataTransfer.effectAllowed = 'move';
+        e.dataTransfer.effectAllowed = isCopy ? 'copy' : 'copyMove';
         row.style.opacity = '0.35';
         window._activeCrewDragData = dragData;
       });
@@ -8272,10 +8548,17 @@ class SheetNavigator {
 
       card.addEventListener('dragover', (e) => {
         e.preventDefault();
-        e.dataTransfer.dropEffect = 'move';
-        card.style.borderColor = '#3b82f6';
-        card.style.background = 'rgba(59, 130, 246, 0.08)';
-        card.style.boxShadow = '0 0 12px rgba(59, 130, 246, 0.35)';
+        const isCopy = e.altKey || e.ctrlKey || Boolean(window._activeCrewDragData && window._activeCrewDragData.isCopy);
+        e.dataTransfer.dropEffect = isCopy ? 'copy' : 'move';
+        if (isCopy) {
+          card.style.borderColor = '#c084fc';
+          card.style.background = 'rgba(192, 132, 252, 0.1)';
+          card.style.boxShadow = '0 0 12px rgba(192, 132, 252, 0.35)';
+        } else {
+          card.style.borderColor = '#3b82f6';
+          card.style.background = 'rgba(59, 130, 246, 0.08)';
+          card.style.boxShadow = '0 0 12px rgba(59, 130, 246, 0.35)';
+        }
       });
 
       card.addEventListener('dragleave', (e) => {
@@ -8304,6 +8587,9 @@ class SheetNavigator {
         if (!data && window._activeCrewDragData) data = window._activeCrewDragData;
 
         if (data) {
+          if (e.altKey || e.ctrlKey) {
+            data.isCopy = true;
+          }
           await this.handleCrewCardDrop(data, destBaseJob);
         }
       });
@@ -8357,6 +8643,12 @@ class SheetNavigator {
   async handleCrewCardDrop(dragData, destBaseJob) {
     if (!dragData || !destBaseJob) return;
     const { empName, fromBaseJob, fromSlot, isSecondary } = dragData;
+
+    // Handle Alt/Ctrl drag duplication
+    if (dragData.isCopy) {
+      this.promptDuplicateMember(empName, fromBaseJob, destBaseJob);
+      return;
+    }
 
     const statusCardNames = ['Vacation', 'Leave', 'Light Duty', 'Weeds', 'Medical'];
     const statusCardLower = statusCardNames.map(s => s.toLowerCase());
@@ -9419,6 +9711,8 @@ class SheetNavigator {
           'Last Updated': todayFormatted
         }
       });
+
+      await this.recordJobTrackingScheduleChange(jt, jtRowIdx, 'crew_card');
     }
 
     // If Location changed, cascade to primary members and their assigned equipment
@@ -9775,36 +10069,65 @@ class SheetNavigator {
     }
 
     const newJobNumber = `${baseJob}.${cleanNum}`;
-    this.executeMemberSlotChange(empName, newJobNumber);
+    this.executeMemberSlotChange(empName, newJobNumber, baseJob);
   }
 
-  async executeMemberSlotChange(empName, newJobNumber) {
+  async executeMemberSlotChange(empName, newJobNumber, baseJob = '') {
     const empTable = this.db.getTable('employees');
     if (!empTable || !empTable.rows) return;
     const emp = empTable.rows.find(e => String(e['Employee Name'] || e['Name'] || '').trim().toLowerCase() === empName.toLowerCase());
     if (!emp) return;
 
-    const oldSlot = emp['Job Number'];
-    emp['Job Number'] = newJobNumber;
-    if (emp['Job #']) emp['Job #'] = newJobNumber;
+    // Determine if we are changing their secondary slot or primary slot
+    const secJob = String(emp['Secondary Job Number'] || emp['Secondary Job #'] || '').trim();
+    const secBase = secJob.replace(/\.\d+.*$/, '').trim();
+    const isTargetingSecondary = Boolean(baseJob && secBase && secBase.toLowerCase() === baseJob.toLowerCase());
 
-    const colIdx = (empTable.headers || []).findIndex(h => /^(job\s*#|job\s*number)$/i.test(h)) + 1;
-    const rIdx = emp._rowIdx || (empTable.rows.indexOf(emp) + 2);
-    if (empTable.rawGrid && empTable.rawGrid[rIdx - 1] && colIdx > 0) {
-      empTable.rawGrid[rIdx - 1][colIdx - 1] = newJobNumber;
+    if (isTargetingSecondary) {
+      const oldSlot = emp['Secondary Job Number'] || emp['Secondary Job #'] || '';
+      emp['Secondary Job Number'] = newJobNumber;
+      if (emp['Secondary Job #']) emp['Secondary Job #'] = newJobNumber;
+
+      const colIdx = (empTable.headers || []).findIndex(h => /secondary\s*job/i.test(h)) + 1;
+      const rIdx = emp._rowIdx || (empTable.rows.indexOf(emp) + 2);
+      if (empTable.rawGrid && empTable.rawGrid[rIdx - 1] && colIdx > 0) {
+        empTable.rawGrid[rIdx - 1][colIdx - 1] = newJobNumber;
+      }
+
+      await this.db.addMutation({
+        action: 'UPDATE_CELL',
+        sheetName: empTable.name || 'Employees',
+        tableKey: 'employees',
+        row: rIdx,
+        col: colIdx > 0 ? colIdx : 15,
+        header: 'Secondary Job Number',
+        itemIdentifier: empName,
+        oldValue: oldSlot,
+        value: newJobNumber
+      });
+    } else {
+      const oldSlot = emp['Job Number'];
+      emp['Job Number'] = newJobNumber;
+      if (emp['Job #']) emp['Job #'] = newJobNumber;
+
+      const colIdx = (empTable.headers || []).findIndex(h => /^(job\s*#|job\s*number)$/i.test(h)) + 1;
+      const rIdx = emp._rowIdx || (empTable.rows.indexOf(emp) + 2);
+      if (empTable.rawGrid && empTable.rawGrid[rIdx - 1] && colIdx > 0) {
+        empTable.rawGrid[rIdx - 1][colIdx - 1] = newJobNumber;
+      }
+
+      await this.db.addMutation({
+        action: 'UPDATE_CELL',
+        sheetName: empTable.name || 'Employees',
+        tableKey: 'employees',
+        row: rIdx,
+        col: colIdx > 0 ? colIdx : 2,
+        header: 'Job Number',
+        itemIdentifier: empName,
+        oldValue: oldSlot,
+        value: newJobNumber
+      });
     }
-
-    await this.db.addMutation({
-      action: 'UPDATE_CELL',
-      sheetName: empTable.name || 'Employees',
-      tableKey: 'employees',
-      row: rIdx,
-      col: colIdx > 0 ? colIdx : 2,
-      header: 'Job Number',
-      itemIdentifier: empName,
-      oldValue: oldSlot,
-      value: newJobNumber
-    });
 
     await this.db.persistSnapshot(this.db.snapshot);
     this.renderCurrentSheet();
@@ -10197,9 +10520,16 @@ class SheetNavigator {
       this.promptChangeMemberClassification(empName, emp?.['Job Classification'] || '');
     }));
 
-    menu.appendChild(makeItem('⚡', 'Assign Secondary Job', () => {
-      this.promptAssignSecondaryJob(empName);
-    }));
+    menu.appendChild(makeItem('👯', 'Duplicate to Another Crew...', () => {
+      this.promptDuplicateMember(empName, baseJob);
+    }, '#c084fc', 'rgba(168, 85, 247, 0.12)'));
+
+    const secJobVal = String(emp?.['Secondary Job Number'] || emp?.['Secondary Job #'] || '').trim();
+    if (secJobVal || isSecondary) {
+      menu.appendChild(makeItem('⚡', 'Edit 1st / 2nd Job Assignment...', () => {
+        this.promptEditSecondJob(empName, baseJob, isSecondary);
+      }, '#fbbf24', 'rgba(245, 158, 11, 0.12)'));
+    }
 
     menu.appendChild(makeItem('👤', 'Open Employee Profile', () => {
       if (window.employeeProfileEngine) {
@@ -10334,12 +10664,405 @@ class SheetNavigator {
   }
 
   promptAssignSecondaryJob(empName) {
+    this.promptDuplicateMember(empName);
+  }
+
+  promptDuplicateMember(empName, fromBaseJob, preselectDest = '') {
+    const modalId = 'modal-live-duplicate-member';
+    let existing = document.getElementById(modalId);
+    if (existing) existing.remove();
+
     const empTable = this.db.getTable('employees');
-    const emp = (empTable?.rows || []).find(e => String(e['Employee Name'] || e['Name'] || '').trim().toLowerCase() === empName.toLowerCase());
-    const curSec = emp?.['Secondary Job Number'] || emp?.['Secondary Job #'] || '';
-    const newSec = prompt(`Assign or edit secondary job for ${empName}:\n(e.g. 040-26 (Fri-Sat).1 — or leave blank to clear)`, curSec);
-    if (newSec === null) return;
-    this.executeSecondaryJobChange(empName, newSec.trim());
+    const jtTable = this.db.getTable('job_tracking');
+    if (!empTable || !jtTable) return;
+
+    const emp = (empTable.rows || []).find(e => String(e['Employee Name'] || e['Name'] || '').trim().toLowerCase() === empName.toLowerCase());
+    if (!emp) return;
+
+    const curPrimary = String(emp['Job Number'] || emp['Job #'] || '').trim();
+    const curSecondary = String(emp['Secondary Job Number'] || emp['Secondary Job #'] || '').trim();
+
+    // Group field crews from Job Tracking
+    const pendingCrews = [];
+    const activeCrews = [];
+    (jtTable.rows || []).forEach(j => {
+      const jn = String(j['Job Number'] || j['Job #'] || '').trim();
+      const base = jn.replace(/\.\d+.*$/, '').trim();
+      const stat = String(j['Status'] || 'Active').trim();
+      const statLower = stat.toLowerCase();
+      if (!base || base.startsWith('002') || base.startsWith('005') || statLower === 'completed' || base.toLowerCase() === 'job number' || base.toLowerCase() === 'job #') {
+        return;
+      }
+      const loc = String(j['Location'] || 'Helena').trim();
+      const jName = String(j['Job Name'] || '').trim();
+      const memberCount = (empTable.rows || []).filter(e => {
+        const ej = String(e['Job Number'] || e['Job #'] || '').trim();
+        const es = String(e['Secondary Job Number'] || e['Secondary Job #'] || '').trim();
+        return ej.startsWith(base + '.') || es.startsWith(base + '.');
+      }).length;
+
+      const crewObj = { base, loc, jName, stat, memberCount, rawJt: j };
+      if (statLower.includes('pending') || statLower.includes('hold')) {
+        pendingCrews.push(crewObj);
+      } else {
+        activeCrews.push(crewObj);
+      }
+    });
+
+    // Helper to calculate next available slot on a given base job
+    const calcNextSlot = (targetBase) => {
+      if (!targetBase) return '';
+      const existingSuffixes = (empTable.rows || []).map(e => {
+        const j1 = String(e['Job Number'] || e['Job #'] || '').trim();
+        const j2 = String(e['Secondary Job Number'] || e['Secondary Job #'] || '').trim();
+        let m = null;
+        if (j1 === targetBase || j1.startsWith(targetBase + '.')) m = j1.match(/\.(\d+)/);
+        else if (j2 === targetBase || j2.startsWith(targetBase + '.')) m = j2.match(/\.(\d+)/);
+        return m ? parseInt(m[1], 10) : 0;
+      }).filter(n => n > 0);
+
+      let next = 1;
+      while (existingSuffixes.includes(next)) next++;
+      return `${targetBase}.${next}`;
+    };
+
+    let defaultDest = preselectDest || (pendingCrews[0]?.base || activeCrews[0]?.base || '');
+    if (defaultDest && fromBaseJob && defaultDest.toLowerCase() === fromBaseJob.toLowerCase()) {
+      defaultDest = pendingCrews.find(c => c.base.toLowerCase() !== fromBaseJob.toLowerCase())?.base
+        || activeCrews.find(c => c.base.toLowerCase() !== fromBaseJob.toLowerCase())?.base || '';
+    }
+    const defaultSlot = calcNextSlot(defaultDest);
+
+    const renderCrewOptions = (crews) => {
+      return crews.map(c => {
+        const isCurrent = fromBaseJob && c.base.toLowerCase() === fromBaseJob.toLowerCase();
+        const sel = c.base === defaultDest ? 'selected' : '';
+        const dis = isCurrent ? 'disabled style="color: #64748b;"' : '';
+        return `<option value="${c.base}" ${sel} ${dis}>🚜 Crew ${c.base} (${c.loc}) — ${c.memberCount} members [${c.stat}] ${c.jName ? '• ' + c.jName : ''} ${isCurrent ? '(Current)' : ''}</option>`;
+      }).join('');
+    };
+
+    const overlay = document.createElement('div');
+    overlay.id = modalId;
+    overlay.className = 'modal-overlay active';
+    overlay.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.78) !important; display: flex; align-items: center; justify-content: center; z-index: 15000 !important; pointer-events: auto !important; padding: 20px;';
+
+    overlay.innerHTML = `
+      <div class="modal-box" style="background: var(--bg-secondary, #1e293b); border: 1px solid rgba(168, 85, 247, 0.45); border-radius: 10px; max-width: 520px; width: 100%; box-shadow: 0 16px 40px rgba(0,0,0,0.7); overflow: hidden; color: #fff; pointer-events: auto !important;">
+        <div style="padding: 14px 20px; border-bottom: 1px solid rgba(255,255,255,0.1); display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.25);">
+          <div style="font-size: 15px; font-weight: 800; color: #c084fc; display: flex; align-items: center; gap: 8px;">
+            <span>👯</span> Duplicate Employee on Live Schedule
+          </div>
+          <button id="btn-duplicate-live-close" style="background: transparent; border: none; color: #94a3b8; font-size: 16px; cursor: pointer; padding: 4px 8px;">✕</button>
+        </div>
+        <div style="padding: 20px; font-size: 12.5px; display: flex; flex-direction: column; gap: 14px;">
+          <div>
+            Duplicate <strong>${this.escapeHtml(empName)}</strong> to a secondary crew (e.g. an upcoming <strong>Pending Start</strong> job) so they appear on both crews with live 1st/2nd job pills.
+          </div>
+
+          <div style="background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.08); border-radius: 6px; padding: 10px 14px;">
+            <div style="font-size: 11px; color: var(--text-muted); margin-bottom: 4px;">CURRENT ASSIGNMENTS:</div>
+            <div style="display: flex; gap: 12px; font-family: monospace; font-size: 12px;">
+              <div>⭐ 1st Job: <strong style="color: #60a5fa;">${curPrimary || '(Unassigned)'}</strong></div>
+              ${curSecondary ? `<div>⚡ 2nd Job: <strong style="color: #fbbf24;">${curSecondary}</strong></div>` : `<div style="color: #64748b;">(No 2nd job assigned)</div>`}
+            </div>
+          </div>
+
+          ${curSecondary ? `
+            <div style="background: rgba(245, 158, 11, 0.12); border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 6px; padding: 8px 12px; color: #fde047; font-size: 11.5px;">
+              ⚠️ <strong>Notice:</strong> ${this.escapeHtml(empName)} already has a 2nd job assignment (${curSecondary}). Duplicating will update their secondary job to the new crew.
+            </div>
+          ` : ''}
+
+          <div>
+            <label style="display: block; font-weight: 700; margin-bottom: 6px; color: #cbd5e1; font-size: 11.5px;">
+              Select Destination Field Crew:
+            </label>
+            <select id="live-dup-dest-select" style="width: 100%; box-sizing: border-box; background: #0f172a; border: 1px solid #3b82f6; border-radius: 6px; padding: 8px 10px; color: #fff; font-size: 12.5px; font-weight: 600; cursor: pointer;">
+              ${pendingCrews.length > 0 ? `
+                <optgroup label="🟡 Pending Start / On Hold Field Crews (Upcoming)">
+                  ${renderCrewOptions(pendingCrews)}
+                </optgroup>
+              ` : ''}
+              ${activeCrews.length > 0 ? `
+                <optgroup label="🟢 Active Field Crews (Working)">
+                  ${renderCrewOptions(activeCrews)}
+                </optgroup>
+              ` : ''}
+            </select>
+          </div>
+
+          <div>
+            <label style="display: block; font-weight: 700; margin-bottom: 6px; color: #cbd5e1; font-size: 11.5px;">
+              Destination Slot Number:
+            </label>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <input type="text" id="live-dup-slot-input" value="${this.escapeHtml(defaultSlot)}" style="flex: 1; background: #0f172a; border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 12px; color: #fff; font-family: monospace; font-size: 13px; font-weight: 700;">
+              <button type="button" class="btn btn-secondary" id="btn-live-dup-recalc" style="font-size: 11px; padding: 7px 10px;" title="Reset to lowest available slot">
+                Auto Slot
+              </button>
+            </div>
+            <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
+              Automatically set to next open slot. You can customize the suffix number if needed.
+            </div>
+          </div>
+        </div>
+
+        <div style="padding: 12px 20px; border-top: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.25); display: flex; justify-content: flex-end; gap: 8px;">
+          <button class="btn btn-secondary" id="btn-duplicate-live-cancel" style="font-size: 12px; padding: 6px 14px; cursor: pointer;">Cancel</button>
+          <button class="btn btn-primary" id="btn-duplicate-live-submit" style="background: linear-gradient(135deg, #a855f7 0%, #7e22ce 100%); border: none; font-size: 12px; font-weight: 700; padding: 6px 18px; cursor: pointer;">
+            👯 Duplicate Employee
+          </button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    const destSelect = overlay.querySelector('#live-dup-dest-select');
+    const slotInput = overlay.querySelector('#live-dup-slot-input');
+    const btnAuto = overlay.querySelector('#btn-live-dup-recalc');
+
+    if (destSelect && slotInput) {
+      destSelect.addEventListener('change', () => {
+        slotInput.value = calcNextSlot(destSelect.value);
+      });
+      if (btnAuto) {
+        btnAuto.addEventListener('click', () => {
+          slotInput.value = calcNextSlot(destSelect.value);
+        });
+      }
+    }
+
+    const closeModal = () => overlay.remove();
+    overlay.querySelector('#btn-duplicate-live-close')?.addEventListener('click', closeModal);
+    overlay.querySelector('#btn-duplicate-live-cancel')?.addEventListener('click', closeModal);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) closeModal(); });
+
+    overlay.querySelector('#btn-duplicate-live-submit')?.addEventListener('click', async () => {
+      const destSlot = (slotInput ? slotInput.value : '').trim();
+      if (!destSlot) {
+        alert('Please enter a destination slot number.');
+        return;
+      }
+      closeModal();
+      await this.executeDuplicateMember(empName, destSlot);
+    });
+  }
+
+  async executeDuplicateMember(empName, destSlot) {
+    const empTable = this.db.getTable('employees');
+    if (!empTable || !empTable.rows) return;
+    const emp = empTable.rows.find(e => String(e['Employee Name'] || e['Name'] || '').trim().toLowerCase() === empName.toLowerCase());
+    if (!emp) return;
+
+    emp['Secondary Job Number'] = destSlot;
+    if (emp['Secondary Job #']) emp['Secondary Job #'] = destSlot;
+
+    const colIdx = (empTable.headers || []).findIndex(h => /secondary\s*job/i.test(h)) + 1;
+    const rIdx = emp._rowIdx || (empTable.rows.indexOf(emp) + 2);
+    if (empTable.rawGrid && empTable.rawGrid[rIdx - 1] && colIdx > 0) {
+      empTable.rawGrid[rIdx - 1][colIdx - 1] = destSlot;
+    }
+
+    await this.db.addMutation({
+      action: 'UPDATE_CELL',
+      sheetName: empTable.name || 'Employees',
+      tableKey: 'employees',
+      row: rIdx,
+      col: colIdx > 0 ? colIdx : 15,
+      header: 'Secondary Job Number',
+      itemIdentifier: empName,
+      value: destSlot
+    });
+
+    await this.db.persistSnapshot(this.db.snapshot);
+    this.renderCurrentSheet();
+
+    if (typeof window.showToast === 'function') {
+      window.showToast(`👯 Duplicated ${empName} to ${destSlot}! Displaying 1st/2nd job badges.`, 'success');
+    }
+  }
+
+  promptEditSecondJob(empName, currentBaseJob, isSecondary = false) {
+    const modalId = 'modal-live-edit-second-job';
+    let existing = document.getElementById(modalId);
+    if (existing) existing.remove();
+
+    const empTable = this.db.getTable('employees');
+    const jtTable = this.db.getTable('job_tracking');
+    if (!empTable) return;
+
+    const emp = (empTable.rows || []).find(e => String(e['Employee Name'] || e['Name'] || '').trim().toLowerCase() === empName.toLowerCase());
+    if (!emp) return;
+
+    const primarySlot = String(emp['Job Number'] || emp['Job #'] || '').trim();
+    const secondarySlot = String(emp['Secondary Job Number'] || emp['Secondary Job #'] || '').trim();
+
+    const primaryBase = primarySlot.replace(/\.\d+.*$/, '').trim();
+    const secondaryBase = secondarySlot.replace(/\.\d+.*$/, '').trim();
+
+    const primaryJt = (jtTable?.rows || []).find(j => String(j['Job Number'] || j['Job #'] || '').trim().replace(/\.\d+.*$/, '') === primaryBase);
+    const secondaryJt = (jtTable?.rows || []).find(j => String(j['Job Number'] || j['Job #'] || '').trim().replace(/\.\d+.*$/, '') === secondaryBase);
+
+    const primaryStatus = String(primaryJt?.['Status'] || 'Active').trim();
+    const secondaryStatus = String(secondaryJt?.['Status'] || 'Pending Start').trim();
+
+    const primaryLoc = String(primaryJt?.['Location'] || emp['Location'] || 'Helena').trim();
+    const secondaryLoc = String(secondaryJt?.['Location'] || 'Helena').trim();
+
+    const overlay = document.createElement('div');
+    overlay.id = modalId;
+    overlay.className = 'modal-overlay active';
+    overlay.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.78) !important; display: flex; align-items: center; justify-content: center; z-index: 15000 !important; pointer-events: auto !important; padding: 20px;';
+
+    overlay.innerHTML = `
+      <div class="modal-box" style="background: var(--bg-secondary, #1e293b); border: 1px solid rgba(245, 158, 11, 0.45); border-radius: 10px; max-width: 520px; width: 100%; box-shadow: 0 16px 40px rgba(0,0,0,0.7); overflow: hidden; color: #fff; pointer-events: auto !important;">
+        <div style="padding: 14px 20px; border-bottom: 1px solid rgba(255,255,255,0.1); display: flex; justify-content: space-between; align-items: center; background: rgba(0,0,0,0.25);">
+          <div style="font-size: 15px; font-weight: 800; color: #fbbf24; display: flex; align-items: center; gap: 8px;">
+            <span>⚡</span> 1st &amp; 2nd Job Assignment for ${this.escapeHtml(empName)}
+          </div>
+          <button id="btn-edit-sec-close" style="background: transparent; border: none; color: #94a3b8; font-size: 16px; cursor: pointer; padding: 4px 8px;">✕</button>
+        </div>
+
+        <div style="padding: 20px; font-size: 12.5px; display: flex; flex-direction: column; gap: 14px;">
+          <!-- Dual Job Overview Cards -->
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+            <!-- Primary Card -->
+            <div style="background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.35); border-radius: 8px; padding: 12px;">
+              <div style="font-size: 11px; font-weight: 800; color: #93c5fd; text-transform: uppercase; margin-bottom: 4px; display: flex; align-items: center; justify-content: space-between;">
+                <span>⭐ 1st Job (Primary)</span>
+                <span class="badge" style="background: rgba(59, 130, 246, 0.2); color: #93c5fd; font-size: 9.5px; padding: 1px 5px;">${this.escapeHtml(primaryStatus)}</span>
+              </div>
+              <div style="font-family: monospace; font-size: 15px; font-weight: 800; color: #fff; margin-bottom: 2px;">
+                ${this.escapeHtml(primarySlot || '(None)')}
+              </div>
+              <div style="font-size: 11px; color: var(--text-muted);">
+                Crew ${this.escapeHtml(primaryBase)} • ${this.escapeHtml(primaryLoc)}
+              </div>
+            </div>
+
+            <!-- Secondary Card -->
+            <div style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 8px; padding: 12px;">
+              <div style="font-size: 11px; font-weight: 800; color: #fde047; text-transform: uppercase; margin-bottom: 4px; display: flex; align-items: center; justify-content: space-between;">
+                <span>⚡ 2nd Job (Secondary)</span>
+                <span class="badge" style="background: rgba(245, 158, 11, 0.2); color: #fde047; font-size: 9.5px; padding: 1px 5px;">${this.escapeHtml(secondaryStatus)}</span>
+              </div>
+              <div style="font-family: monospace; font-size: 15px; font-weight: 800; color: #fff; margin-bottom: 2px;">
+                ${this.escapeHtml(secondarySlot || '(None)')}
+              </div>
+              <div style="font-size: 11px; color: var(--text-muted);">
+                Crew ${this.escapeHtml(secondaryBase)} • ${this.escapeHtml(secondaryLoc)}
+              </div>
+            </div>
+          </div>
+
+          <!-- Swap Button -->
+          <div style="display: flex; justify-content: center; margin: -4px 0;">
+            <button type="button" class="btn btn-secondary" id="btn-swap-jobs" style="border: 1px solid #38bdf8; background: rgba(56, 189, 248, 0.12); color: #38bdf8; font-size: 11.5px; font-weight: 700; padding: 6px 16px; border-radius: 6px; cursor: pointer; display: inline-flex; align-items: center; gap: 6px;">
+              <span>🔄</span> Swap 1st &amp; 2nd Jobs (Make 2nd Job Primary)
+            </button>
+          </div>
+
+          <div style="height: 1px; background: rgba(255,255,255,0.08); margin: 4px 0;"></div>
+
+          <!-- Edit Secondary Slot -->
+          <div>
+            <label style="display: block; font-weight: 700; margin-bottom: 6px; color: #cbd5e1; font-size: 11.5px;">
+              Edit Secondary Slot Number (e.g. 033-27.1):
+            </label>
+            <input type="text" id="edit-second-slot-input" value="${this.escapeHtml(secondarySlot)}" style="width: 100%; box-sizing: border-box; background: #0f172a; border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 12px; color: #fff; font-family: monospace; font-size: 13px; font-weight: 700;">
+          </div>
+        </div>
+
+        <div style="padding: 12px 20px; border-top: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.25); display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+          <button class="btn btn-secondary" id="btn-remove-second-job" style="color: #ef4444; border-color: rgba(239, 68, 68, 0.4); font-size: 11.5px; padding: 6px 12px; cursor: pointer;">
+            🗑️ Remove 2nd Job
+          </button>
+          <div style="display: flex; gap: 8px;">
+            <button class="btn btn-secondary" id="btn-edit-sec-cancel" style="font-size: 12px; padding: 6px 14px; cursor: pointer;">Cancel</button>
+            <button class="btn btn-primary" id="btn-edit-sec-save" style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); border: none; font-size: 12px; font-weight: 700; padding: 6px 16px; cursor: pointer;">
+              Save Changes
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    const closeModal = () => overlay.remove();
+    overlay.querySelector('#btn-edit-sec-close')?.addEventListener('click', closeModal);
+    overlay.querySelector('#btn-edit-sec-cancel')?.addEventListener('click', closeModal);
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) closeModal(); });
+
+    // Swap Jobs action
+    overlay.querySelector('#btn-swap-jobs')?.addEventListener('click', async () => {
+      closeModal();
+      await this.executeSwapJobs(empName);
+    });
+
+    // Remove Secondary Job action
+    overlay.querySelector('#btn-remove-second-job')?.addEventListener('click', async () => {
+      if (!confirm(`Remove secondary job (${secondarySlot}) from ${empName}?`)) return;
+      closeModal();
+      await this.executeSecondaryJobChange(empName, '');
+    });
+
+    // Save modified slot
+    overlay.querySelector('#btn-edit-sec-save')?.addEventListener('click', async () => {
+      const newSec = (overlay.querySelector('#edit-second-slot-input')?.value || '').trim();
+      closeModal();
+      await this.executeSecondaryJobChange(empName, newSec);
+    });
+  }
+
+  async executeSwapJobs(empName) {
+    const empTable = this.db.getTable('employees');
+    if (!empTable || !empTable.rows) return;
+    const emp = empTable.rows.find(e => String(e['Employee Name'] || e['Name'] || '').trim().toLowerCase() === empName.toLowerCase());
+    if (!emp) return;
+
+    const oldPrimary = String(emp['Job Number'] || emp['Job #'] || '').trim();
+    const oldSecondary = String(emp['Secondary Job Number'] || emp['Secondary Job #'] || '').trim();
+
+    if (!oldSecondary) {
+      if (typeof window.showToast === 'function') window.showToast(`${empName} does not have a 2nd job to swap with.`, 'warning');
+      return;
+    }
+
+    emp['Job Number'] = oldSecondary;
+    if (emp['Job #']) emp['Job #'] = oldSecondary;
+    emp['Secondary Job Number'] = oldPrimary;
+    if (emp['Secondary Job #']) emp['Secondary Job #'] = oldPrimary;
+
+    const primaryColIdx = (empTable.headers || []).findIndex(h => /^(job\s*#|job\s*number)$/i.test(h)) + 1;
+    const secColIdx = (empTable.headers || []).findIndex(h => /secondary\s*job/i.test(h)) + 1;
+    const rIdx = emp._rowIdx || (empTable.rows.indexOf(emp) + 2);
+
+    if (empTable.rawGrid && empTable.rawGrid[rIdx - 1]) {
+      if (primaryColIdx > 0) empTable.rawGrid[rIdx - 1][primaryColIdx - 1] = oldSecondary;
+      if (secColIdx > 0) empTable.rawGrid[rIdx - 1][secColIdx - 1] = oldPrimary;
+    }
+
+    await this.db.addMutation({
+      action: 'UPDATE_ROW',
+      sheetName: empTable.name || 'Employees',
+      tableKey: 'employees',
+      row: rIdx,
+      itemIdentifier: empName,
+      updatedFields: {
+        'Job Number': oldSecondary,
+        'Secondary Job Number': oldPrimary
+      }
+    });
+
+    await this.db.persistSnapshot(this.db.snapshot);
+    this.renderCurrentSheet();
+
+    if (typeof window.showToast === 'function') {
+      window.showToast(`🔄 Swapped jobs for ${empName}: 1st is now ${oldSecondary}, 2nd is ${oldPrimary}!`, 'success');
+    }
   }
 
   async executeSecondaryJobChange(empName, newSecJob) {
@@ -10362,7 +11085,7 @@ class SheetNavigator {
       sheetName: empTable.name || 'Employees',
       tableKey: 'employees',
       row: rIdx,
-      col: colIdx > 0 ? colIdx : 5,
+      col: colIdx > 0 ? colIdx : 15,
       header: 'Secondary Job Number',
       itemIdentifier: empName,
       value: newSecJob
@@ -10448,6 +11171,10 @@ class SheetNavigator {
   renderStandardTable(container, countBadge, tableData) {
     if (!tableData) {
       tableData = this.db.getTable(this.currentSheetKey) || { headers: [], rows: [] };
+    }
+    if (this.currentSheetKey === 'job_tracking') {
+      this.renderJobTrackingTable(container, countBadge, tableData);
+      return;
     }
     const isEquipmentSheet = ['gloves', 'sleeves', 'blankets', 'macks', 'hv_testers', 'phasing_sets', 'aed', 'grounds', 'hot_sticks'].includes(this.currentSheetKey);
     const isInventorySheet = isEquipmentSheet;
@@ -10796,11 +11523,11 @@ class SheetNavigator {
       'expired': 1,
       'critical': 2,
       'warning': 3,
-      'missing': 4,
-      'upcoming': 5,
-      'ok': 6,
-      'declined': 7,
-      'not required': 8,
+      'upcoming': 4,
+      'ok': 5,
+      'declined': 6,
+      'not required': 7,
+      'missing': 8,
       // Training
       'scheduled': 1,
       'pending': 1,
@@ -13463,6 +14190,1026 @@ class SheetNavigator {
     });
   }
 
+  // ==========================================
+  // JOB TRACKING COLLAPSIBLE SECTIONS & TABLE
+  // ==========================================
+
+  toggleJobTrackingSection(sectionKey) {
+    if (this.jtSections && this.jtSections[sectionKey] !== undefined) {
+      this.jtSections[sectionKey] = !this.jtSections[sectionKey];
+      try {
+        localStorage.setItem(`sa_jt_${sectionKey}_collapsed`, String(this.jtSections[sectionKey]));
+      } catch { /* ignore */ }
+      this.renderActiveView();
+    }
+  }
+
+  expandAllJobTrackingSections() {
+    if (!this.jtSections) return;
+    this.jtSections.dates = false;
+    this.jtSections.schedule = false;
+    this.jtSections.history = false;
+    try {
+      localStorage.setItem('sa_jt_dates_collapsed', 'false');
+      localStorage.setItem('sa_jt_schedule_collapsed', 'false');
+      localStorage.setItem('sa_jt_history_collapsed', 'false');
+    } catch { /* ignore */ }
+    this.renderActiveView();
+  }
+
+  collapseAllJobTrackingSections() {
+    if (!this.jtSections) return;
+    this.jtSections.dates = true;
+    this.jtSections.schedule = true;
+    this.jtSections.history = true;
+    try {
+      localStorage.setItem('sa_jt_dates_collapsed', 'true');
+      localStorage.setItem('sa_jt_schedule_collapsed', 'true');
+      localStorage.setItem('sa_jt_history_collapsed', 'true');
+    } catch { /* ignore */ }
+    this.renderActiveView();
+  }
+
+  async quickChangeWorkSchedule(jobNum, newSchedule) {
+    if (window.currentRoleMode === 'view_only') return;
+    const jtTable = this.db.getTable('job_tracking');
+    if (!jtTable || !jtTable.rows) return;
+
+    const rowObj = jtTable.rows.find(j => {
+      const jn = String(j['Job Number'] || j['Job #'] || Object.values(j)[0] || '').trim();
+      return jn === String(jobNum).trim();
+    });
+    if (!rowObj) return;
+
+    const oldSchedule = rowObj['Work Schedule'] || 'Mon-Thu (4 10s)';
+    rowObj['Work Schedule'] = newSchedule;
+
+    // Auto-set standard day skip checkboxes based on preset
+    if (newSchedule.includes('Mon-Thu') || newSchedule.includes('4 10s')) {
+      rowObj['Skip Sun'] = true;
+      rowObj['Skip Mon'] = false;
+      rowObj['Skip Tue'] = false;
+      rowObj['Skip Wed'] = false;
+      rowObj['Skip Thu'] = false;
+      rowObj['Skip Fri'] = true;
+      rowObj['Skip Sat'] = true;
+    } else if (newSchedule.includes('Mon-Fri') || newSchedule.includes('5 8s')) {
+      rowObj['Skip Sun'] = true;
+      rowObj['Skip Mon'] = false;
+      rowObj['Skip Tue'] = false;
+      rowObj['Skip Wed'] = false;
+      rowObj['Skip Thu'] = false;
+      rowObj['Skip Fri'] = false;
+      rowObj['Skip Sat'] = true;
+    } else if (newSchedule.includes('Tue-Fri')) {
+      rowObj['Skip Sun'] = true;
+      rowObj['Skip Mon'] = true;
+      rowObj['Skip Tue'] = false;
+      rowObj['Skip Wed'] = false;
+      rowObj['Skip Thu'] = false;
+      rowObj['Skip Fri'] = false;
+      rowObj['Skip Sat'] = true;
+    } else if (newSchedule.includes('Weekend') || newSchedule.includes('Fri & Sat')) {
+      rowObj['Skip Sun'] = true;
+      rowObj['Skip Mon'] = true;
+      rowObj['Skip Tue'] = true;
+      rowObj['Skip Wed'] = true;
+      rowObj['Skip Thu'] = true;
+      rowObj['Skip Fri'] = false;
+      rowObj['Skip Sat'] = false;
+    }
+
+    const rowIdx = rowObj._rowIdx || (jtTable.rows.indexOf(rowObj) + 2);
+    await this.recordJobTrackingScheduleChange(rowObj, rowIdx, 'dropdown');
+
+    // Also queue mutations for the skip day checkboxes that changed
+    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    for (const d of days) {
+      const hName = 'Skip ' + d;
+      const cIdx = (jtTable.headers || []).indexOf(hName);
+      if (cIdx !== -1) {
+        await this.db.addMutation({
+          action: 'UPDATE_CELL',
+          sheetName: jtTable.name || 'Job Tracking',
+          tableKey: 'job_tracking',
+          row: rowIdx,
+          col: cIdx + 1,
+          header: hName,
+          itemIdentifier: jobNum,
+          value: rowObj[hName]
+        });
+      }
+    }
+
+    if (typeof window.showToast === 'function') {
+      window.showToast(`Updated schedule for Job ${jobNum} to ${newSchedule}`, 'success');
+    }
+    this.renderActiveView();
+  }
+
+  async recordJobTrackingScheduleChange(rowObj, rowIdx, triggerType = 'user_edit') {
+    if (!rowObj) return;
+    const jtTable = this.db.getTable('job_tracking') || (this.db.snapshot && this.db.snapshot.tables ? this.db.snapshot.tables['job_tracking'] : null);
+    if (!jtTable) return;
+
+    const jobNum = String(rowObj['Job Number'] || rowObj['Job #'] || Object.values(rowObj)[0] || '').trim();
+    const todayFormatted = new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+
+    // Calculate new skip days string
+    const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    const skipped = days.filter(d => {
+      const k = 'Skip ' + d;
+      return rowObj[k] === true || String(rowObj[k]).toLowerCase() === 'true';
+    });
+    const newSkipDays = skipped.join(', ');
+
+    // Detect if schedule changed from what was stored
+    const oldSchedule = String(rowObj['Work Schedule'] || 'Mon-Thu (4 10s)').trim();
+    const oldSkipDays = String(rowObj['Skip Days'] || '').trim();
+    const oldEffective = String(rowObj['Schedule Effective'] || rowObj['Start Date'] || todayFormatted).trim();
+
+    // Parse existing history
+    let history = [];
+    const rawHist = String(rowObj['Schedule History'] || '').trim();
+    if (rawHist && rawHist !== '[]') {
+      try {
+        const parsed = JSON.parse(rawHist);
+        if (Array.isArray(parsed)) history = parsed;
+      } catch (e) {
+        history = [];
+      }
+    }
+
+    // Only archive if there is an actual change in skip days or schedule name
+    const hasChanged = (oldSkipDays && oldSkipDays !== newSkipDays) || (oldSchedule && rowObj['Work Schedule'] && oldSchedule !== rowObj['Work Schedule']);
+
+    if (hasChanged) {
+      history.push({
+        schedule: oldSchedule,
+        skipDays: oldSkipDays || 'None',
+        effectiveDate: oldEffective,
+        changedDate: todayFormatted,
+        trigger: triggerType
+      });
+      rowObj['Schedule History'] = JSON.stringify(history);
+      rowObj['Schedule Effective'] = todayFormatted;
+    }
+
+    rowObj['Skip Days'] = newSkipDays;
+    rowObj['Last Updated'] = todayFormatted;
+
+    // Sync to rawGrid if present
+    const actualRowIdx = rowObj._rowIdx || rowIdx;
+    if (jtTable.rawGrid && actualRowIdx && jtTable.rawGrid[actualRowIdx - 1]) {
+      const gRow = jtTable.rawGrid[actualRowIdx - 1];
+      (jtTable.headers || []).forEach((h, cIdx) => {
+        if (rowObj[h] !== undefined) gRow[cIdx] = rowObj[h];
+      });
+    }
+
+    // Queue mutations for Google Sheets sync
+    const headersToSync = ['Skip Days', 'Last Updated', 'Schedule Effective', 'Schedule History', 'Work Schedule'];
+    for (const hName of headersToSync) {
+      if (rowObj[hName] !== undefined) {
+        const cIdx = (jtTable.headers || []).indexOf(hName);
+        if (cIdx !== -1) {
+          await this.db.addMutation({
+            action: 'UPDATE_CELL',
+            sheetName: jtTable.name || 'Job Tracking',
+            tableKey: 'job_tracking',
+            row: actualRowIdx,
+            col: cIdx + 1,
+            header: hName,
+            itemIdentifier: jobNum,
+            value: rowObj[hName]
+          });
+        }
+      }
+    }
+
+    if (typeof this.db.schedulePersistSnapshot === 'function') {
+      this.db.schedulePersistSnapshot(this.db.snapshot, 300);
+    } else if (typeof this.db.saveLocalSnapshot === 'function') {
+      await this.db.saveLocalSnapshot();
+    }
+  }
+
+  showScheduleHistoryModal(jobNum) {
+    const jtTable = this.db.getTable('job_tracking');
+    if (!jtTable || !jtTable.rows) return;
+
+    const row = jtTable.rows.find(j => {
+      const jn = String(j['Job Number'] || j['Job #'] || Object.values(j)[0] || '').trim();
+      return jn === String(jobNum).trim();
+    });
+
+    if (!row) {
+      if (typeof window.showToast === 'function') {
+        window.showToast(`Job ${jobNum} not found in Job Tracking`, 'error');
+      } else {
+        alert(`Job ${jobNum} not found in Job Tracking.`);
+      }
+      return;
+    }
+
+    const jobName = String(row['Job Name'] || '').trim();
+    const loc = String(row['Location'] || '').trim();
+    const foreman = String(row['Foreman'] || '').trim();
+    const currentSchedule = String(row['Work Schedule'] || 'Mon-Thu (4 10s)').trim();
+    const currentEffective = String(row['Schedule Effective'] || row['Start Date'] || '—').trim();
+    const currentSkipDays = String(row['Skip Days'] || 'Sun, Fri, Sat').trim();
+    const lastUpdated = String(row['Last Updated'] || '—').trim();
+
+    let historyArr = [];
+    const rawHist = String(row['Schedule History'] || '').trim();
+    if (rawHist && rawHist !== '[]') {
+      try {
+        const parsed = JSON.parse(rawHist);
+        if (Array.isArray(parsed)) historyArr = parsed;
+      } catch (e) {
+        historyArr = [];
+      }
+    }
+
+    const modalId = 'job-schedule-history-modal';
+    const oldModal = document.getElementById(modalId);
+    if (oldModal) oldModal.remove();
+
+    let historyListHtml = '';
+    if (historyArr.length === 0) {
+      historyListHtml = `
+        <div style="padding: 24px 16px; text-align: center; background: rgba(255,255,255,0.03); border: 1px dashed var(--border-color); border-radius: 8px; color: var(--text-muted); font-size: 13px;">
+          <div style="font-size: 26px; margin-bottom: 6px;">📋</div>
+          <strong style="color: var(--text-primary); font-size: 13.5px;">No previous schedule changes on record.</strong>
+          <div style="font-size: 11.5px; margin-top: 6px; color: var(--text-secondary); line-height: 1.5;">
+            This crew is currently operating on its initial schedule. Any future schedule presets or skip-day changes will be automatically logged here with dates and audit details.
+          </div>
+        </div>
+      `;
+    } else {
+      const reversed = [...historyArr].reverse();
+      historyListHtml = `
+        <div style="display: flex; flex-direction: column; gap: 10px; max-height: 280px; overflow-y: auto;">
+          ${reversed.map((entry, idx) => {
+            const sched = entry.schedule || 'Unknown';
+            const skips = entry.skipDays || 'None';
+            const eff = entry.effectiveDate || '—';
+            const changed = entry.changedDate || entry.endDate || '—';
+            const trig = entry.trigger ? ` · ${entry.trigger}` : '';
+            return `
+              <div style="padding: 10px 14px; background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); border-left: 3px solid #60a5fa; border-radius: 6px; font-size: 12px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                  <span style="font-weight: 700; color: #93c5fd; font-size: 12.5px;">${this.escapeHtml(sched)}</span>
+                  <span style="font-size: 10.5px; color: var(--text-muted);">Replaced: <strong>${this.escapeHtml(changed)}</strong></span>
+                </div>
+                <div style="color: var(--text-secondary); font-size: 11.5px;">
+                  Days Off: <span style="font-family: monospace; color: #cbd5e1;">${this.escapeHtml(skips)}</span>
+                </div>
+                <div style="font-size: 10.5px; color: var(--text-muted); margin-top: 3px;">
+                  Was Effective: ${this.escapeHtml(eff)} → ${this.escapeHtml(changed)}${this.escapeHtml(trig)}
+                </div>
+              </div>
+            `;
+          }).join('')}
+        </div>
+      `;
+    }
+
+    const modalHtml = `
+      <div id="${modalId}" style="position: fixed; inset: 0; background: rgba(0,0,0,0.75); z-index: 10000; display: flex; align-items: center; justify-content: center; backdrop-filter: blur(2px);">
+        <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 12px; padding: 22px; max-width: 520px; width: 92%; box-shadow: 0 16px 48px rgba(0,0,0,0.7); max-height: 90vh; overflow-y: auto;">
+          
+          <!-- Header -->
+          <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; border-bottom: 1px solid var(--border-color); padding-bottom: 12px;">
+            <div>
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="font-size: 18px;">📜</span>
+                <h3 style="font-size: 16px; font-weight: 800; color: var(--text-primary); margin: 0;">
+                  Schedule History — Job ${this.escapeHtml(jobNum)}
+                </h3>
+              </div>
+              <div style="font-size: 12px; color: var(--text-muted); margin-top: 4px;">
+                ${jobName ? `<strong style="color: #60a5fa;">${this.escapeHtml(jobName)}</strong> · ` : ''}
+                ${loc ? `Location: <strong>${this.escapeHtml(loc)}</strong> · ` : ''}
+                Foreman: <strong>${this.escapeHtml(foreman || 'Unassigned')}</strong>
+              </div>
+            </div>
+            <button onclick="document.getElementById('${modalId}').remove()" style="background: none; border: none; color: var(--text-muted); font-size: 20px; cursor: pointer; padding: 0 4px;" title="Close">✕</button>
+          </div>
+
+          <!-- Current Schedule Banner -->
+          <div style="background: linear-gradient(135deg, rgba(37, 99, 235, 0.15) 0%, rgba(30, 58, 138, 0.25) 100%); border: 1px solid rgba(59, 130, 246, 0.4); border-radius: 8px; padding: 12px 14px; margin-bottom: 16px;">
+            <div style="font-size: 11px; font-weight: 800; text-transform: uppercase; color: #93c5fd; letter-spacing: 0.5px; margin-bottom: 4px;">
+              🟢 Current Active Schedule
+            </div>
+            <div style="display: flex; justify-content: space-between; align-items: baseline; flex-wrap: wrap; gap: 6px;">
+              <span style="font-size: 15px; font-weight: 800; color: #ffffff;">${this.escapeHtml(currentSchedule)}</span>
+              <span style="font-size: 11.5px; color: #bfdbfe;">
+                Days Off: <strong style="font-family: monospace;">${this.escapeHtml(currentSkipDays)}</strong>
+              </span>
+            </div>
+            <div style="display: flex; gap: 14px; margin-top: 8px; font-size: 11px; color: #93c5fd;">
+              <span>Effective Since: <strong>${this.escapeHtml(currentEffective)}</strong></span>
+              <span>Last Updated: <strong>${this.escapeHtml(lastUpdated)}</strong></span>
+            </div>
+          </div>
+
+          <!-- Past Schedule Changes Timeline -->
+          <div style="margin-bottom: 18px;">
+            <div style="font-size: 12px; font-weight: 800; text-transform: uppercase; color: var(--text-muted); letter-spacing: 0.5px; margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between;">
+              <span>Past Changes Timeline</span>
+              <span class="badge" style="background: rgba(255,255,255,0.06); font-size: 10px; padding: 1px 6px; border-radius: 10px;">${historyArr.length} record${historyArr.length === 1 ? '' : 's'}</span>
+            </div>
+            ${historyListHtml}
+          </div>
+
+          <!-- Footer -->
+          <div style="display: flex; justify-content: flex-end; gap: 8px; border-top: 1px solid var(--border-color); padding-top: 14px;">
+            <button class="btn btn-secondary" onclick="document.getElementById('${modalId}').remove()" style="padding: 6px 16px; font-size: 12px; font-weight: 600; cursor: pointer;">
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+  }
+
+  renderJobTrackingTable(container, countBadge, tableData) {
+    if (!tableData) {
+      tableData = this.db.getTable('job_tracking') || { headers: [], rows: [] };
+    }
+    if (tableData.headers && !tableData.headers.some(h => String(h).trim().toLowerCase() === 'crew type')) {
+      tableData.headers.push('Crew Type');
+    }
+    const headers = tableData.headers || [];
+    let rows = [...(tableData.rows || [])];
+
+    if (!headers.length && !rows.length) {
+      container.innerHTML = `
+        <div class="empty-sheet-container" style="padding: 36px 20px; text-align: center; max-width: 580px; margin: 30px auto; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 14px; box-shadow: 0 10px 30px rgba(0,0,0,0.3);">
+          <div style="font-size: 42px; margin-bottom: 12px;">📋</div>
+          <h3 style="color: var(--text-primary); font-size: 18px; font-weight: 700; margin-bottom: 8px;">No records loaded for Job Tracking</h3>
+          <p style="color: var(--text-secondary); font-size: 13.5px; line-height: 1.5; margin-bottom: 22px;">
+            Download the live database from Google Sheets or import a snapshot file to view your crews.
+          </p>
+          <button class="btn btn-primary" onclick="window.syncEngine.downloadLatestSnapshot()" style="padding: 12px 18px; font-size: 13.5px; font-weight: 700; background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); border: none; border-radius: 8px; cursor: pointer; color: #fff;">
+            ⬇️ Download Database from Google Sheets
+          </button>
+        </div>
+      `;
+      if (countBadge) countBadge.textContent = '0 rows';
+      return;
+    }
+
+    // Search filter
+    if (this.searchTerm) {
+      const term = this.searchTerm.toLowerCase().trim();
+      rows = rows.filter(row => {
+        return Object.values(row).some(val => {
+          if (val === null || val === undefined) return false;
+          return String(val).toLowerCase().includes(term);
+        });
+      });
+    }
+
+    // Default sort: Status then Job Number
+    if (!this.sortCol && !this.multiSort) {
+      this.multiSort = ['Status', 'Job Number'];
+      this.sortDir = 'asc';
+    }
+
+    const statusRank = {
+      'active': 1,
+      'pending start': 2,
+      'on hold': 3,
+      'completed': 4
+    };
+
+    const compareValues = (colName, valA, valB) => {
+      const sA = String(valA !== undefined && valA !== null ? valA : '').trim();
+      const sB = String(valB !== undefined && valB !== null ? valB : '').trim();
+      if (!sA && !sB) return 0;
+      if (!sA) return 1;
+      if (!sB) return -1;
+      const colLower = (colName || '').toLowerCase();
+      if (colLower === 'status' || colLower === 'job status') {
+        const rA = statusRank[sA.toLowerCase()] || 99;
+        const rB = statusRank[sB.toLowerCase()] || 99;
+        if (rA !== rB) return rA - rB;
+      }
+      if (colLower.includes('size') || colLower.includes('count')) {
+        const nA = parseFloat(sA.replace(/[^0-9.-]/g, ''));
+        const nB = parseFloat(sB.replace(/[^0-9.-]/g, ''));
+        if (!isNaN(nA) && !isNaN(nB)) return nA - nB;
+      }
+      if (colLower.includes('date')) {
+        const dA = new Date(sA).getTime();
+        const dB = new Date(sB).getTime();
+        if (!isNaN(dA) && !isNaN(dB)) return dA - dB;
+      }
+      return sA.localeCompare(sB, undefined, { numeric: true, sensitivity: 'base' });
+    };
+
+    if (this.multiSort && this.multiSort.length > 0) {
+      const [colA, colB] = this.multiSort;
+      const dir = this.sortDir === 'asc' ? 1 : -1;
+      rows.sort((a, b) => {
+        const cmp1 = compareValues(colA, a[colA], b[colA]);
+        if (cmp1 !== 0) return dir * cmp1;
+        return dir * compareValues(colB, a[colB], b[colB]);
+      });
+    } else if (this.sortCol) {
+      const col = this.sortCol;
+      const dir = this.sortDir === 'asc' ? 1 : -1;
+      rows.sort((a, b) => {
+        return dir * compareValues(col, a[col], b[col]);
+      });
+    }
+
+    if (countBadge) countBadge.textContent = `${rows.length} rows`;
+
+    // Collapsible section states
+    const isDatesCollapsed = this.jtSections ? this.jtSections.dates : true;
+    const isSchedCollapsed = this.jtSections ? this.jtSections.schedule : true;
+    const isHistCollapsed = this.jtSections ? this.jtSections.history : true;
+
+    // Quick sort indicators
+    const dirArrow = (active) => active ? (this.sortDir === 'asc' ? ' ▲' : ' ▼') : '';
+    const isStatSorted = this.sortCol === 'Status';
+    const isJobSorted = this.sortCol === 'Job Number';
+    const isStatJobSorted = this.multiSort && this.multiSort[0] === 'Status' && this.multiSort[1] === 'Job Number';
+    const isLocSorted = this.sortCol === 'Location';
+
+    // Toolbar HTML
+    const toolbarHtml = `
+      <div style="padding: 8px 16px; background-color: var(--bg-secondary); border-bottom: 1px solid var(--border-color); display: flex; align-items: center; justify-content: space-between; gap: 8px; font-size: 12px; overflow-x: auto; flex-wrap: wrap;">
+        
+        <!-- Left: Quick Sort Buttons -->
+        <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+          <span style="color: var(--text-muted); font-weight: 700; font-size: 11px; text-transform: uppercase;">⚡ Quick Sort:</span>
+          <button class="btn btn-secondary ${isStatJobSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px;" onclick="window.sheetNavigator.setPresetSort('statusJob')">🏷️+🔢 Status &amp; Job #${dirArrow(isStatJobSorted)}</button>
+          <button class="btn btn-secondary ${isJobSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px;" onclick="window.sheetNavigator.setPresetSort('jobNumber')">🔢 Job #${dirArrow(isJobSorted)}</button>
+          <button class="btn btn-secondary ${isLocSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px;" onclick="window.sheetNavigator.setPresetSort('location')">📍 Location${dirArrow(isLocSorted)}</button>
+          <button class="btn btn-secondary ${isStatSorted ? 'active' : ''}" style="padding: 3px 8px; font-size: 11px;" onclick="window.sheetNavigator.setPresetSort('status')">🏷️ Status${dirArrow(isStatSorted)}</button>
+        </div>
+
+        <!-- Center: Section Toggle Pills -->
+        <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+          <span style="color: var(--text-muted); font-weight: 700; font-size: 11px; text-transform: uppercase;">Sections:</span>
+          
+          <span class="badge" style="background: rgba(37, 99, 235, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.35); padding: 3px 8px; border-radius: 6px; font-weight: 700; font-size: 11px;">
+            📋 Core (7)
+          </span>
+
+          <button class="btn btn-secondary ${!isDatesCollapsed ? 'active' : ''}" 
+                  onclick="window.sheetNavigator.toggleJobTrackingSection('dates')" 
+                  style="padding: 3px 9px; font-size: 11px; display: inline-flex; align-items: center; gap: 5px; font-weight: 600; cursor: pointer;"
+                  title="${isDatesCollapsed ? 'Click to expand 5 date columns' : 'Click to collapse date columns'}">
+            <span>⏳ Dates (5)</span>
+            <span style="font-size: 10px; color: ${!isDatesCollapsed ? '#60a5fa' : 'var(--text-muted)'};">${!isDatesCollapsed ? '◀' : '▶'}</span>
+          </button>
+
+          <button class="btn btn-secondary ${!isSchedCollapsed ? 'active' : ''}" 
+                  onclick="window.sheetNavigator.toggleJobTrackingSection('schedule')" 
+                  style="padding: 3px 9px; font-size: 11px; display: inline-flex; align-items: center; gap: 5px; font-weight: 600; cursor: pointer;"
+                  title="${isSchedCollapsed ? 'Click to expand 10 schedule & skip day columns' : 'Click to collapse schedule columns'}">
+            <span>📅 Schedule (10)</span>
+            <span style="font-size: 10px; color: ${!isSchedCollapsed ? '#38bdf8' : 'var(--text-muted)'};">${!isSchedCollapsed ? '◀' : '▶'}</span>
+          </button>
+
+          <button class="btn btn-secondary ${!isHistCollapsed ? 'active' : ''}" 
+                  onclick="window.sheetNavigator.toggleJobTrackingSection('history')" 
+                  style="padding: 3px 9px; font-size: 11px; display: inline-flex; align-items: center; gap: 5px; font-weight: 600; cursor: pointer;"
+                  title="${isHistCollapsed ? 'Click to expand 5 audit & history columns' : 'Click to collapse history columns'}">
+            <span>📜 History (5)</span>
+            <span style="font-size: 10px; color: ${!isHistCollapsed ? '#c084fc' : 'var(--text-muted)'};">${!isHistCollapsed ? '◀' : '▶'}</span>
+          </button>
+        </div>
+
+        <!-- Right: Expand All / Collapse All -->
+        <div style="display: flex; align-items: center; gap: 6px;">
+          <button class="btn btn-secondary" onclick="window.sheetNavigator.expandAllJobTrackingSections()" style="padding: 3px 8px; font-size: 11px; cursor: pointer;" title="Expand all sections">
+            ↔️ Expand All
+          </button>
+          <button class="btn btn-secondary" onclick="window.sheetNavigator.collapseAllJobTrackingSections()" style="padding: 3px 8px; font-size: 11px; cursor: pointer;" title="Collapse all sections to compact view">
+            ◀▶ Compact
+          </button>
+        </div>
+      </div>
+    `;
+
+    // Build Table Header
+    let html = toolbarHtml + `<table class="data-table"><thead><tr>`;
+
+    // Header helper
+    const renderTh = (hName, label = null) => {
+      let sortIndicator = '';
+      if (this.sortCol === hName) {
+        sortIndicator = this.sortDir === 'asc' ? ' ▲' : ' ▼';
+      } else if (this.multiSort && this.multiSort.includes(hName)) {
+        sortIndicator = ` [${this.multiSort.indexOf(hName) + 1}]`;
+      }
+      const displayLabel = label || hName;
+      return `
+        <th style="cursor: pointer; user-select: none;" onclick="window.sheetNavigator.setSort('${this.escapeHtml(hName)}')" title="Click to sort by ${this.escapeHtml(displayLabel)}">
+          <div style="display: flex; align-items: center; justify-content: space-between; gap: 6px;">
+            <span>${this.escapeHtml(displayLabel)}<span style="color: var(--accent); font-weight: bold;">${sortIndicator}</span></span>
+          </div>
+        </th>
+      `;
+    };
+
+    // 1. Actions Header (1st column for instant access)
+    html += `<th style="width: 75px; min-width: 75px; text-align: center;">Actions</th>`;
+
+    // 2. Core Headers (Job Number, then Job Name)
+    html += renderTh('Job Number', 'Job #');
+    html += renderTh('Job Name', 'Job Name ⭐');
+    html += renderTh('Location', 'Location');
+    html += renderTh('Foreman', 'Foreman');
+    html += renderTh('Crew Size', 'Size');
+    html += renderTh('Crew Type', 'Discipline');
+    html += renderTh('Status', 'Status');
+
+    // 2. Dates Headers
+    if (isDatesCollapsed) {
+      html += `
+        <th class="jt-collapsed-col-th" 
+            onclick="window.sheetNavigator.toggleJobTrackingSection('dates')" 
+            style="width: 34px; min-width: 34px; max-width: 34px; padding: 14px 2px; text-align: center; cursor: pointer; user-select: none; background: var(--bg-secondary); border-right: 1px solid var(--border-color); vertical-align: middle; transition: background 0.15s ease;" 
+            onmouseover="this.style.background='rgba(59, 130, 246, 0.12)'" 
+            onmouseout="this.style.background='var(--bg-secondary)'" 
+            title="Click to expand Dates &amp; Timeline (5 columns)">
+          <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; min-height: 110px;">
+            <span style="font-size: 11px; color: #93c5fd;">▶</span>
+            <span style="writing-mode: vertical-rl; transform: rotate(180deg); font-size: 11px; font-weight: 800; color: #93c5fd; text-transform: uppercase; letter-spacing: 1.5px; white-space: nowrap;">Dates</span>
+            <span class="badge" style="background: rgba(59, 130, 246, 0.2); color: #93c5fd; font-size: 9px; font-weight: 700; padding: 1px 4px; border-radius: 8px;">5</span>
+          </div>
+        </th>
+      `;
+    } else {
+      // Expanded 34px rail header (arrow points the other way: ◀)
+      html += `
+        <th class="jt-expanded-col-th" 
+            onclick="window.sheetNavigator.toggleJobTrackingSection('dates')" 
+            style="width: 34px; min-width: 34px; max-width: 34px; padding: 14px 2px; text-align: center; cursor: pointer; user-select: none; background: rgba(59, 130, 246, 0.1); border-left: 2px solid #3b82f6; border-right: 1px solid var(--border-color); vertical-align: middle; transition: background 0.15s ease;" 
+            onmouseover="this.style.background='rgba(59, 130, 246, 0.22)'" 
+            onmouseout="this.style.background='rgba(59, 130, 246, 0.1)'" 
+            title="Click to collapse Dates &amp; Timeline (5 columns)">
+          <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; min-height: 110px;">
+            <span style="font-size: 11px; color: #93c5fd;">◀</span>
+            <span style="writing-mode: vertical-rl; transform: rotate(180deg); font-size: 11px; font-weight: 800; color: #93c5fd; text-transform: uppercase; letter-spacing: 1.5px; white-space: nowrap;">Dates</span>
+            <span class="badge" style="background: rgba(59, 130, 246, 0.3); color: #bfdbfe; font-size: 9px; font-weight: 700; padding: 1px 4px; border-radius: 8px;">5</span>
+          </div>
+        </th>
+      `;
+      html += renderTh('Start Date', 'Start Date');
+      html += renderTh('Put On Hold Date', 'On Hold Date');
+      html += renderTh('Estimated Return', 'Est. Return');
+      html += renderTh('Est. End Date', 'Est. End');
+      html += renderTh('Actual End Date', 'Actual End');
+    }
+
+    // 3. Safety Schedule Headers
+    if (isSchedCollapsed) {
+      html += `
+        <th class="jt-collapsed-col-th" 
+            onclick="window.sheetNavigator.toggleJobTrackingSection('schedule')" 
+            style="width: 34px; min-width: 34px; max-width: 34px; padding: 14px 2px; text-align: center; cursor: pointer; user-select: none; background: var(--bg-secondary); border-right: 1px solid var(--border-color); vertical-align: middle; transition: background 0.15s ease;" 
+            onmouseover="this.style.background='rgba(56, 189, 248, 0.12)'" 
+            onmouseout="this.style.background='var(--bg-secondary)'" 
+            title="Click to expand Safety Schedule (10 columns)">
+          <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; min-height: 110px;">
+            <span style="font-size: 11px; color: #38bdf8;">▶</span>
+            <span style="writing-mode: vertical-rl; transform: rotate(180deg); font-size: 11px; font-weight: 800; color: #38bdf8; text-transform: uppercase; letter-spacing: 1.5px; white-space: nowrap;">Schedule</span>
+            <span class="badge" style="background: rgba(56, 189, 248, 0.2); color: #38bdf8; font-size: 9px; font-weight: 700; padding: 1px 4px; border-radius: 8px;">10</span>
+          </div>
+        </th>
+      `;
+    } else {
+      // Expanded 34px rail header (arrow points the other way: ◀)
+      html += `
+        <th class="jt-expanded-col-th" 
+            onclick="window.sheetNavigator.toggleJobTrackingSection('schedule')" 
+            style="width: 34px; min-width: 34px; max-width: 34px; padding: 14px 2px; text-align: center; cursor: pointer; user-select: none; background: rgba(56, 189, 248, 0.1); border-left: 2px solid #0284c7; border-right: 1px solid var(--border-color); vertical-align: middle; transition: background 0.15s ease;" 
+            onmouseover="this.style.background='rgba(56, 189, 248, 0.22)'" 
+            onmouseout="this.style.background='rgba(56, 189, 248, 0.1)'" 
+            title="Click to collapse Safety Schedule (10 columns)">
+          <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; min-height: 110px;">
+            <span style="font-size: 11px; color: #38bdf8;">◀</span>
+            <span style="writing-mode: vertical-rl; transform: rotate(180deg); font-size: 11px; font-weight: 800; color: #38bdf8; text-transform: uppercase; letter-spacing: 1.5px; white-space: nowrap;">Schedule</span>
+            <span class="badge" style="background: rgba(56, 189, 248, 0.3); color: #bae6fd; font-size: 9px; font-weight: 700; padding: 1px 4px; border-radius: 8px;">10</span>
+          </div>
+        </th>
+      `;
+      html += renderTh('Work Schedule', 'Work Schedule');
+      html += renderTh('Skip Sun', 'Skip Sun');
+      html += renderTh('Skip Mon', 'Skip Mon');
+      html += renderTh('Skip Tue', 'Skip Tue');
+      html += renderTh('Skip Wed', 'Skip Wed');
+      html += renderTh('Skip Thu', 'Skip Thu');
+      html += renderTh('Skip Fri', 'Skip Fri');
+      html += renderTh('Skip Sat', 'Skip Sat');
+      html += renderTh('Skip Weekly Meeting', 'Skip Wkly Mtg');
+      html += renderTh('Skip Monthly Checklist', 'Skip Mthly Chk');
+    }
+
+    // 4. Audit & History Headers
+    if (isHistCollapsed) {
+      html += `
+        <th class="jt-collapsed-col-th" 
+            onclick="window.sheetNavigator.toggleJobTrackingSection('history')" 
+            style="width: 34px; min-width: 34px; max-width: 34px; padding: 14px 2px; text-align: center; cursor: pointer; user-select: none; background: var(--bg-secondary); border-right: 1px solid var(--border-color); vertical-align: middle; transition: background 0.15s ease;" 
+            onmouseover="this.style.background='rgba(168, 85, 247, 0.12)'" 
+            onmouseout="this.style.background='var(--bg-secondary)'" 
+            title="Click to expand Audit &amp; History (5 columns)">
+          <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; min-height: 110px;">
+            <span style="font-size: 11px; color: #c084fc;">▶</span>
+            <span style="writing-mode: vertical-rl; transform: rotate(180deg); font-size: 11px; font-weight: 800; color: #c084fc; text-transform: uppercase; letter-spacing: 1.5px; white-space: nowrap;">History</span>
+            <span class="badge" style="background: rgba(168, 85, 247, 0.2); color: #c084fc; font-size: 9px; font-weight: 700; padding: 1px 4px; border-radius: 8px;">5</span>
+          </div>
+        </th>
+      `;
+    } else {
+      // Expanded 34px rail header (arrow points the other way: ◀)
+      html += `
+        <th class="jt-expanded-col-th" 
+            onclick="window.sheetNavigator.toggleJobTrackingSection('history')" 
+            style="width: 34px; min-width: 34px; max-width: 34px; padding: 14px 2px; text-align: center; cursor: pointer; user-select: none; background: rgba(168, 85, 247, 0.1); border-left: 2px solid #9333ea; border-right: 1px solid var(--border-color); vertical-align: middle; transition: background 0.15s ease;" 
+            onmouseover="this.style.background='rgba(168, 85, 247, 0.22)'" 
+            onmouseout="this.style.background='rgba(168, 85, 247, 0.1)'" 
+            title="Click to collapse Audit &amp; History (5 columns)">
+          <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; min-height: 110px;">
+            <span style="font-size: 11px; color: #c084fc;">◀</span>
+            <span style="writing-mode: vertical-rl; transform: rotate(180deg); font-size: 11px; font-weight: 800; color: #c084fc; text-transform: uppercase; letter-spacing: 1.5px; white-space: nowrap;">History</span>
+            <span class="badge" style="background: rgba(168, 85, 247, 0.3); color: #e9d5ff; font-size: 9px; font-weight: 700; padding: 1px 4px; border-radius: 8px;">5</span>
+          </div>
+        </th>
+      `;
+      html += renderTh('Last Updated', 'Last Updated');
+      html += renderTh('Schedule Effective', 'Sched. Effective');
+      html += renderTh('Skip Days', 'Skip Days');
+      html += renderTh('Schedule History', 'Schedule History');
+      html += renderTh('Notes', 'Notes');
+    }
+
+    html += `</tr></thead><tbody>`;
+
+    // Presets for Work Schedule
+    const schedPresets = [
+      'Mon-Thu (4 10s)',
+      'Mon-Fri (5 8s)',
+      'Tue-Fri (4 10s)',
+      'Fri & Sat Weekend',
+      'Custom'
+    ];
+
+    // Build Rows
+    rows.forEach((row, rowIdx) => {
+      let sheetRowIdx = row._rowIdx;
+      if (!sheetRowIdx && tableData.rows) {
+        const rIdx = tableData.rows.indexOf(row);
+        if (rIdx !== -1) sheetRowIdx = rIdx + 2;
+      }
+      if (!sheetRowIdx) sheetRowIdx = rowIdx + 2;
+      row._rowIdx = sheetRowIdx;
+
+      const jobNum = String(row['Job Number'] || row['Job #'] || row['Crew'] || '').trim();
+      const jobName = String(row['Job Name'] || row['Site Name'] || '').trim();
+      const loc = String(row['Location'] || '').trim();
+      const foreman = String(row['Foreman'] || '').trim();
+      const crewSize = String(row['Crew Size'] || '').trim();
+      const sched = String(row['Work Schedule'] || 'Mon-Thu (4 10s)').trim();
+      const skipDays = String(row['Skip Days'] || '').trim();
+      const startDate = String(row['Start Date'] || '').trim();
+
+      // Discipline/Crew Type detection
+      let typeStr = String(row['Crew Type'] || '').trim();
+      if (!typeStr) {
+        const jnLower = jobName.toLowerCase();
+        const locLower = loc.toLowerCase();
+        if (jobNum.startsWith('005') || jnLower.includes('office') || jnLower.includes('management') || locLower === 'office') {
+          typeStr = 'Office';
+        } else if (jnLower.includes('substation') || jnLower.includes('sub-station')) {
+          typeStr = 'Substation';
+        } else if (jnLower.includes('gas')) {
+          typeStr = 'Gas';
+        } else if (jnLower.includes('mechanic') || jnLower.includes('shop')) {
+          typeStr = 'Mechanic';
+        } else {
+          typeStr = 'Electric';
+        }
+      }
+
+      let typeBadgeBg = 'rgba(14, 165, 233, 0.15)';
+      let typeTextColor = '#38bdf8';
+      let typeBorderColor = 'rgba(14, 165, 233, 0.35)';
+      if (typeStr === 'Substation') { typeBadgeBg = 'rgba(168, 85, 247, 0.15)'; typeTextColor = '#c084fc'; typeBorderColor = 'rgba(168, 85, 247, 0.35)'; }
+      else if (typeStr === 'Gas') { typeBadgeBg = 'rgba(245, 158, 11, 0.15)'; typeTextColor = '#fbbf24'; typeBorderColor = 'rgba(245, 158, 11, 0.35)'; }
+      else if (typeStr === 'Office') { typeBadgeBg = 'rgba(16, 185, 129, 0.15)'; typeTextColor = '#34d399'; typeBorderColor = 'rgba(16, 185, 129, 0.35)'; }
+      else if (typeStr === 'Mechanic') { typeBadgeBg = 'rgba(148, 163, 184, 0.2)'; typeTextColor = '#94a3b8'; typeBorderColor = 'rgba(148, 163, 184, 0.35)'; }
+
+      // Status
+      let statusStr = String(row['Status'] || 'Active').trim();
+      let badgeBg = '#15803d';
+      let statusIcon = '🟢';
+      if (statusStr.includes('Pending Start')) { statusStr = 'Pending Start'; badgeBg = '#b45309'; statusIcon = '🟡'; }
+      else if (statusStr.includes('Completed')) { statusStr = 'Completed'; badgeBg = '#0369a1'; statusIcon = '🏁'; }
+      else if (statusStr.includes('On Hold')) { statusStr = 'On Hold'; badgeBg = '#64748b'; statusIcon = '⏸️'; }
+      else { statusStr = 'Active'; badgeBg = '#15803d'; statusIcon = '🟢'; }
+
+      // Cell helper
+      const getColIdx = (hName) => (headers.indexOf(hName) + 1);
+
+      html += `<tr>`;
+
+      // 1. Action Cell (First Column for instant access)
+      html += `
+        <td style="text-align: center; white-space: nowrap; width: 75px; min-width: 75px;">
+          <div style="display: inline-flex; align-items: center; gap: 4px; justify-content: center;">
+            <button class="btn btn-secondary" style="padding: 2px 6px; font-size: 11px; color: #60a5fa; border-color: rgba(96, 165, 250, 0.35); background: rgba(96, 165, 250, 0.08); cursor: pointer;" onclick="window.sheetNavigator.showJobLifecycleModal('${this.escapeJs(jobNum)}')" title="Edit Job Properties">🔧</button>
+            <button class="btn btn-secondary admin-only-control" style="padding: 2px 6px; font-size: 11px; color: #f87171; border-color: rgba(239, 68, 68, 0.35); background: rgba(239, 68, 68, 0.08); cursor: pointer;" onclick="window.sheetNavigator.deleteJobTrackingRow('${this.escapeJs(jobNum)}')" title="Delete Job">🗑️</button>
+          </div>
+        </td>
+      `;
+
+      // 2. Core Cells
+      // Job Number
+      html += `<td data-row="${sheetRowIdx}" data-col="${getColIdx('Job Number')}" data-header="Job Number" data-item="${this.escapeHtml(jobNum)}" style="font-family: monospace; font-weight: bold; color: #60a5fa;">${this.escapeHtml(jobNum)}</td>`;
+
+      // Job Name (Moved to 2nd position!)
+      html += `<td class="editable" contenteditable="true" data-row="${sheetRowIdx}" data-col="${getColIdx('Job Name')}" data-header="Job Name" data-item="${this.escapeHtml(jobNum)}" style="font-weight: 600; color: #ffffff;" title="Click to edit Job Name / Site Description">${this.escapeHtml(jobName || '—')}</td>`;
+
+      // Location
+      html += `<td class="editable" contenteditable="true" data-row="${sheetRowIdx}" data-col="${getColIdx('Location')}" data-header="Location" data-item="${this.escapeHtml(jobNum)}" title="Click to edit Location">${this.escapeHtml(loc)}</td>`;
+
+      // Foreman (clickable to profile)
+      html += `<td data-row="${sheetRowIdx}" data-col="${getColIdx('Foreman')}" data-header="Foreman" data-item="${this.escapeHtml(jobNum)}">${foreman ? `<span style="font-weight: 600; color: #93c5fd; cursor: pointer; text-decoration: underline dotted;" title="Click to view employee profile for ${this.escapeHtml(foreman)}" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(foreman)}');}">👤 ${this.escapeHtml(foreman)}</span>` : '<span style="color: var(--text-muted); font-style: italic;">Unassigned</span>'}</td>`;
+
+      // Crew Size
+      html += `<td class="editable" contenteditable="true" data-row="${sheetRowIdx}" data-col="${getColIdx('Crew Size')}" data-header="Crew Size" data-item="${this.escapeHtml(jobNum)}" style="text-align: center; font-weight: 700; color: #bfdbfe;" title="Click to edit Crew Size">${this.escapeHtml(crewSize)}</td>`;
+
+      // Crew Type Dropdown
+      html += `<td data-row="${sheetRowIdx}" data-col="${getColIdx('Crew Type')}" data-header="Crew Type" data-item="${this.escapeHtml(jobNum)}">
+        <select class="crew-type-table-select"
+                onclick="event.stopPropagation()"
+                onchange="window.sheetNavigator.quickChangeCrewType('${this.escapeJs(jobNum)}', this.value)"
+                style="background: var(--bg-primary); color: ${typeTextColor}; border: 1px solid ${typeBorderColor}; padding: 2px 6px; border-radius: 4px; font-weight: 700; font-size: 11px; cursor: pointer; outline: none;">
+          <option value="Electric" ${typeStr === 'Electric' ? 'selected' : ''}>⚡ Electric</option>
+          <option value="Substation" ${typeStr === 'Substation' ? 'selected' : ''}>🏗️ Substation</option>
+          <option value="Gas" ${typeStr === 'Gas' ? 'selected' : ''}>⛽ Gas</option>
+          <option value="Office" ${typeStr === 'Office' ? 'selected' : ''}>🏢 Office</option>
+          <option value="Mechanic" ${typeStr === 'Mechanic' ? 'selected' : ''}>🔧 Mechanic</option>
+        </select>
+      </td>`;
+
+      // Status
+      html += `<td data-row="${sheetRowIdx}" data-col="${getColIdx('Status')}" data-header="Status" data-item="${this.escapeHtml(jobNum)}">
+        <div style="display: inline-flex; align-items: center; gap: 4px;">
+          <span class="badge" style="background-color: ${badgeBg}; color: #fff; padding: 2px 7px; border-radius: 4px; font-weight: 700; cursor: pointer; font-size: 11px;" title="Click to manage job status / dates" onclick="window.sheetNavigator.showJobLifecycleModal('${this.escapeHtml(jobNum)}')">${statusIcon} ${this.escapeHtml(statusStr)}</span>
+          <button class="btn btn-secondary" style="padding: 1px 4px; font-size: 10px; border-radius: 3px; cursor: pointer;" title="Manage Job Lifecycle" onclick="window.sheetNavigator.showJobLifecycleModal('${this.escapeHtml(jobNum)}')">⚙️</button>
+        </div>
+      </td>`;
+
+      // 2. Dates Cells
+      if (isDatesCollapsed) {
+        html += `
+          <td class="jt-collapsed-col-td" 
+              onclick="window.sheetNavigator.toggleJobTrackingSection('dates')" 
+              style="width: 34px; min-width: 34px; max-width: 34px; text-align: center; background: rgba(0,0,0,0.12); border-right: 1px solid var(--border-color); cursor: pointer; padding: 4px;" 
+              title="Dates: Start: ${this.escapeHtml(startDate || 'None')} · Click to expand 5 columns">
+            <span style="color: var(--text-muted); font-size: 11px; opacity: 0.7;">⏳</span>
+          </td>
+        `;
+      } else {
+        html += `
+          <td class="jt-expanded-col-td" 
+              onclick="window.sheetNavigator.toggleJobTrackingSection('dates')" 
+              style="width: 34px; min-width: 34px; max-width: 34px; text-align: center; background: rgba(59, 130, 246, 0.04); border-left: 2px solid rgba(59, 130, 246, 0.35); border-right: 1px solid var(--border-color); cursor: pointer; padding: 4px;" 
+              title="Dates &amp; Timeline (5 cols) — click to collapse">
+            <span style="color: #93c5fd; font-size: 10px; opacity: 0.35;">◀</span>
+          </td>
+        `;
+        const dCols = ['Start Date', 'Put On Hold Date', 'Estimated Return', 'Est. End Date', 'Actual End Date'];
+        dCols.forEach(dc => {
+          const v = String(row[dc] || '').trim();
+          html += `<td class="editable" contenteditable="true" data-row="${sheetRowIdx}" data-col="${getColIdx(dc)}" data-header="${this.escapeHtml(dc)}" data-item="${this.escapeHtml(jobNum)}" style="font-size: 11.5px; font-family: monospace;" title="Click to edit ${this.escapeHtml(dc)}">${this.escapeHtml(v || '—')}</td>`;
+        });
+      }
+
+      // 3. Safety Schedule Cells
+      if (isSchedCollapsed) {
+        html += `
+          <td class="jt-collapsed-col-td" 
+              onclick="window.sheetNavigator.toggleJobTrackingSection('schedule')" 
+              style="width: 34px; min-width: 34px; max-width: 34px; text-align: center; background: rgba(0,0,0,0.12); border-right: 1px solid var(--border-color); cursor: pointer; padding: 4px;" 
+              title="Schedule: ${this.escapeHtml(sched)} · Skips: ${this.escapeHtml(skipDays || 'None')} · Click to expand 10 columns">
+            <span style="color: #38bdf8; font-size: 11px; opacity: 0.85;">📅</span>
+          </td>
+        `;
+      } else {
+        html += `
+          <td class="jt-expanded-col-td" 
+              onclick="window.sheetNavigator.toggleJobTrackingSection('schedule')" 
+              style="width: 34px; min-width: 34px; max-width: 34px; text-align: center; background: rgba(56, 189, 248, 0.04); border-left: 2px solid rgba(56, 189, 248, 0.35); border-right: 1px solid var(--border-color); cursor: pointer; padding: 4px;" 
+              title="Safety Schedule (10 cols) — click to collapse">
+            <span style="color: #38bdf8; font-size: 10px; opacity: 0.35;">◀</span>
+          </td>
+        `;
+        // Work Schedule Dropdown
+        html += `<td data-row="${sheetRowIdx}" data-col="${getColIdx('Work Schedule')}" data-header="Work Schedule" data-item="${this.escapeHtml(jobNum)}">
+          <select class="jt-sched-select"
+                  onclick="event.stopPropagation()"
+                  onchange="window.sheetNavigator.quickChangeWorkSchedule('${this.escapeJs(jobNum)}', this.value)"
+                  style="background: var(--bg-primary); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.35); padding: 2px 6px; border-radius: 4px; font-weight: 700; font-size: 11px; cursor: pointer; outline: none;">
+            ${schedPresets.map(p => `<option value="${p}" ${sched === p || (!schedPresets.includes(sched) && p === 'Custom') ? 'selected' : ''}>${p}</option>`).join('')}
+          </select>
+        </td>`;
+
+        // 7 Day Skips + 2 Meeting Skips
+        const sCols = ['Skip Sun', 'Skip Mon', 'Skip Tue', 'Skip Wed', 'Skip Thu', 'Skip Fri', 'Skip Sat', 'Skip Weekly Meeting', 'Skip Monthly Checklist'];
+        sCols.forEach(sc => {
+          const isChecked = row[sc] === true || row[sc] === 'TRUE' || String(row[sc]).toLowerCase() === 'true';
+          html += `<td style="text-align: center;" data-row="${sheetRowIdx}" data-col="${getColIdx(sc)}" data-header="${this.escapeHtml(sc)}" data-item="${this.escapeHtml(jobNum)}">
+            <span style="cursor: pointer; font-size: 14px;" data-toggle-checkbox="${sheetRowIdx}" data-col="${getColIdx(sc)}" data-sheet="${this.escapeHtml(tableData.name || 'Job Tracking')}" data-header="${this.escapeHtml(sc)}">${isChecked ? '☑️' : '⬜'}</span>
+          </td>`;
+        });
+      }
+
+      // 4. Audit & History Cells
+      if (isHistCollapsed) {
+        html += `
+          <td class="jt-collapsed-col-td" 
+              onclick="window.sheetNavigator.toggleJobTrackingSection('history')" 
+              style="width: 34px; min-width: 34px; max-width: 34px; text-align: center; background: rgba(0,0,0,0.12); border-right: 1px solid var(--border-color); cursor: pointer; padding: 4px;" 
+              title="Audit &amp; History · Click to expand 5 columns">
+            <span style="color: #c084fc; font-size: 11px; opacity: 0.85;">📜</span>
+          </td>
+        `;
+      } else {
+        html += `
+          <td class="jt-expanded-col-td" 
+              onclick="window.sheetNavigator.toggleJobTrackingSection('history')" 
+              style="width: 34px; min-width: 34px; max-width: 34px; text-align: center; background: rgba(168, 85, 247, 0.04); border-left: 2px solid rgba(168, 85, 247, 0.35); border-right: 1px solid var(--border-color); cursor: pointer; padding: 4px;" 
+              title="Audit &amp; History (5 cols) — click to collapse">
+            <span style="color: #c084fc; font-size: 10px; opacity: 0.35;">◀</span>
+          </td>
+        `;
+        // Last Updated
+        html += `<td data-row="${sheetRowIdx}" data-col="${getColIdx('Last Updated')}" data-header="Last Updated" data-item="${this.escapeHtml(jobNum)}" style="font-size: 11px; color: var(--text-muted); font-family: monospace;">${this.escapeHtml(row['Last Updated'] || '—')}</td>`;
+
+        // Schedule Effective
+        html += `<td data-row="${sheetRowIdx}" data-col="${getColIdx('Schedule Effective')}" data-header="Schedule Effective" data-item="${this.escapeHtml(jobNum)}" style="font-size: 11px; color: #93c5fd; font-family: monospace;">${this.escapeHtml(row['Schedule Effective'] || '—')}</td>`;
+
+        // Skip Days
+        html += `<td data-row="${sheetRowIdx}" data-col="${getColIdx('Skip Days')}" data-header="Skip Days" data-item="${this.escapeHtml(jobNum)}" style="font-size: 11px; color: var(--text-secondary); font-family: monospace;">${this.escapeHtml(skipDays || '—')}</td>`;
+
+        // Schedule History (SMART RENDERER!)
+        let histCount = 0;
+        const rawH = String(row['Schedule History'] || '').trim();
+        if (rawH && rawH !== '[]') {
+          try {
+            const parsed = JSON.parse(rawH);
+            if (Array.isArray(parsed)) histCount = parsed.length;
+          } catch { histCount = 0; }
+        }
+
+        let histHtml = '';
+        if (histCount === 0) {
+          histHtml = `<span style="color: var(--text-muted); font-size: 11px; font-style: italic;">— None</span>`;
+        } else {
+          histHtml = `
+            <span class="badge" 
+                  onclick="event.stopPropagation(); window.sheetNavigator.showScheduleHistoryModal('${this.escapeJs(jobNum)}')" 
+                  style="background: rgba(168, 85, 247, 0.15); color: #c084fc; border: 1px solid rgba(168, 85, 247, 0.4); font-size: 10.5px; font-weight: 700; padding: 2px 7px; border-radius: 4px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;" 
+                  title="Click to view schedule change history (${histCount} record${histCount === 1 ? '' : 's'})">
+              <span>📜</span> ${histCount} ${histCount === 1 ? 'change' : 'changes'}
+            </span>
+          `;
+        }
+        html += `<td data-row="${sheetRowIdx}" data-col="${getColIdx('Schedule History')}" data-header="Schedule History" data-item="${this.escapeHtml(jobNum)}">${histHtml}</td>`;
+
+        // Notes
+        html += `<td class="editable" contenteditable="true" data-row="${sheetRowIdx}" data-col="${getColIdx('Notes')}" data-header="Notes" data-item="${this.escapeHtml(jobNum)}" style="font-size: 11px; color: var(--text-muted);" title="Click to edit notes">${this.escapeHtml(row['Notes'] || '')}</td>`;
+      }
+
+      html += `</tr>`;
+    });
+
+    html += `</tbody></table>`;
+    container.innerHTML = html;
+
+    // Attach listeners
+    this.attachJobTrackingListeners(container, tableData);
+  }
+
+  attachJobTrackingListeners(container, tableData) {
+    if (!container || !tableData) return;
+
+    // 1. Checkbox toggle handlers
+    container.querySelectorAll('[data-toggle-checkbox]').forEach(cb => {
+      cb.addEventListener('click', async (e) => {
+        if (window.currentRoleMode === 'view_only') return;
+        const span = e.currentTarget;
+        const sheetName = span.dataset.sheet;
+        const row = parseInt(span.dataset.toggleCheckbox, 10);
+        const col = parseInt(span.dataset.col, 10);
+        const header = span.dataset.header;
+        const isCurrentlyChecked = span.textContent === '☑️';
+        const newBool = !isCurrentlyChecked;
+
+        span.textContent = newBool ? '☑️' : '⬜';
+
+        const rowObj = tableData.rows ? tableData.rows.find(r => r._rowIdx === row) : null;
+        if (rowObj) {
+          rowObj[header] = newBool;
+          if (header.toLowerCase().startsWith('skip ')) {
+            await this.recordJobTrackingScheduleChange(rowObj, row, 'checkbox');
+          }
+        }
+
+        await this.db.addMutation({
+          action: 'UPDATE_CELL',
+          sheetName: sheetName || tableData.name || 'Job Tracking',
+          tableKey: 'job_tracking',
+          row: row,
+          col: col,
+          header: header,
+          itemIdentifier: rowObj ? rowObj['Job Number'] : '',
+          value: newBool
+        });
+
+        if (typeof this.db.schedulePersistSnapshot === 'function') {
+          this.db.schedulePersistSnapshot(this.db.snapshot, 300);
+        } else if (typeof this.db.saveLocalSnapshot === 'function') {
+          await this.db.saveLocalSnapshot();
+        }
+
+        this.renderActiveView();
+      });
+    });
+
+    // 2. Editable cell handlers
+    container.querySelectorAll('td.editable').forEach(td => {
+      let initialVal = '';
+      td.addEventListener('focus', () => {
+        initialVal = (td.textContent || '').trim();
+        if (initialVal === '—') td.textContent = '';
+      });
+      td.addEventListener('blur', async () => {
+        const newVal = (td.textContent || '').trim();
+        if (newVal === initialVal || (initialVal === '—' && newVal === '')) {
+          if (!newVal) td.textContent = '—';
+          return;
+        }
+        const row = parseInt(td.dataset.row, 10);
+        const col = parseInt(td.dataset.col, 10);
+        const header = td.dataset.header;
+        const jobNum = td.dataset.item;
+
+        const tableRow = tableData.rows ? tableData.rows.find(r => r._rowIdx === row) : null;
+        if (tableRow) {
+          tableRow[header] = newVal;
+        }
+        if (tableData.rawGrid && row && tableData.rawGrid[row - 1] && col) {
+          tableData.rawGrid[row - 1][col - 1] = newVal;
+        }
+
+        await this.db.addMutation({
+          action: 'UPDATE_CELL',
+          sheetName: tableData.name || 'Job Tracking',
+          tableKey: 'job_tracking',
+          row: row,
+          col: col,
+          header: header,
+          itemIdentifier: jobNum,
+          value: newVal
+        });
+
+        if (typeof this.db.schedulePersistSnapshot === 'function') {
+          this.db.schedulePersistSnapshot(this.db.snapshot, 300);
+        } else if (typeof this.db.saveLocalSnapshot === 'function') {
+          await this.db.saveLocalSnapshot();
+        }
+
+        td.style.transition = 'background-color 0.2s ease';
+        td.style.backgroundColor = 'rgba(34, 197, 94, 0.25)';
+        setTimeout(() => { td.style.backgroundColor = ''; }, 450);
+      });
+      td.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          td.blur();
+        } else if (e.key === 'Escape') {
+          td.textContent = initialVal;
+          td.blur();
+        }
+      });
+    });
+  }
+
   promptFailedRubberReason(itemIdentifier, currentTestDate = '') {
     return new Promise((resolve) => {
       const modal = document.getElementById('failed-rubber-reason-modal');
@@ -14543,8 +16290,10 @@ class SheetNavigator {
     const today = new Date().toISOString().split('T')[0];
     const currentStatus = String(row['Status'] || 'Active').trim();
     const currentCrewType = String(row['Crew Type'] || 'Electric').trim();
-    const loc = row['Location'] || '';
-    const foreman = row['Foreman'] || '';
+    const loc = String(row['Location'] || '').trim();
+    const jobNameVal = String(row['Job Name'] || '').trim();
+    const foreman = String(row['Foreman'] || '').trim();
+    const workSched = String(row['Work Schedule'] || 'Mon-Thu (4 10s)').trim();
 
     const isSkipSun = row['Skip Sun'] === true || row['Skip Sun'] === 'TRUE';
     const isSkipMon = row['Skip Mon'] === true || row['Skip Mon'] === 'TRUE';
@@ -14558,31 +16307,61 @@ class SheetNavigator {
 
     const modalHtml = `
       <div id="job-lifecycle-sheet-modal" style="position: fixed; inset: 0; background: rgba(0,0,0,0.75); z-index: 10000; display: flex; align-items: center; justify-content: center;">
-        <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 12px; padding: 24px; max-width: 520px; width: 90%; box-shadow: 0 12px 40px rgba(0,0,0,0.6); max-height: 90vh; overflow-y: auto;">
+        <div style="background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 12px; padding: 24px; max-width: 540px; width: 92%; box-shadow: 0 12px 40px rgba(0,0,0,0.6); max-height: 90vh; overflow-y: auto;">
           
           <!-- Header -->
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 16px; border-bottom: 1px solid var(--border-color); padding-bottom: 12px;">
             <div>
               <h3 style="font-size: 17px; font-weight: 800; color: var(--text-primary); margin: 0; display: flex; align-items: center; gap: 8px;">
-                <span>⚙️</span> Job ${this.escapeHtml(jobNum)} — ${this.escapeHtml(loc)}
+                <span>⚙️</span> Edit Crew &amp; Job Properties: ${this.escapeHtml(jobNum)}
               </h3>
               <div style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">
-                Foreman: <strong>${this.escapeHtml(foreman || 'Unassigned')}</strong> | Current Status: <strong>${this.escapeHtml(currentStatus)}</strong>
+                Syncs directly to Job Tracking cloud repository
               </div>
             </div>
             <button onclick="document.getElementById('job-lifecycle-sheet-modal').remove()" style="background: none; border: none; color: var(--text-muted); font-size: 20px; cursor: pointer;">✕</button>
           </div>
 
-          <!-- Crew Discipline / Type Selector -->
-          <div style="margin-bottom: 16px;">
-            <label style="font-size: 12px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 6px;">Crew Discipline / Type:</label>
-            <select id="job-modal-crew-type" class="form-control" style="width: 100%; box-sizing: border-box; padding: 7px 10px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 6px; font-size: 12.5px; font-weight: 700;">
-              <option value="Electric" ${currentCrewType === 'Electric' ? 'selected' : ''}>⚡ Electric (Rubber PPE Required)</option>
-              <option value="Substation" ${currentCrewType === 'Substation' ? 'selected' : ''}>🏗️ Substation (No Rubber PPE)</option>
-              <option value="Gas" ${currentCrewType === 'Gas' ? 'selected' : ''}>⛽ Gas (No Rubber PPE)</option>
-              <option value="Office" ${currentCrewType === 'Office' ? 'selected' : ''}>🏢 Office (Rubber PPE Required)</option>
-              <option value="Mechanic" ${currentCrewType === 'Mechanic' ? 'selected' : ''}>🔧 Mechanic (No Rubber PPE)</option>
-            </select>
+          <!-- Job Name / Site Description -->
+          <div style="margin-bottom: 14px;">
+            <label style="font-size: 12px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 5px;">Job Name / Site Description:</label>
+            <input type="text" id="job-modal-job-name" class="form-control" value="${this.escapeHtml(jobNameVal)}" placeholder="e.g. G Falls ZIPLY Poles 040-26 Fri &amp; Sat" style="width: 100%; box-sizing: border-box; padding: 7px 10px; background: var(--bg-primary); color: #fff; border: 1px solid var(--border-color); border-radius: 6px; font-size: 12.5px; font-weight: 600;">
+          </div>
+
+          <!-- Location & Foreman Row -->
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 14px;">
+            <div>
+              <label style="font-size: 12px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 5px;">Physical City / Location:</label>
+              <input type="text" id="job-modal-location" class="form-control" value="${this.escapeHtml(loc)}" placeholder="e.g. Great Falls, Helena, Bozeman" style="width: 100%; box-sizing: border-box; padding: 7px 10px; background: var(--bg-primary); color: #fff; border: 1px solid var(--border-color); border-radius: 6px; font-size: 12.5px;">
+            </div>
+            <div>
+              <label style="font-size: 12px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 5px;">Designated Foreman / Lead:</label>
+              <input type="text" id="job-modal-foreman" class="form-control" value="${this.escapeHtml(foreman)}" placeholder="e.g. Corey Allen" style="width: 100%; box-sizing: border-box; padding: 7px 10px; background: var(--bg-primary); color: #fff; border: 1px solid var(--border-color); border-radius: 6px; font-size: 12.5px;">
+            </div>
+          </div>
+
+          <!-- Crew Discipline / Type & Work Schedule Row -->
+          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-bottom: 16px;">
+            <div>
+              <label style="font-size: 12px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 5px;">Crew Discipline / Type:</label>
+              <select id="job-modal-crew-type" class="form-control" style="width: 100%; box-sizing: border-box; padding: 7px 10px; background: var(--bg-primary); color: var(--text-primary); border: 1px solid var(--border-color); border-radius: 6px; font-size: 12px; font-weight: 700;">
+                <option value="Electric" ${currentCrewType === 'Electric' ? 'selected' : ''}>⚡ Electric</option>
+                <option value="Substation" ${currentCrewType === 'Substation' ? 'selected' : ''}>🏗️ Substation</option>
+                <option value="Gas" ${currentCrewType === 'Gas' ? 'selected' : ''}>⛽ Gas</option>
+                <option value="Office" ${currentCrewType === 'Office' ? 'selected' : ''}>🏢 Office</option>
+                <option value="Mechanic" ${currentCrewType === 'Mechanic' ? 'selected' : ''}>🔧 Mechanic</option>
+              </select>
+            </div>
+            <div>
+              <label style="font-size: 12px; font-weight: 700; color: var(--text-muted); display: block; margin-bottom: 5px;">Work Schedule Preset:</label>
+              <select id="job-modal-work-schedule" class="form-control" style="width: 100%; box-sizing: border-box; padding: 7px 10px; background: var(--bg-primary); color: #38bdf8; border: 1px solid var(--border-color); border-radius: 6px; font-size: 12px; font-weight: 700;">
+                <option value="Mon-Thu (4 10s)" ${workSched === 'Mon-Thu (4 10s)' ? 'selected' : ''}>Mon-Thu (4 10s)</option>
+                <option value="Mon-Fri (5 8s)" ${workSched === 'Mon-Fri (5 8s)' ? 'selected' : ''}>Mon-Fri (5 8s)</option>
+                <option value="Tue-Fri (4 10s)" ${workSched === 'Tue-Fri (4 10s)' ? 'selected' : ''}>Tue-Fri (4 10s)</option>
+                <option value="Fri &amp; Sat Weekend" ${workSched.toLowerCase().includes('weekend') || workSched.toLowerCase().includes('fri & sat') ? 'selected' : ''}>Fri &amp; Sat Weekend</option>
+                <option value="Custom" ${!['Mon-Thu (4 10s)', 'Mon-Fri (5 8s)', 'Tue-Fri (4 10s)'].includes(workSched) && !workSched.toLowerCase().includes('weekend') ? 'selected' : ''}>Custom</option>
+              </select>
+            </div>
           </div>
 
           <!-- Status Selector -->
@@ -14713,10 +16492,18 @@ class SheetNavigator {
     const selectedRadio = document.querySelector('input[name="job-target-status"]:checked');
     const targetStatus = selectedRadio ? selectedRadio.value : 'Active';
     const targetCrewType = document.getElementById('job-modal-crew-type')?.value || 'Electric';
+    const targetJobName = document.getElementById('job-modal-job-name')?.value?.trim() || '';
+    const targetLocation = document.getElementById('job-modal-location')?.value?.trim() || '';
+    const targetForeman = document.getElementById('job-modal-foreman')?.value?.trim() || '';
+    const targetWorkSched = document.getElementById('job-modal-work-schedule')?.value || 'Mon-Thu (4 10s)';
     const todayFormatted = new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
 
     row['Status'] = targetStatus;
     row['Crew Type'] = targetCrewType;
+    if (targetJobName) row['Job Name'] = targetJobName;
+    if (targetLocation) row['Location'] = targetLocation;
+    if (targetForeman !== undefined) row['Foreman'] = targetForeman;
+    row['Work Schedule'] = targetWorkSched;
     row['Skip Sun'] = document.getElementById('skip-sun').checked;
     row['Skip Mon'] = document.getElementById('skip-mon').checked;
     row['Skip Tue'] = document.getElementById('skip-tue').checked;
@@ -14766,8 +16553,12 @@ class SheetNavigator {
       tableKey: 'job_tracking',
       itemIdentifier: jobNum,
       updatedFields: {
+        'Job Name': row['Job Name'] || '',
+        'Location': row['Location'] || '',
+        'Foreman': row['Foreman'] || '',
         'Status': row['Status'],
         'Crew Type': targetCrewType,
+        'Work Schedule': targetWorkSched,
         'Skip Sun': row['Skip Sun'],
         'Skip Mon': row['Skip Mon'],
         'Skip Tue': row['Skip Tue'],
@@ -14784,6 +16575,8 @@ class SheetNavigator {
         'Last Updated': todayFormatted
       }
     });
+
+    await this.recordJobTrackingScheduleChange(row, row._rowIdx, 'lifecycle_modal');
 
     if (typeof this.db.setSnapshot === 'function') {
       await this.db.setSnapshot(this.db.snapshot);

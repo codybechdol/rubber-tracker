@@ -419,7 +419,7 @@ class SMSDialogEngine {
     window.location.href = smsUrl;
 
     // Record notification in local database
-    this.recordSmsNotification();
+    this.recordSmsNotification('sms');
   }
 
   /**
@@ -438,7 +438,7 @@ class SMSDialogEngine {
     if (navigator.clipboard && navigator.clipboard.writeText) {
       navigator.clipboard.writeText(fullPayload).then(() => {
         alert('📋 Message & phone copied to clipboard!\n\nYou can now paste it directly into your messaging app.');
-        this.recordSmsNotification();
+        this.recordSmsNotification('sms');
       }).catch(() => {
         alert('Could not copy automatically. Please copy the text from the preview box.');
       });
@@ -448,14 +448,21 @@ class SMSDialogEngine {
   /**
    * Records that SMS notification was sent in IndexedDB / local database mutations
    */
-  async recordSmsNotification() {
+  async recordSmsNotification(actionType = 'sent') {
     if (window.currentRoleMode === 'view_only') return;
     const ctx = this.currentContext;
     if (!ctx) return;
 
     const todayStr = new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
     const isInstructions = ctx.type === 'instructions';
-    const notifStatus = isInstructions ? `Instructions Sent ${todayStr}` : `Sent ${todayStr}`;
+    let notifStatus = '';
+    if (isInstructions) {
+      notifStatus = `Instructions Sent ${todayStr}`;
+    } else if (actionType === 'notified') {
+      notifStatus = `Notified ${todayStr}`;
+    } else {
+      notifStatus = `Sent ${todayStr}`;
+    }
 
     const snap = (this.db && typeof this.db.getSnapshot === 'function') ? this.db.getSnapshot() : (this.db ? this.db.snapshot : null);
     const certsTable = snap && snap.tables ? (snap.tables['expiring_certs'] || snap.tables['Expiring Certs']) : null;
@@ -509,12 +516,16 @@ class SMSDialogEngine {
       }
     }
 
-    // Refresh UI if visible
+    // Refresh UI across active views and open modals
     if (window.sheetNavigator) {
-      if (typeof window.sheetNavigator.renderCurrentSheet === 'function') {
-        window.sheetNavigator.renderCurrentSheet();
-      } else if (typeof window.sheetNavigator.renderExpiringCerts === 'function') {
+      if (typeof window.sheetNavigator.renderExpiringCerts === 'function' &&
+          (window.sheetNavigator.currentSheetKey === 'expiring_certs' || document.getElementById('expiring-certs-view')?.classList.contains('active'))) {
         window.sheetNavigator.renderExpiringCerts();
+      }
+      if (typeof window.sheetNavigator.renderActiveView === 'function') {
+        window.sheetNavigator.renderActiveView();
+      } else if (typeof window.sheetNavigator.renderCurrentSheet === 'function') {
+        window.sheetNavigator.renderCurrentSheet();
       }
     }
     if (window.employeeProfileEngine && window.employeeProfileEngine.currentEmployeeData) {
@@ -531,8 +542,8 @@ class SMSDialogEngine {
     }
 
     if (typeof window.showToast === 'function') {
-      const actionName = isInstructions ? 'class instructions SMS' : 'SMS notification';
-      window.showToast(`✅ Recorded ${actionName} for ${ctx.employeeName} (${ctx.certType})`);
+      const actionLabel = isInstructions ? 'class instructions' : (actionType === 'notified' ? 'marked as notified' : 'SMS notification');
+      window.showToast(`✅ Recorded ${actionLabel} for ${ctx.employeeName} (${ctx.certType})`, 'success');
     }
 
     setTimeout(() => {

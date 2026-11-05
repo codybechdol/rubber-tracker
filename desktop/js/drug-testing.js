@@ -14,6 +14,7 @@ class DrugTestingEngine {
     this.searchTerm = '';
     this.activeTab = 'pool'; // 'pool' or 'clinics'
     this.clinicFilter = 'all'; // 'all', 'mobile', 'walkin', 'appt'
+    this.clinicSearchTerm = '';
     this.defaultClinics = [
       { name: "First Choice - Butte", isMobile: false, address: "2929 Phillips Ave", city: "Butte", state: "MT", zip: "59701", phone: "406-494-0137", hours: "M-F 8am-5pm", apptReq: "No", paperwork: "Has generic CCFs, eCCF", notes: "No appointment needed" },
       { name: "Frontier Medicine - Helena", isMobile: false, address: "1930 N Sanders St", city: "Helena", state: "MT", zip: "59601", phone: "406-444-2454", hours: "M-F 8am-4:30pm", apptReq: "No", paperwork: "Has generic CCFs, eCCF", notes: "Walk-in welcome" },
@@ -343,75 +344,132 @@ class DrugTestingEngine {
     }).length;
     const pct = totalCount > 0 ? Math.round((completedCount / totalCount) * 100) : 0;
 
+    // Clinics metrics
+    const mobileClinicsCount = clinics.filter(c => c.isMobile).length;
+    const walkinClinicsCount = clinics.filter(c => !c.isMobile && c.apptReq.toLowerCase() !== 'yes').length;
+    const apptClinicsCount = clinics.filter(c => c.apptReq.toLowerCase() === 'yes').length;
+
     // Build HTML layout
     container.innerHTML = `
+      <!-- Top Level Tabs Bar (Standard App Navigation) -->
+      <div class="sheet-tabs-bar" style="margin-bottom: 0; background: var(--bg-secondary); border-bottom: 1px solid var(--border-color); padding: 0 16px; display: flex; gap: 6px; overflow-x: auto;">
+        <button class="sheet-tab ${this.activeTab === 'pool' ? 'active' : ''}" 
+                onclick="window.drugTestingEngine.switchTab('pool')"
+                style="display: inline-flex; align-items: center; gap: 8px; padding: 10px 18px; border: none; background: ${this.activeTab === 'pool' ? 'rgba(56, 189, 248, 0.12)' : 'transparent'}; color: ${this.activeTab === 'pool' ? '#38bdf8' : 'var(--text-muted)'}; font-weight: 700; font-size: 13px; cursor: pointer; border-bottom: 2px solid ${this.activeTab === 'pool' ? '#38bdf8' : 'transparent'}; transition: all 0.15s ease;">
+          <span>🧪</span> DOT Drug Tests (Quarterly Pool)
+          <span class="badge" style="background: rgba(56, 189, 248, 0.2); color: #93c5fd; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 10px; margin-left: 4px;">${totalCount}</span>
+        </button>
+        <button class="sheet-tab ${this.activeTab === 'clinics' ? 'active' : ''}" 
+                onclick="window.drugTestingEngine.switchTab('clinics')"
+                style="display: inline-flex; align-items: center; gap: 8px; padding: 10px 18px; border: none; background: ${this.activeTab === 'clinics' ? 'rgba(16, 185, 129, 0.12)' : 'transparent'}; color: ${this.activeTab === 'clinics' ? '#34d399' : 'var(--text-muted)'}; font-weight: 700; font-size: 13px; cursor: pointer; border-bottom: 2px solid ${this.activeTab === 'clinics' ? '#34d399' : 'transparent'}; transition: all 0.15s ease;">
+          <span>🏥</span> Drug Test Clinics
+          <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #34d399; font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 10px; margin-left: 4px;">${clinics.length}</span>
+        </button>
+      </div>
+
       <div class="sheet-toolbar" style="display: flex; flex-direction: column; gap: 10px; padding: 12px 20px; background: #1e293b; border-bottom: 1px solid var(--border-color);">
         <!-- Top Title & Navigation Row -->
         <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
-          <div style="display: flex; align-items: center; gap: 12px;">
-            <span style="font-size: 22px;">🧪</span>
-            <div>
-              <h2 style="font-size: 16px; margin: 0; font-weight: 800; color: #f8fafc;">DOT Drug Testing & Clinic Scheduling</h2>
-              <div style="font-size: 11px; color: var(--text-muted);">Quarterly Random Testing Pool, Clinic Appointments & Mobile Collectors</div>
-            </div>
-          </div>
-
-          <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
-            <div style="display: flex; align-items: center; gap: 6px; background: var(--bg-primary); padding: 4px 8px; border-radius: 6px; border: 1px solid var(--border-color);">
-              <span style="font-size: 11px; font-weight: 700; color: #93c5fd;">QUARTER:</span>
-              <select id="dt-quarter-select" style="padding: 3px 8px; font-size: 12px; font-weight: 700; background: transparent; border: none; color: #fff; outline: none; cursor: pointer;">
-                ${quarters.map(q => `<option value="${q}" ${q === this.currentQuarter ? 'selected' : ''} style="background: #1e293b;">${q}</option>`).join('')}
-              </select>
-              <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 10.5px; margin-left: 4px;" onclick="window.drugTestingEngine.promptNewQuarter()" title="Start a new quarterly testing pool (e.g. Q4 2026)">+ New Quarter</button>
+          ${this.activeTab === 'pool' ? `
+            <div style="display: flex; align-items: center; gap: 12px;">
+              <span style="font-size: 22px;">🧪</span>
+              <div>
+                <h2 style="font-size: 16px; margin: 0; font-weight: 800; color: #f8fafc;">DOT Drug Testing &amp; Clinic Scheduling</h2>
+                <div style="font-size: 11px; color: var(--text-muted);">Quarterly Random Testing Pool, Clinic Appointments &amp; Mobile Collectors</div>
+              </div>
             </div>
 
-            <div style="display: flex; background: var(--bg-primary); border-radius: 6px; padding: 2px; border: 1px solid var(--border-color);">
-              <button class="btn btn-secondary ${this.activeTab === 'pool' ? 'active' : ''}" style="font-size: 11.5px; padding: 5px 12px; border: none; font-weight: 700;" onclick="window.drugTestingEngine.switchTab('pool')">📋 Test Pool (${totalCount})</button>
-              <button class="btn btn-secondary ${this.activeTab === 'clinics' ? 'active' : ''}" style="font-size: 11.5px; padding: 5px 12px; border: none; font-weight: 700;" onclick="window.drugTestingEngine.switchTab('clinics')">🏥 Clinics Directory (${clinics.length})</button>
+            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+              <div style="display: flex; align-items: center; gap: 6px; background: var(--bg-primary); padding: 4px 8px; border-radius: 6px; border: 1px solid var(--border-color);">
+                <span style="font-size: 11px; font-weight: 700; color: #93c5fd;">QUARTER:</span>
+                <select id="dt-quarter-select" style="padding: 3px 8px; font-size: 12px; font-weight: 700; background: transparent; border: none; color: #fff; outline: none; cursor: pointer;">
+                  ${quarters.map(q => `<option value="${q}" ${q === this.currentQuarter ? 'selected' : ''} style="background: #1e293b;">${q}</option>`).join('')}
+                </select>
+                <button class="btn btn-secondary" style="padding: 2px 8px; font-size: 10.5px; margin-left: 4px;" onclick="window.drugTestingEngine.promptNewQuarter()" title="Start a new quarterly testing pool (e.g. Q4 2026)">+ New Quarter</button>
+              </div>
+
+              <button class="btn btn-primary" style="font-size: 11.5px; font-weight: 700; background: linear-gradient(135deg, #10b981 0%, #059669 100%); display: inline-flex; align-items: center; gap: 6px; border: none;" onclick="window.drugTestingEngine.openAddEmployeeModal()" title="Add a single employee to this quarter">
+                <span>➕</span> Add Employee
+              </button>
+
+              <button class="btn btn-primary" style="font-size: 11.5px; font-weight: 700; background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%); display: inline-flex; align-items: center; gap: 6px; border: none;" onclick="window.drugTestingEngine.openBulkPasteModal()">
+                <span>📋</span> Bulk Paste Roster
+              </button>
+
+              <button class="btn btn-primary" style="font-size: 11.5px; font-weight: 700; background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); display: inline-flex; align-items: center; gap: 6px; border: none;" onclick="window.drugTestingEngine.forcePushTests()" title="Push Drug Tests directly to Google Sheets">
+                <span>⬆️</span> Push Tests to Sheets
+              </button>
+            </div>
+          ` : `
+            <div style="display: flex; align-items: center; gap: 12px;">
+              <span style="font-size: 22px;">🏥</span>
+              <div>
+                <h2 style="font-size: 16px; margin: 0; font-weight: 800; color: #f8fafc;">Drug Test Clinics &amp; Mobile Collectors Directory</h2>
+                <div style="font-size: 11px; color: var(--text-muted);">Regional Occupational Health Clinics, Urgent Cares &amp; Mobile Dispatch Services</div>
+              </div>
             </div>
 
-            <button class="btn btn-primary" style="font-size: 11.5px; font-weight: 700; background: linear-gradient(135deg, #10b981 0%, #059669 100%); display: inline-flex; align-items: center; gap: 6px; border: none;" onclick="window.drugTestingEngine.openAddEmployeeModal()" title="Add a single employee to this quarter">
-              <span>➕</span> Add Employee
-            </button>
+            <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+              <button class="btn btn-primary" style="font-size: 11.5px; font-weight: 700; background: linear-gradient(135deg, #10b981 0%, #059669 100%); display: inline-flex; align-items: center; gap: 6px; border: none;" onclick="window.drugTestingEngine.openAddClinicModal()" title="Add a new clinic or mobile collector">
+                <span>➕</span> Add Clinic / Collector
+              </button>
 
-            <button class="btn btn-primary" style="font-size: 11.5px; font-weight: 700; background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%); display: inline-flex; align-items: center; gap: 6px; border: none;" onclick="window.drugTestingEngine.openBulkPasteModal()">
-              <span>📋</span> Bulk Paste Roster
-            </button>
-
-            <button class="btn btn-primary" style="font-size: 11.5px; font-weight: 700; background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); display: inline-flex; align-items: center; gap: 6px; border: none;" onclick="window.drugTestingEngine.forcePushTests()" title="Push Drug Tests directly to Google Sheets">
-              <span>⬆️</span> Push Tests to Sheets
-            </button>
-          </div>
+              <button class="btn btn-primary" style="font-size: 11.5px; font-weight: 700; background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); display: inline-flex; align-items: center; gap: 6px; border: none;" onclick="window.drugTestingEngine.forcePushClinics()" title="Push Drug Test Clinics directory to Google Sheets">
+                <span>⬆️</span> Push Clinics to Sheets
+              </button>
+            </div>
+          `}
         </div>
 
         <!-- KPI Metric Cards -->
-        <div style="display: flex; flex-direction: row; gap: 12px; width: 100%; align-items: stretch;">
-          <div style="flex: 1; min-width: 0; background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 12px;">
-            <div style="font-size: 10.5px; color: var(--text-muted); font-weight: 600;">Selected Roster</div>
-            <div style="font-size: 17px; font-weight: 800; color: #93c5fd; font-family: monospace; margin-top: 2px;">${totalCount} <span style="font-size: 11px; font-weight: normal; color: var(--text-muted);">employees</span></div>
-          </div>
-          <div style="flex: 1; min-width: 0; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(234, 179, 8, 0.3); border-radius: 6px; padding: 8px 12px;">
-            <div style="font-size: 10.5px; color: #fde047; font-weight: 600;">⏳ Pending Schedule</div>
-            <div style="font-size: 17px; font-weight: 800; color: #facc15; font-family: monospace; margin-top: 2px;">${pendingCount}</div>
-          </div>
-          <div style="flex: 1; min-width: 0; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 6px; padding: 8px 12px;">
-            <div style="font-size: 10.5px; color: #93c5fd; font-weight: 600;">📅 Scheduled</div>
-            <div style="font-size: 17px; font-weight: 800; color: #60a5fa; font-family: monospace; margin-top: 2px;">${scheduledCount}</div>
-          </div>
-          <div style="flex: 1; min-width: 0; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(168, 85, 247, 0.3); border-radius: 6px; padding: 8px 12px;">
-            <div style="font-size: 10.5px; color: #c084fc; font-weight: 600;">🚚 Mobile Dispatch</div>
-            <div style="font-size: 17px; font-weight: 800; color: #a855f7; font-family: monospace; margin-top: 2px;">${mobileCount}</div>
-          </div>
-          <div style="flex: 1.2; min-width: 0; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(34, 197, 94, 0.3); border-radius: 6px; padding: 8px 12px;">
-            <div style="display: flex; justify-content: space-between; align-items: center;">
-              <span style="font-size: 10.5px; color: #86efac; font-weight: 600;">✅ Completed (${pct}%)</span>
-              <span style="font-size: 11px; color: #4ade80; font-weight: 700;">${completedCount} / ${totalCount}</span>
+        ${this.activeTab === 'pool' ? `
+          <div style="display: flex; flex-direction: row; gap: 12px; width: 100%; align-items: stretch;">
+            <div style="flex: 1; min-width: 0; background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 12px;">
+              <div style="font-size: 10.5px; color: var(--text-muted); font-weight: 600;">Selected Roster</div>
+              <div style="font-size: 17px; font-weight: 800; color: #93c5fd; font-family: monospace; margin-top: 2px;">${totalCount} <span style="font-size: 11px; font-weight: normal; color: var(--text-muted);">employees</span></div>
             </div>
-            <div style="background: rgba(255,255,255,0.1); height: 6px; border-radius: 3px; margin-top: 6px; overflow: hidden;">
-              <div style="background: linear-gradient(90deg, #10b981, #34d399); height: 100%; width: ${pct}%;"></div>
+            <div style="flex: 1; min-width: 0; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(234, 179, 8, 0.3); border-radius: 6px; padding: 8px 12px;">
+              <div style="font-size: 10.5px; color: #fde047; font-weight: 600;">⏳ Pending Schedule</div>
+              <div style="font-size: 17px; font-weight: 800; color: #facc15; font-family: monospace; margin-top: 2px;">${pendingCount}</div>
+            </div>
+            <div style="flex: 1; min-width: 0; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 6px; padding: 8px 12px;">
+              <div style="font-size: 10.5px; color: #93c5fd; font-weight: 600;">📅 Scheduled</div>
+              <div style="font-size: 17px; font-weight: 800; color: #60a5fa; font-family: monospace; margin-top: 2px;">${scheduledCount}</div>
+            </div>
+            <div style="flex: 1; min-width: 0; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(168, 85, 247, 0.3); border-radius: 6px; padding: 8px 12px;">
+              <div style="font-size: 10.5px; color: #c084fc; font-weight: 600;">🚚 Mobile Dispatch</div>
+              <div style="font-size: 17px; font-weight: 800; color: #a855f7; font-family: monospace; margin-top: 2px;">${mobileCount}</div>
+            </div>
+            <div style="flex: 1.2; min-width: 0; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(34, 197, 94, 0.3); border-radius: 6px; padding: 8px 12px;">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span style="font-size: 10.5px; color: #86efac; font-weight: 600;">✅ Completed (${pct}%)</span>
+                <span style="font-size: 11px; color: #4ade80; font-weight: 700;">${completedCount} / ${totalCount}</span>
+              </div>
+              <div style="background: rgba(255,255,255,0.1); height: 6px; border-radius: 3px; margin-top: 6px; overflow: hidden;">
+                <div style="background: linear-gradient(90deg, #10b981, #34d399); height: 100%; width: ${pct}%;"></div>
+              </div>
             </div>
           </div>
-        </div>
+        ` : `
+          <div style="display: flex; flex-direction: row; gap: 12px; width: 100%; align-items: stretch;">
+            <div style="flex: 1; min-width: 0; background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: 6px; padding: 8px 12px;">
+              <div style="font-size: 10.5px; color: var(--text-muted); font-weight: 600;">Total In Directory</div>
+              <div style="font-size: 17px; font-weight: 800; color: #93c5fd; font-family: monospace; margin-top: 2px;">${clinics.length} <span style="font-size: 11px; font-weight: normal; color: var(--text-muted);">locations</span></div>
+            </div>
+            <div style="flex: 1; min-width: 0; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(168, 85, 247, 0.3); border-radius: 6px; padding: 8px 12px;">
+              <div style="font-size: 10.5px; color: #c084fc; font-weight: 600;">🚚 Mobile Collectors</div>
+              <div style="font-size: 17px; font-weight: 800; color: #a855f7; font-family: monospace; margin-top: 2px;">${mobileClinicsCount}</div>
+            </div>
+            <div style="flex: 1; min-width: 0; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(34, 197, 94, 0.3); border-radius: 6px; padding: 8px 12px;">
+              <div style="font-size: 10.5px; color: #86efac; font-weight: 600;">🟢 Walk-In Welcome</div>
+              <div style="font-size: 17px; font-weight: 800; color: #4ade80; font-family: monospace; margin-top: 2px;">${walkinClinicsCount}</div>
+            </div>
+            <div style="flex: 1; min-width: 0; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 6px; padding: 8px 12px;">
+              <div style="font-size: 10.5px; color: #f87171; font-weight: 600;">🔴 Appt Required</div>
+              <div style="font-size: 17px; font-weight: 800; color: #ef4444; font-family: monospace; margin-top: 2px;">${apptClinicsCount}</div>
+            </div>
+          </div>
+        `}
 
         <!-- Filter & Add Employee Bar -->
         ${this.activeTab === 'pool' ? `
@@ -449,14 +507,15 @@ class DrugTestingEngine {
           </div>
         ` : `
           <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 8px;">
-            <div style="display: flex; align-items: center; gap: 8px;">
+            <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
               <span style="font-size: 11.5px; color: var(--text-muted); font-weight: 600;">Filter Clinics:</span>
               <button class="btn btn-secondary ${this.clinicFilter === 'all' ? 'active' : ''}" style="padding: 2px 8px; font-size: 11px;" onclick="window.drugTestingEngine.setClinicFilter('all')">All (${clinics.length})</button>
               <button class="btn btn-secondary ${this.clinicFilter === 'mobile' ? 'active' : ''}" style="padding: 2px 8px; font-size: 11px; color: #c084fc;" onclick="window.drugTestingEngine.setClinicFilter('mobile')">🚚 Mobile Collectors</button>
               <button class="btn btn-secondary ${this.clinicFilter === 'walkin' ? 'active' : ''}" style="padding: 2px 8px; font-size: 11px; color: #4ade80;" onclick="window.drugTestingEngine.setClinicFilter('walkin')">🟢 Walk-In</button>
               <button class="btn btn-secondary ${this.clinicFilter === 'appt' ? 'active' : ''}" style="padding: 2px 8px; font-size: 11px; color: #f87171;" onclick="window.drugTestingEngine.setClinicFilter('appt')">🔴 Appt Required</button>
+
+              <input type="text" id="dt-clinic-search-input" value="${this.escapeHtml(this.clinicSearchTerm || '')}" placeholder="🔍 Search clinic name, city, state, phone..." style="padding: 4px 10px; font-size: 11.5px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; color: #fff; width: 260px;" oninput="window.drugTestingEngine.setClinicSearch(this.value)">
             </div>
-            <button class="btn btn-secondary" style="font-size: 11.5px; font-weight: 700; color: #34d399;" onclick="window.drugTestingEngine.openAddClinicModal()">➕ Add New Clinic / Collector</button>
           </div>
         `}
       </div>
@@ -665,8 +724,24 @@ class DrugTestingEngine {
       if (this.clinicFilter === 'mobile' && !c.isMobile) return false;
       if (this.clinicFilter === 'walkin' && c.apptReq.toLowerCase() === 'yes') return false;
       if (this.clinicFilter === 'appt' && c.apptReq.toLowerCase() !== 'yes') return false;
+      if (this.clinicSearchTerm) {
+        const q = this.clinicSearchTerm.toLowerCase();
+        const str = `${c.name} ${c.city} ${c.state} ${c.zip} ${c.address} ${c.phone} ${c.notes} ${c.paperwork}`.toLowerCase();
+        if (!str.includes(q)) return false;
+      }
       return true;
     });
+
+    if (filtered.length === 0) {
+      return `
+        <div style="background: #1e293b; border-radius: 8px; border: 1px solid var(--border-color); padding: 50px 20px; text-align: center; color: var(--text-muted);">
+          <div style="font-size: 32px; margin-bottom: 10px;">🏥</div>
+          <div style="font-size: 15px; font-weight: 700; color: #f8fafc;">No Clinics Found</div>
+          <div style="font-size: 12px; margin-top: 5px; color: var(--text-muted);">No clinic or mobile collector matches your current search or filter criteria.</div>
+          <button class="btn btn-secondary" style="margin-top: 14px; font-size: 11.5px; color: #38bdf8;" onclick="window.drugTestingEngine.setClinicFilter('all'); window.drugTestingEngine.setClinicSearch('');">Clear Filters &amp; Search</button>
+        </div>
+      `;
+    }
 
     return `
       <div style="background: #1e293b; border-radius: 8px; border: 1px solid var(--border-color); overflow: hidden; box-shadow: 0 4px 12px rgba(0,0,0,0.25);">
@@ -1730,6 +1805,32 @@ class DrugTestingEngine {
   }
 
   // --- UI Helpers ---
+
+  setClinicSearch(val) {
+    this.clinicSearchTerm = (val || '').toLowerCase().trim();
+    const container = document.querySelector('#drug-testing-view > div:last-of-type');
+    if (container && this.activeTab === 'clinics') {
+      const clinics = this.getClinicsList();
+      container.innerHTML = this.renderClinicsTable(clinics);
+    } else {
+      this.render();
+    }
+  }
+
+  async forcePushClinics() {
+    const t = this.getClinicsTable();
+    if (!t || !t.rows || t.rows.length === 0) {
+      alert('No clinic records to push.');
+      return;
+    }
+    await this.saveClinicsTable(t);
+    if (window.syncEngine && typeof window.syncEngine.pushChangesToGoogleSheets === 'function') {
+      await window.syncEngine.pushChangesToGoogleSheets();
+      alert('Successfully pushed Drug Test Clinics directory to Google Sheets!');
+    } else {
+      alert('Changes queued in outbox. Push when online.');
+    }
+  }
 
   switchTab(tab) {
     this.activeTab = tab;

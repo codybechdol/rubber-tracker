@@ -2313,7 +2313,16 @@ class CrewImportEngine {
       const explicitPrimary = occurrences.find(o => o.emp.isPrimary);
       const isSecondaryOnly = !explicitPrimary && occurrences.some(o => o.emp.isSecondary);
 
-      let primaryOcc = explicitPrimary || occurrences[0];
+      // If an employee is on multiple crews and neither is explicitly marked primary,
+      // prefer an Active crew over a Pending Start or On Hold crew as primary.
+      let primaryOcc = explicitPrimary;
+      if (!primaryOcc) {
+        const activeOcc = occurrences.find(o => {
+          const st = String(o.crew?.status || '').toLowerCase().trim();
+          return st === 'active' || (!st && !String(o.crew?.jobNumber || '').toLowerCase().includes('pending'));
+        });
+        primaryOcc = activeOcc || occurrences[0];
+      }
       let secOccs = occurrences.filter(o => o !== primaryOcc);
 
       const empName = (explicitPrimary || occurrences[0]).emp.name;
@@ -4158,6 +4167,11 @@ class CrewImportEngine {
             Browse File
           </button>
         </div>
+        <div style="margin-top: 14px; text-align: center;">
+          <button class="btn btn-secondary" onclick="window.crewPlanningEngine.openHistoricalExcelImportModal()" style="font-size: 12px; font-weight: 600; padding: 6px 14px; display: inline-flex; align-items: center; gap: 6px;">
+            <span>📚</span> Batch Archive Past Weekly Tabs into Roster History
+          </button>
+        </div>
       `;
     }
 
@@ -4168,15 +4182,20 @@ class CrewImportEngine {
         <div>
           <!-- Tab Selector if Multi-Sheet -->
           ${this.workbook && this.workbook.SheetNames.length > 1 ? `
-            <div style="margin-bottom: 16px; display: flex; align-items: center; gap: 8px;">
-              <span style="font-size: 12px; font-weight: 700; color: var(--text-muted);">Select Sheet Tab:</span>
-              <div style="display: flex; gap: 6px; flex-wrap: wrap;">
-                ${this.workbook.SheetNames.map(sn => `
-                  <button class="btn ${this.selectedSheet === sn ? 'btn-primary' : 'btn-secondary'}" style="font-size: 12px; padding: 4px 10px; cursor: pointer;" onclick="window.crewImportEngine.switchSheetTab('${sn}')">
-                    📄 ${sn}
-                  </button>
-                `).join('')}
+            <div style="margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+              <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+                <span style="font-size: 12px; font-weight: 700; color: var(--text-muted);">Select Sheet Tab:</span>
+                <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+                  ${this.workbook.SheetNames.map(sn => `
+                    <button class="btn ${this.selectedSheet === sn ? 'btn-primary' : 'btn-secondary'}" style="font-size: 12px; padding: 4px 10px; cursor: pointer;" onclick="window.crewImportEngine.switchSheetTab('${sn}')">
+                      📄 ${sn}
+                    </button>
+                  `).join('')}
+                </div>
               </div>
+              <button class="btn btn-secondary" onclick="window.crewPlanningEngine.importHistoricalWorkbookTabs(window.crewImportEngine.workbook).then(r => alert('✅ Archived ' + r.importedCount + ' tabs into Roster History!')).catch(e => alert(e.message))" style="font-size: 11.5px; font-weight: 600; padding: 4px 10px; display: inline-flex; align-items: center; gap: 5px;" title="Archive all weekly tabs from this workbook into the Historical Roster Archive">
+                <span>📚</span> Archive All Tabs to History
+              </button>
             </div>
           ` : ''}
 
