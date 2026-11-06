@@ -752,6 +752,14 @@ class CrewPlanningEngine {
           jobName: String(j['Job Name'] || '').trim(),
           members: []
         });
+      } else {
+        const existing = crewsMap.get(baseJob);
+        const curName = String(j['Job Name'] || '').trim();
+        const exName = String(existing.jobName || '').trim();
+        if (curName && (!exName || (exName.toLowerCase().includes('dock') && !curName.toLowerCase().includes('dock')))) {
+          existing.jobName = curName;
+        }
+        if (!existing.foreman && j['Foreman']) existing.foreman = String(j['Foreman']).trim();
       }
     });
 
@@ -3687,6 +3695,31 @@ class CrewPlanningEngine {
               updatedFields: updated
             });
           }
+
+          // Clean up any other duplicate rows in job_tracking matching crew.jobNumber
+          const dupJtRows = jtTable.rows.filter(j => {
+            if (j === jtRow) return false;
+            const jn = String(j['Job Number'] || j['Job #'] || '').trim();
+            return jn === crew.jobNumber || jn.replace(/\.\d+.*$/, '').trim() === crew.jobNumber;
+          });
+          if (dupJtRows.length > 0) {
+            jtTable.rows = jtTable.rows.filter(j => !dupJtRows.includes(j));
+            jtTable.rowCount = jtTable.rows.length;
+            jtTable.rows.forEach((r, idx) => { r._rowIdx = idx + 2; });
+            for (const dupRow of dupJtRows) {
+              const dIdx = dupRow._rowIdx;
+              if (jtTable.rawGrid && dIdx && jtTable.rawGrid[dIdx - 1]) {
+                jtTable.rawGrid.splice(dIdx - 1, 1);
+              }
+              await this.db.addMutation({
+                action: 'DELETE_ROW',
+                sheetName: jtTable.name || 'Job Tracking',
+                tableKey: 'job_tracking',
+                itemIdentifier: crew.jobNumber,
+                row: dIdx
+              });
+            }
+          }
         } else if (jtTable) {
           // New crew created in Crew Planning not yet in Job Tracking: Add it to Job Tracking!
           const newJtRow = {
@@ -5109,6 +5142,31 @@ class CrewPlanningEngine {
               itemIdentifier: jobNumber,
               updatedFields: updated
             });
+
+            // Clean up any other duplicate rows in job_tracking matching jobNumber
+            const dupJtRows = jtTbl.rows.filter(j => {
+              if (j === row) return false;
+              const jn = String(j['Job Number'] || j['Job #'] || '').trim();
+              return jn === jobNumber || jn.replace(/\.\d+.*$/, '').trim() === jobNumber;
+            });
+            if (dupJtRows.length > 0) {
+              jtTbl.rows = jtTbl.rows.filter(j => !dupJtRows.includes(j));
+              jtTbl.rowCount = jtTbl.rows.length;
+              jtTbl.rows.forEach((r, idx) => { r._rowIdx = idx + 2; });
+              for (const dupRow of dupJtRows) {
+                const dIdx = dupRow._rowIdx;
+                if (jtTbl.rawGrid && dIdx && jtTbl.rawGrid[dIdx - 1]) {
+                  jtTbl.rawGrid.splice(dIdx - 1, 1);
+                }
+                await this.db.addMutation({
+                  action: 'DELETE_ROW',
+                  sheetName: jtTbl.name || 'Job Tracking',
+                  tableKey: 'job_tracking',
+                  itemIdentifier: jobNumber,
+                  row: dIdx
+                });
+              }
+            }
           } else {
             const newRow = {
               'Job Number': jobNumber,

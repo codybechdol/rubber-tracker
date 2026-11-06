@@ -1983,6 +1983,61 @@ class LocalDatabase {
           }
         }
       }
+
+      // Deduplicate Job Tracking rows (strictly enforce unique base job numbers)
+      const isJobTracking = tableKey === 'job_tracking' || (table.name && table.name.toLowerCase() === 'job tracking');
+      if (isJobTracking && table.rows && table.rows.length > 0) {
+        const seenJobs = new Map();
+        const dupJtRowsToRemove = new Set();
+        table.rows.forEach(r => {
+          const rawJob = String(r['Job Number'] || r['Job #'] || '').trim();
+          if (!rawJob || rawJob.toLowerCase() === 'unassigned') return;
+          const baseKey = rawJob.replace(/\.\d+.*$/, '').toLowerCase();
+          if (seenJobs.has(baseKey)) {
+            const master = seenJobs.get(baseKey);
+            // Merge fields: prefer non-dock descriptive job name, later start date, or non-empty fields
+            const masterName = String(master['Job Name'] || '').trim();
+            const curName = String(r['Job Name'] || '').trim();
+            const masterIsDock = masterName.toLowerCase().includes('dock');
+            const curIsDock = curName.toLowerCase().includes('dock');
+            if (curName && (!masterName || (masterIsDock && !curIsDock))) {
+              master['Job Name'] = curName;
+            }
+            if (!master['Start Date'] && r['Start Date']) master['Start Date'] = r['Start Date'];
+            if (!master['Foreman'] && r['Foreman']) master['Foreman'] = r['Foreman'];
+            if ((!master['Crew Type'] || master['Crew Type'] === 'Electric') && r['Crew Type']) master['Crew Type'] = r['Crew Type'];
+            if (r['Crew Size'] && (!master['Crew Size'] || Number(r['Crew Size']) > Number(master['Crew Size']))) {
+              master['Crew Size'] = r['Crew Size'];
+            }
+            console.warn(`[normalizeTableData] Deduplicating Job Tracking row for ${baseKey}: merged into row ${master._rowIdx}`);
+            dupJtRowsToRemove.add(r);
+          } else {
+            seenJobs.set(baseKey, r);
+          }
+        });
+
+        if (dupJtRowsToRemove.size > 0) {
+          table.rows = table.rows.filter(r => !dupJtRowsToRemove.has(r));
+          table.rowCount = table.rows.length;
+          table.rows.forEach((r, idx) => {
+            r._rowIdx = idx + 2;
+          });
+          if (table.rawGrid && table.rawGrid.length > 1) {
+            const seenGridJobs = new Set();
+            const newRawGrid = [table.rawGrid[0]];
+            for (let i = 1; i < table.rawGrid.length; i++) {
+              const gridRow = table.rawGrid[i];
+              if (!Array.isArray(gridRow)) continue;
+              const gJob = String(gridRow[0] || '').trim().replace(/\.\d+.*$/, '').toLowerCase();
+              if (gJob && seenGridJobs.has(gJob)) continue;
+              if (gJob) seenGridJobs.add(gJob);
+              newRawGrid.push(gridRow);
+            }
+            table.rawGrid = newRawGrid;
+            table.maxRows = table.rawGrid.length;
+          }
+        }
+      }
     }
 
     // 3. Header finding logic & Swap Table Row Reconstruction

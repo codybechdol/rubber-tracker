@@ -2095,6 +2095,7 @@ class SheetNavigator {
    * Opens the certification date, provider, and notes modal from Expiring Certs table.
    */
   openCertEditModal(sheetRowIdx) {
+    this.currentSheetKey = 'expiring_certs';
     const tableData = this.db ? this.db.getTable('expiring_certs') : null;
     if (!tableData || !tableData.rows) return;
 
@@ -9712,7 +9713,66 @@ class SheetNavigator {
         }
       });
 
+      // Also clean up any other duplicate rows in job_tracking matching baseJob
+      const duplicateJtRows = jtTable.rows.filter(j => {
+        if (j === jt) return false;
+        const jn = String(j['Job Number'] || j['Job #'] || '').trim();
+        return jn === baseJob || jn.replace(/\.\d+.*$/, '').trim() === baseJob;
+      });
+      if (duplicateJtRows.length > 0) {
+        jtTable.rows = jtTable.rows.filter(j => !duplicateJtRows.includes(j));
+        jtTable.rowCount = jtTable.rows.length;
+        jtTable.rows.forEach((r, idx) => { r._rowIdx = idx + 2; });
+        for (const dupRow of duplicateJtRows) {
+          const dIdx = dupRow._rowIdx;
+          if (jtTable.rawGrid && dIdx && jtTable.rawGrid[dIdx - 1]) {
+            jtTable.rawGrid.splice(dIdx - 1, 1);
+          }
+          await this.db.addMutation({
+            action: 'DELETE_ROW',
+            sheetName: jtTable.name || 'Job Tracking',
+            tableKey: 'job_tracking',
+            itemIdentifier: baseJob,
+            row: dIdx
+          });
+        }
+      }
+
       await this.recordJobTrackingScheduleChange(jt, jtRowIdx, 'crew_card');
+    } else {
+      // Create new row in Job Tracking if it didn't exist yet
+      const newJtRow = {
+        'Job Number': baseJob,
+        'Job Name': newJobName || baseJob,
+        'Location': newLoc,
+        'Foreman': newForeman,
+        'Crew Type': newCrewType,
+        'Status': newStatus,
+        'Work Schedule': newSchedule,
+        'Skip Mon': isSkipMon,
+        'Skip Tue': isSkipTue,
+        'Skip Wed': isSkipWed,
+        'Skip Thu': isSkipThu,
+        'Skip Fri': isSkipFri,
+        'Skip Sat': isSkipSat,
+        'Skip Sun': isSkipSun,
+        'Skip Weekly Meeting': skipMtg,
+        'Skip Monthly Checklist': skipChk,
+        'Last Updated': todayFormatted
+      };
+      jtTable.rows.push(newJtRow);
+      newJtRow._rowIdx = jtTable.rows.length + 1;
+      if (jtTable.rawGrid) {
+        jtTable.rawGrid.push(jtTable.headers.map(h => newJtRow[h] !== undefined ? newJtRow[h] : ''));
+      }
+      await this.db.addMutation({
+        action: 'ADD_ROW',
+        sheetName: jtTable.name || 'Job Tracking',
+        tableKey: 'job_tracking',
+        itemIdentifier: baseJob,
+        row: newJtRow._rowIdx,
+        rowData: newJtRow
+      });
     }
 
     // If Location changed, cascade to primary members and their assigned equipment

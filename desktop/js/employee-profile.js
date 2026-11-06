@@ -5366,6 +5366,8 @@ class EmployeeProfileEngine {
 
       if (typeof this.db.saveLocalSnapshot === 'function') {
         await this.db.saveLocalSnapshot();
+      } else if (window.desktopAPI && typeof window.desktopAPI.saveLocalSnapshot === 'function' && this.db.snapshot) {
+        await window.desktopAPI.saveLocalSnapshot(this.db.snapshot);
       }
 
       // Update in-memory state in currentEmployeeData
@@ -5418,15 +5420,35 @@ class EmployeeProfileEngine {
       this.closeEditCertModal();
     }
 
-    // Re-render the profile modal body immediately to show updated dates & badges
+    // Re-render the profile modal body immediately if open
+    const profileModal = document.getElementById('employee-profile-modal');
     const modalBody = document.getElementById('employee-profile-modal-body');
-    if (modalBody) {
+    if (profileModal && profileModal.style.display !== 'none' && modalBody) {
       this.renderModalContent(modalBody);
     }
 
-    // Refresh sheetNavigator view immediately so table updates live on screen
-    if (window.sheetNavigator && window.sheetNavigator.currentSheetKey === 'expiring_certs') {
-      window.sheetNavigator.renderExpiringCerts();
+    // Refresh sheetNavigator view immediately so table & cards update live on screen
+    if (window.sheetNavigator) {
+      const isExpiringCertsActive = (window.sheetNavigator.currentSheetKey === 'expiring_certs') ||
+        Boolean(document.getElementById('expiring-certs-view')?.classList.contains('active'));
+
+      if (isExpiringCertsActive && typeof window.sheetNavigator.renderExpiringCerts === 'function') {
+        await window.sheetNavigator.renderExpiringCerts();
+      } else if (typeof window.sheetNavigator.renderActiveView === 'function') {
+        window.sheetNavigator.renderActiveView();
+      } else if (typeof window.sheetNavigator.renderCurrentSheet === 'function') {
+        window.sheetNavigator.renderCurrentSheet();
+      }
+    }
+
+    // Also refresh lookup view if active
+    if (document.getElementById('lookup-view')?.classList.contains('active') && window.lookupApp && typeof window.lookupApp.init === 'function') {
+      try { window.lookupApp.init(); } catch (e) { console.warn('Lookup refresh warning:', e); }
+    }
+
+    // Also refresh weekly summary if active
+    if (document.getElementById('weekly-summary-view')?.classList.contains('active') && window.weeklySummaryEngine && typeof window.weeklySummaryEngine.render === 'function') {
+      try { window.weeklySummaryEngine.render(); } catch (e) { console.warn('Weekly summary refresh warning:', e); }
     }
 
     if (typeof window.showToast === 'function') {

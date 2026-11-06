@@ -577,6 +577,33 @@ class FiscalYearEngine {
           }
         });
 
+        // Deduplicate Job Tracking rows so no duplicate target jobs exist
+        const seenJtBase = new Map();
+        const dupJtToRemove = new Set();
+        jtTable.rows.forEach(r => {
+          const jn = String(r[jobCol] || '').trim();
+          if (!jn) return;
+          const baseKey = jn.replace(/\.\d+.*$/, '').toLowerCase();
+          if (seenJtBase.has(baseKey)) {
+            const master = seenJtBase.get(baseKey);
+            const masterName = String(master['Job Name'] || '').trim();
+            const curName = String(r['Job Name'] || '').trim();
+            if (curName && (!masterName || masterName.toLowerCase().includes('dock'))) {
+              master['Job Name'] = curName;
+            }
+            if (!master['Start Date'] && r['Start Date']) master['Start Date'] = r['Start Date'];
+            if (!master['Foreman'] && r['Foreman']) master['Foreman'] = r['Foreman'];
+            dupJtToRemove.add(r);
+          } else {
+            seenJtBase.set(baseKey, r);
+          }
+        });
+        if (dupJtToRemove.size > 0) {
+          jtTable.rows = jtTable.rows.filter(r => !dupJtToRemove.has(r));
+          jtTable.rowCount = jtTable.rows.length;
+          jtTable.rows.forEach((r, idx) => { r._rowIdx = idx + 2; });
+        }
+
         // Rebuild rawGrid for Job Tracking table
         if (jtTable.rawGrid && jtTable.headers) {
           jtTable.rawGrid = [jtTable.headers];

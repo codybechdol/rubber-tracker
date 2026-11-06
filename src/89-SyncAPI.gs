@@ -2604,7 +2604,10 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
               var headers = data[0].map(function(h) { return String(h || '').trim(); });
               var fields = mut.updatedFields || mut.updates;
               var idStr = String(mut.itemIdentifier || mut.jobNumber || mut.keyValue || '').trim().toLowerCase();
-              var isEmpSheet = (sheetName.toLowerCase() === 'employees' || (typeof SHEET_EMPLOYEES !== 'undefined' && sheetName === SHEET_EMPLOYEES));
+              var sheetLower = sheetName.toLowerCase().trim();
+              var isInvSheet = ['gloves', 'sleeves', 'blankets', 'macks', 'hv testers', 'phasing sets', 'aed', 'grounds', 'hot sticks', 'hv_testers', 'phasing_sets', 'hot_sticks'].indexOf(sheetLower) !== -1;
+              var isEmpSheet = (sheetLower === 'employees' || sheetLower === 'previous employees' || sheetLower === 'previous_employees' || (typeof SHEET_EMPLOYEES !== 'undefined' && sheetName === SHEET_EMPLOYEES));
+              var isJtSheet = (sheetLower === 'job tracking' || sheetLower === 'job_tracking' || (typeof SHEET_JOB_TRACKING !== 'undefined' && sheetName === SHEET_JOB_TRACKING));
               
               var targetRowIdx = -1;
               if (idStr) {
@@ -2633,7 +2636,7 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
                   if (isMatch) {
                     if (targetRowIdx === -1) {
                       targetRowIdx = r + 1; // 1-based sheet row
-                      if (!isInvSheet && !isEmpSheet) break;
+                      if (!isInvSheet && !isEmpSheet && !isJtSheet) break;
                     } else {
                       updateDupRowsToDelete.push(r + 1);
                     }

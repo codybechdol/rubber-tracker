@@ -445,14 +445,15 @@ class SupabaseSyncEngine {
 
     // 3. Re-render Sheet & History Tab Bars so hidden tabs are filtered out
     if (window.sheetNavigator && typeof window.sheetNavigator.renderTabsBar === 'function') {
-      if (!isMaster && !this.canViewTab(window.sheetNavigator.currentSheetKey, 'sheets-view')) {
+      const isSheetsViewActive = Boolean(document.getElementById('sheets-view')?.classList.contains('active'));
+      if (isSheetsViewActive && !isMaster && !this.canViewTab(window.sheetNavigator.currentSheetKey, 'sheets-view')) {
         const firstAllowed = window.sheetNavigator.sheetList.find(s => this.canViewTab(s.key, 'sheets-view'));
         if (firstAllowed) {
           window.sheetNavigator.currentSheetKey = firstAllowed.key;
         }
       }
       window.sheetNavigator.renderTabsBar(true);
-      if (document.getElementById('sheets-view')?.classList.contains('active')) {
+      if (isSheetsViewActive) {
         window.sheetNavigator.renderCurrentSheet();
       }
     }

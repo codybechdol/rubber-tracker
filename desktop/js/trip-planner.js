@@ -4250,7 +4250,7 @@ class TripPlannerApp {
 
       await this.db.persistSnapshot(this.db.snapshot);
 
-      if (window.sheetNavigator && window.sheetNavigator.currentSheetKey === 'expiring_certs') {
+      if (window.sheetNavigator && (window.sheetNavigator.currentSheetKey === 'expiring_certs' || document.getElementById('expiring-certs-view')?.classList.contains('active'))) {
         window.sheetNavigator.renderExpiringCerts();
       }
 
