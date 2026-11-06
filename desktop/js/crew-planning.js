@@ -231,14 +231,14 @@ class CrewPlanningEngine {
     const jnLower = String(jobName || '').toLowerCase();
     const locLower = String(loc || '').toLowerCase();
 
+    // If an explicit type is already provided, ALWAYS respect the explicit choice!
+    if (t) {
+      return t;
+    }
+
     // 005-XX and office keywords are strictly Office discipline per company standards
     if (jn.startsWith('005') || jnLower.includes('office') || jnLower.includes('management') || jnLower.includes('admin') || locLower === 'office') {
       return 'Office';
-    }
-
-    // If explicitType is already a valid non-default type, respect it
-    if (t && t.toLowerCase() !== 'electric') {
-      return t;
     }
 
     if (jnLower.includes('substation') || jnLower.includes('sub-station') || jnLower.includes('sub station') || jn.startsWith('007')) {
@@ -253,7 +253,7 @@ class CrewPlanningEngine {
       return 'Telecom';
     }
 
-    return t || 'Electric';
+    return 'Electric';
   }
 
   /**
@@ -536,10 +536,20 @@ class CrewPlanningEngine {
     // Safety auto-repair: Ensure no active baseline employees are completely missing from the plan
     this.healMissingBaselineEmployees(plan);
 
-    // Auto-heal crew types if they were wrongly defaulted or empty
+    // Sync crew types with Job Tracking and auto-heal if empty
     if (plan.crews && Array.isArray(plan.crews)) {
+      const jtTable = this.db ? this.db.getTable('job_tracking') : null;
+      const jtRows = jtTable?.rows || [];
       plan.crews.forEach(c => {
-        c.crewType = this.detectCrewType(c.jobNumber, c.jobName, c.location, c.crewType);
+        const matchingJt = jtRows.find(j => {
+          const jn = String(j['Job Number'] || j['Job #'] || '').trim();
+          return jn === c.jobNumber || jn.replace(/\.\d+.*$/, '').trim() === c.jobNumber;
+        });
+        if (matchingJt && matchingJt['Crew Type']) {
+          c.crewType = matchingJt['Crew Type'];
+        } else if (!c.crewType) {
+          c.crewType = this.detectCrewType(c.jobNumber, c.jobName, c.location, '');
+        }
       });
     }
 
@@ -4880,7 +4890,7 @@ class CrewPlanningEngine {
 
     const currentJobName = crew.jobName || (jtRow && jtRow['Job Name']) || '';
     const currentLocation = crew.location || (jtRow && jtRow['Location']) || 'Helena';
-    const currentCrewType = crew.crewType || (jtRow && jtRow['Crew Type']) || 'Electric';
+    const currentCrewType = (jtRow && jtRow['Crew Type']) || crew.crewType || 'Electric';
     const currentStatus = crew.status || (jtRow && jtRow['Status']) || 'Active';
     const currentForeman = crew.foreman || (jtRow && jtRow['Foreman']) || '';
     const currentSchedule = crew.schedule || (jtRow && (jtRow['Work Schedule'] || jtRow['Schedule'])) || 'Mon-Thu (4 10s)';

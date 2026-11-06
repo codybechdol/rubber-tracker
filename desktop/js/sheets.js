@@ -8140,6 +8140,18 @@ class SheetNavigator {
           border = 'rgba(148, 163, 184, 0.35)';
           icon = '🔧';
           title = 'Discipline: Mechanic (No Rubber PPE required)';
+        } else if (t === 'Civil') {
+          bg = 'rgba(245, 158, 11, 0.15)';
+          color = '#f59e0b';
+          border = 'rgba(245, 158, 11, 0.35)';
+          icon = '🚧';
+          title = 'Discipline: Civil (No Rubber PPE required)';
+        } else if (t === 'Telecom') {
+          bg = 'rgba(56, 189, 248, 0.15)';
+          color = '#38bdf8';
+          border = 'rgba(56, 189, 248, 0.35)';
+          icon = '📡';
+          title = 'Discipline: Telecom (No Rubber PPE required)';
         }
 
         if (!baseJob || window.currentRoleMode === 'view_only') {
@@ -8148,7 +8160,7 @@ class SheetNavigator {
 
         return `
           <select class="crew-type-select-badge"
-                  title="Discipline: Click to assign Electric, Substation, Gas, Office, or Mechanic to Job ${this.escapeHtml(baseJob)}"
+                  title="Discipline: Click to assign Electric, Substation, Gas, Office, Mechanic, Civil, or Telecom to Job ${this.escapeHtml(baseJob)}"
                   onclick="event.stopPropagation()"
                   onchange="window.sheetNavigator.quickChangeCrewType('${this.escapeJs(baseJob)}', this.value)"
                   style="background: ${bg}; color: ${color}; border: 1px solid ${border}; font-size: 10.5px; font-weight: 700; padding: 2px 6px; border-radius: 4px; cursor: pointer; outline: none; transition: all 0.2s ease;">
@@ -8157,6 +8169,8 @@ class SheetNavigator {
             <option value="Gas" ${t === 'Gas' ? 'selected' : ''}>⛽ Gas</option>
             <option value="Office" ${t === 'Office' ? 'selected' : ''}>🏢 Office</option>
             <option value="Mechanic" ${t === 'Mechanic' ? 'selected' : ''}>🔧 Mechanic</option>
+            <option value="Civil" ${t === 'Civil' ? 'selected' : ''}>🚧 Civil</option>
+            <option value="Telecom" ${t === 'Telecom' ? 'selected' : ''}>📡 Telecom</option>
           </select>
         `;
       };
@@ -8208,6 +8222,8 @@ class SheetNavigator {
                     <option value="Gas" ${crew.crewType === 'Gas' ? 'selected' : ''}>⛽ Gas</option>
                     <option value="Office" ${crew.crewType === 'Office' ? 'selected' : ''}>🏢 Office</option>
                     <option value="Mechanic" ${crew.crewType === 'Mechanic' ? 'selected' : ''}>🔧 Mechanic</option>
+                    <option value="Civil" ${crew.crewType === 'Civil' ? 'selected' : ''}>🚧 Civil</option>
+                    <option value="Telecom" ${crew.crewType === 'Telecom' ? 'selected' : ''}>📡 Telecom</option>
                   </select>
                 </div>
               </div>
