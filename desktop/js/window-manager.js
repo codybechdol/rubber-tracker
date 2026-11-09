@@ -362,6 +362,11 @@ class WindowManager {
     this.enhanceModal(modal);
     this.activeModals.add(modal);
 
+    // Ensure OS keyboard focus is active when opening modals
+    if (typeof document !== 'undefined' && !document.hasFocus() && window.desktopAPI && typeof window.desktopAPI.forceFocusWindow === 'function') {
+      window.desktopAPI.forceFocusWindow().catch(() => {});
+    }
+
     // Dynamic z-index elevation
     this.bringToFront(modal);
 

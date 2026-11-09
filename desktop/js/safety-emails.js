@@ -1294,7 +1294,7 @@ class SafetyEmailsEngine {
         window.syncEngine.updateStatusUI('synced', `Compliance updated (${new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })})`);
       }
 
-      // If running in background, update floating widget and show completion toast
+      // If running in background, update floating widget
       if (this.isMinimized) {
         this.updateBackgroundWidget({
           title: '✅ Email Processing Complete',
@@ -1302,9 +1302,6 @@ class SafetyEmailsEngine {
           pct: 100,
           status: 'completed'
         });
-        if (!options.silent) {
-          this.showToast(`🎉 Safety email processing complete! <strong>${totalLogs} emails logged</strong>, ${totalIssues} equipment issues. <a href="javascript:void(0)" onclick="window.safetyComplianceEngine.restoreProcessEmailsModal()" style="color: #fef08a; text-decoration: underline; margin-left: 6px; font-weight: 700;">View Report</a>`);
-        }
         // Auto-dismiss completed widget after 12 seconds if not manually dismissed
         setTimeout(() => {
           const w = document.getElementById('safety-emails-bg-widget');

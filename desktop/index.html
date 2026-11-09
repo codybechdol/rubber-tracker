@@ -2324,7 +2324,7 @@
 
   <!-- Manage Vendors & Product Catalogs Modal -->
   <div id="manage-vendors-modal" class="modal-overlay">
-    <div class="modal-box" style="max-width: 1000px; width: 95%; max-height: 90vh;">
+    <div class="modal-box" style="max-width: 1180px; width: 96%; max-height: 92vh;">
       <div class="modal-header" style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); color: white;">
         <div style="display: flex; align-items: center; gap: 8px;">
           <span style="font-size: 18px;">⚙️</span>
@@ -3854,9 +3854,6 @@
 
         try {
           console.log('🚀 [Startup Scans] Initiating automated background email scans...');
-          if (typeof window.showToast === 'function') {
-            window.showToast('🚀 Scanning Gmail for Safety Emails & Incident Reports in background...', 'info');
-          }
 
           // 1. Start Process Safety Emails (JHAs, Weekly Safety Meetings, Monthly Checklists)
           if (window.safetyComplianceEngine && typeof window.safetyComplianceEngine.runProcessEmails === 'function') {
@@ -3864,7 +3861,7 @@
               console.log('[Startup Scans] Starting Process Safety Emails in background...');
               window.safetyComplianceEngine.runProcessEmails({
                 runInBackground: true,
-                silent: false,
+                silent: true,
                 reportTypeFilter: 'ALL',
                 daysBack: 7,
                 newOnlyMode: true,
@@ -3886,7 +3883,7 @@
               console.log('[Startup Scans] Starting Incident Reports scan in background...');
               window.incidentReportsEngine.scanEmails(false, {
                 runInBackground: true,
-                silent: false
+                silent: true
               }).catch(incErr => {
                 console.warn('[Startup Scans] Incident email scan error:', incErr);
               });
@@ -3904,22 +3901,32 @@
     // Global Focus & Caret Recovery Guard:
     // Prevents Chromium/Electron from dropping text caret or keyboard focus after alerts, modals, or window blurs
     (function initFocusRecoveryGuard() {
+      const clearBodyUserSelect = () => {
+        document.body.style.userSelect = '';
+        if (document.body.style.removeProperty) {
+          document.body.style.removeProperty('user-select');
+          document.body.style.removeProperty('-webkit-user-select');
+        }
+      };
+
       const origAlert = window.alert;
       window.alert = function(msg) {
+        const prevActive = document.activeElement;
         try {
+          if (window.desktopAPI && typeof window.desktopAPI.showNativeAlertSync === 'function') {
+            return window.desktopAPI.showNativeAlertSync(msg);
+          }
           return origAlert.call(window, msg);
         } finally {
-          document.body.style.userSelect = '';
-          if (document.body.style.removeProperty) {
-            document.body.style.removeProperty('user-select');
-            document.body.style.removeProperty('-webkit-user-select');
-          }
+          clearBodyUserSelect();
           if (window.desktopAPI && typeof window.desktopAPI.forceFocusWindow === 'function') {
             window.desktopAPI.forceFocusWindow();
           }
           setTimeout(() => {
             window.focus();
-            if (document.activeElement && typeof document.activeElement.focus === 'function') {
+            if (prevActive && prevActive.isConnected && typeof prevActive.focus === 'function') {
+              prevActive.focus();
+            } else if (document.activeElement && typeof document.activeElement.focus === 'function') {
               document.activeElement.focus();
             }
           }, 30);
@@ -3928,39 +3935,43 @@
 
       const origConfirm = window.confirm;
       window.confirm = function(msg) {
+        const prevActive = document.activeElement;
         try {
+          if (window.desktopAPI && typeof window.desktopAPI.showNativeConfirmSync === 'function') {
+            return window.desktopAPI.showNativeConfirmSync(msg);
+          }
           return origConfirm.call(window, msg);
         } finally {
-          document.body.style.userSelect = '';
-          if (document.body.style.removeProperty) {
-            document.body.style.removeProperty('user-select');
-            document.body.style.removeProperty('-webkit-user-select');
-          }
+          clearBodyUserSelect();
           if (window.desktopAPI && typeof window.desktopAPI.forceFocusWindow === 'function') {
             window.desktopAPI.forceFocusWindow();
           }
           setTimeout(() => {
             window.focus();
+            if (prevActive && prevActive.isConnected && typeof prevActive.focus === 'function') {
+              prevActive.focus();
+            }
           }, 30);
         }
       };
 
-      // Ensure clicking any input or editable field explicitly activates it and restores caret
-      document.addEventListener('click', (e) => {
-        const editable = e.target.closest('input, textarea, select, [contenteditable="true"], .editable, td.editable');
-        if (editable) {
-          if (document.body.style.userSelect === 'none') {
-            document.body.style.userSelect = '';
-            if (document.body.style.removeProperty) {
-              document.body.style.removeProperty('user-select');
-              document.body.style.removeProperty('-webkit-user-select');
-            }
-          }
-          if (document.activeElement !== editable && typeof editable.focus === 'function') {
-            editable.focus();
-          }
+      // Ensure clicking or pointerdown on any input or editable field explicitly activates OS window keyboard focus and restores caret
+      const ensureEditableFocus = (e) => {
+        const editable = e.target && e.target.closest ? e.target.closest('input, textarea, select, [contenteditable="true"], .editable, td.editable') : null;
+        if (!editable) return;
+        clearBodyUserSelect();
+        if (!document.hasFocus() && window.desktopAPI && typeof window.desktopAPI.forceFocusWindow === 'function') {
+          window.desktopAPI.forceFocusWindow().then(() => {
+            window.focus();
+            if (typeof editable.focus === 'function') editable.focus();
+          }).catch(() => {});
         }
-      }, true);
+        if (document.activeElement !== editable && typeof editable.focus === 'function') {
+          editable.focus();
+        }
+      };
+      document.addEventListener('pointerdown', ensureEditableFocus, true);
+      document.addEventListener('click', ensureEditableFocus, true);
     })();
 
     // App Initialization

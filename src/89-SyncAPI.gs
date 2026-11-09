@@ -2603,7 +2603,7 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
             if (data && data.length > 0) {
               var headers = data[0].map(function(h) { return String(h || '').trim(); });
               var fields = mut.updatedFields || mut.updates;
-              var idStr = String(mut.itemIdentifier || mut.jobNumber || mut.keyValue || '').trim().toLowerCase();
+              var idStr = String(mut.itemIdentifier || mut.employeeName || mut.empName || mut.jobNumber || mut.keyValue || '').trim().toLowerCase();
               var sheetLower = sheetName.toLowerCase().trim();
               var isInvSheet = ['gloves', 'sleeves', 'blankets', 'macks', 'hv testers', 'phasing sets', 'aed', 'grounds', 'hot sticks', 'hv_testers', 'phasing_sets', 'hot_sticks'].indexOf(sheetLower) !== -1;
               var isEmpSheet = (sheetLower === 'employees' || sheetLower === 'previous employees' || sheetLower === 'previous_employees' || (typeof SHEET_EMPLOYEES !== 'undefined' && sheetName === SHEET_EMPLOYEES));
@@ -2777,7 +2777,7 @@ function applyBatchSyncMutations(mutations, returnSnapshot, options) {
                 sheetsModified[sheetName] = true;
                 appliedCount++;
               } else {
-                errors.push('Could not find row for ' + (mut.itemIdentifier || mut.jobNumber || 'item') + ' in ' + sheetName);
+                errors.push('Could not find row for ' + (mut.itemIdentifier || mut.employeeName || mut.empName || mut.jobNumber || 'item') + ' in ' + sheetName);
               }
             }
           }

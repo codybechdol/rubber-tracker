@@ -15,6 +15,8 @@ contextBridge.exposeInMainWorld('desktopAPI', {
   savePdfToFile: (base64Data, defaultFilename) => ipcRenderer.invoke('save-pdf-to-file', { base64Data, defaultFilename }),
   saveHtmlToPdf: (htmlContent, defaultFilename) => ipcRenderer.invoke('save-html-to-pdf', { htmlContent, defaultFilename }),
   forceFocusWindow: () => ipcRenderer.invoke('force-focus-window'),
+  showNativeAlertSync: (msg) => ipcRenderer.sendSync('show-native-alert-sync', msg),
+  showNativeConfirmSync: (msg) => ipcRenderer.sendSync('show-native-confirm-sync', msg),
   selectCertPhotoFile: () => ipcRenderer.invoke('select-cert-photo-file'),
   saveCertPhoto: (data) => ipcRenderer.invoke('save-cert-photo', data),
   getCertPhoto: (params) => ipcRenderer.invoke('get-cert-photo', params),

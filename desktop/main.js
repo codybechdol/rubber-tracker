@@ -255,12 +255,52 @@ ipcMain.handle('save-local-outbox', async (event, outbox) => {
 
 ipcMain.handle('force-focus-window', () => {
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.focus();
-    if (mainWindow.webContents) {
-      mainWindow.webContents.focus();
-    }
+    try {
+      mainWindow.blur();
+      mainWindow.focus();
+      if (mainWindow.webContents) {
+        mainWindow.webContents.focus();
+      }
+    } catch (e) {}
   }
   return true;
+});
+
+ipcMain.on('show-native-alert-sync', (event, message) => {
+  try {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      dialog.showMessageBoxSync(mainWindow, {
+        type: 'info',
+        title: 'Safety Assistant',
+        message: String(message ?? ''),
+        buttons: ['OK']
+      });
+      mainWindow.blur();
+      mainWindow.focus();
+      if (mainWindow.webContents) mainWindow.webContents.focus();
+    }
+  } catch (e) {}
+  event.returnValue = true;
+});
+
+ipcMain.on('show-native-confirm-sync', (event, message) => {
+  let result = 0;
+  try {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      result = dialog.showMessageBoxSync(mainWindow, {
+        type: 'question',
+        title: 'Confirm',
+        message: String(message ?? ''),
+        buttons: ['OK', 'Cancel'],
+        defaultId: 0,
+        cancelId: 1
+      });
+      mainWindow.blur();
+      mainWindow.focus();
+      if (mainWindow.webContents) mainWindow.webContents.focus();
+    }
+  } catch (e) {}
+  event.returnValue = (result === 0);
 });
 
 ipcMain.handle('select-snapshot-file', async () => {

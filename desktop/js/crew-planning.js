@@ -1744,6 +1744,12 @@ class CrewPlanningEngine {
                 }
 
                 const otherSlotText = otherOcc.slot || otherOcc.baseJob;
+                const otherPlannedCrew = (plan.crews || []).find(c => String(c.jobNumber || '').trim().toLowerCase() === String(otherOcc.baseJob || '').trim().toLowerCase());
+                const otherJtRow = (jtTable?.rows || []).find(j => String(j['Job Number'] || j['Job #'] || '').trim().replace(/\.\d+.*$/, '').toLowerCase() === String(otherOcc.baseJob || '').trim().toLowerCase());
+                const otherJobName = String(otherPlannedCrew?.jobName || otherJtRow?.['Job Name'] || '').trim();
+                const otherLabelText = (otherJobName && otherJobName.toLowerCase() !== String(otherOcc.baseJob || '').trim().toLowerCase())
+                  ? `${otherSlotText} (${otherJobName})`
+                  : otherSlotText;
                 secondJobPill = `
                   <span class="badge second-job-pill"
                         onclick="event.stopPropagation(); window.crewPlanningEngine.promptEditPlannedSecondJob('${this.escapeJs(m.name)}', '${this.escapeJs(crew.jobNumber)}')"
@@ -1751,7 +1757,7 @@ class CrewPlanningEngine {
                         onmouseover="this.style.background='rgba(245, 158, 11, 0.35)'; this.style.borderColor='#f59e0b';"
                         onmouseout="this.style.background='rgba(245, 158, 11, 0.18)'; this.style.borderColor='rgba(245, 158, 11, 0.45)';"
                         title="${this.escapeHtml(pillTitle)} — Click to edit, swap, or remove 1st/2nd job">
-                    ⚡ ${pillType}: ${this.escapeHtml(otherSlotText)} <span style="font-size: 8.5px; opacity: 0.85;">✏️</span>
+                    ⚡ ${pillType}: ${this.escapeHtml(otherLabelText)} <span style="font-size: 8.5px; opacity: 0.85;">✏️</span>
                   </span>
                 `;
               }
@@ -4747,12 +4753,45 @@ class CrewPlanningEngine {
           const wasLiveChanged = Boolean(originalJob && liveJob && originalJob.toLowerCase() !== liveJob.toLowerCase());
 
           const occMap = this.getEmployeeOccurrencesMap(plan);
-          const isMulti = (occMap.get(m.name.toLowerCase()) || []).length > 1;
+          const occurrences = occMap.get(m.name.toLowerCase()) || [];
+          const isMulti = occurrences.length > 1;
           const inLightDuty = (plan.sidePane?.lightDuty || []).some(ld => ld.name.toLowerCase() === m.name.toLowerCase());
           const curSecondary = String(live['Secondary Job Number'] || live['Secondary Job #'] || '').trim();
+          const liveBaseJob = liveJob.replace(/\.\d+.*$/, '').trim().toLowerCase();
+          const origBaseJob = String(base?.originalBaseJob || originalJob || '').replace(/\.\d+.*$/, '').trim().toLowerCase();
+          const curCrewBase = String(crew.jobNumber || '').replace(/\.\d+.*$/, '').trim().toLowerCase();
 
-          if (inLightDuty || isMulti) {
-            // Duplicated/Multi-crew assignment: write to Secondary Job Number, preserving primary & Light Duty
+          // Determine if this specific crew occurrence is a Secondary assignment vs Primary assignment
+          let isSecondaryOccurrence = false;
+          if (inLightDuty) {
+            isSecondaryOccurrence = true;
+          } else if (isMulti) {
+            const otherOccs = occurrences.filter(o => String(o.baseJob || '').trim().toLowerCase() !== curCrewBase);
+            const curSecBase = curSecondary.replace(/\.\d+.*$/, '').trim().toLowerCase();
+            const isWeekendSched = /fri|sat|weekend/i.test(String(crew.schedule || ''));
+            const isPendingStatus = /pending|hold/i.test(String(crew.status || ''));
+
+            if (m.isSecondaryMember === true) {
+              isSecondaryOccurrence = true;
+            } else if (m.primaryJobNumber && String(m.primaryJobNumber).replace(/\.\d+.*$/, '').trim().toLowerCase() !== curCrewBase) {
+              isSecondaryOccurrence = true;
+            } else if (curSecBase && curSecBase === curCrewBase && curCrewBase !== liveBaseJob) {
+              isSecondaryOccurrence = true;
+            } else if (liveBaseJob && otherOccs.some(o => String(o.baseJob || '').trim().toLowerCase() === liveBaseJob) && curCrewBase !== liveBaseJob) {
+              isSecondaryOccurrence = true;
+            } else if (origBaseJob && otherOccs.some(o => String(o.baseJob || '').trim().toLowerCase() === origBaseJob) && curCrewBase !== origBaseJob) {
+              isSecondaryOccurrence = true;
+            } else if ((isWeekendSched || isPendingStatus) && otherOccs.length > 0) {
+              isSecondaryOccurrence = true;
+            } else {
+              // Fallback: first occurrence in plan is Primary, subsequent occurrences are Secondary
+              const firstOccBase = String(occurrences[0]?.baseJob || '').trim().toLowerCase();
+              isSecondaryOccurrence = Boolean(firstOccBase && firstOccBase !== curCrewBase);
+            }
+          }
+
+          if (isSecondaryOccurrence) {
+            // Duplicated/Multi-crew secondary assignment: write to Secondary Job Number, preserving primary & Light Duty
             if (m.slot && m.slot !== curSecondary) {
               transfers.push({
                 name: m.name,
@@ -4768,7 +4807,7 @@ class CrewPlanningEngine {
               });
             }
           } else {
-            if (curSecondary && !transfers.some(tr => tr.name.toLowerCase() === m.name.toLowerCase() && tr.clearSecondary)) {
+            if (!isMulti && curSecondary && !transfers.some(tr => tr.name.toLowerCase() === m.name.toLowerCase() && tr.clearSecondary)) {
               // Employee only has 1 crew assignment now: clear previous Secondary Job Number on live
               transfers.push({
                 name: m.name,
@@ -4784,11 +4823,30 @@ class CrewPlanningEngine {
                 originalJob
               });
             }
-            if (m.slot && m.slot !== liveJob) {
+            const liveStatLower = String(live['Status'] || '').toLowerCase().trim();
+            const liveLocLower = String(live['Location'] || '').toLowerCase().trim();
+            const hasActiveWeekVacInPlan = (plan.sidePane?.vacation || []).some(v =>
+              v.name.toLowerCase() === m.name.toLowerCase() && !v.isFutureVacation && !v.keepOnCrew
+            );
+            const isReturningFromStatus = !hasActiveWeekVacInPlan && (
+              liveStatLower === 'vacation' || liveStatLower === 'weeds' || liveStatLower === 'leave' || liveStatLower === 'medical' ||
+              liveLocLower.includes('(vacation)') || liveLocLower === 'vacation' ||
+              liveLocLower.includes('(weeds)') || liveLocLower === 'weeds' ||
+              liveLocLower.includes('(leave)') || liveLocLower === 'leave' ||
+              (!inLightDuty && (liveStatLower === 'light duty' || liveLocLower.includes('(light duty)') || liveLocLower === 'light duty'))
+            );
+
+            if (m.slot && (m.slot !== liveJob || isReturningFromStatus)) {
+              const statusLabel = live['Status'] && String(live['Status']).toLowerCase() !== 'active'
+                ? String(live['Status']).trim()
+                : 'Vacation';
               transfers.push({
                 name: m.name,
-                fromJob: liveJob || 'Unassigned',
+                fromJob: (m.slot === liveJob && isReturningFromStatus)
+                  ? `${statusLabel} (${liveJob || 'Unassigned'})`
+                  : (liveJob || 'Unassigned'),
                 toJob: m.slot,
+                isReturningFromStatus,
                 destinationCrew: crew.jobNumber,
                 destinationLocation: crew.location || 'Helena',
                 targetRow: live,
@@ -5140,9 +5198,22 @@ class CrewPlanningEngine {
       const histTable = this.db.getTable('employee_history');
       const todayFormatted = new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
 
+      const syncRowToRawGrid = (table, rowObj) => {
+        if (!table || !rowObj || !Array.isArray(table.headers) || !Array.isArray(table.rawGrid)) return;
+        const rIdx = rowObj._rowIdx || (Array.isArray(table.rows) ? (table.rows.indexOf(rowObj) + 2) : -1);
+        if (rIdx >= 2 && table.rawGrid[rIdx - 1]) {
+          table.headers.forEach((h, cIdx) => {
+            if (h && rowObj[h] !== undefined) {
+              table.rawGrid[rIdx - 1][cIdx] = rowObj[h];
+            }
+          });
+        }
+      };
+
       // 1. Process Transfers
       for (const t of deltas.transfers) {
         if (t.targetRow) {
+          const empRowNum = t.targetRow._rowIdx || (empTable?.rows ? (empTable.rows.indexOf(t.targetRow) + 2) : undefined);
           if (t.isSecondaryAssignment) {
             t.targetRow['Secondary Job Number'] = t.toJob;
             if (t.keepLightDuty) {
@@ -5152,11 +5223,14 @@ class CrewPlanningEngine {
                 t.targetRow['Location'] = `${curLoc.replace(/\s*\([^)]*\)/g, '').trim()} (Light Duty)`;
               }
             }
+            syncRowToRawGrid(empTable, t.targetRow);
             await this.db.addMutation({
               action: 'UPDATE_ROW',
               sheetName: empTable.name || 'Employees',
               tableKey: 'employees',
+              itemIdentifier: t.name,
               employeeName: t.name,
+              row: empRowNum,
               updatedFields: {
                 'Secondary Job Number': t.toJob,
                 'Status': t.targetRow['Status'],
@@ -5165,20 +5239,23 @@ class CrewPlanningEngine {
             });
           } else {
             t.targetRow['Job Number'] = t.toJob;
-            if (t.destinationLocation) {
-              t.targetRow['Location'] = t.destinationLocation;
-            }
-            if (t.targetRow['Status'] === 'Vacation' || t.targetRow['Status'] === 'Weeds') {
+            const cleanDestLoc = String(t.destinationLocation || t.targetRow['Location'] || 'Helena').replace(/\s*\([^)]*\)/g, '').trim() || 'Helena';
+            t.targetRow['Location'] = cleanDestLoc;
+            const curStatLower = String(t.targetRow['Status'] || '').toLowerCase().trim();
+            if (!curStatLower || ['vacation', 'weeds', 'leave', 'medical', 'light duty'].includes(curStatLower) || t.isReturningFromStatus) {
               t.targetRow['Status'] = 'Active';
             }
+            syncRowToRawGrid(empTable, t.targetRow);
             await this.db.addMutation({
               action: 'UPDATE_ROW',
               sheetName: empTable.name || 'Employees',
               tableKey: 'employees',
+              itemIdentifier: t.name,
               employeeName: t.name,
+              row: empRowNum,
               updatedFields: {
                 'Job Number': t.toJob,
-                'Location': t.destinationLocation || t.targetRow['Location'] || 'Helena',
+                'Location': cleanDestLoc,
                 'Status': t.targetRow['Status'] || 'Active'
               }
             });
@@ -5211,12 +5288,16 @@ class CrewPlanningEngine {
       for (const v of deltas.vacations) {
         if (v.targetRow) {
           if (!v.isFutureVacation && !v.keepOnCrew) {
+            const empRowNum = v.targetRow._rowIdx || (empTable?.rows ? (empTable.rows.indexOf(v.targetRow) + 2) : undefined);
             v.targetRow['Status'] = 'Vacation';
+            syncRowToRawGrid(empTable, v.targetRow);
             await this.db.addMutation({
               action: 'UPDATE_ROW',
               sheetName: empTable.name || 'Employees',
               tableKey: 'employees',
+              itemIdentifier: v.name,
               employeeName: v.name,
+              row: empRowNum,
               updatedFields: { 'Status': 'Vacation' }
             });
           }
@@ -5226,12 +5307,16 @@ class CrewPlanningEngine {
       // 3. Process Weeds
       for (const w of deltas.weeds) {
         if (w.targetRow) {
+          const empRowNum = w.targetRow._rowIdx || (empTable?.rows ? (empTable.rows.indexOf(w.targetRow) + 2) : undefined);
           w.targetRow['Status'] = 'Weeds';
+          syncRowToRawGrid(empTable, w.targetRow);
           await this.db.addMutation({
             action: 'UPDATE_ROW',
             sheetName: empTable.name || 'Employees',
             tableKey: 'employees',
+            itemIdentifier: w.name,
             employeeName: w.name,
+            row: empRowNum,
             updatedFields: { 'Status': 'Weeds' }
           });
         }
@@ -5247,21 +5332,47 @@ class CrewPlanningEngine {
       // 3.6 Process Light Duty
       for (const ld of (deltas.lightDuty || [])) {
         if (ld.targetRow) {
+          const empRowNum = ld.targetRow._rowIdx || (empTable?.rows ? (empTable.rows.indexOf(ld.targetRow) + 2) : undefined);
           ld.targetRow['Status'] = 'Light Duty';
           const curLoc = String(ld.targetRow['Location'] || 'Helena').replace(/\s*\([^)]*\)/g, '').trim();
           ld.targetRow['Location'] = `${curLoc} (Light Duty)`;
+          syncRowToRawGrid(empTable, ld.targetRow);
           await this.db.addMutation({
             action: 'UPDATE_ROW',
             sheetName: empTable.name || 'Employees',
             tableKey: 'employees',
+            itemIdentifier: ld.name,
             employeeName: ld.name,
+            row: empRowNum,
             updatedFields: { 'Status': 'Light Duty', 'Location': ld.targetRow['Location'] }
           });
         }
       }
 
       // 4. Process Job Tracking Foremen, Schedules & Active Crews
+      const allPlansForNames = this.getPlansMap();
+      const allHistForNames = this.db?.snapshot?.configs?.crew_roster_history || {};
       for (const crew of plan.crews) {
+        // If crew.jobName is empty on this week's plan, check other weeks' plans or roster history for a saved Job Name
+        if (!crew.jobName || crew.jobName === crew.jobNumber) {
+          for (const p of Object.values(allPlansForNames)) {
+            const matchCrew = (p?.crews || []).find(c => String(c.jobNumber || '').trim() === crew.jobNumber && c.jobName && c.jobName !== crew.jobNumber);
+            if (matchCrew) {
+              crew.jobName = matchCrew.jobName;
+              break;
+            }
+          }
+          if (!crew.jobName || crew.jobName === crew.jobNumber) {
+            for (const h of Object.values(allHistForNames)) {
+              const matchCrew = (h?.crews || []).find(c => String(c.jobNumber || '').trim() === crew.jobNumber && c.jobName && c.jobName !== crew.jobNumber);
+              if (matchCrew) {
+                crew.jobName = matchCrew.jobName;
+                break;
+              }
+            }
+          }
+        }
+
         let jtRow = (jtTable?.rows || []).find(j => {
           const jn = String(j['Job Number'] || j['Job #'] || '').trim();
           return jn === crew.jobNumber || jn.replace(/\.\d+.*$/, '').trim() === crew.jobNumber;
@@ -5311,11 +5422,13 @@ class CrewPlanningEngine {
             updated['Skip Monthly Checklist'] = crew.skipChk;
           }
           if (Object.keys(updated).length > 0) {
+            syncRowToRawGrid(jtTable, jtRow);
             await this.db.addMutation({
               action: 'UPDATE_ROW',
               sheetName: jtTable.name || 'Job Tracking',
               tableKey: 'job_tracking',
               itemIdentifier: crew.jobNumber,
+              row: jtRow._rowIdx || (jtTable.rows.indexOf(jtRow) + 2),
               updatedFields: updated
             });
           }
@@ -6812,6 +6925,30 @@ class CrewPlanningEngine {
 
       this.savePlan(plan);
 
+      // Also propagate Job Name & metadata to matching crew across all other saved week plans & roster history
+      const allPlans = this.getPlansMap();
+      let plansUpdated = false;
+      Object.values(allPlans).forEach(p => {
+        if (!p || p.weekDate === plan.weekDate || !Array.isArray(p.crews)) return;
+        const cMatch = p.crews.find(c => String(c.jobNumber || '').trim() === jobNumber);
+        if (cMatch && newJobName && cMatch.jobName !== newJobName) {
+          cMatch.jobName = newJobName;
+          plansUpdated = true;
+        }
+      });
+      if (plansUpdated) {
+        this.savePlansMap(allPlans);
+      }
+      const histMap = this.db?.snapshot?.configs?.crew_roster_history;
+      if (histMap && typeof histMap === 'object') {
+        Object.values(histMap).forEach(h => {
+          const cMatch = (h?.crews || []).find(c => String(c.jobNumber || '').trim() === jobNumber);
+          if (cMatch && newJobName) {
+            cMatch.jobName = newJobName;
+          }
+        });
+      }
+
       if (writeJt) {
         const jtTbl = this.db.getTable('job_tracking');
         if (jtTbl && jtTbl.rows) {
@@ -6836,11 +6973,18 @@ class CrewPlanningEngine {
           };
           if (row) {
             Object.assign(row, updated);
+            const rIdx = row._rowIdx || (jtTbl.rows.indexOf(row) + 2);
+            if (Array.isArray(jtTbl.headers) && Array.isArray(jtTbl.rawGrid) && rIdx >= 2 && jtTbl.rawGrid[rIdx - 1]) {
+              jtTbl.headers.forEach((h, cIdx) => {
+                if (h && row[h] !== undefined) jtTbl.rawGrid[rIdx - 1][cIdx] = row[h];
+              });
+            }
             await this.db.addMutation({
               action: 'UPDATE_ROW',
               sheetName: jtTbl.name || 'Job Tracking',
               tableKey: 'job_tracking',
               itemIdentifier: jobNumber,
+              row: rIdx,
               updatedFields: updated
             });
 
@@ -6871,13 +7015,20 @@ class CrewPlanningEngine {
           } else {
             const newRow = {
               'Job Number': jobNumber,
-              ...updated
+              ...updated,
+              _rowIdx: jtTbl.rows.length + 2
             };
             jtTbl.rows.push(newRow);
+            jtTbl.rowCount = jtTbl.rows.length;
+            if (Array.isArray(jtTbl.headers) && Array.isArray(jtTbl.rawGrid)) {
+              jtTbl.rawGrid.push(jtTbl.headers.map(h => newRow[h] !== undefined ? newRow[h] : ''));
+            }
             await this.db.addMutation({
               action: 'ADD_ROW',
               sheetName: jtTbl.name || 'Job Tracking',
               tableKey: 'job_tracking',
+              itemIdentifier: jobNumber,
+              rowData: newRow,
               row: newRow
             });
           }

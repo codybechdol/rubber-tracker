@@ -7548,6 +7548,62 @@ class SheetNavigator {
     // Filter out previous/inactive employees
     let activeRows = (tableData.rows || []).filter(r => this.isEmployeeActive(r, prevEmpNames));
 
+    // Self-heal secondary crew assignments for 009-27 (-> 036-26) and 022-27 (-> 031-27) if overwritten by primary slot during publish
+    const allPlansConfig = this.db?.snapshot?.configs?.crew_structure_plans || {};
+    const allHistConfig = this.db?.snapshot?.configs?.crew_roster_history || {};
+    const lookupPlannedCrewMeta = (targetBaseJob) => {
+      const cleanTarget = String(targetBaseJob || '').trim().toLowerCase();
+      if (!cleanTarget) return null;
+      let bestMatch = null;
+      const searchSources = [
+        allPlansConfig[this.selectedEmployeeWeek],
+        allHistConfig[this.selectedEmployeeWeek],
+        ...Object.values(allPlansConfig),
+        ...Object.values(allHistConfig)
+      ];
+      for (const src of searchSources) {
+        if (!src || !Array.isArray(src.crews)) continue;
+        const c = src.crews.find(cr => String(cr.jobNumber || '').trim().toLowerCase() === cleanTarget);
+        if (c) {
+          if (!bestMatch) bestMatch = { ...c };
+          if (c.jobName && c.jobName.trim().toLowerCase() !== cleanTarget && (!bestMatch.jobName || bestMatch.jobName.trim().toLowerCase() === cleanTarget)) {
+            bestMatch.jobName = c.jobName.trim();
+          }
+          if (c.location && !bestMatch.location) bestMatch.location = c.location;
+          if (c.foreman && !bestMatch.foreman) bestMatch.foreman = c.foreman;
+          if (c.schedule && !bestMatch.schedule) bestMatch.schedule = c.schedule;
+          if (c.status && !bestMatch.status) bestMatch.status = c.status;
+          if (c.crewType && !bestMatch.crewType) bestMatch.crewType = c.crewType;
+        }
+      }
+      if (cleanTarget === '031-27' && (!bestMatch?.jobName || bestMatch.jobName.toLowerCase() === '031-27')) {
+        bestMatch = bestMatch || { jobNumber: '031-27', location: 'Great Falls', schedule: 'Fri & Sat (Weekend)', status: 'Active', crewType: 'Electric' };
+        bestMatch.jobName = 'Great Falls ZIPLY';
+      }
+      return bestMatch;
+    };
+
+    let healedSecondaryAssignments = false;
+    (tableData.rows || []).forEach(r => {
+      if (!this.isEmployeeActive(r, prevEmpNames)) return;
+      const j = String(r['Job Number'] || r['Job #'] || '').trim();
+      const jBase = j.replace(/\.\d+.*$/, '').trim();
+      const s = String(r['Secondary Job Number'] || r['Secondary Job #'] || '').trim();
+      const sBase = s.replace(/\.\d+.*$/, '').trim();
+      const suffixMatch = j.match(/\.(\d+)/);
+      const suffix = suffixMatch ? suffixMatch[1] : '1';
+      if (jBase === '009-27' && (!sBase || sBase === '009-27')) {
+        r['Secondary Job Number'] = `036-26.${suffix}`;
+        healedSecondaryAssignments = true;
+      } else if (jBase === '022-27' && (!sBase || sBase === '022-27')) {
+        r['Secondary Job Number'] = `031-27.${suffix}`;
+        healedSecondaryAssignments = true;
+      }
+    });
+    if (healedSecondaryAssignments && typeof this.db?.schedulePersistSnapshot === 'function') {
+      this.db.schedulePersistSnapshot(this.db.snapshot, 300);
+    }
+
     const totalActiveCount = activeRows.length;
 
     // Search filter
@@ -7764,20 +7820,24 @@ class SheetNavigator {
       if (!baseJob || baseJob.toLowerCase() === 'job number' || baseJob.toLowerCase() === 'job #' || baseJob.startsWith('002')) return;
 
       // Find matching job_tracking row
-      const jt = jtRows.find(j => {
+      let jt = jtRows.find(j => {
         const jn = String(j['Job Number'] || j['Job #'] || '').trim();
         return jn === baseJob || jn.replace(/\.\d+.*$/, '').trim() === baseJob;
       });
+      const plannedMeta = lookupPlannedCrewMeta(baseJob);
+      if (jt && plannedMeta && plannedMeta.jobName && (!jt['Job Name'] || String(jt['Job Name']).trim() === '' || String(jt['Job Name']).trim() === baseJob)) {
+        jt['Job Name'] = plannedMeta.jobName;
+      }
 
-      // Crew Location: from job_tracking, or from first member, or Helena
-      let loc = (jt && jt['Location']) ? String(jt['Location']).trim() : '';
+      // Crew Location: from job_tracking, planned meta, or from first member, or Helena
+      let loc = (jt && jt['Location']) ? String(jt['Location']).trim() : (plannedMeta?.location || '');
       if (!loc && members.length > 0) {
         loc = members[0].location.replace(/\s*\([^)]*\)/g, '').trim();
       }
       if (!loc) loc = 'Helena';
 
       // Foreman
-      let foreman = (jt && jt['Foreman']) ? String(jt['Foreman']).trim() : '';
+      let foreman = (jt && jt['Foreman']) ? String(jt['Foreman']).trim() : (plannedMeta?.foreman || '');
       if (!foreman && members.length > 0) {
         // Find member with highest rank
         const sortedByRank = [...members].sort((a, b) => getRolePriority(a.classification) - getRolePriority(b.classification));
@@ -7787,25 +7847,29 @@ class SheetNavigator {
       }
 
       // Status
-      let status = (jt && jt['Status']) ? String(jt['Status']).trim() : 'Active';
+      let status = (jt && jt['Status']) ? String(jt['Status']).trim() : (plannedMeta?.status || 'Active');
 
       // Work Schedule & Skips
-      let schedule = (jt && jt['Work Schedule']) ? String(jt['Work Schedule']).trim() : 'Mon-Thu (4 10s)';
+      let schedule = (jt && jt['Work Schedule']) ? String(jt['Work Schedule']).trim() : (plannedMeta?.schedule || 'Mon-Thu (4 10s)');
+      const isWeekendDefault = /fri|sat|weekend/i.test(schedule);
       const isSkipSun = jt ? (jt['Skip Sun'] === true || String(jt['Skip Sun']).toLowerCase() === 'true') : true;
-      const isSkipMon = jt ? (jt['Skip Mon'] === true || String(jt['Skip Mon']).toLowerCase() === 'true') : false;
-      const isSkipTue = jt ? (jt['Skip Tue'] === true || String(jt['Skip Tue']).toLowerCase() === 'true') : false;
-      const isSkipWed = jt ? (jt['Skip Wed'] === true || String(jt['Skip Wed']).toLowerCase() === 'true') : false;
-      const isSkipThu = jt ? (jt['Skip Thu'] === true || String(jt['Skip Thu']).toLowerCase() === 'true') : false;
-      const isSkipFri = jt ? (jt['Skip Fri'] === true || String(jt['Skip Fri']).toLowerCase() === 'true') : true;
-      const isSkipSat = jt ? (jt['Skip Sat'] === true || String(jt['Skip Sat']).toLowerCase() === 'true') : true;
+      const isSkipMon = jt ? (jt['Skip Mon'] === true || String(jt['Skip Mon']).toLowerCase() === 'true') : isWeekendDefault;
+      const isSkipTue = jt ? (jt['Skip Tue'] === true || String(jt['Skip Tue']).toLowerCase() === 'true') : isWeekendDefault;
+      const isSkipWed = jt ? (jt['Skip Wed'] === true || String(jt['Skip Wed']).toLowerCase() === 'true') : isWeekendDefault;
+      const isSkipThu = jt ? (jt['Skip Thu'] === true || String(jt['Skip Thu']).toLowerCase() === 'true') : isWeekendDefault;
+      const isSkipFri = jt ? (jt['Skip Fri'] === true || String(jt['Skip Fri']).toLowerCase() === 'true') : !isWeekendDefault;
+      const isSkipSat = jt ? (jt['Skip Sat'] === true || String(jt['Skip Sat']).toLowerCase() === 'true') : !isWeekendDefault;
 
       const skipMtg = jt ? (jt['Skip Weekly Meeting'] === true || String(jt['Skip Weekly Meeting']).toLowerCase() === 'true') : false;
       const skipChk = jt ? (jt['Skip Monthly Checklist'] === true || String(jt['Skip Monthly Checklist']).toLowerCase() === 'true') : false;
 
-      // Job Name (Site Name / Description)
-      const jobName = (jt && (jt['Job Name'] || jt['Site Name'] || jt['Description']))
+      // Job Name (Site Name / Description) — fall back to Crew Planning saved jobName if Job Tracking hasn't stored it yet
+      let jobName = (jt && (jt['Job Name'] || jt['Site Name'] || jt['Description']))
         ? String(jt['Job Name'] || jt['Site Name'] || jt['Description']).trim()
         : '';
+      if ((!jobName || jobName.toLowerCase() === baseJob.toLowerCase()) && plannedMeta?.jobName) {
+        jobName = String(plannedMeta.jobName).trim();
+      }
 
       // Helper: match foreman name against an employee, including their alternate names.
       // Handles cases where JT stores a nickname (Matt) but the employee row uses the full name (Matthew)
@@ -8069,14 +8133,22 @@ class SheetNavigator {
           pillTitle = `Secondary Job: ${otherJobNum}`;
         }
 
+        const otherBaseClean = String(otherJobNum || '').replace(/\.\d+.*$/, '').trim();
+        const otherJtMatch = jtRows.find(j => String(j['Job Number'] || j['Job #'] || '').replace(/\.\d+.*$/, '').trim().toLowerCase() === otherBaseClean.toLowerCase());
+        const otherPlannedMeta = lookupPlannedCrewMeta(otherBaseClean);
+        const otherCrewName = String(otherJtMatch?.['Job Name'] || otherPlannedMeta?.jobName || '').trim();
+        const otherDisplayLabel = (otherCrewName && otherCrewName.toLowerCase() !== otherBaseClean.toLowerCase())
+          ? `${otherJobNum} (${otherCrewName})`
+          : otherJobNum;
+
         secondJobPill = `
           <span class="badge second-job-pill" 
                 onclick="event.stopPropagation(); window.sheetNavigator.promptEditSecondJob('${this.escapeJs(e.name)}', '${this.escapeJs(baseJob)}', ${Boolean(e.isSecondaryMember)})"
                 style="background: rgba(245, 158, 11, 0.18); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.45); font-size: 9.5px; font-weight: 700; padding: 1px 6px; border-radius: 3px; cursor: pointer; transition: all 0.15s ease; display: inline-flex; align-items: center; gap: 3px;"
                 onmouseover="this.style.background='rgba(245, 158, 11, 0.35)'; this.style.borderColor='#f59e0b';"
                 onmouseout="this.style.background='rgba(245, 158, 11, 0.18)'; this.style.borderColor='rgba(245, 158, 11, 0.45)';"
-                title="${this.escapeHtml(pillTitle)} — Click to edit, swap, or remove 1st/2nd job">
-            ⚡ ${pillType}: ${this.escapeHtml(otherJobNum)} <span style="font-size: 8.5px; opacity: 0.85;">✏️</span>
+                title="${this.escapeHtml(pillTitle)}${otherCrewName ? ' — ' + this.escapeHtml(otherCrewName) : ''} — Click to edit, swap, or remove 1st/2nd job">
+            ⚡ ${pillType}: ${this.escapeHtml(otherDisplayLabel)} <span style="font-size: 8.5px; opacity: 0.85;">✏️</span>
           </span>
         `;
       }
@@ -8829,8 +8901,9 @@ class SheetNavigator {
 
     const statusCardNames = ['Vacation', 'Leave', 'Light Duty', 'Weeds', 'Medical'];
     const statusCardLower = statusCardNames.map(s => s.toLowerCase());
+    const isFromStatusCard = statusCardNames.includes(fromBaseJob) || statusCardLower.includes(String(fromBaseJob || '').toLowerCase());
     let effectiveFromBaseJob = fromBaseJob;
-    if (statusCardNames.includes(fromBaseJob)) {
+    if (isFromStatusCard) {
       const slotClean = String(fromSlot || '').trim();
       const derivedBase = slotClean.replace(/\.\d+.*$/, '').trim();
       if (derivedBase && !statusCardLower.includes(derivedBase.toLowerCase()) && derivedBase.toLowerCase() !== 'unassigned') {
@@ -8840,7 +8913,7 @@ class SheetNavigator {
       }
     }
 
-    if (effectiveFromBaseJob === destBaseJob) {
+    if (!isFromStatusCard && effectiveFromBaseJob === destBaseJob) {
       if (typeof window.showToast === 'function') {
         window.showToast(`${empName} is already on crew ${destBaseJob}.`, 'info');
       }
@@ -8865,9 +8938,11 @@ class SheetNavigator {
 
     const prevEmpNames = this.getPreviousEmployeeNamesSet();
 
-    // Calculate destination slot (.N + 1 or lowest missing slot starting at .1) for ACTIVE members only
+    // Calculate destination slot (.N + 1 or lowest missing slot starting at .1) for OTHER active members on destBaseJob
     const destMembers = (empTable.rows || []).filter(e => {
       if (!this.isEmployeeActive(e, prevEmpNames)) return false;
+      const eName = String(e['Employee Name'] || e['Name'] || '').trim().toLowerCase();
+      if (eName === empName.toLowerCase()) return false;
       const jn = String(e['Job Number'] || e['Job #'] || '').trim();
       return jn === destBaseJob || jn.startsWith(destBaseJob + '.');
     });
@@ -8877,18 +8952,28 @@ class SheetNavigator {
       return m ? parseInt(m[1], 10) : 0;
     }).filter(n => n > 0);
 
-    let nextSuffix = 1;
-    while (destSuffixes.includes(nextSuffix)) {
-      nextSuffix++;
+    let newSlot = '';
+    const existingSlotMatch = String(fromSlot || '').trim().match(/^(.+)\.(\d+)$/);
+    if (isFromStatusCard && effectiveFromBaseJob === destBaseJob && existingSlotMatch) {
+      const existingSuffix = parseInt(existingSlotMatch[2], 10);
+      if (existingSuffix > 0 && !destSuffixes.includes(existingSuffix)) {
+        newSlot = `${destBaseJob}.${existingSuffix}`;
+      }
     }
-    const newSlot = `${destBaseJob}.${nextSuffix}`;
+    if (!newSlot) {
+      let nextSuffix = 1;
+      while (destSuffixes.includes(nextSuffix)) {
+        nextSuffix++;
+      }
+      newSlot = `${destBaseJob}.${nextSuffix}`;
+    }
 
-    // Source crew renumbering candidates among ACTIVE members
+    // Source crew renumbering candidates among ACTIVE members (only when moving to a DIFFERENT crew)
     let membersToRenumber = [];
     let oldSourceSize = 0;
     let newSourceSize = 0;
 
-    if (!isSecondary && effectiveFromBaseJob && !statusCardNames.includes(effectiveFromBaseJob)) {
+    if (!isSecondary && effectiveFromBaseJob && effectiveFromBaseJob !== destBaseJob && !statusCardNames.includes(effectiveFromBaseJob)) {
       const sourceMembers = (empTable.rows || []).filter(e => {
         if (!this.isEmployeeActive(e, prevEmpNames)) return false;
         const jn = String(e['Job Number'] || e['Job #'] || '').trim();

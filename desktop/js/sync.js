@@ -816,6 +816,67 @@ class SyncEngine {
         m.id = `mut_${Date.now()}_${idx}_${Math.random().toString(36).substr(2, 6)}`;
         needsIdSave = true;
       }
+      if (!m.action && m.type) { m.action = m.type; needsIdSave = true; }
+      if (!m.sheetName && m.sheet) { m.sheetName = m.sheet; needsIdSave = true; }
+      if (!m.tableKey && m.sheetName && this.db) { m.tableKey = this.db.getTableKeyForSheet(m.sheetName); needsIdSave = true; }
+      if (!m.rowData && m.data) { m.rowData = m.data; needsIdSave = true; }
+      const resolvedId = m.itemIdentifier || m.employeeName || m.empName || m.itemNumber || m.itemNum || m.serialNum || m.jobNumber || m.keyValue || '';
+      if (!m.itemIdentifier && resolvedId) {
+        m.itemIdentifier = resolvedId;
+        needsIdSave = true;
+      }
+
+      // Self-heal buggy secondary job number transfers where Secondary Job Number was set to the employee's primary base job (e.g. 009-27 -> 036-26, 022-27 -> 031-27)
+      if (m.action === 'UPDATE_ROW' && (m.tableKey === 'employees' || String(m.sheetName || '').toLowerCase() === 'employees') && m.updatedFields && m.updatedFields['Secondary Job Number']) {
+        const secVal = String(m.updatedFields['Secondary Job Number'] || '').trim();
+        const secBase = secVal.replace(/\.\d+.*$/, '').trim();
+        const suffixMatch = secVal.match(/\.(\d+)/);
+        const suffix = suffixMatch ? suffixMatch[1] : '1';
+        const empTbl = this.db ? this.db.getTable('employees') : null;
+        const empRow = (empTbl?.rows || []).find(r => String(r['Employee Name'] || r['Name'] || '').trim().toLowerCase() === String(m.itemIdentifier || m.employeeName || '').trim().toLowerCase());
+        const priJob = String(m.updatedFields['Job Number'] || empRow?.['Job Number'] || '').trim();
+        const priBase = priJob.replace(/\.\d+.*$/, '').trim();
+        if (secBase && priBase && secBase === priBase) {
+          if (priBase === '009-27') {
+            m.updatedFields['Secondary Job Number'] = `036-26.${suffix}`;
+            if (empRow) empRow['Secondary Job Number'] = `036-26.${suffix}`;
+            needsIdSave = true;
+          } else if (priBase === '022-27') {
+            m.updatedFields['Secondary Job Number'] = `031-27.${suffix}`;
+            if (empRow) empRow['Secondary Job Number'] = `031-27.${suffix}`;
+            needsIdSave = true;
+          }
+        }
+      }
+      if (m.action === 'ADD_ROW' && (m.tableKey === 'employee_history' || String(m.sheetName || '').toLowerCase() === 'employee history') && m.rowData) {
+        const notes = String(m.rowData['Notes'] || '');
+        if (notes.includes('Assigned secondary crew 009-27 (009-27.')) {
+          m.rowData['Notes'] = notes.replace(/009-27/g, '036-26');
+          m.rowData['Job Number'] = String(m.rowData['Job Number'] || '').replace(/^009-27/, '036-26');
+          needsIdSave = true;
+        } else if (notes.includes('Assigned secondary crew 022-27 (022-27.')) {
+          m.rowData['Notes'] = notes.replace(/022-27/g, '031-27');
+          m.rowData['Job Number'] = String(m.rowData['Job Number'] || '').replace(/^022-27/, '031-27');
+          needsIdSave = true;
+        }
+      }
+
+      // Resolve row index if missing on UPDATE_ROW
+      if ((m.action === 'UPDATE_ROW' || m.action === 'UPDATE_JOB_TRACKING') && !m.row && m.itemIdentifier && this.db) {
+        const tblKey = m.tableKey || this.db.getTableKeyForSheet(m.sheetName);
+        const tbl = tblKey ? this.db.getTable(tblKey) : null;
+        if (tbl && Array.isArray(tbl.rows)) {
+          const targetIdLower = String(m.itemIdentifier).trim().toLowerCase();
+          const rowIdxInArr = tbl.rows.findIndex(r => {
+            const c0 = String(r['Employee Name'] || r['Name'] || r['Job Number'] || r['Job #'] || r['Item #'] || r['Serial #'] || Object.values(r)[0] || '').trim().toLowerCase();
+            return c0 === targetIdLower || c0.replace(/\.\d+.*$/, '').trim() === targetIdLower;
+          });
+          if (rowIdxInArr !== -1) {
+            m.row = tbl.rows[rowIdxInArr]._rowIdx || (rowIdxInArr + 2);
+            needsIdSave = true;
+          }
+        }
+      }
     });
     if (needsIdSave) {
       await this.db.saveOutbox(currentOutbox);
@@ -906,6 +967,9 @@ class SyncEngine {
           if (!mCopy.sheetName && mCopy.sheet) mCopy.sheetName = mCopy.sheet;
           if (!mCopy.tableKey && mCopy.sheetName && this.db) mCopy.tableKey = this.db.getTableKeyForSheet(mCopy.sheetName);
           if (!mCopy.rowData && mCopy.data) mCopy.rowData = mCopy.data;
+          if (!mCopy.itemIdentifier) {
+            mCopy.itemIdentifier = mCopy.employeeName || mCopy.empName || mCopy.itemNumber || mCopy.itemNum || mCopy.serialNum || mCopy.jobNumber || mCopy.keyValue || '';
+          }
           if (mCopy.rawGrid && Array.isArray(mCopy.rawGrid)) {
             if (mCopy.rawGrid.length <= 1) {
               delete mCopy.rawGrid;

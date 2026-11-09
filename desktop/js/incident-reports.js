@@ -878,10 +878,6 @@ class IncidentReportsEngine {
       status: 'scanning'
     });
 
-    if (!options.silent && typeof window.showToast === 'function') {
-      window.showToast('Scanning Gmail for incident reports from mptablets@mountainpower.com...', 'info');
-    }
-
     // Dynamic progress ticker while server query executes
     let progressPct = 12;
     const progressTimer = setInterval(() => {
@@ -942,14 +938,6 @@ class IncidentReportsEngine {
           if (typeof this.db.persistSnapshot === 'function') {
             await this.db.persistSnapshot(this.db.snapshot);
           }
-        }
-
-        const successMsg = count > 0
-          ? `Successfully logged ${count} new incident report${count === 1 ? '' : 's'} (${total} total in database)!`
-          : `Scan complete. ${total} total incident report${total === 1 ? '' : 's'} up to date.`;
-
-        if (!options.silent && typeof window.showToast === 'function') {
-          window.showToast(successMsg, 'success');
         }
 
         this.updateBackgroundWidget({
