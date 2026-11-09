@@ -223,7 +223,7 @@ class SMSDialogEngine {
     const shortWeek = cleanWeek.replace(/\/20(\d\d)$/, '/$1');
     const firstName = String(foreman || '').trim().split(' ')[0] || 'there';
 
-    const defaultMsg = `Hi ${firstName}, we did not receive the ${itemsStr} for the week of ${shortWeek} from your crew (${cleanJob}).
+    const defaultMsg = `Hi ${firstName}, we did not receive the ${itemsStr} for the week of ${shortWeek} from your crew.
 
 Did you send it and I just didn't get it?
 Is it hung up in the app?
