@@ -10,7 +10,7 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="stylesheet" href="css/leaflet.css">
-  <link rel="stylesheet" href="css/app.css?v=20261104_07">
+  <link rel="stylesheet" href="css/app.css?v=20261109_02">
 </head>
 <body>
 
@@ -95,86 +95,182 @@
         </div>
       </div>
 
-      <div class="nav-group">
-        <div class="nav-group-title">Main Workspaces</div>
-        <div class="nav-item active" data-view="sheets-view">
-          <span class="nav-item-icon">📦</span> Active Inventory & Swaps
+      <!-- Direct Top-Level Workspace: Weekly Summary & Briefing (Non-collapsible) -->
+      <div style="padding: 10px 12px 6px 12px;">
+        <div class="nav-item" data-view="weekly-summary-view" id="nav-weekly-summary" style="border-radius: 8px; font-weight: 700; border: 1px solid rgba(59, 130, 246, 0.25); background: rgba(59, 130, 246, 0.08);">
+          <span class="nav-item-icon" style="font-size: 16px;">📊</span> Weekly Summary & Briefing
         </div>
-        <div class="nav-item" data-view="weekly-summary-view">
-          <span class="nav-item-icon">📊</span> Weekly Summary & Briefing
+      </div>
+
+      <!-- SECTION 1: EMPLOYEES & INVENTORY (Collapsible) -->
+      <div class="nav-section" id="nav-section-inventory">
+        <div class="nav-section-header" onclick="toggleNavSection('inventory')">
+          <span class="nav-section-title"><span>👥</span> Employees & Inventory</span>
+          <span class="nav-section-chevron">▼</span>
         </div>
-        <div class="nav-item" data-view="tailgate-generator-view" id="nav-tailgate-generator">
-          <span class="nav-item-icon">👷</span> Foreman Tailgates
+        <div class="nav-section-body">
+          <!-- A. Employees -->
+          <div class="nav-subgroup-title"><span>👥</span> Employees</div>
+          <div class="nav-item nav-sub-item active" data-view="sheets-view" data-sheet="employees">
+            <span class="nav-item-icon">👤</span> Crew Structure
+          </div>
+          <div class="nav-item nav-sub-item" data-view="sheets-view" data-sheet="job_tracking">
+            <span class="nav-item-icon">📋</span> Job Tracking
+          </div>
+          <div class="nav-item nav-sub-item" data-action="open-location-approvals">
+            <span class="nav-item-icon">📍</span> Locations & Approvals
+          </div>
+
+          <!-- B. Rubber -->
+          <div class="nav-subgroup-title"><span>🧤</span> Rubber</div>
+          <div class="nav-item nav-sub-item" data-view="sheets-view" data-sheet="gloves">
+            <span class="nav-item-icon">🧤</span> Gloves
+          </div>
+          <div class="nav-item nav-sub-item" data-view="sheets-view" data-sheet="sleeves">
+            <span class="nav-item-icon">🦺</span> Sleeves
+          </div>
+          <div class="nav-item nav-sub-item" data-view="sheets-view" data-sheet="blankets">
+            <span class="nav-item-icon">🧱</span> Blankets
+          </div>
+
+          <!-- C. Equipment -->
+          <div class="nav-subgroup-title"><span>⚡</span> Equipment</div>
+          <div class="nav-item nav-sub-item" data-view="sheets-view" data-sheet="macks">
+            <span class="nav-item-icon">🧱</span> MACKs
+          </div>
+          <div class="nav-item nav-sub-item" data-view="sheets-view" data-sheet="hv_testers">
+            <span class="nav-item-icon">⚡</span> HV Testers
+          </div>
+          <div class="nav-item nav-sub-item" data-view="sheets-view" data-sheet="phasing_sets">
+            <span class="nav-item-icon">⚡</span> Phasing Sets
+          </div>
+          <div class="nav-item nav-sub-item" data-view="sheets-view" data-sheet="aed">
+            <span class="nav-item-icon">🏥</span> AED
+          </div>
+          <div class="nav-item nav-sub-item" data-view="sheets-view" data-sheet="grounds">
+            <span class="nav-item-icon">⚡</span> Grounds
+          </div>
+          <div class="nav-item nav-sub-item" data-view="sheets-view" data-sheet="hot_sticks">
+            <span class="nav-item-icon">🔴</span> Hot Sticks
+          </div>
+          <div class="nav-item nav-sub-item" data-view="sheets-view" data-sheet="test_batches">
+            <span class="nav-item-icon">🔬</span> Lab Test Batches & JM Portal
+          </div>
+
+          <!-- Procurement & Fleet Analytics -->
+          <div class="nav-subgroup-title"><span>🛒</span> Procurement & Fleet</div>
+          <div class="nav-item nav-sub-item" data-view="procurement-view">
+            <span class="nav-item-icon">🛒</span> Purchase Needs & Orders
+          </div>
+          <div class="nav-item nav-sub-item" data-view="aging-view">
+            <span class="nav-item-icon">📊</span> Fleet Aging & EOL
+          </div>
+          <div class="nav-item nav-sub-item" data-action="open-ppe-tracker">
+            <span class="nav-item-icon">🧤</span> Rubber PPE Tracker
+          </div>
+
+          <!-- D & E: Previous Employees & Crew Import -->
+          <div class="nav-subgroup-title"><span>📂</span> Personnel Archive</div>
+          <div class="nav-item nav-sub-item" data-view="previous-employees-view">
+            <span class="nav-item-icon">👥</span> Previous Employees
+          </div>
+          <div class="nav-item nav-sub-item" data-view="crew-import-view">
+            <span class="nav-item-icon">📥</span> Crew Import (Excel)
+          </div>
         </div>
-        <div class="nav-item" data-view="crew-import-view">
-          <span class="nav-item-icon">👥</span> Crew Import (Excel)
+      </div>
+
+      <!-- SECTION 2: SAFETY - FORMS & CERTS (Collapsible) -->
+      <div class="nav-section" id="nav-section-safety">
+        <div class="nav-section-header" onclick="toggleNavSection('safety')">
+          <span class="nav-section-title"><span>🛡️</span> Safety - Forms & Certs</span>
+          <span class="nav-section-chevron">▼</span>
         </div>
-        <div class="nav-item" data-view="safety-compliance-view">
-          <span class="nav-item-icon">🛡️</span> Safety Compliance
+        <div class="nav-section-body">
+          <div class="nav-item nav-sub-item" data-view="safety-compliance-view">
+            <span class="nav-item-icon">🛡️</span> Safety Compliance
+          </div>
+          <div class="nav-item nav-sub-item" data-view="incident-reports-view">
+            <span class="nav-item-icon">⚠️</span> Incident Reports
+          </div>
+          <div class="nav-item nav-sub-item" data-view="expiring-certs-view">
+            <span class="nav-item-icon">📜</span> Expiring Certs
+          </div>
+          <div class="nav-item nav-sub-item" data-view="tailgate-generator-view" id="nav-tailgate-generator">
+            <span class="nav-item-icon">👷</span> Foreman Tailgates
+          </div>
+          <div class="nav-item nav-sub-item" data-view="nwe-fire-view">
+            <span class="nav-item-icon">🔥</span> NWE Fire Info
+          </div>
         </div>
-        <div class="nav-item" data-view="incident-reports-view">
-          <span class="nav-item-icon">⚠️</span> Incident Reports
+      </div>
+
+      <!-- SECTION 3: TRAINING & TESTING (Collapsible) -->
+      <div class="nav-section" id="nav-section-training">
+        <div class="nav-section-header" onclick="toggleNavSection('training')">
+          <span class="nav-section-title"><span>🎓</span> Training & Testing</span>
+          <span class="nav-section-chevron">▼</span>
         </div>
-        <div class="nav-item" data-view="expiring-certs-view">
-          <span class="nav-item-icon">📜</span> Expiring Certs
+        <div class="nav-section-body">
+          <div class="nav-item nav-sub-item" data-view="training-view">
+            <span class="nav-item-icon">🎓</span> Training Tracking
+          </div>
+          <div class="nav-item nav-sub-item" data-view="drug-testing-view">
+            <span class="nav-item-icon">🧪</span> DOT Drug Testing
+          </div>
         </div>
-        <div class="nav-item" data-view="training-view">
-          <span class="nav-item-icon">🎓</span> Training
+      </div>
+
+      <!-- SECTION 4: SCHEDULE & PLANNING (Collapsible) -->
+      <div class="nav-section" id="nav-section-schedule">
+        <div class="nav-section-header" onclick="toggleNavSection('schedule')">
+          <span class="nav-section-title"><span>🗺️</span> Schedule & Planning</span>
+          <span class="nav-section-chevron">▼</span>
         </div>
-        <div class="nav-item" data-view="drug-testing-view">
-          <span class="nav-item-icon">🧪</span> DOT Drug Testing
+        <div class="nav-section-body">
+          <div class="nav-item nav-sub-item" data-view="trip-planner-view">
+            <span class="nav-item-icon">🗺️</span> Trip Planner
+          </div>
+          <div class="nav-item nav-sub-item" data-view="tasks-view">
+            <span class="nav-item-icon">📋</span> Tasks & Calendar
+          </div>
         </div>
-        <div class="nav-item" data-view="previous-employees-view">
-          <span class="nav-item-icon">👥</span> Previous Employees
+      </div>
+
+      <!-- SECTION 5: HISTORY & ARCHIVES (Collapsible) -->
+      <div class="nav-section" id="nav-section-history">
+        <div class="nav-section-header" onclick="toggleNavSection('history')">
+          <span class="nav-section-title"><span>📜</span> History & Archives</span>
+          <span class="nav-section-chevron">▼</span>
         </div>
-        <div class="nav-item" data-view="history-view">
-          <span class="nav-item-icon">📜</span> History Records
+        <div class="nav-section-body">
+          <div class="nav-item nav-sub-item" data-view="history-view">
+            <span class="nav-item-icon">📜</span> Historical Records
+          </div>
+          <div class="nav-item nav-sub-item" data-view="history-view" data-history-sheet="retired_equipment">
+            <span class="nav-item-icon">🗄️</span> Retired Equipment
+          </div>
+          <div class="nav-item nav-sub-item" data-view="lookup-view">
+            <span class="nav-item-icon">🔍</span> Lookup & Search
+          </div>
         </div>
-        <div class="nav-item" data-view="trip-planner-view">
-          <span class="nav-item-icon">🗺️</span> Trip Planner
-        </div>
-        <div class="nav-item" data-view="tasks-view">
-          <span class="nav-item-icon">📋</span> Tasks & Calendar
-        </div>
-        <div class="nav-item" data-view="lookup-view">
-          <span class="nav-item-icon">🔍</span> Lookup & Search
-        </div>
-        <div class="nav-item" data-view="procurement-view">
-          <span class="nav-item-icon">🛒</span> Purchase Needs & Orders
-        </div>
-        <div class="nav-item" data-view="aging-view">
-          <span class="nav-item-icon">📊</span> Fleet Aging & EOL
-        </div>
-        <div class="nav-item" data-view="jm-test-view">
-          <span class="nav-item-icon">⚡</span> JM Test Systems
-        </div>
-        <div class="nav-item" data-view="nwe-fire-view">
-          <span class="nav-item-icon">🔥</span> NWE Fire Info
-        </div>
-        <div class="nav-item" data-action="open-ppe-tracker" onclick="if(window.ppeTrackingEngine){window.ppeTrackingEngine.openModal();}">
-          <span class="nav-item-icon">🧤</span> Rubber PPE Tracker
-        </div>
-        <div class="nav-item" data-action="open-location-approvals" onclick="if(window.locationApprovalsEngine){window.locationApprovalsEngine.openModal();}">
-          <span class="nav-item-icon">📍</span> Location Approvals
-        </div>
-        <div class="nav-item" id="nav-item-fiscal-year" data-action="open-fiscal-year-transition" onclick="if(window.fiscalYearEngine){window.fiscalYearEngine.openModal();}">
-          <span class="nav-item-icon">📅</span> FY Transition
-        </div>
-        <div class="nav-item" id="nav-item-ai-copilot" onclick="if(window.aiCopilotEngine){window.aiCopilotEngine.openDrawer();}" style="color: #c084fc;">
+      </div>
+
+      <!-- Persistent Footer Tools -->
+      <div style="margin-top: auto; padding: 12px 10px 10px 10px; border-top: 1px solid var(--border-color); display: flex; flex-direction: column; gap: 4px; background: rgba(15, 23, 42, 0.4);">
+        <div class="nav-item" id="nav-item-ai-copilot" onclick="if(window.aiCopilotEngine){window.aiCopilotEngine.openDrawer();}" style="color: #c084fc; padding: 8px 12px; border-radius: 6px;">
           <span class="nav-item-icon">✨</span> AI Copilot
         </div>
-      </div>
-
-      <div class="nav-group">
-        <div class="nav-group-title">Settings & Storage</div>
-        <div class="nav-item" data-view="settings-view">
+        <div class="nav-item" id="nav-item-fiscal-year" data-action="open-fiscal-year-transition" onclick="if(window.fiscalYearEngine){window.fiscalYearEngine.openModal();}" style="padding: 8px 12px; border-radius: 6px;">
+          <span class="nav-item-icon">📅</span> FY Transition
+        </div>
+        <div class="nav-item" data-view="settings-view" style="padding: 8px 12px; border-radius: 6px;">
           <span class="nav-item-icon">⚙️</span> Sync Settings
         </div>
-      </div>
-
-      <div style="margin-top: auto; padding: 16px; font-size: 11px; color: var(--text-muted); border-top: 1px solid var(--border-color);">
-        Safety Assistant v2026.1<br>
-        100% Offline Capable
+        <div style="padding: 8px 6px 2px 6px; font-size: 11px; color: var(--text-muted); display: flex; justify-content: space-between; align-items: center;">
+          <span>Safety Assistant v2026.1</span>
+          <span style="color: #10b981; font-weight: 600;">● Offline Ready</span>
+        </div>
       </div>
     </aside>
 
@@ -207,6 +303,9 @@
             </button>
             <button class="btn admin-only-control" id="btn-generate-swaps" style="display: none; background: linear-gradient(135deg, #0284c7, #0369a1); color: white; padding: 6px 14px; font-size: 12px;" onclick="window.swapEngine.generateAllSwaps()">
               ⚡ Generate Swaps
+            </button>
+            <button class="btn btn-secondary" id="btn-swaps-exclusions" style="display: none; padding: 6px 12px; font-size: 12px; font-weight: 600; border-color: rgba(245, 158, 11, 0.4); color: #fbbf24; background: rgba(245, 158, 11, 0.12); align-items: center; gap: 5px;" onclick="window.ppeTrackingEngine?.openExclusionsDialog()" title="Manage employees excluded from Swaps & Purchase Needs on their current crew">
+              <span>🚫</span> Swaps Exclusions
             </button>
             <button class="btn admin-only-control" id="btn-new-item" style="display: none; background: #2563eb; color: white; padding: 6px 14px; font-size: 12px;" onclick="window.inventoryManager.showNewItemModal(window.sheetNavigator.currentSheetKey)">
               ➕ New Item
@@ -3243,8 +3342,8 @@
   <!-- Mobile Bottom Navigation Bar (Visible on tablets & mobile screens) -->
   <nav class="mobile-bottom-nav" id="mobile-bottom-nav">
     <div class="mobile-nav-btn active" data-view="sheets-view">
-      <span class="mobile-nav-icon">📦</span>
-      <span class="mobile-nav-label">Inventory</span>
+      <span class="mobile-nav-icon">👥</span>
+      <span class="mobile-nav-label">Employees & Inv</span>
     </div>
     <div class="mobile-nav-btn" data-view="trip-planner-view">
       <span class="mobile-nav-icon">🗺️</span>
@@ -3272,28 +3371,28 @@
 
   <script src="js/db.js?v=20261103_02"></script>
   <script src="js/sync.js?v=20261103_05"></script>
-  <script src="js/supabase-sync.js?v=20261104_02"></script>
+  <script src="js/supabase-sync.js?v=20261109_02"></script>
   <script src="js/window-manager.js?v=20261027_01"></script>
   <script src="js/gps.js?v=20261027_01"></script>
   <script src="js/scanner.js?v=20261027_01"></script>
   <script src="js/employee-resolver.js?v=20261027_01"></script>
   <script src="js/inventory.js?v=20261027_01"></script>
-  <script src="js/swaps.js?v=20261027_01"></script>
+  <script src="js/swaps.js?v=20261109_02"></script>
   <script src="js/crew-import.js?v=20261027_01"></script>
   <script src="js/crew-planning.js?v=20261104_07"></script>
   <script src="js/item-stats.js?v=20261027_01"></script>
   <script src="js/sms-dialog.js?v=20261027_01"></script>
-  <script src="js/employee-profile.js?v=20261104_01"></script>
+  <script src="js/employee-profile.js?v=20261109_02"></script>
   <script src="js/safety-emails.js?v=20261027_02"></script>
   <script src="js/certs-config.js?v=20261027_01"></script>
   <script src="js/cpr-roster.js?v=20261027_01"></script>
   <script src="js/certs-import.js?v=20261027_01"></script>
-  <script src="js/time-breakdown.js?v=20261027_01"></script>
-  <script src="js/sheets.js?v=20261104_02"></script>
-  <script src="js/history.js?v=20261103_01"></script>
+  <script src="js/time-breakdown.js?v=20261109_02"></script>
+  <script src="js/sheets.js?v=20261109_02"></script>
+  <script src="js/history.js?v=20261109_02"></script>
   <script src="js/history-issues.js?v=20261027_01"></script>
   <script src="js/previous-employees.js?v=20261027_01"></script>
-  <script src="js/tasks.js?v=20261027_01"></script>
+  <script src="js/tasks.js?v=20261109_02"></script>
   <script src="js/trip-planner.js?v=20261103_01"></script>
   <script src="js/vendor/leaflet.js"></script>
   <script src="js/vendor/heic2any.min.js"></script>
@@ -3305,14 +3404,14 @@
   </script>
   <script src="js/trip-route-map.js?v=20260918_07"></script>
   <script src="js/lookup.js?v=20260901_25"></script>
-  <script src="js/procurement.js?v=20261030_03"></script>
+  <script src="js/procurement.js?v=20261109_02"></script>
   <script src="js/aging.js?v=20260901_25"></script>
   <script src="js/drug-testing.js?v=20260902_1"></script>
-  <script src="js/ppe-tracking.js?v=20261019_01"></script>
+  <script src="js/ppe-tracking.js?v=20261109_02"></script>
   <script src="js/incident-reports.js?v=20260930_01"></script>
   <script src="js/weekly-summary.js?v=20261014_03"></script>
   <script src="js/fiscal-year.js?v=20261001_04"></script>
-  <script src="js/location-approvals.js?v=20261007_01"></script>
+  <script src="js/location-approvals.js?v=20261109_02"></script>
   <script src="js/ai-copilot.js?v=20261002_03"></script>
 
   <script>
@@ -3353,9 +3452,79 @@
       }, 3500);
     };
 
-    // Navigation routing for desktop & mobile
-    function navigateToView(viewId) {
-      window.navigateToView = navigateToView;
+    function toggleNavSection(secId) {
+      const el = document.getElementById('nav-section-' + secId);
+      if (!el) return;
+      const isCollapsed = el.classList.toggle('collapsed');
+      try {
+        localStorage.setItem('sa_nav_' + secId + '_collapsed', isCollapsed ? 'true' : 'false');
+      } catch (e) {}
+    }
+    window.toggleNavSection = toggleNavSection;
+
+    function initNavSections() {
+      const sections = ['inventory', 'safety', 'training', 'schedule', 'history'];
+      sections.forEach(sec => {
+        const el = document.getElementById('nav-section-' + sec);
+        if (!el) return;
+        let collapsed = false;
+        try {
+          const saved = localStorage.getItem('sa_nav_' + sec + '_collapsed');
+          if (saved !== null) {
+            collapsed = saved === 'true';
+          } else {
+            // Default: inventory & safety open; training, schedule, history collapsed
+            collapsed = (sec === 'training' || sec === 'schedule' || sec === 'history');
+          }
+        } catch (e) {}
+        if (collapsed) {
+          el.classList.add('collapsed');
+        } else {
+          el.classList.remove('collapsed');
+        }
+      });
+    }
+
+    function ensureParentSectionExpanded(itemEl) {
+      if (!itemEl) return;
+      const parentSection = itemEl.closest('.nav-section');
+      if (parentSection && parentSection.classList.contains('collapsed')) {
+        parentSection.classList.remove('collapsed');
+        const secId = parentSection.id.replace('nav-section-', '');
+        try {
+          localStorage.setItem('sa_nav_' + secId + '_collapsed', 'false');
+        } catch (e) {}
+      }
+    }
+
+    function highlightSidebarItem(viewId, sheetKey) {
+      document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+      let sidebarMatch = null;
+      if (viewId === 'sheets-view') {
+        const targetSheet = sheetKey || (window.sheetNavigator ? window.sheetNavigator.currentSheetKey : 'employees');
+        sidebarMatch = document.querySelector(`.nav-item[data-view="sheets-view"][data-sheet="${targetSheet}"]`);
+        if (!sidebarMatch) {
+          sidebarMatch = document.querySelector(`.nav-item[data-view="sheets-view"]`);
+        }
+      } else if (viewId === 'history-view') {
+        const isRet = (window.historyNavigator && window.historyNavigator.currentSheetKey === 'retired_equipment');
+        if (isRet) {
+          sidebarMatch = document.querySelector(`.nav-item[data-view="history-view"][data-history-sheet="retired_equipment"]`);
+        }
+        if (!sidebarMatch) {
+          sidebarMatch = document.querySelector(`.nav-item[data-view="history-view"]:not([data-history-sheet])`);
+        }
+      } else {
+        sidebarMatch = document.querySelector(`.nav-item[data-view="${viewId}"]`);
+      }
+
+      if (sidebarMatch) {
+        sidebarMatch.classList.add('active');
+        ensureParentSectionExpanded(sidebarMatch);
+      }
+    }
+
+    function navigateToView(viewId, sheetKey) {
       if (window.supabaseSync && !window.supabaseSync.canViewPage(viewId)) {
         window.showToast('🔒 Your account does not have permission to view this page.', true);
         return;
@@ -3363,15 +3532,17 @@
       const viewEl = document.getElementById(viewId);
       if (viewEl && viewEl.classList.contains('active')) {
         document.querySelector('.app-sidebar')?.classList.remove('mobile-open');
+        if (viewId === 'sheets-view' && sheetKey && window.sheetNavigator) {
+          window.sheetNavigator.switchToSheet(sheetKey);
+          highlightSidebarItem(viewId, sheetKey);
+        }
         return;
       }
 
-      document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
-      document.querySelectorAll('.mobile-nav-btn').forEach(n => n.classList.remove('active'));
       document.querySelectorAll('.view-container').forEach(v => v.classList.remove('active'));
+      document.querySelectorAll('.mobile-nav-btn').forEach(n => n.classList.remove('active'));
 
-      const sidebarMatch = document.querySelector(`.nav-item[data-view="${viewId}"]`);
-      if (sidebarMatch) sidebarMatch.classList.add('active');
+      highlightSidebarItem(viewId, sheetKey);
 
       const mobileMatch = document.querySelector(`.mobile-nav-btn[data-view="${viewId}"]`);
       if (mobileMatch) mobileMatch.classList.add('active');
@@ -3392,7 +3563,13 @@
         }
       }
       if (viewId === 'tasks-view') window.taskManager.renderTasks();
-      if (viewId === 'sheets-view') window.sheetNavigator.renderCurrentSheet();
+      if (viewId === 'sheets-view') {
+        if (sheetKey && window.sheetNavigator) {
+          window.sheetNavigator.switchToSheet(sheetKey);
+        } else if (window.sheetNavigator) {
+          window.sheetNavigator.renderCurrentSheet();
+        }
+      }
       if (viewId === 'crew-import-view') window.crewImportEngine.render();
       if (viewId === 'safety-compliance-view') window.sheetNavigator.renderSafetyCompliance();
       if (viewId === 'expiring-certs-view') window.sheetNavigator.renderExpiringCerts();
@@ -3416,9 +3593,34 @@
 
     document.querySelectorAll('.nav-item').forEach(item => {
       item.addEventListener('click', () => {
-        if (item.dataset.view) navigateToView(item.dataset.view);
+        const viewId = item.dataset.view;
+        const sheetKey = item.dataset.sheet;
+        const histSheet = item.dataset.historySheet;
+        const action = item.dataset.action;
+
+        if (action === 'open-location-approvals') {
+          if (window.locationApprovalsEngine) window.locationApprovalsEngine.openModal();
+          return;
+        }
+        if (action === 'open-fiscal-year-transition') {
+          if (window.fiscalYearEngine) window.fiscalYearEngine.openModal();
+          return;
+        }
+        if (action === 'open-ppe-tracker') {
+          if (window.ppeTrackingEngine) window.ppeTrackingEngine.openModal();
+          return;
+        }
+
+        if (viewId) {
+          if (viewId === 'history-view' && histSheet && window.historyNavigator) {
+            window.historyNavigator.switchToHistory(histSheet);
+          }
+          navigateToView(viewId, sheetKey);
+        }
       });
     });
+
+    initNavSections();
 
     document.querySelectorAll('.mobile-nav-btn[data-view]').forEach(item => {
       item.addEventListener('click', () => navigateToView(item.dataset.view));

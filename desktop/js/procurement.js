@@ -716,26 +716,15 @@ class ProcurementEngine {
   }
 
   /**
-   * Checks whether an employee is excluded from PPE compliance tracking
-   * (checks manual exclusions and crew discipline exclusions)
+   * Checks whether an employee is excluded from PPE tracking or procurement
+   * (checks crew-locked manual swaps/procurement exclusions and crew discipline exclusions)
    */
   isEmployeePpeExcluded(empName) {
     if (!empName) return false;
+    if (this.isManualPpeExcluded(empName)) return true;
     if (window.ppeTrackingEngine && typeof window.ppeTrackingEngine.isEmployeeExcluded === 'function') {
       return window.ppeTrackingEngine.isEmployeeExcluded(empName);
     }
-    // Fallback: check manual map
-    try {
-      const raw = localStorage.getItem('sa_ppe_excluded_employees');
-      if (raw) {
-        const arr = JSON.parse(raw);
-        if (Array.isArray(arr)) {
-          const norm = this.normalizeName(empName);
-          if (arr.some(x => this.isNameMatch(this.normalizeName(x), norm))) return true;
-        }
-      }
-    } catch { /* ignore */ }
-
     // Fallback: check crew discipline from db
     try {
       const snap = (this.db && typeof this.db.getSnapshot === 'function')
@@ -773,17 +762,23 @@ class ProcurementEngine {
   }
 
   /**
-   * Checks whether an employee was manually excluded from PPE tracking
+   * Checks whether an employee is excluded from Swaps & Purchase Needs on their current crew
    */
   isManualPpeExcluded(empName) {
     if (!empName) return false;
+    if (typeof window !== 'undefined' && window.ppeTrackingEngine && typeof window.ppeTrackingEngine.isEmployeeSwapsExcluded === 'function') {
+      return window.ppeTrackingEngine.isEmployeeSwapsExcluded(empName);
+    }
     try {
       const raw = localStorage.getItem('sa_ppe_excluded_employees');
       if (raw) {
         const arr = JSON.parse(raw);
         if (Array.isArray(arr)) {
           const norm = this.normalizeName(empName);
-          if (arr.some(x => this.isNameMatch(this.normalizeName(x), norm))) return true;
+          return arr.some(x => {
+            const xName = typeof x === 'object' ? (x.name || '') : String(x || '');
+            return this.isNameMatch(this.normalizeName(xName), norm);
+          });
         }
       }
     } catch { /* ignore */ }
@@ -1912,6 +1907,16 @@ class ProcurementEngine {
 
         if (isPrevEmpIndicator) return;
 
+        // If swap row represents a new assignment satisfied by shelf stock or picked for delivery, do not purchase!
+        const isNeedsEquipment = statLower.includes('needs equipment') || statLower.includes('needs size');
+        if (isNeedsEquipment) {
+          const hasPickedItem = pickItem && pickItem !== '—' && pickItem !== '-' && !pickItem.includes('Needs Size');
+          if (hasPickedItem || statLower.includes('ready for delivery')) {
+            markCovered(s.type, emp);
+            return;
+          }
+        }
+
         const isNeedToPurchase = statLower.includes('need to purchase') ||
                                  statLower.includes('purchase') ||
                                  isSizeUp ||
@@ -2374,6 +2379,52 @@ class ProcurementEngine {
     // =========================================================================
     // SECTION 4: PPE COMPLIANCE — MISSING EQUIPMENT
     // =========================================================================
+    // Helper to check if available shelf stock satisfies an employee need
+    const hasShelfStockAvailable = (invTable, reqClass, reqSize, empName) => {
+      if (!invTable || !invTable.rows) return false;
+      const normReqSize = cleanSize(reqSize);
+      if (!normReqSize) return false; // Missing size cannot match shelf item
+      const normReqClass = parseInt(String(reqClass || '').replace(/\D/g, '') || '2', 10);
+
+      return invTable.rows.some(item => {
+        const stat = String(item['Status'] || '').trim().toLowerCase();
+        const isOnShelf = stat === 'on shelf' || stat === 'in stock' || stat === 'available';
+        if (!isOnShelf) return false;
+        const iClass = parseInt(String(item['Class'] || '').replace(/\D/g, '') || '0', 10);
+        if (iClass !== normReqClass) return false;
+        const iSize = cleanSize(item['Size']);
+        const isSizeMatch = iSize === normReqSize || (!isNaN(parseFloat(iSize)) && parseFloat(iSize) === parseFloat(normReqSize));
+        const pf = String(item['Picked For'] || '').trim();
+        const notReservedOther = !pf || pf.toLowerCase().includes((empName || '').toLowerCase());
+        return isSizeMatch && notReservedOther;
+      });
+    };
+
+    const isSatisfiedOnSwapSheet = (swapKey, empName) => {
+      const swTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable(swapKey) : null) || snap?.tables?.[swapKey];
+      if (!swTable) return false;
+      const rows = swTable.rows || swTable.rawGrid || [];
+      return rows.some(r => {
+        let rowEmp = '';
+        let rowPick = '';
+        let rowStat = '';
+        if (Array.isArray(r)) {
+          rowEmp = String(r[0] || '').trim();
+          rowPick = String(r[6] || '').trim();
+          rowStat = String(r[7] || '').trim();
+        } else if (r && typeof r === 'object') {
+          rowEmp = String(r['Employee'] || r['Assigned To'] || '').trim();
+          rowPick = String(r['Pick List Item #'] || r['Pick List Glove #'] || r['Pick List Sleeve #'] || r['Pick List'] || '').trim();
+          rowStat = String(r['Status'] || '').trim();
+        }
+        if (!rowEmp || !this.isNameMatch(rowEmp, empName)) return false;
+        const statLower = rowStat.toLowerCase();
+        const hasPick = rowPick && rowPick !== '—' && rowPick !== '-' && !rowPick.includes('Needs Size');
+        const isSatisfiedStatus = statLower.includes('needs equipment') || statLower.includes('in stock') || statLower.includes('ready for delivery') || statLower.includes('delivered');
+        return hasPick || isSatisfiedStatus;
+      });
+    };
+
     // Active personnel in tracked classifications (SUP, GF, F, JRY, AP 1-7) missing rubber equipment
     empDirectory.forEach(empRec => {
       if (this.isDepartedOrPreviousEmployee(empRec.name)) return;
@@ -2400,8 +2451,15 @@ class ProcurementEngine {
           ? `${empRec.name} (⚠️ No preferred size listed in Employees)`
           : `${empRec.name} (${meta.code} - Missing Gloves)`;
 
-        addItem('compliance_missing', 'Gloves', '🧤 Gloves', neededSize, hasNoSize, locationApprovalClass, empLabel, 0, true);
-        markCovered('Gloves', empRec.name);
+        const isCoveredOnSwap = isSatisfiedOnSwapSheet('glove_swaps', empRec.name);
+        const hasShelf = validPref && hasShelfStockAvailable(glovesTable, locationApprovalClass, validPref, empRec.name);
+
+        if (isCoveredOnSwap || hasShelf) {
+          markCovered('Gloves', empRec.name);
+        } else {
+          addItem('compliance_missing', 'Gloves', '🧤 Gloves', neededSize, hasNoSize, locationApprovalClass, empLabel, 0, true);
+          markCovered('Gloves', empRec.name);
+        }
       }
 
       // 4B. Missing Rubber Sleeves (AP 4-7, JRY, SUP, GF, F)
@@ -2413,8 +2471,15 @@ class ProcurementEngine {
           ? `${empRec.name} (⚠️ No preferred size listed in Employees)`
           : `${empRec.name} (${meta.code} - Missing Sleeves)`;
 
-        addItem('compliance_missing', 'Sleeves', '🦺 Sleeves', neededSize, hasNoSize, locationApprovalClass, empLabel, 0, true);
-        markCovered('Sleeves', empRec.name);
+        const isCoveredOnSwap = isSatisfiedOnSwapSheet('sleeve_swaps', empRec.name);
+        const hasShelf = validPref && hasShelfStockAvailable(sleevesTable, locationApprovalClass, validPref, empRec.name);
+
+        if (isCoveredOnSwap || hasShelf) {
+          markCovered('Sleeves', empRec.name);
+        } else {
+          addItem('compliance_missing', 'Sleeves', '🦺 Sleeves', neededSize, hasNoSize, locationApprovalClass, empLabel, 0, true);
+          markCovered('Sleeves', empRec.name);
+        }
       }
     });
 
@@ -2530,8 +2595,9 @@ class ProcurementEngine {
     this.render();
   }
 
-  doesCatalogItemMatch(catalogItemName, itemType, classVal, size, requireSize = true) {
+  doesCatalogItemMatch(catalogItemName, itemType, classVal, size, requireSize = true, catalogPartNumber = '') {
     const name = String(catalogItemName || '').toLowerCase().trim();
+    const partNum = String(catalogPartNumber || '').toLowerCase().trim();
     if (!name) return false;
 
     const cleanType = this.cleanItemType(itemType).toLowerCase();
@@ -2544,24 +2610,83 @@ class ProcurementEngine {
 
     if (!typeMatch) return false;
 
+    let tSize = String(size || '').toLowerCase().trim();
+    tSize = tSize.replace(/^size\s*[:\s]*/i, '').replace(/\s*\(\s*class\s*[^)]*\)/i, '').trim();
+
+    // Prevent Blanket Canister from matching normal blanket orders unless Canister is explicitly requested
+    if (cleanType.includes('blanket')) {
+      const isCanisterCatalog = /\b(?:canister|cannister)\b/i.test(name);
+      const isCanisterRequested = /\b(?:canister|cannister)\b/i.test(tSize) || /\b(?:canister|cannister)\b/i.test(String(itemType || ''));
+      if (isCanisterCatalog !== isCanisterRequested) return false;
+
+      // Also strictly separate Split vs non-Split (Regular / Eyelet / Solid / 36x36) blankets even when requireSize is false
+      const isSplitCatalog = /\bsplit\b/i.test(name);
+      const isSplitRequested = /\bsplit\b/i.test(tSize) || /\bsplit\b/i.test(String(itemType || ''));
+      if (tSize && tSize !== '—' && !tSize.includes('needs size')) {
+        if (isSplitCatalog !== isSplitRequested) return false;
+      }
+    }
+
     const tClassNum = String(classVal || '').replace(/[^0-9]/g, '').trim();
     if (tClassNum) {
-      const classRegex = new RegExp(`(?:class|cl|c)\\s*[-:#]?\\s*${tClassNum}\\b|\\bclass\\s*${tClassNum}\\b`, 'i');
-      const hasClassToken = classRegex.test(name) || name.includes(`cl${tClassNum}`) || name.includes(`class ${tClassNum}`) || name.includes(`class${tClassNum}`);
-      if (!hasClassToken) return false;
+      // Check if catalog item explicitly specifies any class number (0-4) in description or Salisbury part number
+      const anyClassMatch = name.match(/(?:class|cl|c)\s*[-:#]?\s*([0-4])\b|\bclass\s*([0-4])\b/i);
+      const partClassMatch = partNum.match(/^(?:psc|e|g)?([0-4])(?:14|16|18)/i);
+      const catalogClassNum = anyClassMatch ? (anyClassMatch[1] || anyClassMatch[2]) : (partClassMatch ? partClassMatch[1] : null);
+
+      if (catalogClassNum !== null) {
+        if (String(catalogClassNum) !== String(tClassNum)) return false;
+      } else {
+        // Catalog item does NOT mention a class number in its name or part number
+        // Gloves and Sleeves must always specify their class; Blankets/MACKs/etc. (e.g. "Blanket Split") are implicitly Class 4
+        if (cleanType.includes('glove') || cleanType.includes('sleeve')) {
+          return false;
+        }
+      }
     }
 
     if (!requireSize) return true;
 
-    let tSize = String(size || '').toLowerCase().trim();
-    tSize = tSize.replace(/^size\s*[:\s]*/i, '').replace(/\s*\(\s*class\s*[^)]*\)/i, '').trim();
-    if (!tSize || tSize === '—' || tSize.includes('needs size') || tSize === 'standard') return false;
+    if (!tSize || tSize === '—' || tSize.includes('needs size') || tSize === 'standard') {
+      if (cleanType.includes('blanket')) {
+        // Default/Standard blanket matches non-split, non-canister blanket
+        return !/\b(?:split|canister|cannister)\b/i.test(name);
+      }
+      return false;
+    }
 
-    // Numeric size (e.g. 9 vs 9.5, 10 vs 10.5)
+    // Blankets size / style matching (Split vs Regular / Eyelet / Solid / 36x36 vs Canister)
+    if (cleanType.includes('blanket')) {
+      if (/\b(?:canister|cannister)\b/i.test(tSize)) {
+        return /\b(?:canister|cannister)\b/i.test(name);
+      }
+      if (/\bsplit\b/i.test(tSize)) {
+        return /\bsplit\b/i.test(name);
+      }
+      if (/^(?:regular|reg|eyelet|eye|solid|36x36)$/i.test(tSize)) {
+        return !/\b(?:split|canister|cannister)\b/i.test(name) &&
+          (/\b(?:regular|reg|eye|eyelet|solid|36x36)\b/i.test(name) || /\b(?:blanket|blk)\b/i.test(name));
+      }
+    }
+
+    // Numeric glove size (e.g. 9 vs 9.5, 10 vs 10.5)
     if (/^\d+(\.\d+)?$/.test(tSize)) {
-      const esc = tSize.replace(/\./g, '\\.');
-      const numRegex = new RegExp(`(?:^|[^0-9.])${esc}(?:h|in|"|\\b|$)(?!\\.\\d)`, 'i');
-      return numRegex.test(name);
+      if (tSize.endsWith('.5')) {
+        const baseInt = tSize.split('.')[0];
+        const esc = tSize.replace(/\./g, '\\.');
+        const decRegex = new RegExp(`(?:^|[^0-9.])${esc}(?:in|"|\\b|$)(?!\\.\\d)`, 'i');
+        const hNameRegex = new RegExp(`(?:^|[^0-9.])${baseInt}h(?:\\b|$)`, 'i');
+        const hPartRegex = new RegExp(`${baseInt}h(?:[a-z]*)$`, 'i');
+        return decRegex.test(name) || hNameRegex.test(name) || hPartRegex.test(partNum);
+      } else {
+        const esc = tSize.replace(/\./g, '\\.');
+        // Whole size: must NOT be followed by .5 or 'H' (Salisbury half-size suffix)
+        const numRegex = new RegExp(`(?:^|[^0-9.])${esc}(?:in|"|\\b|$)(?!\\.\\d|h)`, 'i');
+        const conflictHRegex = new RegExp(`(?:^|[^0-9.])${esc}h(?:\\b|$)`, 'i');
+        const conflictPartH = new RegExp(`${esc}h(?:[a-z]*)$`, 'i');
+        if (conflictHRegex.test(name) || conflictPartH.test(partNum)) return false;
+        return numRegex.test(name);
+      }
     }
 
     if (tSize === 'regular' || tSize === 'reg') {
@@ -2608,7 +2733,7 @@ class ProcurementEngine {
     if (!this.vendors || !this.vendors.length) return null;
 
     let vendorList = this.vendors;
-    if (specificVendorName) {
+    if (specificVendorName && typeof specificVendorName === 'string') {
       const v = this.vendors.find(vend => vend.name.toLowerCase() === specificVendorName.toLowerCase());
       if (v) {
         vendorList = [v, ...this.vendors.filter(vend => vend.name !== v.name)];
@@ -2627,13 +2752,13 @@ class ProcurementEngine {
     for (const v of vendorList) {
       if (!v.items || !v.items.length) continue;
       const catalog = v.items;
-      const isPrimaryVendor = !specificVendorName || v.name.toLowerCase() === specificVendorName.toLowerCase();
+      const isPrimaryVendor = !specificVendorName || typeof specificVendorName !== 'string' || v.name.toLowerCase() === specificVendorName.toLowerCase();
 
       // 1. Exact match (Type + Class + Size)
-      if (tSize && tSize !== '—' && !tSize.includes('needs size') && tSize !== 'standard') {
+      if (tSize && tSize !== '—' && !tSize.includes('needs size')) {
         const exactMatches = catalog.filter(ci => {
           const priceOk = !/glove|sleeve/i.test(ci.item || '') || (ci.price || 0) <= 350;
-          return priceOk && this.doesCatalogItemMatch(ci.item, itemType, classVal, size, true);
+          return priceOk && this.doesCatalogItemMatch(ci.item, itemType, classVal, size, true, ci.itemNumber);
         });
         if (exactMatches.length > 0) {
           const withPart = exactMatches.find(ci => ci.itemNumber && String(ci.itemNumber).trim() !== '');
@@ -2652,10 +2777,10 @@ class ProcurementEngine {
         }
       }
 
-      // 2. Type + Class match
+      // 2. Type + Class match (generic class-level item without conflicting size)
       const classMatches = catalog.filter(ci => {
         const priceOk = !/glove|sleeve/i.test(ci.item || '') || (ci.price || 0) <= 350;
-        return priceOk && this.doesCatalogItemMatch(ci.item, itemType, classVal, size, false);
+        return priceOk && this.doesCatalogItemMatch(ci.item, itemType, classVal, size, false, ci.itemNumber);
       });
       if (classMatches.length > 0) {
         // Only fall back to class-level partNumber if the class match doesn't specify a different conflicting size
@@ -2680,8 +2805,8 @@ class ProcurementEngine {
         }
       }
 
-      // 3. Fallback Type match - only for general categories
-      if (!/glove|sleeve/i.test(cleanType)) {
+      // 3. Fallback Type match - only for non-glove/sleeve/blanket categories
+      if (!/glove|sleeve|blanket/i.test(cleanType)) {
         const typeMatchItem = catalog.find(ci => {
           const name = (ci.item || '').toLowerCase();
           return name.includes(cleanType.slice(0, 4));
@@ -3743,8 +3868,9 @@ class ProcurementEngine {
       const cleanType = this.cleanItemType(rawType);
       const sizeStr = cleanSizeStr(item.size, item.hasNoSize);
       const classStr = formatClassStr(item.classVal);
-      const resolvedPart = (item.partNumber && String(item.partNumber).trim())
-        || this.getVendorPartNumber(effVendor, cleanType, sizeStr, classStr)
+      const liveCatalogPart = this.getVendorPartNumber(effVendor, cleanType, sizeStr, classStr);
+      const resolvedPart = (liveCatalogPart && String(liveCatalogPart).trim())
+        || (item.partNumber && String(item.partNumber).trim())
         || '';
       const qty = parseInt(item.quantity, 10) || 1;
       if (qty <= 0) return;
@@ -4999,7 +5125,8 @@ class ProcurementEngine {
     let totalUnitsCount = 0;
 
     consolidatedItems.forEach((item, idx) => {
-      const unitPrice = item.price > 0 ? item.price : 0;
+      const catalogPrice = this.getVendorPrice(currentVendorName, item.itemType, item.size, item.classVal);
+      const unitPrice = item.price > 0 ? item.price : (catalogPrice > 0 ? catalogPrice : 0);
       const subtotal = unitPrice * item.quantity;
       totalEst += subtotal;
       totalUnitsCount += item.quantity;
@@ -5014,7 +5141,7 @@ class ProcurementEngine {
             ${this.escapeHtml(item.typeLabel || item.itemType)}
           </td>
           <td style="padding: 8px 10px; text-align: center;">
-            <input type="text" class="mark-ordered-size-input batch-delivery-input" value="${this.escapeHtml(item.size || 'Standard')}" style="width: 80px; text-align: center;">
+            <input type="text" class="mark-ordered-size-input batch-delivery-input" value="${this.escapeHtml(item.size || 'Standard')}" style="width: 80px; text-align: center;" onchange="window.procurementEngine.onMarkOrderRowSizeChange(${idx}, this.value)">
           </td>
           <td style="padding: 8px 10px; text-align: center; color: #94a3b8;">
             ${this.escapeHtml(item.classVal || 'Class 2')}
@@ -5141,6 +5268,26 @@ class ProcurementEngine {
     if (headingEl) headingEl.textContent = `Items in this Order (${rows.length} lines · ${totalUnits} total units)`;
   }
 
+  onMarkOrderRowSizeChange(idx, newSize) {
+    if (!this.pendingMarkOrderedItems || !this.pendingMarkOrderedItems[idx]) return;
+    const item = this.pendingMarkOrderedItems[idx];
+    item.size = newSize;
+    const vSelect = document.getElementById('mark-order-vendor-select');
+    const vendorName = (vSelect && vSelect.value && vSelect.value !== '__custom__') ? vSelect.value : '';
+    if (vendorName) {
+      const price = this.getVendorPrice(vendorName, item.itemType, newSize, item.classVal);
+      const rows = document.querySelectorAll('.mark-ordered-item-row');
+      const row = rows[idx];
+      if (row) {
+        const priceInput = row.querySelector('.mark-ordered-price-input');
+        if (priceInput && price > 0) {
+          priceInput.value = price.toFixed(2);
+          this.recalcMarkOrderedModal();
+        }
+      }
+    }
+  }
+
   onMarkOrderVendorChange(val) {
     const customInput = document.getElementById('mark-order-custom-vendor');
     if (!customInput) return;
@@ -5149,27 +5296,17 @@ class ProcurementEngine {
       customInput.focus();
     } else {
       customInput.style.display = 'none';
-      const v = this.vendors.find(vend => vend.name === val);
-      if (v && v.items && this.pendingMarkOrderedItems) {
+      if (this.pendingMarkOrderedItems) {
         const rows = document.querySelectorAll('.mark-ordered-item-row');
         rows.forEach((r, idx) => {
           const item = this.pendingMarkOrderedItems[idx];
           if (!item) return;
+          const sizeInput = r.querySelector('.mark-ordered-size-input');
+          const effSize = sizeInput ? sizeInput.value.trim() : (item.size || '');
           const priceInput = r.querySelector('.mark-ordered-price-input');
-          const tType = (item.itemType || '').toLowerCase();
-          const tClassNum = (item.classVal || '').replace(/[^0-9]/g, '').trim();
-          const tSize = (item.size || '').toLowerCase().trim();
-
-          const match = v.items.find(ci => {
-            const name = (ci.item || '').toLowerCase();
-            return name.includes(tType.slice(0, 4)) && (!tClassNum || name.includes(`class ${tClassNum}`)) && (!tSize || name.includes(tSize));
-          }) || v.items.find(ci => {
-            const name = (ci.item || '').toLowerCase();
-            return name.includes(tType.slice(0, 4)) && (!tClassNum || name.includes(`class ${tClassNum}`));
-          });
-
-          if (match && match.price > 0 && priceInput && (!/glove|sleeve/i.test(tType) || match.price <= 350)) {
-            priceInput.value = match.price.toFixed(2);
+          const price = this.getVendorPrice(val, item.itemType, effSize, item.classVal);
+          if (price > 0 && priceInput) {
+            priceInput.value = price.toFixed(2);
           }
         });
         this.recalcMarkOrderedModal();
@@ -7005,11 +7142,13 @@ class ProcurementEngine {
 
   openCreateOrderModal() {
     const nextReq = this.generateNextRequestPoNumber();
+    const defaultVendor = (this.selectedVendor && typeof this.selectedVendor === 'object' ? this.selectedVendor.name : this.selectedVendor)
+      || (this.vendors[0] ? this.vendors[0].name : 'Wagner Smith');
     this.openEditOrderModal({
       rowIdx: null,
       poNum: nextReq,
       orderNum: nextReq,
-      vendor: this.selectedVendor || (this.vendors[0] ? this.vendors[0].name : 'Wagner Smith'),
+      vendor: defaultVendor,
       date: new Date().toISOString().split('T')[0],
       expDeliv: '',
       status: 'Ordered',
@@ -7078,7 +7217,10 @@ class ProcurementEngine {
     const orderYmd = toYmd(po.date) || new Date().toISOString().split('T')[0];
     const delivYmd = toYmd(po.expDeliv) || '';
 
-    const currentVendor = po.vendor || '';
+    const rawVendor = po.vendor;
+    const currentVendor = (typeof rawVendor === 'object' && rawVendor !== null)
+      ? String(rawVendor.name || '')
+      : String(rawVendor || (this.selectedVendor?.name || (this.vendors[0]?.name || '')));
     const vendorExists = this.vendors.some(v => v.name.toLowerCase() === currentVendor.toLowerCase());
 
     let vendorOptions = this.vendors.map(v => 
@@ -7120,6 +7262,19 @@ class ProcurementEngine {
         unitPrice: po.price || 0,
         employeeName: ''
       });
+    }
+
+    // Refresh part numbers & missing prices from current vendor catalog
+    for (const it of this.editingOrderItems) {
+      const cat = it.itemType || it.category || 'Gloves';
+      const sz = it.size || 'Standard';
+      const cl = it.classVal || 'Class 2';
+      const livePart = this.getVendorPartNumber(currentVendor, cat, sz, cl);
+      if (livePart) it.partNumber = livePart;
+      if (!(it.unitPrice > 0)) {
+        const livePrice = this.getVendorPrice(currentVendor, cat, sz, cl);
+        if (livePrice > 0) it.unitPrice = livePrice;
+      }
     }
 
     // Correlate line items with assigned linemen from safety_equipment_needs, swap sheets, and order notes
@@ -7302,7 +7457,7 @@ class ProcurementEngine {
             </div>
             <div>
               <label style="display: block; font-size: 11px; font-weight: 600; color: #94a3b8; margin-bottom: 4px;">Class / Voltage</label>
-              <select id="add-order-item-class" class="batch-delivery-input" onchange="window.procurementEngine.onAddOrderItemChange()">
+              <select id="add-order-item-class" class="batch-delivery-input" onchange="window.procurementEngine.onAddOrderItemChange(true)">
                 <option value="Class 0">Class 0</option>
                 <option value="Class 2" selected>Class 2</option>
                 <option value="Class 3">Class 3</option>
@@ -7312,7 +7467,7 @@ class ProcurementEngine {
             </div>
             <div>
               <label style="display: block; font-size: 11px; font-weight: 600; color: #94a3b8; margin-bottom: 4px;">Size</label>
-              <input type="text" id="add-order-item-size" list="order-item-size-suggestions" class="batch-delivery-input" placeholder="e.g. 8.5" value="8.5" style="text-align: center; font-weight: 600;" onchange="window.procurementEngine.onAddOrderItemChange()" oninput="window.procurementEngine.onAddOrderItemChange()">
+              <input type="text" id="add-order-item-size" list="order-item-size-suggestions" class="batch-delivery-input" placeholder="e.g. 8.5" value="8.5" style="text-align: center; font-weight: 600;" onchange="window.procurementEngine.onAddOrderItemChange(true)" oninput="window.procurementEngine.onAddOrderItemChange(true)">
               <datalist id="order-item-size-suggestions">
                 <option value="8"></option>
                 <option value="8.5"></option>
@@ -7399,16 +7554,22 @@ class ProcurementEngine {
     }
 
     const vSelect = document.getElementById('edit-order-vendor-select');
-    const currentVendor = (vSelect && vSelect.value && vSelect.value !== '__custom__') ? vSelect.value : (this.editingOrder?.vendor || '');
+    const rawVendor = this.editingOrder?.vendor;
+    const fallbackVendor = (typeof rawVendor === 'object' && rawVendor !== null) ? (rawVendor.name || '') : String(rawVendor || '');
+    const currentVendor = (vSelect && vSelect.value && vSelect.value !== '__custom__') ? vSelect.value : fallbackVendor;
 
     container.innerHTML = this.editingOrderItems.map((it, idx) => {
-      const lineCost = (it.unitPrice > 0 ? (it.unitPrice * (it.quantity || 1)) : 0);
+      const qty = parseInt(it.quantity, 10) || 1;
+      const lineCost = (it.unitPrice > 0 ? (it.unitPrice * qty) : 0);
       const isShelf = !it.employeeName || it.employeeName.toLowerCase().includes('shelf') || it.employeeName.toLowerCase().includes('stock');
       const assigneeBadge = isShelf 
         ? `<span class="badge" style="background: rgba(148, 163, 184, 0.15); color: #cbd5e1; border: 1px solid rgba(148, 163, 184, 0.3); font-size: 11px;">📦 On Shelf</span>`
         : `<span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.35); font-size: 11px;">👤 ${this.escapeHtml(it.employeeName)}</span>`;
 
-      const partNum = it.partNumber || (currentVendor ? this.getVendorPartNumber(currentVendor, it.itemType || it.category || 'Gloves', it.size || 'Standard', it.classVal || 'Class 2') : '');
+      const livePart = currentVendor ? this.getVendorPartNumber(currentVendor, it.itemType || it.category || 'Gloves', it.size || 'Standard', it.classVal || 'Class 2') : '';
+      const partNum = livePart || it.partNumber || '';
+      if (livePart) it.partNumber = livePart;
+
       const partBadge = partNum
         ? `<span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fcd34d; border: 1px solid rgba(245, 158, 11, 0.35); font-size: 11px; font-family: monospace;">Part #: ${this.escapeHtml(partNum)}</span>`
         : '';
@@ -7416,16 +7577,19 @@ class ProcurementEngine {
       return `
         <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(15, 23, 42, 0.65); border: 1px solid rgba(59, 130, 246, 0.25); border-radius: 6px; padding: 8px 12px; gap: 10px;">
           <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-            <span style="font-weight: 800; font-size: 13px; color: #38bdf8; min-width: 32px;">(${it.quantity || 1}x)</span>
+            <div style="display: inline-flex; align-items: center; gap: 4px;" title="Edit quantity">
+              <span style="font-size: 11px; color: #94a3b8; font-weight: 600;">Qty:</span>
+              <input type="number" min="1" step="1" class="batch-delivery-input" value="${qty}" onchange="window.procurementEngine.updateEditOrderItemField(${idx}, 'quantity', this.value)" style="width: 54px; padding: 3px 6px; font-size: 12px; font-weight: 800; color: #38bdf8; text-align: center;">
+            </div>
             <span style="font-weight: 700; color: #f8fafc; font-size: 13px;">${this.escapeHtml(it.itemType || it.category || 'Gloves')}</span>
             <span class="badge" style="background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4); font-size: 11px; padding: 1px 6px;">${this.escapeHtml(it.classVal || 'Class 2')}</span>
             <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #6ee7b7; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 11px; font-weight: 700; padding: 1px 6px;">Size: ${this.escapeHtml(it.size || 'Standard')}</span>
             ${partBadge}
-            ${it.unitPrice > 0 ? `
-              <span style="font-family: monospace; font-size: 12px; color: #34d399; font-weight: 600;">
-                @ $${it.unitPrice.toFixed(2)} ${it.quantity > 1 ? `($${lineCost.toFixed(2)})` : ''}
-              </span>
-            ` : ''}
+            <div style="display: inline-flex; align-items: center; gap: 4px;" title="Edit unit price ($)">
+              <span style="font-size: 11px; color: #64748b; font-family: monospace;">@ $</span>
+              <input type="number" min="0" step="0.01" class="batch-delivery-input" value="${it.unitPrice > 0 ? it.unitPrice.toFixed(2) : ''}" placeholder="0.00" onchange="window.procurementEngine.updateEditOrderItemField(${idx}, 'unitPrice', this.value)" style="width: 78px; padding: 3px 6px; font-size: 12px; font-family: monospace; font-weight: 700; color: #34d399; text-align: right;">
+              ${qty > 1 && lineCost > 0 ? `<span style="font-family: monospace; font-size: 11.5px; color: #94a3b8;">($${lineCost.toFixed(2)})</span>` : ''}
+            </div>
             ${assigneeBadge}
           </div>
           <button type="button" class="btn btn-xs" onclick="window.procurementEngine.removeEditOrderItem(${idx})" style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.35); color: #f87171; padding: 3px 8px; font-size: 11px; border-radius: 4px; cursor: pointer; display: inline-flex; align-items: center; gap: 3px;" title="Remove this line item">
@@ -7434,6 +7598,18 @@ class ProcurementEngine {
         </div>
       `;
     }).join('');
+  }
+
+  updateEditOrderItemField(idx, field, val) {
+    if (!this.editingOrderItems || !this.editingOrderItems[idx]) return;
+    const item = this.editingOrderItems[idx];
+    if (field === 'quantity') {
+      item.quantity = Math.max(1, parseInt(val, 10) || 1);
+    } else if (field === 'unitPrice') {
+      item.unitPrice = Math.max(0, parseFloat(val) || 0);
+    }
+    this.syncEditOrderSummaryFromItems();
+    this.renderEditOrderItemsContainer();
   }
 
   addOrderItemToEditOrder() {
@@ -7473,28 +7649,14 @@ class ProcurementEngine {
     this.syncEditOrderSummaryFromItems();
     this.renderEditOrderItemsContainer();
 
-    if (unitPrice > 0) {
-      const totalPriceInput = document.getElementById('edit-order-total-price');
-      const currentTotal = parseFloat(totalPriceInput?.value) || 0;
-      const newTotal = currentTotal + (unitPrice * qty);
-      if (totalPriceInput) totalPriceInput.value = newTotal.toFixed(2);
-    }
-
     if (qtyInput) qtyInput.value = '1';
   }
 
   removeEditOrderItem(idx) {
     if (!this.editingOrderItems || !this.editingOrderItems[idx]) return;
-    const removed = this.editingOrderItems.splice(idx, 1)[0];
+    this.editingOrderItems.splice(idx, 1);
     this.syncEditOrderSummaryFromItems();
     this.renderEditOrderItemsContainer();
-
-    if (removed && removed.unitPrice > 0) {
-      const totalPriceInput = document.getElementById('edit-order-total-price');
-      const currentTotal = parseFloat(totalPriceInput?.value) || 0;
-      const newTotal = Math.max(0, currentTotal - (removed.unitPrice * (removed.quantity || 1)));
-      if (totalPriceInput) totalPriceInput.value = newTotal > 0 ? newTotal.toFixed(2) : '';
-    }
   }
 
   syncEditOrderSummaryFromItems() {
@@ -7507,6 +7669,19 @@ class ProcurementEngine {
     });
     const itemsInput = document.getElementById('edit-order-items');
     if (itemsInput) itemsInput.value = summaryParts.join('; ');
+
+    // Recalculate Total Order Cost ($) from line items
+    const totalPriceInput = document.getElementById('edit-order-total-price');
+    if (totalPriceInput) {
+      const calcTotal = this.editingOrderItems.reduce((sum, it) => {
+        const q = parseInt(it.quantity, 10) || 1;
+        const p = parseFloat(it.unitPrice) || 0;
+        return sum + (q * p);
+      }, 0);
+      if (calcTotal > 0 || this.editingOrderItems.length === 0) {
+        totalPriceInput.value = calcTotal > 0 ? calcTotal.toFixed(2) : '';
+      }
+    }
 
     // Auto-update total unit count in Notes & Reference Info (Issue 2)
     const totalUnits = this.editingOrderItems.reduce((sum, it) => sum + (parseInt(it.quantity, 10) || 1), 0);
@@ -7558,6 +7733,7 @@ class ProcurementEngine {
           <option value="Regular"></option>
           <option value="Split"></option>
           <option value="Eyelet"></option>
+          <option value="Canister"></option>
         `;
       }
     } else if (cat === 'MACKs') {
@@ -7636,8 +7812,8 @@ class ProcurementEngine {
     if (vendor && vendor !== '__custom__' && size) {
       const price = this.getVendorPrice(vendor, cat, size, classVal);
       const priceInput = document.getElementById('add-order-item-price');
-      if (price > 0 && priceInput && (forcePriceUpdate || document.activeElement !== priceInput)) {
-        priceInput.value = price.toFixed(2);
+      if (priceInput && (forcePriceUpdate || document.activeElement !== priceInput)) {
+        priceInput.value = price > 0 ? price.toFixed(2) : '';
       }
     }
   }
@@ -7664,9 +7840,15 @@ class ProcurementEngine {
     }
     if (this.editingOrderItems && val && val !== '__custom__') {
       this.editingOrderItems.forEach(it => {
-        it.partNumber = this.getVendorPartNumber(val, it.itemType || it.category || 'Gloves', it.size || 'Standard', it.classVal || 'Class 2');
+        const cat = it.itemType || it.category || 'Gloves';
+        const sz = it.size || 'Standard';
+        const cl = it.classVal || 'Class 2';
+        it.partNumber = this.getVendorPartNumber(val, cat, sz, cl);
+        const catPrice = this.getVendorPrice(val, cat, sz, cl);
+        if (catPrice > 0) it.unitPrice = catPrice;
       });
     }
+    this.syncEditOrderSummaryFromItems();
     this.renderEditOrderItemsContainer();
     this.onAddOrderItemChange(true);
   }
@@ -8271,7 +8453,10 @@ class ProcurementEngine {
     const vendorName = orderInfo.vendor || '';
     const orderDate = orderInfo.orderDate || '';
     const expDelivery = orderInfo.expectedDelivery || '';
-    const price = item.price > 0 ? item.price.toFixed(2) : (orderInfo.price > 0 ? orderInfo.price.toFixed(2) : '');
+    const currentVendor = vendorName || (this.selectedVendor?.name || (this.vendors[0]?.name || ''));
+    const catalogPrice = this.getVendorPrice(currentVendor, item.itemType, item.size, item.classVal);
+    const rawPriceVal = item.price > 0 ? item.price : (orderInfo.price > 0 ? orderInfo.price : catalogPrice);
+    const price = rawPriceVal > 0 ? rawPriceVal.toFixed(2) : '';
 
     // Get active employees list for selection
     const snap = (this.db && typeof this.db.getSnapshot === 'function')
@@ -8299,7 +8484,6 @@ class ProcurementEngine {
       empOptions += `<option value="${this.escapeHtml(currentAssignee)}" selected>👤 ${this.escapeHtml(currentAssignee)} (Current)</option>`;
     }
 
-    const currentVendor = vendorName || (this.vendors[0]?.name || '');
     const vendorExists = this.vendors.some(v => v.name.toLowerCase() === currentVendor.toLowerCase());
 
     let vendorOptions = this.vendors.map(v => 
@@ -8356,11 +8540,11 @@ class ProcurementEngine {
       <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 14px; margin-bottom: 14px;">
         <div>
           <label style="display: block; font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 5px;">Size</label>
-          <input type="text" id="edit-pending-size" class="batch-delivery-input" value="${this.escapeHtml(item.size || 'Standard')}" style="text-align: center; font-weight: 600;">
+          <input type="text" id="edit-pending-size" class="batch-delivery-input" value="${this.escapeHtml(item.size || 'Standard')}" style="text-align: center; font-weight: 600;" onchange="window.procurementEngine.onEditPendingItemSpecChange()" oninput="window.procurementEngine.onEditPendingItemSpecChange()">
         </div>
         <div>
           <label style="display: block; font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 5px;">Class / KV</label>
-          <input type="text" id="edit-pending-class" class="batch-delivery-input" value="${this.escapeHtml(item.classVal || 'Class 2')}" style="text-align: center; color: #94a3b8;">
+          <input type="text" id="edit-pending-class" class="batch-delivery-input" value="${this.escapeHtml(item.classVal || 'Class 2')}" style="text-align: center; color: #94a3b8;" onchange="window.procurementEngine.onEditPendingItemSpecChange()" oninput="window.procurementEngine.onEditPendingItemSpecChange()">
         </div>
         <div>
           <label style="display: block; font-size: 12px; font-weight: 600; color: #94a3b8; margin-bottom: 5px;">Unit Price ($)</label>
@@ -8392,6 +8576,22 @@ class ProcurementEngine {
     this.editingPendingItem = null;
   }
 
+  onEditPendingItemSpecChange() {
+    if (!this.editingPendingItem || !this.editingPendingItem.item) return;
+    const item = this.editingPendingItem.item;
+    const vSelect = document.getElementById('edit-pending-vendor-select');
+    const vendor = (vSelect && vSelect.value && vSelect.value !== '__custom__') ? vSelect.value : '';
+    const size = document.getElementById('edit-pending-size')?.value?.trim() || item.size || 'Standard';
+    const classVal = document.getElementById('edit-pending-class')?.value?.trim() || item.classVal || 'Class 2';
+    const priceInput = document.getElementById('edit-pending-price');
+    if (vendor && priceInput && document.activeElement !== priceInput) {
+      const catPrice = this.getVendorPrice(vendor, item.itemType, size, classVal);
+      if (catPrice > 0) {
+        priceInput.value = catPrice.toFixed(2);
+      }
+    }
+  }
+
   onEditPendingVendorChange(val) {
     const custom = document.getElementById('edit-pending-custom-vendor');
     if (!custom) return;
@@ -8400,6 +8600,7 @@ class ProcurementEngine {
       custom.focus();
     } else {
       custom.style.display = 'none';
+      this.onEditPendingItemSpecChange();
     }
   }
 

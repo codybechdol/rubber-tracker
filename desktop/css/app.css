@@ -238,6 +238,187 @@ body {
   text-align: center;
 }
 
+/* Expandable / Collapsible Navigation Sections */
+.nav-section {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+  margin-bottom: 2px;
+}
+
+.nav-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px 8px 14px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted, #94a3b8);
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.15s ease;
+}
+
+.nav-section-header:hover {
+  color: #f8fafc;
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.nav-section-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.nav-section-chevron {
+  font-size: 10px;
+  transition: transform 0.2s ease;
+  color: #64748b;
+}
+
+.nav-section.collapsed .nav-section-chevron {
+  transform: rotate(-90deg);
+}
+
+.nav-section.collapsed .nav-section-body {
+  display: none;
+}
+
+.nav-section-body {
+  padding-bottom: 6px;
+}
+
+.nav-subgroup-title {
+  padding: 8px 14px 4px 18px;
+  font-size: 10px;
+  font-weight: 700;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.nav-item.nav-sub-item {
+  padding: 7px 14px 7px 22px;
+  font-size: 12.5px;
+  gap: 8px;
+}
+
+.nav-item.nav-sub-item .nav-item-icon {
+  font-size: 14px;
+  width: 18px;
+}
+
+/* Category & Subtab Styling in Sheets View */
+.sheet-tabs-container {
+  display: flex;
+  flex-direction: column;
+  background-color: #0f172a;
+  border-bottom: 2px solid var(--border-color);
+}
+
+.sheet-group-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px 0 12px;
+  background: #090e17;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  overflow-x: auto;
+}
+
+.sheet-group-btn {
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #94a3b8;
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-radius: 6px 6px 0 0;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.sheet-group-btn:hover {
+  color: #f1f5f9;
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.sheet-group-btn.active {
+  color: #38bdf8;
+  background: #1e293b;
+  border-color: rgba(255, 255, 255, 0.12);
+  border-top: 2px solid #38bdf8;
+}
+
+.sheet-nav-action-btn:hover {
+  background: rgba(255, 255, 255, 0.12) !important;
+  color: #ffffff !important;
+  border-color: rgba(255, 255, 255, 0.28) !important;
+}
+
+.sheet-items-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 12px;
+  background: #1e293b;
+  gap: 10px;
+  overflow-x: auto;
+}
+
+.sheet-items-list {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+}
+
+.sheet-subtabs-pill-box {
+  display: flex;
+  align-items: center;
+  background: #0f172a;
+  padding: 3px;
+  border-radius: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  flex-shrink: 0;
+}
+
+.sheet-subtab-pill {
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #94a3b8;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.sheet-subtab-pill:hover {
+  color: #f8fafc;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.sheet-subtab-pill.active {
+  background: #3b82f6;
+  color: #ffffff;
+  font-weight: 700;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+}
+
 /* Main Content Area */
 .app-content {
   flex: 1;

@@ -2897,6 +2897,14 @@ class EmployeeProfileEngine {
       });
     }
 
+    // Auto-sync updated glove & sleeve sizes directly to any pending swap rows ("Needs Equipment")
+    if (newGlove) {
+      await this.syncEmployeeSizeToSwaps(displayName, 'gloves', newGlove);
+    }
+    if (newSleeve) {
+      await this.syncEmployeeSizeToSwaps(displayName, 'sleeves', newSleeve);
+    }
+
     await this.db.persistSnapshot(this.db.snapshot);
 
     // Refresh profile modal
@@ -2912,6 +2920,150 @@ class EmployeeProfileEngine {
           this.openWelcomeLetterModal(displayName);
         }
       }, 350);
+    }
+  }
+
+  /**
+   * Automatically updates swap sheets when employee size is saved/changed,
+   * matching an available on-shelf inventory item without having to re-generate swaps.
+   */
+  async syncEmployeeSizeToSwaps(displayName, itemType, newSize) {
+    if (!displayName || !newSize) return;
+    const cleanSize = String(newSize).replace(/^(none|n\/a|tbd|—|-)$/i, '').trim();
+    if (!cleanSize) return;
+
+    const isGlove = (itemType === 'glove' || itemType === 'gloves');
+    const swapKey = isGlove ? 'glove_swaps' : 'sleeve_swaps';
+    const invKey = isGlove ? 'gloves' : 'sleeves';
+
+    const swapTable = this.db.getTable(swapKey);
+    const invTable = this.db.getTable(invKey);
+    if (!swapTable) return;
+
+    const rows = swapTable.rows || [];
+    const grid = swapTable.rawGrid || [];
+
+    // Find any row for this employee where size was missing or Needs Size
+    let matchedRow = rows.find(r => {
+      const emp = String(r['Employee'] || r['Assigned To'] || '').trim();
+      return this.isNameMatch(emp, displayName);
+    });
+
+    let gridIdx = -1;
+    let gridRow = null;
+    for (let i = 0; i < grid.length; i++) {
+      const gEmp = String(grid[i]?.[0] || '').trim();
+      if (this.isNameMatch(gEmp, displayName)) {
+        gridIdx = i;
+        gridRow = grid[i];
+        break;
+      }
+    }
+
+    if (!matchedRow && !gridRow) return;
+
+    // Check if the row currently needs size or is a Needs Equipment row
+    const curSize = String((matchedRow && matchedRow['Size']) || (gridRow && gridRow[2]) || '').trim();
+    const curPick = String((matchedRow && (matchedRow['Pick List Item #'] || matchedRow['Pick List Glove #'] || matchedRow['Pick List Sleeve #'])) || (gridRow && gridRow[6]) || '').trim();
+    const curStat = String((matchedRow && matchedRow['Status']) || (gridRow && gridRow[7]) || '').trim().toLowerCase();
+
+    const isNeedsSizeState = curSize.includes('Needs Size') || curPick.includes('Needs Size') || curStat.includes('needs size') || !curSize || curSize === '—';
+    if (!isNeedsSizeState && curSize === cleanSize) return; // Size unchanged
+
+    // Determine target class
+    let targetClass = 2;
+    if (matchedRow && (matchedRow['Class'] || matchedRow['KV'])) {
+      const m = String(matchedRow['Class'] || matchedRow['KV']).match(/\d+/);
+      if (m) targetClass = parseInt(m[0], 10);
+    } else {
+      const pref = this.getPreferredPpeClass(displayName, isGlove ? 'gloves' : 'sleeves');
+      const m = String(pref || '').match(/\d+/);
+      if (m) targetClass = parseInt(m[0], 10);
+    }
+
+    // Try to find available on-shelf inventory item of the new size
+    let pickedItemNum = '—';
+    let pickStatus = 'Need to Purchase ❌';
+    let pickListItemData = null;
+    let isSizeUp = false;
+
+    if (invTable && Array.isArray(invTable.rows)) {
+      const useSize = isGlove ? parseFloat(cleanSize) : cleanSize;
+
+      // Exact match
+      const exactMatch = invTable.rows.find(it => {
+        const stat = String(it['Status'] || '').trim().toLowerCase();
+        const isOnShelf = stat === 'on shelf' || stat === 'in stock';
+        const iClass = parseInt(String(it['Class'] || '').replace(/\D/g, '') || '0', 10);
+        const iSize = isGlove ? parseFloat(it['Size']) : String(it['Size'] || '').trim();
+        const sizeMatch = isGlove ? (iSize === useSize) : (iSize.toLowerCase() === useSize.toLowerCase());
+        const pf = String(it['Picked For'] || '').trim().toLowerCase();
+        const notReservedOther = !pf || pf.includes(displayName.toLowerCase());
+        return isOnShelf && iClass === targetClass && sizeMatch && notReservedOther;
+      });
+
+      if (exactMatch) {
+        pickedItemNum = String(exactMatch['Item #'] || exactMatch['Glove'] || exactMatch['Sleeve'] || exactMatch['ESL ID'] || '').trim();
+        pickStatus = 'Needs Equipment';
+        pickListItemData = exactMatch;
+      } else if (isGlove && !isNaN(useSize)) {
+        // Size up match (+0.5)
+        const sizeUpMatch = invTable.rows.find(it => {
+          const stat = String(it['Status'] || '').trim().toLowerCase();
+          const isOnShelf = stat === 'on shelf' || stat === 'in stock';
+          const iClass = parseInt(String(it['Class'] || '').replace(/\D/g, '') || '0', 10);
+          const iSize = parseFloat(it['Size']);
+          const pf = String(it['Picked For'] || '').trim().toLowerCase();
+          const notReservedOther = !pf || pf.includes(displayName.toLowerCase());
+          return isOnShelf && iClass === targetClass && iSize === useSize + 0.5 && notReservedOther;
+        });
+
+        if (sizeUpMatch) {
+          pickedItemNum = String(sizeUpMatch['Item #'] || sizeUpMatch['Glove'] || sizeUpMatch['Sleeve'] || sizeUpMatch['ESL ID'] || '').trim();
+          pickStatus = 'Needs Equipment (Size Up) ⚠️';
+          pickListItemData = sizeUpMatch;
+          isSizeUp = true;
+        }
+      }
+    }
+
+    // Update row object
+    if (matchedRow) {
+      matchedRow['Size'] = cleanSize;
+      matchedRow['Pick List Item #'] = pickedItemNum;
+      matchedRow['Status'] = pickStatus;
+      if (pickListItemData) {
+        matchedRow['Stage 1 Pick Status'] = pickListItemData['Status'] || 'On Shelf';
+        matchedRow['Stage 1 Pick Assigned'] = pickListItemData['Assigned To'] || 'On Shelf';
+        const rawDate = pickListItemData['Test Date'] || pickListItemData['Date Assigned'];
+        const parsedD = rawDate ? this.parseDate(rawDate) : null;
+        matchedRow['Stage 1 Pick Date'] = parsedD ? this.formatDateDisplay(parsedD) : (rawDate || '');
+      }
+    }
+
+    // Update raw grid row
+    if (gridRow) {
+      gridRow[2] = cleanSize;       // Col C: Size
+      gridRow[6] = pickedItemNum;   // Col G: Pick List Item #
+      gridRow[7] = pickStatus;      // Col H: Status
+      if (pickListItemData) {
+        gridRow[10] = pickListItemData['Status'] || 'On Shelf';
+        gridRow[11] = pickListItemData['Assigned To'] || 'On Shelf';
+        const rawDate = pickListItemData['Test Date'] || pickListItemData['Date Assigned'];
+        const parsedD = rawDate ? this.parseDate(rawDate) : null;
+        gridRow[12] = parsedD ? this.formatDateDisplay(parsedD) : (rawDate || '');
+      }
+    }
+
+    if (this.db && typeof this.db.saveManualPick === 'function' && pickedItemNum !== '—') {
+      const oldItem = (matchedRow && matchedRow['Current Glove #']) || (gridRow && gridRow[1]) || '';
+      this.db.saveManualPick(swapKey, displayName, oldItem, pickedItemNum, pickStatus, false);
+    }
+
+    await this.db.persistSnapshot(this.db.snapshot);
+
+    if (window.sheetNavigator && window.sheetNavigator.currentSheetKey === swapKey) {
+      window.sheetNavigator.renderCurrentSheet();
     }
   }
 
@@ -2938,11 +3090,28 @@ class EmployeeProfileEngine {
       : (window.localDB ? window.localDB.getSnapshot() : null);
     const locTable = snap?.tables?.['locations'];
     if (locTable && locTable.rows) {
-      const match = locTable.rows.find(r => {
+      const matches = locTable.rows.filter(r => {
         const lName = String(r['Location'] || Object.values(r)[0] || '').replace(/\s*\([^)]*\)/g, '').trim().toLowerCase();
         return lName === locClean;
       });
-      if (match) {
+      if (matches.length > 0) {
+        let match = matches[0];
+        if (matches.length > 1) {
+          const canonical = matches.find(m => {
+            const dt = Number(m['Drive Time (min)'] !== undefined ? m['Drive Time (min)'] : m['Drive Time']);
+            const dir = String(m['Direction'] || '').toLowerCase();
+            return dt === 0 || dir === 'home';
+          });
+          if (canonical) {
+            match = canonical;
+          } else {
+            const nonDefault = matches.find(m => {
+              const a = String(m['Rubber Class Approval'] || m['Approval'] || Object.values(m)[6] || '').trim().toUpperCase();
+              return a && a !== 'CL2';
+            });
+            match = nonDefault || matches[matches.length - 1];
+          }
+        }
         const app = String(match['Rubber Class Approval'] || match['Approval'] || Object.values(match)[6] || '').trim().toUpperCase();
         if (app) return app;
       }
@@ -2962,7 +3131,7 @@ class EmployeeProfileEngine {
       'butte': 'CL2',
       'elliston': 'CL2',
       'ennis': 'CL2',
-      'helena': 'CL2',
+      'helena': 'CL2 & CL3',
       'kalispell': 'CL2',
       'missoula': 'CL2',
       'three forks': 'CL2',
@@ -3011,9 +3180,12 @@ class EmployeeProfileEngine {
       ? window.ppeTrackingEngine.parseTrackedClassification(data.role)
       : null;
 
-    const isExcluded = !!(window.ppeTrackingEngine && typeof window.ppeTrackingEngine.isEmployeeExcluded === 'function' && window.ppeTrackingEngine.isEmployeeExcluded(empName));
+    const isExcluded = !!(window.ppeTrackingEngine && typeof window.ppeTrackingEngine.isEmployeeExcluded === 'function' && window.ppeTrackingEngine.isEmployeeExcluded(empName, data.jobNumber));
+    const isSwapsExcluded = !!(window.ppeTrackingEngine && typeof window.ppeTrackingEngine.isEmployeeSwapsExcluded === 'function' && window.ppeTrackingEngine.isEmployeeSwapsExcluded(empName));
+    const baseCrew = (data.jobNumber ? String(data.jobNumber).replace(/\.\d+.*$/, '').trim() : '') ||
+      (window.ppeTrackingEngine && typeof window.ppeTrackingEngine.getEmployeeBaseCrew === 'function' ? window.ppeTrackingEngine.getEmployeeBaseCrew(empName) : '');
 
-    // If explicitly excluded from Rubber PPE tracking
+    // If explicitly excluded from Rubber PPE tracking due to non-electric crew discipline (Gas, Substation, Mechanic)
     if (isExcluded) {
       const codeLabel = classMeta ? classMeta.code : (data.role || 'Exempt');
       return `
@@ -3028,16 +3200,46 @@ class EmployeeProfileEngine {
                 </span>
               </div>
               <div style="font-size: 11.5px; color: #94a3b8; margin-top: 2px;">
-                This employee is manually excluded from Rubber PPE deficit tracking, alert badges, and compliance metrics.
+                This crew discipline (${this.escapeHtml(baseCrew || 'Specialized')}) does not require rubber PPE.
               </div>
             </div>
           </div>
-          <button type="button" class="btn btn-sm" onclick="if(window.ppeTrackingEngine){ window.ppeTrackingEngine.setEmployeeExcluded('${this.escapeJs(empName)}', false); if(window.employeeProfileEngine){ window.employeeProfileEngine.openProfileModal('${this.escapeJs(empName)}', 'equipment'); } }" style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.35); color: #6ee7b7; font-size: 11px; padding: 4px 10px; border-radius: 4px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;">
-            <span>↩</span> Re-Include in Tracking
+        </div>
+      `;
+    }
+
+    let prefixBanner = '';
+    if (isSwapsExcluded) {
+      prefixBanner = `
+        <div class="ppe-profile-swaps-excluded-card" style="background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.35); border-radius: 8px; padding: 10px 14px; margin-bottom: 14px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span style="font-size: 18px;">🚫</span>
+            <div>
+              <div style="font-size: 12.5px; font-weight: 700; color: #fbbf24; display: flex; align-items: center; gap: 6px;">
+                <span>Excluded from Swaps & Purchase Needs</span>
+                <span class="badge" style="background: rgba(245, 158, 11, 0.2); color: #fde68a; font-size: 10px; padding: 1px 6px; border-radius: 4px;">
+                  Crew ${this.escapeHtml(baseCrew || 'Current')}
+                </span>
+              </div>
+              <div style="font-size: 11px; color: #fcd34d; margin-top: 2px;">
+                This employee is excluded from Glove/Sleeve Swaps and Purchase Needs while on Crew ${this.escapeHtml(baseCrew || 'current')}. Automatically re-included if moved to another crew.
+              </div>
+            </div>
+          </div>
+          <button type="button" class="btn btn-sm" onclick="if(window.ppeTrackingEngine){ window.ppeTrackingEngine.setEmployeeExcluded('${this.escapeJs(empName)}', false); if(window.employeeProfileEngine){ window.employeeProfileEngine.openProfileModal('${this.escapeJs(empName)}', 'equipment'); } }" style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.35); color: #6ee7b7; font-size: 11px; padding: 3px 8px; border-radius: 4px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;">
+            <span>↩</span> Re-Include in Swaps & Needs
           </button>
         </div>
       `;
     }
+
+    const excludeBtnHtml = isSwapsExcluded
+      ? `<button type="button" class="btn btn-xs btn-secondary" onclick="if(window.ppeTrackingEngine){ window.ppeTrackingEngine.setEmployeeExcluded('${this.escapeJs(empName)}', false); if(window.employeeProfileEngine){ window.employeeProfileEngine.openProfileModal('${this.escapeJs(empName)}', 'equipment'); } }" style="font-size: 10px; padding: 2px 6px; color: #34d399; border-color: rgba(16, 185, 129, 0.3);" title="Re-include this employee in Swaps & Purchase Needs">
+          ↩ Include in Swaps
+        </button>`
+      : `<button type="button" class="btn btn-xs btn-secondary" onclick="if(window.ppeTrackingEngine){ window.ppeTrackingEngine.promptExcludeEmployee('${this.escapeJs(empName)}'); if(window.employeeProfileEngine){ window.employeeProfileEngine.openProfileModal('${this.escapeJs(empName)}', 'equipment'); } }" style="font-size: 10px; padding: 2px 6px; color: #94a3b8; border-color: rgba(148, 163, 184, 0.3);" title="Exclude this employee from Swaps & Purchase Needs while on Crew ${this.escapeHtml(baseCrew || 'current')}">
+          🚫 Exclude from Swaps
+        </button>`;
 
     const allEq = data.assignedEquipment || [];
     const hasGloves = allEq.some(e => e.eqKey === 'gloves');
@@ -3047,7 +3249,7 @@ class EmployeeProfileEngine {
     if (hasGloves && hasSleeves) {
       const codeLabel = classMeta ? classMeta.code : (data.role || 'Equipped');
       const ruleText = classMeta ? classMeta.ruleSummary : 'Rubber Gloves and Sleeves are both assigned and active.';
-      return `
+      return prefixBanner + `
         <div class="ppe-profile-compliance-card" style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; padding: 12px 16px; margin-bottom: 18px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
           <div style="display: flex; align-items: center; gap: 10px;">
             <span style="font-size: 20px;">🛡️</span>
@@ -3066,11 +3268,7 @@ class EmployeeProfileEngine {
           <div style="display: flex; gap: 6px; font-size: 11px; flex-wrap: wrap; align-items: center;">
             <span style="background: rgba(16, 185, 129, 0.15); color: #6ee7b7; padding: 2px 8px; border-radius: 4px; border: 1px solid rgba(16, 185, 129, 0.25);">🧤 Gloves Assigned (Size ${this.escapeHtml(data.gloveSize || 'Std')})</span>
             <span style="background: rgba(16, 185, 129, 0.15); color: #6ee7b7; padding: 2px 8px; border-radius: 4px; border: 1px solid rgba(16, 185, 129, 0.25);">🦾 Sleeves Assigned (Size ${this.escapeHtml(data.sleeveSize || 'Std')})</span>
-            ${classMeta ? `
-              <button type="button" class="btn btn-xs btn-secondary" onclick="if(window.ppeTrackingEngine){ window.ppeTrackingEngine.promptExcludeEmployee('${this.escapeJs(empName)}'); if(window.employeeProfileEngine){ window.employeeProfileEngine.openProfileModal('${this.escapeJs(empName)}', 'equipment'); } }" style="font-size: 10px; padding: 2px 6px; color: #94a3b8; border-color: rgba(148, 163, 184, 0.3);" title="Exempt this employee from Rubber PPE tracking">
-                🚫 Exclude
-              </button>
-            ` : ''}
+            ${classMeta ? excludeBtnHtml : ''}
           </div>
         </div>
       `;
@@ -3078,7 +3276,7 @@ class EmployeeProfileEngine {
 
     // 2. Tracked AP 1-3: Gloves only required and assigned
     if (classMeta && !classMeta.needsSleeves && hasGloves) {
-      return `
+      return prefixBanner + `
         <div class="ppe-profile-compliance-card" style="background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 8px; padding: 12px 16px; margin-bottom: 18px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
           <div style="display: flex; align-items: center; gap: 10px;">
             <span style="font-size: 20px;">🛡️</span>
@@ -3096,16 +3294,14 @@ class EmployeeProfileEngine {
           </div>
           <div style="display: flex; gap: 6px; font-size: 11px; flex-wrap: wrap; align-items: center;">
             <span style="background: rgba(16, 185, 129, 0.15); color: #6ee7b7; padding: 2px 8px; border-radius: 4px; border: 1px solid rgba(16, 185, 129, 0.25);">🧤 Gloves Assigned (Size ${this.escapeHtml(data.gloveSize || 'Std')})</span>
-            <button type="button" class="btn btn-xs btn-secondary" onclick="if(window.ppeTrackingEngine){ window.ppeTrackingEngine.promptExcludeEmployee('${this.escapeJs(empName)}'); if(window.employeeProfileEngine){ window.employeeProfileEngine.openProfileModal('${this.escapeJs(empName)}', 'equipment'); } }" style="font-size: 10px; padding: 2px 6px; color: #94a3b8; border-color: rgba(148, 163, 184, 0.3);" title="Exempt this employee from Rubber PPE tracking">
-              🚫 Exclude
-            </button>
+            ${excludeBtnHtml}
           </div>
         </div>
       `;
     }
 
     // If classification is not tracked for mandatory PPE (e.g. Office, non-lineman), do not show missing warnings
-    if (!classMeta) return '';
+    if (!classMeta) return prefixBanner;
 
     const needsGloves = !!classMeta.needsGloves;
     const needsSleeves = !!classMeta.needsSleeves;
@@ -3114,10 +3310,18 @@ class EmployeeProfileEngine {
     const missingSleeves = needsSleeves && !hasSleeves;
 
     if (!missingGloves && !missingSleeves) {
-      return '';
+      return prefixBanner;
     }
 
-    let html = `<div class="ppe-compliance-action-section" style="margin-bottom: 20px; display: flex; flex-direction: column; gap: 14px;">`;
+    const bottomExcludeBtn = isSwapsExcluded
+      ? `<button type="button" class="btn btn-sm" onclick="if(window.ppeTrackingEngine){ window.ppeTrackingEngine.setEmployeeExcluded('${this.escapeJs(empName)}', false); if(window.employeeProfileEngine){ window.employeeProfileEngine.openProfileModal('${this.escapeJs(empName)}', 'equipment'); } }" style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.35); color: #6ee7b7; font-size: 11px; padding: 3px 10px; border-radius: 4px; display: inline-flex; align-items: center; gap: 5px; cursor: pointer;" title="Re-include this employee in Swaps & Purchase Needs">
+          <span>↩</span> Re-Include in Swaps & Purchase Needs
+        </button>`
+      : `<button type="button" class="btn btn-sm" onclick="if(window.ppeTrackingEngine){ window.ppeTrackingEngine.promptExcludeEmployee('${this.escapeJs(empName)}'); if(window.employeeProfileEngine){ window.employeeProfileEngine.openProfileModal('${this.escapeJs(empName)}', 'equipment'); } }" style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); color: #fca5a5; font-size: 11px; padding: 3px 10px; border-radius: 4px; display: inline-flex; align-items: center; gap: 5px; cursor: pointer;" title="Exclude this employee from Swaps pages and Purchase Needs while on Crew ${this.escapeHtml(baseCrew || 'current')}">
+          🚫 Exclude from Swaps & Needs (Crew ${this.escapeHtml(baseCrew || 'Current')})
+        </button>`;
+
+    let html = prefixBanner + `<div class="ppe-compliance-action-section" style="margin-bottom: 20px; display: flex; flex-direction: column; gap: 14px;">`;
     if (missingGloves) {
       html += this.renderPpeItemProgressiveWorkflow(data, classMeta, 'gloves');
     }
@@ -3126,9 +3330,7 @@ class EmployeeProfileEngine {
     }
     html += `
       <div style="display: flex; justify-content: flex-end; align-items: center; padding-top: 4px;">
-        <button type="button" class="btn btn-sm" onclick="if(window.ppeTrackingEngine){ window.ppeTrackingEngine.promptExcludeEmployee('${this.escapeJs(empName)}'); if(window.employeeProfileEngine){ window.employeeProfileEngine.openProfileModal('${this.escapeJs(empName)}', 'equipment'); } }" style="background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); color: #fca5a5; font-size: 11px; padding: 3px 10px; border-radius: 4px; display: inline-flex; align-items: center; gap: 5px; cursor: pointer;" title="Exclude this employee from Rubber PPE compliance deficits and alerts">
-          🚫 Exclude from Rubber PPE Tracker
-        </button>
+        ${bottomExcludeBtn}
       </div>
     `;
     html += `</div>`;
@@ -3612,6 +3814,9 @@ class EmployeeProfileEngine {
         this.currentEmployeeData.sleeveSize = size;
       }
     }
+
+    // Auto-sync updated size directly to any pending swap rows ("Needs Equipment")
+    await this.syncEmployeeSizeToSwaps(displayName, isGlove ? 'gloves' : 'sleeves', size);
 
     if (typeof window.showToast === 'function') {
       window.showToast(`Saved ${isGlove ? 'Glove' : 'Sleeve'} Size ${size} to Contact & Details for ${displayName}`, 'success');

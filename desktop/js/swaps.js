@@ -764,6 +764,157 @@ class SwapGenerationEngine {
 
     shelfRetestItems.sort((a, b) => a.itemNum.localeCompare(b.itemNum, undefined, { numeric: true }));
 
+    // Helper to evaluate if employee qualifies for mandatory gloves or sleeves
+    const isQualifyingEmployee = (classification) => {
+      const c = String(classification || '').trim().toUpperCase();
+      if (isGloves) {
+        // Gloves: Mandated for lineworkers, electrical apprentices, substation, and ops leaders
+        if (['SUP', 'GF', 'F', 'GTO F', 'JRY', 'JRY OP', 'WT', 'GTO', 'EO 1', 'EO 2'].includes(c)) return true;
+        if (/^AP\s*[1-7]$/i.test(c)) return true;
+        if (/apprentice|journeyman|foreman|lineman|line\s*worker/i.test(c)) return true;
+        return false;
+      } else {
+        // Sleeves: Mandated for AP 4-7, JRY, JRY OP, WT, SUP, GF, F, GTO F
+        if (['SUP', 'GF', 'F', 'GTO F', 'JRY', 'JRY OP', 'WT'].includes(c)) return true;
+        if (/^AP\s*[4-7]$/i.test(c)) return true;
+        if (/journeyman|foreman|lineman/i.test(c) && !/ap\s*[1-3]/i.test(c)) return true;
+        return false;
+      }
+    };
+
+    const isExcludedEmployee = (nameLower) => {
+      const loc = (empLocationMap[nameLower] || '').toLowerCase();
+      if (loc.includes('vacation') || loc.includes('light duty') || loc.includes('weeds') || loc.includes('leave') || loc.includes('medical') || loc.includes('previous')) {
+        return true;
+      }
+      const jobNum = empJobNumMap[nameLower] || '';
+      if (jobNum.startsWith('002-') || jobNum.startsWith('005-')) {
+        return true;
+      }
+      // Check Rubber PPE Swaps Exclusions (crew-locked, auto-removes on crew change)
+      if (typeof window !== 'undefined' && window.ppeTrackingEngine && typeof window.ppeTrackingEngine.isEmployeeSwapsExcluded === 'function') {
+        if (window.ppeTrackingEngine.isEmployeeSwapsExcluded(nameLower)) return true;
+      }
+      // Check Crew Discipline Exclusions (Substation, Gas, Mechanic, etc.)
+      if (typeof window !== 'undefined' && window.ppeTrackingEngine) {
+        if (typeof window.ppeTrackingEngine.isEmployeeCrewDisciplineExcluded === 'function') {
+          const disc = window.ppeTrackingEngine.isEmployeeCrewDisciplineExcluded(nameLower, jobNum);
+          if (disc && disc.excluded) return true;
+        }
+        if (typeof window.ppeTrackingEngine.isEmployeeExcluded === 'function') {
+          if (window.ppeTrackingEngine.isEmployeeExcluded(nameLower, jobNum)) return true;
+        }
+      }
+      if (typeof window !== 'undefined' && window.procurementEngine) {
+        if (typeof window.procurementEngine.isManualPpeExcluded === 'function' && window.procurementEngine.isManualPpeExcluded(nameLower)) return true;
+        if (typeof window.procurementEngine.getEmployeeCrewType === 'function') {
+          const ct = window.procurementEngine.getEmployeeCrewType(nameLower);
+          if (ct === 'Gas' || ct === 'Mechanic' || ct === 'Substation') return true;
+        }
+      }
+      return false;
+    };
+
+    const getTargetClassForEmployee = (empNameLower, empLoc) => {
+      if (typeof window !== 'undefined' && window.employeeProfileEngine && typeof window.employeeProfileEngine.getPreferredPpeClass === 'function') {
+        const pref = window.employeeProfileEngine.getPreferredPpeClass(empNameLower, isGloves ? 'gloves' : 'sleeves');
+        if (pref) {
+          const m = String(pref).match(/\d+/);
+          if (m) {
+            const prefNum = parseInt(m[0], 10);
+            if (this.isLocationApprovedForClass(empLoc, prefNum, locationApprovals)) {
+              return prefNum;
+            }
+          }
+        }
+      }
+      const locClean = String(empLoc || '').replace(/\s*\([^)]*\)/g, '').trim();
+      let approval = locationApprovals[locClean];
+      if (!approval) {
+        const lower = locClean.toLowerCase();
+        for (const [k, v] of Object.entries(locationApprovals)) {
+          if (k.toLowerCase() === lower) {
+            approval = v;
+            break;
+          }
+        }
+      }
+      const appUpper = String(approval || '').toUpperCase();
+      if (appUpper === 'CL3' || appUpper.includes('CLASS 3 ONLY')) {
+        return 3;
+      }
+      return 2;
+    };
+
+    // Collect all employees who currently hold an active assigned glove or sleeve
+    const currentlyAssignedEmployees = new Set();
+    inventoryData.forEach(item => {
+      const status = String(item['Status'] || '').trim().toLowerCase();
+      const inactiveStatuses = [
+        'on shelf', 'available', 'in stock',
+        'in testing', 'packed for testing', 'ready for test',
+        'packed for delivery', 'ready for delivery',
+        'lost', 'destroyed', 'failed rubber', 'not repairable',
+        'retired', 'out of service'
+      ];
+      if (inactiveStatuses.includes(status)) return;
+
+      const assignedToRaw = String(item['Assigned To'] || '').trim().toLowerCase();
+      if (!assignedToRaw || ignoreNames.includes(assignedToRaw)) return;
+      currentlyAssignedEmployees.add(assignedToRaw);
+
+      if (typeof window !== 'undefined' && window.employeeResolver && typeof window.employeeResolver.resolve === 'function') {
+        const res = window.employeeResolver.resolve(assignedToRaw);
+        if (res && res.employeeName) currentlyAssignedEmployees.add(res.employeeName.toLowerCase());
+      }
+    });
+
+    // Find active directory employees who qualify but have no active assigned item ("Needs Equipment")
+    const unassignedNeedsEquipment = [];
+    const processedUnassigned = new Set();
+
+    Object.keys(empMap).forEach(nameLower => {
+      const empRow = empMap[nameLower];
+      const canonicalName = String(empRow['Name'] || empRow['Employee Name'] || Object.values(empRow)[0] || nameLower).trim();
+      const canonicalLower = canonicalName.toLowerCase();
+      if (processedUnassigned.has(canonicalLower)) return;
+      processedUnassigned.add(canonicalLower);
+
+      if (previousEmployeeNames.has(canonicalLower) || isExcludedEmployee(canonicalLower)) {
+        return;
+      }
+
+      let hasAssignment = currentlyAssignedEmployees.has(canonicalLower) || currentlyAssignedEmployees.has(nameLower);
+      if (!hasAssignment && typeof window !== 'undefined' && window.employeeResolver && typeof window.employeeResolver.areSameEmployee === 'function') {
+        for (const assigned of currentlyAssignedEmployees) {
+          if (window.employeeResolver.areSameEmployee(assigned, canonicalName)) {
+            hasAssignment = true;
+            break;
+          }
+        }
+      }
+      if (hasAssignment) return;
+
+      const classification = empClassificationMap[nameLower] || '';
+      if (!isQualifyingEmployee(classification)) {
+        return;
+      }
+
+      const empLoc = empLocationMap[nameLower] || 'Helena';
+      const targetClass = getTargetClassForEmployee(canonicalLower, empLoc);
+      const rawSize = String(isGloves ? (empRow['Glove Size'] || empRow['Size'] || '') : (empRow['Sleeve Size'] || empRow['Size'] || '')).trim();
+
+      unassignedNeedsEquipment.push({
+        empName: canonicalName,
+        nameLower: canonicalLower,
+        location: empLoc,
+        foreman: getForemanForEmployee(nameLower),
+        targetClass: targetClass,
+        rawSize: rawSize,
+        classification: classification
+      });
+    });
+
     classes.forEach(itemClass => {
       // Collect qualifying swap candidates for this class
       const swapMeta = [];
@@ -1199,6 +1350,184 @@ class SwapGenerationEngine {
           daysDiff: meta.daysDiff,
           itemClass: itemClass,
           isManualPick: isManualSelected || isAlreadyPicked
+        });
+      });
+
+      // Process "Needs Equipment" candidates for this class (active unassigned personnel)
+      const classUnassigned = unassignedNeedsEquipment.filter(u => u.targetClass === itemClass);
+
+      classUnassigned.forEach(u => {
+        const employeeName = u.empName;
+        const empLower = u.nameLower;
+        const rawSizeClean = (u.rawSize || '').replace(/^(none|n\/a|tbd|—|-)$/i, '').trim();
+        const hasNoSize = !rawSizeClean;
+
+        let pickListValue = '—';
+        let pickListStatus = '';
+        let pickListSizeUp = false;
+        let pickListStatusRaw = '';
+        let pickListItemData = null;
+        let isAlreadyPicked = false;
+        let isManualSelected = false;
+
+        // Check if manual pick override exists
+        const manual = manualPicks[empLower];
+        if (manual && manual.pickListNum && manual.pickListNum !== '—' && manual.pickListNum !== '-') {
+          const matchManual = inventoryData.find(it => {
+            const itm = String(it['Item #'] || it['Glove'] || it['Sleeve'] || it['ESL ID'] || '').trim();
+            const classMatch = parseClassNum(it['Class']) === itemClass;
+            return itm.toLowerCase() === manual.pickListNum.toLowerCase() && classMatch;
+          });
+          if (matchManual) {
+            pickListValue = manual.pickListNum;
+            pickListItemData = matchManual;
+            pickListStatusRaw = String(matchManual['Status'] || '').trim().toLowerCase();
+            isManualSelected = true;
+
+            const isPickedState = Boolean(
+              manual.isPicked ||
+              String(manual.status || '').toLowerCase().includes('ready for delivery') ||
+              pickListStatusRaw === 'ready for delivery' ||
+              String(matchManual['Picked For'] || '').toLowerCase().includes(empLower)
+            );
+
+            if (isPickedState) {
+              isAlreadyPicked = true;
+              pickListStatus = 'Ready For Delivery 🚚';
+            } else {
+              pickListStatus = manual.status || 'Needs Equipment';
+            }
+            assignedItemNums.add(pickListValue);
+          }
+        }
+
+        if (hasNoSize) {
+          // Missing size on profile -> flag with ⚠️ Needs Size
+          pickListValue = '⚠️ Needs Size';
+          pickListStatus = 'Needs Size';
+        } else if (!pickListItemData) {
+          const useSize = isGloves ? parseFloat(rawSizeClean) : rawSizeClean;
+
+          // Tier 1: Existing Picked For match
+          const pickedForMatch = inventoryData.find(it => {
+            const pf = String(it['Picked For'] || '').trim().toLowerCase();
+            const classMatch = parseClassNum(it['Class']) === itemClass;
+            return classMatch && pf.includes(empLower) && !isLostLocate(it);
+          });
+
+          if (pickedForMatch) {
+            pickListValue = String(pickedForMatch['Item #'] || pickedForMatch['Glove'] || pickedForMatch['Sleeve'] || pickedForMatch['ESL ID'] || '').trim();
+            pickListStatusRaw = String(pickedForMatch['Status'] || '').trim().toLowerCase();
+            pickListItemData = pickedForMatch;
+            isAlreadyPicked = true;
+            assignedItemNums.add(pickListValue);
+          }
+
+          // Tier 2: Exact Size On Shelf
+          if (!pickListItemData) {
+            const match = inventoryData.find(it => {
+              const itNum = String(it['Item #'] || it['Glove'] || it['Sleeve'] || it['ESL ID'] || '').trim();
+              const stat = String(it['Status'] || '').trim().toLowerCase();
+              const classMatch = parseClassNum(it['Class']) === itemClass;
+              const sizeMatch = isGloves ?
+                parseFloat(it['Size']) === useSize :
+                (String(it['Size'] || '').trim().toLowerCase() === String(useSize).trim().toLowerCase());
+              const notAssigned = !assignedItemNums.has(itNum);
+              const pf = String(it['Picked For'] || '').trim();
+              const isReservedForOther = (stat === 'ready for delivery') && pf !== '' && !pf.toLowerCase().includes(empLower);
+              return stat === 'on shelf' && classMatch && sizeMatch && notAssigned && !isReservedForOther && !isLostLocate(it);
+            });
+
+            if (match) {
+              pickListValue = String(match['Item #'] || match['Glove'] || match['Sleeve'] || match['ESL ID'] || '').trim();
+              pickListStatusRaw = 'on shelf';
+              pickListItemData = match;
+              assignedItemNums.add(pickListValue);
+            }
+          }
+
+          // Tier 3: Size Up On Shelf (+0.5 for Gloves)
+          if (!pickListItemData && isGloves && !isNaN(useSize)) {
+            const match = inventoryData.find(it => {
+              const itNum = String(it['Item #'] || it['Glove'] || it['Sleeve'] || it['ESL ID'] || '').trim();
+              const stat = String(it['Status'] || '').trim().toLowerCase();
+              const pf = String(it['Picked For'] || '').trim();
+              const isReservedForOther = (stat === 'ready for delivery') && pf !== '' && !pf.toLowerCase().includes(empLower);
+              return stat === 'on shelf' &&
+                     parseClassNum(it['Class']) === itemClass &&
+                     parseFloat(it['Size']) === useSize + 0.5 &&
+                     !assignedItemNums.has(itNum) &&
+                     !isReservedForOther &&
+                     !isLostLocate(it);
+            });
+
+            if (match) {
+              pickListValue = String(match['Item #'] || match['Glove'] || match['Sleeve'] || match['ESL ID'] || '').trim();
+              pickListStatusRaw = 'on shelf';
+              pickListSizeUp = true;
+              pickListItemData = match;
+              assignedItemNums.add(pickListValue);
+            }
+          }
+
+          // Determine display status
+          if (pickListValue === '—') {
+            pickListStatus = 'Need to Purchase ❌';
+            needToOrderCount++;
+          } else {
+            pickedCount++;
+            if (isAlreadyPicked) {
+              pickListStatus = pickListSizeUp ? 'Ready For Delivery (Size Up) ⚠️' : 'Ready For Delivery 🚚';
+            } else {
+              pickListStatus = pickListSizeUp ? 'Needs Equipment (Size Up) ⚠️' : 'Needs Equipment';
+            }
+          }
+        }
+
+        let stage2Status = '';
+        let stage2AssignedTo = '';
+        let stage2DateAssigned = '';
+        let stage2PickedFor = '';
+
+        if (isAlreadyPicked && pickListItemData) {
+          stage2Status = pickListItemData['Status'] || 'Ready For Delivery';
+          stage2AssignedTo = pickListItemData['Assigned To'] || 'Packed For Delivery';
+          stage2DateAssigned = this.formatDate(pickListItemData['Date Assigned']) || '';
+          stage2PickedFor = pickListItemData['Picked For'] || '';
+        }
+
+        const rowData = [
+          employeeName,
+          '', // Current Item # is blank
+          hasNoSize ? '⚠️ Needs Size' : rawSizeClean,
+          '', // Date Assigned is blank
+          '', // Change Out Date is blank
+          '', // Days Left is blank
+          pickListValue,
+          pickListStatus,
+          isAlreadyPicked,
+          '',
+          // K-M: Stage 1 Pick List
+          pickListItemData ? (isAlreadyPicked ? 'On Shelf' : (pickListItemData['Status'] || '')) : '',
+          pickListItemData ? (isAlreadyPicked ? 'On Shelf' : (pickListItemData['Assigned To'] || '')) : '',
+          pickListItemData ? (isAlreadyPicked ? '' : (this.formatDate(pickListItemData['Test Date'] || pickListItemData['Date Assigned']) || '')) : '',
+          // N-P: Stage 1 Old Item (blank)
+          '', '', '',
+          // Q-T: Stage 2
+          stage2Status, stage2AssignedTo, stage2DateAssigned, stage2PickedFor,
+          // U-W: Stage 3
+          '', '', ''
+        ];
+
+        classRows.push({
+          data: rowData,
+          location: u.location,
+          foreman: u.foreman,
+          daysLeftColor: '#60a5fa',
+          daysDiff: 9998, // Placed cleanly at bottom of foreman group
+          itemClass: itemClass,
+          isManualPick: isManualSelected || isAlreadyPicked,
+          isNeedsEquipment: true
         });
       });
 
@@ -2329,15 +2658,17 @@ class SwapGenerationEngine {
       }
     } else {
       // Uncheck Picked -> Revert to On Shelf
+      const isNeedsEquipRow = !oldItemNum || oldItemNum === '—' || oldItemNum === '-';
+      const uncheckStatus = isNeedsEquipRow ? 'Needs Equipment' : 'In Stock ✅';
       if (row) {
         row['Picked'] = false;
-        row['Status'] = 'In Stock ✅';
+        row['Status'] = uncheckStatus;
       }
       if (gridRow) {
-        gridRow[7] = 'In Stock ✅';
+        gridRow[7] = uncheckStatus;
         gridRow[8] = 'FALSE';
       }
-      this.db.saveManualPick(swapSheetKey, empName, oldItemNum, pickNum, 'In Stock ✅', false);
+      this.db.saveManualPick(swapSheetKey, empName, oldItemNum, pickNum, uncheckStatus, false);
 
       if (invRow) {
         invRow['Location'] = 'Helena';

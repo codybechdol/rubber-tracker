@@ -486,13 +486,15 @@ class TaskManagerApp {
               }
             }
             const pickListItem = String(r['Pick List Item #'] || r['Pick List Glove #'] || r['Pick List Sleeve #'] || r['Pick List Blanket #'] || r['Pick List MACK #'] || r['Pick List'] || '').trim();
+            const isNewAssignment = !itemNum || itemNum === '—' || itemNum === '-';
+            const taskType = isNewAssignment ? `New ${sw.name.replace('Swap', 'Assignment').trim()}` : sw.name;
             allTasks.push({
               id: swapId,
               sourceSheet: sw.name,
               category: sw.cat,
-              type: sw.name,
-              itemType: specs || sw.name,
-              currentItem: itemNum,
+              type: taskType,
+              itemType: specs || taskType,
+              currentItem: isNewAssignment ? '' : itemNum,
               pickListItem: (pickListItem && pickListItem !== '—' && pickListItem !== '-') ? pickListItem : '',
               swapSheetKey: sw.key,
               tableKey: sw.key,
@@ -507,6 +509,7 @@ class TaskManagerApp {
               scheduledDate: '',
               status: isOverdue ? 'Overdue' : (isPickedOrReady ? 'Ready For Delivery' : 'Unassigned'),
               isOverdue: isOverdue,
+              isNewAssignment: isNewAssignment,
               notes: pickedFor ? `Picked For: ${pickedFor}` : ''
             });
           }

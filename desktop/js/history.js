@@ -23,8 +23,25 @@ class HistoryNavigator {
       { key: 'aed_history', label: '🏥 AED History', icon: '🏥' },
       { key: 'grounds_history', label: '⚡ Grounds History', icon: '⚡' },
       { key: 'hot_sticks_history', label: '🔴 Hot Sticks History', icon: '🔴' },
-      { key: 'employee_history', label: '👥 Employee History', icon: '👥' }
+      { key: 'employee_history', label: '👥 Employee History', icon: '👥' },
+      { key: 'retired_equipment', label: '🗄️ Retired Equipment', icon: '🗄️' }
     ];
+  }
+
+  switchToHistory(sheetKey) {
+    if (!sheetKey) return;
+    this.currentSheetKey = sheetKey;
+    this.sortCol = null;
+    this.multiSort = null;
+    this.sortDir = 'asc';
+    this.searchTerm = '';
+    const input = document.getElementById('history-search-input');
+    if (input) input.value = '';
+    if (window.supabaseSync) {
+      window.supabaseSync.syncEditModeForCurrentContext('history-view');
+    }
+    this.renderTabsBar(true);
+    this.renderCurrentHistory();
   }
 
   init() {

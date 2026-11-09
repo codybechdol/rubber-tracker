@@ -50,7 +50,7 @@ class RubberPpeTrackingEngine {
   }
 
   /**
-   * Loads excluded employees mapping (normalized name -> original display name) from localStorage
+   * Loads excluded employees mapping (normalized name -> exclusion entry object) from localStorage/configs
    */
   loadExcludedEmployeeMap() {
     const map = new Map();
@@ -67,10 +67,32 @@ class RubberPpeTrackingEngine {
         }
       }
       if (Array.isArray(arr)) {
-        arr.forEach(name => {
-          const clean = String(name || '').trim();
-          if (clean) {
-            map.set(this.normalizeName(clean), clean);
+        arr.forEach(item => {
+          let name = '';
+          let crew = '';
+          let location = '';
+          let classification = '';
+          let dateExcluded = '';
+
+          if (item && typeof item === 'object') {
+            name = String(item.name || '').trim();
+            crew = String(item.crew || '').trim();
+            location = String(item.location || '').trim();
+            classification = String(item.classification || '').trim();
+            dateExcluded = String(item.dateExcluded || '').trim();
+          } else if (typeof item === 'string') {
+            name = String(item || '').trim();
+          }
+
+          if (name) {
+            const norm = this.normalizeName(name);
+            map.set(norm, {
+              name,
+              crew: crew || '',
+              location,
+              classification,
+              dateExcluded: dateExcluded || new Date().toISOString().split('T')[0]
+            });
           }
         });
       }
@@ -98,6 +120,82 @@ class RubberPpeTrackingEngine {
     } catch (e) {
       console.error('Error saving excluded PPE employees config:', e);
     }
+  }
+
+  /**
+   * Helper: Resolves employee record from database
+   */
+  getEmployeeRecord(empName) {
+    if (!empName) return null;
+    const snap = (this.db && typeof this.db.getSnapshot === 'function')
+      ? this.db.getSnapshot()
+      : (window.localDB ? window.localDB.getSnapshot() : null);
+    const empTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('employees') : null) || snap?.tables?.['employees'];
+    if (!empTable || !empTable.rows) return null;
+
+    const norm = this.normalizeName(empName);
+    return empTable.rows.find(e => {
+      const n = String(e['Employee Name'] || e['Name'] || Object.values(e)[0] || '').trim();
+      return this.isNameMatch(this.normalizeName(n), norm);
+    }) || null;
+  }
+
+  /**
+   * Helper: Returns base crew number for an employee
+   */
+  getEmployeeBaseCrew(empName) {
+    const emp = this.getEmployeeRecord(empName);
+    if (!emp) return '';
+    const jn = String(emp['Job Number'] || emp['Job #'] || '').trim();
+    return jn.replace(/\.\d+.*$/, '').trim();
+  }
+
+  /**
+   * Validates all excluded employees against their current crew assignment in the employees table.
+   * If an employee has changed crews, they are AUTOMATICALLY removed from the exclusion list.
+   * If an existing entry had no locked crew, it locks to their current crew.
+   */
+  checkAndCleanCrewExclusions() {
+    if (!this.excludedEmployeeMap || this.excludedEmployeeMap.size === 0) return false;
+    let dirty = false;
+
+    for (const [normKey, entry] of Array.from(this.excludedEmployeeMap.entries())) {
+      const empName = (entry && typeof entry === 'object') ? entry.name : String(entry || normKey);
+      const lockedCrew = (entry && typeof entry === 'object' && entry.crew) ? String(entry.crew).trim() : '';
+
+      const emp = this.getEmployeeRecord(empName);
+      if (emp) {
+        const currentBaseCrew = String(emp['Job Number'] || emp['Job #'] || '').replace(/\.\d+.*$/, '').trim();
+
+        if (!lockedCrew && currentBaseCrew) {
+          // Bind legacy unassigned crew
+          if (typeof entry === 'object') {
+            entry.crew = currentBaseCrew;
+            entry.location = String(emp['Location'] || '').trim();
+            entry.classification = String(emp['Job Classification'] || emp['Classification'] || '').trim();
+          } else {
+            this.excludedEmployeeMap.set(normKey, {
+              name: empName,
+              crew: currentBaseCrew,
+              location: String(emp['Location'] || '').trim(),
+              classification: String(emp['Job Classification'] || emp['Classification'] || '').trim(),
+              dateExcluded: new Date().toISOString().split('T')[0]
+            });
+          }
+          dirty = true;
+        } else if (lockedCrew && currentBaseCrew && lockedCrew !== currentBaseCrew) {
+          // CREW CHANGED! Automatically remove from exclusion list
+          console.info(`[PPE Exclusions] Auto-removed "${empName}" from Swaps & Purchase Needs exclusions: crew changed from ${lockedCrew} to ${currentBaseCrew}`);
+          this.excludedEmployeeMap.delete(normKey);
+          dirty = true;
+        }
+      }
+    }
+
+    if (dirty) {
+      this.saveExcludedEmployeeMap();
+    }
+    return dirty;
   }
 
   /**
@@ -182,24 +280,74 @@ class RubberPpeTrackingEngine {
   }
 
   /**
-   * Checks whether an employee is currently excluded from Rubber PPE tracking
-   * (either manually excluded or by crew discipline)
+   * Checks whether an employee is excluded from Swaps & Purchase Needs on their current crew.
+   * Auto-removes them from exclusions if they have changed crews.
    */
-  isEmployeeExcluded(empName, jobNumber) {
+  isEmployeeSwapsExcluded(empName) {
     if (!empName) return false;
-    const norm = this.normalizeName(empName);
+    const clean = String(empName).trim();
+    const norm = this.normalizeName(clean);
     if (!norm) return false;
-    if (this.excludedEmployeeMap.has(norm)) return true;
-    for (const key of this.excludedEmployeeMap.keys()) {
-      if (this.isNameMatch(key, norm)) return true;
+
+    let entry = this.excludedEmployeeMap.get(norm);
+    let matchedKey = norm;
+
+    if (!entry) {
+      for (const [key, val] of this.excludedEmployeeMap.entries()) {
+        if (this.isNameMatch(key, norm)) {
+          entry = val;
+          matchedKey = key;
+          break;
+        }
+      }
     }
-    const crewCheck = this.isEmployeeCrewDisciplineExcluded(empName, jobNumber);
-    if (crewCheck.excluded) return true;
-    return false;
+
+    if (!entry) return false;
+
+    const lockedCrew = (entry && typeof entry === 'object' && entry.crew) ? String(entry.crew).trim() : '';
+    const emp = this.getEmployeeRecord(clean);
+    if (emp) {
+      const currentBaseCrew = String(emp['Job Number'] || emp['Job #'] || '').replace(/\.\d+.*$/, '').trim();
+
+      if (!lockedCrew && currentBaseCrew) {
+        if (typeof entry === 'object') {
+          entry.crew = currentBaseCrew;
+          entry.location = String(emp['Location'] || '').trim();
+          entry.classification = String(emp['Job Classification'] || emp['Classification'] || '').trim();
+        } else {
+          this.excludedEmployeeMap.set(matchedKey, {
+            name: clean,
+            crew: currentBaseCrew,
+            location: String(emp['Location'] || '').trim(),
+            classification: String(emp['Job Classification'] || emp['Classification'] || '').trim(),
+            dateExcluded: new Date().toISOString().split('T')[0]
+          });
+        }
+        this.saveExcludedEmployeeMap();
+      } else if (lockedCrew && currentBaseCrew && lockedCrew !== currentBaseCrew) {
+        // Crew has changed! Automatically remove from exclusions
+        console.info(`[PPE Exclusions] Auto-removed "${clean}" from Swaps & Purchase Needs exclusions: crew changed from ${lockedCrew} to ${currentBaseCrew}`);
+        this.excludedEmployeeMap.delete(matchedKey);
+        this.saveExcludedEmployeeMap();
+        return false;
+      }
+    }
+
+    return true;
   }
 
   /**
-   * Adds or removes an employee from Rubber PPE tracking exclusions
+   * Checks whether an employee is excluded from Rubber PPE tracking entirely
+   * (e.g. Substation, Gas, Mechanic crew discipline).
+   */
+  isEmployeeExcluded(empName, jobNumber) {
+    if (!empName) return false;
+    const crewCheck = this.isEmployeeCrewDisciplineExcluded(empName, jobNumber);
+    return crewCheck.excluded;
+  }
+
+  /**
+   * Adds or removes an employee from Swaps & Purchase Needs exclusions (locked to current crew)
    */
   setEmployeeExcluded(empName, isExcluded) {
     if (!empName) return;
@@ -207,8 +355,24 @@ class RubberPpeTrackingEngine {
     const norm = this.normalizeName(clean);
     if (!norm) return;
 
+    let currentCrew = 'Unassigned';
+    let loc = '';
+    let cls = '';
+    const emp = this.getEmployeeRecord(clean);
+    if (emp) {
+      currentCrew = String(emp['Job Number'] || emp['Job #'] || '').replace(/\.\d+.*$/, '').trim() || 'Unassigned';
+      loc = String(emp['Location'] || '').trim();
+      cls = String(emp['Job Classification'] || emp['Classification'] || '').trim();
+    }
+
     if (isExcluded) {
-      this.excludedEmployeeMap.set(norm, clean);
+      this.excludedEmployeeMap.set(norm, {
+        name: clean,
+        crew: currentCrew,
+        location: loc,
+        classification: cls,
+        dateExcluded: new Date().toISOString().split('T')[0]
+      });
     } else {
       this.excludedEmployeeMap.delete(norm);
       for (const key of this.excludedEmployeeMap.keys()) {
@@ -236,38 +400,44 @@ class RubberPpeTrackingEngine {
       this.renderExclusionsModalContent(exclBody);
     }
 
-    // Refresh crew cards in sheets view if available
+    // Refresh current sheet view if available (e.g. glove_swaps, sleeve_swaps, employees)
     if (window.sheetNavigator && typeof window.sheetNavigator.renderCurrentSheet === 'function') {
       window.sheetNavigator.renderCurrentSheet();
     }
 
     if (typeof window.showToast === 'function') {
       if (isExcluded) {
-        window.showToast(`🚫 Excluded "${clean}" from Rubber PPE compliance tracking`, 'info');
+        window.showToast(`🚫 Excluded "${clean}" from Swaps & Purchase Needs while on Crew ${currentCrew}`, 'info');
       } else {
-        window.showToast(`✅ Restored "${clean}" to Rubber PPE compliance tracking`, 'success');
+        window.showToast(`✅ Restored "${clean}" to Swaps & Purchase Needs`, 'success');
       }
     }
+  }
+
+  setEmployeeSwapsExcluded(empName, isExcluded) {
+    this.setEmployeeExcluded(empName, isExcluded);
   }
 
   /**
    * Toggles exclusion status for an employee
    */
   toggleEmployeeExcluded(empName) {
-    const isCurrently = this.isEmployeeExcluded(empName);
+    const isCurrently = this.isEmployeeSwapsExcluded(empName);
     this.setEmployeeExcluded(empName, !isCurrently);
   }
 
   /**
-   * Prompts user for confirmation before excluding an employee
+   * Prompts user for confirmation before excluding an employee from Swaps & Purchase Needs
    */
   promptExcludeEmployee(empName) {
     if (!empName) return;
+    const currentCrew = this.getEmployeeBaseCrew(empName) || 'their current crew';
     const confirmed = confirm(
-      `Exclude "${empName}" from Rubber PPE compliance tracking?\n\n` +
-      `• They will no longer be counted as missing gloves or sleeves.\n` +
-      `• Alert badges will be hidden on crew cards.\n` +
-      `• You can re-include them at any time from the Excluded tab or Manage Exclusions dialog.`
+      `Exclude "${empName}" from Swaps pages and Purchase Needs while on Crew ${currentCrew}?\n\n` +
+      `• They will NOT appear on Glove or Sleeve Swaps pages.\n` +
+      `• They will NOT generate Purchase Needs orders.\n` +
+      `• They will CONTINUE to be tracked in Rubber PPE Compliance.\n` +
+      `• If they change to another crew, they will AUTOMATICALLY be removed from this exclusion list and appear on Swaps & Purchase Needs.`
     );
     if (confirmed) {
       this.setEmployeeExcluded(empName, true);
@@ -315,15 +485,23 @@ class RubberPpeTrackingEngine {
   }
 
   /**
-   * Excludes all active employees of a specific classification tier (e.g., 'sup')
+   * Excludes all active employees of a specific classification tier (e.g., 'sup') from Swaps & Purchase Needs
    */
   excludeEmployeesByTier(tierKey) {
     const audit = this.compileAuditData();
     const records = audit?.records || [];
     let count = 0;
     records.forEach(r => {
-      if (r.classMeta && r.classMeta.tier === tierKey && !r.isExcluded) {
-        this.excludedEmployeeMap.set(this.normalizeName(r.name), r.name);
+      if (r.classMeta && r.classMeta.tier === tierKey && !r.isSwapsExcluded) {
+        const emp = this.getEmployeeRecord(r.name);
+        const crew = emp ? String(emp['Job Number'] || emp['Job #'] || '').replace(/\.\d+.*$/, '').trim() : r.jobNumber;
+        this.excludedEmployeeMap.set(this.normalizeName(r.name), {
+          name: r.name,
+          crew: crew || 'Unassigned',
+          location: r.location,
+          classification: r.classification,
+          dateExcluded: new Date().toISOString().split('T')[0]
+        });
         count++;
       }
     });
@@ -352,12 +530,12 @@ class RubberPpeTrackingEngine {
     }
 
     if (typeof window.showToast === 'function') {
-      window.showToast(`🚫 Excluded ${count} employee(s) in ${tierKey.toUpperCase()} from Rubber PPE tracking`, 'success');
+      window.showToast(`🚫 Excluded ${count} employee(s) in ${tierKey.toUpperCase()} from Swaps & Purchase Needs`, 'success');
     }
   }
 
   /**
-   * Excludes all active employees on a specific crew prefix (e.g., '005')
+   * Excludes all active employees on a specific crew prefix (e.g., '005') from Swaps & Purchase Needs
    */
   excludeEmployeesByJobPrefix(prefix) {
     const audit = this.compileAuditData();
@@ -365,8 +543,16 @@ class RubberPpeTrackingEngine {
     let count = 0;
     const pfx = String(prefix).trim().toLowerCase();
     records.forEach(r => {
-      if (String(r.jobNumber).toLowerCase().startsWith(pfx) && !r.isExcluded) {
-        this.excludedEmployeeMap.set(this.normalizeName(r.name), r.name);
+      if (String(r.jobNumber).toLowerCase().startsWith(pfx) && !r.isSwapsExcluded) {
+        const emp = this.getEmployeeRecord(r.name);
+        const crew = emp ? String(emp['Job Number'] || emp['Job #'] || '').replace(/\.\d+.*$/, '').trim() : r.jobNumber;
+        this.excludedEmployeeMap.set(this.normalizeName(r.name), {
+          name: r.name,
+          crew: crew || 'Unassigned',
+          location: r.location,
+          classification: r.classification,
+          dateExcluded: new Date().toISOString().split('T')[0]
+        });
         count++;
       }
     });
@@ -395,7 +581,7 @@ class RubberPpeTrackingEngine {
     }
 
     if (typeof window.showToast === 'function') {
-      window.showToast(`🚫 Excluded ${count} employee(s) on crew ${prefix} from Rubber PPE tracking`, 'success');
+      window.showToast(`🚫 Excluded ${count} employee(s) on crew prefix ${prefix} from Swaps & Purchase Needs`, 'success');
     }
   }
 
@@ -540,6 +726,8 @@ class RubberPpeTrackingEngine {
    * Compiles complete audit data for all active employees against gloves and sleeves tables.
    */
   compileAuditData() {
+    this.checkAndCleanCrewExclusions();
+
     const snap = (this.db && typeof this.db.getSnapshot === 'function')
       ? this.db.getSnapshot()
       : (window.localDB ? window.localDB.getSnapshot() : null);
@@ -556,6 +744,7 @@ class RubberPpeTrackingEngine {
           totalMissingBoth: 0,
           totalFullyEquipped: 0,
           totalExcluded: 0,
+          totalSwapsExcluded: 0,
           totalAllPersonnel: 0,
           totalAp1_3: 0,
           totalAp4_7: 0,
@@ -747,6 +936,7 @@ class RubberPpeTrackingEngine {
     let totalMissingBoth = 0;
     let totalFullyEquipped = 0;
     let totalExcluded = 0;
+    let totalSwapsExcluded = 0;
     let totalAp1_3 = 0;
     let totalAp4_7 = 0;
     let totalSupGfF = 0;
@@ -793,9 +983,18 @@ class RubberPpeTrackingEngine {
       const crewLead = String(emp['Crew Lead'] || '').trim();
 
       const crewCheck = this.isEmployeeCrewDisciplineExcluded(name, jobNumber);
-      const isManualExcluded = this.excludedEmployeeMap.has(nameNorm);
-      const isExcluded = crewCheck.excluded || isManualExcluded;
-      const exclusionReason = crewCheck.excluded ? crewCheck.reason : (isManualExcluded ? 'Manually Excluded' : '');
+      const isSwapsExcluded = this.isEmployeeSwapsExcluded(name);
+      let swapsExcludedCrew = '';
+      if (isSwapsExcluded) {
+        totalSwapsExcluded++;
+        const swEntry = this.excludedEmployeeMap.get(nameNorm);
+        swapsExcludedCrew = (swEntry && typeof swEntry === 'object' && swEntry.crew) ? swEntry.crew : jobNumber;
+      }
+
+      // ONLY crew discipline (Gas / Mechanic) exempts an employee from Rubber PPE tracking.
+      // Swaps-excluded employees STILL show up in the Rubber PPE Compliance Tracker!
+      const isExcluded = crewCheck.excluded;
+      const exclusionReason = crewCheck.excluded ? crewCheck.reason : (isSwapsExcluded ? `Swaps Excluded (Crew ${swapsExcludedCrew})` : '');
 
       if (locClean && locClean !== '—') locationSet.add(locClean);
 
@@ -844,8 +1043,9 @@ class RubberPpeTrackingEngine {
         }
       }
 
-      const needsGlovesToPurchase = missingGloves && !gloveInNeeds && !gloveOrdered;
-      const needsSleevesToPurchase = missingSleeves && !sleeveInNeeds && !sleeveOrdered;
+      // Swaps-excluded employees do NOT generate purchase needs orders
+      const needsGlovesToPurchase = missingGloves && !gloveInNeeds && !gloveOrdered && !isSwapsExcluded;
+      const needsSleevesToPurchase = missingSleeves && !sleeveInNeeds && !sleeveOrdered && !isSwapsExcluded;
 
       if (isExcluded) {
         totalExcluded++;
@@ -861,13 +1061,13 @@ class RubberPpeTrackingEngine {
           totalMissingGloves++;
           if (gloveOrdered) totalGlovesInNeeds++;
           else if (gloveInNeeds) totalGlovesInNeeds++;
-          else totalGlovesToQueue++;
+          else if (!isSwapsExcluded) totalGlovesToQueue++;
         }
         if (missingSleeves) {
           totalMissingSleeves++;
           if (sleeveOrdered) totalSleevesInNeeds++;
           else if (sleeveInNeeds) totalSleevesInNeeds++;
-          else totalSleevesToQueue++;
+          else if (!isSwapsExcluded) totalSleevesToQueue++;
         }
         if (isMissingBoth) totalMissingBoth++;
         if (isFullyEquipped) totalFullyEquipped++;
@@ -895,6 +1095,8 @@ class RubberPpeTrackingEngine {
         isMissingAny,
         isFullyEquipped,
         isExcluded,
+        isSwapsExcluded,
+        swapsExcludedCrew,
         crewType: crewCheck.crewType,
         isCrewDisciplineExcluded: crewCheck.excluded,
         exclusionReason,
@@ -936,6 +1138,7 @@ class RubberPpeTrackingEngine {
         totalMissingBoth,
         totalFullyEquipped,
         totalExcluded,
+        totalSwapsExcluded,
         totalAllPersonnel: records.length,
         totalAp1_3,
         totalAp4_7,
@@ -1256,13 +1459,13 @@ class RubberPpeTrackingEngine {
 
           <div class="ppe-stat-card ${this.currentFilter === 'excluded' ? 'active-stat' : ''}"
                onclick="window.ppeTrackingEngine.setFilter('excluded')"
-               style="background: ${this.currentFilter === 'excluded' ? 'rgba(148, 163, 184, 0.22)' : 'rgba(148, 163, 184, 0.08)'}; border: 1px solid ${this.currentFilter === 'excluded' ? '#94a3b8' : 'rgba(148, 163, 184, 0.3)'}; border-radius: 8px; padding: 10px 14px; cursor: pointer; transition: all 0.15s ease;">
+               style="background: ${this.currentFilter === 'excluded' ? 'rgba(245, 158, 11, 0.22)' : 'rgba(245, 158, 11, 0.08)'}; border: 1px solid ${this.currentFilter === 'excluded' ? '#f59e0b' : 'rgba(245, 158, 11, 0.3)'}; border-radius: 8px; padding: 10px 14px; cursor: pointer; transition: all 0.15s ease;">
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
-              <span style="font-size: 11px; font-weight: 700; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.5px;">Excluded</span>
+              <span style="font-size: 11px; font-weight: 700; color: #fbbf24; text-transform: uppercase; letter-spacing: 0.5px;">Swaps Excluded</span>
               <span style="font-size: 16px;">🚫</span>
             </div>
-            <div style="font-size: 24px; font-weight: 800; color: #cbd5e1; line-height: 1;">${summary.totalExcluded}</div>
-            <div style="font-size: 11px; color: #94a3b8; margin-top: 4px;">Exempt Personnel</div>
+            <div style="font-size: 24px; font-weight: 800; color: #fde68a; line-height: 1;">${summary.totalSwapsExcluded}</div>
+            <div style="font-size: 11px; color: #fbbf24; margin-top: 4px;">Exempt on Current Crew</div>
           </div>
 
           <div class="ppe-stat-card ${this.currentFilter === 'all_tracked' ? 'active-stat' : ''}"
@@ -1273,7 +1476,7 @@ class RubberPpeTrackingEngine {
               <span style="font-size: 16px;">👥</span>
             </div>
             <div style="font-size: 24px; font-weight: 800; color: #bfdbfe; line-height: 1;">${summary.totalTracked}</div>
-            <div style="font-size: 11px; color: #93c5fd; margin-top: 4px;">Active Personnel${summary.totalExcluded > 0 ? ` (${summary.totalExcluded} Excluded)` : ''}</div>
+            <div style="font-size: 11px; color: #93c5fd; margin-top: 4px;">Active Personnel${summary.totalSwapsExcluded > 0 ? ` (${summary.totalSwapsExcluded} Swaps Excluded)` : ''}</div>
           </div>
 
         </div>
@@ -1306,8 +1509,8 @@ class RubberPpeTrackingEngine {
             <button class="filter-pill ${this.currentFilter === 'fully_equipped' ? 'active' : ''}" onclick="window.ppeTrackingEngine.setFilter('fully_equipped')">
               ✅ Equipped (${summary.totalFullyEquipped})
             </button>
-            <button class="filter-pill ${this.currentFilter === 'excluded' ? 'active' : ''}" onclick="window.ppeTrackingEngine.setFilter('excluded')" style="${summary.totalExcluded > 0 ? 'border-color: rgba(148, 163, 184, 0.45); color: #cbd5e1;' : ''}">
-              🚫 Excluded (${summary.totalExcluded})
+            <button class="filter-pill ${this.currentFilter === 'excluded' ? 'active' : ''}" onclick="window.ppeTrackingEngine.setFilter('excluded')" style="${summary.totalSwapsExcluded > 0 ? 'border-color: rgba(245, 158, 11, 0.45); color: #fbbf24;' : ''}">
+              🚫 Swaps Excluded (${summary.totalSwapsExcluded})
             </button>
             <button class="filter-pill ${this.currentFilter === 'all_tracked' ? 'active' : ''}" onclick="window.ppeTrackingEngine.setFilter('all_tracked')">
               All (${records.length})
@@ -1727,7 +1930,7 @@ class RubberPpeTrackingEngine {
         
         <!-- Employee Name & Profile Link -->
         <td style="padding: 10px 12px;">
-          <div style="display: flex; align-items: center; gap: 6px;">
+          <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
             <a href="javascript:void(0)" 
                onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(r.name)}');}"
                style="color: #60a5fa; font-weight: 700; text-decoration: none; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;"
@@ -1738,6 +1941,11 @@ class RubberPpeTrackingEngine {
               <span>${this.escapeHtml(r.name)}</span>
             </a>
             ${r.crewLead === 'Yes' ? '<span title="Crew Lead" style="font-size: 11px;">👑</span>' : ''}
+            ${r.isSwapsExcluded ? `
+              <span class="badge" style="background: rgba(245, 158, 11, 0.18); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); font-size: 9.5px; font-weight: 700; padding: 1px 5px; border-radius: 4px;" title="Excluded from Swaps pages & Purchase Needs while on Crew ${this.escapeHtml(r.swapsExcludedCrew || r.jobNumber)}. Auto-removes if assigned to another crew.">
+                🚫 Swaps Excluded (${this.escapeHtml(r.swapsExcludedCrew || r.jobNumber)})
+              </span>
+            ` : ''}
           </div>
         </td>
 
@@ -1794,15 +2002,15 @@ class RubberPpeTrackingEngine {
                     title="View complete employee equipment profile">
               👤 Dossier
             </button>
-            ${r.isExcluded ? `
+            ${r.isSwapsExcluded ? `
               <button class="btn btn-xs" 
                       onclick="window.ppeTrackingEngine.setEmployeeExcluded('${this.escapeJs(r.name)}', false)"
                       style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); color: #6ee7b7; font-size: 11px; padding: 3px 8px; border-radius: 4px; cursor: pointer; display: inline-flex; align-items: center; gap: 3px;"
-                      title="Include ${this.escapeHtml(r.name)} back in Rubber PPE compliance tracking">
-                <span>↩</span> Include
+                      title="Re-include ${this.escapeHtml(r.name)} in Swaps and Purchase Needs">
+                <span>↩</span> Include in Swaps
               </button>
             ` : `
-              ${(!r.isExcluded && (r.needsGlovesToPurchase || r.needsSleevesToPurchase)) ? `
+              ${(r.needsGlovesToPurchase || r.needsSleevesToPurchase) ? `
                 <button class="btn btn-xs" 
                         onclick="window.ppeTrackingEngine.addToPurchaseNeedsForEmployee('${this.escapeJs(r.name)}')"
                         style="background: rgba(245, 158, 11, 0.15); border: 1px solid rgba(245, 158, 11, 0.35); color: #fcd34d; font-size: 11px; padding: 3px 8px; border-radius: 4px; cursor: pointer; display: inline-flex; align-items: center; gap: 3px;"
@@ -1829,8 +2037,8 @@ class RubberPpeTrackingEngine {
               <button class="btn btn-xs btn-secondary" 
                       onclick="window.ppeTrackingEngine.promptExcludeEmployee('${this.escapeJs(r.name)}')"
                       style="font-size: 11px; padding: 3px 7px; color: #94a3b8; border-color: rgba(148, 163, 184, 0.35); cursor: pointer;"
-                      title="Exclude ${this.escapeHtml(r.name)} from Rubber PPE compliance tracking">
-                🚫 Exclude
+                      title="Exclude ${this.escapeHtml(r.name)} from Swaps & Purchase Needs while on Crew ${this.escapeHtml(r.jobNumber)}">
+                🚫 Exclude from Swaps
               </button>
             `}
           </div>
@@ -2296,11 +2504,30 @@ class RubberPpeTrackingEngine {
       : (window.localDB ? window.localDB.getSnapshot() : null);
     const locTable = snap?.tables?.['locations'];
     if (locTable && locTable.rows) {
-      const match = locTable.rows.find(r => {
+      const matches = locTable.rows.filter(r => {
         const lName = String(r['Location'] || Object.values(r)[0] || '').replace(/\s*\([^)]*\)/g, '').trim().toLowerCase();
         return lName === locClean;
       });
-      if (match) {
+      if (matches.length > 0) {
+        let match = matches[0];
+        if (matches.length > 1) {
+          // If multiple rows exist (e.g. Helena canonical home shop vs 80-min duplicate), prefer canonical Home / 0 drive time record
+          const canonical = matches.find(m => {
+            const dt = Number(m['Drive Time (min)'] !== undefined ? m['Drive Time (min)'] : m['Drive Time']);
+            const dir = String(m['Direction'] || '').toLowerCase();
+            return dt === 0 || dir === 'home';
+          });
+          if (canonical) {
+            match = canonical;
+          } else {
+            // Or prefer any entry that explicitly has a non-CL2 approval (e.g. CL2 & CL3)
+            const nonDefault = matches.find(m => {
+              const a = String(m['Rubber Class Approval'] || m['Approval'] || Object.values(m)[6] || '').trim().toUpperCase();
+              return a && a !== 'CL2';
+            });
+            match = nonDefault || matches[matches.length - 1];
+          }
+        }
         const app = String(match['Rubber Class Approval'] || match['Approval'] || Object.values(match)[6] || '').trim().toUpperCase();
         if (app) return app;
       }
@@ -2320,7 +2547,7 @@ class RubberPpeTrackingEngine {
       'butte': 'CL2',
       'elliston': 'CL2',
       'ennis': 'CL2',
-      'helena': 'CL2',
+      'helena': 'CL2 & CL3',
       'kalispell': 'CL2',
       'missoula': 'CL2',
       'three forks': 'CL2',
@@ -2951,6 +3178,7 @@ class RubberPpeTrackingEngine {
    */
   renderExclusionsModalContent(container) {
     if (!container) return;
+    this.checkAndCleanCrewExclusions();
     const audit = this.compileAuditData();
     const records = audit?.records || [];
 
@@ -2968,7 +3196,7 @@ class RubberPpeTrackingEngine {
       if (loc === 'previous employee' || loc.includes('previous')) return;
       const norm = this.normalizeName(name);
       if (norm === 'lost' || norm === 'in testing' || norm.includes('system placeholder')) return;
-      if (!this.isEmployeeExcluded(name)) {
+      if (!this.isEmployeeSwapsExcluded(name)) {
         availableToAdd.push({
           name,
           classification: String(emp['Job Classification'] || emp['Classification'] || '—').trim(),
@@ -2980,20 +3208,22 @@ class RubberPpeTrackingEngine {
 
     availableToAdd.sort((a, b) => a.name.localeCompare(b.name));
 
+    const excludedEntries = Array.from(this.excludedEmployeeMap.values());
+
     container.innerHTML = `
       <div style="display: flex; flex-direction: column; gap: 14px;">
         <!-- Explanation Info Banner -->
-        <div style="background: rgba(148, 163, 184, 0.08); border: 1px solid rgba(148, 163, 184, 0.25); border-left: 4px solid #94a3b8; border-radius: 6px; padding: 10px 14px; font-size: 12px; color: #cbd5e1; line-height: 1.45;">
-          <div style="font-weight: 700; color: #f8fafc; margin-bottom: 2px;">
-            Rubber PPE Compliance Exclusions
+        <div style="background: rgba(245, 158, 11, 0.08); border: 1px solid rgba(245, 158, 11, 0.25); border-left: 4px solid #f59e0b; border-radius: 6px; padding: 10px 14px; font-size: 12px; color: #cbd5e1; line-height: 1.45;">
+          <div style="font-weight: 700; color: #fbbf24; margin-bottom: 2px;">
+            Rubber PPE Swaps & Purchase Needs Exclusions (Crew-Locked)
           </div>
-          Excluded employees are exempt from Rubber PPE tracking. They will not count as missing gloves or sleeves, will not reduce compliance percentages, and will not show missing equipment warning badges on crew cards.
+          Excluded employees will <strong style="color: #f8fafc;">not appear on Glove or Sleeve Swaps pages</strong> and will <strong style="color: #f8fafc;">not generate Purchase Needs orders</strong> while on their current crew. They <strong style="color: #6ee7b7;">continue to be monitored</strong> in the Rubber PPE Compliance Tracker. If an employee is reassigned to another crew, they are <strong style="color: #38bdf8;">automatically removed</strong> from this exclusion list and reappear on Swaps & Purchase Needs.
         </div>
 
         <!-- Quick Presets -->
         <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
           <div style="font-size: 12px; font-weight: 700; color: #94a3b8;">
-            ⚡ Quick Presets:
+            ⚡ Quick Presets (Current Crew):
           </div>
           <div style="display: flex; gap: 6px; flex-wrap: wrap;">
             <button class="btn btn-xs btn-secondary" onclick="window.ppeTrackingEngine.excludeEmployeesByTier('sup')" style="font-size: 11px; padding: 4px 8px; color: #cbd5e1;" title="Exclude all employees with classification SUP (Superintendents/Supervisors)">
@@ -3008,7 +3238,7 @@ class RubberPpeTrackingEngine {
         <!-- Add Employee to Exclusions Search Bar -->
         <div style="background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px 14px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
           <label style="font-size: 12px; font-weight: 700; color: #cbd5e1; white-space: nowrap;">
-            ➕ Exclude Employee:
+            ➕ Exclude Employee on Current Crew:
           </label>
           <select id="ppe-exclude-select-emp" style="flex: 1; min-width: 220px; font-size: 12px; padding: 6px 8px; background: var(--bg-secondary); border: 1px solid var(--border-color); color: #fff; border-radius: 4px;">
             <option value="">-- Select an employee to exclude --</option>
@@ -3022,7 +3252,7 @@ class RubberPpeTrackingEngine {
               window.ppeTrackingEngine.setEmployeeExcluded(sel.value, true);
             }
           " style="font-size: 11.5px; padding: 5px 12px; font-weight: 700;">
-            🚫 Exclude
+            🚫 Exclude on Crew
           </button>
         </div>
 
@@ -3031,14 +3261,14 @@ class RubberPpeTrackingEngine {
           <div style="padding: 8px 12px; background: rgba(0,0,0,0.15); border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;">
             <div style="font-size: 12.5px; font-weight: 700; color: #f8fafc; display: flex; align-items: center; gap: 6px;">
               <span>🚫</span>
-              <span>Currently Excluded Employees</span>
-              <span class="badge" style="background: rgba(148, 163, 184, 0.2); color: #cbd5e1; font-size: 10.5px; padding: 1px 6px; border-radius: 10px;">
+              <span>Currently Excluded from Swaps & Purchase Needs</span>
+              <span class="badge" style="background: rgba(245, 158, 11, 0.2); color: #fbbf24; font-size: 10.5px; padding: 1px 6px; border-radius: 10px;">
                 ${this.excludedEmployeeMap.size}
               </span>
             </div>
             ${this.excludedEmployeeMap.size > 0 ? `
               <span style="font-size: 11px; color: #94a3b8;">
-                Click "↩ Include" to restore
+                Auto-removes when employee changes crew
               </span>
             ` : ''}
           </div>
@@ -3048,7 +3278,7 @@ class RubberPpeTrackingEngine {
               <div style="padding: 28px 16px; text-align: center; color: var(--text-muted);">
                 <div style="font-size: 24px; margin-bottom: 6px;">🛡️</div>
                 <div style="font-size: 13.5px; font-weight: 700; color: #f8fafc; margin-bottom: 3px;">No Excluded Employees</div>
-                <div style="font-size: 11.5px; color: #94a3b8;">All active personnel in tracked classifications are currently monitored for Rubber PPE compliance.</div>
+                <div style="font-size: 11.5px; color: #94a3b8;">All active personnel appear on Swaps pages and generate Purchase Needs for missing or due equipment.</div>
               </div>
             ` : `
               <table class="data-table" style="width: 100%; border-collapse: collapse; font-size: 12px;">
@@ -3056,17 +3286,23 @@ class RubberPpeTrackingEngine {
                   <tr style="background: var(--bg-tertiary); border-bottom: 1px solid var(--border-color);">
                     <th style="padding: 8px 10px; color: #cbd5e1;">Employee</th>
                     <th style="padding: 8px 10px; color: #cbd5e1;">Classification</th>
-                    <th style="padding: 8px 10px; color: #cbd5e1;">Job / Crew</th>
+                    <th style="padding: 8px 10px; color: #cbd5e1;">Locked Crew</th>
+                    <th style="padding: 8px 10px; color: #cbd5e1;">Current Crew</th>
                     <th style="padding: 8px 10px; color: #cbd5e1;">Location</th>
+                    <th style="padding: 8px 10px; color: #cbd5e1;">Date Excluded</th>
                     <th style="padding: 8px 10px; text-align: right; color: #cbd5e1;">Action</th>
                   </tr>
                 </thead>
                 <tbody>
-                  ${Array.from(this.excludedEmployeeMap.values()).map(empName => {
+                  ${excludedEntries.map(entry => {
+                    const empName = (entry && typeof entry === 'object') ? entry.name : String(entry || '');
+                    const lockedCrew = (entry && typeof entry === 'object') ? (entry.crew || '—') : '—';
+                    const dateExcl = (entry && typeof entry === 'object') ? (entry.dateExcluded || '—') : '—';
                     const matchRec = records.find(r => this.isNameMatch(r.name, empName));
-                    const cls = matchRec ? matchRec.classification : '—';
-                    const job = matchRec ? matchRec.jobNumber : '—';
-                    const loc = matchRec ? matchRec.location : '—';
+                    const cls = matchRec ? matchRec.classification : ((entry && entry.classification) || '—');
+                    const curCrew = matchRec ? matchRec.jobNumber : (this.getEmployeeBaseCrew(empName) || '—');
+                    const loc = matchRec ? matchRec.location : ((entry && entry.location) || '—');
+                    const isMatchingCrew = Boolean(lockedCrew && curCrew && (lockedCrew === curCrew || curCrew.startsWith(lockedCrew)));
 
                     return `
                       <tr style="border-bottom: 1px solid rgba(255,255,255,0.04);">
@@ -3076,11 +3312,20 @@ class RubberPpeTrackingEngine {
                         <td style="padding: 8px 10px; color: #94a3b8;">
                           ${this.escapeHtml(cls)}
                         </td>
-                        <td style="padding: 8px 10px; color: #93c5fd; font-family: monospace;">
-                          ${this.escapeHtml(job)}
+                        <td style="padding: 8px 10px; color: #fbbf24; font-family: monospace; font-weight: 700;">
+                          ${this.escapeHtml(lockedCrew)}
+                        </td>
+                        <td style="padding: 8px 10px; font-family: monospace;">
+                          <span style="color: ${isMatchingCrew ? '#34d399' : '#f87171'}; font-weight: 700;">
+                            ${this.escapeHtml(curCrew)}
+                          </span>
+                          ${isMatchingCrew ? '<span style="font-size: 10px; color: #34d399; margin-left: 4px;">✓ Locked</span>' : ''}
                         </td>
                         <td style="padding: 8px 10px; color: #cbd5e1;">
                           ${this.escapeHtml(loc)}
+                        </td>
+                        <td style="padding: 8px 10px; color: #94a3b8; font-size: 11px;">
+                          ${this.escapeHtml(dateExcl)}
                         </td>
                         <td style="padding: 8px 10px; text-align: right;">
                           <button class="btn btn-xs" onclick="window.ppeTrackingEngine.setEmployeeExcluded('${this.escapeJs(empName)}', false)" style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.35); color: #6ee7b7; font-size: 11px; padding: 2px 8px; border-radius: 4px; cursor: pointer; display: inline-flex; align-items: center; gap: 3px;">

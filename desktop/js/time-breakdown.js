@@ -838,6 +838,7 @@ class TimeBreakdownEngine {
             const dKey = this.normalizeDateKey(rawDate);
             if (daysMap[dKey]) {
               const isReclaim = Boolean(!cleanNew || String(r['Days Left'] || '').toUpperCase().includes('PREV') || status.includes('return to shelf'));
+              const isNewAssignment = Boolean(!oldItem && cleanNew && cleanNew !== '—' && cleanNew !== '-');
               const normEmp = this.normalizeEmpName(empClean).toLowerCase();
               const dedupe = `${cfg.label}_${normEmp}_${cleanNew}_${oldItem}`.toLowerCase();
               if (!seenSwapKeys.has(dedupe)) {
@@ -846,9 +847,10 @@ class TimeBreakdownEngine {
                 const sKey = `${cfg.sw}|${empClean.toLowerCase()}|${cfg.label.toLowerCase()}|${oldItem.toLowerCase()}`;
                 const officeInfo = getSwapOfficeInfo(sKey, empClean, oldItem, cleanNew, cfg.label, dKey);
                 const swapObj = {
-                  type: isReclaim ? `${cfg.label} Reclaim` : `${cfg.label} Swap`,
+                  type: isReclaim ? `${cfg.label} Reclaim` : (isNewAssignment ? `New ${cfg.label} Assignment` : `${cfg.label} Swap`),
                   label: cfg.label,
                   isReclaim: isReclaim,
+                  isNewAssignment: isNewAssignment,
                   employee: empClean,
                   oldItem: oldItem,
                   newItem: cleanNew,
@@ -1711,7 +1713,7 @@ class TimeBreakdownEngine {
             } else if (sw.oldItem && sw.newItem && sw.newItem !== '—' && sw.newItem !== '-') {
               itemDesc = `${label} swap #${sw.oldItem} to #${sw.newItem}`;
             } else if (sw.newItem && sw.newItem !== '—' && sw.newItem !== '-') {
-              itemDesc = `new ${label} #${sw.newItem}`;
+              itemDesc = `new ${label} assignment #${sw.newItem}`;
             } else {
               itemDesc = `${label} exchange`;
             }
@@ -1728,6 +1730,7 @@ class TimeBreakdownEngine {
           });
 
           const allReclaims = fieldSwaps.every(sw => sw.isReclaim);
+          const allNewAssignments = fieldSwaps.every(sw => sw.isNewAssignment || (!sw.oldItem && sw.newItem));
           let swapTypeWord = '';
           let pluralWord = '';
 
@@ -1738,6 +1741,13 @@ class TimeBreakdownEngine {
             pluralWord = isAllGloves ? 'glove reclaims' :
                          isAllSleeves ? 'sleeve reclaims' :
                          isAllBlankets ? 'blanket reclaims' : 'equipment reclaims';
+          } else if (allNewAssignments) {
+            swapTypeWord = isAllGloves ? 'new glove assignment' :
+                           isAllSleeves ? 'new sleeve assignment' :
+                           isAllBlankets ? 'new blanket assignment' : 'new equipment assignment';
+            pluralWord = isAllGloves ? 'new glove assignments' :
+                         isAllSleeves ? 'new sleeve assignments' :
+                         isAllBlankets ? 'new blanket assignments' : 'new equipment assignments';
           } else {
             swapTypeWord = isAllGloves ? 'glove swap' :
                            isAllSleeves ? 'sleeve swap' :
@@ -2034,16 +2044,23 @@ class TimeBreakdownEngine {
               const specs = specParts.join(', ');
 
               const isReclaim = Boolean(sw.isReclaim || (!sw.newItem || sw.newItem === '—' || sw.newItem === '-'));
-              const swapAction = isReclaim ? `${sw.label} Reclaim` : `${sw.label} Swap`;
+              const isNewAssignment = Boolean(sw.isNewAssignment || (!sw.oldItem && sw.newItem && sw.newItem !== '—' && sw.newItem !== '-'));
+              const swapAction = isReclaim ? `${sw.label} Reclaim` : (isNewAssignment ? `New ${sw.label} Assignment` : `${sw.label} Swap`);
               let swapDetails = '';
               if (isReclaim) {
                 swapDetails = `#${sw.oldItem} to ${sw.location || 'Helena'}`;
+              } else if (isNewAssignment) {
+                swapDetails = `Item #${sw.newItem}`;
               } else if (sw.oldItem && sw.newItem) {
                 swapDetails = `#${sw.oldItem} to #${sw.newItem}`;
               } else {
                 swapDetails = `#${sw.newItem || sw.oldItem}`;
               }
-              lines.push(`       - ${sw.employee}${crewTag}: ${swapAction} ${swapDetails}${specs ? ' (' + specs + ')' : ''}`);
+              if (isNewAssignment) {
+                lines.push(`       - New ${sw.label} Assignment: ${sw.employee}${crewTag} — Item #${sw.newItem}${specs ? ' (' + specs + ')' : ''}`);
+              } else {
+                lines.push(`       - ${sw.employee}${crewTag}: ${swapAction} ${swapDetails}${specs ? ' (' + specs + ')' : ''}`);
+              }
             });
           }
         });
@@ -2085,12 +2102,15 @@ class TimeBreakdownEngine {
           const crewTag = t.crew ? ` (Crew ${this.getSignificantJobNumber(t.crew)})` : (t.job ? ` (Job ${t.job})` : '');
 
           const isReclaim = Boolean(t.isReclaim || ((t.oldItem || t.newItem) && (!t.newItem || t.newItem === '—' || t.newItem === '-')));
-          const cleanLabel = t.label || String(t.type || 'Equipment').replace(/\s*(Swap|Reclaim)\s*/i, '');
-          const type = isReclaim ? `${cleanLabel} Reclaim` : (t.label ? `${t.label} Swap` : (t.type || t['Task Type'] || t['Type'] || 'Task'));
+          const isNewAssignment = Boolean(t.isNewAssignment || (!t.oldItem && t.newItem && t.newItem !== '—' && t.newItem !== '-'));
+          const cleanLabel = t.label || String(t.type || 'Equipment').replace(/\s*(Swap|Reclaim|Assignment)\s*/i, '');
+          const type = isReclaim ? `${cleanLabel} Reclaim` : (isNewAssignment ? `New ${cleanLabel} Assignment` : (t.label ? `${t.label} Swap` : (t.type || t['Task Type'] || t['Type'] || 'Task')));
 
           let swapDetails = '';
           if (isReclaim) {
             swapDetails = `#${t.oldItem} to ${t.location || 'Helena'}`;
+          } else if (isNewAssignment) {
+            swapDetails = `Item #${t.newItem}`;
           } else if (t.oldItem || t.newItem) {
             swapDetails = (t.oldItem && t.newItem && t.newItem !== '—' && t.newItem !== '-') ? `#${t.oldItem} to #${t.newItem}` : `#${t.newItem || t.oldItem}`;
           } else {
@@ -2108,7 +2128,11 @@ class TimeBreakdownEngine {
           if (t.length) specParts.push(`${t.length}`);
           const specs = specParts.join(', ');
 
-          lines.push(`     • ${emp}${crewTag}: ${type} ${swapDetails}${specs ? ' (' + specs + ')' : ''}`);
+          if (isNewAssignment) {
+            lines.push(`     • New ${cleanLabel} Assignment: ${emp}${crewTag} — Item #${t.newItem}${specs ? ' (' + specs + ')' : ''}`);
+          } else {
+            lines.push(`     • ${emp}${crewTag}: ${type} ${swapDetails}${specs ? ' (' + specs + ')' : ''}`);
+          }
         });
       }
 

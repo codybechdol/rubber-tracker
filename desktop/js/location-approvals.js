@@ -177,35 +177,45 @@ class LocationApprovalsEngine {
   async updateApproval(locationName, newApproval) {
     if (!locationName || !newApproval) return;
     const locTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('locations') : null) || this.db?.snapshot?.tables?.['locations'];
-    if (!locTable) return;
+    if (!locTable || !locTable.rows) return;
 
-    const rowObj = locTable.rows.find(r => {
+    const matches = locTable.rows.filter(r => {
       const n = String(r['Location'] || Object.values(r)[0] || '').trim().toLowerCase();
       return n === locationName.toLowerCase();
     });
 
-    if (!rowObj) {
+    if (!matches || matches.length === 0) {
       console.warn(`[LocationApprovals] Location not found: ${locationName}`);
       return;
     }
 
-    const oldApproval = rowObj['Rubber Class Approval'] || 'CL2';
-    if (oldApproval === newApproval) return;
-
-    rowObj['Rubber Class Approval'] = newApproval;
-
-    // Update rawGrid if present
-    if (locTable.rawGrid && locTable.headers) {
-      const colIdx = locTable.headers.findIndex(h => /rubber class|approval/i.test(String(h || '').trim()));
-      const targetCol = colIdx !== -1 ? colIdx : 6;
-      const actualRowIdx = rowObj._rowIdx || (locTable.rows.indexOf(rowObj) + 2);
-      if (locTable.rawGrid[actualRowIdx - 1]) {
-        locTable.rawGrid[actualRowIdx - 1][targetCol] = newApproval;
-      }
+    // Prefer canonical record (e.g. 0-min / Home shop for Helena)
+    let canonicalRow = matches[0];
+    if (matches.length > 1) {
+      const can = matches.find(m => {
+        const dt = Number(m['Drive Time (min)'] !== undefined ? m['Drive Time (min)'] : m['Drive Time']);
+        const dir = String(m['Direction'] || '').toLowerCase();
+        return dt === 0 || dir === 'home';
+      });
+      if (can) canonicalRow = can;
+      else canonicalRow = matches[matches.length - 1];
     }
 
-    // Queue UPDATE_CELL mutation for Google Sheets
-    const actualRowIdx = rowObj._rowIdx || (locTable.rows.indexOf(rowObj) + 2);
+    // Update all matching rows so duplicates (e.g. Helena) never retain conflicting approval
+    matches.forEach(rowObj => {
+      rowObj['Rubber Class Approval'] = newApproval;
+      if (locTable.rawGrid && locTable.headers) {
+        const colIdx = locTable.headers.findIndex(h => /rubber class|approval/i.test(String(h || '').trim()));
+        const targetCol = colIdx !== -1 ? colIdx : 6;
+        const actualRowIdx = rowObj._rowIdx || (locTable.rows.indexOf(rowObj) + 2);
+        if (locTable.rawGrid[actualRowIdx - 1]) {
+          locTable.rawGrid[actualRowIdx - 1][targetCol] = newApproval;
+        }
+      }
+    });
+
+    // Queue UPDATE_CELL mutation for Google Sheets targeting the canonical row
+    const actualRowIdx = canonicalRow._rowIdx || (locTable.rows.indexOf(canonicalRow) + 2);
     const colIdx = (locTable.headers || []).findIndex(h => /rubber class|approval/i.test(String(h || '').trim()));
     const sheetCol = colIdx !== -1 ? (colIdx + 1) : 7;
 

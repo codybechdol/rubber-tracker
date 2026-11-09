@@ -112,9 +112,9 @@ class SupabaseSyncEngine {
     return [
       {
         key: 'sheets-view',
-        label: '📦 Active Inventory & Swaps',
+        label: '👥 Employees & Inventory',
         tabs: [
-          { key: 'employees', label: '👥 Employees' },
+          { key: 'employees', label: '👥 Crew Structure' },
           { key: 'job_tracking', label: '📋 Job Tracking' },
           { key: 'locations', label: '📍 Locations & Approvals' },
           { key: 'gloves', label: '🧤 Gloves' },
@@ -135,9 +135,7 @@ class SupabaseSyncEngine {
           { key: 'ground_swaps', label: '🔄 Ground Swaps' },
           { key: 'hot_sticks', label: '🔴 Hot Sticks' },
           { key: 'hot_stick_swaps', label: '🔄 Hot Stick Swaps' },
-          { key: 'dot_drug_tests', label: '🧪 DOT Drug Tests' },
-          { key: 'retired_equipment', label: '🗄️ Retired Equipment' },
-          { key: 'test_batches', label: '🔬 Test Batches' }
+          { key: 'test_batches', label: '🔬 Lab Test Batches' }
         ]
       },
       { key: 'weekly-summary-view', label: '📊 Weekly Summary & Briefing', tabs: [] },
@@ -169,7 +167,8 @@ class SupabaseSyncEngine {
           { key: 'aed_history', label: '🏥 AED History' },
           { key: 'grounds_history', label: '⚡ Grounds History' },
           { key: 'hot_sticks_history', label: '🔴 Hot Sticks History' },
-          { key: 'employee_history', label: '👥 Employee History' }
+          { key: 'employee_history', label: '👥 Employee History' },
+          { key: 'retired_equipment', label: '🗄️ Retired Equipment' }
         ]
       },
       { 

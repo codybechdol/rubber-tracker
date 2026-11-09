@@ -73,7 +73,7 @@ class SheetNavigator {
     };
 
     this.sheetList = [
-      { key: 'employees', label: '👥 Employees', icon: '👤', isSwap: false },
+      { key: 'employees', label: '👥 Crew Structure', icon: '👤', isSwap: false },
       { key: 'job_tracking', label: '📋 Job Tracking', icon: '📋', isSwap: false },
       { key: 'locations', label: '📍 Locations & Approvals', icon: '📍', isSwap: false },
       { key: 'gloves', label: '🧤 Gloves', icon: '🧤', isSwap: false },
@@ -94,9 +94,7 @@ class SheetNavigator {
       { key: 'ground_swaps', label: '🔄 Ground Swaps', icon: '🔄', isSwap: true },
       { key: 'hot_sticks', label: '🔴 Hot Sticks', icon: '🔴', isSwap: false },
       { key: 'hot_stick_swaps', label: '🔄 Hot Stick Swaps', icon: '🔄', isSwap: true },
-      { key: 'dot_drug_tests', label: '🧪 DOT Drug Tests', icon: '🧪', isSwap: false },
-      { key: 'retired_equipment', label: '🗄️ Retired Equipment', icon: '🗄️', isSwap: false },
-      { key: 'test_batches', label: '🔬 Test Batches', icon: '🔬', isSwap: false }
+      { key: 'test_batches', label: '🔬 Lab Test Batches', icon: '🔬', isSwap: false }
     ];
   }
 
@@ -473,100 +471,286 @@ class SheetNavigator {
     );
   }
 
+  getCategoryMapping(sheetKey) {
+    const key = sheetKey || this.currentSheetKey || 'employees';
+    const mappings = {
+      // Employees
+      employees: { group: 'employees', item: 'employees', subtab: 'inventory', invKey: 'employees', swapKey: null },
+      job_tracking: { group: 'employees', item: 'job_tracking', subtab: 'inventory', invKey: 'job_tracking', swapKey: null },
+      locations: { group: 'employees', item: 'locations', subtab: 'inventory', invKey: 'locations', swapKey: null },
+
+      // Rubber
+      gloves: { group: 'rubber', item: 'gloves', subtab: 'inventory', invKey: 'gloves', swapKey: 'glove_swaps' },
+      glove_swaps: { group: 'rubber', item: 'gloves', subtab: 'swaps', invKey: 'gloves', swapKey: 'glove_swaps' },
+      sleeves: { group: 'rubber', item: 'sleeves', subtab: 'inventory', invKey: 'sleeves', swapKey: 'sleeve_swaps' },
+      sleeve_swaps: { group: 'rubber', item: 'sleeves', subtab: 'swaps', invKey: 'sleeves', swapKey: 'sleeve_swaps' },
+      blankets: { group: 'rubber', item: 'blankets', subtab: 'inventory', invKey: 'blankets', swapKey: 'blanket_swaps' },
+      blanket_swaps: { group: 'rubber', item: 'blankets', subtab: 'swaps', invKey: 'blankets', swapKey: 'blanket_swaps' },
+
+      // Equipment
+      macks: { group: 'equipment', item: 'macks', subtab: 'inventory', invKey: 'macks', swapKey: 'mack_swaps' },
+      mack_swaps: { group: 'equipment', item: 'macks', subtab: 'swaps', invKey: 'macks', swapKey: 'mack_swaps' },
+      hv_testers: { group: 'equipment', item: 'hv_testers', subtab: 'inventory', invKey: 'hv_testers', swapKey: 'hv_tester_swaps' },
+      hv_tester_swaps: { group: 'equipment', item: 'hv_testers', subtab: 'swaps', invKey: 'hv_testers', swapKey: 'hv_tester_swaps' },
+      phasing_sets: { group: 'equipment', item: 'phasing_sets', subtab: 'inventory', invKey: 'phasing_sets', swapKey: 'phasing_set_swaps' },
+      phasing_set_swaps: { group: 'equipment', item: 'phasing_sets', subtab: 'swaps', invKey: 'phasing_sets', swapKey: 'phasing_set_swaps' },
+      aed: { group: 'equipment', item: 'aed', subtab: 'inventory', invKey: 'aed', swapKey: 'aed_swaps' },
+      aed_swaps: { group: 'equipment', item: 'aed', subtab: 'swaps', invKey: 'aed', swapKey: 'aed_swaps' },
+      grounds: { group: 'equipment', item: 'grounds', subtab: 'inventory', invKey: 'grounds', swapKey: 'ground_swaps' },
+      ground_swaps: { group: 'equipment', item: 'grounds', subtab: 'swaps', invKey: 'grounds', swapKey: 'ground_swaps' },
+      hot_sticks: { group: 'equipment', item: 'hot_sticks', subtab: 'inventory', invKey: 'hot_sticks', swapKey: 'hot_stick_swaps' },
+      hot_stick_swaps: { group: 'equipment', item: 'hot_sticks', subtab: 'swaps', invKey: 'hot_sticks', swapKey: 'hot_stick_swaps' },
+      test_batches: { group: 'equipment', item: 'test_batches', subtab: 'inventory', invKey: 'test_batches', swapKey: null }
+    };
+    return mappings[key] || { group: 'employees', item: 'employees', subtab: 'inventory', invKey: 'employees', swapKey: null };
+  }
+
+  switchToSheet(sheetKey) {
+    if (!sheetKey) return;
+    this.currentSheetKey = sheetKey;
+    this.activeSheetTabKey = sheetKey;
+    this.filterSize = 'all';
+    this.filterClass = 'all';
+    this.filterLocation = 'all';
+    this.filterStatus = 'all';
+    this.searchTerm = '';
+    const sInput = document.getElementById('sheet-search-input');
+    if (sInput) sInput.value = '';
+    const INVENTORY_KEYS = ['gloves', 'sleeves', 'blankets', 'macks', 'hv_testers', 'phasing_sets', 'aed', 'grounds', 'hot_sticks'];
+    if (sheetKey === 'employees') {
+      this.multiSort = ['Location', 'Job Number'];
+      this.sortCol = null;
+    } else if (sheetKey === 'job_tracking') {
+      this.multiSort = ['Status', 'Job Number'];
+      this.sortCol = null;
+    } else if (INVENTORY_KEYS.includes(sheetKey)) {
+      this.sortCol = null;
+      this.multiSort = null;
+      this.sortDir = 'asc';
+    } else {
+      this.sortCol = null;
+      this.multiSort = null;
+    }
+    this.sortDir = 'asc';
+    if (window.supabaseSync) {
+      window.supabaseSync.syncEditModeForCurrentContext('sheets-view');
+    }
+    this.renderTabsBar(true);
+    this.renderCurrentSheet();
+  }
+
   renderTabsBar(force = false) {
     const bar = document.getElementById('sheet-tabs-bar');
     if (!bar) return;
 
-    const visibleSheets = this.sheetList.filter(s => !window.supabaseSync || window.supabaseSync.canViewTab(s.key, 'sheets-view'));
+    const mapping = this.getCategoryMapping(this.currentSheetKey);
+    const activeGroup = mapping.group;
+    const activeItem = mapping.item;
+    const activeSubtab = mapping.subtab;
 
-    // Fast-path: If buttons are already built, just update active states and badges without destroying DOM
-    if (!force && bar.children.length === visibleSheets.length) {
-      for (let i = 0; i < bar.children.length; i++) {
-        const btn = bar.children[i];
-        const sheetKey = btn.dataset.sheetKey;
-        btn.classList.toggle('active', sheetKey === this.currentSheetKey);
-
-        // Update badge if historyIssuesEngine is active
-        if (window.historyIssuesEngine) {
-          const issueCount = window.historyIssuesEngine.getEquipmentItemCount(sheetKey);
-          let badge = btn.querySelector('.tab-history-issues-badge');
-          if (issueCount > 0) {
-            if (!badge) {
-              badge = document.createElement('span');
-              badge.className = 'tab-history-issues-badge';
-              badge.onclick = (e) => {
-                e.stopPropagation();
-                window.historyIssuesEngine.openHistoryIssuesModal(sheetKey);
-              };
-              btn.appendChild(badge);
-            }
-            badge.title = `${issueCount} items with history discrepancies (Click to inspect)`;
-            badge.innerHTML = `⚠️ ${issueCount}`;
-          } else if (badge) {
-            badge.remove();
-          }
-        }
-      }
-      return;
-    }
-
+    bar.className = 'sheet-tabs-container';
     bar.innerHTML = '';
 
-    visibleSheets.forEach(sheet => {
-      const btn = document.createElement('button');
-      btn.className = 'sheet-tab-btn' + (sheet.key === this.currentSheetKey ? ' active' : '');
-      btn.dataset.sheetKey = sheet.key;
-      btn.innerHTML = `<span>${sheet.icon}</span> ${sheet.label.replace(/^.*? /, '')}`;
+    // --- ROW 1: CATEGORY GROUPS BAR ---
+    const groupBar = document.createElement('div');
+    groupBar.className = 'sheet-group-bar';
+
+    const groups = [
+      { key: 'employees', label: 'Employees', icon: '👥' },
+      { key: 'rubber', label: 'Rubber Goods', icon: '🧤' },
+      { key: 'equipment', label: 'Equipment', icon: '⚡' }
+    ];
+
+    groups.forEach(g => {
+      const gBtn = document.createElement('button');
+      gBtn.className = 'sheet-group-btn' + (g.key === activeGroup ? ' active' : '');
+      gBtn.innerHTML = `<span>${g.icon}</span> ${g.label}`;
+      gBtn.onclick = () => {
+        if (g.key === activeGroup) return;
+        let defaultSheet = 'employees';
+        if (g.key === 'rubber') defaultSheet = 'gloves';
+        if (g.key === 'equipment') defaultSheet = 'macks';
+        this.switchToSheet(defaultSheet);
+      };
+      groupBar.appendChild(gBtn);
+    });
+
+    // Subtle separator between sheet groups and workspace quick-actions on the left
+    const groupDivider = document.createElement('div');
+    groupDivider.className = 'sheet-group-divider';
+    groupDivider.style.width = '1px';
+    groupDivider.style.height = '18px';
+    groupDivider.style.background = 'rgba(255, 255, 255, 0.15)';
+    groupDivider.style.margin = '0 6px 4px 8px';
+    groupDivider.style.flexShrink = '0';
+    groupBar.appendChild(groupDivider);
+
+    // Navigation shortcuts placed on the left directly next to the category tabs
+    const quickNav = document.createElement('div');
+    quickNav.className = 'sheet-group-actions';
+    quickNav.style.display = 'flex';
+    quickNav.style.gap = '6px';
+    quickNav.style.alignItems = 'center';
+    quickNav.style.marginBottom = '4px';
+
+    const prevEmpBtn = document.createElement('button');
+    prevEmpBtn.className = 'btn btn-secondary sheet-nav-action-btn';
+    prevEmpBtn.style.fontSize = '11.5px';
+    prevEmpBtn.style.padding = '3px 9px';
+    prevEmpBtn.style.fontWeight = '500';
+    prevEmpBtn.style.color = '#cbd5e1';
+    prevEmpBtn.style.background = 'rgba(255, 255, 255, 0.06)';
+    prevEmpBtn.style.border = '1px solid rgba(255, 255, 255, 0.12)';
+    prevEmpBtn.style.borderRadius = '5px';
+    prevEmpBtn.style.cursor = 'pointer';
+    prevEmpBtn.style.display = 'inline-flex';
+    prevEmpBtn.style.alignItems = 'center';
+    prevEmpBtn.style.gap = '5px';
+    prevEmpBtn.style.whiteSpace = 'nowrap';
+    prevEmpBtn.title = 'Open Previous Employees & History workspace';
+    prevEmpBtn.innerHTML = '<span>👥</span> Previous Employees';
+    prevEmpBtn.onclick = () => {
+      if (typeof window.navigateToView === 'function') window.navigateToView('previous-employees-view');
+    };
+    quickNav.appendChild(prevEmpBtn);
+
+    const crewImpBtn = document.createElement('button');
+    crewImpBtn.className = 'btn btn-secondary sheet-nav-action-btn';
+    crewImpBtn.style.fontSize = '11.5px';
+    crewImpBtn.style.padding = '3px 9px';
+    crewImpBtn.style.fontWeight = '500';
+    crewImpBtn.style.color = '#cbd5e1';
+    crewImpBtn.style.background = 'rgba(255, 255, 255, 0.06)';
+    crewImpBtn.style.border = '1px solid rgba(255, 255, 255, 0.12)';
+    crewImpBtn.style.borderRadius = '5px';
+    crewImpBtn.style.cursor = 'pointer';
+    crewImpBtn.style.display = 'inline-flex';
+    crewImpBtn.style.alignItems = 'center';
+    crewImpBtn.style.gap = '5px';
+    crewImpBtn.style.whiteSpace = 'nowrap';
+    crewImpBtn.title = 'Open Crew Import workspace';
+    crewImpBtn.innerHTML = '<span>📥</span> Crew Import';
+    crewImpBtn.onclick = () => {
+      if (typeof window.navigateToView === 'function') window.navigateToView('crew-import-view');
+    };
+    quickNav.appendChild(crewImpBtn);
+
+    groupBar.appendChild(quickNav);
+    bar.appendChild(groupBar);
+
+    // --- ROW 2: ITEMS & SUBTABS BAR ---
+    const itemsBar = document.createElement('div');
+    itemsBar.className = 'sheet-items-bar';
+
+    const itemsList = document.createElement('div');
+    itemsList.className = 'sheet-items-list';
+
+    let currentItems = [];
+    if (activeGroup === 'employees') {
+      currentItems = [
+        { id: 'employees', label: 'Crew Structure', icon: '👤', invKey: 'employees', swapKey: null },
+        { id: 'job_tracking', label: 'Job Tracking', icon: '📋', invKey: 'job_tracking', swapKey: null },
+        { id: 'locations', label: 'Locations & Approvals', icon: '📍', invKey: 'locations', swapKey: null }
+      ];
+    } else if (activeGroup === 'rubber') {
+      currentItems = [
+        { id: 'gloves', label: 'Gloves', icon: '🧤', invKey: 'gloves', swapKey: 'glove_swaps' },
+        { id: 'sleeves', label: 'Sleeves', icon: '🦺', invKey: 'sleeves', swapKey: 'sleeve_swaps' },
+        { id: 'blankets', label: 'Blankets', icon: '🧱', invKey: 'blankets', swapKey: 'blanket_swaps' }
+      ];
+    } else if (activeGroup === 'equipment') {
+      currentItems = [
+        { id: 'macks', label: 'MACKs', icon: '🧱', invKey: 'macks', swapKey: 'mack_swaps' },
+        { id: 'hv_testers', label: 'HV Testers', icon: '⚡', invKey: 'hv_testers', swapKey: 'hv_tester_swaps' },
+        { id: 'phasing_sets', label: 'Phasing Sets', icon: '⚡', invKey: 'phasing_sets', swapKey: 'phasing_set_swaps' },
+        { id: 'aed', label: 'AED', icon: '🏥', invKey: 'aed', swapKey: 'aed_swaps' },
+        { id: 'grounds', label: 'Grounds', icon: '⚡', invKey: 'grounds', swapKey: 'ground_swaps' },
+        { id: 'hot_sticks', label: 'Hot Sticks', icon: '🔴', invKey: 'hot_sticks', swapKey: 'hot_stick_swaps' },
+        { id: 'test_batches', label: 'Lab Test Batches', icon: '🔬', invKey: 'test_batches', swapKey: null }
+      ];
+    }
+
+    currentItems.forEach(item => {
+      const isItemActive = (item.id === activeItem);
+      let targetKey = item.invKey;
+      if (item.swapKey && activeSubtab === 'swaps') {
+        targetKey = item.swapKey;
+      }
+
+      const itemBtn = document.createElement('button');
+      itemBtn.className = 'sheet-tab-btn' + (isItemActive ? ' active' : '');
+      itemBtn.dataset.sheetKey = targetKey;
+      itemBtn.dataset.itemId = item.id;
+      itemBtn.innerHTML = `<span>${item.icon}</span> ${item.label}`;
 
       if (window.historyIssuesEngine) {
-        const issueCount = window.historyIssuesEngine.getEquipmentItemCount(sheet.key);
+        const issueCount = window.historyIssuesEngine.getEquipmentItemCount(item.invKey);
         if (issueCount > 0) {
           const badge = document.createElement('span');
           badge.className = 'tab-history-issues-badge';
-          badge.title = `${issueCount} ${sheet.label} with history discrepancies (Click to inspect)`;
+          badge.title = `${issueCount} items with history discrepancies (Click to inspect)`;
           badge.innerHTML = `⚠️ ${issueCount}`;
           badge.onclick = (e) => {
             e.stopPropagation();
-            window.historyIssuesEngine.openHistoryIssuesModal(sheet.key);
+            window.historyIssuesEngine.openHistoryIssuesModal(item.invKey);
           };
-          btn.appendChild(badge);
+          itemBtn.appendChild(badge);
         }
       }
 
-      btn.onclick = () => {
-        this.currentSheetKey = sheet.key;
-        this.activeSheetTabKey = sheet.key;
-        this.filterSize = 'all';
-        this.filterClass = 'all';
-        this.filterLocation = 'all';
-        this.filterStatus = 'all';
-        this.searchTerm = '';
-        const sInput = document.getElementById('sheet-search-input');
-        if (sInput) sInput.value = '';
-        const INVENTORY_KEYS = ['gloves', 'sleeves', 'blankets', 'macks', 'hv_testers', 'phasing_sets', 'aed', 'grounds', 'hot_sticks'];
-        if (sheet.key === 'employees') {
-          this.multiSort = ['Location', 'Job Number'];
-          this.sortCol = null;
-        } else if (sheet.key === 'job_tracking') {
-          this.multiSort = ['Status', 'Job Number'];
-          this.sortCol = null;
-        } else if (INVENTORY_KEYS.includes(sheet.key)) {
-          this.sortCol = null; // Auto-detected in renderStandardTable as primary item column
-          this.multiSort = null;
-          this.sortDir = 'asc';
-        } else {
-          this.sortCol = null;
-          this.multiSort = null;
-        }
-        this.sortDir = 'asc';
-        if (window.supabaseSync) {
-          window.supabaseSync.syncEditModeForCurrentContext('sheets-view');
-        }
-        this.renderTabsBar();
-        this.renderCurrentSheet();
+      itemBtn.onclick = () => {
+        this.switchToSheet(targetKey);
       };
-      bar.appendChild(btn);
+      itemsList.appendChild(itemBtn);
     });
+
+    itemsBar.appendChild(itemsList);
+
+    // Subtabs Switch
+    const activeItemDef = currentItems.find(it => it.id === activeItem);
+    if (activeItemDef && activeItemDef.swapKey) {
+      const subtabBox = document.createElement('div');
+      subtabBox.className = 'sheet-subtabs-pill-box';
+
+      const invPill = document.createElement('button');
+      invPill.className = 'sheet-subtab-pill' + (activeSubtab === 'inventory' ? ' active' : '');
+      invPill.innerHTML = `<span>📦</span> Active Inventory`;
+      invPill.onclick = () => {
+        this.switchToSheet(activeItemDef.invKey);
+      };
+
+      const swapPill = document.createElement('button');
+      swapPill.className = 'sheet-subtab-pill' + (activeSubtab === 'swaps' ? ' active' : '');
+      swapPill.innerHTML = `<span>🔄</span> Swaps (Stage 1/2/3)`;
+      swapPill.onclick = () => {
+        this.switchToSheet(activeItemDef.swapKey);
+      };
+
+      subtabBox.appendChild(invPill);
+      subtabBox.appendChild(swapPill);
+      itemsBar.appendChild(subtabBox);
+    } else if (activeItem === 'test_batches') {
+      const subtabBox = document.createElement('div');
+      subtabBox.className = 'sheet-subtabs-pill-box';
+
+      const logPill = document.createElement('button');
+      logPill.className = 'sheet-subtab-pill active';
+      logPill.innerHTML = `<span>🔬</span> Testing Batches Log`;
+
+      const portalPill = document.createElement('button');
+      portalPill.className = 'sheet-subtab-pill';
+      portalPill.innerHTML = `<span>🌐</span> Open JM Portal ↗`;
+      portalPill.title = 'Open JM Test Systems Portal';
+      portalPill.onclick = () => {
+        if (typeof window.navigateToView === 'function') window.navigateToView('jm-test-view');
+      };
+
+      subtabBox.appendChild(logPill);
+      subtabBox.appendChild(portalPill);
+      itemsBar.appendChild(subtabBox);
+    }
+
+    bar.appendChild(itemsBar);
   }
 
   setupSearch() {
@@ -6753,6 +6937,11 @@ class SheetNavigator {
       }
     }
 
+    const btnSwapsExcl = document.getElementById('btn-swaps-exclusions');
+    if (btnSwapsExcl) {
+      btnSwapsExcl.style.display = isSwapSheet ? 'inline-flex' : 'none';
+    }
+
     if (btnFixDates) {
       btnFixDates.style.display = isInventorySheet ? 'inline-block' : 'none';
       if (isInventorySheet && sheetMeta) {
@@ -7100,6 +7289,38 @@ class SheetNavigator {
         if (!rowMatches && !isClassHeader && !isPrevEmpHeader && !isClassReclaimHeader && !isLostHeader && !isRetestHeader && !isCityHeader && !isForemanHeader) return;
       }
 
+      // Check if this row represents an unassigned employee deficit ("Needs Equipment" / "Needs Size")
+      // who is excluded from Swaps on their current crew or whose crew discipline does not require rubber PPE.
+      // NOTE: If the employee HAS an assigned item in the field (itemNum is not empty/—), DO NOT skip!
+      // When assigned gloves/sleeves are ready for a changeout, they MUST show up on the swaps page.
+      if (firstCell && !isSubHeader && !isClassHeader && !isRetestHeader && !isPrevEmpHeader && !isClassReclaimHeader && !isLostHeader && !isCityHeader && !isForemanHeader) {
+        const currentItemNum = String(rowArr[1] || '').trim();
+        const isUnassignedDeficit = (!currentItemNum || currentItemNum === '—' || currentItemNum === '-');
+
+        if (isUnassignedDeficit) {
+          // 1. Check if manually excluded from Swaps on their current crew
+          if (typeof window !== 'undefined' && window.ppeTrackingEngine && typeof window.ppeTrackingEngine.isEmployeeSwapsExcluded === 'function') {
+            if (window.ppeTrackingEngine.isEmployeeSwapsExcluded(firstCell)) {
+              return; // Skip rendering unassigned excluded employee on swaps page
+            }
+          }
+          // 2. Check if crew discipline excludes them from Rubber PPE (Substation, Gas, Mechanic)
+          if (typeof window !== 'undefined' && window.ppeTrackingEngine) {
+            if (typeof window.ppeTrackingEngine.isEmployeeCrewDisciplineExcluded === 'function') {
+              const disc = window.ppeTrackingEngine.isEmployeeCrewDisciplineExcluded(firstCell);
+              if (disc && disc.excluded) {
+                return; // Skip rendering unassigned employee whose crew discipline does not require rubber PPE
+              }
+            }
+            if (typeof window.ppeTrackingEngine.isEmployeeExcluded === 'function') {
+              if (window.ppeTrackingEngine.isEmployeeExcluded(firstCell)) {
+                return; // Skip rendering unassigned employee whose crew discipline does not require rubber PPE
+              }
+            }
+          }
+        }
+      }
+
       visibleRowCount++;
       html += `<tr>`;
 
@@ -7252,6 +7473,10 @@ class SheetNavigator {
             if (vLower === 'ordered' || vLower.includes('ordered') || val.includes('Ordered')) {
               const cleanVal = val.replace(/📦/g, '').trim();
               customContent = `<span class="badge" style="background-color: #7c3aed; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700;">📦 ${this.escapeHtml(cleanVal || 'Ordered')}</span>`;
+            } else if (vLower === 'needs equipment' || vLower.includes('needs equipment')) {
+              customContent = `<span class="badge" style="background-color: #0284c7; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700;">📦 ${this.escapeHtml(val || 'Needs Equipment')}</span>`;
+            } else if (vLower === 'needs size' || vLower.includes('needs size') || val.includes('Needs Size')) {
+              customContent = `<span class="badge" style="background-color: #d97706; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 700;">⚠️ Needs Size</span>`;
             } else if (vLower === 'return to shelf' || vLower.includes('return to shelf') || vLower.includes('return')) {
               customContent = `<span class="badge" style="background-color: #475569; color: #fff; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600;">↩️ Return to Shelf</span>`;
             } else if (vLower === 'packed for testing' || vLower.includes('packed for testing')) {
@@ -7305,6 +7530,10 @@ class SheetNavigator {
             if (isEmployeeCol && displayVal && !displayVal.includes('STAGE') && !displayVal.includes('Class ') && !displayVal.includes('Previous Employee')) {
               customContent = `<span style="font-weight: 700; color: #60a5fa; cursor: pointer; text-decoration: underline dotted;" title="Click to view full profile, assignments & certs for ${this.escapeHtml(displayVal)}" onclick="if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(displayVal)}');}">👤 ${this.escapeHtml(displayVal)}</span>`;
               isCellEditable = false;
+            } else if ((colLower.includes('current') || colLower.includes('date assigned') || colLower.includes('change out') || colLower.includes('days')) && (!displayVal || displayVal === '—' || displayVal === '-')) {
+              customContent = `<span style="color: var(--text-muted); opacity: 0.4;">—</span>`;
+            } else if (displayVal && displayVal.includes('Needs Size')) {
+              customContent = `<span style="color: #f59e0b; font-weight: 700;">⚠️ Needs Size</span>`;
             } else {
               customContent = this.escapeHtml(displayVal);
             }
