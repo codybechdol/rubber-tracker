@@ -4587,7 +4587,7 @@ class ProcurementEngine {
       this.render();
       if (!silent) {
         this.closeManageVendorsModal();
-        alert('✅ Vendor catalog saved successfully! Click "Push Changes to Sheets" at the top whenever you wish to sync changes back to Google Sheets.');
+        alert('✅ Vendor catalog saved successfully! Click "Sync & Save" at the top whenever you wish to sync changes to the cloud.');
       }
     } catch (err) {
       console.error('Error saving vendor catalog:', err);

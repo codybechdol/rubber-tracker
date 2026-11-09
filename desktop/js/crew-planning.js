@@ -99,6 +99,39 @@ class CrewPlanningEngine {
     return this.formatDate(this.getSundayOfDate(new Date()));
   }
 
+  isWeekPublished(weekStr) {
+    if (!weekStr) return false;
+    const plans = this.getPlansMap();
+    const hist = this.getHistoryMap();
+    return Boolean(
+      (plans[weekStr] && plans[weekStr].status === 'published') ||
+      (hist[weekStr] && hist[weekStr].publishedAt)
+    );
+  }
+
+  getDefaultPlanningWeekStr() {
+    const currentWeekStr = this.getCurrentWeekSundayStr();
+    if (!this.isWeekPublished(currentWeekStr)) {
+      return currentWeekStr;
+    }
+    const pWeeks = this.getPlanningWeeks();
+    return pWeeks.length > 0 ? pWeeks[0].weekStr : currentWeekStr;
+  }
+
+  selectPlanningWeek(weekStr) {
+    if (!weekStr) return;
+    this.selectedWeek = weekStr;
+    if (window.sheetNavigator) {
+      window.sheetNavigator.selectedEmployeeWeek = weekStr;
+      window.sheetNavigator.employeeViewMode = 'planning';
+      window.sheetNavigator.updateEmployeeViewToggleUI();
+      window.sheetNavigator.updateEmployeeWeekNavUI();
+      window.sheetNavigator.renderCurrentSheet();
+    } else {
+      this.refreshView();
+    }
+  }
+
   getPlanningWeeks() {
     const currentSunday = this.getSundayOfDate(new Date());
     const weeks = [];
@@ -152,9 +185,10 @@ class CrewPlanningEngine {
     })).reverse(); // Farther out first, Next Week closest to Current
 
     const currentStr = this.getCurrentWeekSundayStr();
+    const isCurPub = this.isWeekPublished(currentStr);
     const current = [{
       weekStr: currentStr,
-      label: `Week of ${currentStr} (Live)`,
+      label: isCurPub ? `Week of ${currentStr} (Current Wk — Live)` : `Week of ${currentStr} (Current Wk — Unpublished)`,
       type: 'current',
       offset: 0
     }];
@@ -361,6 +395,10 @@ class CrewPlanningEngine {
         if (catKey === 'quit' && item.isScheduledDeparture) {
           return;
         }
+        // Exclude mirror future/partial-week vacation records when the employee remains active on their crew
+        if (catKey === 'vacation' && (item.isFutureVacation || item.keepOnCrew)) {
+          return;
+        }
         registerOcc(item.name, {
           type: 'side',
           sideType: catKey,
@@ -371,6 +409,81 @@ class CrewPlanningEngine {
     });
 
     return occMap;
+  }
+
+  /**
+   * Helper: checks if an employee name matches a crew's designated foreman.
+   * Resolves nicknames and alternate names (e.g. Benjamin Lapka <-> Ben Lapka).
+   */
+  isCrewForeman(crew, empName) {
+    if (!crew || !crew.foreman || !empName) return false;
+    const f = String(crew.foreman).trim().toLowerCase();
+    const n = String(empName).trim().toLowerCase();
+    if (f === n) return true;
+
+    // Check alternate names from employees table or baseline
+    const empTable = this.db ? this.db.getTable('employees') : null;
+    const rows = empTable?.rows || [];
+
+    // 1. Direct match on empName row's Alternate Names
+    const empRow = rows.find(r => String(r['Employee Name'] || r['Name'] || '').trim().toLowerCase() === n);
+    if (empRow && empRow['Alternate Names']) {
+      const alts = String(empRow['Alternate Names']).split(/[|,;]/).map(s => s.trim().toLowerCase()).filter(Boolean);
+      if (alts.includes(f)) return true;
+    }
+
+    // 2. Direct match on crew.foreman row's Alternate Names
+    const fRow = rows.find(r => String(r['Employee Name'] || r['Name'] || '').trim().toLowerCase() === f);
+    if (fRow) {
+      const canonicalF = String(fRow['Employee Name'] || fRow['Name'] || '').trim().toLowerCase();
+      if (canonicalF === n) return true;
+      if (fRow['Alternate Names']) {
+        const alts = String(fRow['Alternate Names']).split(/[|,;]/).map(s => s.trim().toLowerCase()).filter(Boolean);
+        if (alts.includes(n)) return true;
+      }
+    }
+
+    // 3. Common nickname patterns (e.g. Benjamin <-> Ben, Matthew <-> Matt)
+    const nicknames = [
+      ['benjamin', 'ben'],
+      ['matthew', 'matt'],
+      ['michael', 'mike'],
+      ['william', 'bill', 'billy', 'will'],
+      ['robert', 'bob', 'bobby', 'rob'],
+      ['james', 'jim', 'jimmy'],
+      ['joseph', 'joe', 'joey'],
+      ['christopher', 'chris'],
+      ['daniel', 'dan', 'danny'],
+      ['alexander', 'alex'],
+      ['anthony', 'tony'],
+      ['andrew', 'andy', 'drew'],
+      ['nicholas', 'nick'],
+      ['joshua', 'josh'],
+      ['samuel', 'sam', 'sammy'],
+      ['timothy', 'tim'],
+      ['thomas', 'tom', 'tommy'],
+      ['jonathan', 'jon'],
+      ['steven', 'stephen', 'steve'],
+      ['charles', 'charlie', 'chuck'],
+      ['edward', 'ed', 'eddie'],
+      ['richard', 'rick', 'rich', 'dick'],
+      ['kenneth', 'ken', 'kenny'],
+      ['zachary', 'zach', 'zack'],
+      ['nathaniel', 'nathan', 'nate']
+    ];
+    for (const group of nicknames) {
+      const fInGroup = group.some(nick => f.startsWith(nick + ' ') || f === nick);
+      const nInGroup = group.some(nick => n.startsWith(nick + ' ') || n === nick);
+      if (fInGroup && nInGroup) {
+        const fParts = f.split(/\s+/);
+        const nParts = n.split(/\s+/);
+        if (fParts.length > 1 && nParts.length > 1 && fParts[fParts.length - 1] === nParts[nParts.length - 1]) {
+          return true;
+        }
+      }
+    }
+
+    return false;
   }
 
   /**
@@ -428,6 +541,10 @@ class CrewPlanningEngine {
       } else if (!base.originalBaseJob || base.originalBaseJob.toLowerCase() !== currentBaseJob.toLowerCase()) {
         isMoved = true;
         originalLabel = base.originalBaseJob ? `Crew ${base.originalBaseJob}` : 'Unassigned';
+      } else if (base.secondaryBaseJob && !occurrences.some(o => o.baseJob && o.baseJob.toLowerCase() === base.secondaryBaseJob.toLowerCase())) {
+        // Employee previously had a secondary crew assignment on live that has been removed/dropped in this plan
+        isMoved = true;
+        originalLabel = `Crew ${base.originalBaseJob} & ${base.secondaryBaseJob}`;
       } else {
         originalLabel = `Crew ${base.originalBaseJob}`;
       }
@@ -442,11 +559,18 @@ class CrewPlanningEngine {
     const memberObj = currentOcc?.memberObj;
 
     const confirmKey = currentBaseJob ? `${norm}::${currentBaseJob.toLowerCase()}` : `${norm}::${(currentSideType || '').toLowerCase()}`;
-    const isConfirmed = Boolean(
-      memberObj?.isConfirmed ||
-      (plan.confirmedPositions && plan.confirmedPositions[confirmKey]) ||
-      (plan.confirmedPositions && plan.confirmedPositions[norm])
-    );
+    let explicitConfirmVal = undefined;
+    if (plan.confirmedPositions) {
+      if (plan.confirmedPositions[confirmKey] !== undefined) {
+        explicitConfirmVal = plan.confirmedPositions[confirmKey];
+      } else if (plan.confirmedPositions[norm] !== undefined) {
+        explicitConfirmVal = plan.confirmedPositions[norm];
+      }
+    }
+
+    const isConfirmed = explicitConfirmVal !== undefined
+      ? Boolean(explicitConfirmVal)
+      : Boolean(memberObj?.isConfirmed);
 
     // Conditional styling evaluation:
     // 1. If not multi-location and not moved: NORMAL (conditional coloring removed)
@@ -476,6 +600,17 @@ class CrewPlanningEngine {
         statusColor = 'purple';
         badgeText = 'Moved';
         title = `Moved from ${originalLabel} to ${currentLabel}. Click to confirm position`;
+      }
+    } else if (explicitConfirmVal !== undefined) {
+      // User explicitly confirmed or unconfirmed this employee
+      if (isConfirmed) {
+        statusColor = 'yellow';
+        badgeText = 'Confirmed';
+        title = `Confirmed position in ${currentLabel}`;
+      } else {
+        statusColor = 'purple';
+        badgeText = 'Unconfirmed';
+        title = `Unconfirmed position in ${currentLabel}. Click to confirm position`;
       }
     }
 
@@ -519,10 +654,21 @@ class CrewPlanningEngine {
   }
 
   getPlanForWeek(weekStr) {
-    if (!weekStr) weekStr = this.getPlanningWeeks()[0].weekStr;
+    if (!weekStr) weekStr = this.getDefaultPlanningWeekStr();
     const plans = this.getPlansMap();
     if (!plans[weekStr]) {
-      plans[weekStr] = this.initializePlanFromCurrentRoster(weekStr);
+      const currentWeekStr = this.getCurrentWeekSundayStr();
+      const nextWeekStr = this.getPlanningWeeks()[0]?.weekStr;
+      // If opening Current Week (e.g. 11/08/2026) before it has been published, and the user already
+      // made draft edits on Next Week (e.g. 11/15/2026), carry those draft edits into Current Week automatically!
+      if (weekStr === currentWeekStr && nextWeekStr && plans[nextWeekStr] && plans[nextWeekStr].status !== 'published') {
+        const cloned = JSON.parse(JSON.stringify(plans[nextWeekStr]));
+        cloned.weekDate = weekStr;
+        cloned.weekDateFormatted = weekStr;
+        plans[weekStr] = cloned;
+      } else {
+        plans[weekStr] = this.initializePlanFromCurrentRoster(weekStr);
+      }
       this.savePlansMap(plans);
     }
     const plan = plans[weekStr];
@@ -664,29 +810,6 @@ class CrewPlanningEngine {
       });
       activeNamesInPlan.add(normName);
       healedCount++;
-    });
-
-    // Secondary Check: Ensure baseline secondary assignments are preserved in their secondary crews
-    baselineMap.forEach((base, normName) => {
-      if (!base.name || this.isNonEmployeeName(base.name)) return;
-      if (!base.secondaryBaseJob) return;
-
-      const targetSecCrew = (plan.crews || []).find(c => c.jobNumber.toLowerCase() === base.secondaryBaseJob.toLowerCase());
-      if (targetSecCrew && !targetSecCrew.members.some(m => m.name.toLowerCase() === normName)) {
-        targetSecCrew.members.push({
-          name: base.name,
-          slot: base.secondarySlot || `${targetSecCrew.jobNumber}.${targetSecCrew.members.length + 1}`,
-          originalSlot: base.secondarySlot || targetSecCrew.jobNumber,
-          originalBaseJob: targetSecCrew.jobNumber,
-          classification: String(base.rawRow?.['Job Classification'] || base.rawRow?.['Classification'] || 'Journeyman').trim(),
-          role: String(base.rawRow?.['Role'] || 'JL').trim(),
-          location: targetSecCrew.location || 'Helena',
-          isConfirmed: false,
-          isSecondaryMember: true,
-          primaryJobNumber: base.originalSlot || base.originalBaseJob
-        });
-        healedCount++;
-      }
     });
 
     if (healedCount > 0 || purgedCount > 0) {
@@ -1103,16 +1226,65 @@ class CrewPlanningEngine {
   // Workspace Renderers
   // ==========================================================================
 
-  renderPlanningWorkspace(container, countBadge, targetWeekStr) {
+  /**
+   * Evaluates whether a crew card matches a search query across job#, location, foreman, job name, crew type, or member details.
+   */
+  isCrewMatchingSearch(crew, sTerm = '') {
+    if (!sTerm) return true;
+    const term = sTerm.toLowerCase().trim();
+    if (crew.jobNumber && crew.jobNumber.toLowerCase().includes(term)) return true;
+    if (crew.location && crew.location.toLowerCase().includes(term)) return true;
+    if (crew.foreman && crew.foreman.toLowerCase().includes(term)) return true;
+    if (crew.jobName && crew.jobName.toLowerCase().includes(term)) return true;
+    if (crew.crewType && crew.crewType.toLowerCase().includes(term)) return true;
+    if (crew.schedule && crew.schedule.toLowerCase().includes(term)) return true;
+    if (Array.isArray(crew.members)) {
+      return crew.members.some(m => {
+        if (!m) return false;
+        const name = String(m.name || '').toLowerCase();
+        const cls = String(m.classification || '').toLowerCase();
+        const jn = String(m.jobNumber || m.slot || '').toLowerCase();
+        const sec = String(m.secondaryJob || '').toLowerCase();
+        return name.includes(term) || cls.includes(term) || jn.includes(term) || sec.includes(term);
+      });
+    }
+    return false;
+  }
+
+  renderPlanningWorkspace(container, countBadge, targetWeekStr, incomingSearchTerm) {
     if (!container) return;
 
     // Run automated check for any employee whose last day has arrived
     this.checkAndArchiveDepartedEmployees();
 
     if (!targetWeekStr) {
-      targetWeekStr = this.selectedWeek || this.getPlanningWeeks()[0].weekStr;
+      targetWeekStr = this.selectedWeek || this.getDefaultPlanningWeekStr();
     }
     this.selectedWeek = targetWeekStr;
+
+    const currentWeekStr = this.getCurrentWeekSundayStr();
+    const planningWeekOptions = [
+      {
+        weekStr: currentWeekStr,
+        label: `Week of ${currentWeekStr} (Current Week${!this.isWeekPublished(currentWeekStr) ? ' — Unpublished' : ''})`
+      },
+      ...this.getPlanningWeeks().map(p => ({
+        weekStr: p.weekStr,
+        label: p.offset === 1 ? `Week of ${p.weekStr} (Next Week)` : `Week of ${p.weekStr} (+${p.offset} Weeks Out)`
+      }))
+    ];
+    if (!planningWeekOptions.some(w => w.weekStr === targetWeekStr)) {
+      planningWeekOptions.unshift({
+        weekStr: targetWeekStr,
+        label: `Week of ${targetWeekStr}`
+      });
+    }
+
+    if (incomingSearchTerm !== undefined) {
+      this.searchTerm = incomingSearchTerm;
+    } else if (window.sheetNavigator && window.sheetNavigator.searchTerm !== undefined) {
+      this.searchTerm = window.sheetNavigator.searchTerm;
+    }
 
     const plan = this.getPlanForWeek(targetWeekStr);
 
@@ -1150,6 +1322,17 @@ class CrewPlanningEngine {
 
     const sTerm = (this.searchTerm || '').toLowerCase().trim();
 
+    // Capture scroll positions before replacing innerHTML so edits don't reset the page to the top
+    const prevMain = container.querySelector('.planning-main-panel');
+    const savedMainY = (prevMain && prevMain.scrollTop > 0) ? prevMain.scrollTop : (this._lastSavedMainY || 0);
+    const savedMainX = (prevMain && prevMain.scrollLeft > 0) ? prevMain.scrollLeft : (this._lastSavedMainX || 0);
+    const prevSide = container.querySelector('.side-pane-scroll-body');
+    const savedSideY = (prevSide && prevSide.scrollTop > 0) ? prevSide.scrollTop : (this._lastSavedSideY || 0);
+    const savedContainerY = container.scrollTop;
+    const savedContainerX = container.scrollLeft;
+    const savedWinY = window.scrollY || document.documentElement?.scrollTop || 0;
+    const savedWinX = window.scrollX || document.documentElement?.scrollLeft || 0;
+
     container.innerHTML = `
       <div class="crew-planning-wrapper" style="display: flex; height: 100%; width: 100%; overflow: hidden; background: var(--bg-primary, #0f172a); color: var(--text-primary, #f8fafc); box-sizing: border-box;">
         
@@ -1164,8 +1347,19 @@ class CrewPlanningEngine {
                 <span>🏗️</span>
                 <span>Crew Structure Planning</span>
               </div>
+              <div style="display: inline-flex; align-items: center; gap: 6px; background: rgba(15, 23, 42, 0.75); border: 1px solid rgba(96, 165, 250, 0.4); border-radius: 6px; padding: 3px 8px;">
+                <span style="font-size: 11px; font-weight: 700; color: #93c5fd;">📅 Editing Week:</span>
+                <select onchange="window.crewPlanningEngine.selectPlanningWeek(this.value)"
+                        style="background: transparent; border: none; color: #f8fafc; font-size: 12px; font-weight: 800; cursor: pointer; outline: none;">
+                  ${planningWeekOptions.map(w => `
+                    <option value="${this.escapeHtml(w.weekStr)}" ${w.weekStr === targetWeekStr ? 'selected' : ''} style="background: #0f172a; color: #f8fafc;">
+                      ${this.escapeHtml(w.label)}
+                    </option>
+                  `).join('')}
+                </select>
+              </div>
               <span class="badge" style="background: rgba(245, 158, 11, 0.18); color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 4px;">
-                🟡 Draft Plan (Pre-Publish)
+                ${plan.status === 'published' ? '🟢 Published Plan' : '🟡 Draft Plan (Pre-Publish)'}
               </span>
 
               <!-- Status Counter Badges -->
@@ -1182,6 +1376,12 @@ class CrewPlanningEngine {
                 ${yellowCount > 0 ? `
                   <span class="badge" style="background: rgba(234, 179, 8, 0.2); color: #fde047; border: 1px solid #eab308; padding: 2px 8px; border-radius: 4px;" title="Confirmed positions (will carry through as yellow once published)">
                     🟡 ${yellowCount} Confirmed
+                  </span>
+                ` : ''}
+                ${sTerm ? `
+                  <span class="badge" style="background: rgba(56, 189, 248, 0.2); color: #38bdf8; border: 1px solid #38bdf8; padding: 2px 8px; border-radius: 4px; display: inline-flex; align-items: center; gap: 5px;" title="Filtered by search query: '${this.escapeHtml(sTerm)}'">
+                    🔍 "${this.escapeHtml(sTerm)}" (${plan.crews.filter(c => this.isCrewMatchingSearch(c, sTerm)).length} of ${plan.crews.length} crews)
+                    <button onclick="const si = document.getElementById('sheet-search-input'); if (si) { si.value = ''; si.dispatchEvent(new Event('input')); }" style="background: transparent; border: none; color: #38bdf8; font-size: 11px; font-weight: 800; cursor: pointer; padding: 0 2px; line-height: 1;" title="Clear search">✕</button>
                   </span>
                 ` : ''}
               </div>
@@ -1222,19 +1422,34 @@ class CrewPlanningEngine {
                 <span>🚜</span> Planned Field Crews (${plan.crews.length})
               </div>
               <div style="font-size: 11px; color: var(--text-muted, #94a3b8); font-style: italic; display: flex; align-items: center; gap: 8px;">
-                <span>💡 Drag to move • Hold Alt/Ctrl+Drag to duplicate • Click 🟣/🟡 to toggle confirmation</span>
+                <span>💡 Drag ⠿ to reorder crews • Drag members between crews • Hold Alt/Ctrl+Drag to duplicate • Click 🟣/🟡 to confirm</span>
               </div>
             </div>
 
             <div class="planned-crews-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 14px;">
-              ${plan.crews.map(crew => this.renderPlannedCrewCard(crew, sTerm, plan, baselineMap, occMap)).join('')}
+              ${(() => {
+                const matchingCrews = plan.crews.filter(c => this.isCrewMatchingSearch(c, sTerm));
+                if (matchingCrews.length === 0 && sTerm) {
+                  return `
+                    <div style="grid-column: 1 / -1; padding: 36px 20px; text-align: center; color: var(--text-muted, #94a3b8); background: rgba(30, 41, 59, 0.4); border: 1px dashed rgba(255,255,255,0.12); border-radius: 8px;">
+                      <div style="font-size: 28px; margin-bottom: 8px;">🔍</div>
+                      <div style="font-size: 14px; font-weight: 700; color: #f8fafc; margin-bottom: 4px;">No planned field crews match "${this.escapeHtml(sTerm)}"</div>
+                      <div style="font-size: 12px; color: #94a3b8; margin-bottom: 12px;">Check the Staging Side Pane on the right, or clear the search to view all ${plan.crews.length} crews.</div>
+                      <button class="btn btn-secondary" onclick="const si = document.getElementById('sheet-search-input'); if (si) { si.value = ''; si.dispatchEvent(new Event('input')); }" style="font-size: 11.5px; padding: 4px 12px; display: inline-flex; align-items: center; gap: 4px;">
+                        <span>✕</span> Clear Search
+                      </button>
+                    </div>
+                  `;
+                }
+                return matchingCrews.map(crew => this.renderPlannedCrewCard(crew, sTerm, plan, baselineMap, occMap)).join('');
+              })()}
             </div>
           </div>
         </div>
 
         <!-- Collapsible Staging Side Pane -->
         <div class="planning-side-pane" style="width: ${this.isSidebarCollapsed ? '44px' : '360px'}; min-width: ${this.isSidebarCollapsed ? '44px' : '360px'}; background: var(--bg-secondary, #1e293b); border-left: 1px solid var(--border-color, rgba(255,255,255,0.1)); display: flex; flex-direction: column; height: 100%; transition: width 0.2s ease, min-width 0.2s ease; box-sizing: border-box; position: relative;">
-          ${this.isSidebarCollapsed ? this.renderCollapsedSidePane() : this.renderExpandedSidePane(plan, baselineMap, occMap)}
+          ${this.isSidebarCollapsed ? this.renderCollapsedSidePane() : this.renderExpandedSidePane(plan, baselineMap, occMap, sTerm)}
         </div>
 
       </div>
@@ -1242,19 +1457,59 @@ class CrewPlanningEngine {
 
     // Attach interactive drag & drop listeners
     this.attachPlanningDragHandlers(container);
+
+    // Track real-time scroll offsets
+    const newMain = container.querySelector('.planning-main-panel');
+    if (newMain) {
+      newMain.addEventListener('scroll', () => {
+        this._lastSavedMainY = newMain.scrollTop;
+        this._lastSavedMainX = newMain.scrollLeft;
+      }, { passive: true });
+    }
+    const newSide = container.querySelector('.side-pane-scroll-body');
+    if (newSide) {
+      newSide.addEventListener('scroll', () => {
+        this._lastSavedSideY = newSide.scrollTop;
+      }, { passive: true });
+    }
+
+    // Restore scroll positions across view refreshes so edits never jump to top
+    const restoreScroll = () => {
+      const curMain = container.querySelector('.planning-main-panel');
+      if (curMain) {
+        if (sTerm) {
+          curMain.scrollTop = 0;
+        } else {
+          if (savedMainY > 0) curMain.scrollTop = savedMainY;
+          if (savedMainX > 0) curMain.scrollLeft = savedMainX;
+        }
+      }
+      const curSide = container.querySelector('.side-pane-scroll-body');
+      if (curSide) {
+        if (sTerm) {
+          curSide.scrollTop = 0;
+        } else if (savedSideY > 0) {
+          curSide.scrollTop = savedSideY;
+        }
+      }
+      if (container && !sTerm) {
+        if (savedContainerY > 0) container.scrollTop = savedContainerY;
+        if (savedContainerX > 0) container.scrollLeft = savedContainerX;
+      }
+      if (!sTerm && (savedWinY > 0 || savedWinX > 0)) {
+        window.scrollTo({ top: savedWinY, left: savedWinX, behavior: 'instant' });
+      }
+    };
+    restoreScroll();
+    requestAnimationFrame(restoreScroll);
+    setTimeout(restoreScroll, 35);
   }
 
   /**
    * Renders a single planned crew card with member rows and conditional coloring (Purple / Yellow / Normal).
    */
   renderPlannedCrewCard(crew, sTerm = '', plan, baselineMap, occMap) {
-    const isMatching = !sTerm ||
-      crew.jobNumber.toLowerCase().includes(sTerm) ||
-      (crew.location && crew.location.toLowerCase().includes(sTerm)) ||
-      (crew.foreman && crew.foreman.toLowerCase().includes(sTerm)) ||
-      crew.members.some(m => m.name.toLowerCase().includes(sTerm));
-
-    if (!isMatching) return '';
+    if (!this.isCrewMatchingSearch(crew, sTerm)) return '';
 
     const skipDays = this.getCrewSkipDays(crew);
     const dayPillsConfig = [
@@ -1286,30 +1541,81 @@ class CrewPlanningEngine {
       `;
     }).join('');
 
+    const term = (sTerm || '').toLowerCase().trim();
+    const isCrewHeaderMatch = Boolean(term && (
+      (crew.jobNumber && crew.jobNumber.toLowerCase().includes(term)) ||
+      (crew.location && crew.location.toLowerCase().includes(term)) ||
+      (crew.foreman && crew.foreman.toLowerCase().includes(term)) ||
+      (crew.jobName && crew.jobName.toLowerCase().includes(term)) ||
+      (crew.crewType && crew.crewType.toLowerCase().includes(term)) ||
+      (crew.schedule && crew.schedule.toLowerCase().includes(term))
+    ));
+    const hasMemberMatch = Boolean(term && Array.isArray(crew.members) && crew.members.some(m => {
+      if (!m) return false;
+      const n = String(m.name || '').toLowerCase();
+      const c = String(m.classification || '').toLowerCase();
+      const s = String(m.slot || m.jobNumber || '').toLowerCase();
+      const sec = String(m.secondaryJob || '').toLowerCase();
+      return n.includes(term) || c.includes(term) || s.includes(term) || sec.includes(term);
+    }));
+
+    let cardBorder = 'border: 1px solid rgba(59, 130, 246, 0.35);';
+    let cardShadow = 'box-shadow: 0 1px 4px rgba(0,0,0,0.25);';
+    if (hasMemberMatch) {
+      cardBorder = 'border: 1.5px solid #f59e0b;';
+      cardShadow = 'box-shadow: 0 0 12px rgba(245, 158, 11, 0.28);';
+    } else if (isCrewHeaderMatch) {
+      cardBorder = 'border: 1.5px solid #38bdf8;';
+      cardShadow = 'box-shadow: 0 0 12px rgba(56, 189, 248, 0.28);';
+    }
+
     return `
       <div class="field-crew-card planned-crew-card"
            data-crew-job="${this.escapeHtml(crew.jobNumber)}"
-           style="background: rgba(30, 41, 59, 0.7); border: 1px solid rgba(59, 130, 246, 0.35); border-radius: 8px; padding: 12px; display: flex; flex-direction: column; box-shadow: 0 1px 4px rgba(0,0,0,0.25);">
+           style="background: rgba(30, 41, 59, 0.7); ${cardBorder} border-radius: 8px; padding: 12px; display: flex; flex-direction: column; ${cardShadow} position: relative; transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease;">
         
-        <!-- Crew Header -->
-        <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 7px; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 6px;">
-          <div>
-            <div style="display: flex; align-items: center; gap: 6px; font-weight: 800; font-size: 14px; color: #60a5fa;">
-              <span>🚜</span>
-              <span>${this.escapeHtml(crew.jobNumber)}</span>
-              ${crew.jobName ? `<span style="font-size: 11px; font-weight: 600; color: #94a3b8;">— ${this.escapeHtml(crew.jobName)}</span>` : ''}
+        <!-- Crew Header (Draggable to Reorder) -->
+        <div class="planned-crew-header"
+             draggable="true"
+             data-crew-job="${this.escapeHtml(crew.jobNumber)}"
+             style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 7px; border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 6px; cursor: grab; user-select: none;"
+             title="Drag to reorder this crew card on the board">
+          <div style="display: flex; align-items: flex-start; gap: 6px;">
+            <div class="crew-card-drag-handle"
+                 style="cursor: grab; display: flex; align-items: center; justify-content: center; width: 18px; height: 22px; border-radius: 3px; color: #94a3b8; font-size: 14px; user-select: none; margin-top: 1px; transition: background 0.15s, color 0.15s;"
+                 title="Drag this crew to reorder it on the board"
+                 onmouseover="this.style.color='#60a5fa'; this.style.background='rgba(96,165,250,0.15)';"
+                 onmouseout="this.style.color='#94a3b8'; this.style.background='transparent';">
+              ⠿
             </div>
-            <div style="font-size: 11px; color: var(--text-muted, #94a3b8); margin-top: 2px; display: flex; align-items: center; gap: 6px;">
-              <span>📍 ${this.escapeHtml(crew.location || 'Helena')}</span>
-              <span style="color: rgba(255,255,255,0.25);">•</span>
-              <span style="color: ${this.getCrewTypeInfo(crew.crewType).color}; font-weight: 700; display: inline-flex; align-items: center; gap: 3px;">
-                <span>${this.getCrewTypeInfo(crew.crewType).icon}</span>
-                <span>${this.escapeHtml(crew.crewType || 'Electric')}</span>
-              </span>
+            <div>
+              <div style="display: flex; align-items: center; gap: 6px; font-weight: 800; font-size: 14px; color: #60a5fa;">
+                <span>🚜</span>
+                <span>${this.escapeHtml(crew.jobNumber)}</span>
+                ${isCrewHeaderMatch ? `
+                  <span class="badge" style="background: rgba(56, 189, 248, 0.25); color: #7dd3fc; border: 1px solid #38bdf8; font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px;">
+                    🔍 Match
+                  </span>
+                ` : ''}
+                ${crew.jobName ? `<span style="font-size: 11px; font-weight: 600; color: #94a3b8;">— ${this.escapeHtml(crew.jobName)}</span>` : ''}
+              </div>
+              <div style="font-size: 11px; color: var(--text-muted, #94a3b8); margin-top: 2px; display: flex; align-items: center; gap: 6px;">
+                <span>📍 ${this.escapeHtml(crew.location || 'Helena')}</span>
+                <span style="color: rgba(255,255,255,0.25);">•</span>
+                <span style="color: ${this.getCrewTypeInfo(crew.crewType).color}; font-weight: 700; display: inline-flex; align-items: center; gap: 3px;">
+                  <span>${this.getCrewTypeInfo(crew.crewType).icon}</span>
+                  <span>${this.escapeHtml(crew.crewType || 'Electric')}</span>
+                </span>
+              </div>
             </div>
           </div>
-          <div style="display: flex; align-items: center; gap: 6px;">
-            <button class="btn btn-xs" onclick="window.crewPlanningEngine.promptEditPlannedCrew('${this.escapeJs(crew.jobNumber)}')" style="font-size: 10.5px; font-weight: 700; padding: 2px 7px; background: rgba(59, 130, 246, 0.12); border: 1px solid rgba(59, 130, 246, 0.35); color: #93c5fd; border-radius: 4px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;" title="Edit planned crew metadata (Location, Job Name, Discipline, Status, Schedule)">
+          <div style="display: flex; align-items: center; gap: 5px;">
+            <!-- Board Order Quick Arrows -->
+            <div style="display: flex; align-items: center; gap: 2px; background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.08); border-radius: 4px; padding: 1px 3px;">
+              <button class="btn btn-xs" onclick="event.stopPropagation(); window.crewPlanningEngine.moveCrewOrder('${this.escapeJs(crew.jobNumber)}', -1)" style="background: transparent; border: none; color: #94a3b8; font-size: 10px; padding: 1px 4px; cursor: pointer; border-radius: 2px;" title="Move crew earlier (left/up) on board" onmouseover="this.style.color='#60a5fa'" onmouseout="this.style.color='#94a3b8'">◀</button>
+              <button class="btn btn-xs" onclick="event.stopPropagation(); window.crewPlanningEngine.moveCrewOrder('${this.escapeJs(crew.jobNumber)}', 1)" style="background: transparent; border: none; color: #94a3b8; font-size: 10px; padding: 1px 4px; cursor: pointer; border-radius: 2px;" title="Move crew later (right/down) on board" onmouseover="this.style.color='#60a5fa'" onmouseout="this.style.color='#94a3b8'">▶</button>
+            </div>
+            <button class="btn btn-xs" onclick="event.stopPropagation(); window.crewPlanningEngine.promptEditPlannedCrew('${this.escapeJs(crew.jobNumber)}')" style="font-size: 10.5px; font-weight: 700; padding: 2px 7px; background: rgba(59, 130, 246, 0.12); border: 1px solid rgba(59, 130, 246, 0.35); color: #93c5fd; border-radius: 4px; cursor: pointer; display: inline-flex; align-items: center; gap: 4px;" title="Edit planned crew metadata (Location, Job Name, Discipline, Status, Schedule)">
               ✏️ Edit
             </button>
             <span class="badge" style="background: rgba(59, 130, 246, 0.18); color: #93c5fd; font-size: 10.5px; font-weight: 700; padding: 2px 6px; border-radius: 4px;">
@@ -1339,7 +1645,11 @@ class CrewPlanningEngine {
           <div style="display: flex; align-items: center; gap: 6px;">
             <span style="font-weight: 700; color: #94a3b8;">Foreman:</span>
             ${crew.foreman ? `
-              <span style="color: #f472b6; font-weight: 700; display: inline-flex; align-items: center; gap: 4px;">
+              <span style="color: #f472b6; font-weight: 700; display: inline-flex; align-items: center; gap: 4px; cursor: pointer;"
+                    onclick="event.stopPropagation(); if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(crew.foreman)}');}"
+                    onmouseover="this.style.color='#60a5fa'; this.style.textDecoration='underline';"
+                    onmouseout="this.style.color='#f472b6'; this.style.textDecoration='none';"
+                    title="Click to open Employee Profile for ${this.escapeHtml(crew.foreman)}">
                 <span>👑</span> ${this.escapeHtml(crew.foreman)}
               </span>
             ` : `<span style="color: #64748b; font-style: italic;">(None designated)</span>`}
@@ -1354,15 +1664,25 @@ class CrewPlanningEngine {
              data-crew-job="${this.escapeHtml(crew.jobNumber)}"
              style="flex: 1; min-height: 48px; border-radius: 6px; padding: 2px; display: flex; flex-direction: column; gap: 3px;">
           ${crew.members.length > 0 ? crew.members.map(m => {
-            const isForeman = crew.foreman && m.name.toLowerCase() === crew.foreman.toLowerCase();
+            const isForeman = this.isCrewForeman(crew, m.name);
             const statusInfo = this.getEmployeePlanningStatus(m.name, crew.jobNumber, null, plan, baselineMap, occMap);
+
+            const isMemberMatch = Boolean(term && (
+              (m.name && m.name.toLowerCase().includes(term)) ||
+              (m.classification && m.classification.toLowerCase().includes(term)) ||
+              (m.slot && m.slot.toLowerCase().includes(term)) ||
+              (m.secondaryJob && m.secondaryJob.toLowerCase().includes(term))
+            ));
 
             // Conditional Row Styles
             let rowBg = 'transparent';
             let rowBorder = 'border-bottom: 1px dashed rgba(255,255,255,0.06);';
             let statusBadge = '';
 
-            if (statusInfo.statusColor === 'purple') {
+            if (isMemberMatch) {
+              rowBg = 'background: rgba(245, 158, 11, 0.22);';
+              rowBorder = 'border: 1.5px solid #f59e0b; border-left: 4px solid #f59e0b; box-shadow: 0 0 8px rgba(245, 158, 11, 0.3);';
+            } else if (statusInfo.statusColor === 'purple') {
               rowBg = 'background: rgba(147, 51, 234, 0.16);';
               rowBorder = 'border: 1px solid rgba(168, 85, 247, 0.45); border-left: 3.5px solid #c084fc;';
               statusBadge = `
@@ -1389,6 +1709,11 @@ class CrewPlanningEngine {
             const quitEntry = (plan.sidePane?.quit || []).find(q => q.name.trim().toLowerCase() === m.name.trim().toLowerCase());
             const departureDate = m.departureDate || (quitEntry?.isScheduledDeparture ? quitEntry.departureDate : null);
             const departureReason = m.departureReason || quitEntry?.departureReason || 'Quit';
+
+            const vacEntry = (plan.sidePane?.vacation || []).find(v => v.name.trim().toLowerCase() === m.name.trim().toLowerCase());
+            const vacDateRange = m.vacationDateRange || vacEntry?.dateRange || vacEntry?.vacationStartDate || null;
+            const isFutureVac = Boolean(m.isFutureVacation || vacEntry?.isFutureVacation);
+            const vacNotes = m.vacationNotes || vacEntry?.notes || '';
 
             let secondJobPill = '';
             if (statusInfo.isMultiLocation) {
@@ -1442,9 +1767,18 @@ class CrewPlanningEngine {
                 <div style="display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; flex-wrap: wrap;">
                   <span class="drag-handle" style="color: #64748b; font-size: 13px; user-select: none;" title="Drag up/down to reorder • Drag to other crew • Alt/Ctrl+Drag to duplicate">⠿</span>
                   <span style="font-family: monospace; font-size: 11px; color: #94a3b8;">${this.escapeHtml(m.slot || '—')}</span>
-                  <span style="font-weight: ${isForeman ? '700' : '500'}; color: ${isForeman ? '#f472b6' : 'inherit'};">
+                  <span style="font-weight: ${isForeman ? '700' : '500'}; color: ${isForeman ? '#f472b6' : 'inherit'}; cursor: pointer;"
+                        onclick="event.stopPropagation(); if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(m.name)}');}"
+                        onmouseover="this.style.color='#60a5fa'; this.style.textDecoration='underline';"
+                        onmouseout="this.style.color='${isForeman ? '#f472b6' : 'inherit'}'; this.style.textDecoration='none';"
+                        title="Click to open Employee Profile for ${this.escapeHtml(m.name)}">
                     ${isForeman ? '👑 ' : ''}${this.escapeHtml(m.name)}
                   </span>
+                  ${isMemberMatch ? `
+                    <span class="badge" style="background: #f59e0b; color: #000; font-size: 9px; font-weight: 800; padding: 1px 5px; border-radius: 3px; box-shadow: 0 1px 3px rgba(0,0,0,0.3);">
+                      🔍 Match
+                    </span>
+                  ` : ''}
                   ${secondJobPill}
                   ${departureDate ? `
                     <span class="badge"
@@ -1454,10 +1788,21 @@ class CrewPlanningEngine {
                       🚪 Last Day: ${this.escapeHtml(departureDate)}
                     </span>
                   ` : ''}
+                  ${(vacDateRange || vacEntry) ? `
+                    <span class="badge"
+                          onclick="event.stopPropagation(); window.crewPlanningEngine.editVacationSchedule('${this.escapeJs(m.name)}')"
+                          style="background: rgba(245, 158, 11, 0.2); color: #fcd34d; border: 1px solid rgba(245, 158, 11, 0.45); font-size: 9.5px; font-weight: 700; padding: 1px 6px; border-radius: 3px; cursor: pointer; display: inline-flex; align-items: center; gap: 3px;"
+                          title="${isFutureVac ? 'Future Scheduled Vacation' : 'Scheduled Vacation'}: ${this.escapeHtml(vacDateRange || 'Dates not set')}${vacNotes ? ' (' + this.escapeHtml(vacNotes) + ')' : ''} — Click to edit dates or week scope">
+                      🏖️ ${isFutureVac ? 'Future Vac' : 'Vac'}: ${this.escapeHtml(vacDateRange || 'Add Dates')} ✏️
+                    </span>
+                  ` : ''}
                   ${statusBadge}
                 </div>
                 <div style="display: flex; align-items: center; gap: 3px; flex-shrink: 0;">
-                  <span class="badge" style="background: rgba(255,255,255,0.06); color: #94a3b8; font-size: 9.5px; padding: 1px 5px; border-radius: 3px;">
+                  <span class="badge"
+                        onclick="event.stopPropagation(); if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(m.name)}', 'details');}"
+                        style="background: rgba(255,255,255,0.06); color: #94a3b8; font-size: 9.5px; padding: 1px 5px; border-radius: 3px; cursor: pointer;"
+                        title="Click to edit classification & profile details for ${this.escapeHtml(m.name)}">
                     ${this.escapeHtml(m.classification || m.role || '—')}
                   </span>
                   <button class="btn btn-xs"
@@ -1501,13 +1846,29 @@ class CrewPlanningEngine {
   /**
    * Renders the expanded staging side pane with category drop zones.
    */
-  renderExpandedSidePane(plan, baselineMap, occMap) {
+  renderExpandedSidePane(plan, baselineMap, occMap, sTerm = '') {
     if (!baselineMap) baselineMap = this.getOriginalEmployeeLocations();
     if (!occMap) occMap = this.getEmployeeOccurrencesMap(plan);
 
     const sp = plan.sidePane;
+    const term = (sTerm || this.searchTerm || '').toLowerCase().trim();
 
     const renderSideList = (title, icon, color, badgeBg, list, typeKey) => {
+      const rawList = list || [];
+      const filteredList = term ? rawList.filter(item => {
+        if (!item) return false;
+        const n = String(item.name || '').toLowerCase();
+        const c = String(item.classification || '').toLowerCase();
+        const j = String(item.currentJob || '').toLowerCase();
+        const ac = String(item.activeCrew || '').toLowerCase();
+        const nt = String(item.note || item.dateRange || item.departureReason || item.departureDate || '').toLowerCase();
+        return n.includes(term) || c.includes(term) || j.includes(term) || ac.includes(term) || nt.includes(term);
+      }) : rawList;
+
+      const badgeText = (term && filteredList.length !== rawList.length)
+        ? `${filteredList.length} / ${rawList.length}`
+        : `${rawList.length}`;
+
       return `
         <div class="side-pane-section" data-side-type="${typeKey}" style="margin-bottom: 12px; background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.06); border-radius: 6px; overflow: hidden;">
           <div style="display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; background: rgba(255,255,255,0.03); border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 12px; font-weight: 700; color: ${color};">
@@ -1515,19 +1876,29 @@ class CrewPlanningEngine {
               <span>${icon}</span> ${title}
             </span>
             <span class="badge" style="background: ${badgeBg}; color: ${color}; font-size: 10px; padding: 1px 6px; border-radius: 10px;">
-              ${list.length}
+              ${badgeText}
             </span>
           </div>
           <!-- Drop Zone -->
           <div class="side-drop-zone" data-side-type="${typeKey}" style="min-height: 38px; padding: 4px; display: flex; flex-direction: column; gap: 4px;">
-            ${list.length > 0 ? list.map(item => {
+            ${filteredList.length > 0 ? filteredList.map(item => {
               const statusInfo = this.getEmployeePlanningStatus(item.name, null, typeKey, plan, baselineMap, occMap);
+              const isItemMatch = Boolean(term && (
+                (item.name && item.name.toLowerCase().includes(term)) ||
+                (item.classification && item.classification.toLowerCase().includes(term)) ||
+                (item.currentJob && item.currentJob.toLowerCase().includes(term)) ||
+                (item.activeCrew && item.activeCrew.toLowerCase().includes(term)) ||
+                (item.note && String(item.note).toLowerCase().includes(term))
+              ));
 
               let itemBg = 'background: rgba(255,255,255,0.04);';
               let itemBorder = '';
               let statusBadge = '';
 
-              if (statusInfo.statusColor === 'purple') {
+              if (isItemMatch) {
+                itemBg = 'background: rgba(245, 158, 11, 0.22);';
+                itemBorder = 'border: 1.5px solid #f59e0b; border-left: 3.5px solid #f59e0b;';
+              } else if (statusInfo.statusColor === 'purple') {
                 itemBg = 'background: rgba(147, 51, 234, 0.16);';
                 itemBorder = 'border-left: 3px solid #c084fc;';
                 statusBadge = `
@@ -1559,7 +1930,16 @@ class CrewPlanningEngine {
                      style="display: flex; justify-content: space-between; align-items: center; ${itemBg} ${itemBorder} padding: 4px 6px; border-radius: 4px; font-size: 11.5px; cursor: grab; transition: all 0.15s ease;">
                   <div style="display: flex; align-items: center; gap: 5px; flex: 1; min-width: 0; flex-wrap: wrap;">
                     <span class="drag-handle" style="color: #64748b; font-size: 12px; user-select: none;">⠿</span>
-                    <span style="font-weight: 600;">${this.escapeHtml(item.name)}</span>
+                    <span style="font-weight: 600; cursor: pointer;"
+                          onclick="event.stopPropagation(); if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(item.name)}');}"
+                          onmouseover="this.style.color='#60a5fa'; this.style.textDecoration='underline';"
+                          onmouseout="this.style.color='inherit'; this.style.textDecoration='none';"
+                          title="Click to open Employee Profile for ${this.escapeHtml(item.name)}">${this.escapeHtml(item.name)}</span>
+                    ${isItemMatch ? `
+                      <span class="badge" style="background: #f59e0b; color: #000; font-size: 8.5px; font-weight: 800; padding: 1px 4px; border-radius: 2px;">
+                        🔍 Match
+                      </span>
+                    ` : ''}
                     ${typeKey === 'quit' ? `
                       ${item.departureDate ? `
                         <span class="badge" onclick="event.stopPropagation(); window.crewPlanningEngine.editQuitDeparture('${this.escapeJs(item.name)}')" style="background: rgba(239, 68, 68, 0.22); color: #fca5a5; border: 1px solid rgba(239, 68, 68, 0.4); font-size: 9.5px; font-weight: 700; padding: 1px 6px; border-radius: 3px; cursor: pointer; display: inline-flex; align-items: center; gap: 3px;" title="Last Day: ${this.escapeHtml(item.departureDate)} (${this.escapeHtml(item.departureReason || 'Quit')}) — Click to edit">
@@ -1576,13 +1956,34 @@ class CrewPlanningEngine {
                           (Active on Crew ${this.escapeHtml(item.activeCrew || item.currentJob || '—')})
                         </span>
                       ` : ''}
+                    ` : typeKey === 'vacation' ? `
+                      ${(item.dateRange || item.vacationStartDate) ? `
+                        <span class="badge" onclick="event.stopPropagation(); window.crewPlanningEngine.editVacationSchedule('${this.escapeJs(item.name)}')" style="background: rgba(245, 158, 11, 0.22); color: #fcd34d; border: 1px solid rgba(245, 158, 11, 0.45); font-size: 9.5px; font-weight: 700; padding: 1px 6px; border-radius: 3px; cursor: pointer; display: inline-flex; align-items: center; gap: 3px;" title="Vacation Dates: ${this.escapeHtml(item.dateRange || item.vacationStartDate)}${item.notes ? ' — ' + this.escapeHtml(item.notes) : ''} (Click to edit dates or week scope)">
+                          📅 ${this.escapeHtml(item.dateRange || item.vacationStartDate)}
+                        </span>
+                        <button class="btn btn-xs" onclick="event.stopPropagation(); window.crewPlanningEngine.editVacationSchedule('${this.escapeJs(item.name)}')" style="background: transparent; border: none; color: #94a3b8; font-size: 9.5px; padding: 0 2px; cursor: pointer;" title="Edit Vacation Dates & Scope">✏️</button>
+                      ` : `
+                        <span class="badge" onclick="event.stopPropagation(); window.crewPlanningEngine.editVacationSchedule('${this.escapeJs(item.name)}')" style="background: rgba(245, 158, 11, 0.32); color: #fef3c7; border: 1px dashed #f59e0b; font-size: 9.5px; font-weight: 800; padding: 1px 6px; border-radius: 3px; cursor: pointer; display: inline-flex; align-items: center; gap: 3px;" title="Click to add Vacation Dates and clarify whether this is for this week or a future week">
+                          ⚠️ Add Vacation Dates
+                        </span>
+                      `}
+                      ${item.isFutureVacation ? `
+                        <span class="badge" onclick="event.stopPropagation(); window.crewPlanningEngine.editVacationSchedule('${this.escapeJs(item.name)}')" style="background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4); font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px; cursor: pointer;" title="Future Week Vacation — Employee remains active on Crew ${this.escapeHtml(item.activeCrew || item.priorBaseJob || item.currentJob || 'Field')} this week">
+                          ⏭️ Future Wk${(item.activeCrew || item.priorBaseJob) ? ' (Active: ' + this.escapeHtml(item.activeCrew || item.priorBaseJob) + ')' : ''}
+                        </span>
+                      ` : (item.dateRange || item.vacationStartDate || item.isFutureVacation === false) ? `
+                        <span class="badge" onclick="event.stopPropagation(); window.crewPlanningEngine.editVacationSchedule('${this.escapeJs(item.name)}')" style="background: rgba(16, 185, 129, 0.16); color: #6ee7b7; border: 1px solid rgba(16, 185, 129, 0.35); font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 3px; cursor: pointer;" title="${item.keepOnCrew ? 'Partial-week vacation — Kept on Crew ' + this.escapeHtml(item.activeCrew || item.priorBaseJob || '') : 'Off on vacation during this planned week'}">
+                          🗓️ This Wk${item.keepOnCrew ? ' (On Crew)' : ''}
+                        </span>
+                      ` : ''}
+                      ${item.notes ? `<span style="color: #94a3b8; font-size: 10px;">(${this.escapeHtml(item.notes)})</span>` : ''}
                     ` : (item.note || item.dateRange ? `<span style="color: #64748b; font-size: 10px;">(${this.escapeHtml(item.note || item.dateRange)})</span>` : '')}
                     ${statusBadge}
                   </div>
                   <div style="display: flex; align-items: center; gap: 3px;">
                     ${item.currentJob ? `<span style="font-size: 9.5px; color: #94a3b8; font-family: monospace;">${this.escapeHtml(item.currentJob)}</span>` : ''}
                     <button class="btn btn-xs"
-                            onclick="window.crewPlanningEngine.promptDuplicateMember('${this.escapeJs(item.name)}', '')"
+                            onclick="window.crewPlanningEngine.promptDuplicateMember('${this.escapeJs(item.name)}', '', '${typeKey}')"
                             style="background: transparent; border: none; color: #c084fc; font-size: 11px; padding: 0 3px; cursor: pointer;"
                             title="Duplicate">👯</button>
                     <button class="btn btn-xs"
@@ -1592,11 +1993,15 @@ class CrewPlanningEngine {
                   </div>
                 </div>
               `;
-            }).join('') : `
+            }).join('') : (term && rawList.length > 0 ? `
+              <div style="color: #64748b; font-size: 10.5px; font-style: italic; padding: 6px; text-align: center;">
+                No matches
+              </div>
+            ` : `
               <div style="color: #64748b; font-size: 10.5px; font-style: italic; padding: 6px; text-align: center;">
                 Drop here to stage
               </div>
-            `}
+            `)}
           </div>
         </div>
       `;
@@ -1613,17 +2018,8 @@ class CrewPlanningEngine {
         </button>
       </div>
 
-      <!-- Quick Add to Planning Input -->
-      <div style="padding: 8px 10px; border-bottom: 1px solid rgba(255,255,255,0.06);">
-        <input type="text"
-               id="planning-side-search"
-               placeholder="Search or add employee to planning..."
-               style="width: 100%; box-sizing: border-box; background: rgba(0,0,0,0.3); border: 1px solid rgba(255,255,255,0.1); border-radius: 4px; padding: 5px 8px; color: #fff; font-size: 11.5px; outline: none;"
-               oninput="window.crewPlanningEngine.filterSideSearch(this.value)">
-      </div>
-
       <!-- Side Pane Category Lists -->
-      <div style="flex: 1; overflow-y: auto; padding: 10px;">
+      <div class="side-pane-scroll-body" style="flex: 1; overflow-y: auto; padding: 10px;">
         ${renderSideList('Planning Pool (Floaters)', '📌', '#60a5fa', 'rgba(59, 130, 246, 0.2)', sp.planning, 'planning')}
         ${renderSideList('Scheduled Vacation', '🏖️', '#fbbf24', 'rgba(245, 158, 11, 0.2)', sp.vacation, 'vacation')}
         ${renderSideList('Quit / Notice', '🚪', '#f87171', 'rgba(239, 68, 68, 0.2)', sp.quit, 'quit')}
@@ -1657,28 +2053,47 @@ class CrewPlanningEngine {
   }
 
   filterSideSearch(query) {
-    const q = String(query || '').trim().toLowerCase();
-    const items = document.querySelectorAll('.side-pane-item');
-    items.forEach(el => {
-      if (!q) {
-        el.style.display = '';
-        return;
+    const q = String(query || '').trim();
+    this.searchTerm = q;
+    if (window.sheetNavigator) {
+      window.sheetNavigator.searchTerm = q.toLowerCase();
+      const topSearch = document.getElementById('sheet-search-input');
+      if (topSearch && topSearch.value !== q) {
+        topSearch.value = q;
       }
-      const text = el.textContent.toLowerCase();
-      el.style.display = text.includes(q) ? '' : 'none';
-    });
+      window.sheetNavigator.renderCurrentSheet();
+    } else {
+      const items = document.querySelectorAll('.side-pane-item');
+      items.forEach(el => {
+        if (!q) {
+          el.style.display = '';
+          return;
+        }
+        const text = el.textContent.toLowerCase();
+        el.style.display = text.includes(q.toLowerCase()) ? '' : 'none';
+      });
+    }
   }
 
   /**
    * Renders a read-only historical roster for past reference weeks.
    */
-  renderHistoricalWorkspace(container, countBadge, weekStr) {
+  renderHistoricalWorkspace(container, countBadge, weekStr, incomingSearchTerm) {
     if (!container) return;
     const roster = this.getHistoricalRoster(weekStr);
 
     if (countBadge) {
       countBadge.style.display = 'none';
     }
+
+    if (incomingSearchTerm !== undefined) {
+      this.searchTerm = incomingSearchTerm;
+    } else if (window.sheetNavigator && window.sheetNavigator.searchTerm !== undefined) {
+      this.searchTerm = window.sheetNavigator.searchTerm;
+    }
+    const sTerm = (this.searchTerm || '').toLowerCase().trim();
+
+    const matchingCrews = (roster.crews || []).filter(crew => this.isCrewMatchingSearch(crew, sTerm));
 
     container.innerHTML = `
       <div class="historical-roster-wrapper" style="height: 100%; overflow-y: auto; padding: 14px 18px; box-sizing: border-box;">
@@ -1708,7 +2123,7 @@ class CrewPlanningEngine {
 
         <!-- Historical Crew Cards Grid -->
         <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 14px;">
-          ${roster.crews && roster.crews.length > 0 ? roster.crews.map(crew => `
+          ${matchingCrews.length > 0 ? matchingCrews.map(crew => `
             <div style="background: var(--bg-secondary, #1e293b); border: 1px solid var(--border-color, rgba(255,255,255,0.1)); border-radius: 8px; padding: 12px;">
               <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(255,255,255,0.06); padding-bottom: 6px; margin-bottom: 8px;">
                 <div style="font-weight: 800; font-size: 13.5px; color: #93c5fd;">
@@ -1719,13 +2134,13 @@ class CrewPlanningEngine {
                 </span>
               </div>
               <div style="font-size: 11.5px; margin-bottom: 6px; color: #f472b6; font-weight: 700;">
-                👑 Foreman: ${this.escapeHtml(crew.foreman || '—')}
+                👑 Foreman: ${crew.foreman ? `<span style="cursor: pointer;" onclick="event.stopPropagation(); if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(crew.foreman)}');}" onmouseover="this.style.color='#60a5fa'; this.style.textDecoration='underline';" onmouseout="this.style.color='#f472b6'; this.style.textDecoration='none';" title="Click to open Employee Profile for ${this.escapeHtml(crew.foreman)}">${this.escapeHtml(crew.foreman)}</span>` : '—'}
               </div>
               <div style="display: flex; flex-direction: column; gap: 4px;">
                 ${crew.members && crew.members.length > 0 ? crew.members.map(m => `
                   <div style="display: flex; justify-content: space-between; font-size: 12px; padding: 3px 4px; border-bottom: 1px dashed rgba(255,255,255,0.04);">
                     <span style="font-family: monospace; font-size: 11px; color: #94a3b8; min-width: 45px;">${this.escapeHtml(m.slot || '—')}</span>
-                    <span style="flex: 1; margin-left: 6px; font-weight: 500;">${this.escapeHtml(m.name)}</span>
+                    <span style="flex: 1; margin-left: 6px; font-weight: 500; cursor: pointer;" onclick="event.stopPropagation(); if(window.employeeProfileEngine){window.employeeProfileEngine.openProfileModal('${this.escapeJs(m.name)}');}" onmouseover="this.style.color='#60a5fa'; this.style.textDecoration='underline';" onmouseout="this.style.color='inherit'; this.style.textDecoration='none';" title="Click to open Employee Profile for ${this.escapeHtml(m.name)}">${this.escapeHtml(m.name)}</span>
                     <span style="font-size: 10px; color: #64748b;">${this.escapeHtml(m.classification || m.role || '')}</span>
                   </div>
                 `).join('') : '<div style="color: #64748b; font-size: 11px; font-style: italic;">No individual member records archived</div>'}
@@ -1749,6 +2164,46 @@ class CrewPlanningEngine {
 
   attachPlanningDragHandlers(container) {
     if (!container) return;
+
+    // 0. Drag source on Planned Crew Headers / Drag Handles (reordering entire crew cards)
+    container.querySelectorAll('.planned-crew-header[draggable="true"]').forEach(header => {
+      header.addEventListener('dragstart', (e) => {
+        // If user clicked a button or interactive child, don't drag crew card
+        if (e.target.closest('button, select, input, a')) {
+          e.preventDefault();
+          return;
+        }
+
+        const crewJob = header.dataset.crewJob;
+        if (!crewJob) return;
+
+        const card = header.closest('.planned-crew-card');
+        const dragData = {
+          type: 'crew',
+          jobNumber: crewJob
+        };
+
+        e.dataTransfer.setData('application/json', JSON.stringify(dragData));
+        e.dataTransfer.effectAllowed = 'move';
+        window._activePlanningCrewDrag = crewJob;
+        window._activePlanningDragData = null;
+
+        if (card) {
+          card.classList.add('is-dragging-crew');
+        }
+      });
+
+      header.addEventListener('dragend', () => {
+        window._activePlanningCrewDrag = null;
+        container.querySelectorAll('.planned-crew-card').forEach(c => {
+          c.classList.remove('is-dragging-crew', 'crew-drop-before', 'crew-drop-after');
+          c.style.borderLeft = '';
+          c.style.borderRight = '';
+          c.style.borderColor = '';
+          c.style.boxShadow = '';
+        });
+      });
+    });
 
     // 1. Drag source on member rows
     container.querySelectorAll('.planned-member-row[draggable="true"], .side-member-row[draggable="true"]').forEach(row => {
@@ -1783,6 +2238,11 @@ class CrewPlanningEngine {
     // 2. Drop target on individual Planned Member Rows (reordering inside crew & targeted insert)
     container.querySelectorAll('.planned-member-row').forEach(targetRow => {
       targetRow.addEventListener('dragover', (e) => {
+        // If a whole crew is being dragged, allow the event to bubble up to the crew card!
+        if (window._activePlanningCrewDrag) {
+          return;
+        }
+
         e.preventDefault();
         e.stopPropagation(); // Prevent bubbling up to the crew card while targeting a row
 
@@ -1816,6 +2276,11 @@ class CrewPlanningEngine {
       });
 
       targetRow.addEventListener('drop', (e) => {
+        // If a whole crew is being dragged, allow bubbling up to the crew card drop handler!
+        if (window._activePlanningCrewDrag) {
+          return;
+        }
+
         e.preventDefault();
         e.stopPropagation(); // Do not trigger parent card's drop handler
         targetRow.classList.remove('drag-over-top', 'drag-over-bottom', 'drag-over-top-copy', 'drag-over-bottom-copy');
@@ -1842,13 +2307,45 @@ class CrewPlanningEngine {
       });
     });
 
-    // 3. Drop target on Planned Crew Cards / Drop Zones (append to end if dropped on card outside rows)
+    // 3. Drop target on Planned Crew Cards / Drop Zones (crew reordering OR member append)
     container.querySelectorAll('.planned-crew-card').forEach(card => {
       const destJob = card.dataset.crewJob;
       if (!destJob) return;
 
       card.addEventListener('dragover', (e) => {
         e.preventDefault();
+
+        // CASE A: Whole crew is being dragged to reorder
+        if (window._activePlanningCrewDrag) {
+          const srcJob = window._activePlanningCrewDrag;
+          if (srcJob === destJob) {
+            card.classList.remove('crew-drop-before', 'crew-drop-after');
+            card.style.borderLeft = '';
+            card.style.borderRight = '';
+            card.style.boxShadow = '';
+            return;
+          }
+          e.dataTransfer.dropEffect = 'move';
+          const rect = card.getBoundingClientRect();
+          const relX = e.clientX - rect.left;
+          const isBefore = relX < rect.width / 2;
+
+          if (isBefore) {
+            card.classList.add('crew-drop-before');
+            card.classList.remove('crew-drop-after');
+            card.style.borderLeft = '5px solid #38bdf8';
+            card.style.borderRight = '';
+          } else {
+            card.classList.add('crew-drop-after');
+            card.classList.remove('crew-drop-before');
+            card.style.borderRight = '5px solid #38bdf8';
+            card.style.borderLeft = '';
+          }
+          card.style.boxShadow = '0 0 14px rgba(56, 189, 248, 0.45)';
+          return;
+        }
+
+        // CASE B: Member is being dragged
         const isCopy = e.altKey || e.ctrlKey || (window._activePlanningDragData && window._activePlanningDragData.isCopy);
         e.dataTransfer.dropEffect = isCopy ? 'copy' : 'move';
         card.style.borderColor = isCopy ? '#c084fc' : '#3b82f6';
@@ -1857,20 +2354,41 @@ class CrewPlanningEngine {
 
       card.addEventListener('dragleave', (e) => {
         if (!card.contains(e.relatedTarget)) {
+          card.classList.remove('crew-drop-before', 'crew-drop-after');
           card.style.borderColor = '';
+          card.style.borderLeft = '';
+          card.style.borderRight = '';
           card.style.boxShadow = '';
         }
       });
 
       card.addEventListener('drop', (e) => {
         e.preventDefault();
+        card.classList.remove('crew-drop-before', 'crew-drop-after');
         card.style.borderColor = '';
+        card.style.borderLeft = '';
+        card.style.borderRight = '';
         card.style.boxShadow = '';
 
         let data = null;
         try {
           data = JSON.parse(e.dataTransfer.getData('application/json'));
         } catch { /* ignore */ }
+
+        // CASE A: Crew Reorder Drop
+        if ((data && data.type === 'crew') || window._activePlanningCrewDrag) {
+          const srcJob = (data && data.jobNumber) || window._activePlanningCrewDrag;
+          window._activePlanningCrewDrag = null;
+          if (srcJob && srcJob !== destJob) {
+            const rect = card.getBoundingClientRect();
+            const relX = e.clientX - rect.left;
+            const isBefore = relX < rect.width / 2;
+            this.reorderCrew(srcJob, destJob, isBefore ? 'before' : 'after');
+          }
+          return;
+        }
+
+        // CASE B: Member Drop
         if (!data && window._activePlanningDragData) data = window._activePlanningDragData;
 
         if (data) {
@@ -1880,12 +2398,33 @@ class CrewPlanningEngine {
       });
     });
 
+    // 3.5 Drop target on planned crews grid background (to move to end)
+    const grid = container.querySelector('.planned-crews-grid');
+    if (grid) {
+      grid.addEventListener('dragover', (e) => {
+        if (window._activePlanningCrewDrag) {
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+        }
+      });
+
+      grid.addEventListener('drop', (e) => {
+        if (window._activePlanningCrewDrag && (e.target === grid || (e.target.closest('.planned-crews-grid') === grid && !e.target.closest('.planned-crew-card')))) {
+          e.preventDefault();
+          const srcJob = window._activePlanningCrewDrag;
+          window._activePlanningCrewDrag = null;
+          this.reorderCrew(srcJob, null, 'end');
+        }
+      });
+    }
+
     // 4. Drop target on Side Pane Categories
     container.querySelectorAll('.side-pane-section').forEach(sec => {
       const destSideType = sec.dataset.sideType;
       if (!destSideType) return;
 
       sec.addEventListener('dragover', (e) => {
+        if (window._activePlanningCrewDrag) return;
         e.preventDefault();
         const isCopy = e.altKey || e.ctrlKey || (window._activePlanningDragData && window._activePlanningDragData.isCopy);
         e.dataTransfer.dropEffect = isCopy ? 'copy' : 'move';
@@ -1899,6 +2438,7 @@ class CrewPlanningEngine {
       });
 
       sec.addEventListener('drop', (e) => {
+        if (window._activePlanningCrewDrag) return;
         e.preventDefault();
         sec.style.borderColor = '';
 
@@ -1917,11 +2457,79 @@ class CrewPlanningEngine {
   }
 
   /**
+   * Reorders a planned crew card to be placed before or after another crew card, or at the end.
+   */
+  reorderCrew(srcJobNumber, targetJobNumber, position = 'before') {
+    const plan = this.getPlanForWeek(this.selectedWeek);
+    if (!plan || !Array.isArray(plan.crews)) return;
+
+    const fromIdx = plan.crews.findIndex(c => c.jobNumber.toLowerCase() === String(srcJobNumber || '').toLowerCase());
+    if (fromIdx === -1) return;
+
+    const [movedCrew] = plan.crews.splice(fromIdx, 1);
+
+    if (position === 'end' || !targetJobNumber) {
+      plan.crews.push(movedCrew);
+    } else {
+      let toIdx = plan.crews.findIndex(c => c.jobNumber.toLowerCase() === String(targetJobNumber || '').toLowerCase());
+      if (toIdx === -1) {
+        plan.crews.push(movedCrew);
+      } else {
+        if (position === 'after') {
+          toIdx += 1;
+        }
+        plan.crews.splice(toIdx, 0, movedCrew);
+      }
+    }
+
+    this.savePlan(plan);
+    this.refreshView();
+
+    if (typeof window.showToast === 'function') {
+      if (position === 'end' || !targetJobNumber) {
+        window.showToast(`🚜 Moved Crew ${srcJobNumber} to the end of the board.`, 'info');
+      } else {
+        window.showToast(`🚜 Moved Crew ${srcJobNumber} ${position} Crew ${targetJobNumber}.`, 'info');
+      }
+    }
+  }
+
+  /**
+   * Moves a planned crew earlier (-1) or later (+1) in the board display order.
+   */
+  moveCrewOrder(jobNumber, delta) {
+    const plan = this.getPlanForWeek(this.selectedWeek);
+    if (!plan || !Array.isArray(plan.crews)) return;
+
+    const idx = plan.crews.findIndex(c => c.jobNumber.toLowerCase() === String(jobNumber || '').toLowerCase());
+    if (idx === -1) return;
+
+    const targetIdx = idx + delta;
+    if (targetIdx < 0 || targetIdx >= plan.crews.length) {
+      if (typeof window.showToast === 'function') {
+        window.showToast(`Crew ${jobNumber} is already at the ${delta < 0 ? 'start' : 'end'} of the board.`, 'info');
+      }
+      return;
+    }
+
+    const [movedCrew] = plan.crews.splice(idx, 1);
+    plan.crews.splice(targetIdx, 0, movedCrew);
+
+    this.savePlan(plan);
+    this.refreshView();
+
+    if (typeof window.showToast === 'function') {
+      window.showToast(`🚜 Moved Crew ${jobNumber} ${delta < 0 ? 'earlier' : 'later'} in board order.`, 'info');
+    }
+  }
+
+  /**
    * Reorders an employee inside a crew, or moves/copies an employee into a crew at a target position.
    * Always renumbers member slots sequentially (.1, .2, .3, ...) so there are never gaps.
    */
   handleReorderOrMoveMember(dragData, destBaseJob, targetEmpName = null, insertPosition = 'end', isCopy = false) {
-    const { empName, fromBaseJob, fromSideType } = dragData;
+    const empName = dragData.empName || dragData.name;
+    const { fromBaseJob, fromSideType } = dragData;
     const plan = this.getPlanForWeek(this.selectedWeek);
     if (!plan) return;
 
@@ -1990,6 +2598,12 @@ class CrewPlanningEngine {
             srcCrew.members.forEach((m, i) => {
               m.slot = `${srcCrew.jobNumber}.${i + 1}`;
             });
+            // If moved member was the foreman of source crew, update/clear source crew foreman
+            if (this.isCrewForeman(srcCrew, memberObj.name)) {
+              const remaining = srcCrew.members;
+              const nextLead = remaining.find(m => /^(foreman|f|sup|gf|lead)/i.test(m.classification || m.role)) || remaining[0];
+              srcCrew.foreman = nextLead ? nextLead.name : '';
+            }
           }
         }
       }
@@ -2033,7 +2647,9 @@ class CrewPlanningEngine {
     if (isCopy) memberObj.isDuplicate = true;
 
     // Insert into destination crew at target position
-    if (!targetEmpName || insertPosition === 'end') {
+    if (insertPosition === 'start') {
+      destCrew.members.unshift(memberObj);
+    } else if (!targetEmpName || insertPosition === 'end') {
       destCrew.members.push(memberObj);
     } else {
       const normTarget = String(targetEmpName).trim().toLowerCase();
@@ -2052,6 +2668,12 @@ class CrewPlanningEngine {
     destCrew.members.forEach((m, idx) => {
       m.slot = `${destCrew.jobNumber}.${idx + 1}`;
     });
+
+    // If destination crew had no foreman, or if moving member is a Foreman ('F') and was placed at start:
+    const isLeadRank = /^(foreman|f|sup|gf)/i.test(memberObj.classification || memberObj.role);
+    if (!destCrew.foreman || (insertPosition === 'start' && isLeadRank)) {
+      destCrew.foreman = memberObj.name;
+    }
 
     // If employee has a scheduled departure, keep their active crew updated in Quit / Notice
     if (plan.sidePane && plan.sidePane.quit) {
@@ -2076,7 +2698,8 @@ class CrewPlanningEngine {
   }
 
   handleMoveToSideCategory(dragData, destSideType, isCopy = false) {
-    const { empName, fromBaseJob, fromSideType } = dragData;
+    const empName = dragData.empName || dragData.name;
+    const { fromBaseJob, fromSideType } = dragData;
     const plan = this.getPlanForWeek(this.selectedWeek);
     if (!plan || !plan.sidePane[destSideType]) return;
 
@@ -2085,6 +2708,12 @@ class CrewPlanningEngine {
     // RULE: If moving to Quit / Notice, prompt for Last Working Day & departure details first!
     if (destSideType === 'quit') {
       this.promptQuitDeparture(dragData, isCopy);
+      return;
+    }
+
+    // RULE: If moving to Scheduled Vacation, prompt for Vacation Dates & This Week vs. Future Week scope!
+    if (destSideType === 'vacation') {
+      this.promptVacationSchedule(dragData, isCopy);
       return;
     }
 
@@ -2113,6 +2742,12 @@ class CrewPlanningEngine {
             srcCrew.members.forEach((m, i) => {
               m.slot = `${srcCrew.jobNumber}.${i + 1}`;
             });
+            // If moved member was the foreman of source crew, update/clear source crew foreman
+            if (this.isCrewForeman(srcCrew, memberObj.name)) {
+              const remaining = srcCrew.members;
+              const nextLead = remaining.find(m => /^(foreman|f|sup|gf|lead)/i.test(m.classification || m.role)) || remaining[0];
+              srcCrew.foreman = nextLead ? nextLead.name : '';
+            }
           }
         }
       }
@@ -2146,7 +2781,8 @@ class CrewPlanningEngine {
    * Prompts the user to enter the Last Working Day, reason, and notes when moving to Quit/Notice.
    */
   promptQuitDeparture(dragData, isCopy = false, existingItem = null) {
-    const { empName, fromBaseJob } = dragData;
+    const empName = dragData.empName || dragData.name;
+    const { fromBaseJob } = dragData;
     const plan = this.getPlanForWeek(this.selectedWeek);
     if (!plan) return;
 
@@ -2577,6 +3213,696 @@ class CrewPlanningEngine {
     this.promptQuitDeparture(dragData, false, item);
   }
 
+  /**
+   * Prompts the user to enter Vacation Start/End Dates, Notes, and clarify whether the vacation
+   * is for This Planned Week or a Future Week when dragging/editing an employee in Scheduled Vacation.
+   */
+  promptVacationSchedule(dragData, isCopy = false, existingItem = null) {
+    const empName = dragData.empName || dragData.name;
+    const { fromBaseJob } = dragData;
+    const plan = this.getPlanForWeek(this.selectedWeek);
+    if (!plan) return;
+
+    const modalId = 'modal-crew-vacation-schedule';
+    const existingModal = document.getElementById(modalId);
+    if (existingModal) existingModal.remove();
+
+    const normName = String(empName || '').trim().toLowerCase();
+    const baselineMap = this.getOriginalEmployeeLocations();
+    const baseInfo = baselineMap.get(normName);
+
+    let targetCrewNumber = (
+      fromBaseJob ||
+      existingItem?.activeCrew ||
+      existingItem?.priorBaseJob ||
+      (existingItem?.currentJob ? String(existingItem.currentJob).replace(/\.\d+.*$/, '').trim() : '') ||
+      baseInfo?.originalBaseJob ||
+      ''
+    ).replace(/\.\d+.*$/, '').trim();
+
+    if (!targetCrewNumber) {
+      const c = plan.crews.find(cr => cr.members.some(m => m.name.trim().toLowerCase() === normName));
+      if (c) targetCrewNumber = c.jobNumber;
+    }
+
+    // Parse planned week Sunday date
+    const parseWeekSunday = () => {
+      try {
+        const raw = this.selectedWeek || '';
+        if (raw.includes('-')) {
+          const p = raw.split('-');
+          if (p.length === 3) return new Date(parseInt(p[0], 10), parseInt(p[1], 10) - 1, parseInt(p[2], 10));
+        } else if (raw.includes('/')) {
+          const p = raw.split('/');
+          if (p.length === 3) return new Date(parseInt(p[2], 10), parseInt(p[0], 10) - 1, parseInt(p[1], 10));
+        }
+      } catch {
+        // fallback below
+      }
+      return new Date();
+    };
+
+    const fmtDate = (dt) => {
+      const m = String(dt.getMonth() + 1).padStart(2, '0');
+      const d = String(dt.getDate()).padStart(2, '0');
+      const y = dt.getFullYear();
+      return `${m}/${d}/${y}`;
+    };
+
+    const toIsoDate = (dStr) => {
+      if (/^\d{2}\/\d{2}\/\d{4}$/.test(dStr)) {
+        const p = dStr.split('/');
+        return `${p[2]}-${p[0]}-${p[1]}`;
+      }
+      return new Date().toISOString().split('T')[0];
+    };
+
+    const parseMmDdYyyy = (dStr) => {
+      if (!dStr) return null;
+      const p = String(dStr).trim().split('/');
+      if (p.length === 3) {
+        const dt = new Date(parseInt(p[2], 10), parseInt(p[0], 10) - 1, parseInt(p[1], 10));
+        if (!isNaN(dt.getTime())) return dt;
+      }
+      return null;
+    };
+
+    const weekSun = parseWeekSunday();
+    const weekSat = new Date(weekSun);
+    weekSat.setDate(weekSun.getDate() + 6);
+
+    const addDays = (base, offset) => {
+      const d = new Date(base);
+      d.setDate(base.getDate() + offset);
+      return d;
+    };
+
+    // Preset ranges (Mon - Thu)
+    const thisMon = fmtDate(addDays(weekSun, 1));
+    const thisThu = fmtDate(addDays(weekSun, 4));
+    const nextMon = fmtDate(addDays(weekSun, 8));
+    const nextThu = fmtDate(addDays(weekSun, 11));
+    const wk2Mon = fmtDate(addDays(weekSun, 15));
+    const wk2Thu = fmtDate(addDays(weekSun, 18));
+
+    // Existing start/end dates
+    let defaultStart = existingItem?.vacationStartDate || '';
+    let defaultEnd = existingItem?.vacationEndDate || '';
+    if (!defaultStart && existingItem?.dateRange) {
+      const parts = String(existingItem.dateRange).split(/\s*-\s*/);
+      if (/^\d{2}\/\d{2}\/\d{4}$/.test(parts[0] || '')) {
+        defaultStart = parts[0];
+        defaultEnd = parts[1] && /^\d{2}\/\d{2}\/\d{4}$/.test(parts[1]) ? parts[1] : parts[0];
+      }
+    }
+    if (!defaultStart) defaultStart = thisMon;
+    if (!defaultEnd) defaultEnd = thisThu;
+
+    const initialIsFuture = Boolean(existingItem?.isFutureVacation);
+    const initialKeepOnCrew = existingItem
+      ? Boolean(existingItem.keepOnCrew || existingItem.isFutureVacation)
+      : false;
+
+    const overlay = document.createElement('div');
+    overlay.id = modalId;
+    overlay.className = 'modal-overlay active';
+    overlay.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.82) !important; display: flex; align-items: center; justify-content: center; z-index: 16500 !important; pointer-events: auto !important; padding: 20px;';
+
+    overlay.innerHTML = `
+      <div class="modal-box" style="background: #1e293b; border: 1px solid rgba(245, 158, 11, 0.45); border-radius: 10px; max-width: 540px; width: 100%; box-shadow: 0 20px 45px rgba(0,0,0,0.85); overflow: hidden; pointer-events: auto !important; position: relative; z-index: 16501 !important;">
+        <!-- Header -->
+        <div style="background: linear-gradient(135deg, #92400e 0%, #b45309 100%); color: white; padding: 14px 20px; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid rgba(245, 158, 11, 0.4);">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span style="font-size: 21px;">🏖️</span>
+            <div>
+              <div style="font-weight: 800; font-size: 15px;">Scheduled Vacation — Dates & Week Scope</div>
+              <div style="font-size: 11px; opacity: 0.9;">Specify vacation dates and clarify if this is for this week or a future week</div>
+            </div>
+          </div>
+          <button id="btn-vac-close-x" style="background: rgba(0,0,0,0.25); border: none; color: white; font-size: 14px; width: 28px; height: 28px; border-radius: 4px; cursor: pointer;">✕</button>
+        </div>
+
+        <!-- Body -->
+        <div style="padding: 18px 20px; display: flex; flex-direction: column; gap: 14px;">
+          <!-- Employee Info Banner -->
+          <div style="background: rgba(15, 23, 42, 0.75); border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 8px; padding: 11px 14px; display: flex; justify-content: space-between; align-items: center;">
+            <div>
+              <div style="font-size: 10.5px; color: #fbbf24; font-weight: 700; text-transform: uppercase;">Employee on Scheduled Vacation</div>
+              <div style="font-size: 16px; font-weight: 800; color: #ffffff;">${this.escapeHtml(empName)}</div>
+            </div>
+            <div style="text-align: right; font-size: 12px; color: #94a3b8;">
+              <div>Home / Active Crew: <strong style="color: #fde68a;">${this.escapeHtml(targetCrewNumber || 'Unassigned')}</strong></div>
+              <div style="font-size: 10.5px; color: #64748b;">Planned Week: ${this.escapeHtml(this.selectedWeek || '')}</div>
+            </div>
+          </div>
+
+          <!-- 1. Week Scope Clarification (This Week vs Future Week) -->
+          <div>
+            <label style="font-size: 12px; font-weight: 700; color: #fde68a; margin-bottom: 6px; display: block;">
+              <span>1️⃣ Is this vacation for this planned week or a future week? <span style="color: #f59e0b;">*</span></span>
+            </label>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+              <label id="vac-scope-card-this" style="background: ${!initialIsFuture ? 'rgba(16, 185, 129, 0.16)' : 'rgba(15, 23, 42, 0.65)'}; border: 1.5px solid ${!initialIsFuture ? '#10b981' : 'rgba(255,255,255,0.12)'}; border-radius: 8px; padding: 10px 12px; cursor: pointer; display: flex; flex-direction: column; gap: 4px; transition: all 0.15s ease;">
+                <div style="display: flex; align-items: center; gap: 7px;">
+                  <input type="radio" name="vacation-week-scope" id="vac-scope-this" value="this_week" ${!initialIsFuture ? 'checked' : ''} style="accent-color: #10b981; cursor: pointer;" />
+                  <span style="font-size: 12.5px; font-weight: 800; color: #6ee7b7;">🗓️ This Planned Week</span>
+                </div>
+                <div style="font-size: 10.5px; color: #cbd5e1; line-height: 1.35; padding-left: 20px;">
+                  Off during week of <strong>${this.escapeHtml(this.selectedWeek || '')}</strong>. Removes from field crew for this week (unless partial week).
+                </div>
+              </label>
+
+              <label id="vac-scope-card-future" style="background: ${initialIsFuture ? 'rgba(59, 130, 246, 0.18)' : 'rgba(15, 23, 42, 0.65)'}; border: 1.5px solid ${initialIsFuture ? '#3b82f6' : 'rgba(255,255,255,0.12)'}; border-radius: 8px; padding: 10px 12px; cursor: pointer; display: flex; flex-direction: column; gap: 4px; transition: all 0.15s ease;">
+                <div style="display: flex; align-items: center; gap: 7px;">
+                  <input type="radio" name="vacation-week-scope" id="vac-scope-future" value="future_week" ${initialIsFuture ? 'checked' : ''} style="accent-color: #3b82f6; cursor: pointer;" />
+                  <span style="font-size: 12.5px; font-weight: 800; color: #93c5fd;">⏭️ Future Week</span>
+                </div>
+                <div style="font-size: 10.5px; color: #cbd5e1; line-height: 1.35; padding-left: 20px;">
+                  Upcoming vacation for a future week. <strong>Keeps active on Crew ${this.escapeHtml(targetCrewNumber || 'current crew')}</strong> for this week!
+                </div>
+              </label>
+            </div>
+          </div>
+
+          <!-- 2. Vacation Start & End Dates -->
+          <div>
+            <label style="font-size: 12px; font-weight: 700; color: #fde68a; margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between;">
+              <span>2️⃣ Vacation Dates (Start Date — End Date) <span style="color: #f59e0b;">*</span></span>
+              <span style="font-size: 11px; font-weight: normal; color: #94a3b8;">(MM/DD/YYYY)</span>
+            </label>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 8px;">
+              <div>
+                <div style="font-size: 10.5px; color: #94a3b8; margin-bottom: 3px;">Start Date (First Day Off)</div>
+                <div style="display: flex; gap: 5px;">
+                  <input type="text" id="vac-start-date" value="${this.escapeHtml(defaultStart)}" placeholder="MM/DD/YYYY" style="flex: 1; min-width: 0; background: #0f172a; border: 1px solid rgba(255,255,255,0.16); border-radius: 6px; color: #ffffff; padding: 7px 10px; font-size: 12.5px; font-weight: 600;" />
+                  <input type="date" id="vac-start-picker" value="${toIsoDate(defaultStart)}" style="width: 38px; background: #0f172a; border: 1px solid rgba(255,255,255,0.16); border-radius: 6px; color: #ffffff; padding: 5px; cursor: pointer;" title="Pick Start Date" />
+                </div>
+              </div>
+              <div>
+                <div style="font-size: 10.5px; color: #94a3b8; margin-bottom: 3px;">End Date (Last Day Off)</div>
+                <div style="display: flex; gap: 5px;">
+                  <input type="text" id="vac-end-date" value="${this.escapeHtml(defaultEnd)}" placeholder="MM/DD/YYYY" style="flex: 1; min-width: 0; background: #0f172a; border: 1px solid rgba(255,255,255,0.16); border-radius: 6px; color: #ffffff; padding: 7px 10px; font-size: 12.5px; font-weight: 600;" />
+                  <input type="date" id="vac-end-picker" value="${toIsoDate(defaultEnd)}" style="width: 38px; background: #0f172a; border: 1px solid rgba(255,255,255,0.16); border-radius: 6px; color: #ffffff; padding: 5px; cursor: pointer;" title="Pick End Date" />
+                </div>
+              </div>
+            </div>
+
+            <!-- Quick Preset Buttons -->
+            <div style="display: flex; gap: 6px; flex-wrap: wrap;">
+              <button type="button" id="vac-preset-this" class="btn btn-xs" style="font-size: 10.5px; padding: 3px 8px; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.35); color: #6ee7b7; cursor: pointer;">
+                📅 This Week (${thisMon} - ${thisThu})
+              </button>
+              <button type="button" id="vac-preset-next" class="btn btn-xs" style="font-size: 10.5px; padding: 3px 8px; background: rgba(59, 130, 246, 0.16); border: 1px solid rgba(59, 130, 246, 0.35); color: #93c5fd; cursor: pointer;">
+                ⏭️ Next Week (${nextMon} - ${nextThu})
+              </button>
+              <button type="button" id="vac-preset-wk2" class="btn btn-xs" style="font-size: 10.5px; padding: 3px 8px; background: rgba(148, 163, 184, 0.12); border: 1px solid rgba(148, 163, 184, 0.28); color: #cbd5e1; cursor: pointer;">
+                ⏭️ +2 Weeks (${wk2Mon} - ${wk2Thu})
+              </button>
+            </div>
+          </div>
+
+          <!-- 3. Keep on Active Crew Option -->
+          <div style="background: rgba(15, 23, 42, 0.7); border: 1px solid rgba(59, 130, 246, 0.25); border-radius: 8px; padding: 10px 14px;">
+            <label style="display: flex; align-items: flex-start; gap: 9px; cursor: pointer; font-size: 12px; color: #f1f5f9;">
+              <input type="checkbox" id="vac-keep-on-crew" ${initialKeepOnCrew ? 'checked' : ''} style="margin-top: 2px; cursor: pointer; accent-color: #3b82f6; width: 16px; height: 16px;">
+              <div>
+                <div style="font-weight: 700; color: #93c5fd;">Keep employee active on Crew ${this.escapeHtml(targetCrewNumber || 'current crew')} during this planned week</div>
+                <div style="font-size: 11px; color: #94a3b8; line-height: 1.4; margin-top: 2px;">
+                  Automatically checked for <strong>Future Week</strong> vacations (and optional for partial-week vacations). A 🏖️ vacation badge will display on their crew row while tracking their dates in Scheduled Vacation.
+                </div>
+              </div>
+            </label>
+          </div>
+
+          <!-- 4. Notes -->
+          <div>
+            <label for="vac-notes-input" style="font-size: 12px; font-weight: 700; color: #cbd5e1; margin-bottom: 5px; display: block;">
+              <span>📝 Vacation Notes (Optional)</span>
+            </label>
+            <input type="text" id="vac-notes-input" value="${this.escapeHtml(existingItem?.notes || '')}" placeholder="e.g. Hunting trip, family vacation, off Thu only..." style="width: 100%; background: #0f172a; border: 1px solid rgba(255,255,255,0.15); border-radius: 6px; color: #ffffff; padding: 8px 12px; font-size: 13px;" />
+          </div>
+        </div>
+
+        <!-- Footer -->
+        <div style="background: rgba(15, 23, 42, 0.6); border-top: 1px solid rgba(255,255,255,0.1); padding: 12px 20px; display: flex; justify-content: space-between; align-items: center;">
+          <button id="btn-vac-cancel" class="btn btn-secondary" style="font-size: 12px; padding: 6px 14px; cursor: pointer;">
+            Cancel
+          </button>
+          <button id="btn-vac-confirm" class="btn btn-primary" style="background: #d97706; border-color: #b45309; font-weight: 700; font-size: 12.5px; padding: 7px 18px; cursor: pointer; color: #fff;">
+            🏖️ Save Vacation Schedule
+          </button>
+        </div>
+      </div>
+    `;
+
+    document.body.appendChild(overlay);
+
+    const startInput = overlay.querySelector('#vac-start-date');
+    const startPicker = overlay.querySelector('#vac-start-picker');
+    const endInput = overlay.querySelector('#vac-end-date');
+    const endPicker = overlay.querySelector('#vac-end-picker');
+    const radioThis = overlay.querySelector('#vac-scope-this');
+    const radioFuture = overlay.querySelector('#vac-scope-future');
+    const cardThis = overlay.querySelector('#vac-scope-card-this');
+    const cardFuture = overlay.querySelector('#vac-scope-card-future');
+    const keepOnCrewCb = overlay.querySelector('#vac-keep-on-crew');
+    const notesInput = overlay.querySelector('#vac-notes-input');
+
+    const updateScopeVisuals = (scopeVal, autoToggleKeep = true) => {
+      const isFut = scopeVal === 'future_week';
+      if (radioThis) radioThis.checked = !isFut;
+      if (radioFuture) radioFuture.checked = isFut;
+      if (cardThis) {
+        cardThis.style.background = !isFut ? 'rgba(16, 185, 129, 0.16)' : 'rgba(15, 23, 42, 0.65)';
+        cardThis.style.borderColor = !isFut ? '#10b981' : 'rgba(255,255,255,0.12)';
+      }
+      if (cardFuture) {
+        cardFuture.style.background = isFut ? 'rgba(59, 130, 246, 0.18)' : 'rgba(15, 23, 42, 0.65)';
+        cardFuture.style.borderColor = isFut ? '#3b82f6' : 'rgba(255,255,255,0.12)';
+      }
+      if (autoToggleKeep && keepOnCrewCb) {
+        keepOnCrewCb.checked = isFut;
+      }
+    };
+
+    const autoDetectScopeFromStart = (startStr) => {
+      const dt = parseMmDdYyyy(startStr);
+      if (!dt) return;
+      if (dt.getTime() > weekSat.getTime()) {
+        updateScopeVisuals('future_week', true);
+      } else {
+        updateScopeVisuals('this_week', true);
+      }
+    };
+
+    radioThis?.addEventListener('change', () => {
+      if (radioThis.checked) updateScopeVisuals('this_week', true);
+    });
+    radioFuture?.addEventListener('change', () => {
+      if (radioFuture.checked) updateScopeVisuals('future_week', true);
+    });
+
+    startPicker?.addEventListener('change', () => {
+      if (startPicker.value) {
+        const p = startPicker.value.split('-');
+        if (p.length === 3) {
+          startInput.value = `${p[1]}/${p[2]}/${p[0]}`;
+          autoDetectScopeFromStart(startInput.value);
+          // If end date is before start date, bump end date to match start date
+          const sDt = parseMmDdYyyy(startInput.value);
+          const eDt = parseMmDdYyyy(endInput.value);
+          if (sDt && (!eDt || eDt.getTime() < sDt.getTime())) {
+            endInput.value = startInput.value;
+            endPicker.value = startPicker.value;
+          }
+        }
+      }
+    });
+
+    endPicker?.addEventListener('change', () => {
+      if (endPicker.value) {
+        const p = endPicker.value.split('-');
+        if (p.length === 3) endInput.value = `${p[1]}/${p[2]}/${p[0]}`;
+      }
+    });
+
+    startInput?.addEventListener('input', () => {
+      const val = startInput.value.trim();
+      if (/^\d{2}\/\d{2}\/\d{4}$/.test(val)) {
+        startPicker.value = toIsoDate(val);
+        autoDetectScopeFromStart(val);
+      }
+    });
+
+    endInput?.addEventListener('input', () => {
+      const val = endInput.value.trim();
+      if (/^\d{2}\/\d{2}\/\d{4}$/.test(val)) {
+        endPicker.value = toIsoDate(val);
+      }
+    });
+
+    overlay.querySelector('#vac-preset-this')?.addEventListener('click', () => {
+      startInput.value = thisMon;
+      startPicker.value = toIsoDate(thisMon);
+      endInput.value = thisThu;
+      endPicker.value = toIsoDate(thisThu);
+      updateScopeVisuals('this_week', true);
+    });
+
+    overlay.querySelector('#vac-preset-next')?.addEventListener('click', () => {
+      startInput.value = nextMon;
+      startPicker.value = toIsoDate(nextMon);
+      endInput.value = nextThu;
+      endPicker.value = toIsoDate(nextThu);
+      updateScopeVisuals('future_week', true);
+    });
+
+    overlay.querySelector('#vac-preset-wk2')?.addEventListener('click', () => {
+      startInput.value = wk2Mon;
+      startPicker.value = toIsoDate(wk2Mon);
+      endInput.value = wk2Thu;
+      endPicker.value = toIsoDate(wk2Thu);
+      updateScopeVisuals('future_week', true);
+    });
+
+    const closeModal = () => {
+      overlay.remove();
+    };
+
+    overlay.querySelector('#btn-vac-close-x')?.addEventListener('click', closeModal);
+    overlay.querySelector('#btn-vac-cancel')?.addEventListener('click', closeModal);
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) closeModal();
+    });
+
+    const onKey = (e) => {
+      if (e.key === 'Escape') {
+        closeModal();
+        window.removeEventListener('keydown', onKey);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+
+    overlay.querySelector('#btn-vac-confirm')?.addEventListener('click', () => {
+      let sVal = (startInput?.value || '').trim() || thisMon;
+      let eVal = (endInput?.value || '').trim() || sVal;
+
+      if (sVal.includes('-')) {
+        const p = sVal.split('-');
+        if (p.length === 3) sVal = `${p[1]}/${p[2]}/${p[0]}`;
+      }
+      if (eVal.includes('-')) {
+        const p = eVal.split('-');
+        if (p.length === 3) eVal = `${p[1]}/${p[2]}/${p[0]}`;
+      }
+
+      const isFutureWeek = Boolean(radioFuture?.checked);
+      const keepOnCrew = Boolean(keepOnCrewCb?.checked || isFutureWeek);
+      const notesVal = (notesInput?.value || '').trim();
+      const dateRange = (sVal === eVal || !eVal) ? sVal : `${sVal} - ${eVal}`;
+
+      closeModal();
+      this.finalizeMoveToVacation(dragData, {
+        vacationStartDate: sVal,
+        vacationEndDate: eVal,
+        dateRange,
+        isFutureVacation: isFutureWeek,
+        keepOnCrew,
+        notes: notesVal,
+        targetCrewNumber,
+        isCopy,
+        existingItem
+      });
+    });
+
+    setTimeout(() => {
+      startInput?.focus();
+      startInput?.select();
+    }, 50);
+  }
+
+  /**
+   * Applies the vacation dates and this-week vs. future-week scope to the current plan
+   * (and stages into the target future planning week if applicable).
+   */
+  finalizeMoveToVacation(dragData, opts = {}) {
+    const empName = dragData.empName || dragData.name;
+    const { fromBaseJob, fromSideType } = dragData;
+    const {
+      vacationStartDate = '',
+      vacationEndDate = '',
+      dateRange = '',
+      isFutureVacation = false,
+      keepOnCrew = false,
+      notes = '',
+      targetCrewNumber = '',
+      isCopy = false,
+      existingItem = null
+    } = opts;
+
+    const plan = this.getPlanForWeek(this.selectedWeek);
+    if (!plan) return;
+    if (!plan.sidePane) plan.sidePane = {};
+    if (!plan.sidePane.vacation) plan.sidePane.vacation = [];
+    if (!plan.confirmedPositions) plan.confirmedPositions = {};
+
+    const normName = String(empName || '').trim().toLowerCase();
+    const crewNum = (fromBaseJob || targetCrewNumber || '').replace(/\.\d+.*$/, '').trim();
+
+    let srcCrew = null;
+    let memberObj = null;
+
+    if (crewNum) {
+      srcCrew = plan.crews.find(c => c.jobNumber.toLowerCase() === crewNum.toLowerCase());
+      if (srcCrew) {
+        memberObj = srcCrew.members.find(m => m.name.trim().toLowerCase() === normName);
+      }
+    }
+    if (!memberObj) {
+      for (const c of plan.crews) {
+        const found = c.members.find(m => m.name.trim().toLowerCase() === normName);
+        if (found) {
+          srcCrew = c;
+          memberObj = found;
+          break;
+        }
+      }
+    }
+
+    // Lookup employee profile info if needed when restoring to crew
+    const empTable = this.db ? this.db.getTable('employees') : null;
+    const liveRow = (empTable?.rows || []).find(r => String(r['Employee Name'] || r['Name'] || '').trim().toLowerCase() === normName);
+    const resolvedClass = memberObj?.classification || existingItem?.classification || (liveRow ? String(liveRow['Job Classification'] || liveRow['Classification'] || 'Journeyman') : 'Journeyman');
+    const resolvedRole = memberObj?.role || existingItem?.role || resolvedClass;
+
+    if ((keepOnCrew || isFutureVacation) && srcCrew) {
+      // Ensure the employee is present on their active field crew for this planned week!
+      if (!memberObj) {
+        memberObj = {
+          name: existingItem?.name || empName,
+          classification: resolvedClass,
+          role: resolvedRole,
+          isConfirmed: true,
+          slot: `${srcCrew.jobNumber}.${srcCrew.members.length + 1}`
+        };
+        srcCrew.members.push(memberObj);
+      }
+      memberObj.vacationStartDate = vacationStartDate;
+      memberObj.vacationEndDate = vacationEndDate;
+      memberObj.vacationDateRange = dateRange;
+      memberObj.isFutureVacation = Boolean(isFutureVacation);
+      memberObj.vacationNotes = notes;
+      memberObj.isConfirmed = true;
+      plan.confirmedPositions[`${normName}::${srcCrew.jobNumber.toLowerCase()}`] = true;
+
+      // Also update or add entry in plan.sidePane.vacation
+      const vacIdx = plan.sidePane.vacation.findIndex(v => v.name.trim().toLowerCase() === normName);
+      const vacItem = {
+        name: memberObj.name,
+        classification: resolvedClass,
+        role: resolvedRole,
+        currentJob: memberObj.slot || srcCrew.jobNumber,
+        priorBaseJob: srcCrew.jobNumber,
+        activeCrew: srcCrew.jobNumber,
+        vacationStartDate,
+        vacationEndDate,
+        dateRange,
+        isFutureVacation: Boolean(isFutureVacation),
+        keepOnCrew: true,
+        notes,
+        note: `${isFutureVacation ? 'Future: ' : ''}${dateRange}${notes ? ' — ' + notes : ''}`,
+        isConfirmed: true
+      };
+
+      if (vacIdx !== -1) {
+        plan.sidePane.vacation[vacIdx] = vacItem;
+      } else {
+        plan.sidePane.vacation.push(vacItem);
+      }
+      plan.confirmedPositions[`${normName}::side:vacation`] = true;
+
+      // If this is a Future Week vacation, check if the start date falls into one of the upcoming planning weeks and stage it there too!
+      if (isFutureVacation && vacationStartDate) {
+        this.stageFutureVacationInTargetWeek(vacItem, vacationStartDate);
+      }
+
+      this.savePlan(plan);
+      this.refreshView();
+
+      if (typeof window.showToast === 'function') {
+        const msg = isFutureVacation
+          ? `🏖️ Scheduled Future Vacation (${dateRange}) for ${empName}. Kept active on Crew ${srcCrew.jobNumber} this week.`
+          : `🏖️ Scheduled Vacation (${dateRange}) for ${empName} (active on Crew ${srcCrew.jobNumber}).`;
+        window.showToast(msg, 'success');
+      }
+      return;
+    }
+
+    // Otherwise: Employee is OFF on vacation during this planned week (removed from field crew for this week)
+    if (fromSideType && fromSideType !== 'vacation' && plan.sidePane[fromSideType]) {
+      const idx = plan.sidePane[fromSideType].findIndex(m => m.name.trim().toLowerCase() === normName);
+      if (idx !== -1) {
+        if (isCopy) {
+          memberObj = { ...plan.sidePane[fromSideType][idx], isConfirmed: true, isDuplicate: true };
+        } else {
+          memberObj = plan.sidePane[fromSideType].splice(idx, 1)[0];
+        }
+      }
+    }
+
+    // Remove from any field crew in this week's plan (unless isCopy)
+    if (!isCopy) {
+      plan.crews.forEach(cr => {
+        const idx = cr.members.findIndex(m => m.name.trim().toLowerCase() === normName);
+        if (idx !== -1) {
+          const spliced = cr.members.splice(idx, 1)[0];
+          if (!memberObj) memberObj = spliced;
+          cr.members.forEach((m, i) => {
+            m.slot = `${cr.jobNumber}.${i + 1}`;
+          });
+          if (this.isCrewForeman(cr, spliced.name)) {
+            const remaining = cr.members;
+            const nextLead = remaining.find(m => /^(foreman|f|sup|gf|lead)/i.test(m.classification || m.role)) || remaining[0];
+            cr.foreman = nextLead ? nextLead.name : '';
+          }
+        }
+      });
+    }
+
+    const vacIdx = plan.sidePane.vacation.findIndex(v => v.name.trim().toLowerCase() === normName);
+    const baseObj = (vacIdx !== -1 ? plan.sidePane.vacation[vacIdx] : null) || existingItem || memberObj || { name: empName };
+
+    const updatedVacItem = {
+      ...baseObj,
+      name: baseObj.name || empName,
+      classification: resolvedClass,
+      role: resolvedRole,
+      currentJob: crewNum || baseObj.currentJob || '',
+      priorBaseJob: crewNum || baseObj.priorBaseJob || baseObj.currentJob || '',
+      activeCrew: '',
+      vacationStartDate,
+      vacationEndDate,
+      dateRange,
+      isFutureVacation: Boolean(isFutureVacation),
+      keepOnCrew: false,
+      notes,
+      note: `${dateRange}${notes ? ' — ' + notes : ''}`,
+      isConfirmed: true
+    };
+
+    if (vacIdx !== -1) {
+      plan.sidePane.vacation[vacIdx] = updatedVacItem;
+    } else {
+      plan.sidePane.vacation.push(updatedVacItem);
+    }
+    plan.confirmedPositions[`${normName}::side:vacation`] = true;
+
+    this.savePlan(plan);
+    this.refreshView();
+
+    if (typeof window.showToast === 'function') {
+      window.showToast(`🏖️ Scheduled ${empName} for Vacation (${dateRange} — Off This Week).`, 'success');
+    }
+  }
+
+  /**
+   * When an employee's vacation is marked as a Future Week, automatically stages them into
+   * the corresponding future week's plan if that week's plan already exists in storage.
+   */
+  stageFutureVacationInTargetWeek(vacItem, startDateStr) {
+    try {
+      const p = String(startDateStr || '').trim().split('/');
+      if (p.length !== 3) return;
+      const dt = new Date(parseInt(p[2], 10), parseInt(p[0], 10) - 1, parseInt(p[1], 10));
+      if (isNaN(dt.getTime())) return;
+
+      // Compute the Sunday of that start date
+      const sun = new Date(dt);
+      sun.setDate(dt.getDate() - dt.getDay());
+      const sunStr = `${String(sun.getMonth() + 1).padStart(2, '0')}/${String(sun.getDate()).padStart(2, '0')}/${sun.getFullYear()}`;
+      if (sunStr === this.selectedWeek) return;
+
+      if (this.plansMap && this.plansMap[sunStr]) {
+        const futurePlan = this.plansMap[sunStr];
+        if (!futurePlan.sidePane) futurePlan.sidePane = {};
+        if (!futurePlan.sidePane.vacation) futurePlan.sidePane.vacation = [];
+        const norm = vacItem.name.trim().toLowerCase();
+
+        // Remove from field crew in that future week since they are on vacation that week
+        (futurePlan.crews || []).forEach(cr => {
+          const idx = (cr.members || []).findIndex(m => m.name.trim().toLowerCase() === norm);
+          if (idx !== -1) {
+            cr.members.splice(idx, 1);
+            cr.members.forEach((m, i) => { m.slot = `${cr.jobNumber}.${i + 1}`; });
+          }
+        });
+
+        const fIdx = futurePlan.sidePane.vacation.findIndex(v => v.name.trim().toLowerCase() === norm);
+        const fItem = {
+          ...vacItem,
+          isFutureVacation: false,
+          keepOnCrew: false,
+          activeCrew: '',
+          note: `${vacItem.dateRange}${vacItem.notes ? ' — ' + vacItem.notes : ''}`,
+          isConfirmed: true
+        };
+        if (fIdx !== -1) {
+          futurePlan.sidePane.vacation[fIdx] = fItem;
+        } else {
+          futurePlan.sidePane.vacation.push(fItem);
+        }
+        if (!futurePlan.confirmedPositions) futurePlan.confirmedPositions = {};
+        futurePlan.confirmedPositions[`${norm}::side:vacation`] = true;
+        this.savePlan(futurePlan);
+      }
+    } catch (err) {
+      console.warn('[CrewPlanning] stageFutureVacationInTargetWeek warning:', err);
+    }
+  }
+
+  editVacationSchedule(empName) {
+    const plan = this.getPlanForWeek(this.selectedWeek);
+    if (!plan) return;
+
+    const norm = String(empName || '').trim().toLowerCase();
+    let item = (plan.sidePane?.vacation || []).find(v => v.name.trim().toLowerCase() === norm);
+    let crewMatch = null;
+    let memberMatch = null;
+
+    for (const c of (plan.crews || [])) {
+      const m = (c.members || []).find(x => x.name.trim().toLowerCase() === norm);
+      if (m) {
+        crewMatch = c;
+        memberMatch = m;
+        break;
+      }
+    }
+
+    if (!item && memberMatch) {
+      item = {
+        name: memberMatch.name,
+        classification: memberMatch.classification,
+        role: memberMatch.role,
+        currentJob: memberMatch.slot || crewMatch.jobNumber,
+        priorBaseJob: crewMatch.jobNumber,
+        activeCrew: crewMatch.jobNumber,
+        vacationStartDate: memberMatch.vacationStartDate || '',
+        vacationEndDate: memberMatch.vacationEndDate || '',
+        dateRange: memberMatch.vacationDateRange || '',
+        isFutureVacation: Boolean(memberMatch.isFutureVacation),
+        keepOnCrew: true,
+        notes: memberMatch.vacationNotes || ''
+      };
+    }
+
+    const dragData = {
+      empName: item?.name || empName,
+      fromBaseJob: crewMatch?.jobNumber || item?.priorBaseJob || item?.activeCrew || item?.currentJob || '',
+      fromSideType: 'vacation'
+    };
+    this.promptVacationSchedule(dragData, false, item || null);
+  }
+
   removeMemberFromSideCategory(name, sideType) {
     const plan = this.getPlanForWeek(this.selectedWeek);
     if (!plan || !plan.sidePane[sideType]) return;
@@ -2603,6 +3929,21 @@ class CrewPlanningEngine {
             delete m.departureDate;
             delete m.departureReason;
             delete m.departureNotes;
+          }
+        });
+      });
+    }
+
+    if (sideType === 'vacation') {
+      // Clear vacation info from any crew member in the plan
+      plan.crews.forEach(c => {
+        c.members.forEach(m => {
+          if (m.name.trim().toLowerCase() === norm) {
+            delete m.vacationStartDate;
+            delete m.vacationEndDate;
+            delete m.vacationDateRange;
+            delete m.isFutureVacation;
+            delete m.vacationNotes;
           }
         });
       });
@@ -2679,7 +4020,7 @@ class CrewPlanningEngine {
   // Duplication Modal & Execution (Employee in Multiple Locations)
   // ==========================================================================
 
-  promptDuplicateMember(empName, fromBaseJob) {
+  promptDuplicateMember(empName, fromBaseJob, fromSideType = '') {
     const plan = this.getPlanForWeek(this.selectedWeek);
     if (!plan) return;
 
@@ -2691,6 +4032,12 @@ class CrewPlanningEngine {
     overlay.id = modalId;
     overlay.className = 'modal-overlay active';
     overlay.style.cssText = 'position: fixed; inset: 0; background: rgba(0,0,0,0.75) !important; display: flex; align-items: center; justify-content: center; z-index: 15000 !important; pointer-events: auto !important; padding: 20px;';
+
+    const empTable = this.db ? this.db.getTable('employees') : null;
+    const liveRow = (empTable?.rows || []).find(r => String(r['Employee Name'] || r['Name'] || '').trim().toLowerCase() === String(empName || '').trim().toLowerCase());
+    const isForemanRole = /^(foreman|f|sup|gf)/i.test(String(liveRow?.['Job Classification'] || liveRow?.['Classification'] || ''));
+
+    const isFromLightDuty = fromSideType === 'lightDuty' || (plan.sidePane?.lightDuty || []).some(m => m.name.toLowerCase() === empName.toLowerCase());
 
     let firstDifferentValue = '';
     const crewOptions = plan.crews.map(c => {
@@ -2716,6 +4063,11 @@ class CrewPlanningEngine {
           <p style="margin: 0 0 12px; color: #cbd5e1;">
             Duplicate <strong>${this.escapeHtml(empName)}</strong> into another crew or category so they can exist in multiple locations while planning.
           </p>
+          ${isFromLightDuty ? `
+            <div style="background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.4); border-radius: 6px; padding: 10px; margin-bottom: 14px; color: #6ee7b7; font-size: 11.5px; line-height: 1.4;">
+              🩺 <strong>Light Duty Preservation:</strong> ${this.escapeHtml(empName)} will remain on Light Duty while also assigned as a working/foreman member on the destination crew.
+            </div>
+          ` : ''}
           <div style="background: rgba(147, 51, 234, 0.12); border: 1px solid rgba(168, 85, 247, 0.3); border-radius: 6px; padding: 10px; margin-bottom: 14px; color: #d8b4fe; font-size: 11.5px;">
             💡 <strong>Note:</strong> Duplicated employees will be highlighted in <strong>Purple</strong> across all locations until you confirm their assignment (turning them yellow).
           </div>
@@ -2731,8 +4083,19 @@ class CrewPlanningEngine {
               <option value="side::lightDuty">🩺 Light Duty / Medical</option>
             </optgroup>
           </select>
+          <div id="duplicate-as-foreman-wrap" style="margin-top: 12px; background: rgba(244, 114, 182, 0.12); border: 1px solid rgba(244, 114, 182, 0.35); border-radius: 6px; padding: 10px 12px;">
+            <label style="display: flex; align-items: flex-start; gap: 8px; cursor: pointer; font-size: 12px; color: #fbcfe8;">
+              <input type="checkbox" id="duplicate-as-foreman" ${isForemanRole ? 'checked' : ''} style="margin-top: 2px; cursor: pointer; accent-color: #ec4899; width: 16px; height: 16px;">
+              <div>
+                <div style="font-weight: 700; color: #f472b6;">👑 Designate as Crew Foreman on Destination Crew</div>
+                <div style="font-size: 11px; color: #cbd5e1; margin-top: 2px;">
+                  Places ${this.escapeHtml(empName)} at slot .1 and designates them as the crew lead.
+                </div>
+              </div>
+            </label>
+          </div>
         </div>
-        <div style="padding: 12px 18px; border-top: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.25); display: flex; justify-content: flex-end; gap: 8px;">
+        <div style="padding: 12px 18px; border-top: 1px solid rgba(255,255,255,0.1); background: rgba(0,0,0,0.25); display: flex; justify-content: space-between; align-items: center; gap: 8px;">
           <button class="btn btn-secondary" id="btn-duplicate-cancel" style="font-size: 12px; padding: 6px 14px; cursor: pointer;">Cancel</button>
           <button class="btn btn-primary" id="btn-duplicate-submit" style="background: linear-gradient(135deg, #a855f7 0%, #7e22ce 100%); border: none; font-size: 12px; font-weight: 700; padding: 6px 16px; cursor: pointer;">
             👯 Duplicate
@@ -2744,9 +4107,17 @@ class CrewPlanningEngine {
     document.body.appendChild(overlay);
 
     const select = overlay.querySelector('#duplicate-dest-select');
+    const fmWrap = overlay.querySelector('#duplicate-as-foreman-wrap');
     if (select && firstDifferentValue) {
       select.value = firstDifferentValue;
     }
+
+    const updateFmVisibility = () => {
+      const isCrew = select && select.value.startsWith('crew::');
+      if (fmWrap) fmWrap.style.display = isCrew ? 'block' : 'none';
+    };
+    select?.addEventListener('change', updateFmVisibility);
+    updateFmVisibility();
 
     const closeModal = () => {
       overlay.remove();
@@ -2764,7 +4135,8 @@ class CrewPlanningEngine {
         alert('Please select a destination crew or category.');
         return;
       }
-      this.executeDuplicateMember(empName, fromBaseJob, destVal);
+      const asForeman = overlay.querySelector('#duplicate-as-foreman')?.checked ?? false;
+      this.executeDuplicateMember(empName, fromBaseJob, destVal, fromSideType, asForeman);
       closeModal();
     });
 
@@ -2777,7 +4149,7 @@ class CrewPlanningEngine {
     window.addEventListener('keydown', onKey);
   }
 
-  executeDuplicateMember(empName, fromBaseJob, destValue) {
+  executeDuplicateMember(empName, fromBaseJob, destValue, fromSideType = '', asForeman = false) {
     const modalId = 'modal-crew-duplicate-member';
     const m = document.getElementById(modalId);
     if (m) m.remove();
@@ -2785,21 +4157,32 @@ class CrewPlanningEngine {
     if (!destValue) return;
     const [destType, destTarget] = destValue.split('::');
 
+    const effectiveFromSide = fromSideType || (fromBaseJob ? '' : 'planning');
     const dragData = {
       empName,
       fromBaseJob: fromBaseJob || '',
-      fromSideType: fromBaseJob ? '' : 'planning',
+      fromSideType: effectiveFromSide,
       isCopy: true
     };
 
     if (destType === 'crew') {
-      this.handleMoveToCrew(dragData, destTarget, true);
+      const insertPos = asForeman ? 'start' : 'end';
+      this.handleReorderOrMoveMember(dragData, destTarget, null, insertPos, true);
+      if (asForeman) {
+        const plan = this.getPlanForWeek(this.selectedWeek);
+        const destCrew = plan?.crews?.find(c => c.jobNumber.toLowerCase() === destTarget.toLowerCase());
+        if (destCrew) {
+          destCrew.foreman = empName;
+          this.savePlan(plan);
+          this.refreshView();
+        }
+      }
     } else if (destType === 'side') {
       this.handleMoveToSideCategory(dragData, destTarget, true);
     }
 
     if (typeof window.showToast === 'function') {
-      window.showToast(`👯 Duplicated ${empName} to ${destTarget}. Highlighted in purple.`, 'info');
+      window.showToast(`👯 Duplicated ${empName} to ${destTarget}${asForeman ? ' as Foreman' : ''}. Highlighted in purple.`, 'info');
     }
   }
 
@@ -2948,6 +4331,32 @@ class CrewPlanningEngine {
         currentCrew.members.forEach((m, idx) => {
           m.slot = `${currentCrew.jobNumber}.${idx + 1}`;
         });
+        if (this.isCrewForeman(currentCrew, empName)) {
+          currentCrew.foreman = currentCrew.members.length > 0 ? currentCrew.members[0].name : '';
+        }
+        if (plan.confirmedPositions) {
+          delete plan.confirmedPositions[`${norm}::${String(currentBaseJob).toLowerCase()}`];
+        }
+        // Clean up secondaryJob reference on remaining occurrence if only 1 occurrence remains
+        const remainingOccs = (plan.crews || []).flatMap(c => (c.members || []).filter(m => m.name && m.name.toLowerCase() === norm));
+        if (remainingOccs.length === 1) {
+          remainingOccs[0].secondaryJob = '';
+          delete remainingOccs[0].isSecondaryMember;
+          delete remainingOccs[0].primaryJobNumber;
+        }
+        const isStillInCrews = (plan.crews || []).some(c => (c.members || []).some(m => m.name && m.name.toLowerCase() === norm));
+        const sp = plan.sidePane || {};
+        const isStillInSide = Object.keys(sp).some(k => (sp[k] || []).some(m => m.name && m.name.toLowerCase() === norm));
+        if (!isStillInCrews && !isStillInSide) {
+          if (!plan.sidePane) plan.sidePane = {};
+          if (!plan.sidePane.planning) plan.sidePane.planning = [];
+          plan.sidePane.planning.push({
+            name: empName,
+            slot: '',
+            currentJob: `${currentBaseJob} (Unassigned)`,
+            isConfirmed: false
+          });
+        }
         this.savePlan(plan);
         this.refreshView();
         if (typeof window.showToast === 'function') {
@@ -2973,36 +4382,60 @@ class CrewPlanningEngine {
     if (!plan.confirmedPositions) plan.confirmedPositions = {};
 
     let targetMember = null;
+    let matchedCrewJob = null;
+    let matchedSideType = null;
     let confirmKey = '';
 
-    if (baseJobOrSideType) {
-      const crew = plan.crews.find(c => c.jobNumber.toLowerCase() === baseJobOrSideType.toLowerCase());
+    const rawLoc = String(baseJobOrSideType || '').trim();
+    const locLower = rawLoc.toLowerCase();
+
+    if (rawLoc) {
+      const crew = plan.crews.find(c => String(c.jobNumber || '').trim().toLowerCase() === locLower);
       if (crew) {
-        targetMember = crew.members.find(m => m.name.toLowerCase() === norm);
-        confirmKey = `${norm}::${baseJobOrSideType.toLowerCase()}`;
-      } else if (plan.sidePane && plan.sidePane[baseJobOrSideType]) {
-        targetMember = plan.sidePane[baseJobOrSideType].find(m => m.name.toLowerCase() === norm);
-        confirmKey = `${norm}::${baseJobOrSideType.toLowerCase()}`;
+        targetMember = crew.members.find(m => String(m.name || '').trim().toLowerCase() === norm);
+        matchedCrewJob = String(crew.jobNumber || '').trim();
+        confirmKey = `${norm}::${matchedCrewJob.toLowerCase()}`;
+      } else if (plan.sidePane && plan.sidePane[rawLoc]) {
+        targetMember = plan.sidePane[rawLoc].find(m => String(m.name || '').trim().toLowerCase() === norm);
+        matchedSideType = rawLoc;
+        confirmKey = `${norm}::${locLower}`;
       }
     }
 
     if (!targetMember) {
-      // Find first matching occurrence in plan
+      // Find first matching occurrence in plan crews
       for (const crew of plan.crews) {
-        const found = crew.members.find(m => m.name.toLowerCase() === norm);
+        const found = crew.members.find(m => String(m.name || '').trim().toLowerCase() === norm);
         if (found) {
           targetMember = found;
-          confirmKey = `${norm}::${crew.jobNumber.toLowerCase()}`;
+          matchedCrewJob = String(crew.jobNumber || '').trim();
+          confirmKey = `${norm}::${matchedCrewJob.toLowerCase()}`;
           break;
+        }
+      }
+      // Or in sidePane categories
+      if (!targetMember && plan.sidePane) {
+        for (const cat of Object.keys(plan.sidePane)) {
+          const found = (plan.sidePane[cat] || []).find(m => String(m.name || '').trim().toLowerCase() === norm);
+          if (found) {
+            targetMember = found;
+            matchedSideType = cat;
+            confirmKey = `${norm}::${cat.toLowerCase()}`;
+            break;
+          }
         }
       }
     }
 
     if (targetMember) {
-      const newState = !targetMember.isConfirmed;
+      const currentSt = this.getEmployeePlanningStatus(empName, matchedCrewJob, matchedSideType, plan);
+      const newState = !currentSt.isConfirmed;
       targetMember.isConfirmed = newState;
       if (confirmKey) {
         plan.confirmedPositions[confirmKey] = newState;
+      }
+      if (!currentSt.isMultiLocation) {
+        plan.confirmedPositions[norm] = newState;
       }
       this.savePlan(plan);
       if (typeof window.showToast === 'function') {
@@ -3247,11 +4680,14 @@ class CrewPlanningEngine {
         return jn === crew.jobNumber || jn.replace(/\.\d+.*$/, '').trim() === crew.jobNumber;
       });
       const currentForeman = liveJtCrew ? String(liveJtCrew['Foreman'] || '').trim() : '';
-      if (crew.foreman && crew.foreman.toLowerCase() !== currentForeman.toLowerCase()) {
+      const plannedForeman = String(crew.foreman || '').trim();
+      const isSameForeman = plannedForeman.toLowerCase() === currentForeman.toLowerCase() ||
+        (plannedForeman && currentForeman && this.isCrewForeman({ foreman: plannedForeman }, currentForeman));
+      if (!isSameForeman) {
         foremenChanges.push({
           jobNumber: crew.jobNumber,
           oldForeman: currentForeman || 'None',
-          newForeman: crew.foreman
+          newForeman: plannedForeman || 'None'
         });
       }
 
@@ -3310,17 +4746,56 @@ class CrewPlanningEngine {
           // Check if the employee was manually modified on the live sheet mid-week after the plan was drafted
           const wasLiveChanged = Boolean(originalJob && liveJob && originalJob.toLowerCase() !== liveJob.toLowerCase());
 
-          if (m.slot && m.slot !== liveJob) {
-            transfers.push({
-              name: m.name,
-              fromJob: liveJob || 'Unassigned',
-              toJob: m.slot,
-              destinationCrew: crew.jobNumber,
-              destinationLocation: crew.location || 'Helena',
-              targetRow: live,
-              wasLiveChanged,
-              originalJob
-            });
+          const occMap = this.getEmployeeOccurrencesMap(plan);
+          const isMulti = (occMap.get(m.name.toLowerCase()) || []).length > 1;
+          const inLightDuty = (plan.sidePane?.lightDuty || []).some(ld => ld.name.toLowerCase() === m.name.toLowerCase());
+          const curSecondary = String(live['Secondary Job Number'] || live['Secondary Job #'] || '').trim();
+
+          if (inLightDuty || isMulti) {
+            // Duplicated/Multi-crew assignment: write to Secondary Job Number, preserving primary & Light Duty
+            if (m.slot && m.slot !== curSecondary) {
+              transfers.push({
+                name: m.name,
+                fromJob: curSecondary || 'None',
+                toJob: m.slot,
+                isSecondaryAssignment: true,
+                keepLightDuty: inLightDuty,
+                destinationCrew: crew.jobNumber,
+                destinationLocation: crew.location || 'Helena',
+                targetRow: live,
+                wasLiveChanged,
+                originalJob
+              });
+            }
+          } else {
+            if (curSecondary && !transfers.some(tr => tr.name.toLowerCase() === m.name.toLowerCase() && tr.clearSecondary)) {
+              // Employee only has 1 crew assignment now: clear previous Secondary Job Number on live
+              transfers.push({
+                name: m.name,
+                fromJob: curSecondary,
+                toJob: '',
+                isSecondaryAssignment: true,
+                clearSecondary: true,
+                keepLightDuty: false,
+                destinationCrew: '',
+                destinationLocation: '',
+                targetRow: live,
+                wasLiveChanged,
+                originalJob
+              });
+            }
+            if (m.slot && m.slot !== liveJob) {
+              transfers.push({
+                name: m.name,
+                fromJob: liveJob || 'Unassigned',
+                toJob: m.slot,
+                destinationCrew: crew.jobNumber,
+                destinationLocation: crew.location || 'Helena',
+                targetRow: live,
+                wasLiveChanged,
+                originalJob
+              });
+            }
           }
         } else {
           newHires.push({
@@ -3339,8 +4814,38 @@ class CrewPlanningEngine {
       const live = liveEmps.find(e => String(e['Employee Name'] || e['Name'] || '').trim().toLowerCase() === v.name.toLowerCase());
       if (live) {
         const liveStat = String(live['Status'] || live['Location'] || '').toLowerCase();
-        if (!liveStat.includes('vacation')) {
-          vacations.push({ name: v.name, note: v.note, targetRow: live });
+        if (v.isFutureVacation || v.keepOnCrew) {
+          vacations.push({
+            name: v.name,
+            dateRange: v.dateRange || v.vacationStartDate || '',
+            notes: v.notes || v.note || '',
+            isFutureVacation: Boolean(v.isFutureVacation),
+            keepOnCrew: Boolean(v.keepOnCrew),
+            activeCrew: v.activeCrew || v.priorBaseJob || '',
+            targetRow: live
+          });
+        } else if (!liveStat.includes('vacation')) {
+          vacations.push({
+            name: v.name,
+            dateRange: v.dateRange || v.vacationStartDate || '',
+            notes: v.notes || v.note || '',
+            isFutureVacation: false,
+            keepOnCrew: false,
+            activeCrew: '',
+            targetRow: live
+          });
+        }
+      }
+    });
+
+    // Side pane: Light Duty
+    const lightDuty = [];
+    (plan.sidePane?.lightDuty || []).forEach(ld => {
+      const live = liveEmps.find(e => String(e['Employee Name'] || e['Name'] || '').trim().toLowerCase() === ld.name.toLowerCase());
+      if (live) {
+        const liveStat = String(live['Status'] || live['Location'] || '').toLowerCase();
+        if (!liveStat.includes('light duty')) {
+          lightDuty.push({ name: ld.name, targetRow: live });
         }
       }
     });
@@ -3371,7 +4876,7 @@ class CrewPlanningEngine {
       }
     });
 
-    return { transfers, vacations, quits, weeds, foremenChanges, scheduleChanges, newHires, departedOnLive };
+    return { transfers, vacations, quits, weeds, lightDuty, foremenChanges, scheduleChanges, newHires, departedOnLive };
   }
 
   openPublishModal() {
@@ -3397,6 +4902,7 @@ class CrewPlanningEngine {
                           deltas.vacations.length +
                           deltas.quits.length +
                           deltas.weeds.length +
+                          (deltas.lightDuty ? deltas.lightDuty.length : 0) +
                           deltas.newHires.length +
                           deltas.foremenChanges.length +
                           (deltas.scheduleChanges ? deltas.scheduleChanges.length : 0));
@@ -3404,6 +4910,27 @@ class CrewPlanningEngine {
     const modalId = 'modal-crew-publish-confirm';
     let modal = document.getElementById(modalId);
     if (modal) modal.remove();
+
+    const currentWeekStr = this.getCurrentWeekSundayStr();
+    const isCurrentWeekPublished = this.isWeekPublished(currentWeekStr);
+    const defaultPublishWeek = !isCurrentWeekPublished ? currentWeekStr : plan.weekDate;
+
+    const publishWeekOptions = [
+      {
+        weekStr: currentWeekStr,
+        label: `Week of ${currentWeekStr} (Current Week${!isCurrentWeekPublished ? ' — Not Yet Published' : ' — Already Published'})`
+      },
+      ...this.getPlanningWeeks().map(p => ({
+        weekStr: p.weekStr,
+        label: p.offset === 1 ? `Week of ${p.weekStr} (Next Week)` : `Week of ${p.weekStr} (+${p.offset} Weeks Out)`
+      }))
+    ];
+    if (!publishWeekOptions.some(w => w.weekStr === plan.weekDate)) {
+      publishWeekOptions.unshift({
+        weekStr: plan.weekDate,
+        label: `Week of ${plan.weekDate}`
+      });
+    }
 
     const overlay = document.createElement('div');
     overlay.id = modalId;
@@ -3416,7 +4943,7 @@ class CrewPlanningEngine {
         <!-- Modal Header -->
         <div style="padding: 16px 20px; border-bottom: 1px solid rgba(255,255,255,0.1); display: flex; justify-content: space-between; align-items: center;">
           <div style="font-size: 16px; font-weight: 800; color: #34d399; display: flex; align-items: center; gap: 8px;">
-            <span>🚀</span> Publish Crew Structure — Week of ${this.escapeHtml(plan.weekDate)}
+            <span>🚀</span> Publish Crew Structure — Week of <span id="publish-header-week-span">${this.escapeHtml(defaultPublishWeek)}</span>
           </div>
           <button id="btn-publish-close-x" style="background: transparent; border: none; color: #94a3b8; font-size: 18px; cursor: pointer; padding: 4px 8px;">✕</button>
         </div>
@@ -3424,6 +4951,26 @@ class CrewPlanningEngine {
         <!-- Modal Body (Delta Review) -->
         <div style="padding: 20px; overflow-y: auto; flex: 1; font-size: 13px;">
           
+          <!-- Target Week to Publish To Selector -->
+          <div style="background: rgba(59, 130, 246, 0.14); border: 1.5px solid rgba(59, 130, 246, 0.45); border-radius: 8px; padding: 12px 14px; margin-bottom: 14px;">
+            <label for="publish-target-week-select" style="font-size: 12px; font-weight: 800; color: #93c5fd; margin-bottom: 6px; display: flex; align-items: center; justify-content: space-between;">
+              <span>📅 Select Week to Publish This Crew Structure To:</span>
+              ${!isCurrentWeekPublished ? `<span class="badge" style="background: rgba(245, 158, 11, 0.25); color: #fcd34d; border: 1px solid #f59e0b; font-size: 10px; padding: 1px 6px; border-radius: 4px;">Current Week (${this.escapeHtml(currentWeekStr)}) Unpublished</span>` : ''}
+            </label>
+            <select id="publish-target-week-select" style="width: 100%; background: #0f172a; border: 1px solid rgba(96, 165, 250, 0.5); border-radius: 6px; color: #ffffff; padding: 9px 12px; font-size: 13.5px; font-weight: 700; cursor: pointer;">
+              ${publishWeekOptions.map(w => `
+                <option value="${this.escapeHtml(w.weekStr)}" ${w.weekStr === defaultPublishWeek ? 'selected' : ''}>
+                  ${this.escapeHtml(w.label)}
+                </option>
+              `).join('')}
+            </select>
+            ${!isCurrentWeekPublished && plan.weekDate !== currentWeekStr ? `
+              <div style="font-size: 11px; color: #cbd5e1; margin-top: 6px; line-height: 1.4;">
+                💡 <strong>Note:</strong> Week of <strong>${this.escapeHtml(currentWeekStr)}</strong> has not been published yet, so it is pre-selected above. Publishing to <strong>${this.escapeHtml(currentWeekStr)}</strong> will apply all of your current planning changes directly to this week's live roster and archive.
+              </div>
+            ` : ''}
+          </div>
+
           <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 6px; padding: 12px; margin-bottom: 16px;">
             <strong>All changes confirmed! Ready to apply to the live database.</strong><br>
             <span style="color: #94a3b8; font-size: 12px;">This action will atomically update the live <strong>Employees</strong>, <strong>Job Tracking</strong>, and <strong>Employee History</strong> tables, and carry confirmed movements through with yellow highlighting.</span>
@@ -3481,10 +5028,21 @@ class CrewPlanningEngine {
 
             <!-- Vacation & Status -->
             <div style="background: rgba(0,0,0,0.2); padding: 10px; border-radius: 6px; border: 1px solid rgba(255,255,255,0.06);">
-              <div style="font-weight: 700; color: #fbbf24; margin-bottom: 4px;">🏖️ Scheduled Vacation / Status (${deltas.vacations.length + deltas.weeds.length})</div>
-              ${deltas.vacations.map(v => `<div style="font-size: 11.5px; color: #cbd5e1;">• 🏖️ <strong>${this.escapeHtml(v.name)}</strong>: Set Status = Vacation</div>`).join('')}
+              <div style="font-weight: 700; color: #fbbf24; margin-bottom: 4px;">🏖️ Scheduled Vacation / Status (${deltas.vacations.length + deltas.weeds.length + (deltas.lightDuty ? deltas.lightDuty.length : 0)})</div>
+              ${deltas.vacations.map(v => `
+                <div style="font-size: 11.5px; color: #cbd5e1; padding: 1px 0;">
+                  • 🏖️ <strong>${this.escapeHtml(v.name)}</strong>${v.dateRange ? ` (${this.escapeHtml(v.dateRange)})` : ''}:
+                  ${v.isFutureVacation
+                    ? `<span style="color: #93c5fd;">⏭️ Future Week Vacation — Keep Active on Crew ${this.escapeHtml(v.activeCrew || 'Field')} this week</span>`
+                    : v.keepOnCrew
+                      ? `<span style="color: #6ee7b7;">🗓️ Partial Week Vacation — Keep Active on Crew ${this.escapeHtml(v.activeCrew || 'Field')}</span>`
+                      : `<span style="color: #fcd34d;">Set Status = Vacation (Off This Week)</span>`
+                  }
+                </div>
+              `).join('')}
               ${deltas.weeds.map(w => `<div style="font-size: 11.5px; color: #cbd5e1;">• 🌾 <strong>${this.escapeHtml(w.name)}</strong>: Set Status = Weeds</div>`).join('')}
-              ${deltas.vacations.length === 0 && deltas.weeds.length === 0 ? '<span style="font-size: 11.5px; color: #64748b;">Zero status changes.</span>' : ''}
+              ${(deltas.lightDuty || []).map(ld => `<div style="font-size: 11.5px; color: #cbd5e1;">• 🩺 <strong>${this.escapeHtml(ld.name)}</strong>: Set Status = Light Duty</div>`).join('')}
+              ${deltas.vacations.length === 0 && deltas.weeds.length === 0 && (!deltas.lightDuty || deltas.lightDuty.length === 0) ? '<span style="font-size: 11.5px; color: #64748b;">Zero status changes.</span>' : ''}
             </div>
 
             <!-- Quits / Departures -->
@@ -3532,8 +5090,21 @@ class CrewPlanningEngine {
       if (e.target === overlay) closeModal();
     });
 
+    const targetWeekSelect = overlay.querySelector('#publish-target-week-select');
+    const headerWeekSpan = overlay.querySelector('#publish-header-week-span');
+    const submitBtn = overlay.querySelector('#btn-publish-submit');
+    if (submitBtn) {
+      submitBtn.innerHTML = `🚀 Publish to Week of ${this.escapeHtml(defaultPublishWeek)}`;
+    }
+    targetWeekSelect?.addEventListener('change', () => {
+      const val = targetWeekSelect.value;
+      if (headerWeekSpan) headerWeekSpan.textContent = val;
+      if (submitBtn) submitBtn.innerHTML = `🚀 Publish to Week of ${this.escapeHtml(val)}`;
+    });
+
     overlay.querySelector('#btn-publish-submit')?.addEventListener('click', () => {
-      this.executePublish();
+      const selectedTargetWeek = targetWeekSelect?.value || defaultPublishWeek;
+      this.executePublish(selectedTargetWeek);
     });
 
     const onKey = (e) => {
@@ -3545,10 +5116,11 @@ class CrewPlanningEngine {
     window.addEventListener('keydown', onKey);
   }
 
-  async executePublish() {
+  async executePublish(targetPublishWeek = null) {
     const modalId = 'modal-crew-publish-confirm';
     const plan = this.getPlanForWeek(this.selectedWeek);
     if (!plan) return;
+    const publishWeek = targetPublishWeek || document.getElementById('publish-target-week-select')?.value || plan.weekDate;
 
     // Safety re-check for purple members
     const purpleMembers = this.getPurpleMembers(plan);
@@ -3571,34 +5143,58 @@ class CrewPlanningEngine {
       // 1. Process Transfers
       for (const t of deltas.transfers) {
         if (t.targetRow) {
-          t.targetRow['Job Number'] = t.toJob;
-          if (t.destinationLocation) {
-            t.targetRow['Location'] = t.destinationLocation;
-          }
-          if (t.targetRow['Status'] === 'Vacation' || t.targetRow['Status'] === 'Weeds') {
-            t.targetRow['Status'] = 'Active';
-          }
-          await this.db.addMutation({
-            action: 'UPDATE_ROW',
-            sheetName: empTable.name || 'Employees',
-            tableKey: 'employees',
-            employeeName: t.name,
-            updatedFields: {
-              'Job Number': t.toJob,
-              'Location': t.destinationLocation || t.targetRow['Location'] || 'Helena',
-              'Status': 'Active'
+          if (t.isSecondaryAssignment) {
+            t.targetRow['Secondary Job Number'] = t.toJob;
+            if (t.keepLightDuty) {
+              t.targetRow['Status'] = 'Light Duty';
+              const curLoc = String(t.targetRow['Location'] || 'Helena');
+              if (!curLoc.toLowerCase().includes('(light duty)')) {
+                t.targetRow['Location'] = `${curLoc.replace(/\s*\([^)]*\)/g, '').trim()} (Light Duty)`;
+              }
             }
-          });
+            await this.db.addMutation({
+              action: 'UPDATE_ROW',
+              sheetName: empTable.name || 'Employees',
+              tableKey: 'employees',
+              employeeName: t.name,
+              updatedFields: {
+                'Secondary Job Number': t.toJob,
+                'Status': t.targetRow['Status'],
+                'Location': t.targetRow['Location']
+              }
+            });
+          } else {
+            t.targetRow['Job Number'] = t.toJob;
+            if (t.destinationLocation) {
+              t.targetRow['Location'] = t.destinationLocation;
+            }
+            if (t.targetRow['Status'] === 'Vacation' || t.targetRow['Status'] === 'Weeds') {
+              t.targetRow['Status'] = 'Active';
+            }
+            await this.db.addMutation({
+              action: 'UPDATE_ROW',
+              sheetName: empTable.name || 'Employees',
+              tableKey: 'employees',
+              employeeName: t.name,
+              updatedFields: {
+                'Job Number': t.toJob,
+                'Location': t.destinationLocation || t.targetRow['Location'] || 'Helena',
+                'Status': t.targetRow['Status'] || 'Active'
+              }
+            });
+          }
 
           // Log in Employee History
           if (histTable) {
             const histRow = {
               'Date': todayFormatted,
               'Employee Name': t.name,
-              'Event Type': 'Transfer',
+              'Event Type': t.isSecondaryAssignment ? 'Secondary Assignment' : 'Transfer',
               'Job Number': t.toJob,
               'Location': t.destinationLocation || t.targetRow['Location'] || 'Helena',
-              'Notes': `Crew Planning Publish: Transferred from ${t.fromJob} to ${t.toJob}`
+              'Notes': t.isSecondaryAssignment
+                ? `Crew Planning Publish: Assigned secondary crew ${t.destinationCrew} (${t.toJob})${t.keepLightDuty ? ' while on Light Duty' : ''}`
+                : `Crew Planning Publish: Transferred from ${t.fromJob} to ${t.toJob}`
             };
             histTable.rows.unshift(histRow);
             await this.db.addMutation({
@@ -3614,14 +5210,16 @@ class CrewPlanningEngine {
       // 2. Process Vacations
       for (const v of deltas.vacations) {
         if (v.targetRow) {
-          v.targetRow['Status'] = 'Vacation';
-          await this.db.addMutation({
-            action: 'UPDATE_ROW',
-            sheetName: empTable.name || 'Employees',
-            tableKey: 'employees',
-            employeeName: v.name,
-            updatedFields: { 'Status': 'Vacation' }
-          });
+          if (!v.isFutureVacation && !v.keepOnCrew) {
+            v.targetRow['Status'] = 'Vacation';
+            await this.db.addMutation({
+              action: 'UPDATE_ROW',
+              sheetName: empTable.name || 'Employees',
+              tableKey: 'employees',
+              employeeName: v.name,
+              updatedFields: { 'Status': 'Vacation' }
+            });
+          }
         }
       }
 
@@ -3643,6 +5241,22 @@ class CrewPlanningEngine {
       for (const q of deltas.quits) {
         if (!q.alreadyRecordedOnLive) {
           await this.applyQuitDeparture(q, todayFormatted);
+        }
+      }
+
+      // 3.6 Process Light Duty
+      for (const ld of (deltas.lightDuty || [])) {
+        if (ld.targetRow) {
+          ld.targetRow['Status'] = 'Light Duty';
+          const curLoc = String(ld.targetRow['Location'] || 'Helena').replace(/\s*\([^)]*\)/g, '').trim();
+          ld.targetRow['Location'] = `${curLoc} (Light Duty)`;
+          await this.db.addMutation({
+            action: 'UPDATE_ROW',
+            sheetName: empTable.name || 'Employees',
+            tableKey: 'employees',
+            employeeName: ld.name,
+            updatedFields: { 'Status': 'Light Duty', 'Location': ld.targetRow['Location'] }
+          });
         }
       }
 
@@ -3786,11 +5400,11 @@ class CrewPlanningEngine {
 
       if (!this.db.snapshot.configs) this.db.snapshot.configs = {};
       if (!this.db.snapshot.configs.confirmed_yellow_moves) this.db.snapshot.configs.confirmed_yellow_moves = {};
-      this.db.snapshot.configs.confirmed_yellow_moves[plan.weekDate] = yellowConfirmedMoves;
+      this.db.snapshot.configs.confirmed_yellow_moves[publishWeek] = yellowConfirmedMoves;
       this.db.snapshot.configs.latest_published_yellow_moves = yellowConfirmedMoves;
 
-      // 7. Archive published plan to crew_roster_history
-      this.archiveSnapshot(plan.weekDate, {
+      // 7. Archive published plan to crew_roster_history under the selected target publish week
+      this.archiveSnapshot(publishWeek, {
         publishedAt: new Date().toISOString(),
         publishedBy: 'Crew Structure Planning',
         crews: plan.crews,
@@ -3798,22 +5412,37 @@ class CrewPlanningEngine {
         yellowConfirmedMoves: yellowConfirmedMoves
       });
 
-      plan.status = 'published';
-      this.savePlan(plan);
+      const sourceWeek = plan.weekDate;
+      const publishedPlanCopy = JSON.parse(JSON.stringify(plan));
+      publishedPlanCopy.weekDate = publishWeek;
+      publishedPlanCopy.weekDateFormatted = publishWeek;
+      publishedPlanCopy.status = 'published';
+      this.savePlan(publishedPlanCopy);
+
+      // If the user edited on a future week (e.g. 11/15/2026) and published to Current Week (e.g. 11/08/2026),
+      // re-sync the future week draft from the newly updated live roster so it starts clean from the published baseline
+      if (sourceWeek && sourceWeek !== publishWeek) {
+        const allPlans = this.getPlansMap();
+        allPlans[sourceWeek] = this.initializePlanFromCurrentRoster(sourceWeek);
+        this.savePlansMap(allPlans);
+      }
+
+      this.selectedWeek = publishWeek;
 
       // Dismiss modal
       const m = document.getElementById(modalId);
       if (m) m.remove();
 
       if (typeof window.showToast === 'function') {
-        window.showToast(`✅ Week of ${plan.weekDate} published successfully! Yellow moved highlights carried over.`, 'success');
+        window.showToast(`✅ Week of ${publishWeek} published successfully! Yellow moved highlights carried over.`, 'success');
       }
 
       // 8. Automatically archive any employees whose last day has arrived to Previous Employees
       await this.checkAndArchiveDepartedEmployees();
 
-      // Return to live Crew Cards view
+      // Return to live Crew Cards view on the newly published week
       if (window.sheetNavigator) {
+        window.sheetNavigator.selectedEmployeeWeek = publishWeek;
         window.sheetNavigator.setEmployeeViewMode('cards');
         window.sheetNavigator.renderCurrentSheet();
       }
@@ -4072,8 +5701,20 @@ class CrewPlanningEngine {
   }
 
   refreshView() {
-    if (window.sheetNavigator && window.sheetNavigator.currentSheetKey === 'employees') {
+    const container = document.getElementById('sheet-grid-container');
+    const countBadge = document.getElementById('sheet-row-count');
+    const isPlanningVisible = Boolean(container && container.querySelector('.crew-planning-wrapper'));
+    if (window.sheetNavigator && (window.sheetNavigator.currentSheetKey === 'employees' || isPlanningVisible)) {
+      window.sheetNavigator.currentSheetKey = 'employees';
+      window.sheetNavigator.activeSheetTabKey = 'employees';
+      if (this.selectedWeek && isPlanningVisible) {
+        window.sheetNavigator.selectedEmployeeWeek = this.selectedWeek;
+      }
       window.sheetNavigator.renderCurrentSheet();
+      return;
+    }
+    if (isPlanningVisible && container) {
+      this.renderPlanningWorkspace(container, countBadge, this.selectedWeek, this.searchTerm);
     }
   }
 
@@ -4655,6 +6296,10 @@ class CrewPlanningEngine {
       return item.name && !this.isNonEmployeeName(item.name);
     });
 
+    const lightDutyMembers = ((plan.sidePane && plan.sidePane.lightDuty) || []).filter(item => {
+      return item.name && !this.isNonEmployeeName(item.name);
+    });
+
     const card = document.createElement('div');
     card.style.cssText = `
       background: #1e293b; border: 1px solid rgba(255,255,255,0.15); border-radius: 12px;
@@ -4734,6 +6379,26 @@ class CrewPlanningEngine {
             </div>
           </div>
         ` : ''}
+
+        <!-- Light Duty Employees -->
+        ${lightDutyMembers.length > 0 ? `
+          <div style="background: rgba(0,0,0,0.2); border: 1px solid rgba(255,255,255,0.06); border-radius: 6px; padding: 10px;">
+            <div style="font-size: 11px; font-weight: 700; color: #34d399; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;">
+              🩺 Select from Light Duty (Keeps on Light Duty):
+            </div>
+            <div style="max-height: 120px; overflow-y: auto; display: flex; flex-direction: column; gap: 4px;">
+              ${lightDutyMembers.map(ld => `
+                <div style="display: flex; justify-content: space-between; align-items: center; padding: 5px 8px; background: rgba(255,255,255,0.03); border-radius: 4px; font-size: 12px;">
+                  <span style="font-weight: 600;">${this.escapeHtml(ld.name)} <span style="font-size: 10px; color: #94a3b8;">(${this.escapeHtml(ld.classification || 'Light Duty')})</span></span>
+                  <button class="btn btn-xs change-fm-select-btn" data-name="${this.escapeHtml(ld.name)}" data-from-ld="true"
+                          style="font-size: 10.5px; font-weight: 700; padding: 2px 8px; background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); border-radius: 4px; cursor: pointer;">
+                    👑 Select & Assign
+                  </button>
+                </div>
+              `).join('')}
+            </div>
+          </div>
+        ` : ''}
       </div>
     `;
 
@@ -4746,8 +6411,33 @@ class CrewPlanningEngine {
       if (e.target === overlay) closeModal();
     });
 
-    const setForeman = (name) => {
-      crew.foreman = String(name || '').trim();
+    const setForeman = (name, fromLd = false) => {
+      const cleanName = String(name || '').trim();
+      if (!cleanName) {
+        crew.foreman = '';
+        this.savePlan(plan);
+        closeModal();
+        this.refreshView();
+        return;
+      }
+      crew.foreman = cleanName;
+      if (fromLd) {
+        const norm = cleanName.toLowerCase();
+        if (!crew.members.some(m => m.name.toLowerCase() === norm)) {
+          closeModal();
+          this.executeDuplicateMember(cleanName, '', `crew::${crew.jobNumber}`, 'lightDuty', true);
+          return;
+        }
+      }
+      // Reorder designated foreman to index 0 (slot .1) if present in crew
+      const fmIdx = crew.members.findIndex(m => m.name.trim().toLowerCase() === cleanName.toLowerCase());
+      if (fmIdx > 0) {
+        const [fmObj] = crew.members.splice(fmIdx, 1);
+        crew.members.unshift(fmObj);
+        crew.members.forEach((m, idx) => {
+          m.slot = `${crew.jobNumber}.${idx + 1}`;
+        });
+      }
       this.savePlan(plan);
       closeModal();
       this.refreshView();
@@ -4763,7 +6453,8 @@ class CrewPlanningEngine {
 
     card.querySelectorAll('.change-fm-select-btn').forEach(btn => {
       btn.addEventListener('click', () => {
-        setForeman(btn.getAttribute('data-name'));
+        const fromLd = btn.getAttribute('data-from-ld') === 'true';
+        setForeman(btn.getAttribute('data-name'), fromLd);
       });
     });
   }
@@ -5598,7 +7289,8 @@ class CrewPlanningEngine {
 
     const st = this.getEmployeePlanningStatus(empName, baseJob, null, plan);
     const crew = plan.crews.find(c => c.jobNumber.toLowerCase() === String(baseJob || '').toLowerCase());
-    const isForeman = crew && crew.foreman && crew.foreman.toLowerCase() === empName.toLowerCase();
+    const isForeman = crew ? this.isCrewForeman(crew, empName) : false;
+    const dragData = { empName, name: empName, fromBaseJob: baseJob };
 
     // Position menu near click cursor or button
     const clientX = e ? e.clientX : window.innerWidth / 2;
@@ -5668,6 +7360,14 @@ class CrewPlanningEngine {
       return div;
     };
 
+    // 0. Open Employee Profile
+    menu.appendChild(makeItem('👤', 'Open Employee Profile & Edit Details', () => {
+      if (window.employeeProfileEngine) {
+        window.employeeProfileEngine.openProfileModal(empName, 'details');
+      }
+    }, '#60a5fa', 'rgba(96, 165, 250, 0.12)'));
+    menu.appendChild(makeDivider());
+
     // 1. Move Up / Down
     menu.appendChild(makeItem('⬆️', 'Move Up in Crew', () => this.moveMemberUpInCrew(empName, baseJob)));
     menu.appendChild(makeItem('⬇️', 'Move Down in Crew', () => this.moveMemberDownInCrew(empName, baseJob)));
@@ -5708,7 +7408,7 @@ class CrewPlanningEngine {
 
     menu.appendChild(makeDivider());
 
-    // 5. Departure / Notice Options
+    // 5. Departure / Notice & Vacation Options
     const memberObjOnCrew = crew?.members.find(x => x.name.toLowerCase() === empName.toLowerCase());
     const quitEntry = (plan.sidePane?.quit || []).find(q => q.name.trim().toLowerCase() === empName.toLowerCase());
     const hasDeparture = Boolean(memberObjOnCrew?.departureDate || quitEntry?.departureDate);
@@ -5719,6 +7419,17 @@ class CrewPlanningEngine {
       menu.appendChild(makeItem('↩️', 'Cancel Scheduled Departure', () => this.removeMemberFromSideCategory(empName, 'quit'), '#cbd5e1'));
     } else {
       menu.appendChild(makeItem('🚪', 'Schedule Departure / Last Working Day...', () => this.promptQuitDeparture(dragData), '#fca5a5', 'rgba(239, 68, 68, 0.12)'));
+    }
+
+    const vacEntry = (plan.sidePane?.vacation || []).find(v => v.name.trim().toLowerCase() === empName.toLowerCase());
+    const hasVacation = Boolean(memberObjOnCrew?.vacationDateRange || vacEntry);
+    const vacRange = memberObjOnCrew?.vacationDateRange || vacEntry?.dateRange || vacEntry?.vacationStartDate || '';
+
+    if (hasVacation) {
+      menu.appendChild(makeItem('🏖️', `Edit Scheduled Vacation (${vacRange || 'Set Dates'})`, () => this.editVacationSchedule(empName), '#fcd34d', 'rgba(245, 158, 11, 0.15)'));
+      menu.appendChild(makeItem('↩️', 'Cancel Scheduled Vacation', () => this.removeMemberFromSideCategory(empName, 'vacation'), '#cbd5e1'));
+    } else {
+      menu.appendChild(makeItem('🏖️', 'Schedule Vacation / Dates...', () => this.promptVacationSchedule(dragData), '#fcd34d', 'rgba(245, 158, 11, 0.12)'));
     }
 
     menu.appendChild(makeDivider());
@@ -5735,10 +7446,40 @@ class CrewPlanningEngine {
     menu.appendChild(makeItem('✕', 'Remove from this Crew', () => {
       if (confirm(`Remove ${empName} from Crew ${baseJob}?`)) {
         if (crew) {
+          const wasFm = this.isCrewForeman(crew, empName);
           crew.members = crew.members.filter(m => m.name.toLowerCase() !== empName.toLowerCase());
           crew.members.forEach((m, idx) => {
             m.slot = `${crew.jobNumber}.${idx + 1}`;
           });
+          if (wasFm) {
+            crew.foreman = crew.members.length > 0 ? crew.members[0].name : '';
+          }
+          // Remove confirmation key for this assignment
+          const norm = empName.toLowerCase().trim();
+          if (plan.confirmedPositions) {
+            delete plan.confirmedPositions[`${norm}::${String(baseJob).toLowerCase()}`];
+          }
+          // Clean up secondaryJob reference on remaining occurrence if only 1 occurrence remains
+          const remainingOccs = (plan.crews || []).flatMap(c => (c.members || []).filter(m => m.name && m.name.toLowerCase() === norm));
+          if (remainingOccs.length === 1) {
+            remainingOccs[0].secondaryJob = '';
+            delete remainingOccs[0].isSecondaryMember;
+            delete remainingOccs[0].primaryJobNumber;
+          }
+          // If employee is now in 0 crews and 0 side categories, stage them in Planning Pool
+          const isStillInCrews = (plan.crews || []).some(c => (c.members || []).some(m => m.name && m.name.toLowerCase() === norm));
+          const sp = plan.sidePane || {};
+          const isStillInSide = Object.keys(sp).some(k => (sp[k] || []).some(m => m.name && m.name.toLowerCase() === norm));
+          if (!isStillInCrews && !isStillInSide) {
+            if (!plan.sidePane) plan.sidePane = {};
+            if (!plan.sidePane.planning) plan.sidePane.planning = [];
+            plan.sidePane.planning.push({
+              name: empName,
+              slot: '',
+              currentJob: `${baseJob} (Unassigned)`,
+              isConfirmed: false
+            });
+          }
           this.savePlan(plan);
           this.refreshView();
           if (typeof window.showToast === 'function') {

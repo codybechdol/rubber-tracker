@@ -395,10 +395,6 @@ class DrugTestingEngine {
               <button class="btn btn-primary" style="font-size: 11.5px; font-weight: 700; background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%); display: inline-flex; align-items: center; gap: 6px; border: none;" onclick="window.drugTestingEngine.openBulkPasteModal()">
                 <span>📋</span> Bulk Paste Roster
               </button>
-
-              <button class="btn btn-primary" style="font-size: 11.5px; font-weight: 700; background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); display: inline-flex; align-items: center; gap: 6px; border: none;" onclick="window.drugTestingEngine.forcePushTests()" title="Push Drug Tests directly to Google Sheets">
-                <span>⬆️</span> Push Tests to Sheets
-              </button>
             </div>
           ` : `
             <div style="display: flex; align-items: center; gap: 12px;">
@@ -412,10 +408,6 @@ class DrugTestingEngine {
             <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
               <button class="btn btn-primary" style="font-size: 11.5px; font-weight: 700; background: linear-gradient(135deg, #10b981 0%, #059669 100%); display: inline-flex; align-items: center; gap: 6px; border: none;" onclick="window.drugTestingEngine.openAddClinicModal()" title="Add a new clinic or mobile collector">
                 <span>➕</span> Add Clinic / Collector
-              </button>
-
-              <button class="btn btn-primary" style="font-size: 11.5px; font-weight: 700; background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); display: inline-flex; align-items: center; gap: 6px; border: none;" onclick="window.drugTestingEngine.forcePushClinics()" title="Push Drug Test Clinics directory to Google Sheets">
-                <span>⬆️</span> Push Clinics to Sheets
               </button>
             </div>
           `}

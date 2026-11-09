@@ -233,9 +233,6 @@
             <button class="btn btn-secondary" id="btn-toggle-sheet-visuals" style="display: none; padding: 6px 12px; font-size: 12px; align-items: center; gap: 5px; border-color: #3b82f6; color: #93c5fd;" onclick="window.sheetNavigator.toggleVisualsDashboard()" title="Toggle Visual Analytics & Lifecycle Metrics Dashboard">
               <span>📊</span> Visual Analytics
             </button>
-            <button class="btn btn-secondary admin-only-control" id="btn-push-clean-sheet" style="display: none; padding: 6px 12px; font-size: 12px;" onclick="window.syncEngine.pushFullCleanTable(window.sheetNavigator.currentSheetKey)" title="Push this full clean table directly to Google Sheets">
-              📤 Sync Sheet to Google
-            </button>
             <!-- Employee Week Navigator (Current, Past & Future Planning Weeks) -->
             <div id="emp-week-nav" style="display: none; align-items: center; gap: 6px; flex-shrink: 0;">
               <button class="btn btn-secondary" id="btn-emp-week-older" style="font-size: 11px; padding: 4px 8px;" onclick="window.sheetNavigator.navigateEmployeeWeek(-1)" title="Go to older week">
@@ -264,7 +261,10 @@
               </button>
             </div>
 
-            <input type="text" id="sheet-search-input" class="sheet-search" placeholder="Filter rows..." style="max-width: 170px; flex-shrink: 1;">
+            <div style="position: relative; display: inline-flex; align-items: center;">
+              <input type="text" id="sheet-search-input" class="sheet-search" placeholder="Filter rows..." style="max-width: 180px; flex-shrink: 1; padding-right: 22px;">
+              <button id="btn-clear-sheet-search" onclick="const input = document.getElementById('sheet-search-input'); if (input) { input.value = ''; input.dispatchEvent(new Event('input')); input.focus(); }" style="display: none; position: absolute; right: 6px; background: transparent; border: none; color: #94a3b8; cursor: pointer; font-size: 13px; line-height: 1; padding: 2px;" title="Clear search">✕</button>
+            </div>
           </div>
         </div>
         <!-- Dynamic Filter Bar for Inventory Drilldown & Multi-Criteria Filtering -->

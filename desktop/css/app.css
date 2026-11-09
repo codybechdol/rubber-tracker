@@ -642,6 +642,36 @@ body {
   box-shadow: 0 3px 8px rgba(168, 85, 247, 0.45);
 }
 
+/* Crew Planner Card Drag Reordering */
+.planned-crew-header {
+  cursor: grab;
+}
+.planned-crew-header:active {
+  cursor: grabbing;
+}
+.crew-card-drag-handle {
+  cursor: grab;
+}
+.crew-card-drag-handle:active {
+  cursor: grabbing;
+}
+.planned-crew-card.is-dragging-crew {
+  opacity: 0.35 !important;
+  transform: scale(0.97) !important;
+  filter: grayscale(0.4);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45) !important;
+}
+.planned-crew-card.crew-drop-before {
+  position: relative;
+  border-left: 5px solid #38bdf8 !important;
+  box-shadow: -5px 0 16px rgba(56, 189, 248, 0.5) !important;
+}
+.planned-crew-card.crew-drop-after {
+  position: relative;
+  border-right: 5px solid #38bdf8 !important;
+  box-shadow: 5px 0 16px rgba(56, 189, 248, 0.5) !important;
+}
+
 #edit-order-modal input,
 #edit-order-modal select,
 #edit-order-modal textarea,

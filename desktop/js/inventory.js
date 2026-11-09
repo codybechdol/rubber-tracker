@@ -2085,7 +2085,7 @@ class InventoryManager {
           <div id="reconcile-summary-body" style="padding: 20px; overflow-y: auto; flex: 1;"></div>
           <div class="modal-footer" style="padding: 14px 20px; background: #1e293b; border-top: 1px solid #334155; display: flex; justify-content: flex-end; gap: 10px;">
             <button class="btn btn-secondary" onclick="document.getElementById('reconcile-summary-modal').style.display = 'none'">Close</button>
-            <button class="btn btn-primary" onclick="document.getElementById('reconcile-summary-modal').style.display = 'none'; window.syncEngine.pushChangesToGoogleSheets();">⬆️ Push Changes to Sheets</button>
+            <button class="btn btn-primary" onclick="document.getElementById('reconcile-summary-modal').style.display = 'none'; window.syncEngine.syncAndSaveToCloud();">☁️ Sync & Save to Cloud</button>
           </div>
         </div>
       `;
@@ -2458,7 +2458,7 @@ class InventoryManager {
       if (this.db && typeof this.db.archiveLostAndFailedItemsLocal === 'function') {
         const count = await this.db.archiveLostAndFailedItemsLocal();
         if (count > 0) {
-          alert(`✅ Successfully archived ${count} dead item(s) to "Retired Equipment"!\n\nActive inventory sheets are now clean and accurate. Click "Push Changes to Sheets" whenever you are ready to sync.`);
+          alert(`✅ Successfully archived ${count} dead item(s) to "Retired Equipment"!\n\nActive inventory sheets are now clean and accurate. Click "Sync & Save" whenever you are ready to sync.`);
         } else {
           alert('ℹ️ No dead, lost, or failed items found in active inventory.');
         }

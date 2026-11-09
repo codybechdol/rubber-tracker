@@ -12283,9 +12283,6 @@ class TripPlannerApp {
         <button class="btn btn-secondary" style="font-size: 11.5px; font-weight: 700; color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4); display: inline-flex; align-items: center; gap: 5px;" onclick="window.tripPlanner.reSyncTripScheduleFromBoard()" title="Re-sync table from all cards on the calendar board">
           <span>🔄</span> Re-Sync from Board
         </button>
-        <button class="btn btn-primary" style="font-size: 11.5px; font-weight: 700; background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); border: none; display: inline-flex; align-items: center; gap: 5px;" onclick="window.tripPlanner.syncTableToSheets('trip_schedule')" title="Push Trip Schedule directly to Google Sheets">
-          <span>⬆️</span> Sync Sheet to Google
-        </button>
       `
     };
 
@@ -12317,9 +12314,6 @@ class TripPlannerApp {
           <button class="btn btn-secondary" style="font-size: 11.5px; font-weight: 700; color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4); display: inline-flex; align-items: center; gap: 5px;" onclick="window.tripPlanner.switchTab('map')" title="View route and waypoints on Route Map">
             <span>🗺️</span> View Route Map
           </button>
-          <button class="btn btn-primary" style="font-size: 11.5px; font-weight: 700; background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); border: none; display: inline-flex; align-items: center; gap: 5px;" onclick="window.tripPlanner.syncTableToSheets('field_gps_log')" title="Push Field GPS Log directly to Google Sheets">
-            <span>⬆️</span> Sync Sheet to Google
-          </button>
         `
       };
     } else if (tableKey === 'daily_accomplishments') {
@@ -12338,9 +12332,6 @@ class TripPlannerApp {
           </button>
           <button class="btn btn-secondary" style="font-size: 11.5px; font-weight: 700; color: #fbbf24; border: 1px solid rgba(245, 158, 11, 0.4); display: inline-flex; align-items: center; gap: 5px;" onclick="window.tripPlanner.promptAddAccomplishment()" title="Manually add an accomplishment log entry">
             <span>➕</span> Add Log Entry
-          </button>
-          <button class="btn btn-primary" style="font-size: 11.5px; font-weight: 700; background: linear-gradient(135deg, #0284c7 0%, #0369a1 100%); border: none; display: inline-flex; align-items: center; gap: 5px;" onclick="window.tripPlanner.syncTableToSheets('daily_accomplishments')" title="Push Daily Accomplishments directly to Google Sheets">
-            <span>⬆️</span> Sync Sheet to Google
           </button>
         `
       };

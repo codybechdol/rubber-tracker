@@ -1512,7 +1512,12 @@ class EmployeeProfileEngine {
             </div>
           </div>
 
-          <div style="display: flex; align-items: center; gap: 8px;">
+          <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+            ${this.currentActiveTab !== 'details' ? `
+              <button class="btn btn-secondary" style="font-size: 11.5px; padding: 6px 12px; border-color: #60a5fa; color: #93c5fd; display: inline-flex; align-items: center; gap: 5px;" onclick="window.employeeProfileEngine.setTab('details')" title="Edit employee classification, contact info, glove/sleeve size, and status">
+                <span>✏️</span> Edit Profile Details
+              </button>
+            ` : ''}
             ${totalEquipment > 0 ? `
               <button class="btn btn-secondary" style="font-size: 11.5px; padding: 6px 12px; border-color: #0284c7; color: #38bdf8; display: inline-flex; align-items: center; gap: 5px;" onclick="if(window.inventoryManager){window.inventoryManager.openTransferEquipmentModal('${this.escapeHtml(data.displayName)}');}">
                 <span>⚡</span> Transfer Equipment
@@ -2864,6 +2869,32 @@ class EmployeeProfileEngine {
           }
         }
       }
+    }
+
+    // Sync updated classification into any active Crew Structure Plans so Crew Planning cards reflect it immediately
+    if (newClass && this.db.snapshot?.configs?.crew_structure_plans) {
+      const plans = this.db.snapshot.configs.crew_structure_plans;
+      Object.values(plans).forEach(plan => {
+        if (!plan) return;
+        (plan.crews || []).forEach(c => {
+          (c.members || []).forEach(m => {
+            if (m && this.isNameMatch(m.name || '', displayName)) {
+              m.classification = newClass;
+            }
+          });
+        });
+        if (plan.sidePane) {
+          Object.values(plan.sidePane).forEach(list => {
+            if (Array.isArray(list)) {
+              list.forEach(item => {
+                if (item && this.isNameMatch(item.name || '', displayName)) {
+                  item.classification = newClass;
+                }
+              });
+            }
+          });
+        }
+      });
     }
 
     await this.db.persistSnapshot(this.db.snapshot);

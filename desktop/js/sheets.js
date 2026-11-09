@@ -6,6 +6,7 @@ class SheetNavigator {
   constructor(db) {
     this.db = db;
     this.currentSheetKey = 'employees';
+    this.activeSheetTabKey = 'employees';
     this.searchTerm = '';
     this.sortCol = null;
     this.sortDir = 'asc';
@@ -27,7 +28,7 @@ class SheetNavigator {
     let savedEmpView = 'cards';
     try {
       const stored = localStorage.getItem('safety_assistant_emp_view_mode');
-      if (stored === 'cards' || stored === 'table') savedEmpView = stored;
+      if (stored === 'cards' || stored === 'table' || stored === 'planning') savedEmpView = stored;
     } catch { /* ignore */ }
     this.employeeViewMode = savedEmpView;
     this.editingCrewBaseJob = null;
@@ -534,6 +535,7 @@ class SheetNavigator {
 
       btn.onclick = () => {
         this.currentSheetKey = sheet.key;
+        this.activeSheetTabKey = sheet.key;
         this.filterSize = 'all';
         this.filterClass = 'all';
         this.filterLocation = 'all';
@@ -569,10 +571,35 @@ class SheetNavigator {
 
   setupSearch() {
     const input = document.getElementById('sheet-search-input');
+    const clearBtn = document.getElementById('btn-clear-sheet-search');
     if (!input) return;
+
+    const syncClearBtn = () => {
+      if (clearBtn) clearBtn.style.display = input.value ? 'block' : 'none';
+    };
+
     input.addEventListener('input', (e) => {
       this.searchTerm = e.target.value.toLowerCase().trim();
+      if (window.crewPlanningEngine) {
+        window.crewPlanningEngine.searchTerm = this.searchTerm;
+      }
+      syncClearBtn();
       this.renderCurrentSheet();
+    });
+
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && input.value) {
+        e.preventDefault();
+        input.value = '';
+        this.searchTerm = '';
+        if (window.crewPlanningEngine) {
+          window.crewPlanningEngine.searchTerm = '';
+        }
+        syncClearBtn();
+        this.renderCurrentSheet();
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+      }
     });
   }
 
@@ -586,7 +613,14 @@ class SheetNavigator {
     if (mode === 'planning') {
       if (engine) {
         const curWeek = engine.getCurrentWeekSundayStr();
-        if (!this.selectedEmployeeWeek || this.selectedEmployeeWeek === curWeek || (engine.parseDate(this.selectedEmployeeWeek)?.getTime() <= engine.parseDate(curWeek)?.getTime())) {
+        const curDt = engine.parseDate(curWeek);
+        const selDt = engine.parseDate(this.selectedEmployeeWeek);
+        if (!this.selectedEmployeeWeek || (selDt && curDt && selDt.getTime() < curDt.getTime())) {
+          this.selectedEmployeeWeek = typeof engine.getDefaultPlanningWeekStr === 'function'
+            ? engine.getDefaultPlanningWeekStr()
+            : engine.getPlanningWeeks()[0].weekStr;
+        } else if (this.selectedEmployeeWeek === curWeek && typeof engine.isWeekPublished === 'function' && engine.isWeekPublished(curWeek)) {
+          // If current week IS already published and user clicks Crew Planning, jump to Next Week (+1) by default
           this.selectedEmployeeWeek = engine.getPlanningWeeks()[0].weekStr;
         }
       }
@@ -656,7 +690,13 @@ class SheetNavigator {
     const currentWeekStr = engine.getCurrentWeekSundayStr();
 
     if (!this.selectedEmployeeWeek) {
-      this.selectedEmployeeWeek = currentWeekStr;
+      if (this.employeeViewMode === 'planning' && engine) {
+        this.selectedEmployeeWeek = typeof engine.getDefaultPlanningWeekStr === 'function'
+          ? engine.getDefaultPlanningWeekStr()
+          : (engine.getPlanningWeeks?.()[0]?.weekStr || currentWeekStr);
+      } else {
+        this.selectedEmployeeWeek = currentWeekStr;
+      }
     }
 
     select.innerHTML = allWeeks.map(w => {
@@ -689,12 +729,13 @@ class SheetNavigator {
       const curDt = engine.parseDate(currentWeekStr);
       if (dt && curDt && dt.getTime() > curDt.getTime()) {
         this.employeeViewMode = 'planning';
-      } else if (this.employeeViewMode === 'planning' && dt && curDt && dt.getTime() <= curDt.getTime()) {
+      } else if (this.employeeViewMode === 'planning' && dt && curDt && dt.getTime() < curDt.getTime()) {
+        // Only switch out of Crew Planning mode if a strictly past historical week is selected;
+        // selecting the Current Week (e.g. 11/08/2026) stays in Crew Planning so you can edit & publish it!
         this.employeeViewMode = 'cards';
       }
     }
     this.updateEmployeeViewToggleUI();
-    this.updateEmployeeWeekNavUI();
     this.updateEmployeeWeekNavUI();
     this.renderCurrentSheet();
   }
@@ -1078,40 +1119,59 @@ class SheetNavigator {
   }
 
   renderSafetyCompliance() {
+    const isComplianceViewActive = Boolean(document.getElementById('safety-compliance-view')?.classList.contains('active'));
+    const prevSheetKey = this.currentSheetKey;
+    const prevSearchTerm = this.searchTerm;
     this.currentSheetKey = 'safety_compliance';
-    const container = document.getElementById('safety-compliance-grid-container');
-    const countBadge = document.getElementById('safety-compliance-row-count');
-    const searchInput = document.getElementById('safety-compliance-search-input');
-    if (!container) return;
+    try {
+      const container = document.getElementById('safety-compliance-grid-container');
+      const countBadge = document.getElementById('safety-compliance-row-count');
+      const searchInput = document.getElementById('safety-compliance-search-input');
+      if (!container) return;
 
-    if (searchInput) {
-      this.searchTerm = (searchInput.value || '').toLowerCase().trim();
-      if (!searchInput.dataset.bound) {
-        searchInput.dataset.bound = 'true';
-        searchInput.addEventListener('input', (e) => {
-          this.searchTerm = e.target.value.toLowerCase().trim();
-          this.renderSafetyCompliance();
-        });
+      if (searchInput) {
+        this.searchTerm = (searchInput.value || '').toLowerCase().trim();
+        if (!searchInput.dataset.bound) {
+          searchInput.dataset.bound = 'true';
+          searchInput.addEventListener('input', (e) => {
+            this.searchTerm = e.target.value.toLowerCase().trim();
+            this.renderSafetyCompliance();
+          });
+        }
+      } else {
+        this.searchTerm = '';
       }
-    } else {
-      this.searchTerm = '';
-    }
 
-    const tableData = this.db.getTable(this.currentSheetKey);
-    this.updateComplianceViewToggleUI();
-    if (this.complianceViewMode === 'cards') {
-      this.renderSafetyComplianceCardsView(container, countBadge, tableData);
-    } else {
-      this.renderStandardTable(container, countBadge, tableData);
+      const tableData = this.db.getTable('safety_compliance');
+      this.updateComplianceViewToggleUI();
+      if (this.complianceViewMode === 'cards') {
+        this.renderSafetyComplianceCardsView(container, countBadge, tableData);
+      } else {
+        this.renderStandardTable(container, countBadge, tableData);
+      }
+    } finally {
+      if (!isComplianceViewActive) {
+        this.currentSheetKey = prevSheetKey;
+        this.searchTerm = prevSearchTerm;
+      }
     }
   }
 
   async renderExpiringCerts() {
+    const isCertsViewActive = Boolean(document.getElementById('expiring-certs-view')?.classList.contains('active'));
+    const prevSheetKey = this.currentSheetKey;
+    const prevSearchTerm = this.searchTerm;
     this.currentSheetKey = 'expiring_certs';
     const container = document.getElementById('expiring-certs-grid-container');
     const countBadge = document.getElementById('expiring-certs-row-count');
     const searchInput = document.getElementById('expiring-certs-search-input');
-    if (!container) return;
+    if (!container) {
+      if (!isCertsViewActive) {
+        this.currentSheetKey = prevSheetKey;
+        this.searchTerm = prevSearchTerm;
+      }
+      return;
+    }
 
     try {
       // Automatically ensure all active employees have their required certification rows
@@ -1143,7 +1203,7 @@ class SheetNavigator {
         this.searchTerm = '';
       }
 
-      const tableData = (this.db ? (this.db.getTable(this.currentSheetKey) || this.db.getTable('Expiring Certs')) : null) || { headers: [], rows: [] };
+      const tableData = (this.db ? (this.db.getTable('expiring_certs') || this.db.getTable('Expiring Certs')) : null) || { headers: [], rows: [] };
       this.updateCertsViewToggleUI();
       if (this.certsViewMode === 'cards') {
         this.renderExpiringCertsCardsView(container, countBadge, tableData);
@@ -1164,6 +1224,11 @@ class SheetNavigator {
           </button>
         </div>
       `;
+    } finally {
+      if (!isCertsViewActive) {
+        this.currentSheetKey = prevSheetKey;
+        this.searchTerm = prevSearchTerm;
+      }
     }
   }
 
@@ -2095,7 +2160,9 @@ class SheetNavigator {
    * Opens the certification date, provider, and notes modal from Expiring Certs table.
    */
   openCertEditModal(sheetRowIdx) {
-    this.currentSheetKey = 'expiring_certs';
+    if (document.getElementById('expiring-certs-view')?.classList.contains('active')) {
+      this.currentSheetKey = 'expiring_certs';
+    }
     const tableData = this.db ? this.db.getTable('expiring_certs') : null;
     if (!tableData || !tableData.rows) return;
 
@@ -6128,37 +6195,47 @@ class SheetNavigator {
   }
 
   renderTraining() {
+    const isTrainingViewActive = Boolean(document.getElementById('training-view')?.classList.contains('active'));
+    const prevSheetKey = this.currentSheetKey;
+    const prevSearchTerm = this.searchTerm;
     this.currentSheetKey = 'training_tracking';
-    const container = document.getElementById('training-grid-container');
-    const countBadge = document.getElementById('training-row-count');
-    const searchInput = document.getElementById('training-search-input');
-    if (!container) return;
+    try {
+      const container = document.getElementById('training-grid-container');
+      const countBadge = document.getElementById('training-row-count');
+      const searchInput = document.getElementById('training-search-input');
+      if (!container) return;
 
-    if (searchInput) {
-      this.searchTerm = (searchInput.value || '').toLowerCase().trim();
-      if (!searchInput.dataset.bound) {
-        searchInput.dataset.bound = 'true';
-        searchInput.addEventListener('input', (e) => {
-          this.searchTerm = e.target.value.toLowerCase().trim();
-          this.renderTraining();
-        });
+      if (searchInput) {
+        this.searchTerm = (searchInput.value || '').toLowerCase().trim();
+        if (!searchInput.dataset.bound) {
+          searchInput.dataset.bound = 'true';
+          searchInput.addEventListener('input', (e) => {
+            this.searchTerm = e.target.value.toLowerCase().trim();
+            this.renderTraining();
+          });
+        }
+      } else {
+        this.searchTerm = '';
       }
-    } else {
-      this.searchTerm = '';
-    }
 
-    if (!this._reconciledTrainingOnce && this.db && typeof this.reconcileTrainingTrackingLocal === 'function') {
-      this._reconciledTrainingOnce = true;
-      const recRes = this.reconcileTrainingTrackingLocal();
-      if (recRes && (recRes.updatedLeads > 0 || recRes.updatedAttendees > 0 || recRes.updatedSizes > 0 || recRes.prunedRows > 0)) {
-        if (typeof this.db.schedulePersistSnapshot === 'function') {
-          this.db.schedulePersistSnapshot(this.db.snapshot, 100);
+      if (!this._reconciledTrainingOnce && this.db && typeof this.reconcileTrainingTrackingLocal === 'function') {
+        this._reconciledTrainingOnce = true;
+        const recRes = this.reconcileTrainingTrackingLocal();
+        if (recRes && (recRes.updatedLeads > 0 || recRes.updatedAttendees > 0 || recRes.updatedSizes > 0 || recRes.prunedRows > 0)) {
+          if (typeof this.db.schedulePersistSnapshot === 'function') {
+            this.db.schedulePersistSnapshot(this.db.snapshot, 100);
+          }
         }
       }
-    }
 
-    const tableData = this.db.getTable(this.currentSheetKey);
-    this.renderStandardTable(container, countBadge, tableData);
+      const tableData = this.db.getTable('training_tracking');
+      this.renderStandardTable(container, countBadge, tableData);
+    } finally {
+      if (!isTrainingViewActive) {
+        this.currentSheetKey = prevSheetKey;
+        this.searchTerm = prevSearchTerm;
+      }
+    }
   }
 
   promptTrainingDate(td) {
@@ -6554,8 +6631,19 @@ class SheetNavigator {
     const searchInput = document.getElementById('sheet-search-input');
     if (!container) return;
 
+    if (['safety_compliance', 'expiring_certs', 'training_tracking'].includes(this.currentSheetKey)) {
+      this.currentSheetKey = this.activeSheetTabKey || 'employees';
+    } else {
+      this.activeSheetTabKey = this.currentSheetKey;
+    }
+
     if (searchInput) {
       this.searchTerm = (searchInput.value || '').toLowerCase().trim();
+      if (window.crewPlanningEngine) {
+        window.crewPlanningEngine.searchTerm = this.searchTerm;
+      }
+      const clearBtn = document.getElementById('btn-clear-sheet-search');
+      if (clearBtn) clearBtn.style.display = searchInput.value ? 'block' : 'none';
     }
 
     const tableData = this.db.getTable(this.currentSheetKey);
@@ -6572,8 +6660,21 @@ class SheetNavigator {
 
     if (searchInput) {
       if (this.currentSheetKey === 'employees') {
-        searchInput.style.maxWidth = '170px';
+        const engine = window.crewPlanningEngine;
+        const currentWeekStr = engine ? engine.getCurrentWeekSundayStr() : '';
+        const isFutureWeek = Boolean(engine && this.selectedEmployeeWeek && currentWeekStr && (engine.parseDate(this.selectedEmployeeWeek)?.getTime() > engine.parseDate(currentWeekStr)?.getTime()));
+        if (this.employeeViewMode === 'planning' || isFutureWeek) {
+          searchInput.placeholder = 'Search planning crews, members, side pane...';
+          searchInput.style.maxWidth = '260px';
+        } else if (this.employeeViewMode === 'cards') {
+          searchInput.placeholder = 'Search crew cards, foremen, members...';
+          searchInput.style.maxWidth = '250px';
+        } else {
+          searchInput.placeholder = 'Filter rows...';
+          searchInput.style.maxWidth = '180px';
+        }
       } else {
+        searchInput.placeholder = 'Filter rows...';
         searchInput.style.maxWidth = '';
       }
     }
@@ -6596,7 +6697,6 @@ class SheetNavigator {
     const btnImportCrews = document.getElementById('btn-import-crews');
     const btnTransferEquip = document.getElementById('btn-transfer-equipment-top');
     const btnManageDrug = document.getElementById('btn-manage-drug-tests');
-    const btnPushClean = document.getElementById('btn-push-clean-sheet');
     const btnPpeTracking = document.getElementById('btn-ppe-tracking');
     const btnFiscalYear = document.getElementById('btn-fiscal-year-transition');
 
@@ -6620,14 +6720,6 @@ class SheetNavigator {
       grounds: 'Ground',
       hot_sticks: 'Hot Stick'
     };
-
-    if (btnPushClean) {
-      const hasData = Boolean(tableData && ((tableData.rows && tableData.rows.length > 0) || (tableData.rawGrid && tableData.rawGrid.length > 0)));
-      btnPushClean.style.display = hasData ? 'inline-block' : 'none';
-      if (sheetMeta) {
-        btnPushClean.title = `Push full clean ${sheetMeta.label} table directly to Google Sheets`;
-      }
-    }
 
     if (btnImportCrews) {
       btnImportCrews.style.display = isEmployeeOrJobSheet ? 'inline-block' : 'none';
@@ -6737,19 +6829,27 @@ class SheetNavigator {
     if (this.currentSheetKey === 'employees') {
       const engine = window.crewPlanningEngine;
       const currentWeekStr = engine ? engine.getCurrentWeekSundayStr() : '';
-      if (!this.selectedEmployeeWeek) this.selectedEmployeeWeek = currentWeekStr;
+      if (!this.selectedEmployeeWeek) {
+        if (this.employeeViewMode === 'planning' && engine) {
+          this.selectedEmployeeWeek = typeof engine.getDefaultPlanningWeekStr === 'function'
+            ? engine.getDefaultPlanningWeekStr()
+            : (engine.getPlanningWeeks?.()[0]?.weekStr || currentWeekStr);
+        } else {
+          this.selectedEmployeeWeek = currentWeekStr;
+        }
+      }
 
       const isFutureWeek = Boolean(engine && engine.parseDate(this.selectedEmployeeWeek) && engine.parseDate(currentWeekStr) && (engine.parseDate(this.selectedEmployeeWeek).getTime() > engine.parseDate(currentWeekStr).getTime()));
       const isPastWeek = Boolean(engine && engine.parseDate(this.selectedEmployeeWeek) && engine.parseDate(currentWeekStr) && (engine.parseDate(this.selectedEmployeeWeek).getTime() < engine.parseDate(currentWeekStr).getTime()));
 
       if (this.employeeViewMode === 'planning' || isFutureWeek) {
         if (engine && typeof engine.renderPlanningWorkspace === 'function') {
-          engine.renderPlanningWorkspace(container, countBadge, this.selectedEmployeeWeek);
+          engine.renderPlanningWorkspace(container, countBadge, this.selectedEmployeeWeek, this.searchTerm);
           return;
         }
       } else if (isPastWeek && this.employeeViewMode !== 'table') {
         if (engine && typeof engine.renderHistoricalWorkspace === 'function') {
-          engine.renderHistoricalWorkspace(container, countBadge, this.selectedEmployeeWeek);
+          engine.renderHistoricalWorkspace(container, countBadge, this.selectedEmployeeWeek, this.searchTerm);
           return;
         }
       } else if (this.employeeViewMode === 'cards') {
@@ -7453,11 +7553,35 @@ class SheetNavigator {
     // Search filter
     const searchTerm = (this.searchTerm || '').toLowerCase().trim();
     if (searchTerm) {
+      // Map baseJob -> jobName, location, and foreman from job_tracking
+      const jtMetaMap = new Map();
+      jtRows.forEach(j => {
+        const jn = String(j['Job Number'] || j['Job #'] || '').replace(/\.\d+.*$/, '').trim().toLowerCase();
+        if (jn) {
+          jtMetaMap.set(jn, {
+            jobName: String(j['Job Name'] || '').toLowerCase(),
+            location: String(j['Location'] || '').toLowerCase(),
+            foreman: String(j['Foreman'] || '').toLowerCase()
+          });
+        }
+      });
+
       activeRows = activeRows.filter(r => {
-        return Object.values(r).some(val => {
+        const matchesEmployeeVal = Object.values(r).some(val => {
           if (val === null || val === undefined) return false;
           return String(val).toLowerCase().includes(searchTerm);
         });
+        if (matchesEmployeeVal) return true;
+
+        // Check if employee's job number matches a job_tracking Job Name, location, or foreman
+        const job = String(r['Job Number'] || r['Job #'] || '').replace(/\.\d+.*$/, '').trim().toLowerCase();
+        const secJob = String(r['Secondary Job Number'] || r['Secondary Job #'] || '').replace(/\.\d+.*$/, '').trim().toLowerCase();
+        const meta1 = job ? jtMetaMap.get(job) : null;
+        const meta2 = secJob ? jtMetaMap.get(secJob) : null;
+        if (meta1 && (meta1.jobName.includes(searchTerm) || meta1.location.includes(searchTerm) || meta1.foreman.includes(searchTerm))) return true;
+        if (meta2 && (meta2.jobName.includes(searchTerm) || meta2.location.includes(searchTerm) || meta2.foreman.includes(searchTerm))) return true;
+
+        return false;
       });
     }
 
@@ -7589,18 +7713,28 @@ class SheetNavigator {
     });
 
     // Second pass: also register each employee under their secondary job's base crew group.
-    // This populates cards like "040-26 (Fri-Sat)" whose members are primarily on another crew.
-    fieldCrewMembers.forEach(emp => {
+    // This populates cards like "040-26 (Fri-Sat)" whose members are primarily on another crew,
+    // as well as field crews where an employee in Light Duty / Vacation / etc. has a secondary assignment.
+    const allCategorizedEmps = [
+      ...fieldCrewMembers,
+      ...(lightDutyList || []),
+      ...(vacationList || []),
+      ...(weedsList || []),
+      ...(leaveList || []),
+      ...(medicalList || [])
+    ];
+    allCategorizedEmps.forEach(emp => {
       if (!emp.secondaryJob) return;
       // Base of secondary job: strip trailing .N suffix but keep parenthesized schedule tag (e.g. "040-26 (Fri-Sat)")
       const secBase = emp.secondaryJob.replace(/\.\d+\s*$/, '').trim();
-      if (!secBase || secBase === emp.jobNumber.replace(/\.\d+.*$/, '').trim()) return;
+      const priBase = emp.jobNumber ? emp.jobNumber.replace(/\.\d+.*$/, '').trim() : '';
+      if (!secBase || secBase === priBase) return;
       if (!crewGroups.has(secBase)) {
         crewGroups.set(secBase, []);
       }
       // Don't double-add if already there
       const existing = crewGroups.get(secBase);
-      if (!existing.find(m => m.name === emp.name && m.isSecondaryMember)) {
+      if (!existing.find(m => m.name.toLowerCase() === emp.name.toLowerCase() && m.isSecondaryMember)) {
         existing.push({
           ...emp,
           isSecondaryMember: true,
@@ -7677,12 +7811,32 @@ class SheetNavigator {
       // Handles cases where JT stores a nickname (Matt) but the employee row uses the full name (Matthew)
       // or vice versa. alternateNames is a pipe- or comma-separated string.
       const nameMatchesForeman = (emp, foremanName) => {
-        if (!foremanName) return false;
+        if (!foremanName || !emp) return false;
         const fl = foremanName.trim().toLowerCase();
-        if (emp.name.toLowerCase() === fl) return true;
+        const en = (emp.name || '').trim().toLowerCase();
+        if (en === fl) return true;
         if (emp.alternateNames) {
           const alts = emp.alternateNames.split(/[|,;]/).map(s => s.trim().toLowerCase()).filter(Boolean);
           if (alts.includes(fl)) return true;
+        }
+        // Nickname matching with matching last name (e.g. Ben Lapka <-> Benjamin Lapka)
+        const nickPairs = [
+          ['ben', 'benjamin'], ['matt', 'matthew'], ['mike', 'michael'],
+          ['chris', 'christopher'], ['dan', 'daniel'], ['dave', 'david'],
+          ['tom', 'thomas'], ['tim', 'timothy'], ['joe', 'joseph'],
+          ['jon', 'jonathan'], ['josh', 'joshua'], ['sam', 'samuel'],
+          ['alex', 'alexander'], ['nick', 'nicholas'], ['greg', 'gregory']
+        ];
+        const p1 = en.split(/\s+/);
+        const p2 = fl.split(/\s+/);
+        if (p1.length >= 2 && p2.length >= 2) {
+          if (p1[p1.length - 1] === p2[p2.length - 1]) {
+            const f1 = p1[0];
+            const f2 = p2[0];
+            if (nickPairs.some(([a, b]) => (f1 === a && f2 === b) || (f1 === b && f2 === a))) {
+              return true;
+            }
+          }
         }
         return false;
       };
@@ -8061,6 +8215,12 @@ class SheetNavigator {
                   <span class="badge" style="background: var(--bg-tertiary); color: var(--text-muted); font-size: 10px; padding: 1px 6px; border-radius: 3px; font-weight: 700;">
                     ${this.escapeHtml(e.classification || '—')}
                   </span>
+                  <button class="btn btn-xs"
+                          onclick="event.stopPropagation(); window.sheetNavigator.promptDuplicateMember('${this.escapeJs(e.name)}', '${this.escapeJs(crewBaseFromJob)}')"
+                          style="background: transparent; border: 1px solid rgba(168, 85, 247, 0.3); color: #c084fc; font-size: 10px; padding: 1px 5px; border-radius: 3px; cursor: pointer;"
+                          title="Duplicate this employee to a field crew (secondary job)">
+                    👯
+                  </button>
                   <button class="btn btn-xs" style="background: transparent; border: none; color: var(--text-muted); cursor: pointer; padding: 1px 4px; font-size: 12px; border-radius: 3px;"
                           onclick="window.sheetNavigator.openMemberRowActions(event, '${this.escapeJs(e.name)}', '${this.escapeJs(crewBaseFromJob)}', false, false)"
                           title="Employee options">
@@ -9323,6 +9483,7 @@ class SheetNavigator {
     // 3. Update Job Tracking Crew Sizes using actual active member counts
     if (jtTable.rows) {
       const sizeColIdx = (jtTable.headers || []).findIndex(h => /^crew\s*size$/i.test(h)) + 1;
+      const fmColIdx = (jtTable.headers || []).findIndex(h => /^foreman$/i.test(h)) + 1;
       const prevEmpNames = this.getPreviousEmployeeNamesSet();
 
       // Source JT
@@ -9353,6 +9514,33 @@ class SheetNavigator {
             itemIdentifier: fromBaseJob,
             value: activeSourceCount
           });
+
+          // Check if moved employee was the foreman of source crew
+          if (this.isEmpMatchingName(empName, sourceJt['Foreman'], emp)) {
+            const remaining = (empTable.rows || []).filter(e => {
+              if (!this.isEmployeeActive(e, prevEmpNames)) return false;
+              const en = String(e['Employee Name'] || e['Name'] || '').trim().toLowerCase();
+              if (en === empName.toLowerCase()) return false;
+              const jn = String(e['Job Number'] || e['Job #'] || '').trim();
+              return jn === fromBaseJob || jn.startsWith(fromBaseJob + '.');
+            });
+            remaining.sort((a, b) => this.getRolePriority(a['Job Classification'] || a['Classification']) - this.getRolePriority(b['Job Classification'] || b['Classification']));
+            const nextForeman = remaining.length > 0 ? String(remaining[0]['Employee Name'] || remaining[0]['Name'] || '') : '';
+            sourceJt['Foreman'] = nextForeman;
+            if (jtTable.rawGrid && jtTable.rawGrid[sRowIdx - 1] && fmColIdx > 0) {
+              jtTable.rawGrid[sRowIdx - 1][fmColIdx - 1] = nextForeman;
+            }
+            await this.db.addMutation({
+              action: 'UPDATE_CELL',
+              sheetName: jtTable.name || 'Job Tracking',
+              tableKey: 'job_tracking',
+              row: sRowIdx,
+              col: fmColIdx > 0 ? fmColIdx : 3,
+              header: 'Foreman',
+              itemIdentifier: fromBaseJob,
+              value: nextForeman
+            });
+          }
         }
       }
 
@@ -9383,6 +9571,28 @@ class SheetNavigator {
           itemIdentifier: destBaseJob,
           value: activeDestCount
         });
+
+        // Check if destination crew foreman should be updated to moved employee
+        const curDestFm = String(destJt['Foreman'] || '').trim();
+        const empRank = this.getRolePriority(emp?.['Job Classification'] || emp?.['Classification']);
+        const isAssignedSlot1 = String(newSlot || '').endsWith('.1');
+        const matchesDestFm = this.isEmpMatchingName(empName, curDestFm, emp);
+        if (!curDestFm || matchesDestFm || (isAssignedSlot1 && empRank <= 4)) {
+          destJt['Foreman'] = empName;
+          if (jtTable.rawGrid && jtTable.rawGrid[dRowIdx - 1] && fmColIdx > 0) {
+            jtTable.rawGrid[dRowIdx - 1][fmColIdx - 1] = empName;
+          }
+          await this.db.addMutation({
+            action: 'UPDATE_CELL',
+            sheetName: jtTable.name || 'Job Tracking',
+            tableKey: 'job_tracking',
+            row: dRowIdx,
+            col: fmColIdx > 0 ? fmColIdx : 3,
+            header: 'Foreman',
+            itemIdentifier: destBaseJob,
+            value: empName
+          });
+        }
       }
     }
 
@@ -9466,6 +9676,77 @@ class SheetNavigator {
         }
       }
     }
+  }
+
+  /**
+   * Helper for role priority / ranking across crew planning and live crew structure
+   */
+  getRolePriority(role) {
+    if (window.crewImportEngine && typeof window.crewImportEngine.getRolePriority === 'function') {
+      return window.crewImportEngine.getRolePriority(role);
+    }
+    const r = String(role || '').toUpperCase().trim();
+    const map = {
+      'SUP': 1, 'SUPERINTENDENT': 1,
+      'GF': 2, 'GENERAL FOREMAN': 2,
+      'F': 3, 'FOREMAN': 3,
+      'GTO F': 4, 'GTO FOREMAN': 4,
+      'JL': 5, 'JRY': 5, 'JOURNEYMAN': 5, 'JOURNEYMAN LINEMAN': 5,
+      'JRY OP': 6, 'JOURNEYMAN OPERATOR': 6,
+      'WT': 7, 'WORKING TECH': 7, 'WORKING TECHNICIAN': 7,
+      'GTO': 8, 'GAS TECH OPERATOR': 8,
+      'EO 1': 9, 'EO1': 9, 'EQUIPMENT OPERATOR 1': 9,
+      'EO 2': 10, 'EO2': 10, 'EQUIPMENT OPERATOR 2': 10,
+      'AP 7': 11, 'AP 6': 12, 'AP 5': 13, 'AP 4': 14, 'AP 3': 15, 'AP 2': 16, 'AP 1': 17
+    };
+    return map[r] !== undefined ? map[r] : 999;
+  }
+
+  /**
+   * Helper: match an employee name against a target name (such as crew foreman),
+   * accounting for exact match, database Alternate Names, and common nicknames with matching last names.
+   */
+  isEmpMatchingName(eName, targetName, empRow = null) {
+    if (!eName || !targetName) return false;
+    const n1 = String(eName).trim().toLowerCase();
+    const n2 = String(targetName).trim().toLowerCase();
+    if (n1 === n2) return true;
+
+    // Check Alternate Names on empRow or look up in employees table
+    let altStr = empRow ? (empRow['Alternate Names'] || '') : '';
+    if (!altStr) {
+      const empTable = this.db.getTable('employees');
+      const found = (empTable?.rows || []).find(e => {
+        const en = String(e['Employee Name'] || e['Name'] || '').trim().toLowerCase();
+        return en === n1 || en === n2;
+      });
+      if (found) altStr = found['Alternate Names'] || '';
+    }
+    if (altStr) {
+      const alts = altStr.split(/[|,;]/).map(s => s.trim().toLowerCase()).filter(Boolean);
+      if (alts.includes(n1) || alts.includes(n2)) return true;
+    }
+
+    // Common nickname pairs with matching last names (e.g. Ben Lapka <-> Benjamin Lapka)
+    const nickPairs = [
+      ['ben', 'benjamin'], ['matt', 'matthew'], ['mike', 'michael'],
+      ['chris', 'christopher'], ['dan', 'daniel'], ['dave', 'david'],
+      ['tom', 'thomas'], ['tim', 'timothy'], ['joe', 'joseph'],
+      ['jon', 'jonathan'], ['josh', 'joshua'], ['sam', 'samuel'],
+      ['alex', 'alexander'], ['nick', 'nicholas'], ['greg', 'gregory']
+    ];
+    const p1 = n1.split(/\s+/);
+    const p2 = n2.split(/\s+/);
+    if (p1.length >= 2 && p2.length >= 2) {
+      if (p1[p1.length - 1] === p2[p2.length - 1]) {
+        const f1 = p1[0];
+        const f2 = p2[0];
+        if (nickPairs.some(([a, b]) => (f1 === a && f2 === b) || (f1 === b && f2 === a))) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   /**
@@ -9944,8 +10225,9 @@ class SheetNavigator {
 
     const members = (empTable?.rows || []).filter(e => {
       if (!this.isEmployeeActive(e, prevEmpNames)) return false;
-      const j = String(e['Job Number'] || '').trim();
-      return j === baseJob || j.startsWith(baseJob + '.');
+      const j = String(e['Job Number'] || e['Job #'] || '').trim();
+      const s = String(e['Secondary Job Number'] || e['Secondary Job #'] || '').trim();
+      return j === baseJob || j.startsWith(baseJob + '.') || s === baseJob || s.startsWith(baseJob + '.');
     });
 
     const otherEmps = (empTable?.rows || []).filter(e => {
@@ -9978,13 +10260,17 @@ class SheetNavigator {
               ${members.map(m => {
                 const n = String(m['Employee Name'] || m['Name'] || '').trim();
                 const c = String(m['Job Classification'] || m['Classification'] || '');
-                return `<option value="${this.escapeHtml(n)}" ${n.toLowerCase() === currentForeman.toLowerCase() ? 'selected' : ''}>👑 ${this.escapeHtml(n)} (${this.escapeHtml(c)})</option>`;
+                const s = String(m['Secondary Job Number'] || m['Secondary Job #'] || '').trim();
+                const isSec = s === baseJob || s.startsWith(baseJob + '.');
+                const isSelected = this.isEmpMatchingName(n, currentForeman, m);
+                return `<option value="${this.escapeHtml(n)}" ${isSelected ? 'selected' : ''}>👑 ${this.escapeHtml(n)} (${this.escapeHtml(c)})${isSec ? ' [Secondary]' : ''}</option>`;
               }).join('')}
             </optgroup>
             <optgroup label="Other Active Employees">
               ${otherEmps.map(o => {
                 const n = String(o['Employee Name'] || o['Name'] || '').trim();
-                return `<option value="${this.escapeHtml(n)}" ${n.toLowerCase() === currentForeman.toLowerCase() ? 'selected' : ''}>${this.escapeHtml(n)}</option>`;
+                const isSelected = this.isEmpMatchingName(n, currentForeman, o);
+                return `<option value="${this.escapeHtml(n)}" ${isSelected ? 'selected' : ''}>${this.escapeHtml(n)}</option>`;
               }).join('')}
             </optgroup>
           </select>
@@ -10850,6 +11136,12 @@ class SheetNavigator {
             </div>
           ` : ''}
 
+          ${String(emp['Status'] || emp['Location'] || '').toLowerCase().includes('light duty') ? `
+            <div style="background: rgba(16, 185, 129, 0.12); border: 1px solid rgba(16, 185, 129, 0.35); border-radius: 6px; padding: 8px 12px; color: #6ee7b7; font-size: 11.5px;">
+              🩺 <strong>Light Duty Preservation:</strong> ${this.escapeHtml(empName)} will remain on Light Duty while assigned to this secondary crew.
+            </div>
+          ` : ''}
+
           <div>
             <label style="display: block; font-weight: 700; margin-bottom: 6px; color: #cbd5e1; font-size: 11.5px;">
               Select Destination Field Crew:
@@ -10881,6 +11173,13 @@ class SheetNavigator {
             <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
               Automatically set to next open slot. You can customize the suffix number if needed.
             </div>
+          </div>
+
+          <div style="margin-top: 4px;">
+            <label style="display: flex; align-items: center; gap: 8px; font-weight: 700; color: #f472b6; font-size: 12px; cursor: pointer;">
+              <input type="checkbox" id="live-dup-as-foreman" ${this.getRolePriority(emp['Job Classification'] || emp['Classification']) <= 4 ? 'checked' : ''} style="accent-color: #ec4899;">
+              <span>👑 Designate as Crew Foreman on Destination Crew</span>
+            </label>
           </div>
         </div>
 
@@ -10921,12 +11220,13 @@ class SheetNavigator {
         alert('Please enter a destination slot number.');
         return;
       }
+      const asForeman = Boolean(overlay.querySelector('#live-dup-as-foreman')?.checked);
       closeModal();
-      await this.executeDuplicateMember(empName, destSlot);
+      await this.executeDuplicateMember(empName, destSlot, asForeman);
     });
   }
 
-  async executeDuplicateMember(empName, destSlot) {
+  async executeDuplicateMember(empName, destSlot, asForeman = false) {
     const empTable = this.db.getTable('employees');
     if (!empTable || !empTable.rows) return;
     const emp = empTable.rows.find(e => String(e['Employee Name'] || e['Name'] || '').trim().toLowerCase() === empName.toLowerCase());
@@ -10952,11 +11252,40 @@ class SheetNavigator {
       value: destSlot
     });
 
+    if (asForeman) {
+      const jtTable = this.db.getTable('job_tracking');
+      if (jtTable && jtTable.rows) {
+        const destBase = destSlot.replace(/\.\d+.*$/, '').trim();
+        const jt = jtTable.rows.find(j => {
+          const jn = String(j['Job Number'] || j['Job #'] || '').trim();
+          return jn === destBase || jn.replace(/\.\d+.*$/, '').trim() === destBase;
+        });
+        if (jt) {
+          jt['Foreman'] = empName;
+          const fmColIdx = (jtTable.headers || []).findIndex(h => /^foreman$/i.test(h)) + 1;
+          const jRowIdx = jt._rowIdx || (jtTable.rows.indexOf(jt) + 2);
+          if (jtTable.rawGrid && jtTable.rawGrid[jRowIdx - 1] && fmColIdx > 0) {
+            jtTable.rawGrid[jRowIdx - 1][fmColIdx - 1] = empName;
+          }
+          await this.db.addMutation({
+            action: 'UPDATE_CELL',
+            sheetName: jtTable.name || 'Job Tracking',
+            tableKey: 'job_tracking',
+            row: jRowIdx,
+            col: fmColIdx > 0 ? fmColIdx : 3,
+            header: 'Foreman',
+            itemIdentifier: destBase,
+            value: empName
+          });
+        }
+      }
+    }
+
     await this.db.persistSnapshot(this.db.snapshot);
     this.renderCurrentSheet();
 
     if (typeof window.showToast === 'function') {
-      window.showToast(`👯 Duplicated ${empName} to ${destSlot}! Displaying 1st/2nd job badges.`, 'success');
+      window.showToast(`👯 Duplicated ${empName} to ${destSlot}${asForeman ? ' as Foreman' : ''}! Displaying 1st/2nd job badges.`, 'success');
     }
   }
 
