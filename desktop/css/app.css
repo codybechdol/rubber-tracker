@@ -367,10 +367,10 @@ body {
 .sheet-items-bar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  justify-content: flex-start;
   padding: 6px 12px;
   background: #1e293b;
-  gap: 10px;
+  gap: 8px;
   overflow-x: auto;
 }
 

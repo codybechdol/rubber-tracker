@@ -706,9 +706,18 @@ class SheetNavigator {
 
     itemsBar.appendChild(itemsList);
 
-    // Subtabs Switch
+    // Subtabs Switch (placed on the left directly next to the item tabs)
     const activeItemDef = currentItems.find(it => it.id === activeItem);
     if (activeItemDef && activeItemDef.swapKey) {
+      const subtabDivider = document.createElement('div');
+      subtabDivider.className = 'sheet-subtab-divider';
+      subtabDivider.style.width = '1px';
+      subtabDivider.style.height = '18px';
+      subtabDivider.style.background = 'rgba(255, 255, 255, 0.15)';
+      subtabDivider.style.margin = '0 4px 0 6px';
+      subtabDivider.style.flexShrink = '0';
+      itemsBar.appendChild(subtabDivider);
+
       const subtabBox = document.createElement('div');
       subtabBox.className = 'sheet-subtabs-pill-box';
 
@@ -730,6 +739,15 @@ class SheetNavigator {
       subtabBox.appendChild(swapPill);
       itemsBar.appendChild(subtabBox);
     } else if (activeItem === 'test_batches') {
+      const subtabDivider = document.createElement('div');
+      subtabDivider.className = 'sheet-subtab-divider';
+      subtabDivider.style.width = '1px';
+      subtabDivider.style.height = '18px';
+      subtabDivider.style.background = 'rgba(255, 255, 255, 0.15)';
+      subtabDivider.style.margin = '0 4px 0 6px';
+      subtabDivider.style.flexShrink = '0';
+      itemsBar.appendChild(subtabDivider);
+
       const subtabBox = document.createElement('div');
       subtabBox.className = 'sheet-subtabs-pill-box';
 
