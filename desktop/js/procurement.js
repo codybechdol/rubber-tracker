@@ -5097,15 +5097,12 @@ class ProcurementEngine {
 
   openMarkOrderedModal(itemsToOrder = null) {
     let items = itemsToOrder;
-    if (!items || !items.length) {
+    if (items === null) {
       items = (this.items || []).filter(i => i.selected && i.quantity > 0 && i.section !== 'ordered_pending');
     }
-    if (!items || !items.length) {
-      alert('⚠️ Please select at least one item to mark as Ordered.');
-      return;
-    }
+    if (!items) items = [];
 
-    const consolidatedItems = this.consolidateItemsBySizeAndClass(items);
+    const consolidatedItems = items.length ? this.consolidateItemsBySizeAndClass(items) : [];
     this.pendingMarkOrderedItems = consolidatedItems;
     const modal = document.getElementById('mark-ordered-modal');
     const body = document.getElementById('mark-ordered-modal-body');
@@ -5120,54 +5117,26 @@ class ProcurementEngine {
     let vendorOptions = this.vendors.map(v => `<option value="${this.escapeHtml(v.name)}" ${v.name === currentVendorName ? 'selected' : ''}>${this.escapeHtml(v.name)}</option>`).join('');
     vendorOptions += '<option value="__custom__">➕ New / Custom Vendor...</option>';
 
-    let rowsHtml = '';
-    let totalEst = 0;
-    let totalUnitsCount = 0;
+    // Build active employees list for line item assignment dropdown
+    const snap = (this.db && typeof this.db.getSnapshot === 'function')
+      ? this.db.getSnapshot()
+      : (window.localDB ? window.localDB.getSnapshot() : null);
+    const empTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('employees') : null) || snap?.tables?.['employees'];
+    const activeEmployees = [];
+    if (empTable && empTable.rows) {
+      for (const er of empTable.rows) {
+        const name = String(er['Name'] || er['Employee'] || Object.values(er)[0] || '').trim();
+        const stat = String(er['Status'] || er['Employment Status'] || '').toLowerCase();
+        if (name && !stat.includes('inactive') && !stat.includes('term') && !stat.includes('prev')) {
+          activeEmployees.push(name);
+        }
+      }
+    }
+    activeEmployees.sort();
 
-    consolidatedItems.forEach((item, idx) => {
-      const catalogPrice = this.getVendorPrice(currentVendorName, item.itemType, item.size, item.classVal);
-      const unitPrice = item.price > 0 ? item.price : (catalogPrice > 0 ? catalogPrice : 0);
-      const subtotal = unitPrice * item.quantity;
-      totalEst += subtotal;
-      totalUnitsCount += item.quantity;
-
-      const empNames = (item.employees && item.employees.length > 0)
-        ? item.employees.filter(e => e.checked).map(e => e.name).join(', ')
-        : (item.employees?.[0]?.name || 'Shelf Stock');
-
-      rowsHtml += `
-        <tr class="mark-ordered-item-row" data-idx="${idx}">
-          <td style="padding: 8px 10px; font-weight: 600; color: #f1f5f9;">
-            ${this.escapeHtml(item.typeLabel || item.itemType)}
-          </td>
-          <td style="padding: 8px 10px; text-align: center;">
-            <input type="text" class="mark-ordered-size-input batch-delivery-input" value="${this.escapeHtml(item.size || 'Standard')}" style="width: 80px; text-align: center;" onchange="window.procurementEngine.onMarkOrderRowSizeChange(${idx}, this.value)">
-          </td>
-          <td style="padding: 8px 10px; text-align: center; color: #94a3b8;">
-            ${this.escapeHtml(item.classVal || 'Class 2')}
-          </td>
-          <td style="padding: 8px 10px; text-align: center;">
-            <input type="number" min="1" class="mark-ordered-qty-input batch-delivery-input" value="${item.quantity}" style="width: 60px; text-align: center;" onchange="window.procurementEngine.recalcMarkOrderedModal()">
-          </td>
-          <td style="padding: 8px 10px; text-align: right;">
-            <div style="display: flex; align-items: center; justify-content: flex-end; gap: 4px;">
-              <span style="color: #64748b;">$</span>
-              <input type="number" step="0.01" min="0" class="mark-ordered-price-input batch-delivery-input" value="${unitPrice > 0 ? unitPrice.toFixed(2) : ''}" placeholder="0.00" style="width: 85px; text-align: right;" onchange="window.procurementEngine.recalcMarkOrderedModal()">
-            </div>
-          </td>
-          <td style="padding: 8px 10px; text-align: right; font-weight: 700; color: #34d399;" class="mark-ordered-subtotal">
-            $${subtotal.toFixed(2)}
-          </td>
-          <td style="padding: 8px 10px; font-size: 11.5px; color: #cbd5e1;">
-            ${this.escapeHtml(empNames)}
-          </td>
-        </tr>
-      `;
-    });
-
-    const modalTitle = document.getElementById('mark-ordered-modal-title');
-    if (modalTitle) {
-      modalTitle.innerHTML = `<span>📦</span> Create Order from Selected Needs (${totalUnitsCount} Units)`;
+    let empOptions = `<option value="On Shelf" selected>📦 On Shelf (Stock / Spare)</option>`;
+    for (const name of activeEmployees) {
+      empOptions += `<option value="${this.escapeHtml(name)}">👤 ${this.escapeHtml(name)}</option>`;
     }
 
     body.innerHTML = `
@@ -5209,12 +5178,12 @@ class ProcurementEngine {
       </div>
 
       <div style="margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center;">
-        <span id="mark-order-items-count-heading" style="font-size: 12.5px; font-weight: 700; color: #cbd5e1; text-transform: uppercase; letter-spacing: 0.5px;">Items in this Order (${consolidatedItems.length} lines · ${totalUnitsCount} total units)</span>
+        <span id="mark-order-items-count-heading" style="font-size: 12.5px; font-weight: 700; color: #cbd5e1; text-transform: uppercase; letter-spacing: 0.5px;">Items in this Order</span>
         <span style="font-size: 11.5px; color: #64748b;">Prices entered will auto-update vendor catalog</span>
       </div>
 
-      <div style="overflow-x: auto; border: 1px solid var(--border-color); border-radius: 6px; margin-bottom: 16px;">
-        <table style="width: 100%; border-collapse: collapse; font-size: 12.5px;">
+      <div style="overflow-x: auto; border: 1px solid var(--border-color); border-radius: 6px; margin-bottom: 14px;">
+        <table id="mark-ordered-items-table" style="width: 100%; border-collapse: collapse; font-size: 12.5px;">
           <thead>
             <tr style="background: rgba(30, 41, 59, 0.85); border-bottom: 2px solid var(--border-color); text-align: left; color: #94a3b8; font-size: 11px; text-transform: uppercase;">
               <th style="padding: 8px 10px;">Item / Equipment</th>
@@ -5224,24 +5193,368 @@ class ProcurementEngine {
               <th style="padding: 8px 10px; text-align: right; width: 105px;">Unit Price</th>
               <th style="padding: 8px 10px; text-align: right; width: 95px;">Subtotal</th>
               <th style="padding: 8px 10px;">Assigned Linemen</th>
+              <th style="padding: 8px 6px; text-align: center; width: 45px;"></th>
             </tr>
           </thead>
-          <tbody>
-            ${rowsHtml}
+          <tbody id="mark-ordered-tbody">
           </tbody>
         </table>
+      </div>
+
+      <!-- Add Line Item Builder Section -->
+      <div style="background: rgba(30, 41, 59, 0.7); border: 1px dashed rgba(16, 185, 129, 0.45); border-radius: 6px; padding: 12px 14px; margin-bottom: 16px;">
+        <div style="font-weight: 700; font-size: 12.5px; color: #34d399; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
+          <span>➕</span> Add Item to this Order
+        </div>
+        <div style="display: grid; grid-template-columns: 1.3fr 1fr 1fr 0.8fr 1fr; gap: 10px; margin-bottom: 8px;">
+          <div>
+            <label style="display: block; font-size: 11px; font-weight: 600; color: #94a3b8; margin-bottom: 4px;">Item Type</label>
+            <select id="mo-add-item-cat" class="batch-delivery-input" onchange="window.procurementEngine.onMoAddItemCatChange(this.value)">
+              <option value="Gloves" selected>🧤 Rubber Gloves</option>
+              <option value="Sleeves">🦺 Rubber Sleeves</option>
+              <option value="Blankets">🧱 Blankets</option>
+              <option value="MACKs">🧱 MACKs</option>
+              <option value="HV Testers">⚡ HV Testers</option>
+              <option value="Phasing Sets">⚡ Phasing Sets</option>
+              <option value="Grounds">⚡ Grounds</option>
+              <option value="Hot Sticks">🔴 Hot Sticks</option>
+              <option value="AED">🏥 AED Units / Pads</option>
+              <option value="Other">📦 Other / Equipment</option>
+            </select>
+          </div>
+          <div>
+            <label style="display: block; font-size: 11px; font-weight: 600; color: #94a3b8; margin-bottom: 4px;">Class / Voltage</label>
+            <select id="mo-add-item-class" class="batch-delivery-input" onchange="window.procurementEngine.onMoAddItemChange(true)">
+              <option value="Class 0">Class 0</option>
+              <option value="Class 2" selected>Class 2</option>
+              <option value="Class 3">Class 3</option>
+              <option value="Class 4">Class 4</option>
+              <option value="N/A">N/A</option>
+            </select>
+          </div>
+          <div>
+            <label style="display: block; font-size: 11px; font-weight: 600; color: #94a3b8; margin-bottom: 4px;">Size</label>
+            <input type="text" id="mo-add-item-size" list="mo-item-size-suggestions" class="batch-delivery-input" placeholder="e.g. 8.5" value="8.5" style="text-align: center; font-weight: 600;" onchange="window.procurementEngine.onMoAddItemChange(true)" oninput="window.procurementEngine.onMoAddItemChange(true)">
+            <datalist id="mo-item-size-suggestions">
+              <option value="8"></option>
+              <option value="8.5"></option>
+              <option value="9"></option>
+              <option value="9.5"></option>
+              <option value="10"></option>
+              <option value="10.5"></option>
+              <option value="11"></option>
+              <option value="11.5"></option>
+              <option value="12"></option>
+            </datalist>
+          </div>
+          <div>
+            <label style="display: block; font-size: 11px; font-weight: 600; color: #94a3b8; margin-bottom: 4px;">Quantity</label>
+            <input type="number" min="1" step="1" id="mo-add-item-qty" class="batch-delivery-input" value="1" style="text-align: center; font-weight: 600;">
+          </div>
+          <div>
+            <label style="display: block; font-size: 11px; font-weight: 600; color: #94a3b8; margin-bottom: 4px;">Unit Price ($)</label>
+            <input type="number" min="0" step="0.01" id="mo-add-item-price" class="batch-delivery-input" placeholder="0.00" style="text-align: right; font-weight: 600; color: #34d399;">
+          </div>
+        </div>
+        <div style="display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; margin-top: 6px;">
+          <div style="flex: 1;">
+            <label style="display: block; font-size: 11px; font-weight: 600; color: #94a3b8; margin-bottom: 4px;">👤 Ordered For (Lineman / Shelf Stock)</label>
+            <select id="mo-add-item-assignee" class="batch-delivery-input" style="font-weight: 600;">
+              ${empOptions}
+            </select>
+          </div>
+          <div>
+            <button type="button" class="btn btn-primary" onclick="window.procurementEngine.addCustomItemToMarkOrderedModal()" style="padding: 7px 16px; font-size: 12px; font-weight: 700; display: inline-flex; align-items: center; gap: 6px; background: #10b981; border: none; box-shadow: 0 2px 8px rgba(16, 185, 129, 0.4);">
+              <span>➕</span> Add Item to Order
+            </button>
+          </div>
+        </div>
       </div>
 
       <div style="display: flex; justify-content: flex-end; align-items: center; gap: 14px; padding: 12px 16px; background: rgba(15, 23, 42, 0.6); border-radius: 6px; border: 1px solid var(--border-color);">
         <span style="font-size: 13px; color: #94a3b8; font-weight: 600;">Estimated Order Total:</span>
         <span id="mark-order-grand-total" style="font-size: 20px; font-weight: 800; color: #34d399; font-family: monospace;">
-          $${totalEst.toFixed(2)}
+          $0.00
         </span>
       </div>
     `;
 
+    this.renderMarkOrderedTableRows();
+    this.recalcMarkOrderedModal();
+    this.onMoAddItemChange(true);
+
     modal.style.display = 'flex';
     modal.classList.add('active');
+  }
+
+  renderMarkOrderedTableRows() {
+    const tbody = document.getElementById('mark-ordered-tbody');
+    if (!tbody) return;
+
+    if (!this.pendingMarkOrderedItems || this.pendingMarkOrderedItems.length === 0) {
+      tbody.innerHTML = `
+        <tr>
+          <td colspan="8" style="padding: 24px 14px; text-align: center; color: #94a3b8; font-size: 12.5px; background: rgba(15, 23, 42, 0.4);">
+            <div style="font-size: 24px; margin-bottom: 6px;">📦</div>
+            <div style="font-weight: 600; color: #cbd5e1;">No items in this order yet</div>
+            <div style="font-size: 11.5px; color: #64748b; margin-top: 2px;">Use the form below to add line items to this order.</div>
+          </td>
+        </tr>
+      `;
+      return;
+    }
+
+    const vSelect = document.getElementById('mark-order-vendor-select');
+    const vendorName = (vSelect && vSelect.value && vSelect.value !== '__custom__') ? vSelect.value : '';
+
+    let rowsHtml = '';
+    this.pendingMarkOrderedItems.forEach((item, idx) => {
+      const catalogPrice = vendorName ? this.getVendorPrice(vendorName, item.itemType, item.size, item.classVal) : 0;
+      const unitPrice = item.price > 0 ? item.price : (catalogPrice > 0 ? catalogPrice : 0);
+      const qty = parseInt(item.quantity, 10) || 1;
+      const subtotal = unitPrice * qty;
+
+      let empDisplay = '';
+      if (item.employees && item.employees.length > 0) {
+        const checked = item.employees.filter(e => e.checked && e.name && !e.name.toLowerCase().includes('shelf') && !e.name.toLowerCase().includes('stock'));
+        if (checked.length > 0) {
+          empDisplay = checked.map(e => e.name).join(', ');
+        }
+      }
+      if (!empDisplay && item.employeeName && !item.employeeName.toLowerCase().includes('shelf') && !item.employeeName.toLowerCase().includes('stock')) {
+        empDisplay = item.employeeName;
+      }
+
+      const isShelf = !empDisplay;
+      const empBadge = isShelf
+        ? `<span class="badge" style="background: rgba(148, 163, 184, 0.15); color: #cbd5e1; border: 1px solid rgba(148, 163, 184, 0.3); font-size: 11px;">📦 On Shelf</span>`
+        : `<span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.35); font-size: 11px;" title="${this.escapeHtml(empDisplay)}">👤 ${this.escapeHtml(empDisplay)}</span>`;
+
+      rowsHtml += `
+        <tr class="mark-ordered-item-row" data-idx="${idx}">
+          <td style="padding: 8px 10px; font-weight: 600; color: #f1f5f9;">
+            ${this.escapeHtml(item.typeLabel || item.itemType || 'Equipment')}
+          </td>
+          <td style="padding: 8px 10px; text-align: center;">
+            <input type="text" class="mark-ordered-size-input batch-delivery-input" value="${this.escapeHtml(item.size || 'Standard')}" style="width: 80px; text-align: center;" onchange="window.procurementEngine.onMarkOrderRowSizeChange(${idx}, this.value)">
+          </td>
+          <td style="padding: 8px 10px; text-align: center; color: #94a3b8;">
+            ${this.escapeHtml(item.classVal || 'Class 2')}
+          </td>
+          <td style="padding: 8px 10px; text-align: center;">
+            <input type="number" min="1" class="mark-ordered-qty-input batch-delivery-input" value="${qty}" style="width: 60px; text-align: center;" onchange="window.procurementEngine.recalcMarkOrderedModal()">
+          </td>
+          <td style="padding: 8px 10px; text-align: right;">
+            <div style="display: flex; align-items: center; justify-content: flex-end; gap: 4px;">
+              <span style="color: #64748b;">$</span>
+              <input type="number" step="0.01" min="0" class="mark-ordered-price-input batch-delivery-input" value="${unitPrice > 0 ? unitPrice.toFixed(2) : ''}" placeholder="0.00" style="width: 85px; text-align: right;" onchange="window.procurementEngine.recalcMarkOrderedModal()">
+            </div>
+          </td>
+          <td style="padding: 8px 10px; text-align: right; font-weight: 700; color: #34d399;" class="mark-ordered-subtotal">
+            $${subtotal.toFixed(2)}
+          </td>
+          <td style="padding: 8px 10px; font-size: 11.5px; color: #cbd5e1;">
+            ${empBadge}
+          </td>
+          <td style="padding: 8px 6px; text-align: center;">
+            <button type="button" class="btn btn-xs" onclick="window.procurementEngine.removeMarkOrderedItem(${idx})" style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.35); color: #f87171; padding: 3px 6px; font-size: 11px; border-radius: 4px; cursor: pointer; display: inline-flex; align-items: center; justify-content: center;" title="Remove this line from order">
+              🗑️
+            </button>
+          </td>
+        </tr>
+      `;
+    });
+
+    tbody.innerHTML = rowsHtml;
+  }
+
+  syncPendingMarkOrderedItemsFromDom() {
+    if (!this.pendingMarkOrderedItems) return;
+    const rows = document.querySelectorAll('.mark-ordered-item-row');
+    rows.forEach(r => {
+      const idx = parseInt(r.getAttribute('data-idx'), 10);
+      if (isNaN(idx) || !this.pendingMarkOrderedItems[idx]) return;
+      const sizeInput = r.querySelector('.mark-ordered-size-input');
+      const qtyInput = r.querySelector('.mark-ordered-qty-input');
+      const priceInput = r.querySelector('.mark-ordered-price-input');
+      if (sizeInput) this.pendingMarkOrderedItems[idx].size = sizeInput.value.trim();
+      if (qtyInput) this.pendingMarkOrderedItems[idx].quantity = Math.max(1, parseInt(qtyInput.value, 10) || 1);
+      if (priceInput) this.pendingMarkOrderedItems[idx].price = Math.max(0, parseFloat(priceInput.value) || 0);
+    });
+  }
+
+  removeMarkOrderedItem(idx) {
+    this.syncPendingMarkOrderedItemsFromDom();
+    if (!this.pendingMarkOrderedItems || !this.pendingMarkOrderedItems[idx]) return;
+    this.pendingMarkOrderedItems.splice(idx, 1);
+    this.renderMarkOrderedTableRows();
+    this.recalcMarkOrderedModal();
+  }
+
+  onMoAddItemCatChange(cat) {
+    const classSelect = document.getElementById('mo-add-item-class');
+    const sizeInput = document.getElementById('mo-add-item-size');
+    const datalist = document.getElementById('mo-item-size-suggestions');
+
+    if (cat === 'Gloves') {
+      if (classSelect) classSelect.value = 'Class 2';
+      if (sizeInput) sizeInput.value = '8.5';
+      if (datalist) {
+        datalist.innerHTML = `
+          <option value="8"></option>
+          <option value="8.5"></option>
+          <option value="9"></option>
+          <option value="9.5"></option>
+          <option value="10"></option>
+          <option value="10.5"></option>
+          <option value="11"></option>
+          <option value="11.5"></option>
+          <option value="12"></option>
+        `;
+      }
+    } else if (cat === 'Sleeves') {
+      if (classSelect) classSelect.value = 'Class 2';
+      if (sizeInput) sizeInput.value = 'Regular';
+      if (datalist) {
+        datalist.innerHTML = `
+          <option value="Regular"></option>
+          <option value="Large"></option>
+          <option value="Extra Large"></option>
+        `;
+      }
+    } else if (cat === 'Blankets') {
+      if (classSelect) classSelect.value = 'Class 4';
+      if (sizeInput) sizeInput.value = 'Regular';
+      if (datalist) {
+        datalist.innerHTML = `
+          <option value="Regular"></option>
+          <option value="Split"></option>
+          <option value="Eyelet"></option>
+          <option value="Canister"></option>
+        `;
+      }
+    } else if (cat === 'MACKs') {
+      if (classSelect) classSelect.value = 'Class 4';
+      if (sizeInput) sizeInput.value = 'Standard';
+      if (datalist) {
+        datalist.innerHTML = `
+          <option value="Standard"></option>
+          <option value="15kV"></option>
+          <option value="25kV"></option>
+          <option value="35kV"></option>
+        `;
+      }
+    } else if (cat === 'HV Testers' || cat === 'Phasing Sets') {
+      if (classSelect) classSelect.value = 'N/A';
+      if (sizeInput) sizeInput.value = 'Standard';
+      if (datalist) {
+        datalist.innerHTML = `
+          <option value="Standard"></option>
+          <option value="15kV"></option>
+          <option value="25kV"></option>
+          <option value="40kV"></option>
+        `;
+      }
+    } else if (cat === 'Grounds') {
+      if (classSelect) classSelect.value = 'N/A';
+      if (sizeInput) sizeInput.value = 'Single';
+      if (datalist) {
+        datalist.innerHTML = `
+          <option value="Single"></option>
+          <option value="Cluster"></option>
+          <option value="4-Way"></option>
+          <option value="Overhead"></option>
+          <option value="Underground"></option>
+        `;
+      }
+    } else if (cat === 'Hot Sticks') {
+      if (classSelect) classSelect.value = 'N/A';
+      if (sizeInput) sizeInput.value = '8ft';
+      if (datalist) {
+        datalist.innerHTML = `
+          <option value="6ft"></option>
+          <option value="8ft"></option>
+          <option value="10ft"></option>
+          <option value="12ft"></option>
+          <option value="Telescopic"></option>
+        `;
+      }
+    } else if (cat === 'AED') {
+      if (classSelect) classSelect.value = 'N/A';
+      if (sizeInput) sizeInput.value = 'Unit';
+      if (datalist) {
+        datalist.innerHTML = `
+          <option value="Unit"></option>
+          <option value="Adult Pads"></option>
+          <option value="Pediatric Pads"></option>
+          <option value="Battery Pack"></option>
+        `;
+      }
+    } else {
+      if (classSelect) classSelect.value = 'N/A';
+      if (sizeInput) sizeInput.value = 'Standard';
+      if (datalist) {
+        datalist.innerHTML = `<option value="Standard"></option>`;
+      }
+    }
+    this.onMoAddItemChange(true);
+  }
+
+  onMoAddItemChange(forcePriceUpdate = false) {
+    const cat = document.getElementById('mo-add-item-cat')?.value || 'Gloves';
+    const classVal = document.getElementById('mo-add-item-class')?.value || 'Class 2';
+    const size = document.getElementById('mo-add-item-size')?.value || '';
+    const vSelect = document.getElementById('mark-order-vendor-select');
+    let vendor = vSelect ? vSelect.value : '';
+    if (vendor && vendor !== '__custom__' && size) {
+      const price = this.getVendorPrice(vendor, cat, size, classVal);
+      const priceInput = document.getElementById('mo-add-item-price');
+      if (priceInput && (forcePriceUpdate || !priceInput.value || parseFloat(priceInput.value) === 0)) {
+        priceInput.value = price > 0 ? price.toFixed(2) : '';
+      }
+    }
+  }
+
+  addCustomItemToMarkOrderedModal() {
+    const catSelect = document.getElementById('mo-add-item-cat');
+    const cat = catSelect ? catSelect.value : 'Gloves';
+    const classSelect = document.getElementById('mo-add-item-class');
+    const classVal = classSelect ? classSelect.value : 'Class 2';
+    const sizeInput = document.getElementById('mo-add-item-size');
+    const size = sizeInput ? sizeInput.value.trim() : 'Standard';
+    if (!size) {
+      alert('⚠️ Please specify a size (e.g. 8.5, Regular, Standard).');
+      if (sizeInput) sizeInput.focus();
+      return;
+    }
+    const qtyInput = document.getElementById('mo-add-item-qty');
+    const qty = Math.max(1, parseInt(qtyInput?.value, 10) || 1);
+    const priceInput = document.getElementById('mo-add-item-price');
+    const unitPrice = Math.max(0, parseFloat(priceInput?.value) || 0);
+    const empSelect = document.getElementById('mo-add-item-assignee');
+    const assignee = empSelect ? empSelect.value : 'On Shelf';
+
+    const isShelf = !assignee || assignee === 'On Shelf' || assignee.toLowerCase().includes('shelf') || assignee.toLowerCase().includes('stock');
+
+    const newItem = {
+      itemType: cat,
+      typeLabel: cat,
+      size: size,
+      classVal: classVal,
+      quantity: qty,
+      price: unitPrice,
+      employeeName: isShelf ? 'On Shelf' : assignee,
+      employees: isShelf ? [] : [{ name: assignee, label: assignee, checked: true }],
+      section: 'custom_order_item'
+    };
+
+    this.syncPendingMarkOrderedItemsFromDom();
+    if (!this.pendingMarkOrderedItems) this.pendingMarkOrderedItems = [];
+    this.pendingMarkOrderedItems.push(newItem);
+    this.renderMarkOrderedTableRows();
+    this.recalcMarkOrderedModal();
+
+    if (qtyInput) qtyInput.value = '1';
   }
 
   closeMarkOrderedModal() {
@@ -5250,27 +5563,7 @@ class ProcurementEngine {
       modal.style.display = 'none';
       modal.classList.remove('active');
     }
-  }
-
-  recalcMarkOrderedModal() {
-    const rows = document.querySelectorAll('.mark-ordered-item-row');
-    let grandTotal = 0;
-    let totalUnits = 0;
-    rows.forEach(r => {
-      const qtyInput = r.querySelector('.mark-ordered-qty-input');
-      const priceInput = r.querySelector('.mark-ordered-price-input');
-      const subtotalEl = r.querySelector('.mark-ordered-subtotal');
-      const qty = parseInt(qtyInput?.value, 10) || 0;
-      const price = parseFloat(priceInput?.value) || 0;
-      const sub = qty * price;
-      grandTotal += sub;
-      totalUnits += qty;
-      if (subtotalEl) subtotalEl.textContent = `$${sub.toFixed(2)}`;
-    });
-    const totalEl = document.getElementById('mark-order-grand-total');
-    if (totalEl) totalEl.textContent = `$${grandTotal.toFixed(2)}`;
-    const headingEl = document.getElementById('mark-order-items-count-heading');
-    if (headingEl) headingEl.textContent = `Items in this Order (${rows.length} lines · ${totalUnits} total units)`;
+    this.pendingMarkOrderedItems = null;
   }
 
   onMarkOrderRowSizeChange(idx, newSize) {
@@ -5287,6 +5580,7 @@ class ProcurementEngine {
         const priceInput = row.querySelector('.mark-ordered-price-input');
         if (priceInput && price > 0) {
           priceInput.value = price.toFixed(2);
+          item.price = price;
           this.recalcMarkOrderedModal();
         }
       }
@@ -5303,23 +5597,32 @@ class ProcurementEngine {
       customInput.style.display = 'none';
       if (this.pendingMarkOrderedItems) {
         const rows = document.querySelectorAll('.mark-ordered-item-row');
-        rows.forEach((r, idx) => {
+        rows.forEach(r => {
+          const idx = parseInt(r.getAttribute('data-idx'), 10);
+          if (isNaN(idx) || !this.pendingMarkOrderedItems[idx]) return;
           const item = this.pendingMarkOrderedItems[idx];
-          if (!item) return;
           const sizeInput = r.querySelector('.mark-ordered-size-input');
           const effSize = sizeInput ? sizeInput.value.trim() : (item.size || '');
           const priceInput = r.querySelector('.mark-ordered-price-input');
           const price = this.getVendorPrice(val, item.itemType, effSize, item.classVal);
           if (price > 0 && priceInput) {
             priceInput.value = price.toFixed(2);
+            item.price = price;
           }
         });
         this.recalcMarkOrderedModal();
       }
     }
+    this.onMoAddItemChange(true);
   }
 
   async confirmMarkOrdered() {
+    this.syncPendingMarkOrderedItemsFromDom();
+    if (!this.pendingMarkOrderedItems || this.pendingMarkOrderedItems.length === 0) {
+      alert('⚠️ Please add at least one item to this order.');
+      return;
+    }
+
     const poNumInput = document.getElementById('mark-order-po-num');
     let orderNum = poNumInput ? poNumInput.value.trim() : '';
     if (!orderNum) {
@@ -5356,36 +5659,40 @@ class ProcurementEngine {
       let totalUnits = 0;
       const allCheckedEmps = [];
 
-      const rows = document.querySelectorAll('.mark-ordered-item-row');
-
-      for (let i = 0; i < rows.length; i++) {
-        const r = rows[i];
+      for (let i = 0; i < this.pendingMarkOrderedItems.length; i++) {
         const origItem = this.pendingMarkOrderedItems[i];
         if (!origItem) continue;
 
-        const sizeInput = r.querySelector('.mark-ordered-size-input');
-        const qtyInput = r.querySelector('.mark-ordered-qty-input');
-        const priceInput = r.querySelector('.mark-ordered-price-input');
-
-        const resolvedSize = sizeInput ? sizeInput.value.trim() : (origItem.size || 'Standard');
-        const qty = parseInt(qtyInput?.value, 10) || origItem.quantity || 1;
-        const unitPrice = parseFloat(priceInput?.value) || 0;
+        const resolvedSize = (origItem.size || 'Standard').trim();
+        const qty = Math.max(1, parseInt(origItem.quantity, 10) || 1);
+        const unitPrice = Math.max(0, parseFloat(origItem.price) || 0);
         const subtotal = qty * unitPrice;
 
         grandTotal += subtotal;
         totalUnits += qty;
 
-        const checkedEmps = (origItem.employees && origItem.employees.length > 0)
-          ? origItem.employees.filter(e => e.checked).map(e => e.name)
-          : (origItem.employees?.map(e => e.name) || []);
+        // Collect assigned employee names
+        let rawEmps = [];
+        if (origItem.employees && origItem.employees.length > 0) {
+          rawEmps = origItem.employees.filter(e => e.checked && e.name).map(e => e.name);
+        } else if (origItem.employeeName) {
+          rawEmps = [origItem.employeeName];
+        }
 
-        allCheckedEmps.push(...checkedEmps);
+        // Exclude shelf/stock placeholders from linemen assignments
+        const validLinemen = rawEmps.filter(name => {
+          if (!name) return false;
+          const lower = name.toLowerCase();
+          return !lower.includes('shelf') && !lower.includes('stock');
+        });
 
-        const empTag = checkedEmps.length > 0 ? ` [For: ${checkedEmps.join(', ')}]` : '';
-        const summaryStr = `(${qty}) ${origItem.classVal || ''} ${origItem.itemType}, Size ${resolvedSize}${empTag}${unitPrice > 0 ? ' @ $' + unitPrice.toFixed(2) : ''}`;
+        allCheckedEmps.push(...validLinemen);
+
+        const empTag = validLinemen.length > 0 ? ` [For: ${validLinemen.join(', ')}]` : '';
+        const summaryStr = `(${qty}) ${origItem.classVal || ''} ${origItem.itemType || origItem.typeLabel || 'Equipment'}, Size ${resolvedSize}${empTag}${unitPrice > 0 ? ' @ $' + unitPrice.toFixed(2) : ''}`;
         itemsSummaryList.push(summaryStr);
 
-        // Auto-sync vendor price if entered
+        // Auto-sync vendor catalog price if entered
         if (unitPrice > 0) {
           await this.syncVendorPrice(vendorName, origItem.itemType, resolvedSize, origItem.classVal, unitPrice);
         }
@@ -5399,10 +5706,11 @@ class ProcurementEngine {
 
         const swapTable = swapKey ? ((this.db && typeof this.db.getTable === 'function' ? this.db.getTable(swapKey) : null) || snap?.tables?.[swapKey]) : null;
 
-        for (const empName of checkedEmps) {
+        for (const empName of validLinemen) {
           if (!empName) continue;
           const orderNote = `Ordered on ${orderDate || new Date().toLocaleDateString()}, Order #: ${orderNum}, Vendor: ${vendorName}${expectedDelivery ? ', Est. Delivery: ' + expectedDelivery : ''}${unitPrice > 0 ? ', Price: $' + unitPrice.toFixed(2) : ''}`;
 
+          let updatedInSwap = false;
           if (swapTable && swapTable.rows) {
             const sRow = swapTable.rows.find(sr => {
               const name = String(sr['Employee'] || sr['Employee Name'] || sr['Assigned To'] || Object.values(sr)[0] || '').trim();
@@ -5433,6 +5741,7 @@ class ProcurementEngine {
                 col: 12,
                 value: sRow['Notes']
               });
+              updatedInSwap = true;
             }
           }
 
@@ -5455,9 +5764,8 @@ class ProcurementEngine {
                 row: nrIdx,
                 rowData: nRow
               });
-            } else if (!swapKey) {
-              // Only create a new safety_equipment_needs row if this item is NOT tracked in a swap sheet.
-              // Items from glove_swaps/sleeve_swaps/blanket_swaps/mack_swaps are already tracked in swapTable.
+            } else if (!updatedInSwap) {
+              // Only create a new safety_equipment_needs row if this item is NOT already tracked in a swap sheet
               const newNeed = {
                 'Employee': empName,
                 'Item Type': origItem.typeLabel || origItem.itemType,
@@ -5485,7 +5793,7 @@ class ProcurementEngine {
       const uniqueEmps = Array.from(new Set(allCheckedEmps)).filter(Boolean);
       let empNoteStr = uniqueEmps.length > 0
         ? `Ordered ${totalUnits} units (For: ${uniqueEmps.join(', ')})`
-        : `Ordered ${totalUnits} units for Mountain Power Operations`;
+        : `Ordered ${totalUnits} units for Mountain Power Operations (Shelf Stock)`;
       if (orderNum) {
         empNoteStr += `; Order #: ${orderNum}`;
       }
@@ -5510,12 +5818,12 @@ class ProcurementEngine {
         window.ppeTrackingEngine.refresh();
       }
 
-      alert(`✅ Successfully marked ${totalUnits} item(s) as Ordered under Order #${orderNum} with ${vendorName}!`);
+      alert(`✅ Successfully created Order #${orderNum} with ${vendorName} for ${totalUnits} item(s)!`);
     } catch (err) {
       console.error('Error confirming mark ordered:', err);
       alert('❌ Failed to mark items as ordered: ' + (err.message || err));
     } finally {
-      if (confirmBtn) confirmBtn.innerHTML = '<span>📦</span> Confirm & Save Order';
+      if (confirmBtn) confirmBtn.innerHTML = '<span>📦</span> Confirm & Create Order';
     }
   }
 
