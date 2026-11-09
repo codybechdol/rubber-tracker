@@ -66,6 +66,195 @@ class SMSDialogEngine {
   }
 
   /**
+   * Returns storage map for safety compliance SMS notifications
+   */
+  getSafetyComplianceSmsNotifiedMap() {
+    try {
+      const raw = localStorage.getItem('sa_compliance_sms_notified');
+      return raw ? JSON.parse(raw) : {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  /**
+   * Persists an SMS notification record for a crew and week
+   */
+  saveSafetyComplianceSmsNotified(jobNum, weekVal, dateStr) {
+    try {
+      const map = this.getSafetyComplianceSmsNotifiedMap();
+      const cleanJob = String(jobNum || '').trim();
+      const cleanWeek = String(weekVal || '').trim();
+      const key = `${cleanJob}_${cleanWeek}`;
+      map[key] = {
+        jobNum: cleanJob,
+        week: cleanWeek,
+        date: dateStr,
+        timestamp: Date.now()
+      };
+      localStorage.setItem('sa_compliance_sms_notified', JSON.stringify(map));
+    } catch (e) {
+      console.error('Error saving compliance sms notified:', e);
+    }
+  }
+
+  /**
+   * Retrieves notification date for a crew and week if previously notified
+   */
+  getSafetyComplianceSmsNotified(jobNum, weekVal) {
+    try {
+      const map = this.getSafetyComplianceSmsNotifiedMap();
+      const cleanJob = String(jobNum || '').trim();
+      const cleanWeek = String(weekVal || '').trim();
+      const key = `${cleanJob}_${cleanWeek}`;
+      if (map[key]) return map[key].date;
+      const shortWeek = cleanWeek.replace(/\/20(\d\d)$/, '/$1');
+      const longWeek = cleanWeek.replace(/\/(\d\d)$/, '/20$1');
+      if (map[`${cleanJob}_${shortWeek}`]) return map[`${cleanJob}_${shortWeek}`].date;
+      if (map[`${cleanJob}_${longWeek}`]) return map[`${cleanJob}_${longWeek}`].date;
+      return null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  /**
+   * Sets manual phone number if foreman does not have one on profile
+   */
+  setManualPhone(phoneStr) {
+    if (!this.currentContext) return;
+    const raw = String(phoneStr || '').trim();
+    this.currentContext.phone = raw;
+    let clean = raw.replace(/[^0-9]/g, '');
+    if (clean.length === 10) clean = '1' + clean;
+    this.currentContext.cleanPhone = clean;
+  }
+
+  /**
+   * Resets safety missing SMS text message back to template
+   */
+  resetSafetyMissingMessage() {
+    if (!this.currentContext || this.currentContext.type !== 'safety_missing') return;
+    const textarea = document.getElementById('dt-sms-message-text');
+    if (textarea) {
+      textarea.value = this.currentContext.defaultMsg;
+    }
+  }
+
+  /**
+   * Opens the SMS modal for missing safety compliance reports
+   */
+  openSafetyMissingSms(foreman, jobNum, weekVal) {
+    const modal = document.getElementById('sms-notification-modal');
+    const body = document.getElementById('sms-notification-modal-body');
+    const titleEl = document.getElementById('sms-notification-modal-title');
+    if (!modal || !body) return;
+
+    if (titleEl) {
+      titleEl.innerHTML = '<span style="font-size: 18px;">🛡️</span> <span style="font-weight: 700;">Missing Safety Reports SMS Reminder</span>';
+    }
+    const modalHeader = modal.querySelector('.modal-header');
+    if (modalHeader) {
+      modalHeader.style.background = 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)';
+    }
+    const markBtn = modal.querySelector('.modal-footer .btn-success');
+    if (markBtn) {
+      markBtn.innerHTML = '<span>✅</span> Mark as Notified';
+      markBtn.title = 'Mark foreman as notified for this week without opening messaging app';
+    }
+
+    const cleanJob = String(jobNum || '').trim();
+    const cleanWeek = String(weekVal || '').trim();
+
+    // Look up crew row in safety_compliance table
+    const snap = (this.db && typeof this.db.getSnapshot === 'function') ? this.db.getSnapshot() : (this.db ? this.db.snapshot : null);
+    const scTable = snap && snap.tables ? (snap.tables['safety_compliance'] || snap.tables['Safety Compliance']) : null;
+    let crewRow = null;
+    if (scTable && scTable.rows) {
+      crewRow = scTable.rows.find(r => {
+        const rJob = String(r['Job Number'] || r['Crew'] || '').trim();
+        const rWeek = String(r['Week Start'] || r['Week'] || '').trim();
+        return rJob.toLowerCase() === cleanJob.toLowerCase() &&
+               (rWeek === cleanWeek || rWeek.startsWith(cleanWeek) || cleanWeek.startsWith(rWeek));
+      });
+    }
+
+    const dayLabels = {
+      'Sun': 'Sunday JHA',
+      'Mon': 'Monday JHA',
+      'Tue': 'Tuesday JHA',
+      'Wed': 'Wednesday JHA',
+      'Thu': 'Thursday JHA',
+      'Fri': 'Friday JHA',
+      'Sat': 'Saturday JHA'
+    };
+
+    const missingItems = [];
+    if (crewRow) {
+      ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].forEach(d => {
+        const v = String(crewRow[d] || '').trim();
+        if (v.startsWith('❌')) {
+          missingItems.push(dayLabels[d]);
+        }
+      });
+      const wm = String(crewRow['Weekly Meeting'] || '').trim();
+      if (wm.startsWith('❌')) {
+        missingItems.push('Weekly Safety Meeting');
+      }
+      const mc = String(crewRow['Monthly Checklist'] || '').trim();
+      if (mc.startsWith('❌')) {
+        missingItems.push('Monthly Checklist');
+      }
+    }
+
+    if (missingItems.length === 0) {
+      missingItems.push('Safety Reports');
+    }
+
+    let itemsStr = '';
+    if (missingItems.length === 1) {
+      itemsStr = missingItems[0];
+    } else if (missingItems.length === 2) {
+      itemsStr = `${missingItems[0]} and ${missingItems[1]}`;
+    } else {
+      itemsStr = `${missingItems.slice(0, -1).join(', ')}, and ${missingItems[missingItems.length - 1]}`;
+    }
+
+    const shortWeek = cleanWeek.replace(/\/20(\d\d)$/, '/$1');
+    const firstName = String(foreman || '').trim().split(' ')[0] || 'there';
+
+    const defaultMsg = `Hi ${firstName}, we did not receive the ${itemsStr} for the week of ${shortWeek} from your crew (${cleanJob}).
+
+Did you send it and I just didn't get it?
+Is it hung up in the app?
+Did you not work that day?
+Was there an issue turning it in that you need help with?
+
+Please let me know so we can get this updated. Thanks!`;
+
+    const phone = this.getEmployeePhone(foreman);
+    let cleanPhone = phone.replace(/[^0-9]/g, '');
+    if (cleanPhone.length === 10) cleanPhone = '1' + cleanPhone;
+
+    this.currentContext = {
+      type: 'safety_missing',
+      foreman: foreman || 'Foreman',
+      firstName,
+      jobNum: cleanJob,
+      weekVal: cleanWeek,
+      cleanWeek: shortWeek,
+      missingItems,
+      itemsStr,
+      phone,
+      cleanPhone,
+      defaultMsg
+    };
+
+    this.renderModalUI(body);
+    modal.classList.add('active');
+  }
+
+  /**
    * Opens the SMS modal for an expiring certification
    */
   openCertSms(employeeName, certType, expirationDate, rowIdx = null, colIdx = null, sheetName = 'Expiring Certs') {
@@ -152,6 +341,81 @@ class SMSDialogEngine {
   renderModalUI(container) {
     const ctx = this.currentContext;
     if (!ctx) return;
+
+    if (ctx.type === 'safety_missing') {
+      const notifDate = this.getSafetyComplianceSmsNotified(ctx.jobNum, ctx.weekVal);
+      let html = `
+        <!-- Crew & Foreman Summary Card -->
+        <div style="background-color: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 8px; padding: 14px; margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;">
+          <div>
+            <div style="font-size: 16px; font-weight: 800; color: var(--text-primary); display: flex; align-items: center; gap: 6px;">
+              <span>👑</span> ${this.escapeHtml(ctx.foreman)}
+              <span style="font-family: monospace; font-size: 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); padding: 1px 6px; border-radius: 4px; color: #60a5fa;">
+                ${this.escapeHtml(ctx.jobNum)}
+              </span>
+            </div>
+            <div style="font-size: 13px; color: var(--text-secondary); margin-top: 4px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+              <span>📅 <strong>Week:</strong> ${this.escapeHtml(ctx.cleanWeek)}</span>
+              ${notifDate ? `
+                <span style="color: #34d399; font-weight: 700; background: rgba(16, 185, 129, 0.15); border: 1px solid rgba(16, 185, 129, 0.35); padding: 1px 7px; border-radius: 4px; font-size: 11px;">
+                  ✅ Notified on ${this.escapeHtml(notifDate)}
+                </span>
+              ` : `
+                <span style="color: #f87171; font-weight: 700; background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.35); padding: 1px 7px; border-radius: 4px; font-size: 11px;">
+                  ⚠️ Not Yet Contacted
+                </span>
+              `}
+            </div>
+          </div>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            ${ctx.phone ? `
+              <div style="font-size: 14px; font-weight: 700; color: #60a5fa; background: rgba(59, 130, 246, 0.15); padding: 4px 10px; border-radius: 6px; border: 1px solid rgba(59, 130, 246, 0.3); display: flex; align-items: center; gap: 6px;">
+                <span>📞</span> ${this.escapeHtml(ctx.phone)}
+              </div>
+            ` : `
+              <div style="display: flex; align-items: center; gap: 6px;">
+                <input type="tel" id="dt-sms-manual-phone" placeholder="Enter Foreman Phone..." value="${this.escapeHtml(ctx.phone || '')}" oninput="window.smsDialogEngine.setManualPhone(this.value)" style="background: var(--bg-tertiary); border: 1px solid #ef4444; border-radius: 6px; color: var(--text-primary); padding: 5px 8px; font-size: 12px; width: 160px;" />
+                <span style="font-size: 11px; color: #ef4444; font-weight: 600;">⚠️ No Phone</span>
+              </div>
+            `}
+          </div>
+        </div>
+
+        <!-- Missing Reports List -->
+        <div style="background: var(--bg-secondary); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 8px; padding: 12px 14px; margin-bottom: 16px;">
+          <div style="font-size: 12px; font-weight: 700; color: #f87171; margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
+            <span>❌</span> Missing Report${(ctx.missingItems || []).length === 1 ? '' : 's'} for Week of ${this.escapeHtml(ctx.cleanWeek)}:
+          </div>
+          <div style="display: flex; flex-wrap: wrap; gap: 6px;">
+            ${(ctx.missingItems && ctx.missingItems.length > 0) ? ctx.missingItems.map(item => `
+              <span style="background: rgba(239, 68, 68, 0.15); border: 1px solid rgba(239, 68, 68, 0.4); color: #fca5a5; font-size: 12px; font-weight: 700; padding: 3px 8px; border-radius: 5px;">
+                ❌ ${this.escapeHtml(item)}
+              </span>
+            `).join('') : `
+              <span style="color: var(--text-muted); font-size: 12px;">No specific missing items recorded (status marked as missing)</span>
+            `}
+          </div>
+        </div>
+
+        <!-- Message Editor Box -->
+        <div style="margin-bottom: 16px;">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+            <label style="font-size: 12px; font-weight: 700; color: var(--text-secondary);">💬 Text Message to Foreman</label>
+            <button class="btn btn-secondary" style="font-size: 11px; padding: 2px 7px; color: var(--text-muted); cursor: pointer;" onclick="window.smsDialogEngine.resetSafetyMissingMessage()">
+              ↺ Reset Template
+            </button>
+          </div>
+          <textarea id="dt-sms-message-text" rows="7" style="width: 100%; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px; color: var(--text-primary); padding: 10px; font-family: sans-serif; font-size: 13px; line-height: 1.4; resize: vertical;">${this.escapeHtml(ctx.defaultMsg)}</textarea>
+        </div>
+
+        <!-- Action Notice -->
+        <div style="background: rgba(59, 130, 246, 0.1); border: 1px solid rgba(59, 130, 246, 0.25); border-radius: 6px; padding: 8px 12px; font-size: 12px; color: #93c5fd; display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+          <span>💡</span> Clicking <strong>Launch SMS App</strong> opens your messaging app with pre-filled recipient and text. You can also copy to clipboard or mark as notified.
+        </div>
+      `;
+      container.innerHTML = html;
+      return;
+    }
 
     let html = `
       <!-- Employee Info Summary Card -->
@@ -454,6 +718,51 @@ class SMSDialogEngine {
     if (!ctx) return;
 
     const todayStr = new Date().toLocaleDateString('en-US', { month: '2-digit', day: '2-digit', year: 'numeric' });
+
+    if (ctx.type === 'safety_missing') {
+      // 1. Save to localStorage map
+      this.saveSafetyComplianceSmsNotified(ctx.jobNum, ctx.weekVal, todayStr);
+
+      // 2. Update snapshot table row if available
+      const snap = (this.db && typeof this.db.getSnapshot === 'function') ? this.db.getSnapshot() : (this.db ? this.db.snapshot : null);
+      const scTable = snap && snap.tables ? (snap.tables['safety_compliance'] || snap.tables['Safety Compliance']) : null;
+      if (scTable && scTable.rows) {
+        const cleanJob = String(ctx.jobNum || '').trim();
+        const cleanWeek = String(ctx.weekVal || '').trim();
+        const matchedRow = scTable.rows.find(r => {
+          const rJob = String(r['Job Number'] || r['Crew'] || '').trim();
+          const rWeek = String(r['Week Start'] || r['Week'] || '').trim();
+          return rJob.toLowerCase() === cleanJob.toLowerCase() &&
+                 (rWeek === cleanWeek || rWeek.startsWith(cleanWeek) || cleanWeek.startsWith(rWeek));
+        });
+        if (matchedRow) {
+          matchedRow['SMS Notified'] = todayStr;
+        }
+        if (this.db && typeof this.db.persistSnapshot === 'function') {
+          try {
+            await this.db.persistSnapshot(snap);
+          } catch (err) {
+            console.warn('Could not persist snapshot for safety SMS:', err);
+          }
+        }
+      }
+
+      // 3. Refresh Safety Compliance UI
+      if (window.sheetNavigator && typeof window.sheetNavigator.renderSafetyCompliance === 'function') {
+        window.sheetNavigator.renderSafetyCompliance();
+      }
+
+      // 4. Toast notification
+      if (typeof window.showToast === 'function') {
+        window.showToast(`💬 Recorded SMS reminder for Foreman ${ctx.foreman} (${ctx.jobNum})`, 'success');
+      }
+
+      setTimeout(() => {
+        this.closeSmsModal();
+      }, 400);
+      return;
+    }
+
     const isInstructions = ctx.type === 'instructions';
     let notifStatus = '';
     if (isInstructions) {

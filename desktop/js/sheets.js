@@ -1926,6 +1926,10 @@ class SheetNavigator {
     const compCount = weekRows.filter(r => String(r['Status'] || '').toLowerCase() === 'complete').length;
     const missingCount = weekRows.filter(r => String(r['Status'] || '').toLowerCase().includes('missing')).length;
     const pendingCount = weekRows.filter(r => String(r['Status'] || '').toLowerCase() === 'pending').length;
+    const notifiedCount = weekRows.filter(r => {
+      const jn = String(r['Job Number'] || r['Crew'] || '').trim();
+      return Boolean(r['SMS Notified'] || (window.smsDialogEngine && window.smsDialogEngine.getSafetyComplianceSmsNotified(jn, this.selectedComplianceWeek)));
+    }).length;
     const pct = totalCrews > 0 ? Math.round((compCount / totalCrews) * 100) : 0;
 
     const sTerm = (this.searchTerm || '').toLowerCase().trim();
@@ -1961,6 +1965,11 @@ class SheetNavigator {
       });
     } else if (curFilter === 'compliant') {
       filteredCrews = filteredCrews.filter(r => String(r['Status'] || '').toLowerCase() === 'complete');
+    } else if (curFilter === 'sms_notified') {
+      filteredCrews = filteredCrews.filter(r => {
+        const jn = String(r['Job Number'] || r['Crew'] || '').trim();
+        return Boolean(r['SMS Notified'] || (window.smsDialogEngine && window.smsDialogEngine.getSafetyComplianceSmsNotified(jn, this.selectedComplianceWeek)));
+      });
     }
 
     if (countBadge) {
@@ -2014,6 +2023,9 @@ class SheetNavigator {
             <div class="cards-filter-chip ${curFilter === 'compliant' ? 'active' : ''}" style="color: #4ade80;" onclick="window.sheetNavigator.setComplianceCardFilter('compliant')">
               ✅ 100% Compliant (${compCount})
             </div>
+            <div class="cards-filter-chip ${curFilter === 'sms_notified' ? 'active' : ''}" style="color: #38bdf8;" onclick="window.sheetNavigator.setComplianceCardFilter('sms_notified')">
+              💬 SMS Notified (${notifiedCount})
+            </div>
           </div>
         </div>
 
@@ -2045,6 +2057,36 @@ class SheetNavigator {
     const meta = jobLocMap.get(jobNum) || {};
     const location = meta.loc || '';
     const discipline = meta.discipline || 'Electric';
+
+    const dayLabels = {
+      'Sun': 'Sunday JHA',
+      'Mon': 'Monday JHA',
+      'Tue': 'Tuesday JHA',
+      'Wed': 'Wednesday JHA',
+      'Thu': 'Thursday JHA',
+      'Fri': 'Friday JHA',
+      'Sat': 'Saturday JHA'
+    };
+
+    const missingItems = [];
+    ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].forEach(d => {
+      const v = String(crewRow[d] || '').trim();
+      if (v.startsWith('❌')) {
+        missingItems.push(dayLabels[d]);
+      }
+    });
+    const wm = String(crewRow['Weekly Meeting'] || '').trim();
+    if (wm.startsWith('❌')) {
+      missingItems.push('Weekly Safety Meeting');
+    }
+    const mc = String(crewRow['Monthly Checklist'] || '').trim();
+    if (mc.startsWith('❌')) {
+      missingItems.push('Monthly Checklist');
+    }
+
+    const hasMissing = missingItems.length > 0 || status.includes('Missing');
+    const notifDate = crewRow['SMS Notified'] || (window.smsDialogEngine ? window.smsDialogEngine.getSafetyComplianceSmsNotified(jobNum, weekVal) : null);
+    const cleanNotifDate = notifDate ? String(notifDate).replace(/\/20(\d\d)$/, '/$1') : '';
 
     let cardBorderClass = 'status-pending';
     let statusBadge = `<span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #facc15; border: 1px solid rgba(245, 158, 11, 0.35); font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 4px;">⏳ Pending</span>`;
@@ -2153,6 +2195,15 @@ class SheetNavigator {
               <span class="badge" style="background: rgba(14, 165, 233, 0.15); color: #38bdf8; border: 1px solid rgba(14, 165, 233, 0.35); font-size: 9.5px; font-weight: 700; padding: 1px 5px; border-radius: 4px;">
                 ⚡ ${this.escapeHtml(discipline)}
               </span>
+              ${hasMissing ? (notifDate ? `
+                <button class="btn btn-secondary" style="padding: 1px 6px; font-size: 10px; color: #34d399; border-color: rgba(52, 211, 153, 0.4); background: rgba(52, 211, 153, 0.12); cursor: pointer; font-weight: 700; display: inline-flex; align-items: center; gap: 3px;" onclick="if(window.smsDialogEngine){window.smsDialogEngine.openSafetyMissingSms('${this.escapeJs(foreman)}', '${this.escapeJs(jobNum)}', '${this.escapeJs(weekVal)}');}" title="Foreman notified on ${this.escapeHtml(notifDate)}. Click to text again.">
+                  💬 Notified ${this.escapeHtml(cleanNotifDate)}
+                </button>
+              ` : `
+                <button class="btn btn-secondary" style="padding: 1px 6px; font-size: 10px; color: #f87171; border-color: rgba(239, 68, 68, 0.4); background: rgba(239, 68, 68, 0.12); cursor: pointer; font-weight: 700; display: inline-flex; align-items: center; gap: 3px;" onclick="if(window.smsDialogEngine){window.smsDialogEngine.openSafetyMissingSms('${this.escapeJs(foreman)}', '${this.escapeJs(jobNum)}', '${this.escapeJs(weekVal)}');}" title="Missing reports detected. Click to send SMS reminder to Foreman.">
+                  💬 SMS
+                </button>
+              `) : ''}
             </div>
             ${location ? `
               <div style="margin-top: 5px; font-size: 11.5px; color: var(--text-secondary); display: flex; align-items: center; gap: 4px;">
@@ -2186,9 +2237,32 @@ class SheetNavigator {
             ${renderMeetingPill('Monthly Checklist', 'Monthly Checklist')}
           </div>
 
+          <!-- SMS Action Bar for Missing Reports -->
+          ${hasMissing ? `
+            <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid rgba(255,255,255,0.06); display: flex; align-items: center; justify-content: space-between; gap: 8px;">
+              ${notifDate ? `
+                <span style="font-size: 11px; color: #34d399; font-weight: 700; display: flex; align-items: center; gap: 4px;">
+                  <span>✅</span> Notified on ${this.escapeHtml(cleanNotifDate)}
+                </span>
+                <button class="btn btn-secondary" style="padding: 3px 9px; font-size: 11px; font-weight: 700; color: #60a5fa; border-color: rgba(96, 165, 250, 0.4); background: rgba(96, 165, 250, 0.12); cursor: pointer; display: inline-flex; align-items: center; gap: 4px;"
+                        onclick="if(window.smsDialogEngine){window.smsDialogEngine.openSafetyMissingSms('${this.escapeJs(foreman)}', '${this.escapeJs(jobNum)}', '${this.escapeJs(weekVal)}');}" title="Send another SMS reminder to Foreman">
+                  <span>💬</span> Text Again
+                </button>
+              ` : `
+                <span style="font-size: 11px; color: #f87171; font-weight: 700; display: flex; align-items: center; gap: 4px;">
+                  <span>⚠️</span> ${missingItems.length} Missing Item${missingItems.length === 1 ? '' : 's'}
+                </span>
+                <button class="btn btn-secondary" style="padding: 3px 9px; font-size: 11px; font-weight: 700; color: #f87171; border-color: rgba(239, 68, 68, 0.4); background: rgba(239, 68, 68, 0.12); cursor: pointer; display: inline-flex; align-items: center; gap: 4px;"
+                        onclick="if(window.smsDialogEngine){window.smsDialogEngine.openSafetyMissingSms('${this.escapeJs(foreman)}', '${this.escapeJs(jobNum)}', '${this.escapeJs(weekVal)}');}" title="Send SMS reminder to Foreman about missing reports">
+                  <span>📱</span> Text Foreman (Missing Reports)
+                </button>
+              `}
+            </div>
+          ` : ''}
+
           <!-- Card Footer -->
           ${updated ? `
-            <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid rgba(255,255,255,0.04); padding-top: 6px; font-size: 10px; color: var(--text-muted);">
+            <div style="display: flex; justify-content: space-between; align-items: center; border-top: 1px solid rgba(255,255,255,0.04); padding-top: 6px; font-size: 10px; color: var(--text-muted); margin-top: 4px;">
               <span>🕒 Updated: ${this.escapeHtml(updated)}</span>
             </div>
           ` : ''}
