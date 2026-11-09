@@ -5165,6 +5165,11 @@ class ProcurementEngine {
       `;
     });
 
+    const modalTitle = document.getElementById('mark-ordered-modal-title');
+    if (modalTitle) {
+      modalTitle.innerHTML = `<span>📦</span> Create Order from Selected Needs (${totalUnitsCount} Units)`;
+    }
+
     body.innerHTML = `
       <div style="margin-bottom: 18px; background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 8px; padding: 14px 18px;">
         <div style="font-weight: 700; font-size: 14px; color: #34d399; margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">
@@ -7141,6 +7146,12 @@ class ProcurementEngine {
   }
 
   openCreateOrderModal() {
+    const selectedItems = (this.items || []).filter(i => i.selected && i.quantity > 0 && i.section !== 'ordered_pending');
+    if (selectedItems.length > 0) {
+      this.openMarkOrderedModal(selectedItems);
+      return;
+    }
+
     const nextReq = this.generateNextRequestPoNumber();
     const defaultVendor = (this.selectedVendor && typeof this.selectedVendor === 'object' ? this.selectedVendor.name : this.selectedVendor)
       || (this.vendors[0] ? this.vendors[0].name : 'Wagner Smith');
