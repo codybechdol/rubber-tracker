@@ -6120,6 +6120,74 @@ function applyStatusFormatting(sheet, startRow, numRows) {
  * @param {string} [reportTypeFilter] - Filter for report type ('ALL', 'JHA', 'WEEKLY', 'MONTHLY')
  * @param {number} [maxExecutionMs] - Optional maximum execution time in ms (e.g. 25000 for Web App calls)
  */
+/**
+ * Writes and deduplicates equipment issues into the Safety Equipment Needs sheet.
+ * Can be called during batch timeouts or at batch completion.
+ *
+ * @param {Sheet} sheet - Safety Equipment Needs sheet
+ * @param {Array} issues - Array of parsed issue rows
+ * @returns {number} - Number of new issues written
+ */
+function writeSafetyEquipmentIssuesToSheet(sheet, issues) {
+  if (!sheet || !issues || issues.length === 0) return 0;
+  var sheetData = sheet.getDataRange().getValues();
+  var existingEmailKeys = {};
+  var existingContentKeys = {};
+  for (var eiIdx = 1; eiIdx < sheetData.length; eiIdx++) {
+    var eiEmailId = String(sheetData[eiIdx][9] || "");
+    var eiEquipType = String(sheetData[eiIdx][5] || "");
+    var eiDesc = String(sheetData[eiIdx][6] || "").substring(0, 50);
+    if (eiEmailId) {
+      existingEmailKeys[eiEmailId + "|" + eiEquipType + "|" + eiDesc] = true;
+    }
+    var eiDateStr = "";
+    try {
+      var eiDate = sheetData[eiIdx][0];
+      if (eiDate instanceof Date && !isNaN(eiDate.getTime())) {
+        eiDateStr = Utilities.formatDate(eiDate, Session.getScriptTimeZone(), "yyyy-MM-dd");
+      }
+    } catch (e) { eiDateStr = ""; }
+    var eiVehicle = String(sheetData[eiIdx][4] || "").trim();
+    var eiJob = String(sheetData[eiIdx][2] || "").trim();
+    existingContentKeys[eiDateStr + "|" + eiVehicle + "|" + eiJob + "|" + eiEquipType + "|" + eiDesc] = true;
+  }
+  var dedupedIssues = [];
+  for (var diIdx = 0; diIdx < issues.length; diIdx++) {
+    var diEmailId = String(issues[diIdx][9] || "");
+    var diEquipType = String(issues[diIdx][5] || "");
+    var diDesc = String(issues[diIdx][6] || "").substring(0, 50);
+    var emailKey = diEmailId + "|" + diEquipType + "|" + diDesc;
+
+    var diDateStr = "";
+    try {
+      var diDate = issues[diIdx][0];
+      if (diDate instanceof Date && !isNaN(diDate.getTime())) {
+        diDateStr = Utilities.formatDate(diDate, Session.getScriptTimeZone(), "yyyy-MM-dd");
+      }
+    } catch (e) { diDateStr = ""; }
+    var diVehicle = String(issues[diIdx][4] || "").trim();
+    var diJob = String(issues[diIdx][2] || "").trim();
+    var contentKey = diDateStr + "|" + diVehicle + "|" + diJob + "|" + diEquipType + "|" + diDesc;
+
+    if (!existingEmailKeys[emailKey] && !existingContentKeys[contentKey]) {
+      dedupedIssues.push(issues[diIdx]);
+      existingEmailKeys[emailKey] = true;
+      existingContentKeys[contentKey] = true;
+    } else {
+      Logger.log("Skipping duplicate equipment issue: " + (existingEmailKeys[emailKey] ? "email match" : "content match") + " - " + contentKey);
+    }
+  }
+  if (dedupedIssues.length > 0) {
+    var lastRow = sheet.getLastRow();
+    sheet.getRange(lastRow + 1, 1, dedupedIssues.length, 13).setValues(dedupedIssues);
+    applyStatusFormatting(sheet, lastRow + 1, dedupedIssues.length);
+  }
+  if (dedupedIssues.length < issues.length) {
+    Logger.log("Dedup: Wrote " + dedupedIssues.length + " issues, skipped " + (issues.length - dedupedIssues.length) + " duplicates");
+  }
+  return dedupedIssues.length;
+}
+
 function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction, endDate, reportTypeFilter, maxExecutionMs) {
   var startTime = new Date().getTime(); // Track execution time immediately from entry
   var MAX_EXECUTION_MS = (typeof maxExecutionMs === 'number' && maxExecutionMs > 0) ? maxExecutionMs : (5.5 * 60 * 1000);
@@ -6843,6 +6911,9 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
       // If we timed out or reached batch budget, save progress and return early
       if (timedOut) {
         writeCollectedSafetyLogs(rowsCollector);
+        if (issues && issues.length > 0) {
+          writeSafetyEquipmentIssuesToSheet(sheet, issues);
+        }
         var actualProcessed = batchStart + lastProcessedIndex;
         if (actualProcessed <= batchStart && batchThreads.length > 0) {
           actualProcessed = batchStart + 1;
@@ -6924,68 +6995,9 @@ function processSafetyEmails(daysBack, batchSize, newOnlyMode, skipPdfExtraction
       */
 
       // Write equipment issues to sheet (NOT compliance records - those go only to Safety Compliance sheet)
-      // De-duplicate using BOTH email-ID-based AND content-based keys
-      // Content key (date + vehicle + job + equipType + desc) catches duplicates from different email messages
       if (issues.length > 0) {
-        var sheetData = sheet.getDataRange().getValues();
-        var existingEmailKeys = {};
-        var existingContentKeys = {};
-        for (var eiIdx = 1; eiIdx < sheetData.length; eiIdx++) {
-          var eiEmailId = String(sheetData[eiIdx][9] || '');
-          var eiEquipType = String(sheetData[eiIdx][5] || '');
-          var eiDesc = String(sheetData[eiIdx][6] || '').substring(0, 50);
-          if (eiEmailId) {
-            existingEmailKeys[eiEmailId + '|' + eiEquipType + '|' + eiDesc] = true;
-          }
-          // Content-based key: date + vehicle + job + equipType + desc
-          var eiDateStr = '';
-          try {
-            var eiDate = sheetData[eiIdx][0];
-            if (eiDate instanceof Date && !isNaN(eiDate.getTime())) {
-              eiDateStr = Utilities.formatDate(eiDate, Session.getScriptTimeZone(), 'yyyy-MM-dd');
-            }
-          } catch (e) { eiDateStr = ''; }
-          var eiVehicle = String(sheetData[eiIdx][4] || '').trim();
-          var eiJob = String(sheetData[eiIdx][2] || '').trim();
-          existingContentKeys[eiDateStr + '|' + eiVehicle + '|' + eiJob + '|' + eiEquipType + '|' + eiDesc] = true;
-        }
-        var dedupedIssues = [];
-        for (var diIdx = 0; diIdx < issues.length; diIdx++) {
-          var diEmailId = String(issues[diIdx][9] || '');
-          var diEquipType = String(issues[diIdx][5] || '');
-          var diDesc = String(issues[diIdx][6] || '').substring(0, 50);
-          var emailKey = diEmailId + '|' + diEquipType + '|' + diDesc;
-
-          // Build content key for this issue
-          var diDateStr = '';
-          try {
-            var diDate = issues[diIdx][0];
-            if (diDate instanceof Date && !isNaN(diDate.getTime())) {
-              diDateStr = Utilities.formatDate(diDate, Session.getScriptTimeZone(), 'yyyy-MM-dd');
-            }
-          } catch (e) { diDateStr = ''; }
-          var diVehicle = String(issues[diIdx][4] || '').trim();
-          var diJob = String(issues[diIdx][2] || '').trim();
-          var contentKey = diDateStr + '|' + diVehicle + '|' + diJob + '|' + diEquipType + '|' + diDesc;
-
-          if (!existingEmailKeys[emailKey] && !existingContentKeys[contentKey]) {
-            dedupedIssues.push(issues[diIdx]);
-            existingEmailKeys[emailKey] = true;
-            existingContentKeys[contentKey] = true;
-          } else {
-            Logger.log('Skipping duplicate equipment issue: ' + (existingEmailKeys[emailKey] ? 'email match' : 'content match') + ' - ' + contentKey);
-          }
-        }
-        if (dedupedIssues.length > 0) {
-          var lastRow = sheet.getLastRow();
-          sheet.getRange(lastRow + 1, 1, dedupedIssues.length, 13).setValues(dedupedIssues);
-          applyStatusFormatting(sheet, lastRow + 1, dedupedIssues.length);
-        }
-        if (dedupedIssues.length < issues.length) {
-          Logger.log('Dedup: Wrote ' + dedupedIssues.length + ' issues, skipped ' + (issues.length - dedupedIssues.length) + ' duplicates');
-        }
+        writeSafetyEquipmentIssuesToSheet(sheet, issues);
       }
-
       var isComplete = batchEnd >= totalThreadsCount;
       writeCollectedSafetyLogs(rowsCollector);
 
@@ -8095,15 +8107,16 @@ function parseSafetyEmail(message, skipPdfExtraction, startTime, maxExecutionMs)
     var jhaDateOverrides = []; // Holds dates extracted from PDF for JHAs (may have multiple per email)
 
     if (reportType === "Safety Checklist" && skipPdfExtraction) {
-      Logger.log("⚡ FAST MODE: Skipping Safety Checklist PDF extraction for job " + jobNumber + " - equipment issues won't be extracted");
+      Logger.log("🔍 Quick Scan: Parsing Safety Checklist PDF for job " + jobNumber + " to extract equipment issues for Trip Planner");
     }
 
-    // Extract PDF content for JHA reports to get actual "Date Completed" from the PDF
-    // This is important because the email subject date may differ from actual work dates
-    // PROCESSES ALL PDFs in the email (some emails have multiple JHA PDFs)
-    // Extract text from PDF attachments (JHA, Safety Checklist, Fleet Checklist)
-    // NOTE: This is SLOW (~5-10 sec per PDF). Can be skipped with skipPdfExtraction=true
-    if ((reportType === "JHA" || reportType === "Safety Checklist" || reportType === "Fleet Checklist") && !skipPdfExtraction) {
+    // Safety Checklist and Fleet Checklist: ALWAYS extract PDF attachments so equipment issues/defects
+    // can be added to Safety Equipment Needs and scheduled in Trip Planner (even in startup Quick Scan).
+    // JHA: Extract PDF only when !skipPdfExtraction (JHAs are high volume daily and use subject dates in Fast Mode).
+    var shouldExtractPdf = (reportType === "Safety Checklist" || reportType === "Fleet Checklist") ||
+                           (reportType === "JHA" && !skipPdfExtraction);
+
+    if (shouldExtractPdf) {
       Logger.log("Processing PDF attachments for " + reportType + " (Job: " + jobNumber + ")...");
       var attachments = message.getAttachments();
       var pdfCount = 0;

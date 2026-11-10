@@ -31027,20 +31027,21 @@ function setupAEDSheet() {
  */
 function getDefaultCompanyHolidays() {
   return [
-    { date: '2026-01-01', name: "New Year's Day" },
-    { date: '2026-05-25', name: "Memorial Day" },
-    { date: '2026-07-03', name: "Independence Day (Observed)" },
-    { date: '2026-07-04', name: "Independence Day" },
-    { date: '2026-09-07', name: "Labor Day" },
-    { date: '2026-11-26', name: "Thanksgiving Day" },
-    { date: '2026-11-27', name: "Day After Thanksgiving" },
-    { date: '2026-12-24', name: "Christmas Eve" },
-    { date: '2026-12-25', name: "Christmas Day" }
+    { date: '2026-01-01', name: "New Year's Day", isFloating: false },
+    { date: '2026-05-25', name: "Memorial Day", isFloating: false },
+    { date: '2026-07-03', name: "Independence Day (Observed)", isFloating: false },
+    { date: '2026-07-04', name: "Independence Day", isFloating: false },
+    { date: '2026-09-07', name: "Labor Day", isFloating: false },
+    { date: '2026-11-11', name: "Veteran's Day", isFloating: true },
+    { date: '2026-11-26', name: "Thanksgiving Day", isFloating: false },
+    { date: '2026-11-27', name: "Day After Thanksgiving", isFloating: false },
+    { date: '2026-12-24', name: "Christmas Eve", isFloating: false },
+    { date: '2026-12-25', name: "Christmas Day", isFloating: false }
   ];
 }
 
 /**
- * Returns all holidays from ScriptProperties as an array of { date: 'YYYY-MM-DD', name: '...' }.
+ * Returns all holidays from ScriptProperties as an array of { date: 'YYYY-MM-DD', name: '...', isFloating: boolean }.
  * Seeds standard company holidays if HOLIDAYS has not yet been initialized.
  * @return {Array<Object>}
  */
@@ -31062,15 +31063,32 @@ function getHolidays() {
       for (var i = 0; i < parsed.length; i++) {
         var item = parsed[i];
         if (item && typeof item === 'object' && item.date) {
-          list.push({ date: String(item.date).trim(), name: String(item.name || 'Holiday').trim() });
+          list.push({
+            date: String(item.date).trim(),
+            name: String(item.name || 'Holiday').trim(),
+            isFloating: !!item.isFloating
+          });
         } else if (typeof item === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(item)) {
-          list.push({ date: item, name: 'Holiday' });
+          list.push({ date: item, name: 'Holiday', isFloating: false });
         }
       }
     } else if (typeof parsed === 'object') {
       for (var key in parsed) {
         if (/^\d{4}-\d{2}-\d{2}$/.test(key)) {
-          list.push({ date: key, name: String(parsed[key] || 'Holiday').trim() });
+          var val = parsed[key];
+          if (val && typeof val === 'object') {
+            list.push({
+              date: key,
+              name: String(val.name || 'Holiday').trim(),
+              isFloating: !!val.isFloating
+            });
+          } else {
+            list.push({
+              date: key,
+              name: String(val || 'Holiday').trim(),
+              isFloating: false
+            });
+          }
         }
       }
     }
@@ -31097,15 +31115,26 @@ function saveHolidays(holidays) {
     for (var i = 0; i < holidays.length; i++) {
       var h = holidays[i];
       if (h && typeof h === 'object' && h.date) {
-        cleanList.push({ date: String(h.date).trim(), name: String(h.name || 'Holiday').trim() });
+        cleanList.push({
+          date: String(h.date).trim(),
+          name: String(h.name || 'Holiday').trim(),
+          isFloating: !!h.isFloating
+        });
       } else if (typeof h === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(h)) {
-        cleanList.push({ date: h, name: 'Holiday' });
+        cleanList.push({ date: h, name: 'Holiday', isFloating: false });
       }
     }
   } else if (holidays && typeof holidays === 'object') {
     for (var k in holidays) {
       if (/^\d{4}-\d{2}-\d{2}$/.test(k)) {
-        cleanList.push({ date: k, name: String(holidays[k] || 'Holiday').trim() });
+        var entry = holidays[k];
+        var name = (typeof entry === 'object' && entry) ? entry.name : entry;
+        var isFloating = (typeof entry === 'object' && entry) ? !!entry.isFloating : false;
+        cleanList.push({
+          date: k,
+          name: String(name || 'Holiday').trim(),
+          isFloating: isFloating
+        });
       }
     }
   }
@@ -31124,23 +31153,47 @@ function isHoliday(dateKey) {
   return false;
 }
 /**
+ * Checks whether a given dateKey is a floating holiday.
+ * @param {string} dateKey
+ * @return {boolean}
+ */
+function isFloatingHoliday(dateKey) {
+  var holidays = getHolidays();
+  for (var i = 0; i < holidays.length; i++) {
+    if (holidays[i] && holidays[i].date === dateKey) return !!holidays[i].isFloating;
+  }
+  return false;
+}
+/**
+ * Checks whether a given dateKey is a blocking/blackout holiday.
+ * @param {string} dateKey
+ * @return {boolean}
+ */
+function isBlockingHoliday(dateKey) {
+  return isHoliday(dateKey) && !isFloatingHoliday(dateKey);
+}
+/**
  * Toggles a date as a holiday (adds if absent, removes if present).
  * Called from TripPlanner.html checkbox.
- * @param {string} dateKey  - 'YYYY-MM-DD'
- * @param {string} name     - Holiday name (used when adding)
- * @param {boolean} isOn    - true = add, false = remove
+ * @param {string} dateKey    - 'YYYY-MM-DD'
+ * @param {string} name       - Holiday name (used when adding)
+ * @param {boolean} isOn      - true = add, false = remove
+ * @param {boolean} isFloating- true = floating holiday, false = blackout holiday
  * @return {Object} { success: true, holidays: [...] }
  */
-function toggleHoliday(dateKey, name, isOn) {
+function toggleHoliday(dateKey, name, isOn, isFloating) {
   var holidays = getHolidays();
   var idx = -1;
   for (var i = 0; i < holidays.length; i++) {
     if (holidays[i] && holidays[i].date === dateKey) { idx = i; break; }
   }
   if (isOn && idx === -1) {
-    holidays.push({ date: dateKey, name: name || 'Holiday' });
+    holidays.push({ date: dateKey, name: name || 'Holiday', isFloating: !!isFloating });
   } else if (!isOn && idx !== -1) {
     holidays.splice(idx, 1);
+  } else if (isOn && idx !== -1 && typeof isFloating !== 'undefined') {
+    holidays[idx].isFloating = !!isFloating;
+    if (name) holidays[idx].name = name;
   }
   saveHolidays(holidays);
   return { success: true, holidays: holidays };
@@ -31172,6 +31225,20 @@ function getHolidayMap() {
   return map;
 }
 /**
+ * Returns a lookup map of floating holiday dates.
+ * @return {Object}  { 'YYYY-MM-DD': true, ... }
+ */
+function getFloatingHolidayMap() {
+  var holidays = getHolidays();
+  var map = {};
+  for (var i = 0; i < holidays.length; i++) {
+    if (holidays[i] && holidays[i].date && holidays[i].isFloating) {
+      map[holidays[i].date] = true;
+    }
+  }
+  return map;
+}
+/**
  * Shows the Manage Holidays dialog (menu entry point).
  */
 function showManageHolidaysDialog() {
@@ -31183,13 +31250,14 @@ function showManageHolidaysDialog() {
   } else {
     for (var i = 0; i < holidays.length; i++) {
       if (holidays[i] && holidays[i].date) {
-        lines.push('  ' + holidays[i].date + '  ' + holidays[i].name);
+        var flTag = holidays[i].isFloating ? ' [Floating]' : '';
+        lines.push('  ' + holidays[i].date + '  ' + holidays[i].name + flTag);
       }
     }
   }
   lines.push('');
   lines.push('Use the Trip Planner checkboxes to add/remove days.');
-  lines.push('Or type a date below to add one manually (YYYY-MM-DD, Name):');
+  lines.push('Or type a date below to add one manually (YYYY-MM-DD, Name, floating):');
   var result = ui.prompt('Manage Holidays', lines.join('\n'), ui.ButtonSet.OK_CANCEL);
   if (result.getSelectedButton() !== ui.Button.OK) return;
   var input = (result.getResponseText() || '').trim();
@@ -31197,6 +31265,7 @@ function showManageHolidaysDialog() {
   var parts = input.split(',');
   var dateStr = (parts[0] || '').trim();
   var nameStr = (parts[1] || 'Holiday').trim();
+  var isFloating = (parts[2] || '').trim().toLowerCase() === 'floating' || (parts[2] || '').trim().toLowerCase() === 'true';
   if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
     ui.alert('Invalid date format. Please use YYYY-MM-DD.');
     return;
@@ -31208,8 +31277,8 @@ function showManageHolidaysDialog() {
       return;
     }
   }
-  toggleHoliday(dateStr, nameStr, true);
-  ui.alert('Added holiday: ' + nameStr + ' on ' + dateStr);
+  toggleHoliday(dateStr, nameStr, true, isFloating);
+  ui.alert('Added holiday: ' + nameStr + ' on ' + dateStr + (isFloating ? ' (Floating)' : ''));
 }
 // ============================================================
 // FIX: Job Tracking V-Y Schedule Columns (May 2026)

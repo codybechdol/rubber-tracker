@@ -1132,6 +1132,7 @@ class TripRouteMap {
     const drugTests = this.tripPlanner.getDrugTestsForDate(dateKey);
     const manualTasks = this.tripPlanner.getManualTasksForDate(dateKey);
     const isHoliday = this.tripPlanner.isDayHoliday(dateKey);
+    const isFloating = this.tripPlanner.isDayFloatingHoliday ? this.tripPlanner.isDayFloatingHoliday(dateKey) : false;
     const holidayName = this.tripPlanner.getHolidayName(dateKey);
 
     // Picked equipment swaps
@@ -1325,6 +1326,7 @@ class TripRouteMap {
     return {
       dateKey: dateKey,
       isHoliday: isHoliday,
+      isFloating: isFloating,
       holidayName: holidayName,
       origin: hq,
       stops: stops,
@@ -1555,13 +1557,14 @@ class TripRouteMap {
       const dayRoute = this.collectRouteDataForDate(d.dateKey);
       const stopCount = dayRoute && dayRoute.stops ? dayRoute.stops.length : 0;
       const isHol = this.tripPlanner ? this.tripPlanner.isDayHoliday(d.dateKey) : false;
+      const isFl = this.tripPlanner && this.tripPlanner.isDayFloatingHoliday ? this.tripPlanner.isDayFloatingHoliday(d.dateKey) : false;
 
       return `
         <button class="route-day-pill ${isSelected ? 'active' : ''}" onclick="window.tripRouteMap.setDate('${d.dateKey}')" title="${d.dayName} ${d.formattedDate}">
           <span style="font-weight: 800; font-size: 11px;">${d.dayName.substring(0, 3)}</span>
           <span style="font-size: 10px; opacity: 0.85;">${d.formattedDate.split(',')[0]}</span>
           ${isHol ? `
-            <span class="badge" style="background: rgba(234, 179, 8, 0.25); color: #fde047; font-size: 8.5px; padding: 0 4px; border-radius: 6px;">🏖️</span>
+            <span class="badge" style="background: ${isFl ? 'rgba(2, 132, 199, 0.25)' : 'rgba(234, 179, 8, 0.25)'}; color: ${isFl ? '#38bdf8' : '#fde047'}; font-size: 8.5px; padding: 0 4px; border-radius: 6px;" title="${isFl ? 'Floating Holiday' : 'Holiday'}">🏖️${isFl && stopCount > 0 ? ` ${stopCount}` : ''}</span>
           ` : stopCount > 0 ? `
             <span class="badge" style="background: rgba(59, 130, 246, 0.3); color: #93c5fd; font-size: 9px; font-weight: 700; padding: 1px 5px; border-radius: 8px;">
               ${stopCount} ${stopCount === 1 ? 'stop' : 'stops'}
@@ -1611,7 +1614,7 @@ class TripRouteMap {
 
     let stopsTimelineHtml = '';
 
-    if (routeData.isHoliday) {
+    if (routeData.isHoliday && !routeData.isFloating && routeData.stops.length === 0) {
       stopsTimelineHtml = `
         <div style="background: rgba(234, 179, 8, 0.12); border: 1px solid rgba(234, 179, 8, 0.35); border-radius: 8px; padding: 16px; text-align: center; margin: 16px 0;">
           <div style="font-size: 28px; margin-bottom: 6px;">🏖️</div>
@@ -1623,10 +1626,10 @@ class TripRouteMap {
     } else if (routeData.stops.length === 0) {
       stopsTimelineHtml = `
         <div style="background: rgba(255,255,255,0.03); border: 1px dashed var(--border-color); border-radius: 8px; padding: 24px 16px; text-align: center; margin: 16px 0;">
-          <div style="font-size: 30px; margin-bottom: 8px; opacity: 0.7;">🗺️</div>
-          <div style="font-size: 13px; font-weight: 700; color: #fff; margin-bottom: 4px;">No Destinations Scheduled</div>
+          <div style="font-size: 30px; margin-bottom: 8px; opacity: 0.7;">${routeData.isFloating ? '🏖️' : '🗺️'}</div>
+          <div style="font-size: 13px; font-weight: 700; color: #fff; margin-bottom: 4px;">${routeData.isFloating ? `Floating Holiday: ${routeData.holidayName || 'Holiday'}` : 'No Destinations Scheduled'}</div>
           <div style="font-size: 11.5px; color: var(--text-muted); line-height: 1.5; margin-bottom: 14px;">
-            Switch to the <strong>📅 Schedule Board</strong> tab to drag and drop service cities, crew swaps, or trainings onto this day.
+            ${routeData.isFloating ? 'This holiday is floating. Tasks and crew visits can be scheduled for crews working on this date.' : 'Switch to the <strong>📅 Schedule Board</strong> tab to drag and drop service cities, crew swaps, or trainings onto this day.'}
           </div>
           <button class="btn btn-secondary" onclick="window.tripPlanner.switchTab('board')" style="font-size: 11px; font-weight: 700; color: #93c5fd; border-color: rgba(59, 130, 246, 0.4);">
             ◀ Open Schedule Board
@@ -1883,10 +1886,12 @@ class TripRouteMap {
               </div>
 
               <div style="font-size: 11.5px; color: #cbd5e1;">
-                ${d.isHoliday ? `
+                ${(d.isHoliday && !d.isFloating && d.stops.length === 0) ? `
                   <span style="color: #fde047;">🏖️ Holiday (${d.holidayName || 'Excused'})</span>
                 ` : d.stops.length > 0 ? `
-                  <span>Helena ➔ ${d.stops.map(s => `<strong>${s.location}</strong>`).join(' ➔ ')} ➔ Helena</span>
+                  <span>Helena ➔ ${d.stops.map(s => `<strong>${s.location}</strong>`).join(' ➔ ')} ➔ Helena${d.isFloating ? ` <span class="badge" style="background: rgba(2, 132, 199, 0.25); color: #7dd3fc; font-size: 9px; padding: 1px 4px; margin-left: 4px;">🏖️ Floating</span>` : ''}</span>
+                ` : d.isFloating ? `
+                  <span style="color: #38bdf8;">🏖️ Floating Holiday (${d.holidayName || 'Tasks Allowed'})</span>
                 ` : `
                   <span style="color: var(--text-muted);">No field visits scheduled</span>
                 `}

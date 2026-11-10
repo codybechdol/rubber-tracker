@@ -1732,6 +1732,7 @@ function suggestOptimalTrips(daysAhead) {
           overnightCity: null,
           // Holiday flag
           isHoliday: holidayMap.hasOwnProperty(dateKey),
+          isFloating: (typeof isFloatingHoliday === 'function') ? isFloatingHoliday(dateKey) : false,
           holidayName: holidayMap[dateKey] || null,
           // Manual task tracking
           manualTasks: manualTasksOnDay,
@@ -1895,8 +1896,8 @@ function suggestOptimalTrips(daysAhead) {
       for (var d = 0; d < workDays.length; d++) {
         var day = workDays[d];
 
-        // Skip holiday days - no automatic crew visit scheduling
-        if (day.isHoliday) {
+        // Skip holiday days - no automatic crew visit scheduling (unless floating)
+        if (day.isHoliday && !day.isFloating) {
           continue;
         }
 

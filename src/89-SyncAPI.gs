@@ -600,7 +600,10 @@ function persistSnapshotConfigsToProperties(configs, manualPicks) {
           } else if (typeof configs.holidays === 'object') {
             for (var hk in configs.holidays) {
               if (/^\d{4}-\d{2}-\d{2}$/.test(hk)) {
-                hArr.push({ date: hk, name: configs.holidays[hk] || 'Holiday' });
+                var entry = configs.holidays[hk];
+                var hName = (entry && typeof entry === 'object') ? entry.name : entry;
+                var isFl = (entry && typeof entry === 'object') ? !!entry.isFloating : false;
+                hArr.push({ date: hk, name: hName || 'Holiday', isFloating: isFl });
               }
             }
           }

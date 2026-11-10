@@ -2700,6 +2700,9 @@
         <!-- Revision / Version Switcher for modified documents -->
         <div id="safety-pdf-version-selector" style="display: none; align-items: center; gap: 6px; margin: 0 12px;"></div>
         <div style="display: flex; align-items: center; gap: 8px;">
+          <button id="safety-pdf-btn-action-items" type="button" class="btn btn-secondary" style="display: none; font-size: 11px; padding: 4px 10px; align-items: center; gap: 5px; border-color: rgba(245, 158, 11, 0.4); background: rgba(245, 158, 11, 0.12); color: #fbbf24; cursor: pointer; font-weight: 700;" onclick="if(window.safetyComplianceEngine) window.safetyComplianceEngine.toggleActionItemsDrawer();" title="View or add equipment action items for this checklist">
+            <span>🔧</span> Action Items
+          </button>
           <a id="safety-pdf-btn-newtab" href="#" target="_blank" class="btn btn-secondary" style="font-size: 11px; padding: 4px 10px; display: inline-flex; align-items: center; gap: 4px; text-decoration: none;" title="Open in New Browser Tab">
             ↗️ Pop Out
           </a>
@@ -2712,6 +2715,8 @@
           <button class="btn btn-secondary" style="padding: 3px 8px; font-size: 13px; background: rgba(255,255,255,0.1); border: none; color: white; cursor: pointer;" onclick="if (window.incidentReportsEngine && window.incidentReportsEngine.closePdfModal) window.incidentReportsEngine.closePdfModal(); else if (window.safetyComplianceEngine && window.safetyComplianceEngine.closePdfModal) window.safetyComplianceEngine.closePdfModal(); else { var m = document.getElementById('safety-pdf-modal'); if (m) { m.style.display='none'; m.classList.add('hidden'); } }">✕</button>
         </div>
       </div>
+      <!-- Action Items & Equipment Defect Management Drawer -->
+      <div id="safety-pdf-action-items-drawer" style="display: none; background: #0b1329; border-bottom: 1px solid #334155; padding: 10px 18px; font-size: 12px; color: #cbd5e1;"></div>
       <div class="modal-body" id="safety-pdf-modal-body" style="flex: 1; padding: 0; position: relative; background: #1e293b; overflow: hidden; display: flex; align-items: center; justify-content: center;">
         <!-- Embedded PDF iframe / spinner -->
       </div>
@@ -2758,7 +2763,7 @@
 
   <!-- Holiday & Blackout Day Manager Modal -->
   <div id="holidays-modal" class="modal-overlay">
-    <div class="modal-box" style="max-width: 650px; width: 90%; max-height: 90vh;">
+    <div class="modal-box" style="max-width: 740px; width: 92%; max-height: 90vh;">
       <div class="modal-header" style="background: linear-gradient(135deg, #854d0e 0%, #713f12 100%); color: white;">
         <div style="display: flex; align-items: center; gap: 8px;">
           <span style="font-size: 18px;">🏖️</span>

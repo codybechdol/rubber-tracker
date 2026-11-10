@@ -2321,15 +2321,16 @@ class TripPlannerApp {
 
   getDefaultHolidays() {
     return {
-      '2026-01-01': "New Year's Day",
-      '2026-05-25': "Memorial Day",
-      '2026-07-03': "Independence Day (Observed)",
-      '2026-07-04': "Independence Day",
-      '2026-09-07': "Labor Day",
-      '2026-11-26': "Thanksgiving Day",
-      '2026-11-27': "Day After Thanksgiving",
-      '2026-12-24': "Christmas Eve",
-      '2026-12-25': "Christmas Day"
+      '2026-01-01': { name: "New Year's Day", isFloating: false },
+      '2026-05-25': { name: "Memorial Day", isFloating: false },
+      '2026-07-03': { name: "Independence Day (Observed)", isFloating: false },
+      '2026-07-04': { name: "Independence Day", isFloating: false },
+      '2026-09-07': { name: "Labor Day", isFloating: false },
+      '2026-11-11': { name: "Veteran's Day", isFloating: true },
+      '2026-11-26': { name: "Thanksgiving Day", isFloating: false },
+      '2026-11-27': { name: "Day After Thanksgiving", isFloating: false },
+      '2026-12-24': { name: "Christmas Eve", isFloating: false },
+      '2026-12-25': { name: "Christmas Day", isFloating: false }
     };
   }
 
@@ -2340,18 +2341,45 @@ class TripPlannerApp {
       const raw = localStorage.getItem('sa_holidays');
       const parsed = rawCfg || (raw ? JSON.parse(raw) : null);
       if (parsed) {
+        const map = {};
         if (Array.isArray(parsed) && parsed.length > 0) {
-          const map = {};
           parsed.forEach(h => {
             if (h && typeof h === 'object' && h.date) {
-              map[h.date] = h.name || 'Holiday';
+              map[h.date] = {
+                name: h.name || 'Holiday',
+                isFloating: !!h.isFloating
+              };
             } else if (typeof h === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(h)) {
-              map[h] = 'Holiday';
+              map[h] = { name: 'Holiday', isFloating: false };
             }
           });
-          if (Object.keys(map).length > 0) return map;
         } else if (parsed && typeof parsed === 'object' && Object.keys(parsed).length > 0) {
-          return parsed;
+          Object.keys(parsed).forEach(k => {
+            if (/^\d{4}-\d{2}-\d{2}$/.test(k)) {
+              const val = parsed[k];
+              if (val && typeof val === 'object') {
+                map[k] = {
+                  name: val.name || 'Holiday',
+                  isFloating: !!val.isFloating
+                };
+              } else {
+                map[k] = {
+                  name: String(val || 'Holiday'),
+                  isFloating: false
+                };
+              }
+            }
+          });
+        }
+
+        if (Object.keys(map).length > 0) {
+          // Auto-seed Veteran's Day (11/11/2026) as floating if not already configured and not explicitly deleted
+          if (!map['2026-11-11'] && localStorage.getItem('sa_vets_day_seeded') !== 'true') {
+            map['2026-11-11'] = { name: "Veteran's Day", isFloating: true };
+            localStorage.setItem('sa_vets_day_seeded', 'true');
+            this.saveHolidays(map);
+          }
+          return map;
         }
       }
     } catch { /* ignore */ }
@@ -2360,6 +2388,7 @@ class TripPlannerApp {
     const defaults = this.getDefaultHolidays();
     try {
       localStorage.setItem('sa_holidays', JSON.stringify(defaults));
+      localStorage.setItem('sa_vets_day_seeded', 'true');
     } catch { /* ignore */ }
     return defaults;
   }
@@ -2374,16 +2403,29 @@ class TripPlannerApp {
         snap.configs.holidays = holidays;
       }
 
-      // Convert map to canonical server array of { date, name }
+      // Convert map to canonical server array of { date, name, isFloating }
       const cleanArray = [];
       if (Array.isArray(holidays)) {
         holidays.forEach(h => {
-          if (h && h.date) cleanArray.push({ date: h.date, name: h.name || 'Holiday' });
+          if (h && h.date) {
+            cleanArray.push({
+              date: h.date,
+              name: h.name || 'Holiday',
+              isFloating: !!h.isFloating
+            });
+          }
         });
       } else if (holidays && typeof holidays === 'object') {
         Object.keys(holidays).forEach(k => {
           if (/^\d{4}-\d{2}-\d{2}$/.test(k)) {
-            cleanArray.push({ date: k, name: holidays[k] || 'Holiday' });
+            const entry = holidays[k];
+            const name = (entry && typeof entry === 'object') ? entry.name : entry;
+            const isFloating = (entry && typeof entry === 'object') ? !!entry.isFloating : false;
+            cleanArray.push({
+              date: k,
+              name: name || 'Holiday',
+              isFloating: isFloating
+            });
           }
         });
       }
@@ -2402,13 +2444,19 @@ class TripPlannerApp {
     this.saveHolidays(defaults);
     this.renderHolidaysModalContent();
     this.renderPlanner();
+    if (window.tripRouteMap) window.tripRouteMap.render();
+    this.showToast('Restored standard 2026 holidays (including Veteran\'s Day as floating)');
   }
 
-  addOrUpdateHoliday(dateKey, name = 'Holiday') {
+  addOrUpdateHoliday(dateKey, name = 'Holiday', isFloating = false) {
     if (!this.holidaysMap) this.holidaysMap = this.loadHolidays();
-    this.holidaysMap[dateKey] = name || 'Holiday';
+    this.holidaysMap[dateKey] = {
+      name: name || 'Holiday',
+      isFloating: !!isFloating
+    };
     this.saveHolidays(this.holidaysMap);
     this.renderPlanner();
+    if (window.tripRouteMap) window.tripRouteMap.render();
   }
 
   isDayHoliday(dateKey) {
@@ -2416,20 +2464,60 @@ class TripPlannerApp {
     return !!this.holidaysMap[dateKey];
   }
 
-  getHolidayName(dateKey) {
+  isDayFloatingHoliday(dateKey) {
     if (!this.holidaysMap) this.holidaysMap = this.loadHolidays();
-    return this.holidaysMap[dateKey] || 'Holiday';
+    const entry = this.holidaysMap[dateKey];
+    if (!entry) return false;
+    if (typeof entry === 'object') return !!entry.isFloating;
+    return false;
   }
 
-  toggleHoliday(dateKey, name = 'Holiday') {
+  isDayBlockingHoliday(dateKey) {
+    return this.isDayHoliday(dateKey) && !this.isDayFloatingHoliday(dateKey);
+  }
+
+  getHolidayName(dateKey) {
+    if (!this.holidaysMap) this.holidaysMap = this.loadHolidays();
+    const entry = this.holidaysMap[dateKey];
+    if (!entry) return 'Holiday';
+    if (typeof entry === 'object') return entry.name || 'Holiday';
+    return String(entry);
+  }
+
+  toggleHolidayFloating(dateKey) {
+    if (!this.holidaysMap) this.holidaysMap = this.loadHolidays();
+    const entry = this.holidaysMap[dateKey];
+    if (entry) {
+      if (typeof entry === 'object') {
+        entry.isFloating = !entry.isFloating;
+      } else {
+        this.holidaysMap[dateKey] = {
+          name: String(entry),
+          isFloating: true
+        };
+      }
+      this.saveHolidays(this.holidaysMap);
+      this.renderHolidaysModalContent();
+      this.renderPlanner();
+      if (window.tripRouteMap) window.tripRouteMap.render();
+      const statusText = this.isDayFloatingHoliday(dateKey) ? 'Floating (tasks allowed)' : 'Blackout (tasks blocked)';
+      this.showToast(`Updated ${dateKey} holiday to ${statusText}`);
+    }
+  }
+
+  toggleHoliday(dateKey, name = 'Holiday', isFloating = false) {
     if (!this.holidaysMap) this.holidaysMap = this.loadHolidays();
     if (this.holidaysMap[dateKey]) {
       delete this.holidaysMap[dateKey];
     } else {
-      this.holidaysMap[dateKey] = name;
+      this.holidaysMap[dateKey] = {
+        name: name,
+        isFloating: !!isFloating
+      };
     }
     this.saveHolidays(this.holidaysMap);
     this.renderPlanner();
+    if (window.tripRouteMap) window.tripRouteMap.render();
   }
 
   toggleWorkSchedule() {
@@ -5152,7 +5240,7 @@ class TripPlannerApp {
   addTrip(dateKey, location) {
     if (window.currentRoleMode === 'view_only') return;
     if (!location) return;
-    if (this.isDayHoliday(dateKey)) {
+    if (this.isDayBlockingHoliday(dateKey)) {
       const hName = this.getHolidayName(dateKey);
       alert(`🏖️ ${dateKey} is marked as a holiday (${hName}). Field crew visits cannot be scheduled on holiday days.`);
       return;
@@ -5189,7 +5277,7 @@ class TripPlannerApp {
     }
     if (!payload) return;
     const location = payload.location;
-    if (this.isDayHoliday(dateKey)) {
+    if (this.isDayBlockingHoliday(dateKey)) {
       const hName = this.getHolidayName(dateKey);
       alert(`🏖️ ${dateKey} is marked as a holiday (${hName}). Field crew visits cannot be scheduled on holiday days.`);
       return;
@@ -6620,8 +6708,9 @@ class TripPlannerApp {
             <div style="font-size: 14px; font-weight: 700; color: #fde047; margin-bottom: 2px;">
               🏖️ Holiday & Blackout Day Manager
             </div>
-            <div style="font-size: 12px; color: var(--text-secondary);">
-              Holidays protect work days from trip drops and adjust safety compliance and timesheet calculations.
+            <div style="font-size: 12px; color: var(--text-secondary); line-height: 1.4;">
+              <strong>Blackout Holidays:</strong> Blocks field crew visits and task drops on that date.<br>
+              <strong>Floating Holidays:</strong> Keeps official holiday recognition while allowing crew visits and tasks to be scheduled on the Trip Planner.
             </div>
           </div>
           <button type="button" class="btn" onclick="window.tripPlanner.restoreDefaultHolidays()" style="font-size: 11px; font-weight: 700; color: #fde047; border: 1px solid rgba(253, 224, 71, 0.45); background: rgba(234, 179, 8, 0.18); padding: 5px 12px; border-radius: 6px; cursor: pointer; white-space: nowrap;" title="Restore standard company holiday calendar for 2026">
@@ -6632,43 +6721,51 @@ class TripPlannerApp {
         <!-- Quick Presets -->
         <div style="display: flex; gap: 6px; align-items: center; flex-wrap: wrap; font-size: 11.5px; padding: 0 4px;">
           <span style="color: var(--text-muted); font-weight: 600;">Quick Presets:</span>
-          <button type="button" class="btn btn-secondary" style="padding: 2px 8px; font-size: 11px; color: #fde047; border-color: rgba(253, 224, 71, 0.35);" onclick="document.getElementById('new-holiday-date').value='2026-09-07'; document.getElementById('new-holiday-name').value='Labor Day';">
-            📅 Today (Labor Day - 09/07)
+          <button type="button" class="btn btn-secondary" style="padding: 2px 8px; font-size: 11px; color: #fde047; border-color: rgba(253, 224, 71, 0.35);" onclick="document.getElementById('new-holiday-date').value='2026-09-07'; document.getElementById('new-holiday-name').value='Labor Day'; document.getElementById('new-holiday-floating').checked=false;">
+            📅 Labor Day (09/07)
           </button>
-          <button type="button" class="btn btn-secondary" style="padding: 2px 8px; font-size: 11px; color: #93c5fd; border-color: rgba(147, 197, 253, 0.35);" onclick="document.getElementById('new-holiday-date').value='2026-11-26'; document.getElementById('new-holiday-name').value='Thanksgiving Day';">
+          <button type="button" class="btn btn-secondary" style="padding: 2px 8px; font-size: 11px; color: #38bdf8; border-color: rgba(56, 189, 248, 0.4); background: rgba(2, 132, 199, 0.12);" onclick="document.getElementById('new-holiday-date').value='2026-11-11'; document.getElementById('new-holiday-name').value='Veteran\\'s Day'; document.getElementById('new-holiday-floating').checked=true;">
+            🎖️ Veterans Day (11/11 - Floating)
+          </button>
+          <button type="button" class="btn btn-secondary" style="padding: 2px 8px; font-size: 11px; color: #93c5fd; border-color: rgba(147, 197, 253, 0.35);" onclick="document.getElementById('new-holiday-date').value='2026-11-26'; document.getElementById('new-holiday-name').value='Thanksgiving Day'; document.getElementById('new-holiday-floating').checked=false;">
             🦃 Thanksgiving (11/26)
           </button>
-          <button type="button" class="btn btn-secondary" style="padding: 2px 8px; font-size: 11px; color: #34d399; border-color: rgba(52, 211, 153, 0.35);" onclick="document.getElementById('new-holiday-date').value='2026-12-25'; document.getElementById('new-holiday-name').value='Christmas Day';">
+          <button type="button" class="btn btn-secondary" style="padding: 2px 8px; font-size: 11px; color: #34d399; border-color: rgba(52, 211, 153, 0.35);" onclick="document.getElementById('new-holiday-date').value='2026-12-25'; document.getElementById('new-holiday-name').value='Christmas Day'; document.getElementById('new-holiday-floating').checked=false;">
             🎄 Christmas (12/25)
           </button>
-          <button type="button" class="btn btn-secondary" style="padding: 2px 8px; font-size: 11px; color: #c084fc; border-color: rgba(192, 132, 252, 0.35);" onclick="document.getElementById('new-holiday-date').value='2027-01-01'; document.getElementById('new-holiday-name').value='New Year\\'s Day';">
+          <button type="button" class="btn btn-secondary" style="padding: 2px 8px; font-size: 11px; color: #c084fc; border-color: rgba(192, 132, 252, 0.35);" onclick="document.getElementById('new-holiday-date').value='2027-01-01'; document.getElementById('new-holiday-name').value='New Year\\'s Day'; document.getElementById('new-holiday-floating').checked=false;">
             🎉 New Year's (01/01)
           </button>
         </div>
 
         <!-- Add Custom Holiday Row -->
-        <div style="display: flex; gap: 8px; align-items: center; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px 14px;">
+        <div style="display: flex; gap: 8px; align-items: center; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 6px; padding: 10px 14px; flex-wrap: wrap;">
           <input type="date" id="new-holiday-date" style="padding: 5px 8px; font-size: 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; color: #fff;" onkeydown="if(event.key==='Enter') window.tripPlanner.addNewHolidayFromModal()">
-          <input type="text" id="new-holiday-name" placeholder="Holiday name (e.g. Labor Day, Memorial Day)" style="flex: 1; padding: 5px 8px; font-size: 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; color: #fff;" onkeydown="if(event.key==='Enter') window.tripPlanner.addNewHolidayFromModal()">
+          <input type="text" id="new-holiday-name" placeholder="Holiday name (e.g. Veteran's Day, Memorial Day)" style="flex: 1; min-width: 170px; padding: 5px 8px; font-size: 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; color: #fff;" onkeydown="if(event.key==='Enter') window.tripPlanner.addNewHolidayFromModal()">
+          <label style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: #38bdf8; cursor: pointer; user-select: none;" title="Floating holidays allow scheduling trips and tasks on the Trip Planner">
+            <input type="checkbox" id="new-holiday-floating" style="cursor: pointer; width: 15px; height: 15px;">
+            <span style="font-weight: 600;">Floating Holiday (Allow Tasks)</span>
+          </label>
           <button class="btn btn-primary" onclick="window.tripPlanner.addNewHolidayFromModal()" style="font-size: 12px; font-weight: 700; background: #ca8a04; border: none; padding: 6px 14px; cursor: pointer;">
             ➕ Add Holiday
           </button>
         </div>
 
         <!-- Current Holidays List -->
-        <div style="max-height: 320px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-primary);">
+        <div style="max-height: 340px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 6px; background: var(--bg-primary);">
           <table class="data-table" style="width: 100%; border-collapse: collapse; font-size: 12.5px;">
             <thead>
               <tr style="position: sticky; top: 0; background: #1e293b; z-index: 2;">
-                <th style="width: 150px; text-align: left; padding: 8px 12px;">Date</th>
+                <th style="width: 140px; text-align: left; padding: 8px 12px;">Date</th>
                 <th style="text-align: left; padding: 8px 12px;">Holiday / Blackout Name</th>
-                <th style="width: 80px; text-align: center; padding: 8px 12px;">Action</th>
+                <th style="width: 200px; text-align: center; padding: 8px 12px;">Holiday Type (Click to Toggle)</th>
+                <th style="width: 70px; text-align: center; padding: 8px 12px;">Action</th>
               </tr>
             </thead>
             <tbody>
               ${sortedKeys.length === 0 ? `
                 <tr>
-                  <td colspan="3" style="padding: 24px; text-align: center; color: var(--text-muted);">
+                  <td colspan="4" style="padding: 24px; text-align: center; color: var(--text-muted);">
                     No holidays configured.
                     <button class="btn btn-primary" onclick="window.tripPlanner.restoreDefaultHolidays()" style="margin-left: 10px; font-size: 11.5px; font-weight: 700; padding: 4px 12px; background: #ca8a04; border: none; border-radius: 4px; cursor: pointer;">
                       Load Standard 2026 Holidays
@@ -6678,13 +6775,22 @@ class TripPlannerApp {
               ` : sortedKeys.map(dKey => {
                 const dayOfWeek = this.getWeekdayShort(dKey);
                 const isToday = dKey === this.formatIsoDate(new Date());
+                const isFloating = this.isDayFloatingHoliday(dKey);
+                const hName = this.getHolidayName(dKey);
                 return `
                   <tr style="${isToday ? 'background: rgba(202, 138, 4, 0.12);' : ''}">
                     <td style="padding: 8px 12px; font-weight: 700; color: #fde047; font-family: monospace;">
                       ${dKey}${dayOfWeek ? ` <span style="font-size: 11px; font-weight: 600; color: #94a3b8;">(${dayOfWeek})</span>` : ''}
                       ${isToday ? ` <span class="badge" style="background: #ca8a04; font-size: 9px; padding: 1px 5px; border-radius: 3px; margin-left: 4px;">TODAY</span>` : ''}
                     </td>
-                    <td style="padding: 8px 12px; font-weight: 600; color: #f8fafc;">${this.escapeHtml(this.holidaysMap[dKey])}</td>
+                    <td style="padding: 8px 12px; font-weight: 600; color: #f8fafc;">${this.escapeHtml(hName)}</td>
+                    <td style="padding: 8px 12px; text-align: center;">
+                      <button type="button" class="btn" style="font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 4px; cursor: pointer; transition: all 0.15s ease; ${isFloating ? 'background: rgba(2, 132, 199, 0.2); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.45);' : 'background: rgba(202, 138, 4, 0.18); color: #fde047; border: 1px solid rgba(202, 138, 4, 0.4);'}"
+                              onclick="window.tripPlanner.toggleHolidayFloating('${dKey}')"
+                              title="Click to toggle between Floating (tasks allowed) and Blackout (tasks blocked)">
+                        ${isFloating ? '🏖️ Floating (Tasks Allowed)' : '🚫 Blackout (Tasks Blocked)'}
+                      </button>
+                    </td>
                     <td style="padding: 8px 12px; text-align: center;">
                       <button class="btn btn-secondary" style="padding: 3px 8px; font-size: 11px; color: #f87171; cursor: pointer;" onclick="window.tripPlanner.deleteHolidayFromModal('${dKey}')" title="Delete holiday">
                         🗑️
@@ -6703,6 +6809,7 @@ class TripPlannerApp {
   addNewHolidayFromModal() {
     const dateInput = document.getElementById('new-holiday-date');
     const nameInput = document.getElementById('new-holiday-name');
+    const floatingInput = document.getElementById('new-holiday-floating');
     let rawDate = dateInput ? (dateInput.value || '').trim() : '';
 
     if (!rawDate) {
@@ -6732,17 +6839,25 @@ class TripPlannerApp {
     }
 
     const name = (nameInput && nameInput.value.trim()) ? nameInput.value.trim() : 'Company Holiday';
+    const isFloating = !!(floatingInput && floatingInput.checked);
 
-    this.addOrUpdateHoliday(dKey, name);
+    this.addOrUpdateHoliday(dKey, name, isFloating);
+    if (dateInput) dateInput.value = '';
+    if (nameInput) nameInput.value = '';
+    if (floatingInput) floatingInput.checked = false;
     this.renderHolidaysModalContent();
+    this.showToast(`Added ${isFloating ? 'floating ' : ''}holiday: ${name} (${dKey})`);
   }
 
   deleteHolidayFromModal(dKey) {
     if (this.holidaysMap && this.holidaysMap[dKey]) {
       delete this.holidaysMap[dKey];
+      localStorage.setItem('sa_vets_day_seeded', 'true');
       this.saveHolidays(this.holidaysMap);
       this.renderHolidaysModalContent();
       this.renderPlanner();
+      if (window.tripRouteMap) window.tripRouteMap.render();
+      this.showToast(`Deleted holiday ${dKey}`);
     }
   }
 
@@ -8588,6 +8703,9 @@ class TripPlannerApp {
         const trips = this.getTripsForDate(dateKey);
         const drugTests = this.getDrugTestsForDate(dateKey);
         const isHoliday = this.isDayHoliday(dateKey);
+        const isFloating = this.isDayFloatingHoliday(dateKey);
+        const isBlockingHoliday = this.isDayBlockingHoliday(dateKey);
+        const holidayName = this.getHolidayName(dateKey);
 
         const col = document.createElement('div');
         col.className = 'day-column';
@@ -8953,8 +9071,8 @@ class TripPlannerApp {
         if (orderedLocs.length === 0) {
           cardsHtml = `
             <div class="tasks-drop-placeholder" style="margin-top: 20px;">
-              <div style="color: var(--text-muted); font-size: 11px; text-align: center; border: 1px dashed var(--border-color); border-radius: 6px; padding: 14px 10px;">
-                ${isHoliday ? '🏖️ Holiday Day' : '+ Drop city / crew tasks from sidebar'}
+              <div style="color: ${isFloating ? '#38bdf8' : 'var(--text-muted)'}; font-size: 11px; text-align: center; border: 1px dashed ${isFloating ? 'rgba(56, 189, 248, 0.4)' : 'var(--border-color)'}; border-radius: 6px; padding: 14px 10px; background: ${isFloating ? 'rgba(2, 132, 199, 0.06)' : 'transparent'};">
+                ${isHoliday ? (isFloating ? `🏖️ Floating Holiday: ${this.escapeHtml(holidayName)}<br><span style="font-size: 10px; opacity: 0.85; color: #94a3b8;">+ Drop city / crew tasks from sidebar</span>` : `🏖️ Holiday Day (${this.escapeHtml(holidayName)})`) : '+ Drop city / crew tasks from sidebar'}
               </div>
             </div>
           `;
@@ -9147,7 +9265,7 @@ class TripPlannerApp {
             `;
           }).join('');
 
-          if (!isHoliday) {
+          if (!isBlockingHoliday) {
             cardsHtml += `
               <div style="color: var(--text-muted); font-size: 10px; text-align: center; border: 1px dashed rgba(255,255,255,0.08); border-radius: 6px; padding: 5px; opacity: 0.8; margin-top: 4px;">
                 + Drop city / crew tasks from sidebar
@@ -9157,7 +9275,7 @@ class TripPlannerApp {
         }
 
         col.innerHTML = `
-          <div class="day-header" style="background: ${isHoliday ? 'linear-gradient(90deg, #854d0e 0%, #1e293b 100%)' : (drugTests.length > 0 ? 'linear-gradient(90deg, rgba(88, 28, 135, 0.4) 0%, #1e293b 100%)' : '#1e293b')};">
+          <div class="day-header" style="background: ${isHoliday ? (isFloating ? 'linear-gradient(90deg, rgba(2, 132, 199, 0.35) 0%, #1e293b 100%)' : 'linear-gradient(90deg, #854d0e 0%, #1e293b 100%)') : (drugTests.length > 0 ? 'linear-gradient(90deg, rgba(88, 28, 135, 0.4) 0%, #1e293b 100%)' : '#1e293b')};">
             <div style="display: flex; align-items: center; gap: 4px; min-width: 0; flex-wrap: wrap;">
               <span style="font-weight: 800; color: #f8fafc; white-space: nowrap;">${day.dayName}, ${day.formattedDate}</span>
               ${drugTests.length > 0 ? `
@@ -9198,12 +9316,13 @@ class TripPlannerApp {
               <button class="btn btn-secondary admin-only-control" style="padding: 1px 5px; font-size: 9px; line-height: 1.2; background: rgba(249, 115, 22, 0.15); color: #fdba74; border: 1px solid rgba(249, 115, 22, 0.3); border-radius: 3px; cursor: pointer;" onclick="window.tripPlanner.openAddManualTaskModal('${dateKey}', '${this.escapeJs(day.dayName)}, ${this.escapeJs(day.formattedDate)}', 'office_task')" title="Add Personal / Office Task on ${day.dayName}">
                 💼 + Task
               </button>
-              <span class="badge" style="background: ${isHoliday ? '#ca8a04' : (day.isWorkDay ? '#0284c7' : '#475569')}; color: #fff; font-size: 9.5px; padding: 2px 5px; border-radius: 4px;">
-                ${isHoliday ? '🏖️ Holiday' : (day.isWorkDay ? 'Work' : 'Off')}
+              <span class="badge" style="background: ${isHoliday ? (isFloating ? '#0284c7' : '#ca8a04') : (day.isWorkDay ? '#0284c7' : '#475569')}; color: #fff; font-size: 9.5px; padding: 2px 5px; border-radius: 4px; cursor: ${isHoliday ? 'pointer' : 'default'};"
+                    ${isHoliday ? `onclick="window.tripPlanner.openHolidaysModal()" title="${isFloating ? `🏖️ Floating Holiday: ${this.escapeHtml(holidayName)} (Tasks allowed). Click to manage.` : `🏖️ Blackout Holiday: ${this.escapeHtml(holidayName)}. Click to manage.`}"` : ''}>
+                ${isHoliday ? (isFloating ? '🏖️ Floating' : '🏖️ Holiday') : (day.isWorkDay ? 'Work' : 'Off')}
               </span>
             </div>
           </div>
-          <div class="card-drop-zone" data-date="${dateKey}" style="background: ${isHoliday ? 'rgba(202, 138, 4, 0.04)' : 'transparent'};">
+          <div class="card-drop-zone" data-date="${dateKey}" style="background: ${isHoliday ? (isFloating ? 'rgba(2, 132, 199, 0.04)' : 'rgba(202, 138, 4, 0.04)') : 'transparent'};">
             ${cardsHtml}
           </div>
         `;

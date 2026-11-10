@@ -1639,8 +1639,10 @@ class SafetyEmailsEngine {
 
   /**
    * Opens the In-App PDF Document Viewer Modal to render the attached safety PDF immediately.
+   * Supports an optional array of relatedLogs (e.g. all monthly checklists for a crew in that month)
+   * to render interactive, clickable pill buttons in the modal header for seamless document switching.
    */
-  async openPdfViewer(logOrId) {
+  async openPdfViewer(logOrId, relatedLogs = null) {
     let log = null;
     if (typeof logOrId === 'object' && logOrId !== null) {
       log = logOrId;
@@ -1652,6 +1654,8 @@ class SafetyEmailsEngine {
       return;
     }
 
+    this._activeViewingLog = log;
+
     const modal = document.getElementById('safety-pdf-modal');
     const body = document.getElementById('safety-pdf-modal-body');
     const titleEl = document.getElementById('safety-pdf-modal-title');
@@ -1659,6 +1663,9 @@ class SafetyEmailsEngine {
     const gmailBtn = document.getElementById('safety-pdf-btn-gmail');
     const downloadBtn = document.getElementById('safety-pdf-btn-download');
     const popoutBtn = document.getElementById('safety-pdf-btn-newtab');
+    const versionSelector = document.getElementById('safety-pdf-version-selector');
+    const actionItemsBtn = document.getElementById('safety-pdf-btn-action-items');
+    const actionDrawer = document.getElementById('safety-pdf-action-items-drawer');
 
     if (!modal || !body) return;
 
@@ -1670,15 +1677,88 @@ class SafetyEmailsEngine {
     }
 
     const logType = log.type || log.reportType || 'Safety Document';
+    const isChecklist = (logType === 'Monthly Checklist' || log.sheetName === 'Monthly Checklist Log');
     const logJob = log.jobNumber || log.crewId || 'N/A';
     const logForeman = log.foreman || 'UNKNOWN';
     const logDate = log.date || log.reportDate || 'N/A';
     const logDateRec = log.dateReceived || log.receivedDate || logDate;
-    const logUnit = log.vehicleNumber || log.unit || '';
+    const logUnit = this.getLogUnitLabel(log);
     const logGmailUrl = log.gmailUrl || (log.emailId ? ('https://mail.google.com/mail/#all/' + String(log.emailId).trim().split('_')[0]) : '');
 
-    if (titleEl) titleEl.textContent = `${logType} · Crew ${logJob}${logUnit ? ` (Unit ${logUnit})` : ''}`;
-    if (subtitleEl) subtitleEl.textContent = `Foreman: ${logForeman}${logUnit ? ` | Unit: ${logUnit}` : ''} | Report Date: ${logDate} | Received: ${logDateRec}`;
+    if (titleEl) titleEl.textContent = `${logType} · Crew ${logJob}${logUnit && logUnit !== 'Checklist' ? ` (Unit ${logUnit})` : ''}`;
+    if (subtitleEl) subtitleEl.textContent = `Foreman: ${logForeman}${logUnit && logUnit !== 'Checklist' ? ` | Unit: ${logUnit}` : ''} | Report Date: ${logDate} | Received: ${logDateRec}`;
+
+    // Auto-discover related checklists if not passed explicitly for Monthly Checklist
+    try {
+      if (isChecklist && (!relatedLogs || relatedLogs.length === 0)) {
+        relatedLogs = this.getMonthlyChecklistsForCrew(log.jobNumber || log.creditedTo, log.date || log.dateReceived, log.foreman);
+      }
+
+      // Render Clickable Pill Buttons in Header for multiple checklists
+      if (versionSelector) {
+        if (isChecklist && relatedLogs && relatedLogs.length > 1) {
+          versionSelector.style.display = 'flex';
+          versionSelector.style.gap = '6px';
+          versionSelector.style.alignItems = 'center';
+          versionSelector.style.overflowX = 'auto';
+          versionSelector.style.maxWidth = '460px';
+          versionSelector.style.padding = '2px 0';
+
+          versionSelector.innerHTML = relatedLogs.map((l) => {
+            const isSelected = (l.id === log.id || (l.sheetName + '_' + l.rowIndex) === log.id || (l.emailId && l.emailId === log.emailId));
+            const unit = this.getLogUnitLabel(l);
+            const dt = l.date ? String(l.date).replace(/\/20(\d\d)$/, '/$1') : (l.dateReceived ? String(l.dateReceived).split(' ')[0].replace(/\/20(\d\d)$/, '/$1') : '');
+            const hasIssues = String(l.hasEquipmentIssues || '').toLowerCase() === 'yes' || this.hasEquipmentNeedsForLog(l);
+
+            const btnBg = isSelected ? 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)' : 'rgba(255, 255, 255, 0.08)';
+            const btnBorder = isSelected ? '#38bdf8' : 'rgba(255, 255, 255, 0.18)';
+            const btnColor = isSelected ? '#ffffff' : '#cbd5e1';
+            const shadow = isSelected ? 'box-shadow: 0 2px 8px rgba(2, 132, 199, 0.4);' : '';
+
+            return `
+              <button type="button" class="btn pdf-pill-btn ${isSelected ? 'active' : ''}" onclick="window.safetyComplianceEngine.openPdfViewer('${this.escapeJs(l.id)}', window.safetyComplianceEngine._activeChecklistsGroup)"
+                      style="padding: 3px 9px; font-size: 11px; font-weight: 700; border-radius: 14px; border: 1px solid ${btnBorder}; background: ${btnBg}; color: ${btnColor}; cursor: pointer; white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; ${shadow}"
+                      title="Unit ${this.escapeHtml(unit)} · Date: ${this.escapeHtml(l.date || l.dateReceived)}${hasIssues ? ' · ⚠️ Equipment defect reported' : ''}">
+                <span>🚗 ${this.escapeHtml(unit)}</span>
+                ${dt ? `<span style="font-size: 9.5px; opacity: 0.85; font-weight: 500;">(${this.escapeHtml(dt)})</span>` : ''}
+                ${hasIssues ? `<span style="color: #fbbf24; font-size: 11px;" title="Equipment defect reported">⚠️</span>` : ''}
+              </button>
+            `;
+          }).join('');
+          this._activeChecklistsGroup = relatedLogs;
+        } else {
+          versionSelector.style.display = 'none';
+          versionSelector.innerHTML = '';
+          this._activeChecklistsGroup = null;
+        }
+      }
+
+      // Configure Action Items Button and Drawer
+      if (actionDrawer) {
+        actionDrawer.style.display = 'none'; // reset closed on document switch
+      }
+      if (actionItemsBtn) {
+        if (isChecklist) {
+          actionItemsBtn.style.display = 'inline-flex';
+          const openNeeds = this.getEquipmentNeedsForLog(log);
+          if (openNeeds.length > 0) {
+            actionItemsBtn.innerHTML = `<span>⚠️</span> Action Items (${openNeeds.length})`;
+            actionItemsBtn.style.background = 'rgba(239, 68, 68, 0.2)';
+            actionItemsBtn.style.borderColor = 'rgba(239, 68, 68, 0.5)';
+            actionItemsBtn.style.color = '#fca5a5';
+          } else {
+            actionItemsBtn.innerHTML = `<span>🔧</span> Action Items`;
+            actionItemsBtn.style.background = 'rgba(245, 158, 11, 0.12)';
+            actionItemsBtn.style.borderColor = 'rgba(245, 158, 11, 0.4)';
+            actionItemsBtn.style.color = '#fbbf24';
+          }
+        } else {
+          actionItemsBtn.style.display = 'none';
+        }
+      }
+    } catch (headerErr) {
+      console.warn('Error setting up PDF header elements:', headerErr);
+    }
 
     if (gmailBtn) {
       gmailBtn.href = logGmailUrl || '#';
@@ -1787,7 +1867,7 @@ class SafetyEmailsEngine {
       }
 
       if (subtitleEl) {
-        subtitleEl.textContent = `${pdfData.filename || 'Document.pdf'} (${Math.round((pdfData.sizeBytes || 0)/1024)} KB) · Foreman: ${logForeman}${logUnit ? ` · Unit: ${logUnit}` : ''} · Date: ${logDate} · Received: ${logDateRec}`;
+        subtitleEl.textContent = `${pdfData.filename || 'Document.pdf'} (${Math.round((pdfData.sizeBytes || 0)/1024)} KB) · Foreman: ${logForeman}${logUnit && logUnit !== 'Checklist' ? ` · Unit: ${logUnit}` : ''} · Date: ${logDate} · Received: ${logDateRec}`;
       }
 
       body.innerHTML = `
@@ -1823,6 +1903,10 @@ class SafetyEmailsEngine {
       modal.style.display = 'none';
       modal.classList.remove('active');
       modal.classList.add('hidden');
+      const drawer = document.getElementById('safety-pdf-action-items-drawer');
+      if (drawer) drawer.style.display = 'none';
+      this._activeChecklistsGroup = null;
+      this._activeViewingLog = null;
       if (window.windowManager && typeof window.windowManager.syncBackdrop === 'function') {
         window.windowManager.syncBackdrop();
       }
@@ -1830,14 +1914,395 @@ class SafetyEmailsEngine {
   }
 
   /**
-   * Quick-opens the attached PDF for a cell clicked in the Safety Compliance tracker sheet.
+   * Helper to parse dates in MM/DD/YYYY, YYYY-MM-DD, or Date objects timezone-safely at noon.
    */
-  openPdfForComplianceCell(jobNum, colHeader, weekStart) {
+  parseDateHelper(val) {
+    if (!val) return null;
+    if (val instanceof Date) return isNaN(val.getTime()) ? null : val;
+    const str = String(val).trim();
+    if (!str) return null;
+    const mdy = str.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})/);
+    if (mdy) {
+      const m = parseInt(mdy[1], 10) - 1;
+      const d = parseInt(mdy[2], 10);
+      let y = parseInt(mdy[3], 10);
+      if (y < 100) y += 2000;
+      return new Date(y, m, d, 12, 0, 0);
+    }
+    const ymd = str.match(/^(\d{4})[\/-](\d{1,2})[\/-](\d{1,2})/);
+    if (ymd) {
+      const y = parseInt(ymd[1], 10);
+      const m = parseInt(ymd[2], 10) - 1;
+      const d = parseInt(ymd[3], 10);
+      return new Date(y, m, d, 12, 0, 0);
+    }
+    const parsed = new Date(str);
+    return isNaN(parsed.getTime()) ? null : parsed;
+  }
+
+  /**
+   * Extracts clean vehicle / unit label from a checklist log record.
+   */
+  getLogUnitLabel(log) {
+    if (!log) return 'Checklist';
+    if (log.vehicleNumber && String(log.vehicleNumber).trim()) {
+      return String(log.vehicleNumber).trim();
+    }
+    if (log.subject) {
+      const m = String(log.subject).match(/(?:Safety Check\s*list(?:\s*Report)?|Vehicle(?:\s*Checklist)?)\s+([A-Za-z0-9]+)[\s\-]/i);
+      if (m) return m[1].toUpperCase();
+    }
+    return 'Checklist';
+  }
+
+  /**
+   * Retrieves all Monthly Checklist log entries for a crew within the calendar month of weekVal.
+   */
+  getMonthlyChecklistsForCrew(jobNum, weekVal, foreman) {
+    if (!this.currentLogs || this.currentLogs.length === 0) {
+      this.currentLogs = this.extractLogsFromLocalDB();
+    }
+    const cleanJob = String(jobNum || '').trim();
+    const cleanForeman = String(foreman || '').trim().toLowerCase();
+
+    let targetMonth = -1;
+    let targetYear = -1;
+    if (weekVal) {
+      const d = this.parseDateHelper(weekVal);
+      if (d) {
+        // Monday of week is d + 1 day (standard month reference for Sunday-start weeks)
+        const mon = new Date(d.getTime() + 24 * 60 * 60 * 1000);
+        targetMonth = mon.getMonth();
+        targetYear = mon.getFullYear();
+      }
+    }
+
+    const matches = (this.currentLogs || []).filter(l => {
+      if (l.type !== 'Monthly Checklist' && l.sheetName !== 'Monthly Checklist Log') return false;
+
+      const jMatches = (l.jobNumber && l.jobNumber === cleanJob) || 
+                       (l.creditedTo && l.creditedTo === cleanJob) ||
+                       (cleanForeman && l.foreman && l.foreman.toLowerCase() === cleanForeman);
+      if (!jMatches) return false;
+
+      if (targetMonth !== -1 && targetYear !== -1) {
+        const itemDate = this.parseDateHelper(l.date || l.dateReceived);
+        if (itemDate) {
+          if (itemDate.getMonth() !== targetMonth || itemDate.getFullYear() !== targetYear) {
+            return false;
+          }
+        }
+      }
+      return true;
+    });
+
+    const seen = new Set();
+    const deduped = [];
+    matches.forEach(m => {
+      const key = m.emailId || m.id;
+      if (!seen.has(key)) {
+        seen.add(key);
+        deduped.push(m);
+      }
+    });
+
+    return deduped;
+  }
+
+  /**
+   * Retrieves any open equipment needs from safety_equipment_needs matching this log / unit.
+   */
+  getEquipmentNeedsForLog(log) {
+    if (!log) return [];
+    const snap = window.localDB ? window.localDB.getSnapshot() : null;
+    const table = snap && snap.tables ? snap.tables.safety_equipment_needs : null;
+    if (!table || !table.rows) return [];
+
+    const unit = this.getLogUnitLabel(log).toLowerCase();
+    const emailId = String(log.emailId || '').trim();
+    const jobNum = String(log.jobNumber || log.creditedTo || '').trim().toLowerCase();
+
+    return table.rows.filter((r, idx) => {
+      const status = String(r['Status'] || '').toLowerCase();
+      if (status.includes('resolve') || status.includes('complete')) return false;
+
+      const rVeh = String(r['Vehicle Number'] || r['Vehicle #'] || r['Truck'] || r['Unit'] || '').trim().toLowerCase();
+      const rEmail = String(r['Source Email ID'] || r['Email ID'] || '').trim();
+      const rJob = String(r['Job Number'] || r['Job #'] || r['Crew'] || '').trim().toLowerCase();
+
+      // Match by email ID first
+      if (emailId && rEmail && emailId === rEmail) {
+        r._rowIdx = r._rowIdx || (idx + 2);
+        return true;
+      }
+
+      // Or match by unit number + crew
+      if (unit && rVeh && (unit === rVeh || rVeh.includes(unit) || unit.includes(rVeh))) {
+        if (!jobNum || !rJob || jobNum === rJob) {
+          r._rowIdx = r._rowIdx || (idx + 2);
+          return true;
+        }
+      }
+      return false;
+    }).map(r => ({
+      rowIdx: r._rowIdx,
+      equipmentType: r['Equipment Type'] || r['Equipment'] || '',
+      desc: r['Issue Description'] || r['Notes'] || '',
+      notes: r['Notes'] || '',
+      status: r['Status'] || 'Needs Attention',
+      vehicleNumber: r['Vehicle Number'] || ''
+    }));
+  }
+
+  hasEquipmentNeedsForLog(log) {
+    return this.getEquipmentNeedsForLog(log).length > 0;
+  }
+
+  /**
+   * Toggles the Action Items Drawer in the PDF Viewer Modal.
+   */
+  toggleActionItemsDrawer() {
+    const drawer = document.getElementById('safety-pdf-action-items-drawer');
+    if (!drawer) return;
+    if (drawer.style.display !== 'none') {
+      drawer.style.display = 'none';
+      return;
+    }
+    drawer.style.display = 'block';
+    this.renderActionItemsDrawer();
+  }
+
+  /**
+   * Renders the Action Items Drawer content in the PDF Viewer Modal.
+   */
+  renderActionItemsDrawer() {
+    const drawer = document.getElementById('safety-pdf-action-items-drawer');
+    const log = this._activeViewingLog;
+    if (!drawer || !log) return;
+
+    const unit = this.getLogUnitLabel(log);
+    const existingItems = this.getEquipmentNeedsForLog(log);
+
+    let itemsHtml = '';
+    if (existingItems.length > 0) {
+      itemsHtml = `
+        <div style="margin-bottom: 10px;">
+          <div style="font-weight: 700; font-size: 11.5px; color: #fbbf24; margin-bottom: 6px; display: flex; align-items: center; gap: 5px;">
+            <span>⚠️ Open Equipment Issues for Unit ${this.escapeHtml(unit)}:</span>
+          </div>
+          <div style="display: flex; flex-direction: column; gap: 6px;">
+            ${existingItems.map(item => `
+              <div style="background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 6px; padding: 6px 10px; display: flex; justify-content: space-between; align-items: center; gap: 10px;">
+                <div style="min-width: 0;">
+                  <span style="font-weight: 700; color: #38bdf8;">${this.escapeHtml(item.equipmentType || 'Equipment')}</span>:
+                  <span style="color: #f1f5f9;">${this.escapeHtml(item.desc || item.notes || 'Issue reported')}</span>
+                  <span style="font-size: 10px; color: #94a3b8; margin-left: 6px;">(Status: ${this.escapeHtml(item.status || 'Needs Attention')})</span>
+                </div>
+                ${item.rowIdx ? `
+                  <button type="button" class="btn btn-secondary" onclick="window.safetyComplianceEngine.resolveEquipmentNeedFromPdf(${item.rowIdx})"
+                          style="font-size: 10px; padding: 2px 7px; color: #34d399; border-color: rgba(52, 211, 153, 0.4); background: rgba(52, 211, 153, 0.1); cursor: pointer;" title="Mark this issue as Resolved in Safety Equipment Needs and Trip Planner">
+                    ✓ Resolve
+                  </button>
+                ` : ''}
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `;
+    } else {
+      itemsHtml = `
+        <div style="font-size: 11.5px; color: #94a3b8; margin-bottom: 10px; padding: 8px 12px; background: rgba(255, 255, 255, 0.02); border-radius: 6px; border: 1px dashed rgba(255, 255, 255, 0.1);">
+          ✓ No open equipment defects currently logged for Unit <strong>${this.escapeHtml(unit)}</strong>.
+        </div>
+      `;
+    }
+
+    drawer.innerHTML = `
+      <div style="display: flex; justify-content: space-between; align-items: flex-start; gap: 14px; flex-wrap: wrap;">
+        <div style="flex: 1; min-width: 280px;">
+          ${itemsHtml}
+        </div>
+        <!-- Quick Add Form -->
+        <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(59, 130, 246, 0.3); border-radius: 8px; padding: 10px 14px; min-width: 320px; flex: 1;">
+          <div style="font-weight: 700; font-size: 11.5px; color: #60a5fa; margin-bottom: 8px; display: flex; align-items: center; justify-content: space-between;">
+            <span>➕ Add Action Item to Trip Planner (Unit ${this.escapeHtml(unit)})</span>
+            <button type="button" onclick="document.getElementById('safety-pdf-action-items-drawer').style.display='none'" style="background: none; border: none; color: #94a3b8; cursor: pointer; font-size: 13px;">✕</button>
+          </div>
+          <form onsubmit="window.safetyComplianceEngine.addEquipmentNeedFromPdf(event); return false;" style="display: flex; flex-direction: column; gap: 8px;">
+            <div style="display: flex; gap: 8px;">
+              <select id="pdf-add-equip-type" style="padding: 4px 8px; font-size: 11.5px; background: #1e293b; color: #f8fafc; border: 1px solid #475569; border-radius: 4px; flex: 1;" required>
+                <option value="Fire Extinguisher">🧯 Fire Extinguisher</option>
+                <option value="AED">⚡ AED Defibrillator</option>
+                <option value="Hot Sticks">🦯 Hot Sticks / Jumpers</option>
+                <option value="Fall Protection">🦺 Fall Protection / Harness</option>
+                <option value="First Aid">🩹 First Aid Kit / Eyewash</option>
+                <option value="Truck">🚚 Truck Defect (Tires, Horn, Wipers)</option>
+                <option value="Barriers">🚧 Barriers / Cones / Signs</option>
+                <option value="Other">🔧 Other Safety Equipment</option>
+              </select>
+            </div>
+            <div style="display: flex; gap: 8px;">
+              <input type="text" id="pdf-add-equip-desc" placeholder="Issue description (e.g. Discharged, Expired pads, Torn wiper)..."
+                     style="padding: 4px 8px; font-size: 11.5px; background: #1e293b; color: #f8fafc; border: 1px solid #475569; border-radius: 4px; flex: 1;" required />
+              <button type="submit" class="btn btn-primary" style="font-size: 11px; padding: 4px 12px; font-weight: 700; background: #2563eb; color: white; border: none; border-radius: 4px; cursor: pointer; white-space: nowrap;">
+                Add to Trip Planner
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    `;
+  }
+
+  /**
+   * Adds an equipment action item directly to Safety Equipment Needs from the PDF viewer.
+   */
+  async addEquipmentNeedFromPdf(e) {
+    if (e && e.preventDefault) e.preventDefault();
+    const log = this._activeViewingLog;
+    if (!log) return;
+
+    const typeEl = document.getElementById('pdf-add-equip-type');
+    const descEl = document.getElementById('pdf-add-equip-desc');
+    const equipType = typeEl ? typeEl.value : 'Other';
+    const desc = descEl ? descEl.value.trim() : '';
+
+    if (!desc) {
+      alert('Please enter an issue description.');
+      return;
+    }
+
+    const today = new Date();
+    const todayFormatted = `${String(today.getMonth() + 1).padStart(2, '0')}/${String(today.getDate()).padStart(2, '0')}/${today.getFullYear()}`;
+    const unit = this.getLogUnitLabel(log);
+    const jobNum = log.jobNumber || log.creditedTo || '';
+    const foreman = log.foreman || '';
+    const reportDate = log.date || todayFormatted;
+
+    const newRow = {
+      'Date': reportDate,
+      'Report Date': reportDate,
+      'Report Type': 'Safety Checklist',
+      'Job Number': jobNum,
+      'Foreman': foreman,
+      'Vehicle Number': unit,
+      'Equipment Type': equipType,
+      'Issue Description': desc,
+      'Status': 'Needs Attention',
+      'Source Email ID': log.emailId || '',
+      'Notes': `Added via PDF Viewer for Unit ${unit}`,
+      'Email Subject': log.subject || '',
+      'Received Date': log.dateReceived || todayFormatted
+    };
+
+    if (window.localDB && typeof window.localDB.addMutation === 'function') {
+      await window.localDB.addMutation({
+        action: 'ADD_ROW',
+        sheetName: 'Safety Equipment Needs',
+        tableKey: 'safety_equipment_needs',
+        row: newRow
+      });
+    }
+
+    log.hasEquipmentIssues = 'Yes';
+    if (descEl) descEl.value = '';
+
+    if (typeof window.showToast === 'function') {
+      window.showToast(`✅ Added ${equipType} action item for Unit ${unit} to Trip Planner!`, 'success');
+    }
+
+    // Refresh drawer
+    this.renderActionItemsDrawer();
+
+    // Refresh Action Items button in modal header
+    const actionItemsBtn = document.getElementById('safety-pdf-btn-action-items');
+    if (actionItemsBtn) {
+      const openNeeds = this.getEquipmentNeedsForLog(log);
+      actionItemsBtn.innerHTML = `<span>⚠️</span> Action Items (${openNeeds.length})`;
+      actionItemsBtn.style.background = 'rgba(239, 68, 68, 0.2)';
+      actionItemsBtn.style.borderColor = 'rgba(239, 68, 68, 0.5)';
+      actionItemsBtn.style.color = '#fca5a5';
+    }
+
+    // Re-render pill buttons to reflect ⚠️
+    if (this._activeChecklistsGroup && this._activeChecklistsGroup.length > 1) {
+      this.openPdfViewer(log.id, this._activeChecklistsGroup);
+    }
+
+    // Refresh Trip Planner sidebar if tripPlanner exists
+    if (window.tripPlanner && typeof window.tripPlanner.renderEquipmentSidebar === 'function') {
+      window.tripPlanner.renderEquipmentSidebar();
+    }
+  }
+
+  /**
+   * Resolves an equipment action item from the PDF viewer.
+   */
+  async resolveEquipmentNeedFromPdf(rowIdx) {
+    if (!rowIdx) return;
+    const today = new Date();
+    const todayFormatted = `${String(today.getMonth() + 1).padStart(2, '0')}/${String(today.getDate()).padStart(2, '0')}/${today.getFullYear()}`;
+
+    if (window.localDB && typeof window.localDB.addMutation === 'function') {
+      await window.localDB.addMutation({
+        action: 'UPDATE_CELL',
+        sheetName: 'Safety Equipment Needs',
+        tableKey: 'safety_equipment_needs',
+        row: rowIdx,
+        col: 8,
+        header: 'Status',
+        value: 'Resolved'
+      });
+      await window.localDB.addMutation({
+        action: 'UPDATE_CELL',
+        sheetName: 'Safety Equipment Needs',
+        tableKey: 'safety_equipment_needs',
+        row: rowIdx,
+        col: 14,
+        header: 'Resolved On',
+        value: todayFormatted
+      });
+    }
+
+    if (typeof window.showToast === 'function') {
+      window.showToast('✅ Marked equipment need as Resolved.', 'info');
+    }
+
+    this.renderActionItemsDrawer();
+
+    const log = this._activeViewingLog;
+    if (log) {
+      const actionItemsBtn = document.getElementById('safety-pdf-btn-action-items');
+      if (actionItemsBtn) {
+        const openNeeds = this.getEquipmentNeedsForLog(log);
+        if (openNeeds.length > 0) {
+          actionItemsBtn.innerHTML = `<span>⚠️</span> Action Items (${openNeeds.length})`;
+        } else {
+          actionItemsBtn.innerHTML = `<span>🔧</span> Action Items`;
+          actionItemsBtn.style.background = 'rgba(245, 158, 11, 0.12)';
+          actionItemsBtn.style.borderColor = 'rgba(245, 158, 11, 0.4)';
+          actionItemsBtn.style.color = '#fbbf24';
+        }
+      }
+    }
+
+    if (window.tripPlanner && typeof window.tripPlanner.renderEquipmentSidebar === 'function') {
+      window.tripPlanner.renderEquipmentSidebar();
+    }
+  }
+
+  /**
+   * Quick-opens the attached PDF for a cell clicked in the Safety Compliance tracker sheet.
+   * If clicking Monthly Checklist, searches all checklists for that crew in the target month
+   * and opens the viewer with clickable unit pill buttons.
+   */
+  openPdfForComplianceCell(jobNum, colHeader, weekStart, foreman = '') {
     if (!this.currentLogs || this.currentLogs.length === 0) {
       this.currentLogs = this.extractLogsFromLocalDB();
     }
     const cleanJob = String(jobNum || '').trim();
     const cleanWeek = String(weekStart || '').trim();
+    const cleanForeman = String(foreman || '').trim();
     const hLower = String(colHeader || '').toLowerCase();
 
     let targetType = 'JHA';
@@ -1847,12 +2312,22 @@ class SafetyEmailsEngine {
       targetType = 'Monthly Checklist';
     }
 
+    if (targetType === 'Monthly Checklist') {
+      const checklists = this.getMonthlyChecklistsForCrew(cleanJob, cleanWeek, cleanForeman);
+      if (checklists.length > 0) {
+        // Open the newest one, passing the full group of checklists so pill buttons render
+        this.openPdfViewer(checklists[0], checklists);
+        return;
+      }
+    }
+
     // Try to extract date from column header e.g. "Tue (09/29)" or "(09/29/2026)"
     const dateMatch = String(colHeader).match(/(\d{1,2}\/\d{1,2}(?:\/\d{2,4})?)/);
     const dateSubstr = dateMatch ? dateMatch[1] : '';
 
     const match = (this.currentLogs || []).find(l => {
-      const jobMatches = (l.jobNumber === cleanJob) || (l.creditedTo === cleanJob);
+      const jobMatches = (l.jobNumber === cleanJob) || (l.creditedTo === cleanJob) ||
+        (cleanForeman && l.foreman && l.foreman.toLowerCase() === cleanForeman.toLowerCase());
       if (!jobMatches) return false;
 
       if (targetType === 'Weekly Safety Meeting') {
@@ -2200,10 +2675,10 @@ class SafetyEmailsEngine {
           type: 'Monthly Checklist',
           rowIndex: r._rowIdx || (idx + 2),
           dateReceived: getLogRowDateReceived(r),
-          date: r['Report Date'] || '',
+          date: r['Report Date'] || r['Date Created'] || r['Date Completed'] || r['Date'] || '',
           jobNumber: jobNum,
           foreman: r['Foreman'] || '',
-          vehicleNumber: r['Vehicle Number'] || '',
+          vehicleNumber: r['Vehicle Number'] || r['Equipment Number'] || '',
           subject: subject,
           emailId: emailId,
           gmailUrl: buildLogUrl(subject, emailId, jobNum, 'Safety Checklist'),
@@ -2316,6 +2791,14 @@ class SafetyEmailsEngine {
       .replace(/>/g, '&gt;')
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#039;');
+  }
+
+  escapeJs(str) {
+    if (str === null || str === undefined) return '';
+    return String(str)
+      .replace(/\\/g, '\\\\')
+      .replace(/'/g, "\\'")
+      .replace(/"/g, '&quot;');
   }
 }
 

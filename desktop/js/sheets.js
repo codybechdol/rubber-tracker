@@ -2140,7 +2140,7 @@ class SheetNavigator {
       }
 
       return `
-        <div class="comp-day-pill ${pillClass}" title="${title}" ${canClickPdf ? `onclick="if(window.safetyComplianceEngine){window.safetyComplianceEngine.openPdfForComplianceCell('${this.escapeJs(jobNum)}', '${this.escapeJs(dayKey)}', '${this.escapeJs(weekVal)}');}"` : ''}>
+        <div class="comp-day-pill ${pillClass}" title="${title}" ${canClickPdf ? `onclick="if(window.safetyComplianceEngine){window.safetyComplianceEngine.openPdfForComplianceCell('${this.escapeJs(jobNum)}', '${this.escapeJs(dayKey)}', '${this.escapeJs(weekVal)}', '${this.escapeJs(foreman)}');}"` : ''}>
           <span style="font-size: 9px; color: var(--text-muted); margin-bottom: 1px;">${label}</span>
           <span style="font-size: 13px; font-weight: 800; display: flex; align-items: center; justify-content: center; gap: 1px;">${icon}</span>
         </div>
@@ -2153,9 +2153,19 @@ class SheetNavigator {
       let icon = '—';
       let canClickPdf = false;
 
+      let chkCount = 0;
+      if (colKey === 'Monthly Checklist' && window.safetyComplianceEngine && typeof window.safetyComplianceEngine.getMonthlyChecklistsForCrew === 'function') {
+        const checklists = window.safetyComplianceEngine.getMonthlyChecklistsForCrew(jobNum, weekVal, foreman);
+        chkCount = checklists.length;
+      }
+
       if (v === '✅' || v === '✅L' || v.startsWith('✅')) {
         badgeStyle = 'background: rgba(16, 185, 129, 0.15); color: #34d399; border: 1px solid rgba(16, 185, 129, 0.4); cursor: pointer;';
-        icon = '✅ Received';
+        if (colKey === 'Monthly Checklist' && chkCount > 0) {
+          icon = `✅ Received (${chkCount})`;
+        } else {
+          icon = '✅ Received';
+        }
         canClickPdf = true;
       } else if (v === '❌' || v.startsWith('❌')) {
         badgeStyle = 'background: rgba(239, 68, 68, 0.15); color: #f87171; border: 1px solid rgba(239, 68, 68, 0.4);';
@@ -2169,11 +2179,11 @@ class SheetNavigator {
       }
 
       return `
-        <div style="flex: 1; padding: 6px 8px; border-radius: 6px; font-size: 11px; display: flex; align-items: center; justify-content: space-between; ${badgeStyle}"
+        <div style="flex: 1; min-width: 0; padding: 6px 8px; border-radius: 6px; font-size: 11px; display: flex; align-items: center; justify-content: space-between; gap: 4px; ${badgeStyle}"
              title="${titleLabel}: ${icon}${canClickPdf ? ' (Click to view PDF)' : ''}"
-             ${canClickPdf ? `onclick="if(window.safetyComplianceEngine){window.safetyComplianceEngine.openPdfForComplianceCell('${this.escapeJs(jobNum)}', '${this.escapeJs(colKey)}', '${this.escapeJs(weekVal)}');}"` : ''}>
-          <span style="font-weight: 600;">${titleLabel}</span>
-          <span style="font-weight: 700;">${icon}</span>
+             ${canClickPdf ? `onclick="if(window.safetyComplianceEngine){window.safetyComplianceEngine.openPdfForComplianceCell('${this.escapeJs(jobNum)}', '${this.escapeJs(colKey)}', '${this.escapeJs(weekVal)}', '${this.escapeJs(foreman)}');}"` : ''}>
+          <span style="font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${titleLabel}</span>
+          <span style="font-weight: 700; white-space: nowrap; display: inline-flex; align-items: center; gap: 2px;">${icon}</span>
         </div>
       `;
     };
@@ -13193,7 +13203,17 @@ class SheetNavigator {
             const isLate = vStr.includes('L');
             const jobVal = String(row['Job Number'] || row['Job #'] || row['Crew'] || '').trim();
             const weekVal = String(row['Week Start'] || row['Week'] || '').trim();
-            customCellHtml = `<span style="font-size: 14px; display: inline-flex; align-items: center; justify-content: center; gap: 2px; cursor: pointer;" title="${isLate ? 'Completed Late (Received after deadline)' : 'Submitted on time'} · Click to view PDF document" onclick="event.stopPropagation(); if (window.safetyComplianceEngine) window.safetyComplianceEngine.openPdfForComplianceCell('${this.escapeJs(jobVal)}', '${this.escapeJs(h)}', '${this.escapeJs(weekVal)}');">✅${isLate ? '<span style="font-size: 9.5px; font-weight: 800; color: #f59e0b;">L</span>' : ''}</span>`;
+            const foremanVal = String(row['Foreman'] || row['Crew Lead'] || row['Lead'] || '').trim();
+
+            let countLabel = '';
+            if (h === 'Monthly Checklist' && window.safetyComplianceEngine && typeof window.safetyComplianceEngine.getMonthlyChecklistsForCrew === 'function') {
+              const chks = window.safetyComplianceEngine.getMonthlyChecklistsForCrew(jobVal, weekVal, foremanVal);
+              if (chks.length > 0) {
+                countLabel = ` (${chks.length})`;
+              }
+            }
+
+            customCellHtml = `<span style="font-size: 14px; display: inline-flex; align-items: center; justify-content: center; gap: 2px; cursor: pointer;" title="${isLate ? 'Completed Late (Received after deadline)' : 'Submitted on time'}${countLabel ? ` · ${countLabel.trim()} checklists turned in` : ''} · Click to view PDF document" onclick="event.stopPropagation(); if (window.safetyComplianceEngine) window.safetyComplianceEngine.openPdfForComplianceCell('${this.escapeJs(jobVal)}', '${this.escapeJs(h)}', '${this.escapeJs(weekVal)}', '${this.escapeJs(foremanVal)}');">✅${isLate ? '<span style="font-size: 9.5px; font-weight: 800; color: #f59e0b;">L</span>' : ''}${countLabel ? `<span style="font-size: 11px; font-weight: 700; color: #34d399; margin-left: 2px;">${this.escapeHtml(countLabel)}</span>` : ''}</span>`;
           } else if (vStr === '❌' || vStr.startsWith('❌')) {
             const letter = vStr.replace('❌', '').trim();
             const badgeColor = letter === 'A' ? '#38bdf8' : (letter === 'W' ? '#fbbf24' : (letter === 'D' ? '#ef4444' : '#c084fc'));
