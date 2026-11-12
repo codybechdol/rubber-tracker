@@ -830,6 +830,11 @@ function trackEmployeeChange(ss, sheet, editedRow, editedCol, newValue, oldValue
       changeType = EMPLOYEE_EVENT_TYPES.LOCATION_CHANGE;
       changeNotes = 'From: ' + (oldValue || 'N/A') + ' → ' + (newValue || 'N/A');
     } else if (editedCol === jobNumberColIdx) {
+      var oldSig = (typeof getSignificantJobNumber === 'function') ? getSignificantJobNumber(oldValue) : String(oldValue || '').split('.')[0];
+      var newSig = (typeof getSignificantJobNumber === 'function') ? getSignificantJobNumber(newValue) : String(newValue || '').split('.')[0];
+      if (oldSig === newSig) {
+        return; // Skip intra-crew position changes (###-##.1, 2, 3, etc.)
+      }
       changeType = EMPLOYEE_EVENT_TYPES.JOB_NUMBER_CHANGE;
       changeNotes = 'From: ' + (oldValue || 'N/A') + ' → ' + (newValue || 'N/A');
     } else if (hireDateColIdx && editedCol === hireDateColIdx) {
@@ -1043,7 +1048,9 @@ function saveEmployeeHistory() {
 
     // Check for any changes
     var locationChanged = last.location !== currentLocation;
-    var jobNumberChanged = last.jobNumber !== currentJobNumber;
+    var oldJobSig = (typeof getSignificantJobNumber === 'function') ? getSignificantJobNumber(last.jobNumber) : String(last.jobNumber || '').split('.')[0];
+    var curJobSig = (typeof getSignificantJobNumber === 'function') ? getSignificantJobNumber(currentJobNumber) : String(currentJobNumber || '').split('.')[0];
+    var jobNumberChanged = oldJobSig !== curJobSig;
     var phoneChanged = last.phoneNumber !== phoneNumber;
     var emailChanged = last.emailAddress !== emailAddress;
     var gloveSizeChanged = last.gloveSize !== gloveSize;

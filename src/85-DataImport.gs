@@ -467,8 +467,18 @@ function applyCrewChanges(changes) {
       }
 
       if (change.newJobNumber && change.newJobNumber !== String(data[dataIdx][jobNumCol] || '')) {
+        var oldSig = (typeof getSignificantJobNumber === 'function')
+          ? getSignificantJobNumber(change.oldJobNumber || String(data[dataIdx][jobNumCol] || ''))
+          : String(data[dataIdx][jobNumCol] || '').split('.')[0];
+        var newSig = (typeof getSignificantJobNumber === 'function')
+          ? getSignificantJobNumber(change.newJobNumber)
+          : String(change.newJobNumber || '').split('.')[0];
+
         data[dataIdx][jobNumCol] = change.newJobNumber;
-        jobChanged = true;
+        // Only track job number changes if the base job (###-##) changed (ignore intra-crew position changes .1, .2, etc.)
+        if (oldSig !== newSig) {
+          jobChanged = true;
+        }
         columnsModified.jobNum = true;
       }
 

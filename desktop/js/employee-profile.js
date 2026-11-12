@@ -247,6 +247,12 @@ class EmployeeProfileEngine {
     return isNaN(dt.getTime()) ? null : dt;
   }
 
+  getSignificantJobNumber(jobNum) {
+    if (!jobNum) return '';
+    const match = String(jobNum).trim().match(/^(\d{3}-\d{2})/);
+    return match ? match[1] : String(jobNum).trim();
+  }
+
   formatDateDisplay(d) {
     if (!d || !(d instanceof Date) || isNaN(d.getTime())) return '';
     const mm = String(d.getMonth() + 1).padStart(2, '0');
@@ -919,11 +925,11 @@ class EmployeeProfileEngine {
 
     // 4. Scan Training Tracking for this employee / crew
     const trainingTable = snap.tables['training_tracking'];
-    const trainingList = [];
+    const rawTrainingList = [];
     if (trainingTable && trainingTable.rows) {
       trainingTable.rows.forEach(tr => {
         const lead = String(tr['Lead'] || tr['Crew Lead'] || tr['Foreman'] || '').trim();
-        const crew = String(tr['Crew'] || tr['Job #'] || tr['Job Number'] || '').trim();
+        const crew = String(tr['Crew #'] || tr['Crew'] || tr['Job #'] || tr['Job Number'] || '').trim();
         const attendees = String(tr['Attendees'] || tr['Crew Members'] || '').trim();
         const month = String(tr['Month'] || tr['Scheduled Month'] || 'N/A').trim();
         const topic = String(tr['Topic'] || tr['Training Topic'] || tr['Training'] || 'Safety Training').trim();
@@ -935,13 +941,13 @@ class EmployeeProfileEngine {
 
         const isLeadMatch = this.isNameMatch(lead, displayName) || this.isNameMatch(lead, rawEmpName);
         const isAttendeeMatch = attendees && (this.isNameMatch(attendees, displayName) || this.isNameMatch(attendees, rawEmpName));
-        const isCrewMatch = jobNumber && jobNumber !== 'N/A' && crew === jobNumber;
+        const isCrewMatch = jobNumber && jobNumber !== 'N/A' && (crew === jobNumber || this.getSignificantJobNumber(crew) === this.getSignificantJobNumber(jobNumber));
 
         if (isLeadMatch || isAttendeeMatch || isCrewMatch) {
           const hasAttendeeList = attendees && attendees.length > 3 && attendees.toLowerCase() !== 'n/a' && attendees.toLowerCase() !== 'all';
           const attended = isAttendeeMatch || isLeadMatch || (!hasAttendeeList && isCrewMatch);
 
-          trainingList.push({
+          rawTrainingList.push({
             month,
             topic,
             crew,
@@ -951,11 +957,68 @@ class EmployeeProfileEngine {
             completionDate,
             trainer,
             notes,
-            attended
+            attended,
+            isAttendeeMatch: Boolean(isAttendeeMatch),
+            isLeadMatch: Boolean(isLeadMatch)
           });
         }
       });
     }
+
+    // Deduplicate and resolve true completion dates across crew transfers
+    // For each training topic:
+    // 1. If completed with an attendee match, that original completion is preserved.
+    // 2. If completed on multiple crews, the EARLIEST completion date is preserved.
+    // 3. If a topic was already completed, omit pending/makeup records for that topic.
+    const trainingList = [];
+    const coreTopicKey = (t) => {
+      return String(t || '')
+        .replace(/^(?:january|february|march|april|may|june|july|august|september|october|november|december)\s*:\s*/i, '')
+        .replace(/^(?:q[1-4]|1st|2nd|3rd|4th)\s*quarter\s*:\s*/i, '')
+        .trim().toLowerCase();
+    };
+
+    const completedByTopic = new Map();
+    rawTrainingList.forEach(tr => {
+      const isComp = tr.status.toLowerCase().includes('comp') || Boolean(tr.completionDate);
+      if (isComp && tr.attended !== false) {
+        const k = coreTopicKey(tr.topic);
+        const existing = completedByTopic.get(k);
+        if (!existing) {
+          completedByTopic.set(k, tr);
+        } else {
+          // Compare dates: keep the earliest completion date (the employee's original training completion)
+          const d1 = this.parseDate(existing.completionDate);
+          const d2 = this.parseDate(tr.completionDate);
+          if (d2 && d1 && d2.getTime() < d1.getTime()) {
+            completedByTopic.set(k, tr);
+          } else if (tr.isAttendeeMatch && !existing.isAttendeeMatch) {
+            completedByTopic.set(k, tr);
+          }
+        }
+      }
+    });
+
+    // Add completed records first
+    const addedCompletedTopics = new Set();
+    for (const [k, tr] of completedByTopic.entries()) {
+      trainingList.push(tr);
+      addedCompletedTopics.add(k);
+    }
+
+    // Add pending records only if the employee has NOT already completed that core topic
+    rawTrainingList.forEach(tr => {
+      const isComp = tr.status.toLowerCase().includes('comp') || Boolean(tr.completionDate);
+      if (!isComp) {
+        const k = coreTopicKey(tr.topic);
+        if (!addedCompletedTopics.has(k)) {
+          const alreadyPending = trainingList.some(item => coreTopicKey(item.topic) === k && !item.status.toLowerCase().includes('comp'));
+          if (!alreadyPending) {
+            trainingList.push(tr);
+          }
+        }
+      }
+    });
 
     // 5. Scan Employee History & Certifications for Career Milestones
     const historyTable = snap.tables['employee_history'];
@@ -974,6 +1037,22 @@ class EmployeeProfileEngine {
 
           const eventLower = rawEvent.toLowerCase();
           const detailsLower = rawDetails.toLowerCase();
+
+          // 1. Exclude future cert expirations from timeline (visible in Certifications tab)
+          if (eventLower.includes('cert expiration tracked') || detailsLower.includes('cert expiration tracked')) {
+            return;
+          }
+
+          // 2. Exclude intra-crew position changes (e.g. 021-27.2 -> 021-27.3)
+          // Users do not want intra-crew suffix changes tracked, only base job changes (###-##)
+          const jobChangeMatch = (rawEvent + ' ' + rawDetails).match(/Job\s*#?:\s*([0-9]{3}-[0-9]{2}(?:\.[0-9]+)?)\s*[→\->]+\s*([0-9]{3}-[0-9]{2}(?:\.[0-9]+)?)/i);
+          if (jobChangeMatch) {
+            const sigOld = this.getSignificantJobNumber(jobChangeMatch[1]);
+            const sigNew = this.getSignificantJobNumber(jobChangeMatch[2]);
+            if (sigOld && sigNew && sigOld.toLowerCase() === sigNew.toLowerCase()) {
+              return;
+            }
+          }
 
           const isHire = eventLower.includes('new hire') || (eventLower.includes('hire') && !eventLower.includes('rehire')) || eventLower.includes('new employee');
           const isRehire = eventLower.includes('rehire');
@@ -1131,32 +1210,28 @@ class EmployeeProfileEngine {
       }
     }
 
-    // B. Cert Updates from Certifications List (for certs that have a recorded date)
+    // B. Cert Updates from Certifications List:
+    // Future expiring certs are excluded from the timeline per user preference (visible in Certifications & Matrix tab).
+    // Only historical certifications with an explicit past test/acquired date are included.
     if (certifications && certifications.length > 0) {
       certifications.forEach(c => {
         const certName = c.certType || 'Certification';
-        const dateUpdated = (c.testDate && c.testDate !== 'N/A') ? c.testDate : ((c.expDate && c.expDate !== 'N/A' && c.expDate !== 'No Date Set') ? c.expDate : null);
+        const dateUpdated = (c.testDate && c.testDate !== 'N/A' && c.testDate !== 'No Date Set') ? c.testDate : null;
         if (dateUpdated) {
-          const isDup = employeeHistory.some(e => e.type === 'cert' && e.date === dateUpdated && e.details.toLowerCase().includes(certName.toLowerCase()));
-          if (!isDup) {
-            let certDetail = `Valid · ${certName}`;
-            let certEvent = `📜 Cert Recorded: ${certName}`;
-            if (c.testDate && c.testDate !== 'N/A') {
-              certEvent = `📜 Cert Acquired / Renewed: ${certName}`;
-              certDetail = `Acquired / Renewed: ${c.testDate}${c.expDate && c.expDate !== 'N/A' && c.expDate !== 'No Date Set' ? ' · Expires: ' + c.expDate : ''}`;
-            } else if (c.expDate && c.expDate !== 'N/A' && c.expDate !== 'No Date Set') {
-              certEvent = `📜 Cert Expiration Tracked: ${certName}`;
-              certDetail = `Expires: ${c.expDate}`;
+          const testDateObj = this.parseDate(dateUpdated);
+          const now = new Date();
+          if (testDateObj && testDateObj.getTime() <= now.getTime()) {
+            const isDup = employeeHistory.some(e => e.type === 'cert' && e.date === dateUpdated && e.details.toLowerCase().includes(certName.toLowerCase()));
+            if (!isDup) {
+              employeeHistory.push({
+                type: 'cert',
+                date: dateUpdated,
+                event: `📜 Cert Acquired / Renewed: ${certName}`,
+                details: `Acquired / Renewed: ${dateUpdated}${c.expDate && c.expDate !== 'N/A' && c.expDate !== 'No Date Set' ? ' · Expires: ' + c.expDate : ''}`,
+                location: location,
+                job: jobNumber
+              });
             }
-
-            employeeHistory.push({
-              type: 'cert',
-              date: dateUpdated,
-              event: certEvent,
-              details: certDetail,
-              location: location,
-              job: jobNumber
-            });
           }
         }
       });
@@ -1306,11 +1381,19 @@ class EmployeeProfileEngine {
         const isComplete = trObj.status.toLowerCase().includes('comp') || (trObj.completionDate && trObj.completionDate !== 'N/A' && trObj.completionDate !== '');
         if (isComplete && trObj.attended !== false) {
           const trainDate = trObj.completionDate || trObj.month || 'Completed';
-          const isDup = employeeHistory.some(e => e.type === 'training' && e.event.includes(trObj.topic) && e.date === trainDate);
+          const coreTopic = String(trObj.topic || '')
+            .replace(/^(?:january|february|march|april|may|june|july|august|september|october|november|december)\s*:\s*/i, '')
+            .trim().toLowerCase();
+
+          const isDup = employeeHistory.some(e => e.type === 'training' && (
+            e.event.toLowerCase().includes(coreTopic) ||
+            coreTopic.includes(e.event.toLowerCase().replace('🎓 training completed: ', ''))
+          ));
+
           if (!isDup) {
             const trainDetails = [
               trObj.month && trObj.month !== 'N/A' ? `Month: ${trObj.month}` : '',
-              trObj.crew ? `Crew: ${trObj.crew}` : (jobNumber && jobNumber !== 'N/A' ? `Crew: ${jobNumber}` : ''),
+              trObj.crew ? `Crew: ${trObj.crew}` : '',
               trObj.lead ? `Foreman: ${trObj.lead}` : '',
               trObj.hours ? `${trObj.hours} hrs` : '',
               trObj.trainer ? `Trainer: ${trObj.trainer}` : '',

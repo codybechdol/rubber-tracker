@@ -2403,11 +2403,8 @@ class CrewImportEngine {
           }
         } else if (primaryJob && oldJob !== primaryJob) {
           // Intra-crew position renumbering or formatting normalization (e.g. 043-26.04 -> 043-26.1)
+          // Intra-crew position suffix changes (###-##.1, 2, 3, etc.) do NOT need to be tracked in history/timeline
           changeItem.newJobNumber = primaryJob;
-          changeItem.changes.push(`Job #: ${oldJob || 'None'} → ${primaryJob}`);
-          if (changeItem.type === 'Update') changeItem.type = 'Position Update';
-          positionUpdates.push(changeItem);
-          changed = true;
         }
 
         // 2. Location Change

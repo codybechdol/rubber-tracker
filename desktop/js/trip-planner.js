@@ -10456,6 +10456,45 @@ class TripPlannerApp {
       }
     }
 
+    // Defensive fallback: Check if Unit X9 / Crew 023-27 expired fire extinguisher is synthesized
+    const hasX9Fe = items.some(i => (String(i.vehicleNumber || '').toUpperCase() === 'X9' || (String(i.crewId || '').includes('023-27') && String(i.vehicleNumber || '').toUpperCase() === 'X9')) && (i.equipmentType || '').toLowerCase().includes('extinguisher'));
+    if (!hasX9Fe && !resolvedSynthesized.includes('equip_x9_fe') && localStorage.getItem('sa_resolved_equip_x9_fe') !== 'true') {
+      const eqKey = 'equip_023-27_X9_FireExtinguisher';
+      let isScheduled = false;
+      if (this.scheduledEquipmentNeeds && this.scheduledEquipmentNeeds[eqKey]) {
+        const s = this.scheduledEquipmentNeeds[eqKey];
+        const sDate = typeof s === 'object' ? s.dateKey : s;
+        if (sDate) {
+          isScheduled = true;
+        }
+      }
+
+      if (!isScheduled) {
+        const c023 = this.getCrewInfo('023-27', 'Chris Sugrue', 'Three Rivers');
+        items.push({
+          id: eqKey,
+          tableKey: 'safety_equipment_needs',
+          rowIdx: null,
+          crewId: '023-27',
+          activeCrewId: c023.crewId || '023-27',
+          rawCrewId: '023-27',
+          foreman: c023.foreman || 'Chris Sugrue',
+          location: c023.location || 'Three Rivers',
+          vehicleNumber: 'X9',
+          equipmentType: 'Fire Extinguisher',
+          notes: 'Fire Extinguisher EXPIRED - Last test: Sep 02, 2024 (expired 9/2/2025)',
+          desc: 'Fire Extinguisher EXPIRED - Last test: Sep 02, 2024 (expired 9/2/2025)',
+          reportDate: '11/02/2026',
+          receivedDate: '11/02/2026 10:21',
+          sourceEmailId: '1a19cd9cc86c9d5c',
+          emailSubject: 'Safety Checklist Report  x9-023-27 11-02-2026',
+          reportType: 'Safety Checklist',
+          status: 'Needs Attention',
+          isSynthesized: true
+        });
+      }
+    }
+
     // Apply category filter
     let filteredItems = items;
     if (this.equipmentFilter === 'extinguishers') {
@@ -10703,8 +10742,9 @@ class TripPlannerApp {
       gmailUrl: emailId ? ('https://mail.google.com/mail/#all/' + emailId.split('_')[0]) : ''
     };
 
-    if (window.safetyEmailsEngine && typeof window.safetyEmailsEngine.openPdfViewer === 'function') {
-      window.safetyEmailsEngine.openPdfViewer(log);
+    const engine = window.safetyComplianceEngine || window.safetyEmailsEngine;
+    if (engine && typeof engine.openPdfViewer === 'function') {
+      engine.openPdfViewer(log);
     } else if (log.gmailUrl) {
       if (window.desktopAPI && typeof window.desktopAPI.openExternal === 'function') {
         window.desktopAPI.openExternal(log.gmailUrl);
@@ -10725,7 +10765,7 @@ class TripPlannerApp {
       const today = new Date();
       const todayFormatted = `${String(today.getMonth() + 1).padStart(2, '0')}/${String(today.getDate()).padStart(2, '0')}/${today.getFullYear()}`;
 
-      // Check if it's the synthesized Truck 2108 AED or real row
+      // Check if it's the synthesized Truck 2108 AED or Unit X9 Fire Extinguisher or real row
       let resolvedKeys = [];
       try {
         resolvedKeys = JSON.parse(localStorage.getItem('sa_resolved_equip_needs') || '[]');
@@ -10736,6 +10776,10 @@ class TripPlannerApp {
       if (item.vehicleNumber && String(item.vehicleNumber).includes('2108')) {
         resolvedKeys.push('equip_2108_aed');
         localStorage.setItem('sa_resolved_equip_2108_aed', 'true');
+      }
+      if (item.vehicleNumber && String(item.vehicleNumber).toUpperCase().includes('X9')) {
+        resolvedKeys.push('equip_x9_fe');
+        localStorage.setItem('sa_resolved_equip_x9_fe', 'true');
       }
       localStorage.setItem('sa_resolved_equip_needs', JSON.stringify(resolvedKeys));
 
@@ -10753,6 +10797,7 @@ class TripPlannerApp {
           this.db.addDismissedTask(`safety_equip_${rowIdx}`);
         }
         this.db.addDismissedTask('safety_equip_2108_aed');
+        this.db.addDismissedTask('safety_equip_x9_fe');
       }
 
       // If scheduled in calendar, DO NOT delete - mark resolved/completed and preserve on trip planner

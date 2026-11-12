@@ -1829,6 +1829,13 @@ class SafetyEmailsEngine {
         byteNumbers[i] = byteCharacters.charCodeAt(i);
       }
       const byteArray = new Uint8Array(byteNumbers);
+
+      // Auto-scan checklist PDF in background for equipment defects (expired fire extinguishers, AED pads, etc.)
+      if (isChecklist) {
+        this.scanAndSyncChecklistIssues(byteArray, log).catch(e => {
+          console.warn('[PDF Viewer] Auto-scan checklist issues failed:', e);
+        });
+      }
       // Guarantee proper application/pdf MIME type even if email server reported application/octet-stream
       const mimeType = (pdfData.filename && pdfData.filename.toLowerCase().endsWith('.pdf')) ? 'application/pdf' : (pdfData.contentType || 'application/pdf');
       const blob = new Blob([byteArray], { type: mimeType });
@@ -2016,13 +2023,12 @@ class SafetyEmailsEngine {
     if (!log) return [];
     const snap = window.localDB ? window.localDB.getSnapshot() : null;
     const table = snap && snap.tables ? snap.tables.safety_equipment_needs : null;
-    if (!table || !table.rows) return [];
 
     const unit = this.getLogUnitLabel(log).toLowerCase();
     const emailId = String(log.emailId || '').trim();
     const jobNum = String(log.jobNumber || log.creditedTo || '').trim().toLowerCase();
 
-    return table.rows.filter((r, idx) => {
+    const results = (table && table.rows ? table.rows : []).filter((r, idx) => {
       const status = String(r['Status'] || '').toLowerCase();
       if (status.includes('resolve') || status.includes('complete')) return false;
 
@@ -2052,6 +2058,35 @@ class SafetyEmailsEngine {
       status: r['Status'] || 'Needs Attention',
       vehicleNumber: r['Vehicle Number'] || ''
     }));
+
+    // If no database row found yet, check if tripPlanner has a synthesized need matching this log / unit
+    if (results.length === 0 && window.tripPlanner && typeof window.tripPlanner.getEquipmentNeedsData === 'function') {
+      try {
+        const tpData = window.tripPlanner.getEquipmentNeedsData();
+        const synthMatches = (tpData.items || []).filter(item => {
+          if (!item.isSynthesized) return false;
+          const sEmail = String(item.sourceEmailId || '').trim();
+          if (emailId && sEmail && emailId === sEmail) return true;
+          const sVeh = String(item.vehicleNumber || '').trim().toLowerCase();
+          const sCrew = String(item.crewId || '').trim().toLowerCase();
+          if (unit && sVeh && (unit === sVeh || sVeh.includes(unit) || unit.includes(sVeh))) {
+            if (!jobNum || !sCrew || jobNum === sCrew) return true;
+          }
+          return false;
+        }).map(item => ({
+          rowIdx: null,
+          equipmentType: item.equipmentType || '',
+          desc: item.desc || item.notes || '',
+          notes: item.notes || '',
+          status: item.status || 'Needs Attention',
+          vehicleNumber: item.vehicleNumber || '',
+          isSynthesized: true
+        }));
+        if (synthMatches.length > 0) return synthMatches;
+      } catch (_e) {}
+    }
+
+    return results;
   }
 
   hasEquipmentNeedsForLog(log) {
@@ -2230,8 +2265,12 @@ class SafetyEmailsEngine {
     }
 
     // Refresh Trip Planner sidebar if tripPlanner exists
-    if (window.tripPlanner && typeof window.tripPlanner.renderEquipmentSidebar === 'function') {
-      window.tripPlanner.renderEquipmentSidebar();
+    if (window.tripPlanner) {
+      if (typeof window.tripPlanner.renderEquipmentNeedsList === 'function') {
+        window.tripPlanner.renderEquipmentNeedsList();
+      } else if (typeof window.tripPlanner.renderEquipmentSidebar === 'function') {
+        window.tripPlanner.renderEquipmentSidebar();
+      }
     }
   }
 
@@ -2239,9 +2278,48 @@ class SafetyEmailsEngine {
    * Resolves an equipment action item from the PDF viewer.
    */
   async resolveEquipmentNeedFromPdf(rowIdx) {
-    if (!rowIdx) return;
     const today = new Date();
     const todayFormatted = `${String(today.getMonth() + 1).padStart(2, '0')}/${String(today.getDate()).padStart(2, '0')}/${today.getFullYear()}`;
+
+    // If resolving a synthesized need (rowIdx is null)
+    if (!rowIdx) {
+      const log = this._activeViewingLog;
+      const unit = this.getLogUnitLabel(log).toLowerCase();
+      let resolvedKeys = [];
+      try {
+        resolvedKeys = JSON.parse(localStorage.getItem('sa_resolved_equip_needs') || '[]');
+      } catch (_err) {
+        resolvedKeys = [];
+      }
+      if (unit === 'x9') {
+        resolvedKeys.push('equip_x9_fe');
+        localStorage.setItem('sa_resolved_equip_x9_fe', 'true');
+      }
+      localStorage.setItem('sa_resolved_equip_needs', JSON.stringify(resolvedKeys));
+
+      if (typeof window.showToast === 'function') {
+        window.showToast('✅ Marked equipment need as Resolved.', 'info');
+      }
+
+      this.renderActionItemsDrawer();
+
+      const actionItemsBtn = document.getElementById('safety-pdf-btn-action-items');
+      if (actionItemsBtn) {
+        actionItemsBtn.innerHTML = `<span>🔧</span> Action Items`;
+        actionItemsBtn.style.background = 'rgba(245, 158, 11, 0.12)';
+        actionItemsBtn.style.borderColor = 'rgba(245, 158, 11, 0.4)';
+        actionItemsBtn.style.color = '#fbbf24';
+      }
+
+      if (window.tripPlanner) {
+        if (typeof window.tripPlanner.renderEquipmentNeedsList === 'function') {
+          window.tripPlanner.renderEquipmentNeedsList();
+        } else if (typeof window.tripPlanner.renderEquipmentSidebar === 'function') {
+          window.tripPlanner.renderEquipmentSidebar();
+        }
+      }
+      return;
+    }
 
     if (window.localDB && typeof window.localDB.addMutation === 'function') {
       await window.localDB.addMutation({
@@ -2286,8 +2364,351 @@ class SafetyEmailsEngine {
       }
     }
 
-    if (window.tripPlanner && typeof window.tripPlanner.renderEquipmentSidebar === 'function') {
-      window.tripPlanner.renderEquipmentSidebar();
+    if (window.tripPlanner) {
+      if (typeof window.tripPlanner.renderEquipmentNeedsList === 'function') {
+        window.tripPlanner.renderEquipmentNeedsList();
+      } else if (typeof window.tripPlanner.renderEquipmentSidebar === 'function') {
+        window.tripPlanner.renderEquipmentSidebar();
+      }
+    }
+  }
+
+  /**
+   * Helper to extract a bounded section of text between startPattern and the next major section.
+   */
+  extractChecklistSection(text, startPattern, stopPattern) {
+    const startMatch = text.match(startPattern);
+    if (!startMatch) return '';
+    const startIdx = startMatch.index + startMatch[0].length;
+    const remaining = text.slice(startIdx);
+    const stopMatch = remaining.match(stopPattern);
+    if (stopMatch) {
+      return remaining.slice(0, stopMatch.index);
+    }
+    return remaining.slice(0, 600);
+  }
+
+  /**
+   * Parses safety defects (fire extinguishers, AEDs, hot sticks, etc.) from extracted checklist text.
+   */
+  parseChecklistIssuesFromText(text, context = {}) {
+    const issues = [];
+    if (!text) return issues;
+    const normalized = String(text).replace(/\r?\n/g, ' ');
+
+    const nextSectionRegex = /\b(?:First Aid Kits|Triangles|Hot Sticks|Fire Extinguisher|Cones|Signs|Insulated Jumpers|AED|Crane log books|Mileage books|Manuf\. operation manual|Fall Protection Gear|Harnesses\/Lanyards|Trucks|General)\b/i;
+
+    // 1. Fire Extinguisher section
+    const feText = this.extractChecklistSection(normalized, /\bfire\s*extinguisher\b/i, nextSectionRegex);
+    if (feText) {
+      const testMatch = feText.match(/test\s*date\s*:?\s*([A-Za-z]{3,9}\s+\d{1,2},?\s+\d{4}|\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/i);
+      if (testMatch) {
+        const tDate = new Date(testMatch[1]);
+        if (!isNaN(tDate.getTime())) {
+          const expDate = new Date(tDate);
+          expDate.setFullYear(expDate.getFullYear() + 1);
+          const refDate = context.date ? new Date(context.date) : new Date();
+          const now = new Date();
+          if (now > expDate || refDate > expDate) {
+            const tDateStr = tDate.toLocaleDateString('en-US', { month: 'short', day: '2-digit', year: 'numeric' });
+            const expDateStr = `${expDate.getMonth() + 1}/${expDate.getDate()}/${expDate.getFullYear()}`;
+            const formattedTestDate = `${String(tDate.getMonth() + 1).padStart(2, '0')}/${String(tDate.getDate()).padStart(2, '0')}/${tDate.getFullYear()}`;
+            issues.push({
+              equipmentType: 'Fire Extinguisher',
+              issueDescription: `Fire Extinguisher EXPIRED - Last test: ${tDateStr} (expired ${expDateStr})`,
+              feTestDate: formattedTestDate,
+              notes: `Fire Extinguisher EXPIRED - Last test: ${tDateStr} (expired ${expDateStr})`
+            });
+          }
+        }
+      }
+
+      const chargeMatch = feText.match(/properly\s*charged\s*\??\s*:?\s*(yes|no)/i);
+      if (chargeMatch && chargeMatch[1].toLowerCase() === 'no') {
+        issues.push({
+          equipmentType: 'Fire Extinguisher',
+          issueDescription: 'Fire Extinguisher not properly charged',
+          feTestDate: '',
+          notes: 'Discharged / needs recharge'
+        });
+      }
+
+      const inspMatch = feText.match(/monthly\s*inspection\s*done\s*\??\s*:?\s*(yes|no)/i);
+      if (inspMatch && inspMatch[1].toLowerCase() === 'no') {
+        issues.push({
+          equipmentType: 'Fire Extinguisher',
+          issueDescription: 'Fire Extinguisher monthly inspection not done',
+          feTestDate: '',
+          notes: 'Monthly inspection missing'
+        });
+      }
+    }
+
+    // 2. AED section
+    const aedText = this.extractChecklistSection(normalized, /\baed\b/i, nextSectionRegex);
+    if (aedText) {
+      const dmgMatch = aedText.match(/any\s*damage\s*visible\s*\??\s*:?\s*(yes|no)/i);
+      if (dmgMatch && dmgMatch[1].toLowerCase() === 'yes') {
+        issues.push({
+          equipmentType: 'AED',
+          issueDescription: 'AED has visible damage',
+          notes: 'Visible damage reported on AED'
+        });
+      }
+
+      const pad1Match = aedText.match(/expiration\s*date\s*of\s*pads\s*set\s*1\s*:?\s*([A-Za-z]{3,9}\s+\d{1,2},?\s+\d{4}|\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/i);
+      if (pad1Match) {
+        const pDate = new Date(pad1Match[1]);
+        if (!isNaN(pDate.getTime())) {
+          const oneMonthFuture = new Date();
+          oneMonthFuture.setMonth(oneMonthFuture.getMonth() + 1);
+          if (pDate <= oneMonthFuture) {
+            const pDateStr = pad1Match[1].trim();
+            issues.push({
+              equipmentType: 'AED',
+              issueDescription: 'Needs AED Pads',
+              notes: `Set 1 pads expire/expired on ${pDateStr}. Needs replacement AED pads.`
+            });
+          }
+        }
+      }
+    }
+
+    // 3. First Aid Kits
+    const faText = this.extractChecklistSection(normalized, /\bfirst\s*aid\s*kits?\b/i, nextSectionRegex);
+    if (faText) {
+      const stockMatch = faText.match(/fully\s*stocked\s*\??\s*:?\s*(yes|no)/i);
+      if (stockMatch && stockMatch[1].toLowerCase() === 'no') {
+        issues.push({
+          equipmentType: 'First Aid',
+          issueDescription: 'First Aid Kit not fully stocked',
+          notes: 'Restock First Aid supplies'
+        });
+      }
+    }
+
+    // 4. Hot Sticks
+    const hsText = this.extractChecklistSection(normalized, /\bhot\s*sticks?\b/i, nextSectionRegex);
+    if (hsText) {
+      const condMatch = hsText.match(/good\s*condition\s*\??\s*:?\s*(yes|no)/i);
+      if (condMatch && condMatch[1].toLowerCase() === 'no') {
+        issues.push({
+          equipmentType: 'Hot Sticks',
+          issueDescription: 'Hot Sticks not in good condition',
+          notes: 'Hot sticks damaged or failing inspection'
+        });
+      }
+      const hsTestMatch = hsText.match(/test\s*date\s*:?\s*([A-Za-z]{3,9}\s+\d{1,2},?\s+\d{4}|\d{1,2}[\/-]\d{1,2}[\/-]\d{2,4})/i);
+      if (hsTestMatch) {
+        const hsDate = new Date(hsTestMatch[1]);
+        if (!isNaN(hsDate.getTime())) {
+          const hsExp = new Date(hsDate);
+          hsExp.setFullYear(hsExp.getFullYear() + 2); // 24-month cycle
+          const now = new Date();
+          if (now > hsExp) {
+            issues.push({
+              equipmentType: 'Hot Sticks',
+              issueDescription: `Hot Sticks EXPIRED / Due for Testing - Last test: ${hsTestMatch[1]}`,
+              notes: `Hot sticks overdue for dielectric test (2-year cycle)`
+            });
+          }
+        }
+      }
+    }
+
+    // 5. Insulated Jumpers
+    const ijText = this.extractChecklistSection(normalized, /\binsulated\s*jumpers?\b/i, nextSectionRegex);
+    if (ijText) {
+      const condMatch = ijText.match(/good\s*condition\s*\??\s*:?\s*(yes|no)/i);
+      if (condMatch && condMatch[1].toLowerCase() === 'no') {
+        issues.push({
+          equipmentType: 'Hot Sticks',
+          issueDescription: 'Insulated Jumpers not in good condition',
+          notes: 'Jumpers damaged or failing visual inspection'
+        });
+      }
+    }
+
+    // 6. Truck Defects (Wipers, Horn)
+    const truckText = this.extractChecklistSection(normalized, /\b(?:Trucks|General)\b/i, nextSectionRegex);
+    if (truckText) {
+      const badWiper = truckText.match(/wipers?\s*\??\s*:?\s*(no|bad|poor|torn|needs?\s*replac)/i);
+      if (badWiper) {
+        issues.push({
+          equipmentType: 'Truck',
+          issueDescription: 'Windshield wipers need replacement',
+          notes: 'Wipers torn or failing inspection'
+        });
+      }
+      const badHorn = truckText.match(/horn\s*\??\s*:?\s*(no|bad|poor|inop|doesn't\s*work)/i);
+      if (badHorn) {
+        issues.push({
+          equipmentType: 'Truck',
+          issueDescription: 'City/Air horn inoperative',
+          notes: 'Horn inoperative'
+        });
+      }
+    }
+
+    return issues;
+  }
+
+  /**
+   * Extracts text from a checklist PDF via pdfjsLib and syncs any detected equipment defects
+   * directly to safety_equipment_needs and the Trip Planner.
+   */
+  async scanAndSyncChecklistIssues(byteArray, log) {
+    if (!byteArray || !log || !window.pdfjsLib) return;
+
+    try {
+      const loadingTask = window.pdfjsLib.getDocument({ data: byteArray });
+      const pdfDoc = await loadingTask.promise;
+      let fullText = '';
+      for (let p = 1; p <= pdfDoc.numPages; p++) {
+        const page = await pdfDoc.getPage(p);
+        const textContent = await page.getTextContent();
+        const pageText = textContent.items.map(item => item.str).join(' ');
+        fullText += '\n' + pageText;
+      }
+
+      if (!fullText.trim()) return;
+
+      const checklistDate = log.date || log.dateReceived || '';
+      const issues = this.parseChecklistIssuesFromText(fullText, { date: checklistDate });
+      if (!issues || issues.length === 0) return;
+
+      const unit = this.getLogUnitLabel(log);
+      const jobNum = log.jobNumber || log.creditedTo || '';
+      const foreman = log.foreman || '';
+      const snap = window.localDB ? window.localDB.getSnapshot() : null;
+      const equipTable = snap && snap.tables ? snap.tables.safety_equipment_needs : null;
+      const existingRows = equipTable && equipTable.rows ? equipTable.rows : [];
+
+      let addedAny = false;
+      for (const issue of issues) {
+        const alreadyExists = existingRows.some(r => {
+          const status = String(r['Status'] || '').toLowerCase();
+          if (status.includes('resolve') || status.includes('complete')) return false;
+
+          const rVeh = String(r['Vehicle Number'] || r['Vehicle #'] || r['Truck'] || r['Unit'] || '').trim().toLowerCase();
+          const rEmail = String(r['Source Email ID'] || r['Email ID'] || '').trim();
+          const rType = String(r['Equipment Type'] || r['Equipment'] || '').trim().toLowerCase();
+          const rJob = String(r['Job Number'] || r['Job #'] || r['Crew'] || '').trim().toLowerCase();
+
+          if (log.emailId && rEmail && log.emailId === rEmail && rType === issue.equipmentType.toLowerCase()) {
+            return true;
+          }
+
+          if (unit && rVeh && (unit.toLowerCase() === rVeh || rVeh.includes(unit.toLowerCase()))) {
+            if (rType === issue.equipmentType.toLowerCase()) {
+              if (!jobNum || !rJob || jobNum.toLowerCase() === rJob) {
+                return true;
+              }
+            }
+          }
+          return false;
+        });
+
+        if (alreadyExists) continue;
+
+        const today = new Date();
+        const todayFormatted = `${String(today.getMonth() + 1).padStart(2, '0')}/${String(today.getDate()).padStart(2, '0')}/${today.getFullYear()}`;
+        const repDate = log.date || todayFormatted;
+
+        const newRow = {
+          'Report Date': repDate,
+          'Report Type': 'Safety Checklist',
+          'Job Number': jobNum,
+          'Foreman': foreman,
+          'Vehicle Number': unit,
+          'Equipment Type': issue.equipmentType,
+          'Issue Description': issue.issueDescription,
+          'Status': 'Needs Attention',
+          'FE Test Date': issue.feTestDate || '',
+          'Source Email ID': log.emailId || '',
+          'Notes': issue.notes || issue.issueDescription,
+          'Email Subject': log.subject || '',
+          'Received Date': log.dateReceived || todayFormatted,
+          'Resolved On': '',
+          'Archive Controller': '',
+          'Column 1': ''
+        };
+
+        if (window.localDB && typeof window.localDB.addMutation === 'function') {
+          await window.localDB.addMutation({
+            action: 'ADD_ROW',
+            sheetName: 'Safety Equipment Needs',
+            tableKey: 'safety_equipment_needs',
+            row: newRow
+          });
+          addedAny = true;
+        }
+      }
+
+      if (addedAny) {
+        log.hasEquipmentIssues = 'Yes';
+        if (window.localDB && log.rowIndex) {
+          await window.localDB.addMutation({
+            action: 'UPDATE_CELL',
+            sheetName: 'Monthly Checklist Log',
+            tableKey: 'monthly_checklist_log',
+            row: log.rowIndex,
+            col: 10,
+            header: 'Has Equipment Issues',
+            value: 'Yes'
+          });
+        }
+
+        const actionItemsBtn = document.getElementById('safety-pdf-btn-action-items');
+        if (actionItemsBtn) {
+          const openNeeds = this.getEquipmentNeedsForLog(log);
+          actionItemsBtn.innerHTML = `<span>⚠️</span> Action Items (${openNeeds.length})`;
+          actionItemsBtn.style.background = 'rgba(239, 68, 68, 0.2)';
+          actionItemsBtn.style.borderColor = 'rgba(239, 68, 68, 0.5)';
+          actionItemsBtn.style.color = '#fca5a5';
+        }
+
+        if (this._activeChecklistsGroup && this._activeChecklistsGroup.length > 1) {
+          const versionSelector = document.getElementById('safety-pdf-version-selector');
+          if (versionSelector) {
+            versionSelector.innerHTML = this._activeChecklistsGroup.map((l) => {
+              const isSelected = (l.id === log.id || (l.sheetName + '_' + l.rowIndex) === log.id || (l.emailId && l.emailId === log.emailId));
+              const u = this.getLogUnitLabel(l);
+              const dt = l.date ? String(l.date).replace(/\/20(\d\d)$/, '/$1') : (l.dateReceived ? String(l.dateReceived).split(' ')[0].replace(/\/20(\d\d)$/, '/$1') : '');
+              const hasIssues = String(l.hasEquipmentIssues || '').toLowerCase() === 'yes' || this.hasEquipmentNeedsForLog(l);
+
+              const btnBg = isSelected ? 'linear-gradient(135deg, #0284c7 0%, #0369a1 100%)' : 'rgba(255, 255, 255, 0.08)';
+              const btnBorder = isSelected ? '#38bdf8' : 'rgba(255, 255, 255, 0.18)';
+              const btnColor = isSelected ? '#ffffff' : '#cbd5e1';
+              const shadow = isSelected ? 'box-shadow: 0 2px 8px rgba(2, 132, 199, 0.4);' : '';
+
+              return `
+                <button type="button" class="btn pdf-pill-btn ${isSelected ? 'active' : ''}" onclick="window.safetyComplianceEngine.openPdfViewer('${this.escapeJs(l.id)}', window.safetyComplianceEngine._activeChecklistsGroup)"
+                        style="padding: 3px 9px; font-size: 11px; font-weight: 700; border-radius: 14px; border: 1px solid ${btnBorder}; background: ${btnBg}; color: ${btnColor}; cursor: pointer; white-space: nowrap; display: inline-flex; align-items: center; gap: 4px; ${shadow}"
+                        title="Unit ${this.escapeHtml(u)} · Date: ${this.escapeHtml(l.date || l.dateReceived)}${hasIssues ? ' · ⚠️ Equipment defect reported' : ''}">
+                  <span>🚗 ${this.escapeHtml(u)}</span>
+                  ${dt ? `<span style="font-size: 9.5px; opacity: 0.85; font-weight: 500;">(${this.escapeHtml(dt)})</span>` : ''}
+                  ${hasIssues ? `<span style="color: #fbbf24; font-size: 11px;" title="Equipment defect reported">⚠️</span>` : ''}
+                </button>
+              `;
+            }).join('');
+          }
+        }
+
+        if (window.tripPlanner) {
+          if (typeof window.tripPlanner.renderEquipmentNeedsList === 'function') {
+            window.tripPlanner.renderEquipmentNeedsList();
+          } else if (typeof window.tripPlanner.renderEquipmentSidebar === 'function') {
+            window.tripPlanner.renderEquipmentSidebar();
+          }
+        }
+
+        if (typeof window.showToast === 'function') {
+          window.showToast(`⚠️ Detected equipment defect in Unit ${unit} checklist — added to Trip Planner!`, 'warning');
+        }
+      }
+    } catch (err) {
+      console.warn('[PDF Viewer] scanAndSyncChecklistIssues error:', err);
     }
   }
 

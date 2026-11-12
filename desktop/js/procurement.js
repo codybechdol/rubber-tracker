@@ -12,7 +12,10 @@ class ProcurementEngine {
     this.currentSectionFilter = 'all'; // 'all' | 'swaps_need' | 'swaps_size_up' | 'assigned_size_up' | 'compliance_missing'
     this.currentPOFormat = 'clean';
     this.generatedPOTexts = { clean: '', detailed: '' };
-    this.collapsedOrders = new Set();
+    this.expandedOrders = new Set();
+    this.expandedItemSubrows = new Set();
+    this.expandedSections = new Set();
+    this.collapsedSections = new Set();
     this.orderGroupsMap = new Map();
     this.historySortCol = 'date';
     this.historySortDir = 'desc';
@@ -23,6 +26,7 @@ class ProcurementEngine {
       { key: 'Gloves', label: 'Gloves', icon: '🧤', color: '#60a5fa', placeholder: 'e.g. Class 2 Glove, Leather Protector' },
       { key: 'Sleeves', label: 'Sleeves', icon: '🦺', color: '#818cf8', placeholder: 'e.g. Class 2 Sleeve, Sleeve Straps' },
       { key: 'Blankets', label: 'Blankets', icon: '🧱', color: '#fbbf24', placeholder: 'e.g. Class 4 Blanket, Blanket Pin' },
+      { key: 'Testing', label: 'Testing & Labor', icon: '🧪', color: '#10b981', placeholder: 'e.g. Glove Testing, Sleeve Testing, Dielectric Testing, Labor' },
       { key: 'MACKs', label: 'MACKs / Cover-Up', icon: '🔶', color: '#fb923c', placeholder: 'e.g. Line Hose CL2, MACK, Insulator Hood' },
       { key: 'Grounds', label: 'Grounds', icon: '⚡', color: '#34d399', placeholder: 'e.g. Ferrule 2/0 Cu Plug, Ground Clamp' },
       { key: 'Hot Sticks', label: 'Hot Sticks', icon: '🔴', color: '#f87171', placeholder: 'e.g. Hot Stick Soap, Gloss Refinish Kit, Shotgun Stick' },
@@ -210,6 +214,12 @@ class ProcurementEngine {
     const pNum = String(itemNumber || '').trim();
     if (!s.trim()) return 'Other';
 
+    // 0. Testing & Labor (Glove Testing, Sleeve Testing, Blanket Testing, Labor Testing, Dielectric Testing, Recertification, Retest)
+    // Note: Do not confuse with Testers / Phasing physical instruments (voltmeter, phasing set, hi-pot detector)
+    if (/\b(?:testing|retest|recertification|dielectric|labor|wash\s*&\s*test|clean\s*&\s*test)\b/i.test(s) && !/\b(?:voltmeter|phasing|hi-pot|hipot|bierer|detector)\b/i.test(s)) {
+      return 'Testing';
+    }
+
     // 1. Gloves (Rubber gloves, leather protectors, glove liners, bags, dust/talc, inflators)
     if (/\b(?:glove|gloves|protector|liner|glove\s*bag|talc|powder|inflator)\b/i.test(s) || /^ws-glv/i.test(pNum)) {
       return 'Gloves';
@@ -243,6 +253,24 @@ class ProcurementEngine {
       return 'AED';
     }
     return 'Other';
+  }
+
+  /**
+   * Retrieves all testing & labor catalog items for a given vendor.
+   */
+  getVendorTestingItems(vendorName) {
+    if (!vendorName || vendorName === '__custom__') return [];
+    if (!this.vendors || !this.vendors.length) this.loadVendors();
+    const v = (this.vendors || []).find(vend => vend.name.toLowerCase() === vendorName.toLowerCase());
+    if (!v || !v.items) return [];
+    return v.items.filter(it => {
+      const cat = (it.category || '').toLowerCase();
+      const name = (it.item || '').toLowerCase();
+      const pNum = (it.itemNumber || '').toLowerCase();
+      return cat === 'testing' ||
+        /\b(?:testing|labor|dielectric|service|calib|recert)\b/i.test(name) ||
+        /\b(?:testing|labor|dielectric|service|calib|recert)\b/i.test(pNum);
+    });
   }
 
   cleanEmployeeName(name) {
@@ -1237,7 +1265,10 @@ class ProcurementEngine {
 
       let category = 'Gloves';
       const lower = chunk.toLowerCase();
-      if (lower.includes('sleeve')) category = 'Sleeves';
+      const isTesting = lower.includes('testing') || lower.includes('labor') || lower.includes('dielectric') || lower.includes('calibration');
+
+      if (isTesting) category = 'Testing';
+      else if (lower.includes('sleeve')) category = 'Sleeves';
       else if (lower.includes('blanket')) category = 'Blankets';
       else if (lower.includes('mack')) category = 'MACKs';
       else if (lower.includes('glove')) category = 'Gloves';
@@ -1246,6 +1277,7 @@ class ProcurementEngine {
       else if (lower.includes('ground')) category = 'Grounds';
       else if (lower.includes('stick')) category = 'Hot Sticks';
       else if (lower.includes('aed')) category = 'AED';
+      else if (lower.includes('other')) category = 'Other';
 
       let classVal = 'Class 2';
       const classMatch = chunk.match(/(?:class|cl)\s*([0-4])/i);
@@ -1253,15 +1285,36 @@ class ProcurementEngine {
         classVal = `Class ${classMatch[1]}`;
       } else if (category === 'Blankets' || category === 'MACKs') {
         classVal = 'Class 4';
+      } else if (isTesting || category === 'Other' || category === 'HV Testers' || category === 'Phasing Sets' || category === 'Grounds' || category === 'Hot Sticks' || category === 'AED') {
+        classVal = 'N/A';
       }
 
       let size = 'Standard';
-      // Match explicit "size 9.5" or standalone sizes like "CL2 9.5", "10", "Regular", "Split"
-      const sizeMatch = chunk.match(/size\s*[:\s]*([0-9.]+|regular|small|large|x-large|2x-large|lg|xl|2xl|xxl|split)/i) ||
-                        chunk.match(/\b(8\.5|9\.5|10\.5|11\.5|[89]|10|11|12)\b/) ||
-                        chunk.match(/\b(regular|large|x-large|2x-large|small|split)\b/i);
-      if (sizeMatch) {
-        size = sizeMatch[1].trim();
+      if (isTesting) {
+        // Extract the testing item description from the chunk
+        // e.g. "(5) Sleeve Testing @ $15.00" -> "Sleeve Testing"
+        let rawItem = chunk
+          .replace(/^\(\d+\)\s*/, '')
+          .replace(/^(\d+)\s*x\s*/i, '')
+          .replace(/^(\d+)\s+/, '')
+          .replace(/@.*$/, '')
+          .replace(/\[.*\]/, '')
+          .replace(/\(part\s*#.*?\)/i, '')
+          .trim();
+        rawItem = rawItem.replace(/^(?:size|item)[:\s]*/i, '').trim();
+        if (/sleeve/i.test(rawItem)) size = 'Sleeve Testing';
+        else if (/glove/i.test(rawItem)) size = 'Glove Testing';
+        else if (/blanket/i.test(rawItem)) size = 'Blanket Testing';
+        else if (/mack/i.test(rawItem)) size = 'MACK Testing';
+        else size = rawItem || 'Testing & Labor';
+      } else {
+        // Match explicit "size 9.5" or standalone sizes like "CL2 9.5", "10", "Regular", "Split"
+        const sizeMatch = chunk.match(/size\s*[:\s]*([0-9.]+|regular|small|large|x-large|2x-large|lg|xl|2xl|xxl|split)/i) ||
+                          chunk.match(/\b(8\.5|9\.5|10\.5|11\.5|[89]|10|11|12)\b/) ||
+                          chunk.match(/\b(regular|large|x-large|2x-large|small|split)\b/i);
+        if (sizeMatch) {
+          size = sizeMatch[1].trim();
+        }
       }
 
       let unitPrice = 0;
@@ -1645,47 +1698,83 @@ class ProcurementEngine {
       return /^class\b/i.test(c) ? c : `Class ${c}`;
     };
 
+    const normalizeTestingSubtype = (rawType, rawSize, typeLabel, partNumber) => {
+      const s = `${rawType || ''} ${rawSize || ''} ${typeLabel || ''} ${partNumber || ''}`.toLowerCase();
+      if (s.includes('sleeve')) return 'Sleeve Testing';
+      if (s.includes('glove')) return 'Glove Testing';
+      if (s.includes('blanket')) return 'Blanket Testing';
+      if (s.includes('mack')) return 'MACK Testing';
+      if (s.includes('tester') || s.includes('phasing')) return 'Tester Calibration';
+      if (s.includes('stick')) return 'Hot Stick Testing';
+      if (s.includes('ground')) return 'Ground Testing';
+      return (rawSize && !rawSize.toLowerCase().includes('standard') && !rawSize.toLowerCase().includes('needs size') && !rawSize.toLowerCase().includes('labor & testing'))
+        ? rawSize
+        : 'Testing / Labor';
+    };
+
     const addItem = (section, rawItemType, typeLabel, rawSize, hasNoSize, rawClassVal, empLabel, minDaysLeft, isImmediate, orderInfo = null) => {
       const itemType = cleanItemType(rawItemType);
       const size = cleanSize(rawSize, hasNoSize) || (hasNoSize ? '⚠️ Needs Size' : 'Standard');
       const classVal = cleanClass(rawClassVal);
-      const aggKey = `${section}|${itemType}|${size}|${classVal}`;
+      const isTesting = itemType === 'Testing' || rawItemType === 'Testing' ||
+        /\b(?:testing|labor)\b/i.test(itemType) ||
+        /\b(?:testing|labor)\b/i.test(rawItemType) ||
+        /\b(?:testing|labor)\b/i.test(rawSize || '') ||
+        /\b(?:testing|labor)\b/i.test(typeLabel || '') ||
+        /\b(?:testing|labor)\b/i.test(orderInfo?.partNumber || '');
+      const testingSubtype = isTesting
+        ? normalizeTestingSubtype(rawItemType, rawSize, typeLabel, orderInfo?.partNumber)
+        : '';
+      const orderNumTag = (orderInfo?.vendorOrderNumber || orderInfo?.orderNumber || orderInfo?.poNumber || '');
+      const aggKey = isTesting
+        ? `${section}|Testing|${testingSubtype}|Class N/A|${orderNumTag}`
+        : `${section}|${itemType}|${size}|${classVal}`;
 
       if (!aggregated[aggKey]) {
         aggregated[aggKey] = {
           section: section,
           sectionTitle: this.SECTIONS[section] ? this.SECTIONS[section].title : section,
-          itemType: itemType,
-          typeLabel: typeLabel || (itemType === 'Gloves' ? '🧤 Gloves' : (itemType === 'Sleeves' ? '🦺 Sleeves' : (itemType === 'Blankets' ? '🧱 Blankets' : (itemType === 'MACKs' ? '🧱 MACKs' : `📦 ${itemType}`)))),
-          size: size,
-          hasNoSize: !!hasNoSize,
-          classVal: classVal,
+          itemType: isTesting ? 'Testing' : itemType,
+          typeLabel: isTesting ? `🧪 ${testingSubtype}` : (typeLabel || (itemType === 'Gloves' ? '🧤 Gloves' : (itemType === 'Sleeves' ? '🦺 Sleeves' : (itemType === 'Blankets' ? '🧱 Blankets' : (itemType === 'MACKs' ? '🧱 MACKs' : `📦 ${itemType}`))))),
+          size: isTesting ? testingSubtype : size,
+          hasNoSize: isTesting ? false : !!hasNoSize,
+          classVal: isTesting ? 'Class N/A' : classVal,
           quantity: 0,
           employees: [],
           sizeUpCount: 0,
           minDaysLeft: minDaysLeft !== undefined ? minDaysLeft : 30,
           isImmediate: !!isImmediate,
           selected: true,
-          price: (orderInfo && orderInfo.price && !(orderInfo.price > 450 && /glove|sleeve|blanket/i.test(itemType))) ? parseFloat(orderInfo.price) : 0,
-          partNumber: '',
+          price: (orderInfo && orderInfo.price !== undefined && parseFloat(orderInfo.price) >= 0) ? parseFloat(orderInfo.price) : (isTesting ? 15 : 0),
+          partNumber: isTesting ? (orderInfo?.partNumber || 'Labor Testing') : ((orderInfo && orderInfo.partNumber) ? String(orderInfo.partNumber).trim() : ''),
           orderInfo: orderInfo || null
         };
       }
 
+      if (isTesting) {
+        // One entry per testing category (e.g. Sleeve Testing, Glove Testing, Blanket Testing); no individual sub-entries
+        const addQty = (orderInfo && orderInfo.quantity !== undefined) ? (parseInt(orderInfo.quantity, 10) || 0) : 1;
+        const unitP = (orderInfo && orderInfo.price !== undefined && parseFloat(orderInfo.price) >= 0) ? parseFloat(orderInfo.price) : (aggregated[aggKey].price || 15);
+        const prevUnits = aggregated[aggKey].quantity || 0;
+        const prevTotal = (aggregated[aggKey].price || 0) * prevUnits;
+        const newUnits = prevUnits + addQty;
+        aggregated[aggKey].quantity = newUnits;
+        aggregated[aggKey].price = newUnits > 0 ? (prevTotal + (unitP * addQty)) / newUnits : unitP;
+        aggregated[aggKey].employees = [];
+        return;
+      }
+
       if (orderInfo) {
         if (!aggregated[aggKey].orderInfo) aggregated[aggKey].orderInfo = orderInfo;
-        let op = parseFloat(orderInfo.price) || 0;
-        if (op > 450 && /glove|sleeve|blanket/i.test(itemType)) {
-          op = this.getVendorPrice(orderInfo.vendor, itemType, size, classVal) || 0;
-        }
-        if (op > 0 && (!aggregated[aggKey].price || aggregated[aggKey].price > 450)) {
+        const op = parseFloat(orderInfo.price) || 0;
+        if (op > 0 && !aggregated[aggKey].price) {
           aggregated[aggKey].price = op;
         }
       }
-      if (!aggregated[aggKey].price || (aggregated[aggKey].price > 450 && /glove|sleeve|blanket/i.test(itemType)) || !aggregated[aggKey].partNumber) {
+      if (!aggregated[aggKey].price || !aggregated[aggKey].partNumber) {
         const catMatch = this.matchVendorItem(itemType, size, classVal, orderInfo?.vendor || null);
         if (catMatch) {
-          if (catMatch.price > 0 && (!aggregated[aggKey].price || (aggregated[aggKey].price > 450 && /glove|sleeve|blanket/i.test(itemType)))) {
+          if (catMatch.price > 0 && !aggregated[aggKey].price) {
             aggregated[aggKey].price = catMatch.price;
           }
           if (catMatch.partNumber && !aggregated[aggKey].partNumber) {
@@ -1852,7 +1941,7 @@ class ProcurementEngine {
               orderInfo.poNumber = activePo.orderNumber;
               if (!orderInfo.vendor && activePo.vendor) orderInfo.vendor = activePo.vendor;
               if (!orderInfo.orderDate && activePo.orderDate) orderInfo.orderDate = activePo.orderDate;
-              if ((!orderInfo.price || orderInfo.price <= 0 || (orderInfo.price > 450 && /glove|sleeve|blanket/i.test(s.type))) && activePo.unitPrice > 0) {
+              if ((!orderInfo.price || orderInfo.price <= 0 || (orderInfo.price > 1200 && /glove|sleeve|blanket/i.test(s.type))) && activePo.unitPrice > 0) {
                 orderInfo.price = activePo.unitPrice;
               }
               if (!orderInfo.expectedDelivery && activePo.expectedDelivery) orderInfo.expectedDelivery = activePo.expectedDelivery;
@@ -1863,7 +1952,7 @@ class ProcurementEngine {
             const enriched = this.lookupOrderByPoNumber(orderInfo.orderNumber, emp, s.type, size, rowClass);
             if (enriched) {
               if (!orderInfo.vendor && enriched.vendor) orderInfo.vendor = enriched.vendor;
-              if ((!orderInfo.price || orderInfo.price <= 0 || (orderInfo.price > 450 && /glove|sleeve|blanket/i.test(s.type))) && enriched.unitPrice > 0) {
+              if ((!orderInfo.price || orderInfo.price <= 0 || (orderInfo.price > 1200 && /glove|sleeve|blanket/i.test(s.type))) && enriched.unitPrice > 0) {
                 orderInfo.price = enriched.unitPrice;
               }
               if (!orderInfo.orderDate && enriched.orderDate) orderInfo.orderDate = enriched.orderDate;
@@ -1875,7 +1964,7 @@ class ProcurementEngine {
           const validRowSize = cleanSize(size);
           const empRec = getEmpRecord(emp);
           const meta = empRec ? this.parseTrackedClassification(empRec.classification) : null;
-          if (meta && (rowClass === 'Class 0' || !rowClass) && (/glove/i.test(s.type))) {
+          if (meta && !rowClass && (/glove/i.test(s.type))) {
             rowClass = getLocationApprovalClass(empRec);
           }
           let neededSize = validRowSize;
@@ -2067,7 +2156,7 @@ class ProcurementEngine {
               orderInfo.poNumber = activePo.orderNumber;
               if (!orderInfo.vendor && activePo.vendor) orderInfo.vendor = activePo.vendor;
               if (!orderInfo.orderDate && activePo.orderDate) orderInfo.orderDate = activePo.orderDate;
-              if ((!orderInfo.price || orderInfo.price <= 0 || (orderInfo.price > 450 && /glove|sleeve|blanket/i.test(itemType))) && activePo.unitPrice > 0) {
+              if ((!orderInfo.price || orderInfo.price <= 0 || (orderInfo.price > 1200 && /glove|sleeve|blanket/i.test(itemType))) && activePo.unitPrice > 0) {
                 orderInfo.price = activePo.unitPrice;
               }
               if (!orderInfo.expectedDelivery && activePo.expectedDelivery) orderInfo.expectedDelivery = activePo.expectedDelivery;
@@ -2078,7 +2167,7 @@ class ProcurementEngine {
             const enriched = this.lookupOrderByPoNumber(orderInfo.orderNumber, emp, itemType, size, rowClass);
             if (enriched) {
               if (!orderInfo.vendor && enriched.vendor) orderInfo.vendor = enriched.vendor;
-              if ((!orderInfo.price || orderInfo.price <= 0 || (orderInfo.price > 450 && /glove|sleeve|blanket/i.test(itemType))) && enriched.unitPrice > 0) {
+              if ((!orderInfo.price || orderInfo.price <= 0 || (orderInfo.price > 1200 && /glove|sleeve|blanket/i.test(itemType))) && enriched.unitPrice > 0) {
                 orderInfo.price = enriched.unitPrice;
               }
               if (!orderInfo.orderDate && enriched.orderDate) orderInfo.orderDate = enriched.orderDate;
@@ -2090,7 +2179,7 @@ class ProcurementEngine {
 
           const empRec = getEmpRecord(emp);
           const meta = empRec ? this.parseTrackedClassification(empRec.classification) : null;
-          if (meta && (rowClass === 'Class 0' || !rowClass) && (/glove/i.test(itemType))) {
+          if (meta && !rowClass && (/glove/i.test(itemType))) {
             rowClass = getLocationApprovalClass(empRec);
           }
 
@@ -2178,12 +2267,46 @@ class ProcurementEngine {
           const normCat = cleanItemType(pi.category);
           const normSize = cleanSize(pi.size) || 'Standard';
           const normClass = cleanClass(pi.classVal);
-          const aggKey = `ordered_pending|${normCat}|${normSize}|${normClass}`;
-          const currentQty = aggregated[aggKey] ? aggregated[aggKey].quantity : 0;
-          if (currentQty < pi.quantity) {
-            const neededQty = pi.quantity - currentQty;
-            const typeLabel = normCat === 'Gloves' ? '🧤 Gloves' : (normCat === 'Sleeves' ? '🦺 Sleeves' : (normCat === 'Blankets' ? '🧱 Blankets' : (normCat === 'MACKs' ? '🧱 MACKs' : `📦 ${normCat}`)));
+
+          const isTestingItem = normCat === 'Testing' || /\b(?:testing|labor)\b/i.test(normCat) || /\b(?:testing|labor)\b/i.test(normSize) || /\b(?:testing|labor)\b/i.test(pi.item || '') || /\b(?:testing|labor)\b/i.test(pi.partNumber || '');
+          if (isTestingItem) {
+            const testSubtype = normalizeTestingSubtype(normCat, pi.size || normSize, pi.item || '', pi.partNumber || '');
             const parsedNotes = this.parseOrderInfoFromNotes(notes);
+            const orderInfoForTesting = {
+              orderNumber: poNum,
+              poNumber: poNum,
+              vendorOrderNumber: parsedNotes?.vendorOrderNumber || '',
+              vendor: vendor,
+              orderDate: dateStr,
+              expectedDelivery: expDeliv || '',
+              quantity: (pi.quantity !== undefined ? parseInt(pi.quantity, 10) : 1),
+              price: (pi.unitPrice !== undefined && pi.unitPrice !== null) ? (parseFloat(pi.unitPrice) || 0) : 15,
+              partNumber: pi.partNumber || 'Labor Testing'
+            };
+            addItem('ordered_pending', 'Testing', `🧪 ${testSubtype}`, testSubtype, false, 'Class N/A', null, 15, false, orderInfoForTesting);
+            return;
+          }
+
+          const realAggKey = `ordered_pending|${normCat}|${normSize}|${normClass}`;
+          const existingItem = aggregated[realAggKey];
+          const parsedNotes = this.parseOrderInfoFromNotes(notes);
+          const cleanPo = (poNum || '').toLowerCase();
+          const cleanVendorOrder = (parsedNotes?.vendorOrderNumber || '').toLowerCase();
+
+          let currentOrderQty = 0;
+          if (existingItem) {
+            currentOrderQty = (existingItem.employees || []).filter(e => {
+              const oNum = (e.orderInfo?.orderNumber || '').toLowerCase();
+              const vNum = (e.orderInfo?.vendorOrderNumber || '').toLowerCase();
+              const lbl = (e.label || '').toLowerCase();
+              return (cleanPo && (oNum === cleanPo || lbl.includes(cleanPo))) ||
+                     (cleanVendorOrder && (vNum === cleanVendorOrder || lbl.includes(cleanVendorOrder)));
+            }).length;
+          }
+
+          if (currentOrderQty < pi.quantity) {
+            const neededQty = pi.quantity - currentOrderQty;
+            const typeLabel = normCat === 'Gloves' ? '🧤 Gloves' : (normCat === 'Sleeves' ? '🦺 Sleeves' : (normCat === 'Blankets' ? '🧱 Blankets' : (normCat === 'MACKs' ? '🧱 MACKs' : `📦 ${normCat}`)));
 
             let calculatedPrice = pi.unitPrice || 0;
             if (!calculatedPrice && totalPrice > 0) {
@@ -2200,7 +2323,8 @@ class ProcurementEngine {
               vendor: vendor,
               orderDate: dateStr,
               expectedDelivery: expDeliv || '',
-              price: calculatedPrice || 0
+              price: calculatedPrice || 0,
+              partNumber: pi.partNumber || ''
             };
 
             let empForPo = pi.employeeName || '';
@@ -2226,9 +2350,10 @@ class ProcurementEngine {
             });
 
             for (let q = 0; q < neededQty; q++) {
-              const assignedName = matchingEmps[q] || (pi.employeeName && !pi.employeeName.toLowerCase().includes('shelf') ? pi.employeeName : '');
+              let assignedName = matchingEmps[q] || (pi.employeeName && !pi.employeeName.toLowerCase().includes('shelf') ? pi.employeeName : '');
               if (assignedName && isCovered(normCat, assignedName)) {
-                continue;
+                // If employee is already covered by an earlier unit, do not drop the unit! Revert to On Shelf
+                assignedName = '';
               }
               const displayOrderNum = (orderInfo.vendorOrderNumber || poNum || 'Pending');
               const isShelf = !assignedName || assignedName.toLowerCase().includes('shelf') || assignedName.toLowerCase().includes('stock');
@@ -2601,6 +2726,29 @@ class ProcurementEngine {
     if (!name) return false;
 
     const cleanType = this.cleanItemType(itemType).toLowerCase();
+    let tSize = String(size || '').toLowerCase().trim();
+    tSize = tSize.replace(/^size\s*[:\s]*/i, '').replace(/\s*\(\s*class\s*[^)]*\)/i, '').trim();
+
+    // Prevent cross-contamination between testing services and physical equipment
+    const isCatalogTesting = /\b(?:testing|retest|recertification|dielectric|labor)\b/i.test(name) || /\b(?:testing|labor)\b/i.test(partNum);
+    const isReqTesting = cleanType === 'testing' || /\b(?:testing|retest|recertification|dielectric|labor)\b/i.test(cleanType) || /\b(?:testing|labor)\b/i.test(tSize);
+
+    if (isCatalogTesting !== isReqTesting) {
+      return false;
+    }
+
+    if (isCatalogTesting && isReqTesting) {
+      // Testing & Labor matching logic
+      if (tSize && tSize !== 'standard' && tSize !== '—') {
+        if (name === tSize || partNum === tSize || name.includes(tSize) || tSize.includes(name)) return true;
+      }
+      if (cleanType.includes('glove') && name.includes('glove')) return true;
+      if (cleanType.includes('sleeve') && name.includes('sleeve')) return true;
+      if (cleanType.includes('blanket') && name.includes('blanket')) return true;
+      if (cleanType === 'testing') return true;
+      return false;
+    }
+
     let typeMatch = false;
     if (cleanType.includes('glove')) typeMatch = name.includes('glove') || name.includes('glv');
     else if (cleanType.includes('sleeve')) typeMatch = name.includes('sleeve') || name.includes('slv');
@@ -2609,9 +2757,6 @@ class ProcurementEngine {
     else typeMatch = name.includes(cleanType.slice(0, 4));
 
     if (!typeMatch) return false;
-
-    let tSize = String(size || '').toLowerCase().trim();
-    tSize = tSize.replace(/^size\s*[:\s]*/i, '').replace(/\s*\(\s*class\s*[^)]*\)/i, '').trim();
 
     // Prevent Blanket Canister from matching normal blanket orders unless Canister is explicitly requested
     if (cleanType.includes('blanket')) {
@@ -2753,6 +2898,42 @@ class ProcurementEngine {
       if (!v.items || !v.items.length) continue;
       const catalog = v.items;
       const isPrimaryVendor = !specificVendorName || typeof specificVendorName !== 'string' || v.name.toLowerCase() === specificVendorName.toLowerCase();
+
+      // 0. Direct match against catalog item description or part number (handles Testing, Labor, Services, and specific custom items)
+      const cleanSizeStr = String(size || '').trim().toLowerCase();
+      const cleanTypeStr = String(itemType || '').trim().toLowerCase();
+      const isTestingReq = cleanTypeStr === 'testing' || /\b(?:testing|labor|service|dielectric)\b/i.test(cleanTypeStr) || /\b(?:testing|labor|service|dielectric)\b/i.test(cleanSizeStr);
+
+      const directMatch = catalog.find(ci => {
+        const ciName = String(ci.item || '').trim().toLowerCase();
+        const ciPart = String(ci.itemNumber || '').trim().toLowerCase();
+        if (!ciName && !ciPart) return false;
+
+        // Exact match with size / item name
+        if (cleanSizeStr && cleanSizeStr !== 'standard' && cleanSizeStr !== '—') {
+          if (ciName === cleanSizeStr || ciPart === cleanSizeStr) return true;
+          if (isTestingReq && (ciName.includes(cleanSizeStr) || cleanSizeStr.includes(ciName))) return true;
+        }
+
+        // Direct match with itemType if specific (e.g. "Glove Testing")
+        if (ciName === cleanTypeStr || ciPart === cleanTypeStr) return true;
+
+        return false;
+      });
+
+      if (directMatch) {
+        if (isPrimaryVendor && !bestPrice && (directMatch.price || 0) > 0) {
+          bestPrice = directMatch.price;
+          bestVendor = v.name;
+        }
+        if (!bestPartNumber && directMatch.itemNumber) {
+          bestPartNumber = String(directMatch.itemNumber).trim();
+          if (!bestVendor) bestVendor = v.name;
+        }
+        if (bestPrice > 0 && bestPartNumber) {
+          return { price: bestPrice, partNumber: bestPartNumber, vendor: bestVendor || v.name };
+        }
+      }
 
       // 1. Exact match (Type + Class + Size)
       if (tSize && tSize !== '—' && !tSize.includes('needs size')) {
@@ -2955,11 +3136,46 @@ class ProcurementEngine {
 
   toggleOrderCollapse(orderKey, event) {
     if (event) event.stopPropagation();
-    if (!this.collapsedOrders) this.collapsedOrders = new Set();
-    if (this.collapsedOrders.has(orderKey)) {
-      this.collapsedOrders.delete(orderKey);
+    if (!this.expandedOrders) this.expandedOrders = new Set();
+    if (this.expandedOrders.has(orderKey)) {
+      this.expandedOrders.delete(orderKey);
     } else {
-      this.collapsedOrders.add(orderKey);
+      this.expandedOrders.add(orderKey);
+    }
+    this.render();
+  }
+
+  toggleSectionCollapse(secKey, event) {
+    if (event) event.stopPropagation();
+    if (!this.expandedSections) this.expandedSections = new Set();
+    if (!this.collapsedSections) this.collapsedSections = new Set();
+    const currentlyCollapsed = this.isSectionCollapsed(secKey);
+    if (currentlyCollapsed) {
+      this.collapsedSections.delete(secKey);
+      this.expandedSections.add(secKey);
+    } else {
+      this.expandedSections.delete(secKey);
+      this.collapsedSections.add(secKey);
+    }
+    this.render();
+  }
+
+  isSectionCollapsed(secKey) {
+    if (this.expandedSections && this.expandedSections.has(secKey)) return false;
+    if (this.collapsedSections && this.collapsedSections.has(secKey)) return true;
+    if (this.currentSectionFilter && this.currentSectionFilter !== 'all' && this.currentSectionFilter !== 'history') {
+      return false; // Specific single-section view defaults to open
+    }
+    return true; // Main 'all' view defaults to collapsed
+  }
+
+  toggleItemSubrows(globalIdx, event) {
+    if (event) event.stopPropagation();
+    if (!this.expandedItemSubrows) this.expandedItemSubrows = new Set();
+    if (this.expandedItemSubrows.has(globalIdx)) {
+      this.expandedItemSubrows.delete(globalIdx);
+    } else {
+      this.expandedItemSubrows.add(globalIdx);
     }
     this.render();
   }
@@ -2974,7 +3190,6 @@ class ProcurementEngine {
       }
     });
     this.render();
-    this.updateStats();
   }
 
   getOrderItems(orderKey) {
@@ -3346,9 +3561,15 @@ class ProcurementEngine {
     const renderSingleItemHtml = (item, isUnderOrderGroup = false, secConfig = null) => {
       const isChecked = item.selected ? 'checked' : '';
       const totalCost = (item.price || 0) * item.quantity;
-      const hasEmployees = item.employees && item.employees.length > 0;
+      const isTestingItem = item.itemType === 'Testing' || item.category === 'Testing' ||
+        /\b(?:testing|labor)\b/i.test(item.itemType || '') ||
+        /\b(?:testing|labor)\b/i.test(item.typeLabel || '') ||
+        /\b(?:testing|labor)\b/i.test(item.size || '') ||
+        /\b(?:testing|labor)\b/i.test(item.partNumber || '');
+      const hasEmployees = !isTestingItem && item.employees && item.employees.length > 0;
       const checkedEmpCount = hasEmployees ? item.employees.filter(e => e.checked).length : 0;
       const secCfg = secConfig || this.SECTIONS[item.section] || this.SECTIONS.swaps_need;
+      const isSubrowsExpanded = this.expandedItemSubrows && this.expandedItemSubrows.has(item._globalIdx);
 
       let empRowsHtml = '';
       if (hasEmployees) {
@@ -3485,8 +3706,8 @@ class ProcurementEngine {
                 ${secCfg.shortTitle}
               </span>
               ${hasEmployees ? `
-                <span class="badge" style="font-size: 10.5px; padding: 1px 6px; background: rgba(255,255,255,0.08); color: var(--text-secondary); border-radius: 10px; border: 1px solid rgba(255,255,255,0.12);">
-                  👥 ${checkedEmpCount}/${item.employees.length} selected
+                <span class="badge" style="font-size: 10.5px; padding: 2px 7px; background: rgba(59, 130, 246, 0.15); color: #93c5fd; border-radius: 10px; border: 1px solid rgba(59, 130, 246, 0.35); cursor: pointer; user-select: none;" onclick="window.procurementEngine.toggleItemSubrows(${item._globalIdx}, event)" title="Click to expand/collapse individual lineman assignments">
+                  ${isSubrowsExpanded ? '▼' : '▶'} 👥 ${checkedEmpCount}/${item.employees.length} assigned
                 </span>
               ` : ''}
             </div>
@@ -3545,7 +3766,7 @@ class ProcurementEngine {
             `}
           </td>
         </tr>
-        ${empRowsHtml}
+        ${isSubrowsExpanded ? empRowsHtml : ''}
       `;
     };
 
@@ -3558,30 +3779,37 @@ class ProcurementEngine {
       const secUnits = secItems.reduce((acc, it) => acc + it.quantity, 0);
       const secAllChecked = secItems.every(it => it.selected);
 
+      const isSecCollapsed = this.isSectionCollapsed(secKey);
+
       html += `
         <!-- Section Header Row -->
-        <tr class="procurement-section-header-row" style="background: ${secConfig.headerBg}; border-top: 2px solid ${secConfig.accentBorder}; border-bottom: 1px solid var(--border-color);">
-          <td style="padding: 8px; text-align: center;">
+        <tr class="procurement-section-header-row" data-section="${secKey}" style="background: ${secConfig.headerBg}; border-top: 2px solid ${secConfig.accentBorder}; border-bottom: 1px solid var(--border-color); cursor: pointer;" onclick="window.procurementEngine.toggleSectionCollapse('${secKey}', event)">
+          <td style="padding: 8px; text-align: center;" onclick="event.stopPropagation()">
             <input type="checkbox" class="procurement-section-check" data-section="${secKey}" ${secAllChecked ? 'checked' : ''} title="Select/Deselect all in ${secConfig.title}">
           </td>
-          <td colspan="8" style="padding: 10px 12px;">
+          <td colspan="8" style="padding: 10px 14px;">
             <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
               <div style="display: flex; align-items: center; gap: 8px;">
+                <span class="section-collapse-icon" style="font-size: 13px; color: ${secConfig.badgeText}; user-select: none;">${isSecCollapsed ? '▶' : '▼'}</span>
                 <span style="font-size: 16px;">${secConfig.icon}</span>
                 <span style="font-weight: 800; font-size: 13.5px; color: ${secConfig.badgeText};">${secConfig.title.toUpperCase()}</span>
                 <span class="brand-badge" style="background: ${secConfig.badgeColor}; color: ${secConfig.badgeText}; border: 1px solid ${secConfig.badgeBorder}; font-size: 11px; font-weight: 700;">
                   ${secItems.length} line ${secItems.length === 1 ? 'item' : 'items'} (${secUnits} units)
                 </span>
               </div>
-              <div style="font-size: 11.5px; color: var(--text-muted); font-style: italic;">
-                ${secConfig.desc}
+              <div style="display: flex; align-items: center; gap: 12px;">
+                <div style="font-size: 11.5px; color: var(--text-muted); font-style: italic;">
+                  ${secConfig.desc}
+                </div>
+                <span style="font-size: 11px; color: var(--text-muted); user-select: none;">${isSecCollapsed ? '▶ Expand' : '▼ Collapse'}</span>
               </div>
             </div>
           </td>
         </tr>
       `;
 
-      if (secKey === 'ordered_pending') {
+      if (!isSecCollapsed) {
+        if (secKey === 'ordered_pending') {
         // Group ordered items by Order Number / PO Number 1st
         const orderGroupsMap = new Map();
         secItems.forEach(item => {
@@ -3600,6 +3828,34 @@ class ProcurementEngine {
           grp.totalCost += ((item.price || 0) * (item.quantity || 0));
         });
 
+        // Reconcile group totalCost with purchase_orders canonical Total Price if available
+        const snap = (this.db && typeof this.db.getSnapshot === 'function')
+          ? this.db.getSnapshot()
+          : (window.localDB ? window.localDB.getSnapshot() : null);
+        const poTable = (this.db && typeof this.db.getTable === 'function' ? this.db.getTable('purchase_orders') : null) || snap?.tables?.['purchase_orders'];
+        const poRows = poTable ? (poTable.rows || []) : [];
+        if (poRows.length > 0) {
+          orderGroupsMap.forEach(grp => {
+            const targetNum = String(grp.vendorOrderNumber || grp.orderNumber || grp.poNumber || '').trim().toLowerCase();
+            if (targetNum && targetNum !== 'ed') {
+              const matchedPo = poRows.find(r => {
+                const pNum = String(r['PO Number'] || r['PO #'] || '').trim().toLowerCase();
+                const notes = String(r['Notes'] || '');
+                const parsed = this.parseOrderInfoFromNotes(notes);
+                const vNum = (parsed?.vendorOrderNumber || '').toLowerCase();
+                return pNum === targetNum || vNum === targetNum;
+              });
+              if (matchedPo) {
+                const poTotal = parseFloat(matchedPo['Total Price'] || matchedPo['Price'] || 0) || 0;
+                // Only fall back to poTotal from purchase_orders if grp.totalCost is 0 (items had no individual prices)
+                if (grp.totalCost === 0 && poTotal > 0) {
+                  grp.totalCost = poTotal;
+                }
+              }
+            }
+          });
+        }
+
         this.orderGroupsMap = orderGroupsMap;
 
         // Render each Order as a primary collapsible line (sorted by order date descending)
@@ -3610,7 +3866,7 @@ class ProcurementEngine {
         });
 
         sortedOrderGroups.forEach(([orderKey, grp]) => {
-          const isOrderCollapsed = this.collapsedOrders && this.collapsedOrders.has(orderKey);
+          const isOrderCollapsed = !this.expandedOrders || !this.expandedOrders.has(orderKey);
           const allGroupChecked = grp.items.every(it => it.selected);
 
           html += `
@@ -3699,7 +3955,8 @@ class ProcurementEngine {
           html += renderSingleItemHtml(item, false, secConfig);
         });
       }
-    });
+    }
+  });
 
     html += '</tbody></table>';
     container.innerHTML = html;
@@ -3782,15 +4039,23 @@ class ProcurementEngine {
   }
 
   updateTotals() {
+    const activeFilter = this.currentSectionFilter || 'all';
+    let targetItems = this.items || [];
+    if (activeFilter === 'needs') {
+      targetItems = targetItems.filter(i => i.section !== 'ordered_pending');
+    } else if (activeFilter !== 'all' && activeFilter !== 'history') {
+      targetItems = targetItems.filter(i => i.section === activeFilter);
+    }
+
     let selectedCount = 0;
     let totalQty = 0;
     let totalCost = 0;
 
-    this.items.forEach(i => {
+    targetItems.forEach(i => {
       if (i.selected) {
         selectedCount++;
-        totalQty += i.quantity;
-        totalCost += (i.price || 0) * i.quantity;
+        totalQty += (i.quantity || 0);
+        totalCost += ((i.price || 0) * (i.quantity || 0));
       }
     });
 
@@ -4679,6 +4944,10 @@ class ProcurementEngine {
     currentV.items.forEach(it => {
       const cat = it.category || 'Other';
       counts[cat] = (counts[cat] || 0) + 1;
+      const isTestingItem = cat === 'Testing' || /\b(?:testing|retest|recertification|dielectric|labor)\b/i.test(it.item || '') || /\b(?:testing|labor)\b/i.test(it.itemNumber || '');
+      if (isTestingItem && cat !== 'Testing') {
+        counts['Testing'] = (counts['Testing'] || 0) + 1;
+      }
     });
 
     // Render Category Tabs Bar
@@ -4719,8 +4988,14 @@ class ProcurementEngine {
     // Filter items by active tab and search query
     const query = (this.catalogSearchQuery || '').trim().toLowerCase();
     const indexedItems = currentV.items.map((it, iIdx) => ({ it, iIdx })).filter(({ it }) => {
-      if (this.activeCatalogCategoryTab !== 'all' && (it.category || 'Other') !== this.activeCatalogCategoryTab) {
-        return false;
+      if (this.activeCatalogCategoryTab !== 'all') {
+        const cat = it.category || 'Other';
+        if (this.activeCatalogCategoryTab === 'Testing') {
+          const isTestingItem = cat === 'Testing' || /\b(?:testing|retest|recertification|dielectric|labor)\b/i.test(it.item || '') || /\b(?:testing|labor)\b/i.test(it.itemNumber || '');
+          if (!isTestingItem) return false;
+        } else if (cat !== this.activeCatalogCategoryTab) {
+          return false;
+        }
       }
       if (query) {
         const hay = `${it.item || ''} ${it.itemNumber || ''} ${it.category || ''}`.toLowerCase();
@@ -5213,6 +5488,7 @@ class ProcurementEngine {
               <option value="Gloves" selected>🧤 Rubber Gloves</option>
               <option value="Sleeves">🦺 Rubber Sleeves</option>
               <option value="Blankets">🧱 Blankets</option>
+              <option value="Testing">🧪 Labor & Testing</option>
               <option value="MACKs">🧱 MACKs</option>
               <option value="HV Testers">⚡ HV Testers</option>
               <option value="Phasing Sets">⚡ Phasing Sets</option>
@@ -5233,7 +5509,7 @@ class ProcurementEngine {
             </select>
           </div>
           <div>
-            <label style="display: block; font-size: 11px; font-weight: 600; color: #94a3b8; margin-bottom: 4px;">Size</label>
+            <label id="mo-add-item-size-label" style="display: block; font-size: 11px; font-weight: 600; color: #94a3b8; margin-bottom: 4px;">Size / Item</label>
             <input type="text" id="mo-add-item-size" list="mo-item-size-suggestions" class="batch-delivery-input" placeholder="e.g. 8.5" value="8.5" style="text-align: center; font-weight: 600;" onchange="window.procurementEngine.onMoAddItemChange(true)" oninput="window.procurementEngine.onMoAddItemChange(true)">
             <datalist id="mo-item-size-suggestions">
               <option value="8"></option>
@@ -5330,16 +5606,22 @@ class ProcurementEngine {
         ? `<span class="badge" style="background: rgba(148, 163, 184, 0.15); color: #cbd5e1; border: 1px solid rgba(148, 163, 184, 0.3); font-size: 11px;">📦 On Shelf</span>`
         : `<span class="badge" style="background: rgba(59, 130, 246, 0.15); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.35); font-size: 11px;" title="${this.escapeHtml(empDisplay)}">👤 ${this.escapeHtml(empDisplay)}</span>`;
 
+      const isTesting = item.itemType === 'Testing' || item.category === 'Testing' || /\b(?:testing|labor)\b/i.test(item.itemType || '') || /\b(?:testing|labor)\b/i.test(item.typeLabel || '') || /\b(?:testing|labor)\b/i.test(item.size || '');
+      const typeDisplay = isTesting
+        ? `<span style="color: #6ee7b7; font-weight: 700; display: inline-flex; align-items: center; gap: 4px;"><span>🧪</span> ${this.escapeHtml(item.typeLabel || item.size || 'Testing & Labor')}</span>`
+        : this.escapeHtml(item.typeLabel || item.itemType || 'Equipment');
+      const classDisplay = isTesting ? `<span style="color: #64748b;">N/A</span>` : this.escapeHtml(item.classVal || 'Class 2');
+
       rowsHtml += `
         <tr class="mark-ordered-item-row" data-idx="${idx}">
           <td style="padding: 8px 10px; font-weight: 600; color: #f1f5f9;">
-            ${this.escapeHtml(item.typeLabel || item.itemType || 'Equipment')}
+            ${typeDisplay}
           </td>
           <td style="padding: 8px 10px; text-align: center;">
-            <input type="text" class="mark-ordered-size-input batch-delivery-input" value="${this.escapeHtml(item.size || 'Standard')}" style="width: 80px; text-align: center;" onchange="window.procurementEngine.onMarkOrderRowSizeChange(${idx}, this.value)">
+            <input type="text" class="mark-ordered-size-input batch-delivery-input" value="${this.escapeHtml(item.size || 'Standard')}" style="width: ${isTesting ? '120px' : '80px'}; text-align: center;" onchange="window.procurementEngine.onMarkOrderRowSizeChange(${idx}, this.value)">
           </td>
           <td style="padding: 8px 10px; text-align: center; color: #94a3b8;">
-            ${this.escapeHtml(item.classVal || 'Class 2')}
+            ${classDisplay}
           </td>
           <td style="padding: 8px 10px; text-align: center;">
             <input type="number" min="1" class="mark-ordered-qty-input batch-delivery-input" value="${qty}" style="width: 60px; text-align: center;" onchange="window.procurementEngine.recalcMarkOrderedModal()">
@@ -5395,10 +5677,19 @@ class ProcurementEngine {
     const classSelect = document.getElementById('mo-add-item-class');
     const sizeInput = document.getElementById('mo-add-item-size');
     const datalist = document.getElementById('mo-item-size-suggestions');
+    const sizeLabel = document.getElementById('mo-add-item-size-label');
+    const vSelect = document.getElementById('mark-order-vendor-select');
+    const vendorName = (vSelect && vSelect.value && vSelect.value !== '__custom__') ? vSelect.value : '';
 
     if (cat === 'Gloves') {
+      if (sizeLabel) sizeLabel.textContent = 'Size / Item';
       if (classSelect) classSelect.value = 'Class 2';
-      if (sizeInput) sizeInput.value = '8.5';
+      if (sizeInput) {
+        sizeInput.value = '8.5';
+        sizeInput.placeholder = 'e.g. 8.5';
+      }
+      const vItems = this.getVendorTestingItems(vendorName).filter(it => (it.item || '').toLowerCase().includes('glove'));
+      let extraOpts = vItems.map(it => `<option value="${this.escapeHtml(it.item)}">${this.escapeHtml(it.item)} — $${Number(it.price || 0).toFixed(2)}</option>`).join('');
       if (datalist) {
         datalist.innerHTML = `
           <option value="8"></option>
@@ -5410,32 +5701,70 @@ class ProcurementEngine {
           <option value="11"></option>
           <option value="11.5"></option>
           <option value="12"></option>
+          ${extraOpts}
         `;
       }
     } else if (cat === 'Sleeves') {
+      if (sizeLabel) sizeLabel.textContent = 'Size / Item';
       if (classSelect) classSelect.value = 'Class 2';
-      if (sizeInput) sizeInput.value = 'Regular';
+      if (sizeInput) {
+        sizeInput.value = 'Regular';
+        sizeInput.placeholder = 'e.g. Regular';
+      }
+      const vItems = this.getVendorTestingItems(vendorName).filter(it => (it.item || '').toLowerCase().includes('sleeve'));
+      let extraOpts = vItems.map(it => `<option value="${this.escapeHtml(it.item)}">${this.escapeHtml(it.item)} — $${Number(it.price || 0).toFixed(2)}</option>`).join('');
       if (datalist) {
         datalist.innerHTML = `
           <option value="Regular"></option>
           <option value="Large"></option>
           <option value="Extra Large"></option>
+          ${extraOpts}
         `;
       }
     } else if (cat === 'Blankets') {
+      if (sizeLabel) sizeLabel.textContent = 'Size / Item';
       if (classSelect) classSelect.value = 'Class 4';
-      if (sizeInput) sizeInput.value = 'Regular';
+      if (sizeInput) {
+        sizeInput.value = 'Regular';
+        sizeInput.placeholder = 'e.g. Regular';
+      }
+      const vItems = this.getVendorTestingItems(vendorName).filter(it => (it.item || '').toLowerCase().includes('blanket'));
+      let extraOpts = vItems.map(it => `<option value="${this.escapeHtml(it.item)}">${this.escapeHtml(it.item)} — $${Number(it.price || 0).toFixed(2)}</option>`).join('');
       if (datalist) {
         datalist.innerHTML = `
           <option value="Regular"></option>
           <option value="Split"></option>
           <option value="Eyelet"></option>
           <option value="Canister"></option>
+          ${extraOpts}
         `;
       }
+    } else if (cat === 'Testing') {
+      if (sizeLabel) sizeLabel.textContent = 'Testing / Service Item';
+      if (classSelect) classSelect.value = 'N/A';
+      const testingItems = this.getVendorTestingItems(vendorName);
+      if (datalist) {
+        let opts = testingItems.map(it => 
+          `<option value="${this.escapeHtml(it.item)}">${this.escapeHtml(it.item)} ${it.price > 0 ? '— $' + Number(it.price).toFixed(2) : ''}${it.itemNumber ? ' (Part: ' + this.escapeHtml(it.itemNumber) + ')' : ''}</option>`
+        ).join('');
+        if (!opts.includes('Glove Testing')) opts += `<option value="Glove Testing">Glove Testing</option>`;
+        if (!opts.includes('Sleeve Testing')) opts += `<option value="Sleeve Testing">Sleeve Testing</option>`;
+        if (!opts.includes('Blanket Testing')) opts += `<option value="Blanket Testing">Blanket Testing</option>`;
+        if (!opts.includes('Labor Testing')) opts += `<option value="Labor Testing">Labor Testing</option>`;
+        if (!opts.includes('Dielectric Testing')) opts += `<option value="Dielectric Testing">Dielectric Testing</option>`;
+        datalist.innerHTML = opts;
+      }
+      if (sizeInput) {
+        sizeInput.value = (testingItems.length > 0 ? testingItems[0].item : 'Glove Testing');
+        sizeInput.placeholder = 'Select or type testing service...';
+      }
     } else if (cat === 'MACKs') {
+      if (sizeLabel) sizeLabel.textContent = 'Size / Rating';
       if (classSelect) classSelect.value = 'Class 4';
-      if (sizeInput) sizeInput.value = 'Standard';
+      if (sizeInput) {
+        sizeInput.value = 'Standard';
+        sizeInput.placeholder = 'e.g. Standard';
+      }
       if (datalist) {
         datalist.innerHTML = `
           <option value="Standard"></option>
@@ -5445,8 +5774,12 @@ class ProcurementEngine {
         `;
       }
     } else if (cat === 'HV Testers' || cat === 'Phasing Sets') {
+      if (sizeLabel) sizeLabel.textContent = 'Rating / Model';
       if (classSelect) classSelect.value = 'N/A';
-      if (sizeInput) sizeInput.value = 'Standard';
+      if (sizeInput) {
+        sizeInput.value = 'Standard';
+        sizeInput.placeholder = 'e.g. Standard';
+      }
       if (datalist) {
         datalist.innerHTML = `
           <option value="Standard"></option>
@@ -5456,8 +5789,12 @@ class ProcurementEngine {
         `;
       }
     } else if (cat === 'Grounds') {
+      if (sizeLabel) sizeLabel.textContent = 'Style / Type';
       if (classSelect) classSelect.value = 'N/A';
-      if (sizeInput) sizeInput.value = 'Single';
+      if (sizeInput) {
+        sizeInput.value = 'Single';
+        sizeInput.placeholder = 'e.g. Single';
+      }
       if (datalist) {
         datalist.innerHTML = `
           <option value="Single"></option>
@@ -5468,8 +5805,12 @@ class ProcurementEngine {
         `;
       }
     } else if (cat === 'Hot Sticks') {
+      if (sizeLabel) sizeLabel.textContent = 'Length / Type';
       if (classSelect) classSelect.value = 'N/A';
-      if (sizeInput) sizeInput.value = '8ft';
+      if (sizeInput) {
+        sizeInput.value = '8ft';
+        sizeInput.placeholder = 'e.g. 8ft';
+      }
       if (datalist) {
         datalist.innerHTML = `
           <option value="6ft"></option>
@@ -5480,8 +5821,12 @@ class ProcurementEngine {
         `;
       }
     } else if (cat === 'AED') {
+      if (sizeLabel) sizeLabel.textContent = 'Component';
       if (classSelect) classSelect.value = 'N/A';
-      if (sizeInput) sizeInput.value = 'Unit';
+      if (sizeInput) {
+        sizeInput.value = 'Unit';
+        sizeInput.placeholder = 'e.g. Unit';
+      }
       if (datalist) {
         datalist.innerHTML = `
           <option value="Unit"></option>
@@ -5491,10 +5836,18 @@ class ProcurementEngine {
         `;
       }
     } else {
+      if (sizeLabel) sizeLabel.textContent = 'Item / Service Description';
       if (classSelect) classSelect.value = 'N/A';
-      if (sizeInput) sizeInput.value = 'Standard';
+      if (sizeInput) {
+        sizeInput.value = 'Standard';
+        sizeInput.placeholder = 'e.g. Glove Testing, Utility Tool, Hardware...';
+      }
+      const vObj = (this.vendors || []).find(v => v.name.toLowerCase() === vendorName.toLowerCase());
+      const catItems = (vObj?.items || []).filter(it => it.category === 'Other' || it.category === 'Testing' || /\b(?:testing|labor)\b/i.test(it.item || '') || /\b(?:testing|labor)\b/i.test(it.itemNumber || ''));
       if (datalist) {
-        datalist.innerHTML = `<option value="Standard"></option>`;
+        let opts = catItems.map(it => `<option value="${this.escapeHtml(it.item)}">${this.escapeHtml(it.item)} ${it.price > 0 ? '— $' + Number(it.price).toFixed(2) : ''}</option>`).join('');
+        opts += `<option value="Standard"></option><option value="Labor / Testing"></option>`;
+        datalist.innerHTML = opts;
       }
     }
     this.onMoAddItemChange(true);
@@ -5517,13 +5870,13 @@ class ProcurementEngine {
 
   addCustomItemToMarkOrderedModal() {
     const catSelect = document.getElementById('mo-add-item-cat');
-    const cat = catSelect ? catSelect.value : 'Gloves';
+    let cat = catSelect ? catSelect.value : 'Gloves';
     const classSelect = document.getElementById('mo-add-item-class');
-    const classVal = classSelect ? classSelect.value : 'Class 2';
+    let classVal = classSelect ? classSelect.value : 'Class 2';
     const sizeInput = document.getElementById('mo-add-item-size');
     const size = sizeInput ? sizeInput.value.trim() : 'Standard';
     if (!size) {
-      alert('⚠️ Please specify a size (e.g. 8.5, Regular, Standard).');
+      alert('⚠️ Please specify a size or item description.');
       if (sizeInput) sizeInput.focus();
       return;
     }
@@ -5534,11 +5887,17 @@ class ProcurementEngine {
     const empSelect = document.getElementById('mo-add-item-assignee');
     const assignee = empSelect ? empSelect.value : 'On Shelf';
 
+    const isTesting = (cat === 'Testing' || /\b(?:testing|labor|service|dielectric)\b/i.test(cat) || /\b(?:testing|labor|service|dielectric)\b/i.test(size));
+    if (isTesting) {
+      cat = 'Testing';
+      if (!classVal || classVal === 'Class 2') classVal = 'N/A';
+    }
+
     const isShelf = !assignee || assignee === 'On Shelf' || assignee.toLowerCase().includes('shelf') || assignee.toLowerCase().includes('stock');
 
     const newItem = {
       itemType: cat,
-      typeLabel: cat,
+      typeLabel: isTesting ? (size && size !== 'Standard' ? size : 'Testing & Labor') : cat,
       size: size,
       classVal: classVal,
       quantity: qty,
@@ -5613,7 +5972,12 @@ class ProcurementEngine {
         this.recalcMarkOrderedModal();
       }
     }
-    this.onMoAddItemChange(true);
+    const curMoCat = document.getElementById('mo-add-item-cat')?.value;
+    if (curMoCat) {
+      this.onMoAddItemCatChange(curMoCat);
+    } else {
+      this.onMoAddItemChange(true);
+    }
   }
 
   async confirmMarkOrdered() {
@@ -5689,7 +6053,14 @@ class ProcurementEngine {
         allCheckedEmps.push(...validLinemen);
 
         const empTag = validLinemen.length > 0 ? ` [For: ${validLinemen.join(', ')}]` : '';
-        const summaryStr = `(${qty}) ${origItem.classVal || ''} ${origItem.itemType || origItem.typeLabel || 'Equipment'}, Size ${resolvedSize}${empTag}${unitPrice > 0 ? ' @ $' + unitPrice.toFixed(2) : ''}`;
+        const isTestingOrService = (origItem.itemType === 'Testing' || origItem.category === 'Testing' || /\b(?:testing|labor)\b/i.test(origItem.itemType || '') || /\b(?:testing|labor)\b/i.test(origItem.typeLabel || '') || /\b(?:testing|labor)\b/i.test(resolvedSize));
+        let summaryStr = '';
+        if (isTestingOrService) {
+          const itemLabel = resolvedSize && resolvedSize !== 'Standard' ? resolvedSize : (origItem.typeLabel || origItem.itemType || 'Testing & Labor');
+          summaryStr = `(${qty}) ${itemLabel}${empTag}${unitPrice > 0 ? ' @ $' + unitPrice.toFixed(2) : ''}`;
+        } else {
+          summaryStr = `(${qty}) ${origItem.classVal || ''} ${origItem.itemType || origItem.typeLabel || 'Equipment'}, Size ${resolvedSize}${empTag}${unitPrice > 0 ? ' @ $' + unitPrice.toFixed(2) : ''}`;
+        }
         itemsSummaryList.push(summaryStr);
 
         // Auto-sync vendor catalog price if entered
@@ -7765,6 +8136,7 @@ class ProcurementEngine {
                 <option value="Gloves" selected>🧤 Rubber Gloves</option>
                 <option value="Sleeves">🦺 Rubber Sleeves</option>
                 <option value="Blankets">🧱 Blankets</option>
+                <option value="Testing">🧪 Labor & Testing</option>
                 <option value="MACKs">🧱 MACKs</option>
                 <option value="HV Testers">⚡ HV Testers</option>
                 <option value="Phasing Sets">⚡ Phasing Sets</option>
@@ -7785,7 +8157,7 @@ class ProcurementEngine {
               </select>
             </div>
             <div>
-              <label style="display: block; font-size: 11px; font-weight: 600; color: #94a3b8; margin-bottom: 4px;">Size</label>
+              <label id="add-order-item-size-label" style="display: block; font-size: 11px; font-weight: 600; color: #94a3b8; margin-bottom: 4px;">Size / Item</label>
               <input type="text" id="add-order-item-size" list="order-item-size-suggestions" class="batch-delivery-input" placeholder="e.g. 8.5" value="8.5" style="text-align: center; font-weight: 600;" onchange="window.procurementEngine.onAddOrderItemChange(true)" oninput="window.procurementEngine.onAddOrderItemChange(true)">
               <datalist id="order-item-size-suggestions">
                 <option value="8"></option>
@@ -7893,6 +8265,19 @@ class ProcurementEngine {
         ? `<span class="badge" style="background: rgba(245, 158, 11, 0.15); color: #fcd34d; border: 1px solid rgba(245, 158, 11, 0.35); font-size: 11px; font-family: monospace;">Part #: ${this.escapeHtml(partNum)}</span>`
         : '';
 
+      const isTesting = (it.itemType === 'Testing' || it.category === 'Testing' || /\b(?:testing|labor)\b/i.test(it.itemType || '') || /\b(?:testing|labor)\b/i.test(it.size || ''));
+      const catBadge = isTesting
+        ? `<span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #6ee7b7; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 11px; padding: 1px 6px;">🧪 Testing / Labor</span>`
+        : `<span class="badge" style="background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4); font-size: 11px; padding: 1px 6px;">${this.escapeHtml(it.classVal || 'Class 2')}</span>`;
+
+      const itemTitle = isTesting
+        ? (it.size && it.size !== 'Standard' ? it.size : (it.itemType || 'Labor & Testing'))
+        : (it.itemType || it.category || 'Gloves');
+
+      const sizeBadge = isTesting
+        ? ''
+        : `<span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #6ee7b7; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 11px; font-weight: 700; padding: 1px 6px;">Size: ${this.escapeHtml(it.size || 'Standard')}</span>`;
+
       return `
         <div style="display: flex; justify-content: space-between; align-items: center; background: rgba(15, 23, 42, 0.65); border: 1px solid rgba(59, 130, 246, 0.25); border-radius: 6px; padding: 8px 12px; gap: 10px;">
           <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
@@ -7900,9 +8285,9 @@ class ProcurementEngine {
               <span style="font-size: 11px; color: #94a3b8; font-weight: 600;">Qty:</span>
               <input type="number" min="1" step="1" class="batch-delivery-input" value="${qty}" onchange="window.procurementEngine.updateEditOrderItemField(${idx}, 'quantity', this.value)" style="width: 54px; padding: 3px 6px; font-size: 12px; font-weight: 800; color: #38bdf8; text-align: center;">
             </div>
-            <span style="font-weight: 700; color: #f8fafc; font-size: 13px;">${this.escapeHtml(it.itemType || it.category || 'Gloves')}</span>
-            <span class="badge" style="background: rgba(59, 130, 246, 0.2); color: #93c5fd; border: 1px solid rgba(59, 130, 246, 0.4); font-size: 11px; padding: 1px 6px;">${this.escapeHtml(it.classVal || 'Class 2')}</span>
-            <span class="badge" style="background: rgba(16, 185, 129, 0.2); color: #6ee7b7; border: 1px solid rgba(16, 185, 129, 0.4); font-size: 11px; font-weight: 700; padding: 1px 6px;">Size: ${this.escapeHtml(it.size || 'Standard')}</span>
+            <span style="font-weight: 700; color: #f8fafc; font-size: 13px;">${this.escapeHtml(itemTitle)}</span>
+            ${catBadge}
+            ${sizeBadge}
             ${partBadge}
             <div style="display: inline-flex; align-items: center; gap: 4px;" title="Edit unit price ($)">
               <span style="font-size: 11px; color: #64748b; font-family: monospace;">@ $</span>
@@ -7933,13 +8318,13 @@ class ProcurementEngine {
 
   addOrderItemToEditOrder() {
     const catSelect = document.getElementById('add-order-item-cat');
-    const cat = catSelect ? catSelect.value : 'Gloves';
+    let cat = catSelect ? catSelect.value : 'Gloves';
     const classSelect = document.getElementById('add-order-item-class');
-    const classVal = classSelect ? classSelect.value : 'Class 2';
+    let classVal = classSelect ? classSelect.value : 'Class 2';
     const sizeInput = document.getElementById('add-order-item-size');
     const size = sizeInput ? sizeInput.value.trim() : 'Standard';
     if (!size) {
-      alert('⚠️ Please specify a size (e.g. 8.5, Regular, Standard).');
+      alert('⚠️ Please specify a size or item description.');
       if (sizeInput) sizeInput.focus();
       return;
     }
@@ -7951,6 +8336,13 @@ class ProcurementEngine {
     const assignee = empSelect ? empSelect.value : 'On Shelf';
     const vSelect = document.getElementById('edit-order-vendor-select');
     const currentVendor = (vSelect && vSelect.value && vSelect.value !== '__custom__') ? vSelect.value : '';
+
+    const isTesting = (cat === 'Testing' || /\b(?:testing|labor|service|dielectric)\b/i.test(cat) || /\b(?:testing|labor|service|dielectric)\b/i.test(size));
+    if (isTesting) {
+      cat = 'Testing';
+      if (!classVal || classVal === 'Class 2') classVal = 'N/A';
+    }
+
     const partNumber = currentVendor ? this.getVendorPartNumber(currentVendor, cat, size, classVal) : '';
 
     if (!this.editingOrderItems) this.editingOrderItems = [];
@@ -7981,9 +8373,16 @@ class ProcurementEngine {
   syncEditOrderSummaryFromItems() {
     if (!this.editingOrderItems) return;
     const summaryParts = this.editingOrderItems.map(it => {
-      let s = `(${it.quantity || 1}) ${it.classVal || 'Class 2'} ${it.itemType || it.category || 'Gloves'}, Size ${it.size || 'Standard'}`;
+      const isTestingOrService = (it.itemType === 'Testing' || it.category === 'Testing' || /\b(?:testing|labor)\b/i.test(it.itemType || '') || /\b(?:testing|labor)\b/i.test(it.size || ''));
+      let s = '';
+      if (isTestingOrService) {
+        const itemLabel = it.size && it.size !== 'Standard' ? it.size : (it.itemType && it.itemType !== 'Testing' ? it.itemType : 'Labor & Testing');
+        s = `(${it.quantity || 1}) ${itemLabel}`;
+      } else {
+        s = `(${it.quantity || 1}) ${it.classVal || 'Class 2'} ${it.itemType || it.category || 'Gloves'}, Size ${it.size || 'Standard'}`;
+      }
       if (it.unitPrice > 0) s += ` @ $${it.unitPrice.toFixed(2)}`;
-      if (it.employeeName) s += ` [For: ${it.employeeName}]`;
+      if (it.employeeName && !it.employeeName.toLowerCase().includes('shelf')) s += ` [For: ${it.employeeName}]`;
       return s;
     });
     const itemsInput = document.getElementById('edit-order-items');
@@ -8017,10 +8416,19 @@ class ProcurementEngine {
     const classSelect = document.getElementById('add-order-item-class');
     const sizeInput = document.getElementById('add-order-item-size');
     const datalist = document.getElementById('order-item-size-suggestions');
+    const sizeLabel = document.getElementById('add-order-item-size-label');
+    const vSelect = document.getElementById('edit-order-vendor-select');
+    const vendorName = (vSelect && vSelect.value && vSelect.value !== '__custom__') ? vSelect.value : '';
 
     if (cat === 'Gloves') {
+      if (sizeLabel) sizeLabel.textContent = 'Size / Item';
       if (classSelect) classSelect.value = 'Class 2';
-      if (sizeInput) sizeInput.value = '8.5';
+      if (sizeInput) {
+        sizeInput.value = '8.5';
+        sizeInput.placeholder = 'e.g. 8.5';
+      }
+      const vItems = this.getVendorTestingItems(vendorName).filter(it => (it.item || '').toLowerCase().includes('glove'));
+      let extraOpts = vItems.map(it => `<option value="${this.escapeHtml(it.item)}">${this.escapeHtml(it.item)} — $${Number(it.price || 0).toFixed(2)}</option>`).join('');
       if (datalist) {
         datalist.innerHTML = `
           <option value="8"></option>
@@ -8032,32 +8440,70 @@ class ProcurementEngine {
           <option value="11"></option>
           <option value="11.5"></option>
           <option value="12"></option>
+          ${extraOpts}
         `;
       }
     } else if (cat === 'Sleeves') {
+      if (sizeLabel) sizeLabel.textContent = 'Size / Item';
       if (classSelect) classSelect.value = 'Class 2';
-      if (sizeInput) sizeInput.value = 'Regular';
+      if (sizeInput) {
+        sizeInput.value = 'Regular';
+        sizeInput.placeholder = 'e.g. Regular';
+      }
+      const vItems = this.getVendorTestingItems(vendorName).filter(it => (it.item || '').toLowerCase().includes('sleeve'));
+      let extraOpts = vItems.map(it => `<option value="${this.escapeHtml(it.item)}">${this.escapeHtml(it.item)} — $${Number(it.price || 0).toFixed(2)}</option>`).join('');
       if (datalist) {
         datalist.innerHTML = `
           <option value="Regular"></option>
           <option value="Large"></option>
           <option value="Extra Large"></option>
+          ${extraOpts}
         `;
       }
     } else if (cat === 'Blankets') {
+      if (sizeLabel) sizeLabel.textContent = 'Size / Item';
       if (classSelect) classSelect.value = 'Class 4';
-      if (sizeInput) sizeInput.value = 'Regular';
+      if (sizeInput) {
+        sizeInput.value = 'Regular';
+        sizeInput.placeholder = 'e.g. Regular';
+      }
+      const vItems = this.getVendorTestingItems(vendorName).filter(it => (it.item || '').toLowerCase().includes('blanket'));
+      let extraOpts = vItems.map(it => `<option value="${this.escapeHtml(it.item)}">${this.escapeHtml(it.item)} — $${Number(it.price || 0).toFixed(2)}</option>`).join('');
       if (datalist) {
         datalist.innerHTML = `
           <option value="Regular"></option>
           <option value="Split"></option>
           <option value="Eyelet"></option>
           <option value="Canister"></option>
+          ${extraOpts}
         `;
       }
+    } else if (cat === 'Testing') {
+      if (sizeLabel) sizeLabel.textContent = 'Testing / Service Item';
+      if (classSelect) classSelect.value = 'N/A';
+      const testingItems = this.getVendorTestingItems(vendorName);
+      if (datalist) {
+        let opts = testingItems.map(it => 
+          `<option value="${this.escapeHtml(it.item)}">${this.escapeHtml(it.item)} ${it.price > 0 ? '— $' + Number(it.price).toFixed(2) : ''}${it.itemNumber ? ' (Part: ' + this.escapeHtml(it.itemNumber) + ')' : ''}</option>`
+        ).join('');
+        if (!opts.includes('Glove Testing')) opts += `<option value="Glove Testing">Glove Testing</option>`;
+        if (!opts.includes('Sleeve Testing')) opts += `<option value="Sleeve Testing">Sleeve Testing</option>`;
+        if (!opts.includes('Blanket Testing')) opts += `<option value="Blanket Testing">Blanket Testing</option>`;
+        if (!opts.includes('Labor Testing')) opts += `<option value="Labor Testing">Labor Testing</option>`;
+        if (!opts.includes('Dielectric Testing')) opts += `<option value="Dielectric Testing">Dielectric Testing</option>`;
+        datalist.innerHTML = opts;
+      }
+      if (sizeInput) {
+        sizeInput.value = (testingItems.length > 0 ? testingItems[0].item : 'Glove Testing');
+        sizeInput.placeholder = 'Select or type testing service...';
+      }
     } else if (cat === 'MACKs') {
+      if (sizeLabel) sizeLabel.textContent = 'Size / Rating';
       if (classSelect) classSelect.value = 'Class 4';
-      if (sizeInput) sizeInput.value = 'Standard';
+      if (sizeInput) {
+        sizeInput.value = 'Standard';
+        sizeInput.placeholder = 'e.g. Standard';
+      }
       if (datalist) {
         datalist.innerHTML = `
           <option value="Standard"></option>
@@ -8067,8 +8513,12 @@ class ProcurementEngine {
         `;
       }
     } else if (cat === 'HV Testers' || cat === 'Phasing Sets') {
+      if (sizeLabel) sizeLabel.textContent = 'Rating / Model';
       if (classSelect) classSelect.value = 'N/A';
-      if (sizeInput) sizeInput.value = 'Standard';
+      if (sizeInput) {
+        sizeInput.value = 'Standard';
+        sizeInput.placeholder = 'e.g. Standard';
+      }
       if (datalist) {
         datalist.innerHTML = `
           <option value="Standard"></option>
@@ -8078,8 +8528,12 @@ class ProcurementEngine {
         `;
       }
     } else if (cat === 'Grounds') {
+      if (sizeLabel) sizeLabel.textContent = 'Style / Type';
       if (classSelect) classSelect.value = 'N/A';
-      if (sizeInput) sizeInput.value = 'Single';
+      if (sizeInput) {
+        sizeInput.value = 'Single';
+        sizeInput.placeholder = 'e.g. Single';
+      }
       if (datalist) {
         datalist.innerHTML = `
           <option value="Single"></option>
@@ -8090,8 +8544,12 @@ class ProcurementEngine {
         `;
       }
     } else if (cat === 'Hot Sticks') {
+      if (sizeLabel) sizeLabel.textContent = 'Length / Type';
       if (classSelect) classSelect.value = 'N/A';
-      if (sizeInput) sizeInput.value = '8ft';
+      if (sizeInput) {
+        sizeInput.value = '8ft';
+        sizeInput.placeholder = 'e.g. 8ft';
+      }
       if (datalist) {
         datalist.innerHTML = `
           <option value="6ft"></option>
@@ -8102,8 +8560,12 @@ class ProcurementEngine {
         `;
       }
     } else if (cat === 'AED') {
+      if (sizeLabel) sizeLabel.textContent = 'Component';
       if (classSelect) classSelect.value = 'N/A';
-      if (sizeInput) sizeInput.value = 'Unit';
+      if (sizeInput) {
+        sizeInput.value = 'Unit';
+        sizeInput.placeholder = 'e.g. Unit';
+      }
       if (datalist) {
         datalist.innerHTML = `
           <option value="Unit"></option>
@@ -8113,10 +8575,18 @@ class ProcurementEngine {
         `;
       }
     } else {
+      if (sizeLabel) sizeLabel.textContent = 'Item / Service Description';
       if (classSelect) classSelect.value = 'N/A';
-      if (sizeInput) sizeInput.value = 'Standard';
+      if (sizeInput) {
+        sizeInput.value = 'Standard';
+        sizeInput.placeholder = 'e.g. Glove Testing, Utility Tool, Hardware...';
+      }
+      const vObj = (this.vendors || []).find(v => v.name.toLowerCase() === vendorName.toLowerCase());
+      const catItems = (vObj?.items || []).filter(it => it.category === 'Other' || it.category === 'Testing' || /\b(?:testing|labor)\b/i.test(it.item || '') || /\b(?:testing|labor)\b/i.test(it.itemNumber || ''));
       if (datalist) {
-        datalist.innerHTML = `<option value="Standard"></option>`;
+        let opts = catItems.map(it => `<option value="${this.escapeHtml(it.item)}">${this.escapeHtml(it.item)} ${it.price > 0 ? '— $' + Number(it.price).toFixed(2) : ''}</option>`).join('');
+        opts += `<option value="Standard"></option><option value="Labor / Testing"></option>`;
+        datalist.innerHTML = opts;
       }
     }
     this.onAddOrderItemChange(true);
@@ -8169,7 +8639,12 @@ class ProcurementEngine {
     }
     this.syncEditOrderSummaryFromItems();
     this.renderEditOrderItemsContainer();
-    this.onAddOrderItemChange(true);
+    const curCat = document.getElementById('add-order-item-cat')?.value;
+    if (curCat) {
+      this.onAddOrderItemCatChange(curCat);
+    } else {
+      this.onAddOrderItemChange(true);
+    }
   }
 
   async confirmSaveEditOrder() {

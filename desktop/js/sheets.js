@@ -6770,6 +6770,22 @@ class SheetNavigator {
       }
     }
 
+    // Pre-scan completed trainings to track which employees have already completed each topic
+    const completedTopicAttendees = new Set();
+    (tt.rows || []).forEach(r => {
+      const status = String(r['Status'] || r['Training Status'] || '').toLowerCase().trim();
+      const compDate = String(r['Completion Date'] || r['Date Completed'] || '').trim();
+      const isComp = status === 'complete' || status === 'completed' || Boolean(compDate);
+      if (isComp) {
+        const top = String(r['Training Topic'] || r['Topic'] || '').replace(/^(?:january|february|march|april|may|june|july|august|september|october|november|december)\s*:\s*/i, '').trim().toLowerCase();
+        const att = String(r['Attendees'] || '').split(/,\s*/);
+        att.forEach(a => {
+          const aTrim = a.trim().toLowerCase();
+          if (aTrim && top) completedTopicAttendees.add(`${aTrim}|${top}`);
+        });
+      }
+    });
+
     (tt.rows || []).forEach(r => {
       const status = String(r['Status'] || r['Training Status'] || '').toLowerCase().trim();
       const compDate = String(r['Completion Date'] || r['Date Completed'] || '').trim();
@@ -6803,7 +6819,18 @@ class SheetNavigator {
 
       // Update Attendees and Crew Size
       if (activeMembers.length > 0) {
-        const sorted = [...activeMembers];
+        const rowTopic = String(r['Training Topic'] || r['Topic'] || '').trim();
+        const isMakeup = /^(?:january|february|march|april|may|june|july|august|september|october|november|december)\s*:\s*/i.test(rowTopic) ||
+                         String(r['Notes'] || '').toLowerCase().includes('makeup');
+        const coreTopic = rowTopic.replace(/^(?:january|february|march|april|may|june|july|august|september|october|november|december)\s*:\s*/i, '').trim().toLowerCase();
+
+        // Omit members from makeup rows who already completed this training topic
+        const eligibleMembers = activeMembers.filter(memberName => {
+          if (!isMakeup) return true;
+          return !completedTopicAttendees.has(`${memberName.toLowerCase()}|${coreTopic}`);
+        });
+
+        const sorted = [...eligibleMembers];
         const leadToUse = jtForeman || r['Crew Lead'];
         if (leadToUse) {
           const idx = sorted.findIndex(n => n.toLowerCase() === leadToUse.toLowerCase());
